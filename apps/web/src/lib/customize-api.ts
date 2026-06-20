@@ -117,6 +117,8 @@ export interface CustomizeOverrides {
     hooks: Record<string, boolean>;
     modes: Record<string, string>;
     custom_rules: CustomRule[];
+    /** PR-C2 approved SeamSpec docs. Empty when the seam-spec flag is OFF or no spec has been saved yet. */
+    seam_specs?: SeamSpecDoc[];
   };
   tools: Record<string, boolean>;
   /** Free-text USER-RULES.md body injected into the system prompt. */
@@ -337,6 +339,134 @@ export async function deleteCustomRule(
     method: "DELETE",
   });
   if (!res.ok) throw new Error(`Failed to delete custom rule (${res.status})`);
+  const data = (await res.json()) as { overrides: CustomizeOverrides };
+  return data.overrides;
+}
+
+
+// ---------------------------------------------------------------------------
+// PR-C3 — SeamSpec NL builder API client (handoff §5)
+// ---------------------------------------------------------------------------
+
+/** One mutation against the static PRESET_SEAMS catalog. */
+export interface SeamSpecAction {
+  op: "add_seam" | "modify_seam";
+  preset_id: string;
+  controls_refs?: string[];
+  runtime_default_on?: boolean;
+  wiring?: "opt_in" | "opt_out";
+  controls_kind?: "validator" | "evidence";
+  supported_modes?: string[];
+}
+
+/** A persisted/in-flight SeamSpec document (matches the Python wire shape). */
+export interface SeamSpecDoc {
+  /** Server-assigned id once persisted; absent on first compile. */
+  id?: string;
+  spec_version: string;
+  actions: SeamSpecAction[];
+}
+
+/** LLM critic verdict from the compile route. */
+export interface SeamSpecReview {
+  verdict: "aligned" | "mismatch" | "overbroad" | "underbroad" | "unknown";
+  issues: string[];
+  confidence: number;
+}
+
+/**
+ * Response from `POST /v1/app/customize/seams/compile` (preview-only).
+ *
+ * On success: `ok: true`, `spec` is the compiled SeamSpec, `review` is the
+ * LLM critic verdict, `schemaIssues` is the deterministic structural check.
+ * On clarifying-questions: `ok: false`, `clarifyingQuestions` is the list,
+ * `spec` is null, `error` is explicitly null (not undefined).
+ * On compile failure: `ok: false`, `error` carries the reason.
+ * Flag-OFF: `ok: false`, `error: "seam-spec compiler disabled"`.
+ */
+export interface SeamSpecCompileResponse {
+  ok: boolean;
+  spec?: SeamSpecDoc | null;
+  review?: SeamSpecReview;
+  schemaIssues?: string[];
+  clarifyingQuestions?: string[];
+  error?: string | null;
+}
+
+/**
+ * Compiles a natural-language policy into a SeamSpec via
+ * `POST /v1/app/customize/seams/compile`. Same error contract as
+ * `compileCustomRule`: never throws on a 4xx/5xx or network error — returns
+ * `{ ok: false, error }` so the UI can render without a try/catch.
+ */
+export async function compileSeamSpec(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  nlText: string,
+  priorTurns?: ConversationTurn[],
+): Promise<SeamSpecCompileResponse> {
+  try {
+    const bodyPayload: { nlText: string; priorTurns?: ConversationTurn[] } = { nlText };
+    if (priorTurns !== undefined && priorTurns.length > 0) {
+      bodyPayload.priorTurns = priorTurns;
+    }
+    const res = await fetch(`/v1/app/customize/seams/compile`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(bodyPayload),
+    });
+    if (!res.ok) {
+      let backendError = `Compile request failed (${res.status})`;
+      try {
+        const errBody = (await res.json()) as { error?: string };
+        if (typeof errBody.error === "string" && errBody.error.length > 0) backendError = errBody.error;
+      } catch { /* ignore JSON parse failure on error body */ }
+      return { ok: false, error: backendError };
+    }
+    return (await res.json()) as SeamSpecCompileResponse;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Network error";
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * Persists an approved SeamSpec via `PUT /v1/app/customize/seams`. The server
+ * structurally re-validates and returns 422 with `schemaIssues` if the spec
+ * still has issues; throws on any other non-OK status so the caller surfaces
+ * unexpected failures rather than silently dropping them.
+ */
+export async function putSeamSpec(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  doc: SeamSpecDoc,
+): Promise<{ id: string; overrides: CustomizeOverrides }> {
+  const res = await fetch(`/v1/app/customize/seams`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(doc),
+  });
+  if (res.status === 422) {
+    const body = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      schemaIssues?: string[];
+    };
+    throw new Error(
+      body.schemaIssues?.join("; ") ?? body.error ?? `Invalid spec (${res.status})`,
+    );
+  }
+  if (!res.ok) throw new Error(`Failed to save seam spec (${res.status})`);
+  const data = (await res.json()) as { id: string; overrides: CustomizeOverrides };
+  return data;
+}
+
+/** Deletes a persisted SeamSpec by id via `DELETE /v1/app/customize/seams/{id}`. */
+export async function deleteSeamSpec(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  id: string,
+): Promise<CustomizeOverrides> {
+  const res = await fetch(`/v1/app/customize/seams/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(`Failed to delete seam spec (${res.status})`);
   const data = (await res.json()) as { overrides: CustomizeOverrides };
   return data.overrides;
 }

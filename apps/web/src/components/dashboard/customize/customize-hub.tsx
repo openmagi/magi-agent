@@ -25,7 +25,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ShieldCheck, Wrench, Layers, Webhook } from "lucide-react";
+import { ShieldCheck, Wrench, Layers, Webhook, Wand2 } from "lucide-react";
 import {
   useCustomize,
   patchToolOverride,
@@ -43,12 +43,14 @@ import type {
 import { useAgentFetch } from "@/lib/local-api";
 import { VerificationRulePanel } from "./verification-rule-modal";
 import { CustomToolPanel } from "./custom-tool-modal";
+import { SeamBuilderPanel } from "./seam-builder-panel";
 
 export type CustomizeSection =
   | "verification"
   | "tools"
   | "recipes"
-  | "hooks";
+  | "hooks"
+  | "advanced";
 
 const SECTIONS: ReadonlyArray<{
   id: CustomizeSection;
@@ -79,6 +81,13 @@ const SECTIONS: ReadonlyArray<{
     label: "Hooks",
     icon: <Webhook className="h-4 w-4" />,
     description: "Read-only view of ~/.magi/settings.json hook handlers.",
+  },
+  {
+    id: "advanced",
+    label: "Advanced",
+    icon: <Wand2 className="h-4 w-4" />,
+    description:
+      "Author new preset seams via natural language (SeamSpec rule builder). Default-OFF behind MAGI_CUSTOMIZE_SEAM_SPEC_ENABLED.",
   },
 ];
 
@@ -343,6 +352,13 @@ export function CustomizeHub({
         {section === "recipes" ? <RecipesPanel recipes={recipes} /> : null}
 
         {section === "hooks" ? <HooksPanel /> : null}
+
+        {section === "advanced" ? (
+          <SeamBuilderPanel
+            seamSpecs={data.overrides.verification.seam_specs ?? []}
+            onChange={reload}
+          />
+        ) : null}
       </section>
     </div>
   );

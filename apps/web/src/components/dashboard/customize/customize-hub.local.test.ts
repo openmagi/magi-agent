@@ -7,16 +7,18 @@ const src = readFileSync(
 );
 
 describe("CustomizeHub — Phase 4 full-page sub-nav surface", () => {
-  it("declares the four sub-nav sections (no SeamSpec page until PR-C)", () => {
+  it("declares the five sub-nav sections (PR-C3 added Advanced for the SeamSpec builder)", () => {
     expect(src).toContain('"verification"');
     expect(src).toContain('"tools"');
     expect(src).toContain('"recipes"');
     expect(src).toContain('"hooks"');
+    expect(src).toContain('"advanced"');
   });
 
   it("reuses the headless panel bodies from the legacy modals (no duplicate rendering logic)", () => {
     expect(src).toContain("VerificationRulePanel");
     expect(src).toContain("CustomToolPanel");
+    expect(src).toContain("SeamBuilderPanel");
   });
 
   it("ships a Phase-3-aware Recipes panel that greys out unmapped UI labels", () => {
