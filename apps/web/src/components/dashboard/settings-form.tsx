@@ -168,7 +168,7 @@ export function SettingsForm(_props: SettingsFormProps) {
   }
 
   return (
-    <div className="max-w-3xl space-y-4">
+    <div className="max-w-2xl space-y-3">
       {error && (
         <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-500">
           {error}
@@ -181,7 +181,7 @@ export function SettingsForm(_props: SettingsFormProps) {
       )}
 
       <GlassCard>
-        <div className="mb-5 flex items-start justify-between gap-3">
+        <div className="mb-4 flex items-start justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-foreground">Local Runtime</h2>
             <p className="mt-1 text-sm text-secondary">
@@ -195,7 +195,7 @@ export function SettingsForm(_props: SettingsFormProps) {
           )}
         </div>
 
-        <div className="space-y-4">
+        <div className="space-y-3">
           <Select
             label="Provider"
             value={provider}
@@ -242,7 +242,7 @@ export function SettingsForm(_props: SettingsFormProps) {
             placeholder="http://127.0.0.1:11434/v1"
           />
 
-          <div className="border-t border-gray-200 pt-4">
+          <div className="border-t border-gray-200 pt-3">
             <Input
               label="API Key"
               type="password"
@@ -272,15 +272,15 @@ export function SettingsForm(_props: SettingsFormProps) {
       </GlassCard>
 
       <GlassCard>
-        <h2 className="mb-4 text-lg font-semibold text-foreground">Advanced</h2>
-        <div className="space-y-4">
+        <h2 className="mb-3 text-lg font-semibold text-foreground">Advanced</h2>
+        <div className="space-y-3">
           <Input
             label="Gateway token env var"
             value={gatewayTokenEnvVar}
             onChange={(event) => setGatewayTokenEnvVar(event.target.value)}
             placeholder="MAGI_AGENT_SERVER_TOKEN"
           />
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-2">
             <Input
               label="Context window"
               value={contextWindow}
