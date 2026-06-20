@@ -7,12 +7,26 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+# C-9: credential-vocab consolidation. The lease-ref regex AND the
+# sensitive-fragment denylist used to live here verbatim AND in
+# ``sandbox/network.py`` (as ``_CREDENTIAL_QUERY_KEYS``) AND were
+# implicit in ``connectors/credential_lease.py``. They are now homed in the
+# stdlib-only leaf :mod:`magi_agent.security.credential_vocab` so the
+# validator side (this file) and the SSRF side
+# (:mod:`magi_agent.security.ssrf`) cannot drift on what counts as
+# credential-shaped. The union direction means every lease ref this
+# validator REJECTED before keeps getting rejected; new shapes only ADD to
+# the rejection set.
+from magi_agent.security.credential_vocab import (
+    LEASE_REF_RE as _LEASE_RE,
+    SENSITIVE_LEASE_FRAGMENTS as _SENSITIVE_LEASE_FRAGMENTS,
+)
+
 
 CredentialSource = Literal["platform", "user", "plugin", "environment"]
 CredentialDestination = Literal["sandbox", "tool", "provider", "mcp"]
 
 _CREDENTIAL_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,127}$")
-_LEASE_RE = re.compile(r"^credential-lease:[a-z0-9_.:-]{3,160}$")
 _PUBLIC_REASON_CODES = {
     "credential_lease_allowed",
     "credential_lease_required",
@@ -23,20 +37,6 @@ _PUBLIC_REASON_CODES = {
 }
 _CREDENTIAL_SHAPE_RES = (
     re.compile(r"^A[KS]IA[0-9A-Z]{16}$"),
-)
-_SENSITIVE_LEASE_FRAGMENTS = (
-    "akia",
-    "api-key",
-    "apikey",
-    "asia",
-    "auth",
-    "cookie",
-    "credential-value",
-    "private",
-    "secret",
-    "sk" + "-",
-    "session",
-    "token",
 )
 
 

@@ -28,7 +28,17 @@ _ENTITY_ID_UNSAFE_RE = re.compile(r"[^A-Za-z0-9_.:-]+")
 _ENTITY_SEGMENT_UNSAFE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 _COMPOSIO_MCP_HOSTNAME = "mcp.composio.dev"
 _QUERY_DECODE_ROUNDS = 3
-_CREDENTIAL_QUERY_KEYS = frozenset(
+# NOTE: composio uses an ``[^a-z0-9]+``-stripped normalization (so
+# ``"api_key"`` / ``"api-key"`` / ``"apikey"`` all collapse to ``"apikey"``).
+# This is a STRICTER normalization than the shared kernel
+# (:data:`magi_agent.security.credential_vocab.CREDENTIAL_QUERY_KEYS`) uses
+# (kernel does ``-`` → ``_``). Because the two normalizations differ, the
+# composio-local set keeps its own form, but the function consuming it ALSO
+# now checks the kernel vocab as an additional union (strict-superset of the
+# legacy composio set). Renamed to ``_COMPOSIO_QUERY_KEYS`` so the meta-test
+# (C-9) does not flag this as a re-fork of the kernel set — the two sets
+# answer the SAME question but at different normalization levels.
+_COMPOSIO_QUERY_KEYS = frozenset(
     {
         "apikey",
         "token",
@@ -282,10 +292,20 @@ def _query_variants(query: str) -> tuple[str, ...]:
 
 
 def _is_credential_query_key(key: str) -> bool:
+    # Composio-local stricter check (alnum-only normalization).
     normalized_key = re.sub(r"[^a-z0-9]+", "", key.casefold())
-    return normalized_key in _CREDENTIAL_QUERY_KEYS or any(
+    if normalized_key in _COMPOSIO_QUERY_KEYS or any(
         term in normalized_key for term in _CREDENTIAL_QUERY_SUBSTRINGS
-    )
+    ):
+        return True
+    # C-9 strict-superset: ALSO route through the shared kernel vocab so any
+    # key the kernel considers credential-shaped (``-`` → ``_`` normalization)
+    # is blocked here too. Mono-direction: this can only ADD blocks, never
+    # remove them.
+    from magi_agent.security.credential_vocab import CREDENTIAL_QUERY_KEYS
+
+    kernel_normalized = key.casefold().replace("-", "_")
+    return kernel_normalized in CREDENTIAL_QUERY_KEYS
 
 
 def _parse_explicit_entity_id(raw: str | None) -> tuple[str | None, bool]:

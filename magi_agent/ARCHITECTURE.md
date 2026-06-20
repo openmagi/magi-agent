@@ -39,6 +39,7 @@ graph LR
     channels --> harness
     channels --> ops
     channels --> runtime
+    channels --> security
     cli --> adk_bridge
     cli --> benchmarks
     cli --> browser
@@ -69,6 +70,7 @@ graph LR
     cli --> transport
     cli --> web_acquisition
     coding --> meta_orchestration
+    composio --> security
     computer --> cli
     computer --> config
     computer --> tools
@@ -234,6 +236,7 @@ graph LR
     runtime --> tools
     runtime --> transport
     runtime --> web_acquisition
+    sandbox --> security
     security --> ops
     shadow --> adk_bridge
     shadow --> config
@@ -291,6 +294,7 @@ graph LR
     web_acquisition --> ops
     web_acquisition --> research
     web_acquisition --> runtime
+    web_acquisition --> security
     web_acquisition --> tools
     workspace --> tools
 ```
@@ -414,7 +418,7 @@ graph LR
 | runtime_boundary.py | — | authority, contract, dispatcher | channels/dispatcher.py, channels/push_delivery.py, channels/telegram_adapter.py, harness/scheduler_runtime.py |
 | slack_live.py | E4 — Gated live Slack adapter. | platform_registry, scheduler_delivery, slack_urllib, turn_bridge | channels/providers/slack_urllib.py, gateway/channel_watchers.py |
 | taskkind_classifier.py | — | inference_scaling | — |
-| telegram_adapter.py | — | authority, contract, dispatcher, provider_execution, provider_receipts, runtime_boundary | channels/providers/telegram_httpx.py, channels/telegram_live.py, gateway/channel_watchers.py |
+| telegram_adapter.py | — | authority, contract, dispatcher, provider_execution, provider_receipts, runtime_boundary, ssrf | channels/providers/telegram_httpx.py, channels/telegram_live.py, gateway/channel_watchers.py |
 | telegram_boundary.py | — | authority | — |
 | telegram_credentials.py | Resolve the Telegram bot token from the local vault, then the environment. | credentials_admin, local_vault | gateway/channel_watchers.py |
 | telegram_easy.py | Telegram "easy setup": phone number → MTProto user session → automated | — | channels/telegram_easy_telethon.py, transport/integrations.py |
@@ -652,7 +656,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | config, mcp | transport/integrations.py |
-| config.py | — | — | cli/app.py, cli/wiring.py, composio/__init__.py, composio/health.py, composio/mcp.py, transport/health.py, transport/integrations.py |
+| config.py | — | credential_vocab | cli/app.py, cli/wiring.py, composio/__init__.py, composio/health.py, composio/mcp.py, transport/health.py, transport/integrations.py |
 | connections.py | Composio connection management used by the dashboard Integrations tab. | — | — |
 | health.py | — | config, mcp, redaction | cli/app.py, transport/health.py |
 | mcp.py | — | config, redaction | cli/wiring.py, composio/__init__.py, composio/health.py |
@@ -1560,7 +1564,7 @@ graph LR
 | browser.py | — | network, policy | — |
 | child_workspace.py | — | filesystem, policy | — |
 | filesystem.py | — | policy | sandbox/child_workspace.py, sandbox/process.py |
-| network.py | — | policy | sandbox/browser.py, sandbox/process.py, tools/media_egress.py |
+| network.py | — | policy, ssrf | sandbox/browser.py, sandbox/process.py, tools/media_egress.py |
 | policy.py | — | — | sandbox/browser.py, sandbox/child_workspace.py, sandbox/filesystem.py, sandbox/network.py, sandbox/process.py |
 | process.py | — | filesystem, network, policy | — |
 
@@ -1572,10 +1576,12 @@ graph LR
 | advisory.py | — | — | security/__init__.py |
 | compliance.py | — | safety | security/__init__.py |
 | context_guard.py | — | — | security/__init__.py |
-| credentials.py | — | — | security/__init__.py |
+| credential_vocab.py | C-9 leaf — single vocabulary of "what counts as credential-shaped". | — | composio/config.py, security/credentials.py, security/ssrf.py |
+| credentials.py | — | credential_vocab | security/__init__.py |
 | external_surface.py | — | — | security/__init__.py |
 | posture.py | — | — | security/__init__.py |
 | sandbox_preflight.py | — | — | security/__init__.py |
+| ssrf.py | C-6 + C-7 leaf — single SSRF host classifier. | credential_vocab | channels/telegram_adapter.py, sandbox/network.py, web_acquisition/policy.py |
 
 ### shadow/
 
@@ -1825,7 +1831,7 @@ graph LR
 | live_provider_pack.py | — | policy, provider_execution, provider_receipts | web_acquisition/provider_router.py, web_acquisition/research_tools.py, web_acquisition/tests/test_deep_research_orchestrator.py |
 | opencode_provider_router.py | — | policy, provider_boundary, research_tools, result | — |
 | page_navigator.py | Page content navigator for deep web research. | — | web_acquisition/cross_verifier.py, web_acquisition/deep_research.py, web_acquisition/tests/test_cross_verifier.py, web_acquisition/tests/test_page_navigator.py |
-| policy.py | — | safety | browser/autonomous/safety_hooks.py, browser/autonomous/tool.py, browser/live_provider_pack.py, browser/provider_boundary.py, browser/source_tools.py, harness/general_automation/web_source_receipts.py, knowledge/source_tools.py, plugins/agentmemory/tools.py, plugins/native/_common.py, plugins/native/knowledge.py, plugins/native/missions.py, plugins/native/scheduled_work.py, recipes/first_party/general_automation/web_acquisition_contracts.py, tools/document_write/model.py, tools/document_write_tools.py, tools/web_search_tools.py, web_acquisition/acquisition_plan.py, web_acquisition/cross_verifier.py, web_acquisition/live_fetch_provider.py, web_acquisition/live_provider_pack.py, web_acquisition/opencode_provider_router.py, web_acquisition/provider_boundary.py, web_acquisition/provider_router.py, web_acquisition/providers/insane_fetch.py, web_acquisition/providers/jina_reader.py, web_acquisition/providers/platform_endpoint.py, web_acquisition/repo_research_tools.py, web_acquisition/research_tools.py |
+| policy.py | — | safety, ssrf | browser/autonomous/safety_hooks.py, browser/autonomous/tool.py, browser/live_provider_pack.py, browser/provider_boundary.py, browser/source_tools.py, harness/general_automation/web_source_receipts.py, knowledge/source_tools.py, plugins/agentmemory/tools.py, plugins/native/_common.py, plugins/native/knowledge.py, plugins/native/missions.py, plugins/native/scheduled_work.py, recipes/first_party/general_automation/web_acquisition_contracts.py, tools/document_write/model.py, tools/document_write_tools.py, tools/web_search_tools.py, web_acquisition/acquisition_plan.py, web_acquisition/cross_verifier.py, web_acquisition/live_fetch_provider.py, web_acquisition/live_provider_pack.py, web_acquisition/opencode_provider_router.py, web_acquisition/provider_boundary.py, web_acquisition/provider_router.py, web_acquisition/providers/insane_fetch.py, web_acquisition/providers/jina_reader.py, web_acquisition/providers/platform_endpoint.py, web_acquisition/repo_research_tools.py, web_acquisition/research_tools.py |
 | provider_boundary.py | — | policy | web_acquisition/__init__.py, web_acquisition/opencode_provider_router.py, web_acquisition/research_tools.py |
 | provider_router.py | Default-off provider router with retry and fallback for live web acquisition. | live_provider_pack, policy, provider_receipts | web_acquisition/__init__.py, web_acquisition/research_tools.py |
 | query_planner.py | Rule-based query planner for deep web research. | deep_research_config | web_acquisition/deep_research.py, web_acquisition/tests/test_query_planner.py |

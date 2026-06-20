@@ -8,6 +8,10 @@ from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from magi_agent.ops.safety import public_diagnostic_metadata
+from magi_agent.security.ssrf import (
+    METADATA_HOSTS as _SSRF_METADATA_HOSTS,
+    coerce_ip as _ssrf_coerce_ip,
+)
 
 
 _LOCAL_HOSTS = frozenset(
@@ -19,7 +23,23 @@ _LOCAL_HOSTS = frozenset(
         "metadata.google.internal",
     }
 )
-_METADATA_HOSTS = frozenset({"169.254.169.254"})
+# C-6: IP-literal SUBSET of the kernel metadata-host set, derived (not
+# re-declared) from :data:`magi_agent.security.ssrf.METADATA_HOSTS`. The
+# web-acquisition layer's ``url_policy_error`` historically returned
+# ``"metadata_url_blocked"`` ONLY for the IP-literal metadata case
+# (``169.254.169.254``); DNS-name metadata hosts (``metadata.google.internal``)
+# were routed through the separate ``_LOCAL_HOSTS`` set and got
+# ``"local_url_blocked"``. We must preserve that DNS-vs-IP split because
+# downstream callers branch on the exact returned string; widening the
+# DNS-name set here would silently re-categorize existing public-allowed URLs.
+#
+# The derivation below keeps this set in lockstep with the kernel: any new
+# IP-literal metadata host added to the kernel automatically lands here.
+# The set IS a strict subset of the kernel (so the kernel meta-test allowing
+# only the kernel-leaf can confirm by construction that we did not re-fork).
+_METADATA_HOST_IPS = frozenset(
+    host for host in _SSRF_METADATA_HOSTS if host.replace(".", "").isdigit()
+)
 _CGNAT_NETWORK = ip_network("100.64.0.0/10")
 _CLUSTER_HOSTS = frozenset({"browser-worker", "kubernetes", "kubernetes.default.svc"})
 _CLUSTER_HOST_PARTS = (".cluster.local", ".svc", ".svc.cluster.local")
@@ -127,7 +147,7 @@ def url_policy_error(url: str) -> str | None:
         return "invalid_url"
     if host in _LOCAL_HOSTS or host.endswith(".localhost"):
         return "local_url_blocked"
-    if host in _METADATA_HOSTS:
+    if host in _METADATA_HOST_IPS:
         return "metadata_url_blocked"
     if host in _CLUSTER_HOSTS or any(host.endswith(part) for part in _CLUSTER_HOST_PARTS):
         return "cluster_url_blocked"
@@ -161,7 +181,7 @@ def _classify_blocked_ip(parsed_ip: object) -> str | None:
     """
     if not isinstance(parsed_ip, IPv4Address | IPv6Address):
         return None
-    if str(parsed_ip) in _METADATA_HOSTS:
+    if str(parsed_ip) in _METADATA_HOST_IPS:
         return "metadata_url_blocked"
     if parsed_ip.is_loopback or parsed_ip.is_link_local or parsed_ip.is_unspecified:
         return "local_url_blocked"
@@ -253,55 +273,16 @@ def synthetic_url_ref(value: str, *, prefix: str) -> str:
 
 
 def _coerce_ip_address(host: str) -> object:
-    try:
-        return ip_address(host)
-    except ValueError:
-        return _coerce_legacy_ipv4_address(host)
+    """Web-acquisition-facing IP coercion shim.
 
-
-def _coerce_legacy_ipv4_address(host: str) -> IPv4Address | None:
-    parts = host.split(".")
-    if not 1 <= len(parts) <= 4 or any(part == "" for part in parts):
-        return None
-    parsed_parts: list[int] = []
-    for part in parts:
-        parsed = _parse_legacy_ipv4_part(part)
-        if parsed is None:
-            return None
-        parsed_parts.append(parsed)
-    if len(parsed_parts) == 1:
-        value = parsed_parts[0]
-    elif len(parsed_parts) == 2:
-        if parsed_parts[0] > 0xFF or parsed_parts[1] > 0xFFFFFF:
-            return None
-        value = (parsed_parts[0] << 24) | parsed_parts[1]
-    elif len(parsed_parts) == 3:
-        if parsed_parts[0] > 0xFF or parsed_parts[1] > 0xFF or parsed_parts[2] > 0xFFFF:
-            return None
-        value = (parsed_parts[0] << 24) | (parsed_parts[1] << 16) | parsed_parts[2]
-    else:
-        if any(part > 0xFF for part in parsed_parts):
-            return None
-        value = (
-            (parsed_parts[0] << 24)
-            | (parsed_parts[1] << 16)
-            | (parsed_parts[2] << 8)
-            | parsed_parts[3]
-        )
-    if not 0 <= value <= 0xFFFFFFFF:
-        return None
-    return IPv4Address(value)
-
-
-def _parse_legacy_ipv4_part(part: str) -> int | None:
-    try:
-        if part.casefold().startswith("0x"):
-            return int(part, 16)
-        if len(part) > 1 and part.startswith("0"):
-            return int(part, 8)
-        return int(part, 10)
-    except ValueError:
-        return None
+    C-6 consolidation: the standalone ``_coerce_legacy_ipv4_address`` +
+    ``_parse_legacy_ipv4_part`` helpers (that duplicated the sandbox copy
+    line-for-line) moved to :func:`magi_agent.security.ssrf.coerce_ip`. This
+    shim keeps the local name so existing callers (``url_policy_error``,
+    ``is_blocked_ip``) and the internal ``_classify_blocked_ip`` path do not
+    need to change call sites.
+    """
+    return _ssrf_coerce_ip(host)
 
 
 __all__ = [
