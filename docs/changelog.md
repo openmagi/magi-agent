@@ -15,6 +15,35 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.60
+
+### Added
+- Customize PR-C SeamSpec stack lands across three default-OFF PRs gated by
+  `MAGI_CUSTOMIZE_SEAM_SPEC_ENABLED`:
+  - PR-C1 (#789): SeamSpec IR + NL-to-SeamSpec compiler, registration-time
+    and runtime-dormant.
+  - PR-C2 (#793): SeamSpec store + `seam_for_user` runtime resolver + 3
+    `/seams` endpoints (compile / PUT / DELETE). OFF path keeps the store
+    empty and the lookup byte-identical with the builtin map.
+  - PR-C3 (#796): Customize hub gains a 5th `advanced` sub-nav with the
+    SeamSpec rule builder UI panel; the backend endpoints from PR-C2 power
+    it.
+- C-2 security kernel: `safe_metadata` reconciled onto a single
+  `public_diagnostic_metadata` helper so producers reuse one redaction seam
+  (#790).
+- C-6 + C-7 + C-9 security kernel: one SSRF classifier and one credential
+  vocabulary now back all egress + credential surfaces (#795). Removes
+  duplicate classifier/vocabulary branches across producers.
+
+### Fixed
+- Fireworks LiteLLM path now drops `reasoning_effort` for every value
+  (`max` / `high` / `medium` / `low` / `minimal`), not only `max`, closing
+  the Kimi / MiniMax "no final answer text arrived" instant-fail that #753
+  left open. `thinking` payloads remain untouched (#791).
+- Web picker exposes Gemini 3.5 Flash (#792). The backend slug map already
+  carried it; only the picker UI list and label-consistency contract test
+  were out of sync.
+
 ## 0.1.59
 
 ### Added
