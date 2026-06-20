@@ -9,7 +9,16 @@
     "traffic_attached",
     "user_visible_output_enabled"
   ],
-  "model_construct_dump": null,
+  "model_construct_dump": {
+    "liveBillingCallsEnabled": false,
+    "productionAuthority": false,
+    "quotaMutationAttached": false,
+    "spendCommitAttached": false,
+    "stripeAttached": false,
+    "supabaseAttached": false,
+    "trafficAttached": false,
+    "userVisibleOutputEnabled": false
+  },
   "model_construct_force_false_leaks": [],
   "model_validate_dump": {
     "liveBillingCallsEnabled": false,

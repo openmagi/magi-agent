@@ -14,7 +14,13 @@
     "userVisibleRenderAllowed": false
   },
   "model_construct_force_false_leaks": [],
-  "model_validate_dump": null,
+  "model_validate_dump": {
+    "adkArtifactServiceAttached": false,
+    "productionStorageWritten": false,
+    "rendererExecuted": false,
+    "routeAttached": false,
+    "userVisibleRenderAllowed": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.artifacts.render_verification.RenderVerificationAuthorityFlags"
 }

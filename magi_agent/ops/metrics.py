@@ -7,8 +7,9 @@ import hashlib
 import json
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_serializer, field_validator, model_validator
+from pydantic import Field, ValidationError, field_serializer, field_validator
 
+from .authority import FalseOnlyAuthorityModel
 from .safety import (
     require_digest,
     require_metric_name,
@@ -34,17 +35,17 @@ RuntimeOperationEventType = Literal[
 ]
 RuntimeOperationStatus = Literal["accepted", "dropped", "rejected"]
 
-_MODEL_CONFIG = ConfigDict(
-    frozen=True,
-    populate_by_name=True,
-    extra="forbid",
-    validate_default=True,
-    hide_input_in_errors=True,
-)
 
+class _MetricsModel(FalseOnlyAuthorityModel):
+    """Frozen metrics contract base re-parented onto the C-4 kernel.
 
-class RuntimeOperationEvent(BaseModel):
-    model_config = _MODEL_CONFIG
+    PRESERVED inline: ``sanitize_validation_error``-wrapping on every
+    construction surface (``__init__`` / ``model_validate`` /
+    ``model_validate_json``). The kernel's ``model_construct`` /
+    ``model_copy`` / serializer / introspection-based ``_force_false``
+    validator own the force-false invariant uniformly across every
+    subclass.
+    """
 
     def __init__(self, **data: object) -> None:
         try:
@@ -60,35 +61,19 @@ class RuntimeOperationEvent(BaseModel):
             raise sanitize_validation_error(exc, title=cls.__name__) from None
 
     @classmethod
-    def model_validate_json(cls, json_data: str | bytes | bytearray, *args: object, **kwargs: object) -> Self:
+    def model_validate_json(
+        cls,
+        json_data: str | bytes | bytearray,
+        *args: object,
+        **kwargs: object,
+    ) -> Self:
         try:
             return super().model_validate_json(json_data, *args, **kwargs)
         except ValidationError as exc:
             raise sanitize_validation_error(exc, title=cls.__name__) from None
 
-    def model_copy(self, *, update: Mapping[str, object] | None = None, deep: bool = False) -> Self:
-        if update:
-            raise ValueError("model_copy update is disabled for runtime operation events")
-        _ = deep
-        return type(self).model_validate(self.model_dump(by_alias=True, mode="json"))
 
-    def copy(
-        self,
-        *,
-        include: object = None,
-        exclude: object = None,
-        update: Mapping[str, object] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        if update or include is not None or exclude is not None:
-            raise ValueError("copy update/include/exclude is disabled for runtime operation events")
-        return self.model_copy(deep=deep)
-
-    @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: object) -> Self:
-        _ = _fields_set, values
-        raise ValueError("model_construct is disabled for runtime operation events")
-
+class RuntimeOperationEvent(_MetricsModel):
     schema_version: Literal["openmagi.ops.event.v1"] = Field(
         default="openmagi.ops.event.v1",
         alias="schemaVersion",
@@ -160,29 +145,7 @@ class RuntimeOperationEvent(BaseModel):
         return "sha256:" + hashlib.sha256(encoded).hexdigest()
 
 
-class RuntimeOpsAttachmentFlags(BaseModel):
-    model_config = _MODEL_CONFIG
-
-    def __init__(self, **data: object) -> None:
-        try:
-            super().__init__(**data)
-        except ValidationError as exc:
-            raise sanitize_validation_error(exc, title=type(self).__name__) from None
-
-    @classmethod
-    def model_validate(cls, obj: object, *args: object, **kwargs: object) -> Self:
-        try:
-            return super().model_validate(obj, *args, **kwargs)
-        except ValidationError as exc:
-            raise sanitize_validation_error(exc, title=cls.__name__) from None
-
-    @classmethod
-    def model_validate_json(cls, json_data: str | bytes | bytearray, *args: object, **kwargs: object) -> Self:
-        try:
-            return super().model_validate_json(json_data, *args, **kwargs)
-        except ValidationError as exc:
-            raise sanitize_validation_error(exc, title=cls.__name__) from None
-
+class RuntimeOpsAttachmentFlags(_MetricsModel):
     live_tool_execution_attached: Literal[False] = Field(
         default=False,
         alias="liveToolExecutionAttached",
@@ -206,46 +169,12 @@ class RuntimeOpsAttachmentFlags(BaseModel):
         alias="rawToolOutputAttached",
     )
 
-    @model_validator(mode="before")
-    @classmethod
-    def _force_false(cls, value: object) -> dict[str, object]:
-        result = dict(value) if isinstance(value, Mapping) else {}
-        for alias in (
-            "liveToolExecutionAttached",
-            "productionStorageAttached",
-            "productionQueueAttached",
-            "rawPromptAttached",
-            "hiddenReasoningAttached",
-            "credentialAttached",
-            "rawToolOutputAttached",
-        ):
-            result[alias] = False
-        return result
-
-    @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: object) -> Self:
-        _ = _fields_set, values
-        raise ValueError("model_construct is disabled for runtime ops attachment flags")
-
-    def model_copy(self, *, update: Mapping[str, object] | None = None, deep: bool = False) -> Self:
-        if update:
-            raise ValueError("model_copy update is disabled for runtime ops attachment flags")
-        _ = deep
-        return type(self).model_validate(self.model_dump(by_alias=True, mode="json"))
-
-    def copy(
-        self,
-        *,
-        include: object = None,
-        exclude: object = None,
-        update: Mapping[str, object] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        if update or include is not None or exclude is not None:
-            raise ValueError("copy update/include/exclude is disabled for runtime ops attachment flags")
-        return self.model_copy(deep=deep)
-
     def public_projection(self) -> dict[str, object]:
+        # PRESERVED inline: the projection renames `rawPromptAttached` /
+        # `rawToolOutputAttached` to `promptPayloadAttached` /
+        # `toolOutputPayloadAttached` (public-safe field names) -- the kernel's
+        # default `public_projection` uses by-alias model_dump and would emit
+        # the raw names instead. Keep the hand-written rename.
         return {
             "liveToolExecutionAttached": False,
             "productionStorageAttached": False,
@@ -257,29 +186,7 @@ class RuntimeOpsAttachmentFlags(BaseModel):
         }
 
 
-class RuntimeMetricRecord(BaseModel):
-    model_config = _MODEL_CONFIG
-
-    def __init__(self, **data: object) -> None:
-        try:
-            super().__init__(**data)
-        except ValidationError as exc:
-            raise sanitize_validation_error(exc, title=type(self).__name__) from None
-
-    @classmethod
-    def model_validate(cls, obj: object, *args: object, **kwargs: object) -> Self:
-        try:
-            return super().model_validate(obj, *args, **kwargs)
-        except ValidationError as exc:
-            raise sanitize_validation_error(exc, title=cls.__name__) from None
-
-    @classmethod
-    def model_validate_json(cls, json_data: str | bytes | bytearray, *args: object, **kwargs: object) -> Self:
-        try:
-            return super().model_validate_json(json_data, *args, **kwargs)
-        except ValidationError as exc:
-            raise sanitize_validation_error(exc, title=cls.__name__) from None
-
+class RuntimeMetricRecord(_MetricsModel):
     schema_version: Literal["openmagi.ops.metric.v1"] = Field(
         default="openmagi.ops.metric.v1",
         alias="schemaVersion",
@@ -295,29 +202,6 @@ class RuntimeMetricRecord(BaseModel):
         default_factory=RuntimeOpsAttachmentFlags,
         alias="attachmentFlags",
     )
-
-    @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: object) -> Self:
-        _ = _fields_set, values
-        raise ValueError("model_construct is disabled for runtime metric records")
-
-    def model_copy(self, *, update: Mapping[str, object] | None = None, deep: bool = False) -> Self:
-        if update:
-            raise ValueError("model_copy update is disabled for runtime metric records")
-        _ = deep
-        return type(self).model_validate(self.model_dump(by_alias=True, mode="json"))
-
-    def copy(
-        self,
-        *,
-        include: object = None,
-        exclude: object = None,
-        update: Mapping[str, object] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        if update or include is not None or exclude is not None:
-            raise ValueError("copy update/include/exclude is disabled for runtime metric records")
-        return self.model_copy(deep=deep)
 
     @field_validator("metric_name")
     @classmethod
@@ -358,29 +242,7 @@ class RuntimeMetricRecord(BaseModel):
         }
 
 
-class RuntimeMetricsSnapshot(BaseModel):
-    model_config = _MODEL_CONFIG
-
-    def __init__(self, **data: object) -> None:
-        try:
-            super().__init__(**data)
-        except ValidationError as exc:
-            raise sanitize_validation_error(exc, title=type(self).__name__) from None
-
-    @classmethod
-    def model_validate(cls, obj: object, *args: object, **kwargs: object) -> Self:
-        try:
-            return super().model_validate(obj, *args, **kwargs)
-        except ValidationError as exc:
-            raise sanitize_validation_error(exc, title=cls.__name__) from None
-
-    @classmethod
-    def model_validate_json(cls, json_data: str | bytes | bytearray, *args: object, **kwargs: object) -> Self:
-        try:
-            return super().model_validate_json(json_data, *args, **kwargs)
-        except ValidationError as exc:
-            raise sanitize_validation_error(exc, title=cls.__name__) from None
-
+class RuntimeMetricsSnapshot(_MetricsModel):
     schema_version: Literal["openmagi.ops.metrics_snapshot.v1"] = Field(
         default="openmagi.ops.metrics_snapshot.v1",
         alias="schemaVersion",
@@ -397,29 +259,6 @@ class RuntimeMetricsSnapshot(BaseModel):
         default_factory=RuntimeOpsAttachmentFlags,
         alias="attachmentFlags",
     )
-
-    @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: object) -> Self:
-        _ = _fields_set, values
-        raise ValueError("model_construct is disabled for runtime metrics snapshots")
-
-    def model_copy(self, *, update: Mapping[str, object] | None = None, deep: bool = False) -> Self:
-        if update:
-            raise ValueError("model_copy update is disabled for runtime metrics snapshots")
-        _ = deep
-        return type(self).model_validate(self.model_dump(by_alias=True, mode="json"))
-
-    def copy(
-        self,
-        *,
-        include: object = None,
-        exclude: object = None,
-        update: Mapping[str, object] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        if update or include is not None or exclude is not None:
-            raise ValueError("copy update/include/exclude is disabled for runtime metrics snapshots")
-        return self.model_copy(deep=deep)
 
     @field_validator("counts", "event_type_counts")
     @classmethod

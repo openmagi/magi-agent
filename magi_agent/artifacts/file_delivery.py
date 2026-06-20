@@ -6,9 +6,10 @@ import inspect
 import re
 from typing import Any, Literal, Protocol, Self
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 from magi_agent.channels.contract import ChannelDeliveryReceipt, ChannelRef
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.runtime.provider_receipts import (
     ProviderReceipt,
     build_provider_receipt,
@@ -103,9 +104,7 @@ class LiveFileChannelDeliveryPort(Protocol):
     def deliver(self, request: FileDeliveryRequest) -> ChannelDeliveryReceipt: ...
 
 
-class FileDeliveryConfig(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class FileDeliveryConfig(FalseOnlyAuthorityModel):
     enabled: bool = False
     local_fake_artifact_service_enabled: bool = Field(
         default=False,
@@ -136,30 +135,8 @@ class FileDeliveryConfig(BaseModel):
     )
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
 
-    @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: Any) -> Self:
-        _ = _fields_set, values
-        return cls()
 
-    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
-        data = self.model_dump(by_alias=False, mode="python", warnings=False)
-        if update:
-            alias_to_name = {
-                field.alias: name
-                for name, field in self.__class__.model_fields.items()
-                if field.alias is not None
-            }
-            data.update({alias_to_name.get(str(key), str(key)): value for key, value in update.items()})
-        data["production_storage_writes_enabled"] = False
-        data["production_channel_delivery_enabled"] = False
-        data["route_attached"] = False
-        _ = deep
-        return type(self).model_validate(data)
-
-
-class FileDeliveryAuthorityFlags(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class FileDeliveryAuthorityFlags(FalseOnlyAuthorityModel):
     adk_artifact_service_attached: Literal[False] = Field(
         default=False,
         alias="adkArtifactServiceAttached",
@@ -179,27 +156,6 @@ class FileDeliveryAuthorityFlags(BaseModel):
     )
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
     raw_content_injected: Literal[False] = Field(default=False, alias="rawContentInjected")
-
-    @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: Any) -> Self:
-        _ = _fields_set, values
-        return cls()
-
-    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
-        _ = update, deep
-        return type(self)()
-
-    @field_serializer(
-        "adk_artifact_service_attached",
-        "artifact_written",
-        "channel_delivery_performed",
-        "production_storage_written",
-        "production_channel_write",
-        "route_attached",
-        "raw_content_injected",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 class FileDeliveryRequest(BaseModel):

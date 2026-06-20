@@ -8,16 +8,19 @@
     "enabled": false,
     "localFakeArtifactServiceEnabled": false,
     "localFakeChannelDeliveryEnabled": false,
-    "productionChannelDeliveryEnabled": true,
-    "productionStorageWritesEnabled": true,
-    "routeAttached": true
+    "productionChannelDeliveryEnabled": false,
+    "productionStorageWritesEnabled": false,
+    "routeAttached": false
   },
-  "model_construct_force_false_leaks": [
-    "production_channel_delivery_enabled",
-    "production_storage_writes_enabled",
-    "route_attached"
-  ],
-  "model_validate_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "enabled": false,
+    "localFakeArtifactServiceEnabled": false,
+    "localFakeChannelDeliveryEnabled": false,
+    "productionChannelDeliveryEnabled": false,
+    "productionStorageWritesEnabled": false,
+    "routeAttached": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.artifacts.delivery_boundary.ArtifactChannelDeliveryConfig"
 }

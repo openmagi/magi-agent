@@ -7,7 +7,9 @@ import re
 from pathlib import PurePosixPath
 from typing import Any, Literal, Protocol, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 
 
 OutputArtifactRegistryOperation = Literal[
@@ -90,9 +92,7 @@ class OutputArtifactRegistryProviderPort(Protocol):
     def execute(self, request: OutputArtifactRegistryRequest) -> Mapping[str, object]: ...
 
 
-class OutputArtifactRegistryConfig(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class OutputArtifactRegistryConfig(FalseOnlyAuthorityModel):
     enabled: bool = False
     local_fake_registry_enabled: bool = Field(
         default=False,
@@ -109,9 +109,7 @@ class OutputArtifactRegistryConfig(BaseModel):
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
 
 
-class OutputArtifactAuthorityFlags(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class OutputArtifactAuthorityFlags(FalseOnlyAuthorityModel):
     adk_artifact_service_attached: Literal[False] = Field(
         default=False,
         alias="adkArtifactServiceAttached",
@@ -123,25 +121,6 @@ class OutputArtifactAuthorityFlags(BaseModel):
     )
     child_artifact_imported: Literal[False] = Field(default=False, alias="childArtifactImported")
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
-
-    @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: Any) -> Self:
-        _ = _fields_set, values
-        return cls()
-
-    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
-        _ = update, deep
-        return type(self)()
-
-    @field_serializer(
-        "adk_artifact_service_attached",
-        "artifact_written",
-        "production_storage_written",
-        "child_artifact_imported",
-        "route_attached",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 class OutputArtifactRecord(BaseModel):

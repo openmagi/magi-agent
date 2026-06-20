@@ -16,7 +16,14 @@
     "userVisibleDeliveryAllowed": false
   },
   "model_construct_force_false_leaks": [],
-  "model_validate_dump": null,
+  "model_validate_dump": {
+    "adkArtifactServiceAttached": false,
+    "channelDeliveryPerformed": false,
+    "productionChannelWrite": false,
+    "productionStorageWritten": false,
+    "routeAttached": false,
+    "userVisibleDeliveryAllowed": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.artifacts.delivery_receipts.ArtifactDeliveryAuthorityFlags"
 }

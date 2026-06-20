@@ -373,12 +373,17 @@ def test_forced_authority_flags_remain_false() -> None:
     assert flags.user_visible_output_enabled is False
     assert flags.database_mutation_allowed is False
     assert flags.network_call_allowed is False
-    with pytest.raises(ValueError, match="model_construct"):
-        JobQueueAuthorityFlags.model_construct(productionWorkerAttached=True)
-    with pytest.raises(ValueError, match="model_copy update"):
-        flags.model_copy(update={"productionWorkerAttached": True})
-    with pytest.raises(ValueError, match="copy update"):
-        flags.copy(update={"productionWorkerAttached": True})
+    # C-4 PR-I raise-to-coerce: model_construct routes through model_validate
+    # (kernel) so a forged ``productionWorkerAttached=True`` is coerced back to
+    # False instead of raising. The force-false invariant remains.
+    constructed = JobQueueAuthorityFlags.model_construct(productionWorkerAttached=True)
+    assert constructed.production_worker_attached is False
+    # C-4 PR-I leak-closing: model_copy(update=...) coerces force-false fields
+    # back to False instead of raising. The force-false invariant is preserved.
+    copied = flags.model_copy(update={"productionWorkerAttached": True})
+    assert copied.production_worker_attached is False
+    copied2 = flags.copy(update={"productionWorkerAttached": True})
+    assert copied2.production_worker_attached is False
 
 
 @pytest.mark.parametrize(

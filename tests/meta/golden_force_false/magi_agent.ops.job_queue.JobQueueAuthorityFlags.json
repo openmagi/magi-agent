@@ -10,7 +10,17 @@
     "traffic_attached",
     "user_visible_output_enabled"
   ],
-  "model_construct_dump": null,
+  "model_construct_dump": {
+    "databaseMutationAllowed": false,
+    "filesystemMutationAllowed": false,
+    "liveToolExecution": false,
+    "networkCallAllowed": false,
+    "productionBackgroundExecutionEnabled": false,
+    "productionWorkerAttached": false,
+    "productionWrite": false,
+    "trafficAttached": false,
+    "userVisibleOutputEnabled": false
+  },
   "model_construct_force_false_leaks": [],
   "model_validate_dump": {
     "databaseMutationAllowed": false,

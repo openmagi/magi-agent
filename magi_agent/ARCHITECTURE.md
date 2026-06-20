@@ -347,13 +347,13 @@ graph LR
 |---|---|---|---|
 | __init__.py | — | delivery_boundary, file_delivery, output_registry_boundary | — |
 | _file_delivery_fakes.py | Shared local-fake provider implementations for the FileDelivery boundary. | contract | artifacts/file_delivery_live.py, plugins/native/documents.py |
-| delivery_boundary.py | — | contract, file_delivery | artifacts/__init__.py |
-| delivery_receipts.py | — | contract, durable_store, file_delivery, safety | — |
-| file_delivery.py | — | contract, provider_receipts | artifacts/__init__.py, artifacts/delivery_boundary.py, artifacts/delivery_receipts.py, artifacts/file_delivery_live.py, plugins/native/documents.py |
+| delivery_boundary.py | — | authority, contract, file_delivery | artifacts/__init__.py |
+| delivery_receipts.py | — | authority, contract, durable_store, file_delivery, safety | — |
+| file_delivery.py | — | authority, contract, provider_receipts | artifacts/__init__.py, artifacts/delivery_boundary.py, artifacts/delivery_receipts.py, artifacts/file_delivery_live.py, plugins/native/documents.py |
 | file_delivery_live.py | Real filesystem-backed providers for the FileDelivery boundary. | _common, _file_delivery_fakes, contract, file_delivery | plugins/native/documents.py |
-| local_result_store.py | — | output_budget, safety | tools/kernel.py |
-| output_registry_boundary.py | — | — | artifacts/__init__.py |
-| render_verification.py | — | durable_store, safety | — |
+| local_result_store.py | — | authority, output_budget, safety | tools/kernel.py |
+| output_registry_boundary.py | — | authority | artifacts/__init__.py |
+| render_verification.py | — | authority, durable_store, safety | — |
 
 ### benchmarks/
 
@@ -1244,10 +1244,10 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | — | transport/health.py, transport/product_admin.py |
-| authority.py | Frozen-contract / authority model bases (C-4 / C-5 shared home). | — | channels/discord_adapter.py, channels/dispatcher.py, channels/push_delivery.py, channels/runtime_boundary.py, channels/telegram_adapter.py, channels/telegram_boundary.py, channels/workflow_routing.py, config/models.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, evidence/builtin.py, evidence/child_runtime_envelope.py, evidence/citation_audit.py, evidence/coding_tool_receipts.py, evidence/coding_verification.py, evidence/ledger.py, evidence/reports.py, evidence/research_final_gate.py, evidence/rollout.py, evidence/runtime_receipts.py, evidence/source_ledger.py, evidence/subagent.py, evidence/types.py, harness/autopilot.py, harness/cron_runtime.py, harness/discipline_boundary.py, harness/e2e_readiness.py, harness/goal_loop.py, harness/inference_scaling.py, harness/learning_executor.py, harness/memory_compaction.py, harness/memory_recall.py, harness/memory_review.py, harness/memory_write.py, harness/parallel_execution.py, harness/plan_gate.py, harness/resolved.py, harness/scheduler_delivery.py, harness/scheduler_executor.py, harness/scheduler_runtime.py, harness/skill_curator.py, harness/verifier_bus.py, harness/workflow_executor.py, memory/conformance.py, memory/contracts.py, memory/namespaces.py, memory/policy.py, memory/projection.py, memory/recall_ledger.py, memory/write_boundary.py, ops/safety.py, permissions/auto_control.py, recipes/coding_evidence_gate.py, recipes/coding_mutation.py, recipes/coding_subagents.py, recipes/composition.py, recipes/opencode_child_lifecycle.py, recipes/opencode_permission_patterns.py, recipes/research_agents.py, recipes/research_child_runner.py, tools/read_ledger.py, tools/scheduler.py |
+| authority.py | Frozen-contract / authority model bases (C-4 / C-5 shared home). | — | artifacts/delivery_boundary.py, artifacts/delivery_receipts.py, artifacts/file_delivery.py, artifacts/local_result_store.py, artifacts/output_registry_boundary.py, artifacts/render_verification.py, channels/discord_adapter.py, channels/dispatcher.py, channels/push_delivery.py, channels/runtime_boundary.py, channels/telegram_adapter.py, channels/telegram_boundary.py, channels/workflow_routing.py, config/models.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, evidence/builtin.py, evidence/child_runtime_envelope.py, evidence/citation_audit.py, evidence/coding_tool_receipts.py, evidence/coding_verification.py, evidence/ledger.py, evidence/reports.py, evidence/research_final_gate.py, evidence/rollout.py, evidence/runtime_receipts.py, evidence/source_ledger.py, evidence/subagent.py, evidence/types.py, harness/autopilot.py, harness/cron_runtime.py, harness/discipline_boundary.py, harness/e2e_readiness.py, harness/goal_loop.py, harness/inference_scaling.py, harness/learning_executor.py, harness/memory_compaction.py, harness/memory_recall.py, harness/memory_review.py, harness/memory_write.py, harness/parallel_execution.py, harness/plan_gate.py, harness/resolved.py, harness/scheduler_delivery.py, harness/scheduler_executor.py, harness/scheduler_runtime.py, harness/skill_curator.py, harness/verifier_bus.py, harness/workflow_executor.py, memory/conformance.py, memory/contracts.py, memory/namespaces.py, memory/policy.py, memory/projection.py, memory/recall_ledger.py, memory/write_boundary.py, ops/job_queue.py, ops/metrics.py, ops/safety.py, permissions/auto_control.py, recipes/coding_evidence_gate.py, recipes/coding_mutation.py, recipes/coding_subagents.py, recipes/composition.py, recipes/opencode_child_lifecycle.py, recipes/opencode_permission_patterns.py, recipes/research_agents.py, recipes/research_child_runner.py, tenancy/context.py, tools/read_ledger.py, tools/scheduler.py |
 | health.py | — | daemon, scheduler_job_execution | adk_bridge/event_adapter.py, gateway/daemon.py, shadow/gate5b4c3_live_runner_boundary.py, transport/sse.py, transport/streaming_chat_route.py |
-| job_queue.py | — | safety | — |
-| metrics.py | — | safety | — |
+| job_queue.py | — | authority, safety | — |
+| metrics.py | — | authority, safety | — |
 | otel_noise.py | Suppress a benign OpenTelemetry teardown log line. | — | (root)/main.py, cli/app.py |
 | safety.py | — | authority | artifacts/delivery_receipts.py, artifacts/local_result_store.py, artifacts/render_verification.py, billing/quota.py, billing/spend_guard.py, composio/redaction.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, evidence/ledger.py, gates/gate2_readiness.py, harness/verifier_bus.py, ops/job_queue.py, ops/metrics.py, permissions/auto_control.py, runtime/governed_projection.py, runtime/heartbeat_contract.py, runtime/model_tiers.py, runtime/no_agent_watchdog.py, runtime/resume_decision.py, security/compliance.py, shadow/gate2_recipe_profile_resolver.py, tenancy/context.py, tools/kernel.py, tools/output_budget.py, tools/schema_validation.py, transport/product_admin.py, web_acquisition/policy.py |
 
@@ -1674,7 +1674,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | context | — |
-| context.py | — | safety | billing/quota.py, billing/spend_guard.py, tenancy/__init__.py |
+| context.py | — | authority, safety | billing/quota.py, billing/spend_guard.py, tenancy/__init__.py |
 
 ### testing/
 

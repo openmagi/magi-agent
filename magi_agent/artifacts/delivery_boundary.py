@@ -6,9 +6,10 @@ import re
 from pathlib import PurePosixPath
 from typing import Any, Literal, Protocol, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from magi_agent.channels.contract import ChannelDeliveryReceipt, ChannelRef
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 
 
 ArtifactOperation = Literal[
@@ -99,9 +100,7 @@ class ChannelDeliveryPort(Protocol):
     def deliver(self, request: ArtifactChannelDeliveryRequest) -> ChannelDeliveryReceipt: ...
 
 
-class ArtifactChannelDeliveryConfig(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class ArtifactChannelDeliveryConfig(FalseOnlyAuthorityModel):
     enabled: bool = False
     local_fake_artifact_service_enabled: bool = Field(
         default=False,
@@ -122,9 +121,7 @@ class ArtifactChannelDeliveryConfig(BaseModel):
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
 
 
-class ArtifactChannelAuthorityFlags(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class ArtifactChannelAuthorityFlags(FalseOnlyAuthorityModel):
     adk_artifact_service_attached: Literal[False] = Field(
         default=False,
         alias="adkArtifactServiceAttached",
@@ -143,35 +140,6 @@ class ArtifactChannelAuthorityFlags(BaseModel):
         alias="productionChannelWrite",
     )
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set, values
-        return cls()
-
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        _ = update, deep
-        return type(self)()
-
-    @field_serializer(
-        "adk_artifact_service_attached",
-        "artifact_written",
-        "channel_delivery_performed",
-        "production_storage_written",
-        "production_channel_write",
-        "route_attached",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 class ArtifactRecord(BaseModel):

@@ -229,8 +229,6 @@ _FROZEN_BASE_FORK_ALLOWLIST: frozenset[str] = frozenset(
         "meta_orchestration/inspection_loop.py",
         "meta_orchestration/projection.py",
         "meta_orchestration/task_plan.py",
-        "ops/job_queue.py",
-        "ops/metrics.py",
         "packs/types.py",
         "permissions/auto_control.py",
         "research/acceptance_criteria.py",

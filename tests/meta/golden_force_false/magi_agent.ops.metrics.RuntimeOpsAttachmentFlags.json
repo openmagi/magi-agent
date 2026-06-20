@@ -8,9 +8,25 @@
     "raw_prompt_attached",
     "raw_tool_output_attached"
   ],
-  "model_construct_dump": null,
+  "model_construct_dump": {
+    "credentialAttached": false,
+    "hiddenReasoningAttached": false,
+    "liveToolExecutionAttached": false,
+    "productionQueueAttached": false,
+    "productionStorageAttached": false,
+    "rawPromptAttached": false,
+    "rawToolOutputAttached": false
+  },
   "model_construct_force_false_leaks": [],
-  "model_validate_dump": null,
+  "model_validate_dump": {
+    "credentialAttached": false,
+    "hiddenReasoningAttached": false,
+    "liveToolExecutionAttached": false,
+    "productionQueueAttached": false,
+    "productionStorageAttached": false,
+    "rawPromptAttached": false,
+    "rawToolOutputAttached": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.ops.metrics.RuntimeOpsAttachmentFlags"
 }

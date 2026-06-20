@@ -5,8 +5,9 @@ import hashlib
 import json
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import Field, ValidationError, field_validator
 
+from .authority import FalseOnlyAuthorityModel
 from .safety import (
     require_digest,
     require_safe_ref,
@@ -37,15 +38,6 @@ JobQueueReceiptStatus = Literal[
 ]
 EnqueueStatus = Literal["disabled", "queued", "duplicate", "blocked"]
 
-_MODEL_CONFIG = ConfigDict(
-    frozen=True,
-    populate_by_name=True,
-    extra="forbid",
-    validate_default=True,
-    hide_input_in_errors=True,
-)
-
-
 def _digest_payload(payload: Mapping[str, object]) -> str:
     encoded = json.dumps(
         payload,
@@ -65,8 +57,21 @@ def _safe_reason(value: str) -> str:
     return require_safe_ref(value, field_name="reasonCode")
 
 
-class _JobQueueModel(BaseModel):
-    model_config = _MODEL_CONFIG
+class _JobQueueModel(FalseOnlyAuthorityModel):
+    """Frozen job-queue contract base re-parented onto the C-4 kernel.
+
+    PRESERVED inline: ``sanitize_validation_error``-wrapping on every
+    construction surface (``__init__`` / ``model_validate`` /
+    ``model_validate_json``). The kernel does not own that contract --
+    ``tests/test_ops_job_queue.py::
+    test_receipt_validation_errors_do_not_echo_bad_digest_or_private_extra_keys``
+    asserts ``ValidationError`` payloads strip the bad-digest text and
+    private extra keys, which this wrapper guarantees by translating any
+    raw pydantic ``ValidationError`` into a sanitized one with the offending
+    input redacted. The kernel's ``model_construct`` / ``model_copy`` /
+    serializer / introspection-based ``_force_false`` validator own the
+    force-false invariant uniformly across every subclass.
+    """
 
     def __init__(self, **data: object) -> None:
         try:
@@ -92,29 +97,6 @@ class _JobQueueModel(BaseModel):
             return super().model_validate_json(json_data, *args, **kwargs)
         except ValidationError as exc:
             raise sanitize_validation_error(exc, title=cls.__name__) from None
-
-    @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: object) -> Self:
-        _ = _fields_set, values
-        raise ValueError(f"model_construct is disabled for {cls.__name__}")
-
-    def model_copy(self, *, update: Mapping[str, object] | None = None, deep: bool = False) -> Self:
-        if update:
-            raise ValueError(f"model_copy update is disabled for {type(self).__name__}")
-        _ = deep
-        return type(self).model_validate(self.model_dump(by_alias=True, mode="json"))
-
-    def copy(
-        self,
-        *,
-        include: object = None,
-        exclude: object = None,
-        update: Mapping[str, object] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        if update or include is not None or exclude is not None:
-            raise ValueError(f"copy update/include/exclude is disabled for {type(self).__name__}")
-        return self.model_copy(deep=deep)
 
 
 class JobQueueAuthorityFlags(_JobQueueModel):
@@ -142,28 +124,6 @@ class JobQueueAuthorityFlags(_JobQueueModel):
         default=False,
         alias="productionBackgroundExecutionEnabled",
     )
-
-    @model_validator(mode="before")
-    @classmethod
-    def _force_false(cls, value: object) -> dict[str, object]:
-        payload = dict(value) if isinstance(value, Mapping) else {}
-        for field_name, field in cls.model_fields.items():
-            payload[field.alias or field_name] = False
-            payload.pop(field_name, None)
-        return payload
-
-    def public_projection(self) -> dict[str, object]:
-        return {
-            "productionWorkerAttached": False,
-            "productionWrite": False,
-            "liveToolExecution": False,
-            "trafficAttached": False,
-            "userVisibleOutputEnabled": False,
-            "databaseMutationAllowed": False,
-            "filesystemMutationAllowed": False,
-            "networkCallAllowed": False,
-            "productionBackgroundExecutionEnabled": False,
-        }
 
 
 class JobQueueConfig(_JobQueueModel):
@@ -370,21 +330,6 @@ class JobQueueReceipt(_JobQueueModel):
         default_factory=JobQueueAuthorityFlags,
         alias="authorityFlags",
     )
-
-    @model_validator(mode="before")
-    @classmethod
-    def _force_false(cls, value: object) -> dict[str, object]:
-        payload = dict(value) if isinstance(value, Mapping) else {}
-        for alias in (
-            "productionWorkerAttached",
-            "productionWrite",
-            "liveToolExecution",
-            "trafficAttached",
-            "userVisibleOutputEnabled",
-            "publicProjectionAllowed",
-        ):
-            payload[alias] = False
-        return payload
 
     @field_validator(
         "request_digest",
