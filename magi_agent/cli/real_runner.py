@@ -767,9 +767,68 @@ def _apply_customize_verification(required_validators: list[str]) -> list[str]:
             for ref in policy.enabled_deterministic_refs():
                 if ref not in result and is_known_ref(ref):
                     result.append(ref)
+        # Phase 3 — recipe opt-out: when the user supplies an explicit
+        # ``enabled_recipes`` allowlist, drop validator_refs contributed by recipe
+        # packs the user did not opt into. Empty allowlist ⇒ no-op (byte-
+        # identical). Curated mapping in ``customize.catalog.RECIPE_ID_TO_PACK_IDS``
+        # leaves security-critical packs unmapped so a user cannot disable them
+        # through this seam.
+        disabled_validator_refs, _disabled_evidence_refs = (
+            _disabled_recipe_pack_refs(policy)
+        )
+        if disabled_validator_refs:
+            result = [r for r in result if r not in disabled_validator_refs]
         return result
     except Exception:
         return required_validators
+
+
+def _disabled_recipe_pack_refs(policy: object) -> tuple[frozenset[str], frozenset[str]]:
+    """Return (disabled_validator_refs, disabled_evidence_refs) the user opted out via ``enabled_recipes``.
+
+    Allowlist semantics (deliberate, conservative): an empty ``enabled_recipes``
+    set means "no user override" → no refs are dropped (byte-identical). When the
+    set is non-empty it is an explicit allowlist — recipe ids NOT in the set are
+    treated as disabled and their mapped pack's evidence_refs are returned for
+    removal from the assembled requirements.
+
+    Curated ``RECIPE_ID_TO_PACK_IDS`` maps the UI label to one or more real
+    ``RecipePackManifest`` ids; unmapped UI ids (and security-critical packs
+    that are intentionally not mapped) cannot be opted out through this seam.
+
+    Returns ``(frozenset(), frozenset())`` on any error (fail-open).
+    """
+    try:
+        from magi_agent.customize.catalog import (  # noqa: PLC0415
+            RECIPES,
+            pack_ids_for_recipe,
+        )
+        from magi_agent.recipes.compiler import PackRegistry  # noqa: PLC0415
+
+        enabled_recipes = getattr(policy, "enabled_recipes", frozenset())
+        if not enabled_recipes:
+            return (frozenset(), frozenset())
+        registry = PackRegistry.with_first_party_packs()
+        disabled_validator_refs: set[str] = set()
+        disabled_evidence_refs: set[str] = set()
+        for recipe in RECIPES:
+            rid = recipe.get("id")
+            if not isinstance(rid, str) or rid in enabled_recipes:
+                continue
+            for pack_id in pack_ids_for_recipe(rid):
+                try:
+                    pack = registry.get(pack_id)
+                except Exception:  # noqa: BLE001 — unknown pack ⇒ skip
+                    continue
+                disabled_validator_refs.update(
+                    getattr(pack, "validator_refs", ()) or ()
+                )
+                disabled_evidence_refs.update(
+                    getattr(pack, "evidence_refs", ()) or ()
+                )
+        return (frozenset(disabled_validator_refs), frozenset(disabled_evidence_refs))
+    except Exception:  # noqa: BLE001 — never wedge the assembly build
+        return (frozenset(), frozenset())
 
 
 def _apply_customize_evidence_overrides(required_evidence: list[str]) -> list[str]:
@@ -800,6 +859,13 @@ def _apply_customize_evidence_overrides(required_evidence: list[str]) -> list[st
                 continue
             if not policy.resolve_enabled(preset_id, default=seam.runtime_default_on):
                 result = [r for r in result if r not in seam.controls_refs]
+        # Phase 3 — recipe opt-out: same allowlist semantics as the validator
+        # pass above. Empty ``enabled_recipes`` ⇒ no-op (byte-identical).
+        _disabled_validator_refs, disabled_evidence_refs = (
+            _disabled_recipe_pack_refs(policy)
+        )
+        if disabled_evidence_refs:
+            result = [r for r in result if r not in disabled_evidence_refs]
         return result
     except Exception:
         return required_evidence
