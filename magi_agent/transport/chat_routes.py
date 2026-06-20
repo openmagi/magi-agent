@@ -494,6 +494,12 @@ async def _local_adk_chat_sse(
         # a daily entry could be lost). Acceptable for the single-user local CLI;
         # a lock here would only be needed if concurrent same-workspace turns
         # become common.
+        # PR2: no ``summarizer=`` is passed here. ``record_turn`` builds the
+        # default production cheap-model summarizer itself, but ONLY when the
+        # (default-OFF) ``compaction_enabled`` gate resolves True — so a clean
+        # install constructs no model and this path stays byte-identical. The
+        # model is built lazily on first ``summarize`` and fails open to
+        # truncation if no provider/key is configured.
         await asyncio.to_thread(
             record_turn,
             workspace_root=workspace_root,

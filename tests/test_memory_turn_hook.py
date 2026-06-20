@@ -299,3 +299,96 @@ def test_record_turn_never_raises_on_broken_config(
         used_tool=True,
     )
     assert _daily_files(tmp_path) == []
+
+
+# ---------------------------------------------------------------------------
+# PR2. default production summarizer is wired when compaction is enabled
+# ---------------------------------------------------------------------------
+
+
+class _CapturingTree:
+    """Captures the ``summarizer`` the hook hands to ``CompactionTree``."""
+
+    last_summarizer: object = "<unset>"
+
+    def __init__(self, *_a: object, summarizer: object = None, **_k: object) -> None:
+        type(self).last_summarizer = summarizer
+
+    def run(self, *, today: date, force: bool = False):  # noqa: ANN202
+        return None
+
+
+def test_default_cheap_summarizer_wired_when_compaction_enabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from magi_agent.memory.summarizer_runtime import CheapModelSummarizer
+
+    _CapturingTree.last_summarizer = "<unset>"
+    monkeypatch.setattr(memory_turn_hook, "CompactionTree", _CapturingTree)
+
+    record_turn(
+        workspace_root=tmp_path,
+        session_id="sess-summ",
+        turn_id="t0",
+        user_text="prompt about the deploy",
+        assistant_text="a long assistant reply about the deploy pipeline " * 3,
+        used_tool=True,
+        config=_cfg(writeEnabled=True, compactionEnabled=True),
+        today=date(2026, 6, 8),
+    )
+    # When the caller does not inject a summarizer, the hook builds the default
+    # production (cheap-model) summarizer because compaction is ON.
+    assert isinstance(_CapturingTree.last_summarizer, CheapModelSummarizer)
+
+
+def test_explicit_summarizer_overrides_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _CapturingTree.last_summarizer = "<unset>"
+    monkeypatch.setattr(memory_turn_hook, "CompactionTree", _CapturingTree)
+
+    class _Injected:
+        def summarize(self, text: str) -> str:  # pragma: no cover - not called
+            return "x"
+
+    injected = _Injected()
+    record_turn(
+        workspace_root=tmp_path,
+        session_id="sess-inj",
+        turn_id="t0",
+        user_text="prompt about the deploy",
+        assistant_text="a long assistant reply about the deploy pipeline " * 3,
+        used_tool=True,
+        config=_cfg(writeEnabled=True, compactionEnabled=True),
+        today=date(2026, 6, 8),
+        summarizer=injected,
+    )
+    # An explicitly-injected summarizer wins over the default (test seam intact).
+    assert _CapturingTree.last_summarizer is injected
+
+
+def test_no_summarizer_built_when_compaction_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _CapturingTree.last_summarizer = "<unset>"
+    monkeypatch.setattr(memory_turn_hook, "CompactionTree", _CapturingTree)
+    # A spy that fails the test if the builder is ever called when OFF.
+    import magi_agent.runtime.memory_turn_hook as hook_mod
+
+    def _fail_builder(*_a: object, **_k: object):  # noqa: ANN202
+        raise AssertionError("summarizer builder must not run when compaction OFF")
+
+    monkeypatch.setattr(hook_mod, "build_compaction_summarizer", _fail_builder)
+
+    record_turn(
+        workspace_root=tmp_path,
+        session_id="sess-off",
+        turn_id="t0",
+        user_text="prompt about the deploy",
+        assistant_text="a long assistant reply about the deploy pipeline " * 3,
+        used_tool=True,
+        config=_cfg(writeEnabled=True, compactionEnabled=False),
+        today=date(2026, 6, 8),
+    )
+    # CompactionTree was never constructed (compaction OFF), so no summarizer.
+    assert _CapturingTree.last_summarizer == "<unset>"
