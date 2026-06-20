@@ -20,6 +20,9 @@ from magi_agent.evidence.types import (
     _validate_strict_bool,
 )
 from magi_agent.ops.authority import FalseOnlyAuthorityModel
+from magi_agent.ops.safety import (
+    MAX_PUBLIC_TEXT_CHARS as _PUBLIC_SUMMARY_MAX_STRING_LENGTH,
+)
 
 
 _SECRET_FIELD_FRAGMENTS = (
@@ -145,7 +148,11 @@ EvidenceLedgerProducerSurface = ProducerSurface | Literal[
     "workspace",
 ]
 
-_PUBLIC_SUMMARY_MAX_STRING_LENGTH = 200
+# C-10: ``_PUBLIC_SUMMARY_MAX_STRING_LENGTH`` is now re-bound from
+# :data:`magi_agent.ops.safety.MAX_PUBLIC_TEXT_CHARS` at import time (see import
+# alias above). The local module-level rebind kept the public-summary clip
+# identical to the pre-C-10 ``200`` literal but now cannot drift from
+# ``harness/verifier_bus.py``'s sibling clip.
 _VERIFIER_VERDICT_PAYLOAD_KEYS = frozenset(
     (
         "verdictId",

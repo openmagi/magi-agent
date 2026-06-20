@@ -189,7 +189,7 @@ def test_adk_error_matches_gate1_redacted_sse_and_private_reason_jsonl_golden(
     body = writer.body
     assert "synthetic-private-key" not in body
     assert "synthetic-refresh-token" not in body
-    assert body.count("...") >= 2
+    # C-11 (#798): kernel `[redacted]` substitution replaces legacy ellipsis truncation; the `not in body` assertions above already guarantee the security invariant.
     transcript_body = transcript.file_path.read_text(encoding="utf-8")
     assert "synthetic-private-key" in transcript_body
     assert transcript_body == _fixture("adk_error.jsonl")
