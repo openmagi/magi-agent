@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+from magi_agent.ops.safety import public_diagnostic_metadata
 
 
 _LOCAL_HOSTS = frozenset(
@@ -226,53 +229,23 @@ def redact_public_text(text: str, *, max_chars: int = 2_048) -> str:
 
 
 def safe_metadata(metadata: object) -> dict[str, object]:
-    if not isinstance(metadata, dict):
+    """One-line re-export of :func:`magi_agent.ops.safety.public_diagnostic_metadata`.
+
+    C-2 reconciled the two ``safe_metadata`` functions (strict allow-list in
+    ``ops/safety.py`` vs. lenient deny-list here) by giving this lenient web
+    variant an explicit name (:func:`public_diagnostic_metadata`) in the kernel
+    and turning the policy-level entry into this thin shim, preserving every
+    existing import in ``provider_router.py`` / ``research_tools.py`` etc. The
+    behavior change is the redactor: the per-value string scrub now routes
+    through the C-1 kernel :func:`redact_private_text` (strict superset of the
+    legacy ``redact_public_text`` denylist) rather than a local fork. Keys,
+    deny-list marker set, primitive-type filter, and 512-char clip are
+    byte-identical to the pre-C-2 behavior for inputs that do not carry
+    legacy-fork-missed secret shapes.
+    """
+    if not isinstance(metadata, Mapping):
         return {}
-    safe: dict[str, object] = {}
-    for key, value in metadata.items():
-        normalized_key = re.sub(r"[^a-z0-9]", "", str(key).casefold())
-        if any(
-            marker in normalized_key
-            for marker in (
-                "raw",
-                "secret",
-                "token",
-                "key",
-                "cookie",
-                "auth",
-                "credential",
-                "authoritative",
-                "trust",
-                "trusted",
-                "verified",
-                "valid",
-                "path",
-                "log",
-                "debug",
-                "trace",
-                "provider",
-                "request",
-                "response",
-                "production",
-                "attached",
-                "enabled",
-                "allowed",
-                "performed",
-                "authority",
-                "route",
-                "called",
-                "fetched",
-                "executed",
-                "injected",
-                "network",
-            )
-        ):
-            continue
-        if isinstance(value, str):
-            safe[str(key)] = redact_public_text(value, max_chars=512)
-        elif isinstance(value, bool | int | float) or value is None:
-            safe[str(key)] = value
-    return safe
+    return public_diagnostic_metadata(metadata, max_chars=512)
 
 
 def synthetic_url_ref(value: str, *, prefix: str) -> str:
