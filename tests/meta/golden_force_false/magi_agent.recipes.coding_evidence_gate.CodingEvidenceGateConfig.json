@@ -6,12 +6,15 @@
     "enabled": false,
     "enforcement": "audit",
     "localEvaluationEnabled": false,
-    "productionBlockEnabled": true
+    "productionBlockEnabled": false
   },
-  "model_construct_force_false_leaks": [
-    "production_block_enabled"
-  ],
-  "model_validate_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "enabled": false,
+    "enforcement": "audit",
+    "localEvaluationEnabled": false,
+    "productionBlockEnabled": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.recipes.coding_evidence_gate.CodingEvidenceGateConfig"
 }

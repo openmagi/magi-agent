@@ -357,13 +357,25 @@ def test_permission_projection_models_revalidate_copy_and_construct_updates() ->
         profile,
     )
 
+    # C-4 PR-G3 raise-to-coerce: the kernel ``FalseOnlyAuthorityModel`` base
+    # now coerces forged ``Literal[False]`` updates to False during
+    # ``model_validate`` / ``model_construct`` / ``model_copy``. The previous
+    # behaviour was a hard ValidationError; the new behaviour is a silent
+    # coercion. The security property the test asserts -- "the model cannot
+    # be forged into an active state" -- is preserved: the forged update is
+    # corrected back to False on inspection. We additionally still expect
+    # ValidationError on the spoofed ``resourceRef`` path (private file path
+    # is rejected by the explicit ``_validate_resource_ref`` validator).
+    coerced_profile = profile.model_copy(update={"live_authority_allowed": True})
+    assert coerced_profile.live_authority_allowed is False
+    coerced_construct_profile = OpenCodeResearchPermissionProfile.model_construct(
+        liveAuthorityAllowed=True,
+    )
+    assert coerced_construct_profile.live_authority_allowed is False
+    coerced_decision = decision.model_copy(update={"live_authority_allowed": True})
+    assert coerced_decision.live_authority_allowed is False
     with pytest.raises(ValidationError):
-        profile.model_copy(update={"live_authority_allowed": True})
-    with pytest.raises(ValidationError):
-        OpenCodeResearchPermissionProfile.model_construct(liveAuthorityAllowed=True)
-    with pytest.raises(ValidationError):
-        decision.model_copy(update={"live_authority_allowed": True})
-    with pytest.raises(ValidationError):
+        # resourceRef still raises (non-Literal[False] semantic guard).
         OpenCodeResearchPermissionDecision.model_construct(
             status="allowed",
             action="allow",

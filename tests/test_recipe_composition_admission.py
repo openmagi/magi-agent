@@ -14,6 +14,17 @@ from magi_agent.recipes.composition import (
 )
 
 
+# Module-level subclass for forge-rejection tests. Defining this inside a test
+# function body trips pydantic 2.13 + `from __future__ import annotations`:
+# function-local namespaces can't resolve inherited deferred annotations
+# (e.g. `Any`) from `FalseOnlyAuthorityModel`, raising
+# `PydanticUserError: ForgedStack is not fully defined`. Module namespace
+# resolves them, sidestepping the trip while preserving test intent
+# (the admission boundary must reject any non-RecipeStackInput-exact instance).
+class ForgedStack(RecipeStackInput):
+    pass
+
+
 def _secret_fixture(*parts: str) -> str:
     return "".join(parts)
 
@@ -725,9 +736,6 @@ def test_stack_mutated_before_admission_request_construction_is_rejected() -> No
 
 
 def test_subclassed_stack_is_rejected_at_admission_request_boundary() -> None:
-    class ForgedStack(RecipeStackInput):
-        pass
-
     with pytest.raises(ValidationError):
         RecipeAdmissionRequest(
             stack=ForgedStack(
@@ -748,9 +756,6 @@ def test_subclassed_stack_replacement_is_rejected_at_admission_boundary() -> Non
         ),
         admittedSnapshots=(_snapshot("openmagi.research"),),
     )
-
-    class ForgedStack(RecipeStackInput):
-        pass
 
     request.__dict__["stack"] = ForgedStack(
         explicitRecipeRefs=["evil.recipe"],

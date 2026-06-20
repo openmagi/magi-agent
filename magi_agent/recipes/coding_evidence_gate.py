@@ -5,13 +5,14 @@ import hashlib
 import re
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from magi_agent.evidence.coding_verification import (
     CodingVerificationAuditRequest,
     evaluate_coding_verification_audit,
 )
 from magi_agent.evidence.types import EvidenceRecord
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 
 
 CodingEvidenceGateStatus = Literal[
@@ -45,9 +46,11 @@ _PRIVATE_TEXT_RE = re.compile(
 )
 
 
-class CodingEvidenceGateConfig(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class CodingEvidenceGateConfig(FalseOnlyAuthorityModel):
+    # C-4 PR-G3: re-parented onto FalseOnlyAuthorityModel. The kernel owns the
+    # frozen/extra-forbid/validate-default config and force-falses the
+    # ``Literal[False]`` field on every construction surface (closes a
+    # pre-existing ``model_construct`` leak on ``productionBlockEnabled``).
     enabled: bool = False
     local_evaluation_enabled: bool = Field(default=False, alias="localEvaluationEnabled")
     enforcement: CodingEvidenceGateEnforcement = "audit"
@@ -57,9 +60,14 @@ class CodingEvidenceGateConfig(BaseModel):
     )
 
 
-class CodingEvidenceGateAuthorityFlags(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class CodingEvidenceGateAuthorityFlags(FalseOnlyAuthorityModel):
+    # C-4 PR-G3: re-parented onto FalseOnlyAuthorityModel. The kernel's
+    # introspection-based ``_force_false`` validator + ``_ser`` serializer +
+    # ``model_construct`` route-through-validate + ``model_copy`` route-through-
+    # validate replace the hand-pasted ``model_construct`` / ``model_copy``
+    # overrides and the 6-field ``@field_serializer`` that previously
+    # force-falses the authority flags. The ``_false_authority_overrides()``
+    # helper is gone -- the kernel handles every Literal[False] field uniformly.
     local_evaluation_only: bool = Field(default=False, alias="localEvaluationOnly")
     local_claim_blocked: bool = Field(default=False, alias="localClaimBlocked")
     final_answer_blocked: Literal[False] = Field(default=False, alias="finalAnswerBlocked")
@@ -74,39 +82,6 @@ class CodingEvidenceGateAuthorityFlags(BaseModel):
         default=False,
         alias="productionWriteAllowed",
     )
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set
-        values.update(_false_authority_overrides())
-        return cls.model_validate(values)
-
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        data = self.model_dump(by_alias=True, mode="python", warnings=False)
-        if update:
-            data.update(dict(update))
-        data.update(_false_authority_overrides())
-        return type(self).model_validate(data)
-
-    @field_serializer(
-        "final_answer_blocked",
-        "user_visible_output_allowed",
-        "traffic_attached",
-        "runner_attached",
-        "live_tool_attached",
-        "production_write_allowed",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 class CodingEvidenceGateRequest(BaseModel):
@@ -255,7 +230,7 @@ class CodingEvidenceGateMaterialization(BaseModel):
             "validatorCallbackRefs": list(self.validator_callback_refs),
             "requiredEvidenceTypes": list(self.required_evidence_types),
             "optionalEvidenceTypes": list(self.optional_evidence_types),
-            "attachmentFlags": _false_authority_overrides(),
+            "attachmentFlags": dict(_FALSE_ATTACHMENT_FLAGS),
         }
 
 
@@ -354,7 +329,7 @@ class CodingEvidenceGateHarnessBinding:
 
     def materialize(self) -> CodingEvidenceGateMaterialization:
         return CodingEvidenceGateMaterialization(
-            attachmentFlags=_false_authority_overrides(),
+            attachmentFlags=dict(_FALSE_ATTACHMENT_FLAGS),
         )
 
     def evaluate_completion_claim(
@@ -465,25 +440,33 @@ def _public_receipt_ref(value: str) -> str:
     return "redacted_ref"
 
 
-def _false_authority_overrides() -> dict[str, bool]:
-    return {
-        "finalAnswerBlocked": False,
-        "userVisibleOutputAllowed": False,
-        "trafficAttached": False,
-        "runnerAttached": False,
-        "liveToolAttached": False,
-        "productionWriteAllowed": False,
-    }
+# C-4 PR-G3: ``_false_authority_overrides()`` helper has been dropped. The
+# kernel ``FalseOnlyAuthorityModel`` base on ``CodingEvidenceGateAuthorityFlags``
+# now force-falses every ``Literal[False]`` field during ``model_validate`` /
+# ``model_construct`` / ``model_copy``, so callers no longer have to spread a
+# hand-listed dict at construction sites.
 
 
 def _coerce_authority_flags(value: object) -> CodingEvidenceGateAuthorityFlags:
     if isinstance(value, CodingEvidenceGateAuthorityFlags):
-        return value.model_copy(update=_false_authority_overrides())
+        return value.model_copy()
     if isinstance(value, Mapping):
-        data = dict(value)
-        data.update(_false_authority_overrides())
-        return CodingEvidenceGateAuthorityFlags.model_validate(data)
+        return CodingEvidenceGateAuthorityFlags.model_validate(dict(value))
     return CodingEvidenceGateAuthorityFlags()
+
+
+# Module-level constant inlined in place of the dropped helper. Used as the
+# ``attachmentFlags`` payload on the two recipe materialization classes (whose
+# ``attachment_flags`` field is ``Mapping[str, Literal[False]]``, NOT a
+# force-false pydantic model).
+_FALSE_ATTACHMENT_FLAGS: dict[str, bool] = {
+    "finalAnswerBlocked": False,
+    "userVisibleOutputAllowed": False,
+    "trafficAttached": False,
+    "runnerAttached": False,
+    "liveToolAttached": False,
+    "productionWriteAllowed": False,
+}
 
 
 __all__ = [

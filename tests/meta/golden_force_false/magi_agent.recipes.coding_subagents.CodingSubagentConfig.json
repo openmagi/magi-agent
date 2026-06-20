@@ -8,22 +8,25 @@
   ],
   "model_construct_dump": {
     "additionalAllowedTools": [],
-    "backgroundModeEnabled": true,
+    "backgroundModeEnabled": false,
     "enabled": false,
-    "liveToolExecutionEnabled": true,
+    "liveToolExecutionEnabled": false,
     "localFakeChildRunnerEnabled": false,
-    "productionChildExecutionEnabled": true,
-    "productionWorkspaceMutationEnabled": true,
-    "userVisibleActivation": true
+    "productionChildExecutionEnabled": false,
+    "productionWorkspaceMutationEnabled": false,
+    "userVisibleActivation": false
   },
-  "model_construct_force_false_leaks": [
-    "background_mode_enabled",
-    "live_tool_execution_enabled",
-    "production_child_execution_enabled",
-    "production_workspace_mutation_enabled",
-    "user_visible_activation"
-  ],
-  "model_validate_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "additionalAllowedTools": [],
+    "backgroundModeEnabled": false,
+    "enabled": false,
+    "liveToolExecutionEnabled": false,
+    "localFakeChildRunnerEnabled": false,
+    "productionChildExecutionEnabled": false,
+    "productionWorkspaceMutationEnabled": false,
+    "userVisibleActivation": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.recipes.coding_subagents.CodingSubagentConfig"
 }

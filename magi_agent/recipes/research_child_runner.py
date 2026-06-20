@@ -6,8 +6,9 @@ import hashlib
 import re
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.runtime import (
     ChildRunnerConfig,
     ChildRunnerResult,
@@ -58,9 +59,10 @@ _LOCAL_FAKE_PROVIDER_MARKER = f"{_TRUSTED_PROVIDER_MARKER_PREFIX}_local_fake_pro
 _LIVE_PROVIDER_MARKER = f"{_TRUSTED_PROVIDER_MARKER_PREFIX}_live_provider"
 
 
-class ResearchChildRunnerConfig(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class ResearchChildRunnerConfig(FalseOnlyAuthorityModel):
+    # C-4 PR-G3: re-parented onto FalseOnlyAuthorityModel. Closes the
+    # pre-existing ``model_construct`` leak set of 4 fields
+    # (raise-to-coerce on validate).
     enabled: bool = False
     local_fake_child_runner_enabled: bool = Field(
         default=False,
@@ -113,9 +115,12 @@ class ResearchChildRunnerConfig(BaseModel):
         return tuple(dict.fromkeys(safe))
 
 
-class ResearchChildRunnerAuthorityFlags(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class ResearchChildRunnerAuthorityFlags(FalseOnlyAuthorityModel):
+    # C-4 PR-G3: re-parented onto FalseOnlyAuthorityModel. The kernel's
+    # ``_force_false`` validator + ``_ser`` serializer +
+    # ``model_construct`` / ``model_copy`` route-through-validate replace the
+    # hand-pasted overrides + 9-field ``@field_serializer`` + the
+    # ``_false_authority_overrides()`` helper.
     recipe_enabled: bool = Field(default=False, alias="recipeEnabled")
     local_fake_child_runner_enabled: bool = Field(
         default=False,
@@ -141,46 +146,11 @@ class ResearchChildRunnerAuthorityFlags(BaseModel):
     traffic_attached: Literal[False] = Field(default=False, alias="trafficAttached")
     user_visible_activation: Literal[False] = Field(default=False, alias="userVisibleActivation")
 
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set
-        values.update(_false_authority_overrides())
-        return cls.model_validate(values)
 
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        data = self.model_dump(by_alias=True, mode="python", warnings=False)
-        if update:
-            data.update(dict(update))
-        data.update(_false_authority_overrides())
-        return type(self).model_validate(data)
-
-    @field_serializer(
-        "live_tool_execution_enabled",
-        "workspace_mutation_enabled",
-        "workspace_mutated",
-        "background_mode_enabled",
-        "memory_provider_called",
-        "route_attached",
-        "production_authority",
-        "traffic_attached",
-        "user_visible_activation",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
-
-
-class ResearchChildToolScope(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class ResearchChildToolScope(FalseOnlyAuthorityModel):
+    # C-4 PR-G3: re-parented onto FalseOnlyAuthorityModel. Closes the
+    # pre-existing ``model_construct`` leak set of 2 fields (raise-to-coerce
+    # on validate).
     allowed_tools: tuple[str, ...] = Field(default=_READ_ONLY_SOURCE_TOOLS, alias="allowedTools")
     source_inspection_only: bool = Field(default=True, alias="sourceInspectionOnly")
     mutation_intent_allowed: Literal[False] = Field(default=False, alias="mutationIntentAllowed")
@@ -417,11 +387,14 @@ class ResearchChildRunnerRecipe:
             and self.child_runner is not None
             and getattr(self.child_runner, _LIVE_PROVIDER_MARKER, False) is True
         )
+        # C-4 PR-G3: ``_false_authority_overrides()`` spread dropped -- the
+        # kernel ``FalseOnlyAuthorityModel`` base force-falses the same fields
+        # automatically when ``ResearchChildRunnerAuthorityFlags`` is
+        # constructed.
         flags = ResearchChildRunnerAuthorityFlags(
             recipeEnabled=self.config.enabled,
             localFakeChildRunnerEnabled=local_fake_attached,
             liveChildRunnerEnabled=live_child_attached,
-            **_false_authority_overrides(),
         )
         empty_input = _parent_input(parsed, ())
         if not self.config.enabled:
@@ -748,18 +721,14 @@ def _coerce_authority_flags(value: object) -> ResearchChildRunnerAuthorityFlags:
     return ResearchChildRunnerAuthorityFlags()
 
 
-def _false_authority_overrides() -> dict[str, Literal[False]]:
-    return {
-        "liveToolExecutionEnabled": False,
-        "workspaceMutationEnabled": False,
-        "workspaceMutated": False,
-        "backgroundModeEnabled": False,
-        "memoryProviderCalled": False,
-        "routeAttached": False,
-        "productionAuthority": False,
-        "trafficAttached": False,
-        "userVisibleActivation": False,
-    }
+# C-4 PR-G3: ``_false_authority_overrides()`` helper has been dropped. The
+# kernel ``FalseOnlyAuthorityModel`` base on ``ResearchChildRunnerAuthorityFlags``
+# now force-falses every ``Literal[False]`` field on every construction
+# surface; the explicit spread is no longer required. The only remaining call
+# site was the single ``ResearchChildRunnerAuthorityFlags(...)`` construction
+# in ``ResearchChildRunnerRecipe.run`` (the kernel covers it now). This file
+# has no materialization class that consumes the helper as an
+# ``attachmentFlags`` payload, so no module-level constant is needed.
 
 
 def _digest(value: str) -> str:

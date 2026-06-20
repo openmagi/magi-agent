@@ -178,7 +178,19 @@ def test_scout_recipe_decision_cannot_be_forged_via_construct_or_copy() -> None:
         available_tools=SCOUT_REPO_FIXTURE_TOOLS,
     )
 
-    with pytest.raises(ValidationError, match="literal"):
+    # C-4 PR-G3 raise-to-coerce: the kernel ``FalseOnlyAuthorityModel`` base
+    # coerces every ``Literal[False]`` field to False during model_construct /
+    # model_copy / model_validate. A forged ``liveAuthorityAllowed=True``
+    # is silently corrected -- the model_construct surface NEVER reaches the
+    # downstream ``_validate_decision`` model_validator with a True authority
+    # flag now. The test still proves the model cannot be forged into an
+    # active state: the forged payload either coerces the authority flags
+    # back to False (proving the invariant on inspection) OR fails the
+    # ``_validate_decision`` semantic guard for OTHER reasons (reasonCodes,
+    # tool grant mismatch, etc). Either outcome preserves the security
+    # property the test asserts ("decision cannot be forged into a live
+    # state").
+    with pytest.raises(ValidationError, match="grantedToolNames must match"):
         type(decision).model_construct(
             status="ready",
             profileKey="scout_repo_fixture",
@@ -200,15 +212,22 @@ def test_scout_recipe_decision_cannot_be_forged_via_construct_or_copy() -> None:
             },
         )
 
-    with pytest.raises(ValidationError, match="literal"):
-        decision.model_copy(
-            update={
-                "liveAuthorityAllowed": True,
-                "providerCallsAllowed": True,
-                "workspaceMutationAllowed": True,
-                "rawSourceProjectionAllowed": True,
-            }
-        )
+    # model_copy on a valid decision with forged Literal[False] updates: the
+    # kernel coerces the updates back to False -- the copy succeeds and the
+    # forged authority assertions evaporate. Inspect the copy to confirm
+    # the invariant.
+    coerced = decision.model_copy(
+        update={
+            "liveAuthorityAllowed": True,
+            "providerCallsAllowed": True,
+            "workspaceMutationAllowed": True,
+            "rawSourceProjectionAllowed": True,
+        }
+    )
+    assert coerced.live_authority_allowed is False
+    assert coerced.provider_calls_allowed is False
+    assert coerced.workspace_mutation_allowed is False
+    assert coerced.raw_source_projection_allowed is False
 
     grant = decision.tool_grants[0]
     with pytest.raises(ValidationError, match="fixture-only"):
@@ -231,15 +250,25 @@ def test_scout_recipe_decision_cannot_be_forged_via_construct_or_copy() -> None:
             rationale="forged fixture grant",
         )
 
+    # C-4 PR-G3 raise-to-coerce: same property for the grant -- forged
+    # ``mutatesWorkspace`` / ``liveExecutionAllowed`` are coerced back to
+    # False during model_copy, and ``readOnly`` / ``fixtureOnly`` (Literal[True])
+    # remain True via pydantic's standard literal validation.
     with pytest.raises(ValidationError, match="literal"):
         grant.model_copy(
             update={
                 "readOnly": False,
-                "mutatesWorkspace": True,
                 "fixtureOnly": False,
-                "liveExecutionAllowed": True,
             }
         )
+    coerced_grant = grant.model_copy(
+        update={
+            "mutatesWorkspace": True,
+            "liveExecutionAllowed": True,
+        }
+    )
+    assert coerced_grant.mutates_workspace is False
+    assert coerced_grant.live_execution_allowed is False
 
     with pytest.raises(ValidationError, match="profile tool set"):
         type(decision).model_construct(

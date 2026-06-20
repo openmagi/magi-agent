@@ -9,22 +9,29 @@
     "additionalAllowedTools": [],
     "enabled": false,
     "liveChildRunnerEnabled": false,
-    "liveToolExecutionEnabled": true,
+    "liveToolExecutionEnabled": false,
     "localFakeChildRunnerEnabled": false,
     "maxChildTasks": 4,
     "maxSpawnDepth": 1,
-    "productionChildExecutionEnabled": true,
+    "productionChildExecutionEnabled": false,
     "realChildExecutionPackEnabled": false,
-    "userVisibleActivation": true,
-    "workspaceMutationEnabled": true
+    "userVisibleActivation": false,
+    "workspaceMutationEnabled": false
   },
-  "model_construct_force_false_leaks": [
-    "live_tool_execution_enabled",
-    "production_child_execution_enabled",
-    "user_visible_activation",
-    "workspace_mutation_enabled"
-  ],
-  "model_validate_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "additionalAllowedTools": [],
+    "enabled": false,
+    "liveChildRunnerEnabled": false,
+    "liveToolExecutionEnabled": false,
+    "localFakeChildRunnerEnabled": false,
+    "maxChildTasks": 4,
+    "maxSpawnDepth": 1,
+    "productionChildExecutionEnabled": false,
+    "realChildExecutionPackEnabled": false,
+    "userVisibleActivation": false,
+    "workspaceMutationEnabled": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.recipes.research_child_runner.ResearchChildRunnerConfig"
 }

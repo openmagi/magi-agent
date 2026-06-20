@@ -6,6 +6,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.runtime.control import ControlRequestStore
 
 
@@ -98,34 +99,24 @@ _BROAD_PRODUCTION_PERMISSION_PATTERNS = frozenset(
 )
 
 
-class _OpenCodeResearchPermissionModel(BaseModel):
-    model_config = _MODEL_CONFIG
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: object,
-    ) -> Self:
-        _ = _fields_set
-        return cls(**values)
-
-    def model_copy(
-        self,
-        *,
-        update: dict[str, object] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        _ = deep
-        data = self.model_dump(by_alias=False, mode="python", warnings=False)
-        if update:
-            alias_to_name = {
-                field.alias: name
-                for name, field in self.__class__.model_fields.items()
-                if field.alias is not None
-            }
-            data.update({alias_to_name.get(key, key): value for key, value in update.items()})
-        return type(self).model_validate(data)
+class _OpenCodeResearchPermissionModel(FalseOnlyAuthorityModel):
+    # C-4 PR-G3: per-package strict-frozen sub-base re-parented onto
+    # ``FalseOnlyAuthorityModel``. The kernel's frozen config is functionally
+    # equivalent to ``_MODEL_CONFIG`` for the 4 force-false subclasses
+    # (``OpenCodeResearchPermissionRule`` /
+    # ``OpenCodeResearchPermissionProfile`` /
+    # ``OpenCodeResearchPermissionDecision`` /
+    # ``OpenCodeResearchPermissionRejectResult``). The previous custom
+    # ``model_construct`` (``cls(**values)``) and ``model_copy``
+    # (dump-by-name-and-revalidate with alias-aware update) are replaced by the
+    # kernel's defaults (route-through-validate construct + by_alias=True dump
+    # for model_copy). Update keys may be either alias or field name -- the
+    # kernel's model_copy round-trips through ``model_dump(by_alias=True)`` so
+    # update keys matching aliases are honored. Non-force-false subclasses
+    # (``OpenCodeResearchHardDeny``, ``OpenCodeResearchPermissionRequest``)
+    # inherit the kernel's frozen config but do NOT activate the force-false
+    # invariant (no ``Literal[False]`` fields).
+    pass
 
 
 class OpenCodeResearchPermissionRule(_OpenCodeResearchPermissionModel):
@@ -394,8 +385,14 @@ def add_opencode_research_always_approval(
         reasonCode="always_approval_scoped_allow",
         scope="always_approval",
     )
+    # C-4 PR-G3: The kernel ``FalseOnlyAuthorityModel.model_copy`` uses
+    # ``by_alias=True`` for the round-trip dump, so update keys MUST use the
+    # by-alias key. Prefer ``softRules`` over ``soft_rules`` here -- the
+    # previous custom ``_OpenCodeResearchPermissionModel.model_copy`` did
+    # alias-aware translation via ``_alias_updates`` so either key worked;
+    # the kernel does not.
     return parsed_profile.model_copy(
-        update={"soft_rules": (*parsed_profile.soft_rules, scoped_rule)}
+        update={"softRules": (*parsed_profile.soft_rules, scoped_rule)}
     )
 
 

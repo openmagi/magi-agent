@@ -7,6 +7,7 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.evidence.child_runtime_envelope import (
     ChildRuntimeEnvelope,
     project_child_runtime_envelope,
@@ -156,8 +157,19 @@ _UNSAFE_PUBLIC_TEXT_RE = re.compile(
 )
 
 
-class OpenCodeScoutChildLifecycleDecision(BaseModel):
-    model_config = _MODEL_CONFIG
+class OpenCodeScoutChildLifecycleDecision(FalseOnlyAuthorityModel):
+    # C-4 PR-G3: re-parented onto FalseOnlyAuthorityModel. The kernel's
+    # ``_force_false`` validator + ``_ser`` serializer +
+    # ``model_construct`` / ``model_copy`` route-through-validate replace the
+    # custom ``model_construct`` (``cls(**values)``) and ``model_copy`` (dump-
+    # and-revalidate). PRESERVED per-class: ``_validate_decision_shape``
+    # ``@model_validator(mode="after")`` (semantic-shape guard over status /
+    # reasonCodes / admission decision / aggregate report / attachmentFlags
+    # equality), the ``_serialize_attachment_flags`` ``@field_serializer``
+    # (non-Literal[False] Mapping field). The kernel's frozen config drops
+    # ``revalidate_instances="never"`` -- the default is also "never", so this
+    # is semantically equivalent (the original explicit "never" was a defense-
+    # in-depth no-op vs the previous BaseModel default).
 
     status: OpenCodeScoutChildLifecycleStatus
     profile_key: OpenCodeScoutChildLifecycleProfileKey = Field(alias="profileKey")
@@ -265,27 +277,6 @@ class OpenCodeScoutChildLifecycleDecision(BaseModel):
     @field_serializer("attachment_flags")
     def _serialize_attachment_flags(self, value: Mapping[str, bool]) -> dict[str, bool]:
         return dict(value)
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set
-        return cls(**values)
-
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        _ = deep
-        data = self.model_dump(by_alias=True, mode="python", warnings=False)
-        if update:
-            data.update(dict(update))
-        return type(self).model_validate(data)
 
     def public_projection(self) -> dict[str, object]:
         projection: dict[str, object] = {
