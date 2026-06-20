@@ -458,10 +458,90 @@ _CAPABILITY_PRESETS: dict[str, str] = {
     "coding-child-review": "MAGI_CROSS_VERIFY_ENABLED",
 }
 
+# Presets backed by a real runtime capability that is activated through a
+# user-authored custom rule rather than an env flag — for these the Customize
+# tab honestly says "build a custom rule to enable", not "toggle this on".
+_USER_RULE_CAPABILITY_PRESETS: frozenset[str] = frozenset(
+    {
+        # coding-workspace-lock is the tool_perm path/pathAllowlist match
+        # (customize/tool_perm.py): users author a tool_perm custom rule with
+        # ``{"path": "..."}`` or ``{"pathAllowlist": ["..."]}`` to deny edits
+        # outside the listed prefixes during coding turns. The dispatcher is
+        # always-active (gated by the customize master flags) — the *preset*
+        # is the honest UI surface for that capability.
+        "coding-workspace-lock",
+    }
+)
+
+# Presets that ARE in the catalog (for parity with the hosted product / future
+# work-streams) but have no live producer or runtime gate yet. The Customize tab
+# surfaces them so users can see what is intentionally on hold, with a one-line
+# "why" so future activators don't accidentally treat the slot as "free".
+#
+# Why explicit rather than just falling through to the ``preview`` catch-all:
+# - Pins the contract — a future PR that wires one of these MUST also remove it
+#   from this set, so the catalog status changes from ``preview`` → ``enforcing``
+#   (or ``capability``) in lockstep with the wiring (no silent enable).
+# - Distinguishes "we are not building this" from "we just haven't wired it yet".
+#   ``_INTENDED_DORMANT_REASONS[id]`` carries the "why" — the customize UI can
+#   render it in a tooltip so the user knows it isn't simply forgotten.
+# - Lets tests assert that the catalog still surfaces benchmark-verifier /
+#   memory-continuity / task-contract / autopilot-* (audit pins) without
+#   pretending those gates exist at runtime.
+_INTENDED_DORMANT_PRESETS: frozenset[str] = frozenset(
+    {
+        # benchmark evidence schema is undecided; vlibench team owns the schema.
+        "benchmark-verifier",
+        # depends on memory subsystem + compaction lifecycle decisions; on hold.
+        "memory-continuity",
+        # contract-evidence concept itself was undefined; deferred.
+        "task-contract",
+        # semantically overlaps artifact-delivery; kept for hosted parity only.
+        "output-delivery",
+        # H7 autopilot FSM track is on hold (chat-turn regression risk).
+        "autopilot-consensus-gate",
+        "autopilot-interview-gate",
+        "autopilot-phase-router",
+        "autopilot-qa-gate",
+        "autopilot-review-gate",
+    }
+)
+
+_INTENDED_DORMANT_REASONS: dict[str, str] = {
+    "benchmark-verifier": "Benchmark evidence schema undecided; vlibench team owns it.",
+    "memory-continuity": "Awaits memory subsystem + compaction lifecycle decisions.",
+    "task-contract": "Contract-evidence concept undefined; deferred.",
+    "output-delivery": "Overlaps artifact-delivery; kept for hosted-product parity.",
+    "autopilot-consensus-gate": "H7 autopilot FSM track on hold (chat-turn regression risk).",
+    "autopilot-interview-gate": "H7 autopilot FSM track on hold.",
+    "autopilot-phase-router": "H7 autopilot FSM track on hold.",
+    "autopilot-qa-gate": "H7 autopilot FSM track on hold.",
+    "autopilot-review-gate": "H7 autopilot FSM track on hold.",
+}
+
 
 def capability_flag_for(preset_id: str) -> str | None:
     """The env flag that enables a capability preset, or None if not a capability."""
     return _CAPABILITY_PRESETS.get(preset_id)
+
+
+def is_user_rule_capability(preset_id: str) -> bool:
+    """True if this capability preset is activated through a custom rule, not a flag."""
+    return preset_id in _USER_RULE_CAPABILITY_PRESETS
+
+
+def is_intended_dormant(preset_id: str) -> bool:
+    """True if this preset is intentionally surfaced-but-not-wired (see set above)."""
+    return preset_id in _INTENDED_DORMANT_PRESETS
+
+
+def dormant_reason_for(preset_id: str) -> str | None:
+    """One-line "why" for an intended-dormant preset, or ``None`` if not dormant.
+
+    Used by the UI to tell the user this slot is deliberately on hold (not
+    forgotten) and what gates would unlock it.
+    """
+    return _INTENDED_DORMANT_REASONS.get(preset_id)
 
 
 def enforcement_for(preset_id: str, *, category: str, is_security: bool) -> str:
@@ -470,15 +550,19 @@ def enforcement_for(preset_id: str, *, category: str, is_security: bool) -> str:
     ``enforcing``  — toggling this preset changes runtime behavior now.
     ``always-on``  — enforced by the runtime elsewhere (security/PermissionGate),
                      not controllable from this tab.
-    ``capability`` — a real runtime capability gated by an env flag (not a
-                     pre-final verification gate, so not a Customize toggle).
+    ``capability`` — a real runtime capability gated by an env flag OR activated
+                     via a user-authored custom rule (not a pre-final
+                     verification gate, so not a Customize toggle).
     ``preview``    — surfaced for parity but not yet wired to a runtime gate.
+                     Intended-dormant presets share this status but are pinned
+                     explicitly in ``_INTENDED_DORMANT_PRESETS`` so future
+                     activators must update both the set and the seam in one PR.
     """
     if preset_id in PRESET_SEAMS:
         return "enforcing"
     if is_security or category == "security":
         return "always-on"
-    if preset_id in _CAPABILITY_PRESETS:
+    if preset_id in _CAPABILITY_PRESETS or preset_id in _USER_RULE_CAPABILITY_PRESETS:
         return "capability"
     return "preview"
 
@@ -559,19 +643,24 @@ _DESCRIPTIONS: dict[str, str] = {
     "resource-existence": "Block an assertion that a specific file/URL exists when the turn inspected no source (LLM judge; shares the self-claim gate).",
     "claim-citation": "Block uncited factual claims in the answer (LLM judge; coverage, distinct from source-authority anti-fab; needs a critic model).",
     "deterministic-evidence": "Require recorded git-diff and test-run evidence on coding turns (disable to opt out).",
-    "coding-context": "Auto-injects repo map and symbols for code tasks.",
-    "coding-workspace-lock": "Prevents unrelated file changes during coding.",
+    "coding-context": "Auto-inject a workspace summary (repo map + recent changes + entry points) into the system prompt on coding turns.",
+    "coding-workspace-lock": "Block file edits outside an allowed path prefix during coding turns. Configure via a custom `tool_perm` rule with `path` / `pathAllowlist`.",
     "coding-child-review": "Adversarial multi-model review of sub-agent output. Capability — enable with MAGI_CROSS_VERIFY_ENABLED.",
-    "benchmark-verifier": "Detects and blocks performance regressions.",
-    "task-contract": "Enforces a goal to plan to evidence lifecycle.",
     "goal-progress": "Block a completion claim made with no action evidence this turn (LLM judge; shares the completion-evidence gate).",
     "task-board-completion": "Blocks completion when tasks remain incomplete.",
     "parallel-research": "Block a research turn that synthesized from fewer than 2 inspected sources.",
-    "output-delivery": "Verifies created files are actually delivered.",
     "response-language": "Block a final answer that violates the configured language policy (MAGI_RESPONSE_LANGUAGE).",
-    "parallel-research": "Verifies and cross-checks research sources.",
-    "memory-continuity": "Maintains cross-session memory consistency.",
     "document-authoring-coverage": "Checks authored documents cover the requested scope.",
+    # --- intended-dormant (catalog-only; see _INTENDED_DORMANT_PRESETS) ---
+    "benchmark-verifier": "Detect performance regressions on benchmark turns (intended-dormant; awaits vlibench evidence schema).",
+    "task-contract": "Enforce a goal -> plan -> evidence contract lifecycle (intended-dormant; contract-evidence concept undefined).",
+    "output-delivery": "Verify created files are delivered (intended-dormant; overlaps artifact-delivery, kept for hosted parity).",
+    "memory-continuity": "Maintain cross-session memory consistency (intended-dormant; awaits memory subsystem + compaction lifecycle).",
+    "autopilot-phase-router": "Route to the right autopilot phase each turn (intended-dormant; H7 FSM track on hold).",
+    "autopilot-interview-gate": "Block planning while requirements remain ambiguous (intended-dormant; H7 FSM track on hold).",
+    "autopilot-consensus-gate": "Require architect↔critic consensus before executing (intended-dormant; H7 FSM track on hold).",
+    "autopilot-review-gate": "Require a clean adversarial review before completing (intended-dormant; H7 FSM track on hold).",
+    "autopilot-qa-gate": "Require an adversarial QA pass at end-of-turn (intended-dormant; H7 FSM track on hold).",
 }
 
 _DESCRIPTION_FALLBACK = "Surfaced for parity; not yet wired to a runtime gate."

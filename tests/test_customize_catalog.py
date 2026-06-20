@@ -154,7 +154,10 @@ def test_presets_sourced_from_real_catalog_with_hyphen_ids() -> None:
     assert "coding-verification" in ids
     assert "fact-grounding" in ids
     assert not any("_" in i for i in ids), "preset ids must be hyphenated"
-    # 36-preset real catalog, not the old 6-item stub
+    # Real catalog size — 9 of these are intended-dormant (pinned in
+    # ``_INTENDED_DORMANT_PRESETS``) but kept in the catalog for parity / honest
+    # surfacing. Floor is ≥30 to leave headroom for additions without coupling
+    # this test to the exact count.
     assert len(presets) >= 30
 
 
