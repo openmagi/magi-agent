@@ -7,8 +7,19 @@ const source = readFileSync(
 );
 
 describe("local OSS customize dashboard", () => {
-  it("renders the local Python ADK runtime customize console", () => {
-    expect(source).toContain("CustomizeRuntimeConsole");
+  it("mounts the Phase-4 hub (sub-nav full-page surface)", () => {
+    // Phase 4 replaced the legacy CustomizeRuntimeConsole modal duo with the
+    // CustomizeHub component (left sub-nav + page-resident panels).
+    expect(source).toContain("CustomizeHub");
+  });
+
+  it("syncs the active sub-nav section to the URL query string", () => {
+    expect(source).toContain("section");
+    expect(source).toContain("useSearchParams");
+    expect(source).toContain("onSectionChange");
+  });
+
+  it("does not embed hosted-only auth/file surfaces", () => {
     expect(source).not.toContain("/v1/app/workspace/file");
     expect(source).not.toContain("useAuthFetch");
     expect(source).not.toContain("Instruction Files");

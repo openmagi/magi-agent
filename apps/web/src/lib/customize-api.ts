@@ -21,6 +21,12 @@ export interface RecipeItem {
   category: string;
   source: string;
   enabled: boolean;
+  /**
+   * Pack IDs that map this recipe to a UI surface (Phase 3 wiring). Empty
+   * tuple means the recipe is not surfaced in any pack — the Customize hub
+   * UI greys these out as "no live effect".
+   */
+  packIds: string[];
 }
 
 export interface HarnessPresetItem {
