@@ -130,6 +130,28 @@ UNSAFE_TEXT_RE = re.compile(
 
 # Default clip length for fail-open public text scrubs (C-10 homes this here).
 MAX_PUBLIC_TEXT_CHARS = 200
+
+# Defense-in-depth line-drop guard for marker-bearing lines. Copied verbatim
+# from the pre-C-2 ``magi_agent/web_acquisition/policy.py`` (lines 81–86) where
+# it was named ``_RAW_PRIVATE_LINE_RE`` and consumed by ``redact_public_text``
+# to drop ANY line containing a ``raw_*`` / ``hidden_reasoning`` /
+# ``chain_of_thought`` / ... marker BEFORE running the regex-sub redactor.
+#
+# Why this lives in the kernel: the C-1 ``UNSAFE_TEXT_RE`` only matches the
+# marker substring (e.g. ``raw_tool``) and leaves the rest of the line intact,
+# so without this whole-line drop pass the kernel would be STRICTLY LESS
+# redactive than the legacy ``redact_public_text`` on multi-line strings
+# containing a marker (the line tail after the marker would leak). Running this
+# pass inside :func:`public_diagnostic_metadata` BEFORE :func:`redact_private_text`
+# preserves the legacy line-drop semantic AND keeps the C-1 superset of
+# secret-shape coverage for everything else — net effect: strictly more
+# redactive than the legacy on every sampled shape.
+_RAW_PRIVATE_LINE_RE = re.compile(
+    r"raw[_-]?(?:tool|browser|snapshot|transcript|prompt|content)|"
+    r"hidden[_-]?reasoning|chain[_-]?of[_-]?thought|private[_-]?data|"
+    r"captcha|cookie|authorization",
+    re.IGNORECASE,
+)
 UNSAFE_COMPACT_FRAGMENTS = (
     "bearer",
     "authorization",
@@ -262,6 +284,113 @@ def safe_public_ref(value: str, *, field_name: str = "ref") -> str:
     """Public alias of :func:`require_safe_ref` so callers stop importing the
     per-file private ``_safe_ref`` copies. Same fail-closed semantics."""
     return require_safe_ref(value, field_name=field_name)
+
+
+# C-2: lenient, fail-open metadata scrub for Family-B diagnostics.
+#
+# The web/browser projections need a metadata scrub that NEVER raises (a single
+# bad value from a third-party provider must not crash the live response path).
+# Historically this lived as a second function named ``safe_metadata`` in
+# ``web_acquisition/policy.py`` with OPPOSITE fail-mode semantics from the
+# strict :func:`safe_metadata` below — same name, opposite guarantees, on a
+# redaction boundary, with the *weaker* guarantee on the *live* path. C-2
+# reconciles by giving the lenient variant an explicit name
+# (:func:`public_diagnostic_metadata`) here, and turning the web copy into a
+# one-line re-export.
+#
+# Substring-marker key denylist (vs. ``UNSAFE_KEY_RE`` which is a regex):
+# preserved byte-identical from ``web_acquisition/policy.py:236-268`` so the
+# live diagnostic outputs do not shift. ``UNSAFE_KEY_RE`` (the kernel regex)
+# covers a different shape set (``raw|prompt|hidden|reasoning|chain|...``) and
+# is consumed by the STRICT :func:`require_safe_key` path; the two denylists
+# are not duplicates but complements. Both now live in this kernel file.
+PUBLIC_DIAGNOSTIC_KEY_MARKERS: frozenset[str] = frozenset(
+    {
+        "raw",
+        "secret",
+        "token",
+        "key",
+        "cookie",
+        "auth",
+        "credential",
+        "authoritative",
+        "trust",
+        "trusted",
+        "verified",
+        "valid",
+        "path",
+        "log",
+        "debug",
+        "trace",
+        "provider",
+        "request",
+        "response",
+        "production",
+        "attached",
+        "enabled",
+        "allowed",
+        "performed",
+        "authority",
+        "route",
+        "called",
+        "fetched",
+        "executed",
+        "injected",
+        "network",
+    }
+)
+
+
+def public_diagnostic_metadata(
+    value: Mapping[str, object], *, max_chars: int = 512
+) -> dict[str, object]:
+    """Lenient, fail-open metadata scrub for Family-B diagnostics.
+
+    Drops keys whose normalized form (lowercase, alnum-only) contains any
+    :data:`PUBLIC_DIAGNOSTIC_KEY_MARKERS` substring. Redacts every string value
+    through the C-1 kernel :func:`redact_private_text` (max_chars clip applied).
+    Keeps finite numeric primitives (``int`` / finite ``float`` / ``bool``) and
+    ``None``. Drops everything else silently. NEVER raises.
+
+    NOT for authority/contract fields — use :func:`safe_metadata` (strict) there.
+    The strict variant raises on any deviation (allow-list / fail-closed); this
+    lenient variant SILENTLY drops anything it does not recognize (deny-list /
+    fail-open). The name disambiguation is the C-2 fix.
+    """
+    if not isinstance(value, Mapping):
+        return {}
+    safe: dict[str, object] = {}
+    for key, item in value.items():
+        normalized_key = re.sub(r"[^a-z0-9]", "", str(key).casefold())
+        if any(marker in normalized_key for marker in PUBLIC_DIAGNOSTIC_KEY_MARKERS):
+            continue
+        if isinstance(item, bool):
+            safe[str(key)] = item
+        elif isinstance(item, int):
+            safe[str(key)] = item
+        elif isinstance(item, float):
+            if not isfinite(item):
+                continue
+            safe[str(key)] = item
+        elif item is None:
+            safe[str(key)] = item
+        elif isinstance(item, str):
+            # Defense-in-depth: drop any line containing a raw_*/hidden_reasoning/
+            # chain_of_thought/… marker BEFORE the kernel regex-sub scrub. The
+            # kernel ``UNSAFE_TEXT_RE`` only matches the marker substring and
+            # would leave the line tail intact, leaking everything after the
+            # marker. The legacy ``redact_public_text`` (now retired in favor of
+            # this kernel path) did this line-drop pass first; preserve that
+            # invariant so the kernel stays strictly more redactive than the
+            # legacy on multi-line marker-bearing payloads.
+            trimmed = "\n".join(
+                line
+                for line in item.splitlines()
+                if not _RAW_PRIVATE_LINE_RE.search(line)
+            )
+            safe[str(key)] = redact_private_text(trimmed, max_chars=max_chars)
+        # else: silently drop (lists, dicts, custom objects, ...) — fail-open.
+    return safe
 
 
 def safe_metadata(value: Mapping[str, object]) -> dict[str, object]:
