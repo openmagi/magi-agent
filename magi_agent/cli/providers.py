@@ -308,6 +308,26 @@ def default_model_for(provider: str) -> str:
         ) from None
 
 
+def _split_provider_slug(value: str | None) -> tuple[str | None, str | None]:
+    """If ``value`` is a ``<provider>/<model>`` slug, return ``(provider, model)``.
+
+    Recognizes only the known provider prefixes (``SUPPORTED_PROVIDERS`` plus the
+    ``google`` alias for ``gemini``) so the Fireworks raw model id
+    ``accounts/fireworks/models/...`` — which also contains slashes — is
+    correctly treated as a bare id, not as a provider/<model> slug. Returns
+    ``(None, None)`` for an unprefixed id, an empty string, or ``None``.
+    """
+    cleaned = _clean(value)
+    if cleaned is None or "/" not in cleaned:
+        return None, None
+    prefix, _, rest = cleaned.partition("/")
+    prefix_lc = prefix.lower()
+    canonical = "gemini" if prefix_lc == "google" else prefix_lc
+    if canonical not in SUPPORTED_PROVIDERS or not rest.strip():
+        return None, None
+    return canonical, rest.strip()
+
+
 def resolve_provider_config(
     *,
     model_override: str | None = None,
@@ -318,6 +338,13 @@ def resolve_provider_config(
 
     ``env`` and ``config`` are injectable for testing; they default to the real
     process environment and ``~/.magi/config.toml``.
+
+    A ``model_override`` that carries a ``<provider>/<model>`` slug (e.g. the
+    chat picker sending ``anthropic/claude-sonnet-4-6``) ALSO switches the
+    provider — otherwise the config's default provider would be combined with
+    the override's model id, which LiteLLM then proxies through the wrong
+    provider API ("openai does not support parameters: ['reasoning_effort'],
+    for model=anthropic/claude-sonnet-4-6").
     """
 
     env = os.environ if env is None else env
@@ -329,12 +356,28 @@ def resolve_provider_config(
     def key_for(provider: str) -> str | None:
         return _resolve_provider_key(provider, env=env, providers_section=providers_section)
 
+    # If the override carries a `<provider>/<model>` slug, that provider wins
+    # over the config's default — the user just picked a model on that
+    # provider, so we must call THAT provider, not the config one.
+    slug_provider, slug_model = _split_provider_slug(model_override)
+    effective_override_model = slug_model if slug_model is not None else model_override
+
     def model_for(provider: str) -> str:
         return (
-            _clean_model(model_override)
+            _clean_model(effective_override_model)
             or _clean_model(env.get("MAGI_MODEL"))
             or _clean_model(model_section.get("model"))
             or _DEFAULT_MODEL[provider]
+        )
+
+    if slug_provider is not None:
+        api_key = key_for(slug_provider)
+        if not api_key:
+            # No key for the slug-named provider → fall back to the stub
+            # runner instead of calling a different provider with the wrong key.
+            return None
+        return ProviderConfig(
+            provider=slug_provider, model=model_for(slug_provider), api_key=api_key
         )
 
     explicit = _clean(env.get("MAGI_PROVIDER")) or _clean(model_section.get("provider"))
