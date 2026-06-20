@@ -15,6 +15,42 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.58
+
+### Added
+- Customize SHACL compiler hardening (#783, back-port from
+  `magi-control-plane`): (1) UNTRUSTED-fence around natural-language input
+  with a per-call 16-hex nonce + case-insensitive forgery strip so user NL
+  cannot forge the fence; (2) reviewer-not-compiler identity guard at the
+  call site (`transport/customize.py` passes two distinct lambdas;
+  `compile_with_review` enforces `is`-not); (3) aggregate-text 60K precheck
+  that returns 422 before any LLM call; (4) deterministic `_shacl_validate`
+  with Turtle parse, pyshacl pass, and vacuity check, surfaced as a
+  separate `shaclIssues[]` response signal distinct from the LLM critic.
+- C-4 PR-G2 force-false collapse: `harness/*` authority models reuse
+  `FalseOnlyAuthorityModel` (#780). 8 `test_evidence_harness_boundary.py`
+  sites flipped from raise to coerce-to-False to match the collapsed-base
+  pattern; out-of-scope mixed sites (`spawn_depth` / `runOn`) keep their
+  raise validator.
+- C-4 PR-G3 force-false collapse: `recipes/*` authority models reuse
+  `FalseOnlyAuthorityModel` (#765). `ForgedStack` test helper moved to module
+  level to work around pydantic 2.13's nested-class deferred-annotation
+  resolution (same pattern that landed in #757). Closes the C-4 cascade
+  (PR-D/E/F/G1/G2/G3/H all merged).
+
+### Fixed
+- Local-runner turn projection no longer downgrades a committed turn into
+  abort when no receipt accompanies the live local path (#782). Adds
+  `expect_receipt: bool = True` to `project_runner_end_event`; the local
+  `live_compatible` path (`event_adapter.py:876`) passes `False` so a
+  successful local turn is `committed` from the raw projection layer
+  forward, instead of being rewritten to `abort` for missing a receipt that
+  the hosted contract requires but the local path never produces. Default
+  stays `True`, so hosted projection is byte-identical. Provider-specific
+  dashboard rendering differences observed on Kimi/GPT collapse at this
+  layer too. Pairs with #779's surface-level provider-routing fix to close
+  the diagnosed two-layer issue.
+
 ## 0.1.57
 
 ### Added
