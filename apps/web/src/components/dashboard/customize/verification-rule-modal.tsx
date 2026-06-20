@@ -1121,9 +1121,21 @@ function CustomRulesSection({
   );
 }
 
-export function VerificationRuleModal({
-  open,
-  onClose,
+/** Props for the embeddable panel body — same data + handlers as the modal, but
+ * no modal chrome (no Modal wrapper, no close button, no `open`/`onClose`).
+ * The full-page Customize hub mounts this directly; the legacy modal wraps it.
+ */
+export type VerificationRulePanelProps = Omit<
+  VerificationRuleModalProps,
+  "open" | "onClose"
+> & {
+  /** Re-seed the draft when the wrapping surface re-opens (modal) or when the
+   * route mounts (page). Defaults to `true`. */
+  seed?: boolean;
+};
+
+/** Headless panel body — shared between the legacy modal and the Phase-4 hub. */
+export function VerificationRulePanel({
   catalog,
   presetOverrides,
   pendingPresets,
@@ -1138,14 +1150,12 @@ export function VerificationRuleModal({
   onSaveRules,
   onCompileShacl,
   error,
-}: VerificationRuleModalProps): React.ReactElement | null {
+  seed = true,
+}: VerificationRulePanelProps): React.ReactElement {
   const [rulesDraft, setRulesDraft] = useState(userRules);
-  // Re-seed the draft whenever the modal (re)opens with fresh backend state.
   useEffect(() => {
-    if (open) setRulesDraft(userRules);
-  }, [open, userRules]);
-
-  if (!open) return null;
+    if (seed) setRulesDraft(userRules);
+  }, [seed, userRules]);
 
   // Preview presets are pulled out into their own collapsed section regardless of
   // domain; everything else groups by WHEN (domain).
@@ -1161,8 +1171,109 @@ export function VerificationRuleModal({
     ...DOMAIN_ORDER.filter((d) => byDomain.has(d)),
     ...[...byDomain.keys()].filter((d) => !DOMAIN_ORDER.includes(d as never)),
   ];
-
   const rulesDirty = rulesDraft !== userRules;
+
+  return (
+    <>
+      {error ? (
+        <div className="mb-4 rounded-lg border border-red-500/25 bg-red-500/[0.06] px-3 py-2 text-xs text-red-600">
+          {error}
+        </div>
+      ) : null}
+
+      <div className="space-y-6">
+        {orderedDomains.map((domain) => {
+          const presets = byDomain.get(domain) ?? [];
+          if (presets.length === 0) return null;
+          return (
+            <section key={domain}>
+              <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-secondary/70">
+                {DOMAIN_LABELS[domain] ?? domain}
+              </h3>
+              <div className="space-y-2">
+                {presets.map((preset) => (
+                  <PresetRow
+                    key={preset.id}
+                    preset={preset}
+                    checked={presetOverrides[preset.id] ?? preset.defaultEnabled}
+                    pending={pendingPresets.has(preset.id)}
+                    onToggle={onTogglePreset}
+                  />
+                ))}
+              </div>
+            </section>
+          );
+        })}
+
+        {previewPresets.length > 0 ? (
+          <details className="rounded-xl border border-black/[0.06] bg-gray-50/60">
+            <summary className="cursor-pointer px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-secondary/70">
+              Not yet wired — preview ({previewPresets.length})
+            </summary>
+            <div className="space-y-2 px-3 pb-3">
+              {previewPresets.map((preset) => (
+                <PresetRow
+                  key={preset.id}
+                  preset={preset}
+                  checked={false}
+                  pending={false}
+                  onToggle={onTogglePreset}
+                />
+              ))}
+            </div>
+          </details>
+        ) : null}
+
+        <CustomRulesSection
+          menu={catalog.customRuleMenu}
+          rules={customRules}
+          busy={customRuleBusy}
+          onAdd={onAddCustomRule}
+          onToggle={onToggleCustomRule}
+          onDelete={onDeleteCustomRule}
+          onCompileShacl={onCompileShacl}
+        />
+
+        <CustomChecksSection busy={customRuleBusy} />
+
+        <section>
+          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-secondary/70">
+            Freeform guidance
+          </h3>
+          <p className="mb-2 text-xs leading-relaxed text-secondary">
+            Free-text instructions injected into your agent&apos;s system prompt every turn.
+          </p>
+          <textarea
+            aria-label="Freeform guidance"
+            value={rulesDraft}
+            onChange={(e) => setRulesDraft(e.target.value)}
+            rows={5}
+            placeholder="e.g. Always cite sources. Never delete files without confirming."
+            className="w-full resize-y rounded-xl border border-black/[0.10] bg-white px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          />
+          <div className="mt-2 flex justify-end">
+            <button
+              type="button"
+              disabled={!rulesDirty || rulesSaving}
+              onClick={() => onSaveRules(rulesDraft)}
+              className="inline-flex min-h-[36px] items-center rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {rulesSaving ? "Saving…" : rulesDirty ? "Save rules" : "Saved"}
+            </button>
+          </div>
+        </section>
+      </div>
+    </>
+  );
+}
+
+
+export function VerificationRuleModal({
+  open,
+  onClose,
+  ...panelProps
+}: VerificationRuleModalProps): React.ReactElement | null {
+  if (!open) return null;
 
   return (
     <Modal open={open} onClose={onClose}>
@@ -1187,98 +1298,7 @@ export function VerificationRuleModal({
           gates are enforced by the runtime and can&apos;t be turned off here.
         </p>
 
-        {error ? (
-          <div className="mb-4 rounded-lg border border-red-500/25 bg-red-500/[0.06] px-3 py-2 text-xs text-red-600">
-            {error}
-          </div>
-        ) : null}
-
-        <div className="space-y-6">
-          {orderedDomains.map((domain) => {
-            const presets = byDomain.get(domain) ?? [];
-            if (presets.length === 0) return null;
-            return (
-              <section key={domain}>
-                <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-secondary/70">
-                  {DOMAIN_LABELS[domain] ?? domain}
-                </h3>
-                <div className="space-y-2">
-                  {presets.map((preset) => (
-                    <PresetRow
-                      key={preset.id}
-                      preset={preset}
-                      checked={presetOverrides[preset.id] ?? preset.defaultEnabled}
-                      pending={pendingPresets.has(preset.id)}
-                      onToggle={onTogglePreset}
-                    />
-                  ))}
-                </div>
-              </section>
-            );
-          })}
-
-          {/* Preview (not yet wired) — collapsed, non-toggle */}
-          {previewPresets.length > 0 ? (
-            <details className="rounded-xl border border-black/[0.06] bg-gray-50/60">
-              <summary className="cursor-pointer px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-secondary/70">
-                Not yet wired — preview ({previewPresets.length})
-              </summary>
-              <div className="space-y-2 px-3 pb-3">
-                {previewPresets.map((preset) => (
-                  <PresetRow
-                    key={preset.id}
-                    preset={preset}
-                    checked={false}
-                    pending={false}
-                    onToggle={onTogglePreset}
-                  />
-                ))}
-              </div>
-            </details>
-          ) : null}
-
-          {/* Structured custom rules (deterministic + SHACL) */}
-          <CustomRulesSection
-            menu={catalog.customRuleMenu}
-            rules={customRules}
-            busy={customRuleBusy}
-            onAdd={onAddCustomRule}
-            onToggle={onToggleCustomRule}
-            onDelete={onDeleteCustomRule}
-            onCompileShacl={onCompileShacl}
-          />
-
-          {/* Dashboard-authored custom checks (after-tool evidence; self-host only) */}
-          <CustomChecksSection busy={customRuleBusy} />
-
-          {/* Freeform prompt guidance (USER-RULES.md) */}
-          <section>
-            <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-secondary/70">
-              Freeform guidance
-            </h3>
-            <p className="mb-2 text-xs leading-relaxed text-secondary">
-              Free-text instructions injected into your agent&apos;s system prompt every turn.
-            </p>
-            <textarea
-              aria-label="Freeform guidance"
-              value={rulesDraft}
-              onChange={(e) => setRulesDraft(e.target.value)}
-              rows={5}
-              placeholder="e.g. Always cite sources. Never delete files without confirming."
-              className="w-full resize-y rounded-xl border border-black/[0.10] bg-white px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-            />
-            <div className="mt-2 flex justify-end">
-              <button
-                type="button"
-                disabled={!rulesDirty || rulesSaving}
-                onClick={() => onSaveRules(rulesDraft)}
-                className="inline-flex min-h-[36px] items-center rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {rulesSaving ? "Saving…" : rulesDirty ? "Save rules" : "Saved"}
-              </button>
-            </div>
-          </section>
-        </div>
+        <VerificationRulePanel seed={open} {...panelProps} />
       </div>
     </Modal>
   );
