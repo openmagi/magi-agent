@@ -303,6 +303,10 @@ async def _local_adk_chat_sse(
     prompt: str,
 ) -> AsyncIterator[str]:
     from magi_agent.cli.contracts import EngineResult
+    from magi_agent.cli.real_runner import (
+        reset_per_turn_reasoning_effort,
+        set_per_turn_reasoning_effort,
+    )
     from magi_agent.cli.wiring import (
         build_headless_runtime,
         local_runner_policy_routing_enabled_from_env,
@@ -373,68 +377,90 @@ async def _local_adk_chat_sse(
     serve_bot_id = str(getattr(runtime_config, "bot_id", None) or "local")
     serve_owner_user_id = str(getattr(runtime_config, "user_id", None) or "local")
     pinned_recipe_pack_ids = _pinned_recipe_pack_ids_from_payload(payload)
-    headless = build_headless_runtime(
-        cwd=workspace_root,
-        # A-8: explicit, audited local-serve YOLO opt-in (see module constant).
-        permission_mode=_LOCAL_SERVE_PERMISSION_MODE,
-        session_id=session_id,
-        model=model_override,
-        runner_policy_routing_enabled=local_runner_policy_routing_enabled_from_env(),
-        recall_query=prompt,
-        bot_id=serve_bot_id,
-        owner_user_id=serve_owner_user_id,
-        learning_live_readiness=learning_live_readiness,
-        pinned_recipe_pack_ids=pinned_recipe_pack_ids,
-    )
-    # Route the top-level serve turn through the single ``run_governed_turn``
-    # primitive (Phase 1). ``runtime=headless`` reuses the SAME runner/gate/
-    # driver assembly built above — the primitive does not rebuild it — so this
-    # is behavior-preserving. ``to_turn_input()`` adds ``harness_state=ctx``;
-    # output neutrality holds because (a) ``_extract_task_types`` treats any
-    # non-Mapping as ``()`` and (b) even the ``effective_harness_state`` that
-    # runner-policy assembly computes (adding ``resolvedHarnessStateType``) is
-    # passed only as ``harnessState=`` to the ADK runner adapter, which drops
-    # it via its kwargs allowlist — nothing reaches the model or any event.
-    ctx = TurnContext(
-        prompt=prompt,
-        session_id=session_id,
-        turn_id=turn_id,
-        model=model_override,
-        # A-8: keep the ctx authority consistent with the pre-built ``headless``
-        # runtime above. Although ``runtime=headless`` means ``_build_runtime``
-        # is not invoked here, set the field explicitly so the serve TurnContext
-        # never silently relies on the deny/ask default — the serve policy choice
-        # is visible on the context too.
-        permission_mode=_LOCAL_SERVE_PERMISSION_MODE,
-    )
-    stream = run_governed_turn(ctx, runtime=headless)
-    # Accumulate the assistant text + a tool-use signal so the turn-end memory
-    # hook (below) can flush a concise daily entry and skip trivial turns. This
-    # mirrors data we already stream, so it adds no extra engine work.
-    assistant_parts: list[str] = []
-    used_tool = False
-    turn_errored = False
-    async for item in stream:
-        if isinstance(item, EngineResult):
-            if item.error:
-                turn_errored = True
-                yield _sse_event(
-                    "agent",
-                    {
-                        "type": "error",
-                        "turnId": turn_id,
-                        "reason": item.error,
-                    },
-                )
-            break
-        event_payload = dict(item.payload)
-        if event_payload.get("type") == "tool_start":
-            used_tool = True
-        yield _sse_event("agent", event_payload)
-        delta = _local_runtime_event_delta(event_payload)
-        if delta:
-            assistant_parts.append(delta)
-            yield _sse_data({"choices": [{"index": 0, "delta": {"content": delta}}]})
+    # PR2c: extract per-turn ``reasoningEffort`` from the chat-completions
+    # payload (wire protocol: ``"minimal" | "low" | "medium" | "high"``). Any
+    # truthy string flows into the ContextVar below; ``None`` / unknown shape
+    # leaves the override unset so the env path remains authoritative for this
+    # turn (byte-identical to pre-PR2c behavior).
+    _payload_reasoning_effort: str | None = None
+    if isinstance(payload, Mapping):
+        _raw_reasoning = payload.get("reasoningEffort")
+        if isinstance(_raw_reasoning, str):
+            _payload_reasoning_effort = _raw_reasoning
+    # Scope the per-turn override across the LiteLlm build (inside
+    # ``build_headless_runtime``) AND the entire streaming loop. Child/subagent
+    # runners can spawn during the turn and call ``_build_litellm_model`` in
+    # the same async task, so they must observe the same override; the
+    # ``finally`` restores the prior ContextVar value so concurrent or
+    # back-to-back turns never leak state.
+    _reasoning_token = set_per_turn_reasoning_effort(_payload_reasoning_effort)
+    try:
+        headless = build_headless_runtime(
+            cwd=workspace_root,
+            # A-8: explicit, audited local-serve YOLO opt-in (see module constant).
+            permission_mode=_LOCAL_SERVE_PERMISSION_MODE,
+            session_id=session_id,
+            model=model_override,
+            runner_policy_routing_enabled=local_runner_policy_routing_enabled_from_env(),
+            recall_query=prompt,
+            bot_id=serve_bot_id,
+            owner_user_id=serve_owner_user_id,
+            learning_live_readiness=learning_live_readiness,
+            pinned_recipe_pack_ids=pinned_recipe_pack_ids,
+        )
+        # Route the top-level serve turn through the single ``run_governed_turn``
+        # primitive (Phase 1). ``runtime=headless`` reuses the SAME runner/gate/
+        # driver assembly built above — the primitive does not rebuild it — so
+        # this is behavior-preserving. ``to_turn_input()`` adds
+        # ``harness_state=ctx``; output neutrality holds because (a)
+        # ``_extract_task_types`` treats any non-Mapping as ``()`` and (b) even
+        # the ``effective_harness_state`` that runner-policy assembly computes
+        # (adding ``resolvedHarnessStateType``) is passed only as
+        # ``harnessState=`` to the ADK runner adapter, which drops it via its
+        # kwargs allowlist — nothing reaches the model or any event.
+        ctx = TurnContext(
+            prompt=prompt,
+            session_id=session_id,
+            turn_id=turn_id,
+            model=model_override,
+            # A-8: keep the ctx authority consistent with the pre-built ``headless``
+            # runtime above. Although ``runtime=headless`` means ``_build_runtime``
+            # is not invoked here, set the field explicitly so the serve TurnContext
+            # never silently relies on the deny/ask default — the serve policy choice
+            # is visible on the context too.
+            permission_mode=_LOCAL_SERVE_PERMISSION_MODE,
+        )
+        stream = run_governed_turn(ctx, runtime=headless)
+        # Accumulate the assistant text + a tool-use signal so the turn-end
+        # memory hook (below) can flush a concise daily entry and skip trivial
+        # turns. This mirrors data we already stream, so it adds no extra
+        # engine work.
+        assistant_parts: list[str] = []
+        used_tool = False
+        turn_errored = False
+        async for item in stream:
+            if isinstance(item, EngineResult):
+                if item.error:
+                    turn_errored = True
+                    yield _sse_event(
+                        "agent",
+                        {
+                            "type": "error",
+                            "turnId": turn_id,
+                            "reason": item.error,
+                        },
+                    )
+                break
+            event_payload = dict(item.payload)
+            if event_payload.get("type") == "tool_start":
+                used_tool = True
+            yield _sse_event("agent", event_payload)
+            delta = _local_runtime_event_delta(event_payload)
+            if delta:
+                assistant_parts.append(delta)
+                yield _sse_data({"choices": [{"index": 0, "delta": {"content": delta}}]})
+    finally:
+        reset_per_turn_reasoning_effort(_reasoning_token)
     # ── TURN-END MEMORY HOOK (PR-B) ─────────────────────────────────────────
     # This is the turn-finalization point of the live local chat path: the
     # engine stream has drained, so the assistant turn is complete. Flush a
