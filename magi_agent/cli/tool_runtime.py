@@ -1120,6 +1120,19 @@ def build_cli_instruction(
     _research_methodology_block = research_methodology_block()
     _automation_methodology_block = automation_methodology_block()
 
+    # C10 coding-context auto-injection — default-OFF
+    # (MAGI_CODING_CONTEXT_ENABLED). When ON, a ``<coding_context>`` block with
+    # workspace summary (repo map + recent git changes + entry points +
+    # top-level dir stats) is appended so the model has a concise repo map up
+    # front. Fail-safe to "" so byte-identical OFF. Mirrors
+    # ``build_tool_advertisement_block``'s ``workspace_root or "."`` default so
+    # the CLI default (cwd) works without an explicit kwarg.
+    # scope: coding (matches build_cli_instruction's coding-agent prompt path).
+    from magi_agent.runtime.coding_context import coding_context_block  # noqa: PLC0415
+
+    _coding_context_root = Path(workspace_root or ".").resolve()
+    _coding_context_block = coding_context_block(workspace_root=_coding_context_root)
+
     # Cross-family recipe listing (default-OFF: MAGI_RECIPE_ROUTING_LLM_ENABLED).
     # Returns "" when the gate is off so the assembled prompt is byte-identical to
     # pre-wiring (no listing header). When on, lists non-hard packs by when-to-use
@@ -1166,6 +1179,8 @@ def build_cli_instruction(
         parts.append(_research_methodology_block)
     if _automation_methodology_block:
         parts.append(_automation_methodology_block)
+    if _coding_context_block:
+        parts.append(_coding_context_block)
     if _redflags_block:
         parts.append(_redflags_block)
     if _recipe_listing_block:

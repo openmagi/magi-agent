@@ -2314,6 +2314,54 @@ def is_automation_methodology_enabled(env: Mapping[str, str] | None = None) -> b
     return _is_true(source.get(MAGI_AUTOMATION_METHODOLOGY_ENABLED_ENV))
 
 
+MAGI_CODING_CONTEXT_ENABLED_ENV = "MAGI_CODING_CONTEXT_ENABLED"
+MAGI_CODING_CONTEXT_FILE_LIMIT_ENV = "MAGI_CODING_CONTEXT_FILE_LIMIT"
+MAGI_CODING_CONTEXT_TOKEN_BUDGET_ENV = "MAGI_CODING_CONTEXT_TOKEN_BUDGET"
+
+
+def is_coding_context_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Gate for the C10 coding-context auto-injection prompt block.
+
+    Default OFF. ON appends ``<coding_context>`` (workspace summary: repo map +
+    recent git changes + entry points + top-level directory stats) in
+    ``build_cli_instruction`` when ``workspace_root`` is provided. Guidance, not
+    enforcing.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_CODING_CONTEXT_ENABLED_ENV))
+
+
+def coding_context_file_limit(env: Mapping[str, str] | None = None) -> int | None:
+    """Per-tree file-count cap for the coding-context block; ``None`` ⇒ default.
+
+    Caller treats ``None`` and any non-positive value as "use the producer's
+    default" (currently 80). Invalid values fall back to ``None`` so the
+    producer is never misconfigured.
+    """
+    source = os.environ if env is None else env
+    raw = (source.get(MAGI_CODING_CONTEXT_FILE_LIMIT_ENV) or "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+def coding_context_token_budget(env: Mapping[str, str] | None = None) -> int | None:
+    """Token budget for the coding-context block; ``None`` ⇒ producer default."""
+    source = os.environ if env is None else env
+    raw = (source.get(MAGI_CODING_CONTEXT_TOKEN_BUDGET_ENV) or "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
 MAGI_DOCUMENT_AUTHORING_COVERAGE_ENV = "MAGI_DOCUMENT_AUTHORING_COVERAGE"
 
 
