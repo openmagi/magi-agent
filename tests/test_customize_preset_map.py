@@ -108,3 +108,55 @@ def test_supported_modes_default_deterministic():
 def test_seam_for_unknown_returns_none():
     assert seam_for("does-not-exist") is None
     assert seam_for("coding-context") is None  # metadata-only, not wired
+
+
+def test_coding_workspace_lock_is_user_rule_capability():
+    # The workspace-lock preset is not a togglable verification gate — its
+    # capability is the tool_perm path/pathAllowlist matcher in
+    # customize.tool_perm, which users activate by authoring a custom tool_perm
+    # rule. Surface that honestly as a "capability" (same enforcement label as
+    # coding-child-review), distinct from "preview".
+    from magi_agent.customize.preset_map import is_user_rule_capability
+
+    assert is_user_rule_capability("coding-workspace-lock") is True
+    assert is_user_rule_capability("coding-child-review") is False  # env-flag capability
+    assert is_user_rule_capability("coding-context") is False  # plain preview
+    # capability is the surfaced enforcement label.
+    assert enforcement_for(
+        "coding-workspace-lock", category="coding", is_security=False
+    ) == "capability"
+
+
+def test_intended_dormant_presets_are_pinned_and_preview() -> None:
+    # The catalog still surfaces these 9 presets (parity / future work-streams),
+    # but they have NO live runtime gate. The Customize tab honestly badges
+    # them ``preview`` and the dormant pin lets future activators flip them in
+    # lockstep with wiring (the catalog test below ratchets the count).
+    from magi_agent.customize.preset_map import (
+        dormant_reason_for,
+        is_intended_dormant,
+    )
+
+    dormant = {
+        "benchmark-verifier",
+        "memory-continuity",
+        "task-contract",
+        "output-delivery",
+        "autopilot-consensus-gate",
+        "autopilot-interview-gate",
+        "autopilot-phase-router",
+        "autopilot-qa-gate",
+        "autopilot-review-gate",
+    }
+    for pid in dormant:
+        assert is_intended_dormant(pid), pid
+        # every dormant preset must carry a one-line "why" for the UI.
+        reason = dormant_reason_for(pid)
+        assert reason and reason.strip(), pid
+        # honest status = preview (NOT enforcing / always-on / capability).
+        assert enforcement_for(pid, category="task", is_security=False) == "preview", pid
+
+    # Wired / capability presets are NOT marked dormant.
+    assert is_intended_dormant("coding-verification") is False
+    assert is_intended_dormant("coding-workspace-lock") is False
+    assert dormant_reason_for("coding-verification") is None
