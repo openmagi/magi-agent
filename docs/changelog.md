@@ -15,6 +15,17 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.56
+
+### Added
+- Reasoning-effort per-turn override reaches the runtime (PR2c, #775). A
+  `ContextVar` carries the per-turn level through `chat_routes`,
+  `_build_litellm_model`, and `child_runner_live`'s streaming-loop LiteLlm
+  rebuilds without changing any wire signature. `_model_reasoning_kwargs`
+  consults the ContextVar before falling back to env; `thinking_type` /
+  `budget_tokens` remain top-level escape hatches. Payload-and-env both unset
+  stays byte-identical.
+
 ## 0.1.55
 
 ### Added
