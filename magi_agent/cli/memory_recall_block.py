@@ -61,6 +61,29 @@ def select_search_backend(config: object) -> object:
     return _select(config)
 
 
+def rerank_hits(
+    *,
+    hits: object,
+    query: str,
+    memory_dir: "Path",
+    config: object,
+) -> object:
+    """Lazy seam for the optional cheap-model re-rank (PR3).
+
+    Wrapped (not a top-level import) so the cold-start prompt path does not pull
+    in the LiteLlm builder / re-rank machinery until recall runs with BOTH the
+    recall gates AND ``MAGI_MEMORY_RECALL_RERANK_ENABLED`` on.  Default-OFF and
+    fail-open inside the callee: when the rerank flag is off (or anything fails)
+    it returns the BM25 order UNCHANGED, so the block stays byte-identical to the
+    pre-PR3 output.  Tests monkeypatch this attribute to inject a fake selector.
+    """
+    from magi_agent.cli.memory_recall_rerank import (  # noqa: PLC0415
+        rerank_hits as _rerank,
+    )
+
+    return _rerank(hits=hits, query=query, memory_dir=memory_dir, config=config)
+
+
 def build_cli_memory_recall_block(
     *,
     workspace_root: str | None,
@@ -157,6 +180,22 @@ def _build_block(
     if not hits:
         return ""
 
+    # PR3: optional cheap-model semantic re-rank over the BM25 candidates.
+    # Default-OFF + fail-open inside the callee: when the rerank gate is off (or
+    # anything fails) this returns the SAME BM25 order, so the emitted block is
+    # byte-identical to the pre-PR3 output.  Never drops a candidate.
+    memory_dir = root / "memory"
+    try:
+        hits = rerank_hits(hits=hits, query=query, memory_dir=memory_dir, config=config)
+    except Exception:  # noqa: BLE001 — re-rank must never break recall
+        logger.debug("Memory recall re-rank seam failed; using BM25 order", exc_info=True)
+
+    # PR3: stale-pick markers — entries older than one day get a trailing
+    # <system-reminder> staleness note appended INSIDE their part.  Built only
+    # when rerank is active (it surfaces older docs the model chose); off-path
+    # leaves ``stale_paths`` empty so the output is unchanged.
+    stale_paths = _stale_recall_paths(memory_dir)
+
     headroom = len(MEMORY_RECALL_OPEN.encode()) + len(MEMORY_RECALL_CLOSE.encode()) + 4
     content_budget = max(int(max_bytes) - headroom, 0)
     if content_budget <= 0:
@@ -176,6 +215,8 @@ def _build_block(
         if not redacted.strip():
             continue
         part = f"<!-- {path} -->\n{redacted}"
+        if path in stale_paths:
+            part = f"{part}\n{_staleness_note()}"
         parts.append(part)
         remaining = max(remaining - len(part.encode("utf-8")) - 2, 0)
 
@@ -188,8 +229,47 @@ def _build_block(
     return f"{MEMORY_RECALL_OPEN}\n{combined}\n{MEMORY_RECALL_CLOSE}"
 
 
+def _staleness_note() -> str:
+    """The trailing staleness reminder appended to a stale recall pick (PR3)."""
+    return (
+        "<system-reminder>This recalled memory is stale "
+        "(older than 1 day); verify it still holds before relying on it."
+        "</system-reminder>"
+    )
+
+
+def _stale_recall_paths(memory_dir: "Path") -> set[str]:
+    """Return the set of WORKSPACE-relative hit paths that are stale (>1 day).
+
+    Only computed when the re-rank gate is ON, so the default recall path pays no
+    manifest-scan cost and its output stays byte-identical to pre-PR3.  Manifest
+    paths are relative to ``memory/`` (e.g. ``daily/x.md``); BM25 hit paths are
+    workspace-relative (``memory/daily/x.md``), so each stale entry is re-prefixed
+    to match.  Fail-soft: any error returns an empty set (no notes appended).
+    """
+    try:
+        from magi_agent.cli.memory_recall_rerank import (  # noqa: PLC0415
+            _rerank_gate_open,
+        )
+
+        if not _rerank_gate_open():
+            return set()
+        from magi_agent.cli.memory_manifest import (  # noqa: PLC0415
+            build_memory_manifest,
+        )
+
+        stale: set[str] = set()
+        for entry in build_memory_manifest(memory_dir):
+            if entry.stale:
+                stale.add(f"memory/{entry.path}")
+        return stale
+    except Exception:  # noqa: BLE001 — staleness notes are best-effort
+        return set()
+
+
 __all__ = [
     "MEMORY_RECALL_CLOSE",
     "MEMORY_RECALL_OPEN",
     "build_cli_memory_recall_block",
+    "rerank_hits",
 ]
