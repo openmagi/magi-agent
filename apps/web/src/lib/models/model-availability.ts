@@ -20,6 +20,7 @@ const OPTION_PROVIDER: Record<string, string> = {
   gpt_5_5_pro: "openai",
   kimi_k2_5: "fireworks",
   minimax_m2_7: "fireworks",
+  gemini_3_5_flash: "gemini",
   gemini_3_1_flash_lite: "gemini",
   gemini_3_1_pro: "gemini",
 };

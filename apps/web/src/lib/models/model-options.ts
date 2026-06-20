@@ -20,6 +20,7 @@ export const BASE_MODEL_OPTIONS = [
   { value: "gpt_5_5_pro", label: "GPT-5.5 Pro" },
   { value: "kimi_k2_5", label: "Kimi K2.6 (Fireworks AI)" },
   { value: "minimax_m2_7", label: "MiniMax M2.7 (Fireworks AI)" },
+  { value: "gemini_3_5_flash", label: "Gemini 3.5 Flash (Google)" },
   { value: "gemini_3_1_flash_lite", label: "Gemini 3.1 Flash Lite (Google)" },
   { value: "gemini_3_1_pro", label: "Gemini 3.1 Pro (Google)" },
 ] as const satisfies readonly ModelOption[];

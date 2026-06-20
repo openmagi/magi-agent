@@ -30,6 +30,7 @@ export const VALID_MODELS = [
   "local_gemma_fast",
   "local_gemma_max",
   "local_qwen_uncensored",
+  "gemini_3_5_flash",
   "gemini_3_1_flash_lite",
   "gemini_3_1_pro",
 ] as const;
@@ -57,6 +58,7 @@ export const MODEL_LABELS: Record<string, string> = {
   ...Object.fromEntries(
     LOCAL_LLM_MODEL_OPTIONS.map((model) => [model.value, model.label]),
   ),
+  gemini_3_5_flash: "Gemini 3.5 Flash",
   gemini_3_1_flash_lite: "Gemini 3.1 Flash Lite",
   gemini_3_1_pro: "Gemini 3.1 Pro",
 };
