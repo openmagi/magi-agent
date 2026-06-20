@@ -131,12 +131,19 @@ def _rule_matches(match: dict[str, Any], *, tool_name: str, arguments: dict[str,
 
 
 def matched_decision(
-    *, tool_name: str, arguments: dict[str, Any]
+    *,
+    tool_name: str,
+    arguments: dict[str, Any],
+    current_scope: str | None = None,
 ) -> tuple[str, str] | None:
     """Return ``(action, rule_id)`` for the first matching enabled tool_perm rule.
 
     ``action`` is ``"deny"`` or ``"ask"``. Returns ``None`` when the flags are off,
     no rule matches, or on any error (fail-open — never wedges a tool call).
+
+    ``current_scope`` (Phase 2): when supplied, only rules whose ``scope`` covers
+    the current turn are considered. Backwards-compat: ``None`` preserves the
+    historic scope-blind behavior so legacy call sites keep working.
     """
     from magi_agent.config.flags import flag_profile_bool
 
@@ -150,7 +157,7 @@ def matched_decision(
         from magi_agent.customize.verification_policy import CustomizeVerificationPolicy
 
         policy = CustomizeVerificationPolicy.from_overrides(load_overrides())
-        for rule in policy.enabled_tool_perm_rules():
+        for rule in policy.enabled_tool_perm_rules(current_scope=current_scope):
             payload = rule.get("what", {}).get("payload", {})
             match = payload.get("match")
             if not isinstance(match, dict):

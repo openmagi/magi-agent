@@ -742,11 +742,11 @@ graph LR
 | custom_rules.py | Custom verification-rule schema + validation (spec §9.1). | shacl_verifier, what_menu | transport/customize.py |
 | preset_map.py | Canonical preset id → runtime-seam map for the Customize verification tab. | scope | cli/real_runner.py, customize/catalog.py |
 | runtime_gate.py | Runtime-side query for Customize verification preset state. | flags, store, verification_policy | cli/engine.py, customize/what_menu.py |
-| scope.py | Single source of truth for scope vocabulary + task-type → scope mapping. | — | customize/preset_map.py |
+| scope.py | Single source of truth for scope vocabulary + task-type → scope mapping. | — | customize/preset_map.py, customize/verification_policy.py |
 | shacl_compiler.py | SHACL compiler module -- Tasks 3.1 + 3.2: pure helpers + NL-to-SHACL compiler. | builtin, providers, readonly_classifier, shacl_verifier, types | transport/customize.py |
 | store.py | — | — | cli/engine.py, cli/real_runner.py, cli/tests/test_document_coverage_seam_wiring.py, customize/__init__.py, customize/after_tool_gate.py, customize/runtime_gate.py, customize/tool_perm.py, runtime/message_builder.py, runtime/openmagi_runtime.py, transport/customize.py |
 | tool_perm.py | Custom tool-permission rule matching (P2). | flags, store, verification_policy | tools/permission.py |
-| verification_policy.py | — | — | cli/engine.py, cli/real_runner.py, customize/after_tool_gate.py, customize/apply.py, customize/runtime_gate.py, customize/tool_perm.py |
+| verification_policy.py | — | scope | cli/engine.py, cli/real_runner.py, customize/after_tool_gate.py, customize/apply.py, customize/runtime_gate.py, customize/tool_perm.py |
 | what_menu.py | WHAT-menu for deterministic custom rules. | flags, runtime_gate | cli/real_runner.py, customize/catalog.py, customize/custom_rules.py |
 
 ### discovery/
