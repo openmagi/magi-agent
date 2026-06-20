@@ -4,8 +4,9 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Literal, Self
 
-from pydantic import Field, field_serializer, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.ops.safety import (
     FrozenContractModel,
     canonical_digest,
@@ -29,7 +30,7 @@ class _BillingModel(FrozenContractModel):
     """Frozen billing contract base (collapsed onto the shared kernel)."""
 
 
-class QuotaEvaluationConfig(_BillingModel):
+class QuotaEvaluationConfig(FalseOnlyAuthorityModel):
     local_evaluation_enabled: bool = Field(default=False, alias="localEvaluationEnabled")
     kill_switch_enabled: bool = Field(default=False, alias="killSwitchEnabled")
     live_billing_system_attached: Literal[False] = Field(
@@ -44,20 +45,6 @@ class QuotaEvaluationConfig(_BillingModel):
         default_factory=TenantRuntimeAuthorityFlags,
         alias="authorityFlags",
     )
-
-    @model_validator(mode="before")
-    @classmethod
-    def _force_non_production(cls, value: object) -> dict[str, object]:
-        payload = dict(value) if isinstance(value, Mapping) else {}
-        payload["liveBillingSystemAttached"] = False
-        payload.pop("live_billing_system_attached", None)
-        payload["productionQuotaMutationEnabled"] = False
-        payload.pop("production_quota_mutation_enabled", None)
-        return payload
-
-    @field_serializer("live_billing_system_attached", "production_quota_mutation_enabled")
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 class QuotaLimit(_BillingModel):
@@ -162,7 +149,7 @@ class QuotaRequest(_BillingModel):
         )
 
 
-class QuotaDecision(_BillingModel):
+class QuotaDecision(FalseOnlyAuthorityModel):
     schema_version: Literal["openmagi.billing.quota_decision.v1"] = Field(
         default="openmagi.billing.quota_decision.v1",
         alias="schemaVersion",
@@ -188,16 +175,6 @@ class QuotaDecision(_BillingModel):
         alias="productionQuotaMutated",
     )
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), alias="createdAt")
-
-    @model_validator(mode="before")
-    @classmethod
-    def _force_no_live_side_effects(cls, value: object) -> dict[str, object]:
-        payload = dict(value) if isinstance(value, Mapping) else {}
-        payload["liveBillingSystemQueried"] = False
-        payload.pop("live_billing_system_queried", None)
-        payload["productionQuotaMutated"] = False
-        payload.pop("production_quota_mutated", None)
-        return payload
 
     @field_validator("operation_ref", "quota_key")
     @classmethod
@@ -236,10 +213,6 @@ class QuotaDecision(_BillingModel):
         if self.source == "disabled" and self.status != "fail_closed":
             raise ValueError("disabled quota source must fail closed")
         return self
-
-    @field_serializer("live_billing_system_queried", "production_quota_mutated")
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
     @property
     def decision_digest(self) -> str:
