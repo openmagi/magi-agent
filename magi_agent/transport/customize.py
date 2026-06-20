@@ -49,6 +49,39 @@ _MAX_COMPILE_ROUNDS = 3
 _LLM_CALL_TIMEOUT_S = 30
 
 
+def _is_seam_spec_enabled() -> bool:
+    """Read ``MAGI_CUSTOMIZE_SEAM_SPEC_ENABLED`` defensively (PR-C2 flag)."""
+    try:
+        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+        return flag_bool("MAGI_CUSTOMIZE_SEAM_SPEC_ENABLED")
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _resolve_seam_compile_factory(body: dict) -> Any:
+    """Resolve the SeamSpec compiler model factory.
+
+    Mirrors :func:`magi_agent.customize.shacl_compiler._resolve_shacl_compile_factory`:
+    test injection via ``body["_seamModelFactory"]`` wins; otherwise the SHACL
+    production factory resolver is reused so a single provider config covers
+    both NL compilers (handoff §5 explicit reuse of PR-A's resolver).
+
+    Module-level (NOT a closure inside ``register_customize_routes``) so tests
+    can ``monkeypatch.setattr(customize_transport, "_resolve_seam_compile_factory", ...)``
+    to inject a fake — the same pattern the SHACL endpoint tests use.
+    """
+    if isinstance(body, dict):
+        factory = body.get("_seamModelFactory")
+        if callable(factory):
+            return factory
+    from magi_agent.customize.shacl_compiler import (  # noqa: PLC0415
+        _production_shacl_compiler_model_factory,
+    )
+
+    return _production_shacl_compiler_model_factory()
+
+
 def _make_json_safe(obj: Any) -> Any:
     """Recursively convert non-JSON-serializable objects to plain Python primitives.
 
@@ -470,3 +503,250 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             return JSONResponse(
                 content={"ok": False, "error": f"compile error: {exc}"}
             )
+
+    # ------------------------------------------------------------------
+    # PR-C2 — SeamSpec NL-spec routes (default-OFF, gated by
+    # MAGI_CUSTOMIZE_SEAM_SPEC_ENABLED). Mirrors the SHACL compile route
+    # in shape: auth FIRST, then flag check, then precheck, then orchestrator.
+    # ------------------------------------------------------------------
+
+    @app.post("/v1/app/customize/seams/compile")
+    async def compile_seam_spec(request: Request) -> JSONResponse:
+        """NL → SeamSpec compile preview (registration-time only).
+
+        Returns the compiled spec + LLM critic verdict + deterministic
+        ``schemaIssues``. NEVER persists — saving is done by PUT /seams
+        after the user reviews the preview.
+
+        Auth FIRST → flag check → body parse → length caps → aggregate
+        precheck → orchestrator. Same shape as the SHACL compile route.
+        """
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+
+        if not _is_seam_spec_enabled():
+            return JSONResponse(
+                content={"ok": False, "error": "seam-spec compiler disabled"},
+                status_code=200,
+            )
+
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(
+                status_code=400, content={"ok": False, "error": "invalid_json"}
+            )
+        if not isinstance(body, dict) or not isinstance(body.get("nlText"), str):
+            return JSONResponse(
+                status_code=400, content={"ok": False, "error": "nlText_required"}
+            )
+
+        nl_text: str = body["nlText"]
+        if not nl_text.strip():
+            return JSONResponse(
+                status_code=400,
+                content={"ok": False, "error": "nlText must not be empty"},
+            )
+        if len(nl_text.encode()) > _MAX_NL_TEXT_BYTES:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "ok": False,
+                    "error": f"nlText exceeds {_MAX_NL_TEXT_BYTES}-byte limit",
+                },
+            )
+
+        # priorTurns validation — same shape + caps as the SHACL route.
+        _MAX_PRIOR_TURNS = 10
+        raw_prior_turns = body.get("priorTurns")
+        validated_prior_turns: list[dict] = []
+        if isinstance(raw_prior_turns, list):
+            raw_prior_turns = raw_prior_turns[:_MAX_PRIOR_TURNS]
+            total_content_bytes = 0
+            for element in raw_prior_turns:
+                if not isinstance(element, dict):
+                    continue
+                role = element.get("role")
+                content = element.get("content")
+                if role not in ("user", "assistant"):
+                    continue
+                if not isinstance(content, str) or not content:
+                    continue
+                content_bytes = len(content.encode())
+                if content_bytes > _MAX_NL_TEXT_BYTES:
+                    continue
+                total_content_bytes += content_bytes
+                validated_prior_turns.append({"role": role, "content": content})
+                if total_content_bytes > 5 * _MAX_NL_TEXT_BYTES:
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "ok": False,
+                            "error": "priorTurns total content too large",
+                        },
+                    )
+
+        validated_user_turn_count = sum(
+            1 for t in validated_prior_turns if t["role"] == "user"
+        )
+        if validated_user_turn_count >= _MAX_COMPILE_ROUNDS:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "ok": False,
+                    "error": "too many conversation rounds",
+                },
+            )
+
+        # Aggregate text cap — reuses the SHACL precheck for cross-compiler parity.
+        from magi_agent.customize.seam_compiler import (  # noqa: PLC0415
+            MAX_AGGREGATE_TEXT,
+            PrecheckError,
+            compile_with_review,
+        )
+        from magi_agent.customize.shacl_compiler import (  # noqa: PLC0415
+            _precheck_aggregate,
+        )
+
+        try:
+            _precheck_aggregate(nl_text, tuple(validated_prior_turns))
+        except PrecheckError as exc:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "ok": False,
+                    "error": str(exc),
+                    "limit": MAX_AGGREGATE_TEXT,
+                },
+            )
+
+        # Distinct compiler / reviewer callables (handoff §2 self-review guard).
+        resolved = _resolve_seam_compile_factory(body)
+        compiler_factory = (lambda: resolved()) if callable(resolved) else None
+        reviewer_factory = (lambda: resolved()) if callable(resolved) else None
+
+        try:
+            result = await asyncio.wait_for(
+                compile_with_review(
+                    nl_text,
+                    compiler_model_factory=compiler_factory,
+                    reviewer_model_factory=reviewer_factory,
+                    prior_turns=tuple(validated_prior_turns),
+                ),
+                timeout=_LLM_CALL_TIMEOUT_S,
+            )
+        except Exception as exc:  # noqa: BLE001 — never raise from compile route
+            return JSONResponse(
+                content={"ok": False, "error": f"compile error: {exc}"}
+            )
+
+        # Serialize the SeamSpec dataclass back to its JSON shape for the
+        # response. The compile_with_review payload mixes Python objects
+        # (SeamSpec) with primitives; the wire shape must be pure JSON.
+        spec_obj = result.get("spec")
+        spec_payload = None
+        if spec_obj is not None:
+            from magi_agent.customize.seam_compiler import _serialize_spec  # noqa: PLC0415
+            import json as _json  # noqa: PLC0415
+
+            spec_payload = _json.loads(_serialize_spec(spec_obj))
+
+        if result.get("clarifyingQuestions"):
+            return JSONResponse(
+                content={
+                    "ok": False,
+                    "clarifyingQuestions": list(result["clarifyingQuestions"]),
+                    "spec": None,
+                    "error": None,
+                }
+            )
+
+        if not result.get("ok"):
+            return JSONResponse(
+                content={
+                    "ok": False,
+                    "error": result.get("error", "compilation failed"),
+                }
+            )
+
+        return JSONResponse(
+            content={
+                "ok": True,
+                "spec": spec_payload,
+                "review": _make_json_safe(result["review"]),
+                "schemaIssues": list(result.get("schemaIssues", [])),
+            }
+        )
+
+    @app.put("/v1/app/customize/seams")
+    async def put_seam_spec(request: Request) -> JSONResponse:
+        """Persist (upsert) an approved SeamSpec JSON document.
+
+        Body shape: ``{id?: str, spec_version: str, actions: [...]}``. The
+        spec is structurally validated (deterministic) before save; a
+        non-empty issues list is returned with 422 and nothing is persisted.
+
+        Gated behind ``MAGI_CUSTOMIZE_SEAM_SPEC_ENABLED``.
+        """
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        if not _is_seam_spec_enabled():
+            return JSONResponse(
+                content={"ok": False, "error": "seam-spec compiler disabled"},
+                status_code=200,
+            )
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(
+                status_code=400, content={"ok": False, "error": "invalid_json"}
+            )
+        if not isinstance(body, dict):
+            return JSONResponse(
+                status_code=400, content={"ok": False, "error": "object_required"}
+            )
+        from magi_agent.customize.seam_spec import (  # noqa: PLC0415
+            parse_spec,
+            validate_spec,
+        )
+        from magi_agent.customize.store import set_seam_spec  # noqa: PLC0415
+
+        try:
+            spec = parse_spec(body)
+        except ValueError as exc:
+            return JSONResponse(
+                status_code=400,
+                content={"ok": False, "error": str(exc)},
+            )
+        issues = validate_spec(spec)
+        if issues:
+            return JSONResponse(
+                status_code=422,
+                content={"ok": False, "error": "invalid spec", "schemaIssues": issues},
+            )
+
+        spec_doc = dict(body)
+        if not isinstance(spec_doc.get("id"), str) or not spec_doc["id"]:
+            spec_doc["id"] = f"seam_{uuid.uuid4().hex}"
+        overrides = set_seam_spec(spec_doc)
+        return JSONResponse(
+            content={"ok": True, "id": spec_doc["id"], "overrides": overrides}
+        )
+
+    @app.delete("/v1/app/customize/seams/{spec_id}")
+    async def delete_seam_spec_route(spec_id: str, request: Request) -> JSONResponse:
+        """Remove a persisted SeamSpec by id. No-op when the id is absent."""
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        if not _is_seam_spec_enabled():
+            return JSONResponse(
+                content={"ok": False, "error": "seam-spec compiler disabled"},
+                status_code=200,
+            )
+        from magi_agent.customize.store import delete_seam_spec  # noqa: PLC0415
+
+        overrides = delete_seam_spec(spec_id)
+        return JSONResponse(content={"ok": True, "overrides": overrides})
