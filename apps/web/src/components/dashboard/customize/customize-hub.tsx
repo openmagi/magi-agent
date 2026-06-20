@@ -41,9 +41,9 @@ import type {
   ShaclCompileResponse,
 } from "@/lib/customize-api";
 import { useAgentFetch } from "@/lib/local-api";
-import { VerificationRulePanel } from "./verification-rule-modal";
 import { CustomToolPanel } from "./custom-tool-modal";
 import { SeamBuilderPanel } from "./seam-builder-panel";
+import { VerificationTabs } from "./verification-tabs";
 
 export type CustomizeSection =
   | "verification"
@@ -62,7 +62,8 @@ const SECTIONS: ReadonlyArray<{
     id: "verification",
     label: "Verification",
     icon: <ShieldCheck className="h-4 w-4" />,
-    description: "Recipes, harness presets, custom rules, USER-RULES.md.",
+    description:
+      "Built-in preset toggles, user-authored gates, and soft prompt guidance. Use the inner tabs to pick by what you want to do.",
   },
   {
     id: "tools",
@@ -80,14 +81,15 @@ const SECTIONS: ReadonlyArray<{
     id: "hooks",
     label: "Hooks",
     icon: <Webhook className="h-4 w-4" />,
-    description: "Read-only view of ~/.magi/settings.json hook handlers.",
+    description:
+      "Read-only view of file-authored lifecycle handlers (Python entry points registered in settings.json). The dashboard does not write these by design.",
   },
   {
     id: "advanced",
     label: "Advanced",
     icon: <Wand2 className="h-4 w-4" />,
     description:
-      "Author new preset seams via natural language (SeamSpec rule builder). Default-OFF behind MAGI_CUSTOMIZE_SEAM_SPEC_ENABLED.",
+      "Rewire an existing built-in preset via natural language (SeamSpec). This does NOT add a new gate — it changes how an existing preset wires (opt-in/opt-out, which evidence ref it controls). For adding a new gate, use Verification → Gates. Default-OFF behind MAGI_CUSTOMIZE_SEAM_SPEC_ENABLED.",
   },
 ];
 
@@ -321,7 +323,7 @@ export function CustomizeHub({
         </header>
 
         {section === "verification" ? (
-          <VerificationRulePanel
+          <VerificationTabs
             catalog={data.catalog.verification}
             presetOverrides={presetOverrides}
             pendingPresets={presetPending}
@@ -437,18 +439,67 @@ function RecipesPanel({ recipes }: { recipes: ReadonlyArray<{ id: string; title:
  * exists so the sub-nav reaches parity with the four customize layers.
  */
 function HooksPanel(): React.ReactElement {
+  const exampleSettings = `{
+  "hooks": {
+    "beforeToolUse": [
+      { "module": "my_pkg.hooks", "callable": "audit_tool_call" }
+    ],
+    "afterTurnEnd": [
+      { "module": "my_pkg.hooks", "callable": "log_turn_summary" }
+    ]
+  }
+}`;
   return (
-    <div className="rounded-xl border border-dashed border-black/[0.10] bg-gray-50/80 px-4 py-8 text-sm leading-6 text-secondary">
-      <p className="mb-3 font-semibold text-foreground">HookBus — file-authored</p>
-      <p>
-        Lifecycle hooks load from <code>~/.magi/settings.json</code> and
-        <code> &lt;workspace&gt;/.magi/settings.json</code>. The dashboard does not
-        write these by design (self-host only). To author a hook, edit one of those
-        files directly and restart the session.
-      </p>
-      <p className="mt-3 text-xs text-secondary/80">
-        A read-only listing of currently-loaded hook handlers will appear here in a
-        follow-up PR; the underlying registry already supports it.
+    <div className="space-y-4 rounded-xl border border-dashed border-black/[0.10] bg-gray-50/80 px-4 py-6 text-sm leading-6 text-secondary">
+      <div>
+        <p className="font-semibold text-foreground">HookBus — file-authored</p>
+        <p className="mt-1">
+          Lifecycle hooks are <strong>Python callables</strong> the HookBus
+          invokes at specific runtime events (<code>beforeToolUse</code>,{" "}
+          <code>afterTurnEnd</code>, etc.). They are registered by editing{" "}
+          <code>~/.magi/settings.json</code> (user) or{" "}
+          <code>&lt;workspace&gt;/.magi/settings.json</code> (project) — the
+          dashboard does not write these by design (self-host security
+          posture: code-shaped handlers must be explicit in a file, not
+          submitted via HTTP).
+        </p>
+      </div>
+
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-secondary/70">
+          How to author one
+        </p>
+        <ol className="ml-5 mt-2 list-decimal space-y-1 text-xs leading-relaxed">
+          <li>Write a Python function reachable by your runtime's import path.</li>
+          <li>
+            Add a hook entry to <code>settings.json</code>:
+            <pre className="mt-2 overflow-auto rounded-lg bg-white px-3 py-2 text-[11px] leading-snug text-foreground border border-black/[0.06]">
+              {exampleSettings}
+            </pre>
+          </li>
+          <li>Restart the runtime so HookBus picks up the new handler.</li>
+        </ol>
+      </div>
+
+      <div className="rounded-lg border border-black/[0.08] bg-white px-3 py-2 text-xs leading-relaxed">
+        <p className="font-semibold text-foreground">Hook vs Gate vs Preset</p>
+        <ul className="ml-5 mt-1 list-disc space-y-1">
+          <li>
+            <strong>Preset / Gate</strong> = declarative JSON registered via
+            the Verification page. The pre-final / before-tool / after-tool
+            runtime consumers read this config — they are NOT Hooks.
+          </li>
+          <li>
+            <strong>Hook</strong> = arbitrary Python code that runs at a
+            lifecycle event. Use when a Preset or Gate cannot express the
+            behavior you need.
+          </li>
+        </ul>
+      </div>
+
+      <p className="text-[11px] text-secondary/80">
+        A read-only listing of currently-loaded hook handlers will appear
+        here in a follow-up PR; the underlying registry already supports it.
       </p>
     </div>
   );

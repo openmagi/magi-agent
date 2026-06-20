@@ -15,10 +15,22 @@ describe("CustomizeHub — Phase 4 full-page sub-nav surface", () => {
     expect(src).toContain('"advanced"');
   });
 
-  it("reuses the headless panel bodies from the legacy modals (no duplicate rendering logic)", () => {
-    expect(src).toContain("VerificationRulePanel");
+  it("mounts the inner-tabbed Verification surface (UX restructure B), CustomToolPanel and SeamBuilderPanel", () => {
+    // VerificationTabs replaces the monolithic VerificationRulePanel mount —
+    // the modal panel still ships for legacy/modal callers but the hub does
+    // not import it directly anymore.
+    expect(src).toContain("VerificationTabs");
+    expect(src).not.toMatch(/import\s*{[^}]*VerificationRulePanel/);
     expect(src).toContain("CustomToolPanel");
     expect(src).toContain("SeamBuilderPanel");
+  });
+
+  it("explains the Hook vs Gate vs Preset boundary so users do not author the wrong shape", () => {
+    expect(src).toContain("Hook vs Gate vs Preset");
+  });
+
+  it("clarifies that Advanced rewires presets rather than adding new gates", () => {
+    expect(src).toContain("does NOT add a new gate");
   });
 
   it("ships a Phase-3-aware Recipes panel that greys out unmapped UI labels", () => {

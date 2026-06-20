@@ -51,9 +51,9 @@ interface VerificationRuleModalProps {
 // WHEN-group (domain) order + labels — the modal groups by *when a gate fires*
 // rather than by semantic category (spec §7). Preview presets are pulled into
 // their own collapsed section regardless of domain.
-const DOMAIN_ORDER = ["always-on", "coding", "research", "delivery"] as const;
+export const DOMAIN_ORDER = ["always-on", "coding", "research", "delivery"] as const;
 
-const DOMAIN_LABELS: Record<string, string> = {
+export const DOMAIN_LABELS: Record<string, string> = {
   "always-on": "Always-on (security)",
   coding: "Coding tasks",
   research: "Research tasks",
@@ -159,7 +159,7 @@ function Badges({ preset }: { preset: HarnessPresetItem }) {
   );
 }
 
-function PresetRow({
+export function PresetRow({
   preset,
   checked,
   pending,
@@ -199,7 +199,7 @@ function PresetRow({
 // deterministic) and action is block. Saved rules render as toggle/delete rows.
 const SCOPES = ["always", "coding", "research", "delivery", "memory", "task"] as const;
 
-function CustomRulesSection({
+export function CustomRulesSection({
   menu,
   rules,
   busy,
