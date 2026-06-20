@@ -301,8 +301,35 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
                 },
             )
 
+        # Item 3 hardening — aggregate text cap (NL + prior turn content).
+        # Maps PrecheckError to HTTP 422 so a pathological payload fails fast
+        # and deterministically, before the LLM is invoked.
+        from magi_agent.customize.shacl_compiler import (
+            MAX_AGGREGATE_TEXT,
+            PrecheckError,
+            _precheck_aggregate,
+        )
+
+        try:
+            _precheck_aggregate(nl_text, tuple(validated_prior_turns))
+        except PrecheckError as exc:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "ok": False,
+                    "error": str(exc),
+                    "limit": MAX_AGGREGATE_TEXT,
+                },
+            )
+
         # Resolve the compiler model factory (test-injection → production → fail-open).
-        factory = _resolve_shacl_compile_factory(body)
+        # Distinct compiler vs reviewer callables: the orchestrator's reviewer-guard
+        # rejects same-object self-review (handoff §2). Wrapping the underlying
+        # resolver in two separate lambdas gives the guard the identity-distinct
+        # callables it needs while keeping the upstream resolution path intact.
+        resolved = _resolve_shacl_compile_factory(body)
+        compiler_factory = (lambda: resolved()) if callable(resolved) else None
+        reviewer_factory = (lambda: resolved()) if callable(resolved) else None
 
         try:
             # Step 1: Compile NL → SHACL TTL (with LLM timeout).
@@ -311,7 +338,7 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
                 compile_nl_to_shacl(
                     nl_text,
                     fields,
-                    model_factory=factory,
+                    model_factory=compiler_factory,
                     prior_turns=tuple(validated_prior_turns),
                 ),
                 timeout=_LLM_CALL_TIMEOUT_S,
@@ -343,13 +370,18 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
 
             shape_ttl: str = compile_result["shapeTtl"]
 
-            # Step 2: Review + explain (with LLM timeout each).
+            # Step 2: Review + explain (with LLM timeout each). Reviewer uses
+            # the identity-distinct callable so the reviewer-guard sees compiler
+            # ≠ reviewer (handoff §2). Explain reuses the compiler factory; it
+            # is not a critic gate so identity does not matter there.
             review_result = await asyncio.wait_for(
-                review_compilation(nl_text, shape_ttl, fields, model_factory=factory),
+                review_compilation(
+                    nl_text, shape_ttl, fields, model_factory=reviewer_factory
+                ),
                 timeout=_LLM_CALL_TIMEOUT_S,
             )
             explanation = await asyncio.wait_for(
-                explain_shape(shape_ttl, model_factory=factory),
+                explain_shape(shape_ttl, model_factory=compiler_factory),
                 timeout=_LLM_CALL_TIMEOUT_S,
             )
 
@@ -414,12 +446,21 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
                     # Sort by recordIndex so the response ordering is stable.
                     preview.sort(key=lambda c: c.get("recordIndex", 0))
 
+            # Item 4 hardening: surface the deterministic structural check of
+            # the compiled SHACL shape alongside the LLM critic's semantic
+            # verdict. Empty list ⇒ shape parses, pySHACL loads it, and is
+            # non-vacuous. The two signals are intentionally distinct so a
+            # human reviewer is not relying on the LLM critic alone to catch
+            # vacuously-permissive shapes.
+            from magi_agent.customize.shacl_compiler import _shacl_validate
+
             response_payload: dict[str, Any] = {
                 "ok": True,
                 "shapeTtl": shape_ttl,
                 "review": _make_json_safe(review_result),
                 "explanation": explanation,
                 "previewCases": preview,
+                "shaclIssues": _shacl_validate(shape_ttl),
             }
             if preview_truncated:
                 response_payload["previewTruncated"] = True

@@ -433,7 +433,7 @@ async def test_compile_sends_compile_system_instruction_not_critic() -> None:
     """
     from magi_agent.customize.shacl_compiler import (
         compile_nl_to_shacl,
-        _COMPILE_SYSTEM_INSTRUCTION,
+        _COMPILE_SYSTEM_INSTRUCTION_TMPL,
     )
 
     sys_instruction_capture: list[str] = []
@@ -454,7 +454,7 @@ async def test_compile_sends_compile_system_instruction_not_critic() -> None:
     # Must contain the compiler-specific persona.
     assert "SHACL constraint compiler" in captured_si, (
         f"Expected 'SHACL constraint compiler' in system_instruction, got: {captured_si!r}. "
-        f"The _COMPILE_SYSTEM_INSTRUCTION is not reaching the model — "
+        f"The _COMPILE_SYSTEM_INSTRUCTION_TMPL is not reaching the model — "
         f"check that _invoke_llm in shacl_compiler.py uses the system_instruction parameter."
     )
 
@@ -465,9 +465,19 @@ async def test_compile_sends_compile_system_instruction_not_critic() -> None:
         f"Ensure shacl_compiler._invoke_llm is NOT egress_gate._invoke_llm."
     )
 
-    # The captured instruction must match the module constant exactly.
-    assert captured_si == _COMPILE_SYSTEM_INSTRUCTION, (
-        f"system_instruction mismatch. Expected:\n  {_COMPILE_SYSTEM_INSTRUCTION!r}\n"
+    # Per-call nonce hardening: the captured instruction is the template
+    # rendered with a fresh nonce. The non-nonce body must match the template's
+    # body verbatim (no other drift); a 16-hex nonce is substituted into the
+    # ``<UNTRUSTED-{nonce}>`` placeholder slots.
+    import re
+
+    nonces = re.findall(r"<UNTRUSTED-([0-9a-f]{16})>", captured_si)
+    assert nonces and len(set(nonces)) == 1, (
+        f"Expected exactly one nonce-guarded UNTRUSTED fence in system_instruction, got nonces={nonces!r}"
+    )
+    expected_si = _COMPILE_SYSTEM_INSTRUCTION_TMPL.format(nonce=nonces[0])
+    assert captured_si == expected_si, (
+        f"system_instruction mismatch (template-rendered).\nExpected:\n  {expected_si!r}\n"
         f"Got:\n  {captured_si!r}"
     )
 
@@ -505,7 +515,7 @@ async def test_review_sends_review_system_instruction() -> None:
     """review_compilation sends _REVIEW_SYSTEM_INSTRUCTION to the model."""
     from magi_agent.customize.shacl_compiler import (
         review_compilation,
-        _REVIEW_SYSTEM_INSTRUCTION,
+        _REVIEW_SYSTEM_INSTRUCTION_TMPL,
     )
 
     structured_response = json.dumps({"verdict": "aligned", "issues": [], "confidence": 0.95})
@@ -524,7 +534,13 @@ async def test_review_sends_review_system_instruction() -> None:
     assert "answer-grounding critic" not in captured_si, (
         f"review_compilation must not use the critic persona, got: {captured_si!r}"
     )
-    assert captured_si == _REVIEW_SYSTEM_INSTRUCTION
+    import re
+
+    nonces = re.findall(r"<UNTRUSTED-([0-9a-f]{16})>", captured_si)
+    assert nonces and len(set(nonces)) == 1, (
+        f"Expected exactly one nonce-guarded UNTRUSTED fence in reviewer system_instruction, got nonces={nonces!r}"
+    )
+    assert captured_si == _REVIEW_SYSTEM_INSTRUCTION_TMPL.format(nonce=nonces[0])
 
 
 # ---------------------------------------------------------------------------
