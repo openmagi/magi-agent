@@ -15,6 +15,21 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.59
+
+### Added
+- Customize Phase 4 hub (#786): the customize surface is now a full-page hub
+  with a left sub-nav over `verification` / `tools` / `recipes` / `hooks`
+  sections, replacing the prior modal stack. URL state syncs through
+  `?section=`. Modal bodies were split into headless Panel components
+  (legacy modals kept), Recipes is pack-aware (unmapped recipes grey out),
+  Hooks is a self-host-only placeholder.
+- Dashboard pack authoring is default-ON under the `lab` profile (#785), via
+  the `LAB_EXPERIMENTAL_FLAGS` seed pattern, so dogfood/lab self-hosters get
+  the Phase 4 builders + producers/gates without flipping the registry
+  default. Hosted and bare profiles remain default-OFF; setting the flag to
+  `0` under `lab` still wins.
+
 ## 0.1.58
 
 ### Added
