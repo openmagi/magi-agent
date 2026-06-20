@@ -81,6 +81,7 @@ def test_partial_file_is_shape_normalized(tmp_path: Path) -> None:
         "hooks": {},
         "modes": {},
         "custom_rules": [],
+        "seam_specs": [],
     }
 
 
