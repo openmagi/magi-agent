@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Coroutine, Mapping, Sequence
+from contextvars import ContextVar, Token
 from datetime import datetime
 from typing import Any, AsyncGenerator, Callable
 
@@ -352,6 +353,57 @@ def _normalize_reasoning_effort(value: str, provider: str | None) -> str:
     return _REASONING_EFFORT_VALUE_MAP_BY_PROVIDER.get(provider, {}).get(value, value)
 
 
+# Per-turn reasoning_effort override (PR2c).
+#
+# The wire protocol carries an optional ``reasoningEffort`` field on the chat
+# completions request (set by the dashboard's per-turn picker). The transport
+# layer pushes that value into this ContextVar around the turn run; any LiteLlm
+# build that happens inside the same async task (the top-level model build AND
+# any child/subagent ``build_cli_model_runner`` spawned during the turn)
+# observes the override via ``_model_reasoning_kwargs``. Each request runs in
+# its own asyncio task with its own context, so the override is request-scoped
+# without any explicit propagation through the wiring chain.
+#
+# Default is ``None`` ⇒ no override ⇒ behavior is byte-identical to the prior
+# env-only code path.
+_per_turn_reasoning_effort: ContextVar[str | None] = ContextVar(
+    "magi_per_turn_reasoning_effort", default=None
+)
+
+
+def _normalize_per_turn_value(value: str | None) -> str | None:
+    """Trim + lowercase a per-turn ``reasoning_effort`` payload value.
+
+    Returns ``None`` for ``None`` / empty / explicitly-disabled values so the
+    override path falls back to the env path (parity with the env knob, which
+    treats those same tokens as "unset" in ``_model_reasoning_kwargs``).
+    Normalization is value-shape only — provider-specific value rewrites still
+    happen via ``_normalize_reasoning_effort`` at consumption time.
+    """
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if not text or text in {"off", "none", "0", "false", "disable", "disabled"}:
+        return None
+    return text
+
+
+def set_per_turn_reasoning_effort(value: str | None) -> Token[str | None]:
+    """Set the per-turn ``reasoning_effort`` override for the current async task.
+
+    Returns the ``ContextVar`` reset token; callers MUST pass it back to
+    :func:`reset_per_turn_reasoning_effort` (typically in a ``finally`` block)
+    to restore the prior value so concurrent or sequential turns do not leak
+    state across requests.
+    """
+    return _per_turn_reasoning_effort.set(_normalize_per_turn_value(value))
+
+
+def reset_per_turn_reasoning_effort(token: Token[str | None]) -> None:
+    """Restore the per-turn reasoning override to its prior value."""
+    _per_turn_reasoning_effort.reset(token)
+
+
 def _model_reasoning_kwargs(
     env: Mapping[str, str] | None = None,
     *,
@@ -396,6 +448,14 @@ def _model_reasoning_kwargs(
             budget = 0
         if budget > 0:
             return {"thinking": {"type": "enabled", "budget_tokens": budget}}
+    # Per-turn override (ContextVar) wins over env for the current async task.
+    # The transport layer sets this from the chat-completions payload's
+    # ``reasoningEffort`` field (PR2c). ``_normalize_per_turn_value`` already
+    # filtered ``None`` / empty / disabled values, so any truthy value here is
+    # an explicit per-turn pick that should beat the env knob.
+    override = _per_turn_reasoning_effort.get()
+    if override:
+        return {"reasoning_effort": _normalize_reasoning_effort(override, provider)}
     effort = (source.get("MAGI_MODEL_REASONING_EFFORT") or "").strip().lower()
     if effort and effort not in {"off", "none", "0", "false", "disable", "disabled"}:
         return {"reasoning_effort": _normalize_reasoning_effort(effort, provider)}
@@ -1062,4 +1122,6 @@ __all__ = [
     "CliModelRunner",
     "CliProviderDependencyError",
     "build_cli_model_runner",
+    "set_per_turn_reasoning_effort",
+    "reset_per_turn_reasoning_effort",
 ]

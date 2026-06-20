@@ -871,3 +871,132 @@ def test_default_runner_falls_back_with_notice_when_dependency_missing(
     assert isinstance(runner, LocalCliRunner)
     assert runner.notice is not None
     assert "litellm" in runner.notice
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# PR2c: per-turn ``reasoning_effort`` override via ContextVar.
+#
+# The wire protocol carries ``reasoningEffort`` on the chat-completions request
+# body; the transport layer drops it into ``_per_turn_reasoning_effort`` for
+# the duration of the turn. ``_model_reasoning_kwargs`` must prefer the
+# override over the env knob and must still respect the higher-precedence
+# ``MAGI_MODEL_THINKING_TYPE`` / ``MAGI_MODEL_THINKING_BUDGET_TOKENS`` escape
+# hatches. Each test sets + resets the ContextVar explicitly to avoid leakage.
+
+
+def test_per_turn_reasoning_override_beats_absent_env() -> None:
+    token = real_runner.set_per_turn_reasoning_effort("high")
+    try:
+        kwargs = real_runner._model_reasoning_kwargs(env={}, provider="openai")
+    finally:
+        real_runner.reset_per_turn_reasoning_effort(token)
+    assert kwargs == {"reasoning_effort": "high"}
+
+
+def test_per_turn_reasoning_override_beats_existing_env() -> None:
+    token = real_runner.set_per_turn_reasoning_effort("high")
+    try:
+        kwargs = real_runner._model_reasoning_kwargs(
+            env={"MAGI_MODEL_REASONING_EFFORT": "low"},
+            provider="openai",
+        )
+    finally:
+        real_runner.reset_per_turn_reasoning_effort(token)
+    assert kwargs == {"reasoning_effort": "high"}
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["off", "none", "0", "false", "disable", "disabled", "", "   "],
+)
+def test_per_turn_reasoning_off_falls_back_to_env(value: str) -> None:
+    token = real_runner.set_per_turn_reasoning_effort(value)
+    try:
+        kwargs = real_runner._model_reasoning_kwargs(
+            env={"MAGI_MODEL_REASONING_EFFORT": "low"},
+            provider="openai",
+        )
+    finally:
+        real_runner.reset_per_turn_reasoning_effort(token)
+    assert kwargs == {"reasoning_effort": "low"}
+
+
+def test_per_turn_reasoning_none_is_no_op() -> None:
+    token = real_runner.set_per_turn_reasoning_effort(None)
+    try:
+        kwargs = real_runner._model_reasoning_kwargs(
+            env={"MAGI_MODEL_REASONING_EFFORT": "medium"},
+            provider="openai",
+        )
+    finally:
+        real_runner.reset_per_turn_reasoning_effort(token)
+    assert kwargs == {"reasoning_effort": "medium"}
+
+
+def test_per_turn_reasoning_max_normalizes_per_provider_openai() -> None:
+    token = real_runner.set_per_turn_reasoning_effort("max")
+    try:
+        kwargs = real_runner._model_reasoning_kwargs(env={}, provider="openai")
+    finally:
+        real_runner.reset_per_turn_reasoning_effort(token)
+    assert kwargs == {"reasoning_effort": "xhigh"}
+
+
+def test_per_turn_reasoning_max_normalizes_per_provider_gemini() -> None:
+    token = real_runner.set_per_turn_reasoning_effort("MAX")  # mixed-case input
+    try:
+        kwargs = real_runner._model_reasoning_kwargs(env={}, provider="gemini")
+    finally:
+        real_runner.reset_per_turn_reasoning_effort(token)
+    assert kwargs == {"reasoning_effort": "high"}
+
+
+def test_per_turn_reasoning_env_only_unchanged_when_no_override() -> None:
+    # Back-compat: with no override set the env path is byte-identical to the
+    # pre-PR2c behavior (this protects every other env-driven test in the
+    # tree).
+    kwargs_unset = real_runner._model_reasoning_kwargs(env={}, provider="openai")
+    assert kwargs_unset == {}
+    kwargs_env = real_runner._model_reasoning_kwargs(
+        env={"MAGI_MODEL_REASONING_EFFORT": "medium"},
+        provider="openai",
+    )
+    assert kwargs_env == {"reasoning_effort": "medium"}
+
+
+def test_per_turn_reasoning_yields_to_thinking_type_adaptive() -> None:
+    # ``MAGI_MODEL_THINKING_TYPE=adaptive`` is the highest-precedence escape
+    # hatch; the per-turn override must NOT bypass it.
+    token = real_runner.set_per_turn_reasoning_effort("high")
+    try:
+        kwargs = real_runner._model_reasoning_kwargs(
+            env={"MAGI_MODEL_THINKING_TYPE": "adaptive"},
+            provider="anthropic",
+        )
+    finally:
+        real_runner.reset_per_turn_reasoning_effort(token)
+    assert kwargs == {"thinking": {"type": "adaptive"}}
+
+
+def test_per_turn_reasoning_yields_to_thinking_budget_tokens() -> None:
+    # ``MAGI_MODEL_THINKING_BUDGET_TOKENS`` (positive int) likewise outranks
+    # the per-turn override — those env knobs are explicit shape escape
+    # hatches for adaptive/budget-only models.
+    token = real_runner.set_per_turn_reasoning_effort("high")
+    try:
+        kwargs = real_runner._model_reasoning_kwargs(
+            env={"MAGI_MODEL_THINKING_BUDGET_TOKENS": "1024"},
+            provider="anthropic",
+        )
+    finally:
+        real_runner.reset_per_turn_reasoning_effort(token)
+    assert kwargs == {"thinking": {"type": "enabled", "budget_tokens": 1024}}
+
+
+def test_per_turn_reasoning_reset_restores_prior_value() -> None:
+    # Set→reset must not leak the override into subsequent calls in the same
+    # task (the dashboard sends back-to-back turns with different picks).
+    token = real_runner.set_per_turn_reasoning_effort("high")
+    real_runner.reset_per_turn_reasoning_effort(token)
+    kwargs = real_runner._model_reasoning_kwargs(env={}, provider="openai")
+    assert kwargs == {}
