@@ -15,6 +15,31 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.57
+
+### Added
+- C-4 PR-G1 force-false collapse: `evidence/*` authority models reuse
+  `FalseOnlyAuthorityModel` (#763). 2nd-pass audit aligned 2 missed sites with
+  the coerce-to-False pattern (`CodingToolReceiptConfig` raise to coerce, plus
+  `ChildRuntimeEnvelope` guard separated from out-of-scope `MetaTaskPlan` /
+  `MetaProjectionActivationFlags` which keep their raise validator). PR-G2
+  (harness) and PR-G3 (recipes) still open pending the same cascade pass.
+- Customize Phase 2: `custom_rules.scope` enforcement accessor seam wires the
+  preset-scope data model into `tool_perm` and `verification_policy` (#773).
+- Customize Phase 3: `enabled_recipes` allowlist enforcement at runtime
+  (`real_runner` + `customize/catalog`), default-OFF (#776).
+
+### Fixed
+- Per-turn model override now switches the provider as well (#779). When the
+  chat picker sends a `<provider>/<model>` slug like
+  `anthropic/claude-sonnet-4-6`, `resolve_provider_config` honors the slug's
+  provider instead of layering the override's model id on top of the config's
+  default provider, which previously caused LiteLLM "openai does not support
+  parameters: ['reasoning_effort'], for model=anthropic/..." errors. Fireworks
+  raw ids (`accounts/fireworks/models/...`) are correctly treated as bare ids.
+- Web picker label refresh (#778): "Sonnet 4.6" / "Opus 4.8" labels match the
+  current Claude line; backed by a label-consistency contract test.
+
 ## 0.1.56
 
 ### Added
