@@ -856,6 +856,20 @@ FLAGS: tuple[FlagSpec, ...] = (
         stage="stage2",
     ),
     _b(
+        "MAGI_CUSTOMIZE_SEAM_SPEC_ENABLED",
+        summary=(
+            "Enable the customize PresetSeam NL-spec endpoints: POST "
+            "/v1/app/customize/seams/compile (NL→SeamSpec via LLM, "
+            "registration-time only), PUT /v1/app/customize/seams (persist an "
+            "approved spec), DELETE /v1/app/customize/seams/{id}. OFF keeps "
+            "the routes dormant and the runtime ``seam_for_user`` returns the "
+            "byte-identical builtin seam (no spec is read from the overrides "
+            "file). Strict default-OFF; the runtime hot path is unchanged."
+        ),
+        scope="public",
+        stage="stage2",
+    ),
+    _b(
         "MAGI_DASHBOARD_PACK_AUTHORING_ENABLED",
         summary=(
             "Self-host-only dashboard pack-builder UI/REST plus the after-tool "

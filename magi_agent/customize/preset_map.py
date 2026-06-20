@@ -398,6 +398,47 @@ def seam_for(preset_id: str) -> PresetSeam | None:
     return PRESET_SEAMS.get(preset_id)
 
 
+def seam_for_user(
+    preset_id: str,
+    *,
+    spec_docs: tuple[dict, ...] | list[dict] | None = None,
+) -> PresetSeam | None:
+    """Like :func:`seam_for`, but layered with the user's approved SeamSpecs.
+
+    ``spec_docs`` is the list of approved spec JSON documents (each one the
+    result of ``seam_spec.parse_spec``-compatible JSON). When the list is
+    empty or ``None`` this function is byte-identical to :func:`seam_for`.
+
+    Specs are applied in array order. A malformed or invalid spec doc is
+    skipped (the caller's UI is responsible for surfacing structural issues
+    — runtime lookup MUST stay safe even if a stale doc survives a catalog
+    change). The merge is computed on every call; callers on the hot path
+    are expected to cache the result per-runtime.
+    """
+    if not spec_docs:
+        return PRESET_SEAMS.get(preset_id)
+
+    from magi_agent.customize.seam_apply import apply_spec_to_seams  # noqa: PLC0415 — circular guard
+    from magi_agent.customize.seam_spec import parse_spec, validate_spec  # noqa: PLC0415
+
+    merged: dict[str, PresetSeam] = dict(PRESET_SEAMS)
+    for doc in spec_docs:
+        if not isinstance(doc, dict):
+            continue
+        try:
+            spec = parse_spec(doc)
+        except ValueError:
+            continue
+        if validate_spec(spec):
+            # Fail-safe: skip any spec that no longer passes validation against
+            # the current builtin catalog (e.g. a preset was dropped after the
+            # spec was approved). Surfacing this is the UI's job; the runtime
+            # MUST stay safe.
+            continue
+        merged = apply_spec_to_seams(spec, merged)
+    return merged.get(preset_id)
+
+
 def supported_modes_for(preset_id: str) -> tuple[str, ...]:
     seam = PRESET_SEAMS.get(preset_id)
     return seam.supported_modes if seam is not None else ("deterministic",)

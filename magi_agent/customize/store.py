@@ -19,6 +19,12 @@ DEFAULT_OVERRIDES: dict[str, Any] = {
         "hooks": {},
         "modes": {},
         "custom_rules": [],
+        # PR-C2: approved SeamSpec documents. Each entry is the JSON shape of
+        # a :class:`magi_agent.customize.seam_spec.SeamSpec` plus a per-spec
+        # ``id`` for upsert/delete. The runtime ``seam_for_user`` loads this
+        # list and layers it on top of ``PRESET_SEAMS``. Empty by default so
+        # OFF is byte-identical to before.
+        "seam_specs": [],
     },
     "tools": {},
     "user_rules": "",
@@ -176,6 +182,41 @@ def delete_custom_rule(rule_id: str, path: Path | None = None) -> dict[str, Any]
     verification["custom_rules"] = [
         r for r in verification["custom_rules"]
         if not (isinstance(r, dict) and r.get("id") == rule_id)
+    ]
+    save_overrides(overrides, target)
+    return overrides
+
+
+def set_seam_spec(spec_doc: dict[str, Any], path: Path | None = None) -> dict[str, Any]:
+    """Upsert one approved SeamSpec into ``verification.seam_specs[]``.
+
+    ``spec_doc`` is the JSON shape of a :class:`SeamSpec` (``spec_version`` +
+    ``actions``) augmented with a per-doc ``id`` for upsert/delete. Matches
+    on ``id`` (replace) or appends. Caller is responsible for validating
+    the spec via :func:`magi_agent.customize.seam_spec.validate_spec` first.
+    """
+    target = path or customize_path()
+    overrides = load_overrides(target)
+    specs = overrides["verification"]["seam_specs"]
+    spec_id = spec_doc.get("id")
+    for i, existing in enumerate(specs):
+        if isinstance(existing, dict) and existing.get("id") == spec_id:
+            specs[i] = spec_doc
+            break
+    else:
+        specs.append(spec_doc)
+    save_overrides(overrides, target)
+    return overrides
+
+
+def delete_seam_spec(spec_id: str, path: Path | None = None) -> dict[str, Any]:
+    """Remove a SeamSpec doc by id. Returns the overrides (no-op if absent)."""
+    target = path or customize_path()
+    overrides = load_overrides(target)
+    verification = overrides["verification"]
+    verification["seam_specs"] = [
+        s for s in verification["seam_specs"]
+        if not (isinstance(s, dict) and s.get("id") == spec_id)
     ]
     save_overrides(overrides, target)
     return overrides
