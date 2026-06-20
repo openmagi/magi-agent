@@ -133,3 +133,31 @@ def test_reasoning_kwargs_provider_param_is_optional():
     assert _model_reasoning_kwargs({"MAGI_MODEL_REASONING_EFFORT": "max"}) == {
         "reasoning_effort": "max"
     }
+
+
+def test_reasoning_effort_dropped_entirely_for_fireworks():
+    # Fireworks rejects `reasoning_effort` for ANY value
+    # ("litellm.UnsupportedParamsError: fireworks_ai does not support
+    # parameters: ['reasoning_effort'], for model=kimi-k2p6. LiteLLM Retried:
+    # 4 times"). Unlike OpenAI/Gemini which accept a normalized value, fireworks
+    # doesn't accept the parameter at all — drop it entirely so the lab-overlay
+    # default (max) and the per-turn picker values (medium/high/etc) don't
+    # silently break every Kimi turn with "no final answer text arrived".
+    for effort in ("max", "high", "medium", "low", "minimal"):
+        assert _model_reasoning_kwargs(
+            {"MAGI_MODEL_REASONING_EFFORT": effort}, provider="fireworks"
+        ) == {}, effort
+
+
+def test_reasoning_effort_dropped_entirely_for_fireworks_does_not_affect_thinking_blocks():
+    # Adaptive-thinking (MAGI_MODEL_THINKING_TYPE) is provider-independent on
+    # the litellm side; fireworks isn't bypassed for thinking, just for the
+    # `reasoning_effort` knob it rejects.
+    kw = _model_reasoning_kwargs(
+        {
+            "MAGI_MODEL_THINKING_TYPE": "adaptive",
+            "MAGI_MODEL_REASONING_EFFORT": "max",
+        },
+        provider="fireworks",
+    )
+    assert kw == {"thinking": {"type": "adaptive"}}

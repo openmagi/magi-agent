@@ -346,6 +346,16 @@ _REASONING_EFFORT_VALUE_MAP_BY_PROVIDER: dict[str, dict[str, str]] = {
     "gemini": {"max": "high"},
 }
 
+# Providers that reject the ``reasoning_effort`` parameter outright (for ANY
+# value). litellm surfaces:
+#   "fireworks_ai does not support parameters: ['reasoning_effort'], for
+#    model=kimi-k2p6. LiteLLM Retried: 4 times"
+# Unlike the per-value map above (which substitutes a supported value), these
+# providers don't accept the parameter at all — drop it entirely so the lab
+# default (max) AND any per-turn picker value (medium/high/etc) silently
+# disappear instead of breaking every Kimi/Minimax turn.
+_PROVIDERS_THAT_REJECT_REASONING_EFFORT: frozenset[str] = frozenset({"fireworks"})
+
 
 def _normalize_reasoning_effort(value: str, provider: str | None) -> str:
     if provider is None:
@@ -455,9 +465,13 @@ def _model_reasoning_kwargs(
     # an explicit per-turn pick that should beat the env knob.
     override = _per_turn_reasoning_effort.get()
     if override:
+        if provider in _PROVIDERS_THAT_REJECT_REASONING_EFFORT:
+            return {}
         return {"reasoning_effort": _normalize_reasoning_effort(override, provider)}
     effort = (source.get("MAGI_MODEL_REASONING_EFFORT") or "").strip().lower()
     if effort and effort not in {"off", "none", "0", "false", "disable", "disabled"}:
+        if provider in _PROVIDERS_THAT_REJECT_REASONING_EFFORT:
+            return {}
         return {"reasoning_effort": _normalize_reasoning_effort(effort, provider)}
     return {}
 
