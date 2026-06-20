@@ -25,6 +25,7 @@ const VALID_SECTIONS: ReadonlyArray<CustomizeSection> = [
   "tools",
   "recipes",
   "hooks",
+  "advanced",
 ];
 
 function isValidSection(value: string | null): value is CustomizeSection {
