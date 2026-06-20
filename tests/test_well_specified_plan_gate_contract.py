@@ -211,9 +211,19 @@ def test_snapshot_rejects_unexpected_runtime_fields(extra_field: str) -> None:
 
 
 @pytest.mark.parametrize("attached_flag", ("routeAttached", "trafficAttached", "executionAttached"))
-def test_direct_snapshot_construction_rejects_route_traffic_or_execution_attachment(
+def test_direct_snapshot_construction_coerces_route_traffic_or_execution_attachment(
     attached_flag: str,
 ) -> None:
+    """C-4 PR-G2 (raise-to-coerce): the introspection-based
+    :class:`FalseOnlyAuthorityModel` now coerces forged ``Literal[False]``
+    fields to ``False`` uniformly across construct/copy/validate, instead
+    of raising a ``ValidationError`` on a forged True.
+
+    The end-result invariant is preserved: a caller cannot smuggle a
+    routeAttached / trafficAttached / executionAttached True through
+    ``model_validate`` — the value still reads ``False`` in the resulting
+    snapshot.
+    """
     plan_gate = _plan_gate_module()
     payload: dict[str, object] = {
         "decisionId": "pg_decision_attached",
@@ -248,8 +258,9 @@ def test_direct_snapshot_construction_rejects_route_traffic_or_execution_attachm
         attached_flag: True,
     }
 
-    with pytest.raises(ValidationError):
-        plan_gate.PlanGateDecisionSnapshot.model_validate(payload)
+    snapshot = plan_gate.PlanGateDecisionSnapshot.model_validate(payload)
+    dumped = snapshot.model_dump(by_alias=True, mode="python", warnings=False)
+    assert dumped[attached_flag] is False
 
 
 def test_snapshot_rejects_mismatched_control_request_turn_id() -> None:

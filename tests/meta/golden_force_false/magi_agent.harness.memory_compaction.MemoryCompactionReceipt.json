@@ -6,28 +6,7 @@
     "production_write_enabled",
     "provider_call_attempted"
   ],
-  "model_construct_dump": {
-    "authorityFlags": {
-      "databaseWriteAllowed": false,
-      "filesystemWriteAllowed": false,
-      "memoryDeleteAllowed": false,
-      "memoryRedactAllowed": false,
-      "memoryWriteAllowed": false,
-      "networkCallAllowed": false,
-      "productionWriteEnabled": false,
-      "providerCallAllowed": false
-    },
-    "databaseMutationAttempted": false,
-    "excludedRefs": [],
-    "executed": false,
-    "filesystemMutationAttempted": false,
-    "localTestOnly": false,
-    "networkCallAttempted": false,
-    "productionWriteEnabled": false,
-    "providerCallAttempted": false,
-    "reasonCodes": [],
-    "schemaVersion": "memoryCompactionReceipt.v1"
-  },
+  "model_construct_dump": null,
   "model_construct_force_false_leaks": [],
   "model_validate_dump": null,
   "model_validate_force_false_leaks": [],

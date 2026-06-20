@@ -457,8 +457,11 @@ def test_telemetry_model_copy_revalidates_metadata_updates_and_attachment_flags(
     assert updated.model_dump(by_alias=True)["metadata"]["private_key"] == "[REDACTED]"
     with pytest.raises(TypeError):
         updated.metadata["items"] = []
-    with pytest.raises(ValidationError):
-        telemetry.model_copy(update={"trafficAttached": True})
+    # C-4 PR-G2 (raise-to-coerce): a forged Literal[False] attachment flag is
+    # now coerced to False uniformly instead of raising a ValidationError. The
+    # end-result invariant is preserved: the value still reads False.
+    coerced = telemetry.model_copy(update={"trafficAttached": True})
+    assert coerced.traffic_attached is False
     with pytest.raises(ValidationError, match="hidden reasoning"):
         telemetry.model_copy(update={"metadata": {"hiddenReasoning": "private"}})
 
@@ -509,23 +512,29 @@ def test_scaling_policy_decision_model_copy_update_preserves_canonical_budget_te
 
 
 def test_scaling_policy_decision_model_copy_revalidates_parent_and_nested_attachment_updates() -> None:
+    """C-4 PR-G2 (raise-to-coerce): a forged ``Literal[False]`` attachment
+    flag is now coerced to False uniformly across construct/copy/validate
+    instead of raising a ValidationError. The end-result invariant is
+    preserved: the value still reads False on the resulting decision (and
+    on the nested telemetry once it round-trips through validate).
+    """
     decision = _decision_with_budget_telemetry(_raw_private_telemetry())
 
-    with pytest.raises(ValidationError):
-        decision.model_copy(update={"trafficAttached": True})
-    with pytest.raises(ValidationError):
-        decision.model_copy(
-            update={
-                "budgetTelemetry": TelemetryMetadata(
-                    sessionId="sess-1",
-                    turnId="turn-1",
-                    scope=_scope(),
-                    publicSummary="ok",
-                    metadata={"token": "raw-token"},
-                    trafficAttached=True,
-                )
-            }
-        )
+    coerced = decision.model_copy(update={"trafficAttached": True})
+    assert coerced.traffic_attached is False
+
+    nested = TelemetryMetadata(
+        sessionId="sess-1",
+        turnId="turn-1",
+        scope=_scope(),
+        publicSummary="ok",
+        metadata={"token": "raw-token"},
+        trafficAttached=True,
+    )
+    # The nested telemetry was already coerced on its own construction.
+    assert nested.traffic_attached is False
+    coerced_nested = decision.model_copy(update={"budgetTelemetry": nested})
+    assert coerced_nested.budgetTelemetry.traffic_attached is False
 
 
 def test_telemetry_and_decisions_are_frozen_json_like_and_attachment_flags_are_forced_false() -> None:
@@ -551,10 +560,13 @@ def test_telemetry_and_decisions_are_frozen_json_like_and_attachment_flags_are_f
     }
     assert all(decision.model_dump(by_alias=True)[flag] is False for flag in ATTACHMENT_FLAGS)
 
-    with pytest.raises(ValidationError):
-        decision.model_copy(update={"trafficAttached": True})
-    with pytest.raises(ValidationError):
-        decision.model_copy(update={"modelRoutingAttached": True})
+    # C-4 PR-G2 (raise-to-coerce): forged Literal[False] attachment flags
+    # are now coerced uniformly instead of raising on model_copy(update=...).
+    # The end-result invariant is preserved: the value still reads False.
+    coerced_traffic = decision.model_copy(update={"trafficAttached": True})
+    assert coerced_traffic.traffic_attached is False
+    coerced_routing = decision.model_copy(update={"modelRoutingAttached": True})
+    assert coerced_routing.model_routing_attached is False
     with pytest.raises(ValidationError):
         ScalingPolicyInput(
             taskKind="simple_arithmetic",

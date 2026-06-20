@@ -4,7 +4,7 @@
     "production_child_execution_enabled"
   ],
   "model_construct_dump": {
-    "adkRunnerAttached": true,
+    "adkRunnerAttached": false,
     "agentsSpawnedSoFar": 0,
     "enabled": false,
     "liveChildRunnerEnabled": false,
@@ -12,14 +12,22 @@
     "maxConcurrent": 16,
     "maxTotalAgentsPerRun": 1000,
     "parallelPolicy": null,
-    "productionChildExecutionEnabled": true,
+    "productionChildExecutionEnabled": false,
     "realChildExecutionPackEnabled": false
   },
-  "model_construct_force_false_leaks": [
-    "adk_runner_attached",
-    "production_child_execution_enabled"
-  ],
-  "model_validate_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "adkRunnerAttached": false,
+    "agentsSpawnedSoFar": 0,
+    "enabled": false,
+    "liveChildRunnerEnabled": false,
+    "localFakeChildRunnerEnabled": false,
+    "maxConcurrent": 16,
+    "maxTotalAgentsPerRun": 1000,
+    "parallelPolicy": null,
+    "productionChildExecutionEnabled": false,
+    "realChildExecutionPackEnabled": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.harness.workflow_executor.WorkflowExecutorConfig"
 }

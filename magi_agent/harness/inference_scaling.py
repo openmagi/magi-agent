@@ -5,7 +5,9 @@ import re
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
+from pydantic import BaseModel, Field, field_serializer, field_validator, model_validator
+
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 
 
 AgentRole = Literal["general", "coding", "research"]
@@ -79,8 +81,27 @@ _SECRET_KEY_NORMALIZED = frozenset(
 )
 
 
-class _StrictFrozenModel(BaseModel):
-    model_config = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")
+class _StrictFrozenModel(FalseOnlyAuthorityModel):
+    """Inference-scaling frozen base.
+
+    Inherits force-false validator/serializer/construct from
+    FalseOnlyAuthorityModel; preserves two per-class shims:
+
+    * ``__getattr__`` — looks up fields by their camelCase alias
+      (defense-in-depth on top of ``populate_by_name=True`` so any consumer
+      fetching the alias-named attribute keeps working).
+
+    * ``model_copy`` — reads field values directly via ``getattr`` (rather
+      than ``self.model_dump``) so that a per-field serializer (e.g.
+      :class:`TelemetryMetadata._serialize_metadata` which redacts the
+      metadata) does NOT redact the raw payload on a ``model_copy``
+      roundtrip. The kernel's default ``model_copy`` would route through
+      ``model_dump(by_alias=True, mode="python")`` which fires every
+      ``@field_serializer`` along the way; ``_canonical_model_data`` /
+      ``_canonical_value`` recursion bypasses serializers entirely. The
+      end result still routes through ``model_validate`` so the
+      false-only invariant + nested revalidation chains run uniformly.
+    """
 
     def __getattr__(self, item: str) -> Any:
         alias_to_name = {
@@ -93,6 +114,7 @@ class _StrictFrozenModel(BaseModel):
         return super().__getattr__(item)
 
     def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
+        _ = deep
         data = _canonical_model_data(self)
         if update:
             alias_by_input_key = {

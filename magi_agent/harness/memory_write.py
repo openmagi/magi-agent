@@ -4,9 +4,9 @@ import json
 import re
 import time
 from collections.abc import Mapping, Sequence
-from typing import Any, Literal, Self, TypeAlias
+from typing import Literal, Self, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from magi_agent.memory.write_boundary import (
     MemoryMutationReceipt,
@@ -20,6 +20,7 @@ from magi_agent.memory.write_boundary import (
     _sanitize_public_text,
 )
 from magi_agent.memory.declarative_filter import is_declarative_result
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 
 
 MemoryWriteHarnessStatus: TypeAlias = Literal[
@@ -81,7 +82,7 @@ _UNSAFE_REF_MARKER_RE = re.compile(
 )
 
 
-class MemoryWriteHarnessConfig(BaseModel):
+class MemoryWriteHarnessConfig(FalseOnlyAuthorityModel):
     model_config = _MODEL_CONFIG
 
     enabled: bool = False
@@ -100,7 +101,8 @@ class MemoryWriteHarnessConfig(BaseModel):
     )
     # PERMANENTLY FROZEN: Hipocampus is file-based and never writes a DB or the
     # ADK MemoryService — these stay Literal[False] for safety, regardless of the
-    # master switch.
+    # master switch. Force-false is owned by FalseOnlyAuthorityModel's
+    # introspection-based validator/serializer.
     database_mutation_allowed: Literal[False] = Field(
         default=False,
         alias="databaseMutationAllowed",
@@ -112,52 +114,8 @@ class MemoryWriteHarnessConfig(BaseModel):
     )
     traffic_attached: Literal[False] = Field(default=False, alias="trafficAttached")
 
-    @model_validator(mode="before")
-    @classmethod
-    def _force_default_off_authority(cls, value: object) -> dict[str, object]:
-        # Only the permanently-frozen fields are coerced here; the relaxed
-        # bool fields (production_write/provider_call/filesystem/network) now
-        # accept their incoming value so the engine can be enabled in PR4+.
-        payload = dict(value) if isinstance(value, Mapping) else {}
-        payload["databaseMutationAllowed"] = False
-        payload["adkMemoryServiceWriteEnabled"] = False
-        payload["trafficAttached"] = False
-        payload.pop("database_mutation_allowed", None)
-        payload.pop("adk_memory_service_write_enabled", None)
-        payload.pop("traffic_attached", None)
-        return payload
 
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: object,
-    ) -> Self:
-        _ = _fields_set
-        return cls.model_validate(values)
-
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, object] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        payload = self.model_dump(by_alias=True, mode="python", warnings=False)
-        if update:
-            payload.update(dict(update))
-        _ = deep
-        return type(self).model_validate(payload)
-
-    @field_serializer(
-        "database_mutation_allowed",
-        "adk_memory_service_write_enabled",
-        "traffic_attached",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
-
-
-class MemoryWritePolicy(BaseModel):
+class MemoryWritePolicy(FalseOnlyAuthorityModel):
     model_config = _MODEL_CONFIG
 
     policy_ref: str = Field(alias="policyRef")
@@ -181,37 +139,6 @@ class MemoryWritePolicy(BaseModel):
     )
     provider_call_allowed: Literal[False] = Field(default=False, alias="providerCallAllowed")
 
-    @model_validator(mode="before")
-    @classmethod
-    def _force_default_off_authority(cls, value: object) -> dict[str, object]:
-        payload = dict(value) if isinstance(value, Mapping) else {}
-        payload["productionWriteEnabled"] = False
-        payload["providerCallAllowed"] = False
-        payload.pop("production_write_enabled", None)
-        payload.pop("provider_call_allowed", None)
-        return payload
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: object,
-    ) -> Self:
-        _ = _fields_set
-        return cls.model_validate(values)
-
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, object] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        payload = self.model_dump(by_alias=True, mode="python", warnings=False)
-        if update:
-            payload.update(dict(update))
-        _ = deep
-        return type(self).model_validate(payload)
-
     @field_validator("policy_ref", "policy_snapshot_ref", mode="before")
     @classmethod
     def _sanitize_refs(cls, value: object) -> str:
@@ -221,10 +148,6 @@ class MemoryWritePolicy(BaseModel):
     @classmethod
     def _sanitize_allowed_operations(cls, value: object) -> tuple[str, ...]:
         return tuple(_string_tuple(value))
-
-    @field_serializer("production_write_enabled", "provider_call_allowed")
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 class MemoryWriteRequest(BaseModel):

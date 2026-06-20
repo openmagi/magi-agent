@@ -30,12 +30,12 @@ requiredPolicyRefs = eval-observation-required + no-direct-mutation).
 """
 from __future__ import annotations
 
-import os
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, field_serializer
+from pydantic import Field
 
 from magi_agent.learning.config import resolve_learning_config
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.learning.candidates import (
     LearningCandidate,
     LocalFakeTranscriptSource,
@@ -112,21 +112,14 @@ def _reflection_enabled() -> bool:
 # ---------------------------------------------------------------------------
 
 
-class LearningReflectionConfig(BaseModel):
+class LearningReflectionConfig(FalseOnlyAuthorityModel):
     """Minimal configuration for the PR2 reflection executor skeleton.
 
     Authority flags (``llm_attached``, ``production_write_enabled``,
-    ``real_transcript_source_attached``) are locked to ``Literal[False]``
-    and validated to stay False regardless of supplied values.  Promotion to
-    True is deferred to PR7.
+    ``real_transcript_source_attached``) are locked to ``Literal[False]`` and
+    forced False by the FalseOnlyAuthorityModel kernel regardless of supplied
+    values.  Promotion to True is deferred to PR7.
     """
-
-    model_config = ConfigDict(
-        frozen=True,
-        populate_by_name=True,
-        extra="forbid",
-        validate_default=True,
-    )
 
     enabled: bool = False
     local_fake_enabled: bool = Field(default=True, alias="localFakeEnabled")
@@ -147,25 +140,6 @@ class LearningReflectionConfig(BaseModel):
         alias="realTranscriptSourceAttached",
     )
 
-    @field_validator("llm_attached", mode="before")
-    @classmethod
-    def _force_llm_attached_false(cls, _value: object) -> bool:
-        return False
-
-    @field_validator("production_write_enabled", mode="before")
-    @classmethod
-    def _force_production_write_false(cls, _value: object) -> bool:
-        return False
-
-    @field_validator("real_transcript_source_attached", mode="before")
-    @classmethod
-    def _force_real_transcript_false(cls, _value: object) -> bool:
-        return False
-
-    @field_serializer("llm_attached", "production_write_enabled", "real_transcript_source_attached")
-    def _serialize_false(self, _value: object) -> bool:
-        return False
-
 
 # ---------------------------------------------------------------------------
 # Result
@@ -175,15 +149,8 @@ class LearningReflectionConfig(BaseModel):
 LearningReflectionStatus = Literal["disabled", "ok", "error"]
 
 
-class LearningReflectionResult(BaseModel):
+class LearningReflectionResult(FalseOnlyAuthorityModel):
     """Return value from ``run_reflection()``."""
-
-    model_config = ConfigDict(
-        frozen=True,
-        populate_by_name=True,
-        extra="forbid",
-        validate_default=True,
-    )
 
     status: LearningReflectionStatus
     candidates: tuple[LearningCandidate, ...]
@@ -200,7 +167,8 @@ class LearningReflectionResult(BaseModel):
         default=None, alias="evalGateDecisions"
     )
 
-    #: Authority flags — all False in PR2
+    #: Authority flags — all False in PR2 (force-false owned by
+    #: FalseOnlyAuthorityModel kernel).
     llm_attached: Literal[False] = Field(
         default=False,
         alias="llmAttached",
@@ -213,25 +181,6 @@ class LearningReflectionResult(BaseModel):
         default=False,
         alias="realTranscriptSourceAttached",
     )
-
-    @field_validator("llm_attached", mode="before")
-    @classmethod
-    def _force_llm_attached_false(cls, _value: object) -> bool:
-        return False
-
-    @field_validator("production_write_enabled", mode="before")
-    @classmethod
-    def _force_production_write_false(cls, _value: object) -> bool:
-        return False
-
-    @field_validator("real_transcript_source_attached", mode="before")
-    @classmethod
-    def _force_real_transcript_false(cls, _value: object) -> bool:
-        return False
-
-    @field_serializer("llm_attached", "production_write_enabled", "real_transcript_source_attached")
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 # ---------------------------------------------------------------------------

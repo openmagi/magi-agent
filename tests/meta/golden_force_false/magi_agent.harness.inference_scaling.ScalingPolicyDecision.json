@@ -11,31 +11,8 @@
     "runner_attached",
     "traffic_attached"
   ],
-  "model_construct_dump": {
-    "apiProxyAttached": true,
-    "authAttached": true,
-    "billingAttached": true,
-    "canaryAttached": true,
-    "executionAttached": true,
-    "hardEvidenceRequirementsBypassable": true,
-    "modelRoutingAttached": true,
-    "nonHardScalingOptedOut": false,
-    "routeAttached": true,
-    "runnerAttached": true,
-    "trafficAttached": true
-  },
-  "model_construct_force_false_leaks": [
-    "api_proxy_attached",
-    "auth_attached",
-    "billing_attached",
-    "canary_attached",
-    "execution_attached",
-    "hard_evidence_requirements_bypassable",
-    "model_routing_attached",
-    "route_attached",
-    "runner_attached",
-    "traffic_attached"
-  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
   "model_validate_dump": null,
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.harness.inference_scaling.ScalingPolicyDecision"

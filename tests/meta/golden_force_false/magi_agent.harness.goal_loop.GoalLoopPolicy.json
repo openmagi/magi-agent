@@ -36,7 +36,38 @@
     "trafficAttached": false
   },
   "model_construct_force_false_leaks": [],
-  "model_validate_dump": null,
+  "model_validate_dump": {
+    "allowBackgroundResume": false,
+    "enabled": false,
+    "executionAttached": false,
+    "featureKey": "persistent-goal-loop",
+    "optOut": {
+      "disabledReason": null,
+      "disablesBackgroundResume": true,
+      "disablesScheduling": true,
+      "optedOut": false
+    },
+    "ownershipScope": {
+      "childAgentsMayParticipate": true,
+      "hardSafetyScope": [
+        "main",
+        "child"
+      ],
+      "iterationParticipants": [
+        "main",
+        "child"
+      ],
+      "persistenceOwner": "main",
+      "schedulingOwner": "main"
+    },
+    "schedulingEnabled": false,
+    "spawnDepthPolicy": {
+      "defaultDepth": 0,
+      "maxDepth": 2,
+      "minDepth": 0
+    },
+    "trafficAttached": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.harness.goal_loop.GoalLoopPolicy"
 }

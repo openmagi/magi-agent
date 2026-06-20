@@ -3,17 +3,8 @@
     "model_routing_attached",
     "route_attached"
   ],
-  "model_construct_dump": {
-    "eligible": false,
-    "metadataOnly": true,
-    "modelRoutingAttached": true,
-    "reason": null,
-    "routeAttached": true
-  },
-  "model_construct_force_false_leaks": [
-    "model_routing_attached",
-    "route_attached"
-  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
   "model_validate_dump": null,
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.harness.inference_scaling.EscalationMetadata"

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Any, Literal, Self, TypeAlias
+from typing import Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
+from pydantic import ConfigDict, Field
+
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 
 
 ReadinessStatus: TypeAlias = Literal["activation_blocked"]
@@ -66,14 +68,7 @@ E2E_AUTHORITY_FLAG_ALIASES: tuple[str, ...] = (
     "sseWrite",
 )
 
-_MODEL_CONFIG = ConfigDict(
-    frozen=True,
-    populate_by_name=True,
-    extra="forbid",
-    validate_default=True,
-    revalidate_instances="always",
-    hide_input_in_errors=True,
-)
+_MODEL_CONFIG = ConfigDict(revalidate_instances="always")
 
 _CORE_LAYER = "Core substrate"
 _DOMAIN_OWNED_LAYERS = frozenset(
@@ -113,37 +108,11 @@ _SENSITIVE_TEXT_RE = re.compile(
 _REF_PATH_RE = re.compile(r"^[A-Za-z0-9_./:-]+$")
 
 
-class _ReadinessModel(BaseModel):
+class _ReadinessModel(FalseOnlyAuthorityModel):
     model_config = _MODEL_CONFIG
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        return cls(**values)
-
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, object] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        data = self.model_dump(by_alias=False, mode="python", warnings=False)
-        if update:
-            alias_to_name = {
-                field.alias: name
-                for name, field in self.__class__.model_fields.items()
-                if field.alias is not None
-            }
-            data.update({alias_to_name.get(key, key): value for key, value in update.items()})
-        return self.__class__.model_validate(data)
 
 
 class E2EReadinessAuthorityFlags(_ReadinessModel):
-    model_config = _MODEL_CONFIG
-
     traffic: Literal[False] = False
     production_authority: Literal[False] = Field(default=False, alias="productionAuthority")
     user_visible_output: Literal[False] = Field(default=False, alias="userVisibleOutput")
@@ -158,40 +127,6 @@ class E2EReadinessAuthorityFlags(_ReadinessModel):
     db_write: Literal[False] = Field(default=False, alias="dbWrite")
     transcript_write: Literal[False] = Field(default=False, alias="transcriptWrite")
     sse_write: Literal[False] = Field(default=False, alias="sseWrite")
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        return cls(**_false_flag_payload(cls))
-
-    @model_validator(mode="before")
-    @classmethod
-    def _force_false_inputs(cls, value: object) -> object:
-        if isinstance(value, Mapping):
-            return _false_flag_payload(cls)
-        return value
-
-    @field_serializer(
-        "traffic",
-        "production_authority",
-        "user_visible_output",
-        "live_tool_execution",
-        "model_call",
-        "network",
-        "browser",
-        "memory_write",
-        "workspace_mutation",
-        "channel_delivery",
-        "scheduler_mutation",
-        "db_write",
-        "transcript_write",
-        "sse_write",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 class MatrixRowRef(_ReadinessModel):
@@ -448,13 +383,6 @@ def _generic_primitive_proof(rows: Sequence[MatrixReadinessRow]) -> GenericPrimi
         recipeOrProviderOwnedRowIds=recipe_or_provider_ids,
         coreOwnedDomainWorkflowRowIds=core_domain_ids,
     )
-
-
-def _false_flag_payload(model_type: type[BaseModel]) -> dict[str, bool]:
-    return {
-        field.alias or name: False
-        for name, field in model_type.model_fields.items()
-    }
 
 
 def _sanitize_public_ref(value: str) -> str:

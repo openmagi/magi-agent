@@ -41,6 +41,7 @@ from typing import Any, Literal, Protocol, runtime_checkable
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from magi_agent.harness.scheduler_runtime import SchedulerLease, validate_scheduler_lease
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.missions.schedule_grammar import ScheduleSpec, next_run_at, parse_schedule
 
 
@@ -185,13 +186,11 @@ class ScheduledJobRecord(BaseModel):
         return next_run_at(spec, now=now, last_fire=now)
 
 
-class SchedulerExecutorAuthorityFlags(BaseModel):
+class SchedulerExecutorAuthorityFlags(FalseOnlyAuthorityModel):
     """All execution/agent-spawn authority flags are Literal[False].
 
     Pattern mirrors SchedulerAuthorityFlags from scheduler_runtime.py.
     """
-
-    model_config = _MODEL_CONFIG
 
     background_task_started: Literal[False] = Field(
         default=False, alias="backgroundTaskStarted"
