@@ -186,6 +186,7 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     # in every non-safe profile (full AND lab) on their own. The lab seed only
     # forces the strict-truthy ``_b`` experimental flags whose registry default is
     # OFF.
+    "MAGI_DASHBOARD_PACK_AUTHORING_ENABLED",
     "MAGI_DEEP_WEB_RESEARCH_ENABLED",
     "MAGI_DEFERRED_TOOLS_ENABLED",
     "MAGI_DOCUMENT_QA_ENABLED",
