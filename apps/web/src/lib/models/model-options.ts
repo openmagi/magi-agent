@@ -12,8 +12,8 @@ export interface ModelOption {
 // itself reflects what the local runtime can run.
 export const BASE_MODEL_OPTIONS = [
   { value: "haiku", label: "Claude Haiku 4.5" },
-  { value: "sonnet", label: "Claude Sonnet 4.5" },
-  { value: "opus", label: "Claude Opus 4.6" },
+  { value: "sonnet", label: "Claude Sonnet 4.6" },
+  { value: "opus", label: "Claude Opus 4.8" },
   { value: "gpt_5_nano", label: "GPT-5.4 Nano" },
   { value: "gpt_5_mini", label: "GPT-5.4 Mini" },
   { value: "gpt_5_5", label: "GPT-5.5" },
