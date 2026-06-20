@@ -20,6 +20,29 @@ from magi_agent.customize.preset_map import scope_for_preset
 from magi_agent.harness.presets import builtin_preset_catalog
 from magi_agent.transport.app_api import _RUNTIME_HOOK_POINTS as _HOOK_POINTS
 
+# Phase 3 — map the UI ``RECIPES.id`` label to the real
+# :class:`magi_agent.recipes.compiler.RecipePackManifest` pack ids the
+# enforcement layer can subtract evidence_refs for when the user opts a recipe
+# out. Curated and conservative: a RECIPES.id without a mapping (or an empty
+# mapping) is a UI-only label — disabling it is a deliberate no-op. Security-
+# critical packs (``openmagi.context-safety``, ``openmagi.evidence``,
+# ``openmagi.source-grounded``) are intentionally NOT mapped so a user cannot
+# disable hard-safety obligations through this seam.
+RECIPE_ID_TO_PACK_IDS: dict[str, tuple[str, ...]] = {
+    "research": ("openmagi.research", "openmagi.research-scout"),
+    "coding_evidence_gate": ("openmagi.dev-coding",),
+    "coding_mutation": ("openmagi.dev-coding",),
+    "general_automation": ("openmagi.agent-methodology",),
+    "memory_recall": ("openmagi.memory-agentmemory",),
+    # self_improvement has no live recipe pack today — leave unmapped (no-op).
+}
+
+
+def pack_ids_for_recipe(recipe_id: str) -> tuple[str, ...]:
+    """Return the real pack ids a UI recipe id maps to; ``()`` for unmapped."""
+    return RECIPE_ID_TO_PACK_IDS.get(recipe_id, ())
+
+
 # Curated constants mirror REAL recipe modules under magi_agent/recipes/first_party/
 # and the documented harness presets (docs/harness-schema.md). Phase 2 wires their
 # selection to enforcement; Phase 1 surfaces them so the UI reaches parity.
@@ -92,7 +115,17 @@ HARNESS_PRESETS: list[dict[str, Any]] = _build_harness_presets()
 
 
 def _recipe_entries() -> list[dict[str, Any]]:
-    return [{**r, "enabled": True} for r in RECIPES]
+    return [
+        {
+            **r,
+            "enabled": True,
+            # Phase 3 — pack ids this UI recipe id maps to. Empty list = UI-only
+            # label (toggling is a no-op). The frontend can use this to disable
+            # the toggle or surface "no live effect" honesty.
+            "packIds": list(pack_ids_for_recipe(r["id"])),
+        }
+        for r in RECIPES
+    ]
 
 
 def _preset_entries() -> list[dict[str, Any]]:
