@@ -1010,6 +1010,7 @@ graph LR
 | memory_compaction.py | — | authority, discovery, memory_write, registries, write_boundary | firstparty/packs/memory_strategies_default/impl.py, harness/memory_review.py |
 | memory_recall.py | — | authority, contracts, injection, learning_live_readiness, memory_recall, namespaces | cli/learning_recall.py, learning/live.py |
 | memory_review.py | Gated background memory-review harness (A1, PR5). | authority, context, declarative_filter, memory_compaction | firstparty/packs/memory_strategies_default/impl.py |
+| memory_session_extract.py | Session-end auto-extraction of declarative facts (PR4 — Hermes timing). | declarative_filter | — |
 | memory_write.py | — | authority, contracts, declarative_filter, learning_live_readiness, local_file_writable, write_boundary | cli/learning_recall.py, harness/memory_compaction.py, harness/memory_write_tool.py, learning/live.py |
 | memory_write_tool.py | MemoryWriteToolHost — agent-callable tool surface for declarative memory writes (D2). | context, memory_write, registry, result | runtime/memory_write_wiring.py |
 | parallel_execution.py | — | authority | harness/workflow_executor.py |
@@ -1155,7 +1156,7 @@ graph LR
 | conformance.py | — | authority, declarative_filter, hipocampus_readonly, local_file_writable, policy | — |
 | continuity_policy.py | A1 — memory continuity policy block. | — | cli/tool_runtime.py, memory/prompt_projection.py |
 | contracts.py | — | authority | cli/learning_recall.py, harness/memory_recall.py, harness/memory_write.py, learning/injection.py, memory/__init__.py, memory/adapters/hipocampus_readonly.py, memory/adapters/local_file_writable.py, memory/adk_bridge.py, memory/namespaces.py, memory/policy.py, memory/projection.py, recipes/first_party/memory_recall.py |
-| declarative_filter.py | Declarative-only filter for agent memory writes (D2). | — | harness/memory_review.py, harness/memory_write.py, memory/conformance.py |
+| declarative_filter.py | Declarative-only filter for agent memory writes (D2). | — | harness/memory_review.py, harness/memory_session_extract.py, harness/memory_write.py, memory/conformance.py |
 | namespaces.py | — | authority, contracts, policy | cli/learning_recall.py, harness/memory_recall.py, memory/__init__.py, memory/projection.py, recipes/first_party/memory_recall.py |
 | policy.py | — | authority, config, contracts | memory/__init__.py, memory/adapters/hipocampus_readonly.py, memory/adapters/local_file_writable.py, memory/adk_bridge.py, memory/conformance.py, memory/namespaces.py, memory/projection.py, memory/prompt_projection.py, recipes/first_party/memory_recall.py |
 | projection.py | — | authority, contracts, events, namespaces, policy, tool_preview | memory/prompt_projection.py, recipes/first_party/memory_recall.py |
