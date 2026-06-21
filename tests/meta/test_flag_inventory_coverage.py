@@ -2,27 +2,44 @@
 
 The plan (``docs/plans/2026-06-18-magi-agent-oss-main-remediation/
 ws-I-config-quality.md`` §I-1) recommends shrinking the set of inline
-``is_*_enabled`` bodies (``return _is_true(source.get(NAME))``) one batch at a
-time so each PR is reviewable and the budget ratchets monotonically. This
-file is the budget ledger for that migration:
+``is_*_enabled`` bodies one batch at a time so each PR is reviewable and the
+budget ratchets monotonically. This file is the budget ledger for that
+migration and now covers **both** inline patterns under a single unified
+inventory:
 
-* :data:`_UNMIGRATED_INLINE_FLAGS` lists the function names whose bodies still
-  call ``_is_true`` (i.e. have not been routed through the
-  ``config.flags`` registry yet).
-* :func:`test_no_new_inline_is_enabled_body` asserts the *real* set scanned out
-  of ``magi_agent/config/env.py`` is a subset of the allowlist — so a new
-  inline ``def is_X_enabled: ... _is_true(...)`` body forces the author to
-  either migrate it or document it here.
-* :func:`test_unmigrated_allowlist_is_shrinking` asserts the inverse: every
-  entry in the allowlist still exists as an un-migrated inline body in
-  ``env.py``. Drops it stale rows so the budget can only fall — the same
-  ratchet shape as ``tests/meta/test_no_forked_digest.py``.
+* Strict default-OFF inline bodies — ``return _is_true(source.get(NAME))``
+  (or its ``_is_true(env.get(NAME))`` cousin). Migrate via
+  :func:`magi_agent.config.flags.flag_bool` (register a ``_b(...)`` FlagSpec).
+* Profile-aware default-ON inline bodies —
+  ``return _runtime_feature_enabled(source, NAME)``. Migrate via
+  :func:`magi_agent.config.flags.flag_profile_bool` (register a ``_pb(...)``
+  FlagSpec).
 
-Functions that read the flag via :func:`_runtime_feature_enabled` (profile-aware
-default-ON; needs ``flag_profile_bool`` not ``flag_bool``) or via the 3-state
-``resolve_document_authoring_coverage_mode`` helper are intentionally NOT in
-scope for this ratchet — they do not call ``_is_true`` directly and the
-plan's batch-1 explicitly defers them.
+The plan's batch-1 / batch-2 / batch-3 sequence drives both allowlists to
+empty:
+
+* :data:`_UNMIGRATED_INLINE_FLAGS` — strict default-OFF inline bodies. EMPTY
+  after batch 2.
+* :data:`_UNMIGRATED_PROFILE_AWARE_INLINE_FLAGS` — profile-aware default-ON
+  inline bodies. EMPTY after batch 3 (this PR migrates the last 6).
+
+:func:`test_no_new_inline_is_enabled_body` asserts the *real* set of
+strict-default-OFF inline bodies scanned out of ``magi_agent/config/env.py``
+is a subset of :data:`_UNMIGRATED_INLINE_FLAGS`, and the parallel
+:func:`test_no_new_profile_aware_inline_body` asserts the inverse for the
+profile-aware family. New inline bodies of either shape force the author to
+either migrate or document — but the allowlists never grow, only shrink.
+
+:func:`test_unmigrated_allowlist_is_shrinking` /
+:func:`test_unmigrated_profile_aware_allowlist_is_shrinking` are the inverse
+ratchets: every listed name must still be inline in ``env.py``. Stale rows
+fail the gate so the budget can only fall — the same shape as
+``tests/meta/test_no_forked_digest.py``.
+
+The 3-state ``resolve_document_authoring_coverage_mode`` helper is
+intentionally NOT in scope for either ratchet — it is neither strict-truthy
+nor profile-aware, and reaches the registry through a dedicated tri-state
+resolver instead.
 """
 
 from __future__ import annotations
@@ -45,12 +62,22 @@ _IS_ENABLED_RE = re.compile(r"^is_[a-z0-9_]+_enabled$")
 # strict-default-OFF master-switch gates including grounded-answer-guard,
 # goal-nudge, research-fact-guidance, facts-replan, user-hooks,
 # dashboard-pack-authoring, tool-synthesis-nudge) now delegate to
-# ``flag_bool``. The remaining ``is_*_enabled`` bodies (profile-aware
-# default-ON via ``_runtime_feature_enabled`` + the 3-state
-# document-authoring-coverage helper) are intentionally NOT in scope for this
-# ratchet — they need different mechanisms (``flag_profile_bool`` for the
-# former, a tri-state resolver for the latter) and are slated for batch 3+.
+# ``flag_bool``. The profile-aware default-ON inline bodies live in a
+# sibling allowlist below — driven empty by batch 3.
 _UNMIGRATED_INLINE_FLAGS: frozenset[str] = frozenset()
+
+
+# Sibling shrinking allowlist for the *profile-aware default-ON* inline
+# pattern: every entry is an ``is_*_enabled`` function whose body still calls
+# ``_runtime_feature_enabled(env, NAME)`` directly. After I-1 batch 3 (this
+# PR) all 6 such bodies — read-ledger / self-introspection / evidence-ledger-
+# lifecycle / format-on-write / read-quality / message-cache — delegate to
+# :func:`magi_agent.config.flags.flag_profile_bool` and this allowlist is
+# EMPTY. The other ``_runtime_feature_enabled`` readers in ``env.py``
+# (``apply_patch_enabled`` / ``ripgrep_enabled`` / etc.) are not
+# ``is_*_enabled``-named so the scanner already ignores them; if they are
+# ever renamed to fit ``is_*_enabled`` they will need to be migrated too.
+_UNMIGRATED_PROFILE_AWARE_INLINE_FLAGS: frozenset[str] = frozenset()
 
 
 def _scan_inline_is_enabled_bodies() -> set[str]:
@@ -84,14 +111,45 @@ def _scan_inline_is_enabled_bodies() -> set[str]:
     return inline
 
 
+def _scan_inline_profile_aware_bodies() -> set[str]:
+    """Return the set of ``is_*_enabled`` functions in ``env.py`` whose body
+    still contains a direct ``_runtime_feature_enabled(...)`` call.
+
+    AST-based for the same reason as the strict-default-OFF scanner above:
+    docstring mentions of the helper do not count, only real call nodes.
+    Covers both the bare ``_runtime_feature_enabled(env, NAME)`` form and the
+    aliased ``somemod._runtime_feature_enabled(...)`` attribute form so a
+    future ``from .env import _runtime_feature_enabled as foo`` rebinding
+    cannot launder past the gate.
+    """
+
+    tree = ast.parse(_ENV_PY.read_text(encoding="utf-8"))
+    inline: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        if not _IS_ENABLED_RE.match(node.name):
+            continue
+        for sub in ast.walk(node):
+            if not isinstance(sub, ast.Call):
+                continue
+            fn = sub.func
+            if isinstance(fn, ast.Name) and fn.id == "_runtime_feature_enabled":
+                inline.add(node.name)
+                break
+            if isinstance(fn, ast.Attribute) and fn.attr == "_runtime_feature_enabled":
+                inline.add(node.name)
+                break
+    return inline
+
+
 def test_no_new_inline_is_enabled_body() -> None:
     """Forbid a NEW ``is_*_enabled`` body that calls ``_is_true`` directly.
 
     Author the new flag in ``magi_agent/config/flags.py`` (``_b`` for strict
-    default-OFF or ``_pb`` for profile-aware default-ON) and route the reader
-    through :func:`magi_agent.config.flags.flag_bool` /
-    :func:`flag_profile_bool`. The allowlist below is a documented,
-    SHRINKING budget — adding to it is not the fix, migrating is.
+    default-OFF) and route the reader through
+    :func:`magi_agent.config.flags.flag_bool`. The allowlist below is a
+    documented, SHRINKING budget — adding to it is not the fix, migrating is.
     """
 
     found = _scan_inline_is_enabled_bodies()
@@ -101,6 +159,28 @@ def test_no_new_inline_is_enabled_body() -> None:
         "Migrate via `config.flags.flag_bool` (register a `_b(...)` FlagSpec) or "
         "`flag_profile_bool` for profile-aware default-ON gates. Do NOT add to "
         "_UNMIGRATED_INLINE_FLAGS — that allowlist is a shrinking ratchet.\n"
+        + "\n".join(f"  - {name}" for name in new)
+    )
+
+
+def test_no_new_profile_aware_inline_body() -> None:
+    """Forbid a NEW ``is_*_enabled`` body that calls ``_runtime_feature_enabled``.
+
+    Author the new profile-aware default-ON flag in
+    ``magi_agent/config/flags.py`` (``_pb(...)`` FlagSpec) and route the
+    reader through :func:`magi_agent.config.flags.flag_profile_bool`. The
+    allowlist is a documented, SHRINKING budget — adding to it is not the
+    fix, migrating is.
+    """
+
+    found = _scan_inline_profile_aware_bodies()
+    new = sorted(found - _UNMIGRATED_PROFILE_AWARE_INLINE_FLAGS)
+    assert not new, (
+        "New inline `is_*_enabled` body found that still calls "
+        "`_runtime_feature_enabled(...)`. Migrate via "
+        "`config.flags.flag_profile_bool` (register a `_pb(...)` FlagSpec). "
+        "Do NOT add to _UNMIGRATED_PROFILE_AWARE_INLINE_FLAGS — that "
+        "allowlist is a shrinking ratchet.\n"
         + "\n".join(f"  - {name}" for name in new)
     )
 
@@ -125,20 +205,46 @@ def test_unmigrated_allowlist_is_shrinking() -> None:
     )
 
 
-def test_allowlist_count_records_post_batch_state() -> None:
-    """Pin the post-batch-2 size so we notice future batches.
+def test_unmigrated_profile_aware_allowlist_is_shrinking() -> None:
+    """Inverse ratchet for the profile-aware sibling allowlist.
 
-    After I-1 batch 2 the un-migrated set is EMPTY — every simple-body
-    ``is_*_enabled`` function whose inline body was
-    ``return _is_true(source.get(NAME))`` (15 in total: 8 from batch 1 + 7
-    from batch 2) now delegates to ``config.flags.flag_bool``. The remaining
-    bodies in ``env.py`` consult ``_runtime_feature_enabled`` (profile-aware
-    default-ON; needs ``flag_profile_bool``) or
-    ``resolve_document_authoring_coverage_mode`` (3-state) instead — neither
-    is in scope for this strict-truthy ratchet. The fixed-count anchor pins
-    the bottom so a future regression that re-introduces an inline
-    ``_is_true`` body would fail :func:`test_no_new_inline_is_enabled_body`
-    AND this counter (the ratchet only ever falls).
+    Same shape as :func:`test_unmigrated_allowlist_is_shrinking` but pinned
+    to :data:`_UNMIGRATED_PROFILE_AWARE_INLINE_FLAGS` and the
+    ``_runtime_feature_enabled`` scanner.
+    """
+
+    found = _scan_inline_profile_aware_bodies()
+    stale = sorted(_UNMIGRATED_PROFILE_AWARE_INLINE_FLAGS - found)
+    assert not stale, (
+        "Stale `_UNMIGRATED_PROFILE_AWARE_INLINE_FLAGS` entries (the listed "
+        "`is_*_enabled` either no longer exists in env.py or has already been "
+        "migrated to `flag_profile_bool`) — remove from the allowlist so the "
+        "ratchet stays tight.\n"
+        + "\n".join(f"  - {name}" for name in stale)
+    )
+
+
+def test_allowlist_count_records_post_batch_state() -> None:
+    """Pin the post-batch-3 size of BOTH allowlists so future batches notice.
+
+    After I-1 batch 3 both un-migrated sets are EMPTY:
+
+    * 15 simple-body strict default-OFF ``is_*_enabled`` flags (8 from batch
+      1: prompt / coding-context / key-aware / tool-usage-guidance; 7 from
+      batch 2: the strict-default-OFF master-switch gates) delegate to
+      ``flag_bool``.
+    * 6 profile-aware default-ON ``is_*_enabled`` flags (this batch:
+      read-ledger / self-introspection / evidence-ledger-lifecycle /
+      format-on-write / read-quality / message-cache) delegate to
+      ``flag_profile_bool``.
+
+    Total 21 ``is_*_enabled`` readers now go through the registry. The
+    fixed-count anchors pin the bottom so a future regression that
+    re-introduces an inline body of either pattern would fail
+    :func:`test_no_new_inline_is_enabled_body` /
+    :func:`test_no_new_profile_aware_inline_body` AND this counter (the
+    ratchet only ever falls).
     """
 
     assert len(_UNMIGRATED_INLINE_FLAGS) == 0
+    assert len(_UNMIGRATED_PROFILE_AWARE_INLINE_FLAGS) == 0

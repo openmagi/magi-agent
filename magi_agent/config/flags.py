@@ -525,6 +525,21 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_APPLY_PATCH_ENABLED",
         summary="Enable the apply-patch tool for multi-file edits (default-ON full profile).",
     ),
+    _pb(
+        "MAGI_READ_LEDGER_ENABLED",
+        summary=(
+            "Record full reads in the per-turn ledger and enforce read-before-edit "
+            "on the gate5b full toolhost (default-ON full profile)."
+        ),
+    ),
+    _pb(
+        "MAGI_READ_QUALITY_ENABLED",
+        summary=(
+            "Quality-of-life FileRead output: 1-indexed line numbers, line/byte "
+            "caps with continue-offset footer, binary detection, did-you-mean "
+            "filename suggestions on miss (default-ON full profile)."
+        ),
+    ),
     _b(
         "MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED",
         summary=(
@@ -993,6 +1008,15 @@ FLAGS: tuple[FlagSpec, ...] = (
     _pb(
         "MAGI_CONTEXT_COMPACTION_ENABLED",
         summary="Compact the working context when the token threshold is hit (default-ON full profile).",
+    ),
+    _pb(
+        "MAGI_MESSAGE_CACHE_ENABLED",
+        summary=(
+            "Mark the last ~2 non-system conversation messages with an Anthropic "
+            "ephemeral ``cache_control`` marker so the growing conversation tail "
+            "is prompt-cached in addition to the system prefix (default-ON full "
+            "profile)."
+        ),
     ),
     # Strict default-OFF (flat _b, NOT profile-resolved): real-token accounting
     # for compaction. When ON the compaction decision uses the real prompt-token

@@ -79,6 +79,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_MEMORY_QMD_LIVE_ENABLED` (default off) — Use the live qmd search backend for memory recall.
 - `MAGI_MEMORY_RECALL_ENABLED` (default off) — Enable memory recall/injection into the working context.
 - `MAGI_MEMORY_WRITE_ENABLED` (default off) — Allow the memory subsystem to persist writes (vs read-only recall).
+- `MAGI_MESSAGE_CACHE_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Mark the last ~2 non-system conversation messages with an Anthropic ephemeral ``cache_control`` marker so the growing conversation tail is prompt-cached in addition to the system prefix (default-ON full profile).
 - `MAGI_MULTI_FILE_JOIN_ENABLED` (default off) — Append multi-file cross-reference guidance: enumerate archives, read structured files fully, and run joins/dedup programmatically.
 - `MAGI_OBSERVABILITY_ENABLED` (default off) — Enable the hook-tap observability module (bot-activity visibility).
 - `MAGI_OUTPUT_CONTINUATION_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Enable automatic continuation of truncated model output (default-ON full profile).
@@ -86,6 +87,8 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_PROMPT_EXAMPLES_ENABLED` (default off) — Append the <action_discipline_examples> prompt block (positive/negative contrast pairs: act-vs-ask, finish-vs-defer) in build_cli_instruction.
 - `MAGI_PROMPT_REDFLAGS_ENABLED` (default off) — Append the <red_flags> anti-rationalization prompt block ("this thought means stop and correct course" table) in build_cli_instruction.
 - `MAGI_PROMPT_SEARCH_RULES_ENABLED` (default off) — Append the search-decision heuristics prompt block in build_cli_instruction. Even when ON the block only fires when web tools are available (BRAVE_API_KEY AND FIRECRAWL_API_KEY).
+- `MAGI_READ_LEDGER_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Record full reads in the per-turn ledger and enforce read-before-edit on the gate5b full toolhost (default-ON full profile).
+- `MAGI_READ_QUALITY_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Quality-of-life FileRead output: 1-indexed line numbers, line/byte caps with continue-offset footer, binary detection, did-you-mean filename suggestions on miss (default-ON full profile).
 - `MAGI_RECIPE_ROUTING_LLM_ENABLED` (default off) — Let the model select recipe packs by their when_to_use descriptions instead of the selector-membership path; strict default-OFF (OFF is byte-identical to today).
 - `MAGI_RESEARCH_FACT_GUIDANCE_ENABLED` (default off) — Enable research_fact cross-check guidance: consolidated brief header/footer plus the <web_research> system-prompt block (requires BRAVE_API_KEY + FIRECRAWL_API_KEY).
 - `MAGI_RESEARCH_GOVERNANCE_MODE` (default `off`) — Research governance mode. `off` is inert; `audit` records source/citation mismatches without blocking.

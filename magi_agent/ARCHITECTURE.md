@@ -699,7 +699,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | — | — |
-| test_flag_migration_parity.py | Parity tests for the I-1 batches 1+2 flag migration (15 ``is_*_enabled`` flags). | env, flags | — |
+| test_flag_migration_parity.py | Parity tests for the I-1 batches 1+2+3 flag migration (21 ``is_*_enabled`` flags). | env, flags | — |
 | test_flags.py | Unit tests for the canonical flag registry + reader (``config/flags.py``). | config, flags | — |
 | test_truthy.py | Unit tests for ``magi_agent.config._truthy`` — the dependency-free leaf | _truthy, config | — |
 
