@@ -380,6 +380,50 @@ async def _record_turn_memory(
     )
 
 
+async def _maybe_session_extract(
+    *,
+    workspace_root: str,
+    terminal: EngineResult,
+    user_text: str,
+    assistant_text: str,
+) -> None:
+    """Session-end memory extraction for the CLI/headless boundary.
+
+    A headless invocation IS a bounded session: when it returns, the session
+    ends. We hand the just-completed conversation turn to the session-end
+    extractor, which (when enabled) proposes durable declarative user facts and
+    appends the accepted ones to ``MEMORY.md`` through the gated provider.
+
+      * GATED — no-op unless ``MAGI_MEMORY_SESSION_EXTRACT_ENABLED`` (writes also
+        require the memory write gate, owned by the provider).
+      * FAIL-SOFT — never raises into or breaks the headless exit path.
+      * SKIP-ON-ERROR — errored turns carry nothing useful to extract.
+
+    Hermes-style timing: one extraction at the session boundary (not a per-turn
+    fork), so cost stays bounded.
+    """
+    if _is_error(terminal.terminal, terminal.error):
+        return
+    if not (user_text.strip() or assistant_text.strip()):
+        return
+    from magi_agent.runtime.memory_mode_context import (  # noqa: PLC0415
+        current_memory_mode,
+    )
+
+    # incognito / read-only suppress persistence, mirroring ``record_turn``.
+    if current_memory_mode().value in {"incognito", "read_only"}:
+        return
+    from magi_agent.runtime.session_extract_runtime import (  # noqa: PLC0415
+        run_session_extract,
+    )
+
+    messages = [
+        {"role": "user", "content": user_text},
+        {"role": "assistant", "content": assistant_text},
+    ]
+    await run_session_extract(messages, workspace_root=workspace_root)
+
+
 # ---------------------------------------------------------------------------
 # stream-json projection helpers
 # ---------------------------------------------------------------------------
@@ -1070,6 +1114,13 @@ async def run_headless(
             assistant_text=assistant_text,
             used_tool=_used_tool_from_events(events),
         )
+        # Session-end extraction: the headless run is the session boundary.
+        await _maybe_session_extract(
+            workspace_root=cwd,
+            terminal=terminal,
+            user_text=prompt,
+            assistant_text=assistant_text,
+        )
         if output == "text":
             out.write(_text_mode_body(result_frame) + "\n")
         else:
@@ -1212,6 +1263,13 @@ async def run_headless(
             user_text=prompt,
             assistant_text=assistant_text,
             used_tool=used_tool,
+        )
+        # Session-end extraction: the headless run is the session boundary.
+        await _maybe_session_extract(
+            workspace_root=cwd,
+            terminal=terminal,
+            user_text=prompt,
+            assistant_text=assistant_text,
         )
     finally:
         if write_session_log:

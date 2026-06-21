@@ -79,6 +79,19 @@ def create_app(runtime: OpenMagiRuntime) -> FastAPI:
         try:
             yield
         finally:
+            # Serve session-end memory extraction: the local serve path has no
+            # per-conversation end / shared session service, so we flush the
+            # in-process per-session transcript buffer once on shutdown. Gated
+            # (empty + no-op unless MAGI_MEMORY_SESSION_EXTRACT_ENABLED) and
+            # fail-soft — it can never block or crash shutdown.
+            try:
+                from magi_agent.runtime.active_sessions import (  # noqa: PLC0415
+                    drain_and_extract,
+                )
+
+                await drain_and_extract()
+            except Exception:  # noqa: BLE001 - never raise on shutdown
+                logger.warning("session-extract shutdown drain failed", exc_info=True)
             if bootstrap is not None:
                 try:
                     await bootstrap.stop()

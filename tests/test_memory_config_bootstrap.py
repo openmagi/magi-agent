@@ -25,6 +25,9 @@ from pathlib import Path
 import pytest
 
 from magi_agent.cli.memory_bootstrap import apply_memory_config_bootstrap
+from magi_agent.harness.memory_session_extract import (
+    MAGI_MEMORY_SESSION_EXTRACT_ENABLED_ENV,
+)
 from magi_agent.memory.config import (
     MASTER_ENV_VAR,
     PREFER_LOCAL_SEARCH_ENV_VAR,
@@ -32,6 +35,12 @@ from magi_agent.memory.config import (
     PREFER_QMD_AUTO_REGISTER_ENV_VAR,
     resolve_memory_config,
 )
+
+_INSTALL_DEFAULT_ENV_VARS = {
+    MASTER_ENV_VAR,
+    PREFER_LOCAL_SEARCH_ENV_VAR,
+    MAGI_MEMORY_SESSION_EXTRACT_ENABLED_ENV,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -52,7 +61,7 @@ def test_config_absent_sets_correct_env_var_names() -> None:
     canonical names from memory/config.py (no hardcoded strings)."""
     env: dict[str, str] = {}
     apply_memory_config_bootstrap(env, config={})
-    assert set(env) == {MASTER_ENV_VAR, PREFER_LOCAL_SEARCH_ENV_VAR}
+    assert set(env) == _INSTALL_DEFAULT_ENV_VARS
     # qmd auto-register stays opt-in: the bootstrap never sets it.
     assert PREFER_QMD_AUTO_REGISTER_ENV_VAR not in env
 
@@ -118,9 +127,32 @@ def test_unknown_memory_key_ignored_install_defaults_applied() -> None:
     # and ONLY the two known env vars are set (no env var for the bogus key).
     env: dict[str, str] = {}
     apply_memory_config_bootstrap(env, config={"memory": {"bogus": True}})
-    assert set(env) == {MASTER_ENV_VAR, PREFER_LOCAL_SEARCH_ENV_VAR}
+    assert set(env) == _INSTALL_DEFAULT_ENV_VARS
     assert env[MASTER_ENV_VAR] == "1"
     assert env[PREFER_LOCAL_SEARCH_ENV_VAR] == "1"
+    assert env[MAGI_MEMORY_SESSION_EXTRACT_ENABLED_ENV] == "1"
+
+
+def test_session_extract_install_default_on_and_overridable() -> None:
+    # Install default: session-end extraction ON for the local/self-host install.
+    env: dict[str, str] = {}
+    apply_memory_config_bootstrap(env, config={})
+    assert env[MAGI_MEMORY_SESSION_EXTRACT_ENABLED_ENV] == "1"
+
+    # config.toml can turn it back off without touching the master switch.
+    env2: dict[str, str] = {}
+    apply_memory_config_bootstrap(
+        env2, config={"memory": {"session_extract_enabled": False}}
+    )
+    assert env2[MAGI_MEMORY_SESSION_EXTRACT_ENABLED_ENV] == "0"
+    assert env2[MASTER_ENV_VAR] == "1"
+
+
+def test_explicit_session_extract_env_wins() -> None:
+    # A pre-set env var is preserved (setdefault): operator override beats install.
+    env = {MAGI_MEMORY_SESSION_EXTRACT_ENABLED_ENV: "0"}
+    apply_memory_config_bootstrap(env, config={})
+    assert env[MAGI_MEMORY_SESSION_EXTRACT_ENABLED_ENV] == "0"
 
 
 def test_loads_config_file_when_config_omitted(monkeypatch) -> None:
