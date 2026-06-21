@@ -1,9 +1,11 @@
 """Tests for cli/identity.py — self identity + project context loading.
 
-Self identity (``soul``) is read only from the magi-owned ``.magi`` namespace
-(``~/.magi`` global + ``<cwd>/.magi`` project). Repo-root ``AGENTS.md`` /
-``CLAUDE.md`` are read as ``project_context`` — they describe the working repo,
-not who the agent is.
+Self-identity files are read only from the magi-owned ``.magi`` namespace
+(``~/.magi`` global + ``<cwd>/.magi`` project): BOOTSTRAP/IDENTITY/USER/LEARNING/
+AGENTS.md -> bootstrap/identity/user/learning/agents slots. Repo-root
+``AGENTS.md`` / ``CLAUDE.md`` are read as ``project_context`` — they describe the
+working repo, not who the agent is. ``.magi/SOUL.md`` is legacy and no longer
+read into the prompt.
 """
 
 from __future__ import annotations
@@ -50,34 +52,82 @@ def test_load_identity_project_context_orders_agents_before_claude(
     assert ctx.index("## AGENTS.md") < ctx.index("## CLAUDE.md")
 
 
-def test_load_identity_soul_from_project_magi_namespace(tmp_path, monkeypatch) -> None:
+def test_load_identity_identity_from_project_magi_namespace(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     magi_dir = tmp_path / ".magi"
     magi_dir.mkdir()
-    (magi_dir / "SOUL.md").write_text("magi soul", encoding="utf-8")
+    (magi_dir / "IDENTITY.md").write_text("magi identity", encoding="utf-8")
     identity = load_identity(str(tmp_path))
-    assert identity["soul"] == "magi soul"
+    assert identity["identity"] == "magi identity"
 
 
-def test_load_identity_project_magi_soul_overrides_global(tmp_path, monkeypatch) -> None:
+def test_load_identity_all_self_slots_from_magi_namespace(tmp_path, monkeypatch) -> None:
+    # All five self-identity files map to their slot when present under .magi/.
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    magi_dir = tmp_path / ".magi"
+    magi_dir.mkdir()
+    (magi_dir / "BOOTSTRAP.md").write_text("boot body", encoding="utf-8")
+    (magi_dir / "IDENTITY.md").write_text("id body", encoding="utf-8")
+    (magi_dir / "USER.md").write_text("user body", encoding="utf-8")
+    (magi_dir / "LEARNING.md").write_text("learn body", encoding="utf-8")
+    (magi_dir / "AGENTS.md").write_text("roster body", encoding="utf-8")
+    identity = load_identity(str(tmp_path))
+    assert identity["bootstrap"] == "boot body"
+    assert identity["identity"] == "id body"
+    assert identity["user"] == "user body"
+    assert identity["learning"] == "learn body"
+    assert identity["agents"] == "roster body"
+
+
+def test_load_identity_project_magi_identity_overrides_global(tmp_path, monkeypatch) -> None:
     home = tmp_path / "home"
     monkeypatch.setenv("HOME", str(home))
     global_magi = home / ".magi"
     global_magi.mkdir(parents=True)
-    (global_magi / "SOUL.md").write_text("global soul", encoding="utf-8")
+    (global_magi / "IDENTITY.md").write_text("global identity", encoding="utf-8")
     magi_dir = tmp_path / ".magi"
     magi_dir.mkdir()
-    (magi_dir / "SOUL.md").write_text("project soul", encoding="utf-8")
+    (magi_dir / "IDENTITY.md").write_text("project identity", encoding="utf-8")
     identity = load_identity(str(tmp_path))
-    assert identity["soul"] == "project soul"
+    assert identity["identity"] == "project identity"
 
 
-def test_load_identity_repo_root_soul_is_not_self_identity(tmp_path, monkeypatch) -> None:
-    # A SOUL.md at the repo root (outside .magi) must NOT become self identity.
+def test_load_identity_magi_agents_is_self_repo_root_agents_is_project(
+    tmp_path, monkeypatch
+) -> None:
+    # ``.magi/AGENTS.md`` is the agent's OWN roster (self identity, ``agents``
+    # slot); a repo-root ``AGENTS.md`` is the project's convention file. Same
+    # basename, different namespace — both coexist without conflation.
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    (tmp_path / "SOUL.md").write_text("repo soul", encoding="utf-8")
+    magi_dir = tmp_path / ".magi"
+    magi_dir.mkdir()
+    (magi_dir / "AGENTS.md").write_text("self roster", encoding="utf-8")
+    (tmp_path / "AGENTS.md").write_text("project conventions", encoding="utf-8")
+    identity = load_identity(str(tmp_path))
+    assert identity["agents"] == "self roster"
+    assert "project conventions" in identity["project_context"]
+    assert "self roster" not in identity["project_context"]
+
+
+def test_load_identity_repo_root_identity_is_not_self_identity(tmp_path, monkeypatch) -> None:
+    # An IDENTITY.md at the repo root (outside .magi) must NOT become self
+    # identity, and must NOT leak into project context either.
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "IDENTITY.md").write_text("repo identity", encoding="utf-8")
+    identity = load_identity(str(tmp_path))
+    assert "identity" not in identity
+    assert "project_context" not in identity
+
+
+def test_load_identity_legacy_soul_md_is_not_read(tmp_path, monkeypatch) -> None:
+    # Legacy ``.magi/SOUL.md`` is decoupled from prompt assembly — no slot.
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    magi_dir = tmp_path / ".magi"
+    magi_dir.mkdir()
+    (magi_dir / "SOUL.md").write_text("legacy soul", encoding="utf-8")
     identity = load_identity(str(tmp_path))
     assert "soul" not in identity
+    assert "legacy soul" not in repr(identity)
 
 
 def test_load_identity_missing_files_omitted(tmp_path, monkeypatch) -> None:

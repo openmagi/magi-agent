@@ -5,11 +5,23 @@ Two distinct scopes, deliberately kept separate:
 * **Self identity** — who the agent IS. Read only from the magi-owned ``.magi``
   namespace: ``~/.magi/`` (global) and ``<cwd>/.magi/`` (project override).
   This is the agent's own space; a working repository's root files never define
-  the agent's identity.
+  the agent's identity. Each file maps to a render slot in
+  ``_IDENTITY_SECTION_ORDER`` (runtime/message_builder.py), which controls the
+  header and ordering of each section in the system prompt.
+
+  Note the deliberate ``.magi/AGENTS.md`` vs repo-root ``AGENTS.md`` split: the
+  former is the agent's OWN roster/notes (self identity, ``agents`` slot); the
+  latter is the project's cross-tool convention file (project context). Same
+  basename, different namespace, different meaning — never conflated.
 * **Project context** — the repository the agent is working IN. Read from
   repo-root ``AGENTS.md`` / ``CLAUDE.md`` (the cross-tool convention files) and
   surfaced as project context, NOT identity, so a project's description can
   never overwrite the agent's selfhood.
+
+Legacy: ``.magi/SOUL.md`` is no longer read into the prompt — ``IDENTITY.md`` is
+the self-identity file. The operator-gated SOUL.md write-protection subsystem
+(D4 OperatorSoulWriter, sealed basenames, memory conformance invariants) is left
+intact but is now decoupled from prompt assembly.
 """
 from __future__ import annotations
 
@@ -17,7 +29,15 @@ import os
 from typing import Mapping
 
 # Magi-owned self-identity files, read from the ``.magi`` namespace only.
-_SELF_IDENTITY_FILES: tuple[tuple[str, str], ...] = (("SOUL.md", "soul"),)
+# Filename -> identity key. The render header/order for each key lives in
+# ``_IDENTITY_SECTION_ORDER`` (runtime/message_builder.py).
+_SELF_IDENTITY_FILES: tuple[tuple[str, str], ...] = (
+    ("BOOTSTRAP.md", "bootstrap"),
+    ("IDENTITY.md", "identity"),
+    ("USER.md", "user"),
+    ("LEARNING.md", "learning"),
+    ("AGENTS.md", "agents"),
+)
 
 # Repo-root project-context files (other tools' / cross-tool conventions).
 # Order = render order under the PROJECT CONTEXT header.

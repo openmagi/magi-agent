@@ -149,7 +149,7 @@ class TestSectionOrder:
             identity=_IDENTITY,
             now=_utc("2026-05-28T10:00:00.000Z"),
         )
-        sections = ["# BOOTSTRAP", "# SOUL", "# LEARNING", "# IDENTITY", "# USER", "# AGENTS"]
+        sections = ["# BOOTSTRAP", "# IDENTITY", "# USER", "# LEARNING", "# AGENTS", "# SOUL"]
         indexes = [out.index(s) for s in sections]
         assert indexes == sorted(indexes)
 
