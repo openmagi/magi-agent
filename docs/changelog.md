@@ -15,6 +15,24 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.64
+
+### Changed
+- Customize hub Phase 1 mental-model rewrite (#824): the four prior surfaces
+  (Presets / Custom Rules / Custom Checks / SeamSpec) collapse into a single
+  Rules table with origin badges (built-in / custom / after-tool / SeamSpec).
+  SeamSpec mutations now appear inline. Add-rule is a 4-way picker (block bad
+  answer / restrict tool / filter result / rewire built-in) that opens the
+  matching existing form. Verification and Advanced sub-nav items go away;
+  Rules + Guidance take their place. Existing form internals are unchanged.
+
+### Fixed
+- Child runner no longer silently reports `status=ok` when ADK emits an
+  `error_code` event (#827). Errors are now classified — finish-signal
+  variants stay benign, the rest raise `_ChildLlmTurnError(reason=
+  "child_llm_<slug>")` so observability surfaces a real failure code instead
+  of a blank turn.
+
 ## 0.1.63
 
 ### Added
