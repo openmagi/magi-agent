@@ -15,6 +15,13 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.67
+
+### Added
+- Goal mission toggle restored on the chat composer as a Phase 1 opt-in
+  (#835): a per-turn toggle lets the operator promote a single message
+  into a goal-mode mission without leaving the chat surface.
+
 ## 0.1.66
 
 ### Changed
