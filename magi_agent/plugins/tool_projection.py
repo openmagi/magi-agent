@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 
 from .manager import ResolvedPluginState
@@ -74,48 +75,109 @@ _FILE_SEND_INPUT_SCHEMA: dict[str, object] = {
     },
     "required": ("path",),
 }
-_SPAWN_AGENT_INPUT_SCHEMA: dict[str, object] = {
-    "type": "object",
-    "properties": {
-        "prompt": {
-            "type": "string",
-            "description": "The task prompt to send to the child agent.",
+def _build_spawn_agent_input_schema(
+    env: Mapping[str, str] | None = None,
+) -> dict[str, object]:
+    """Build SpawnAgent's input_schema with REGISTRY-DRIVEN route advertising.
+
+    The ``provider`` and ``model`` parameter descriptions enumerate the live
+    ``(provider, model)`` pairs that ``resolve_child_route`` will accept,
+    pulled from :func:`magi_agent.runtime.model_tiers.available_child_model_routes`
+    — the same single-source-of-truth the runtime validates against. This
+    closes the drift gap that previously caused every cross-provider
+    SpawnAgent call to fail with ``child_model_route_unknown``: the static
+    description used to ship the literal example ``claude-opus-4-5`` (a model
+    the registry never had), and the parent LLM copied that name verbatim.
+
+    Fail-soft: any error reading the registry leaves the description as a
+    short, neutral hint that simply names the failure mode. The runtime is
+    still the validation authority either way.
+    """
+    import os as _os  # noqa: PLC0415
+
+    routes: list[str] = []
+    try:
+        from magi_agent.runtime.model_tiers import (  # noqa: PLC0415
+            available_child_model_routes,
+        )
+
+        source_env = env if env is not None else _os.environ
+        routes = list(available_child_model_routes(source_env) or ())
+    except Exception:  # noqa: BLE001 — fail-soft; description below stays neutral.
+        routes = []
+
+    # ``available_child_model_routes`` returns "provider:model (tier)" entries;
+    # strip the tier marker so the LLM sees the bare ``provider:model`` pair.
+    bare_routes = [route.split(" ", 1)[0] for route in routes]
+    providers = sorted({pair.split(":", 1)[0] for pair in bare_routes})
+
+    if bare_routes:
+        provider_desc = (
+            "LLM provider for the child. Must be one of the configured "
+            f"providers: {', '.join(providers)}. Omitting `provider` defaults "
+            "to the parent's provider."
+        )
+        model_desc = (
+            "Model id for the child. The (provider, model) pair MUST be one "
+            f"of the live routes: {', '.join(bare_routes)}. Unknown routes "
+            "are rejected as child_model_route_unknown. Omit `model` to use "
+            "the provider's default."
+        )
+    else:
+        provider_desc = (
+            "LLM provider for the child (e.g. 'anthropic', 'openai', "
+            "'gemini', 'fireworks'). Pair with a matching `model` from the "
+            "deployment's configured routes; unknown routes are rejected as "
+            "child_model_route_unknown."
+        )
+        model_desc = (
+            "Model id for the child. Pair with a matching `provider`; an "
+            "unknown (provider, model) is rejected as child_model_route_unknown. "
+            "Omit to use the provider's default."
+        )
+
+    return {
+        "type": "object",
+        "properties": {
+            "prompt": {
+                "type": "string",
+                "description": "The task prompt to send to the child agent.",
+            },
+            "persona": {
+                "type": "string",
+                "description": "Persona/role for the child agent (e.g. 'coding', 'research', 'general').",
+            },
+            "provider": {
+                "type": "string",
+                "description": provider_desc,
+            },
+            "model": {
+                "type": "string",
+                "description": model_desc,
+            },
+            "budgetMs": {
+                "type": "integer",
+                "description": "Wall-clock time budget in milliseconds for the child task.",
+            },
+            "allowedTools": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Per-task tool grant: names of tools the child is allowed to use. "
+                    "The grant is intersected with the session ceiling — it can only narrow, not expand."
+                ),
+            },
+            "recipeRefs": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Recipe pack references to bind to the child task "
+                    "(validators, gates, and instructions scoped to this subtask)."
+                ),
+            },
         },
-        "persona": {
-            "type": "string",
-            "description": "Persona/role for the child agent (e.g. 'coding', 'research', 'general').",
-        },
-        "provider": {
-            "type": "string",
-            "description": "LLM provider override for the child (e.g. 'anthropic', 'openai').",
-        },
-        "model": {
-            "type": "string",
-            "description": "Model override for the child (e.g. 'claude-opus-4-5').",
-        },
-        "budgetMs": {
-            "type": "integer",
-            "description": "Wall-clock time budget in milliseconds for the child task.",
-        },
-        "allowedTools": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": (
-                "Per-task tool grant: names of tools the child is allowed to use. "
-                "The grant is intersected with the session ceiling — it can only narrow, not expand."
-            ),
-        },
-        "recipeRefs": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": (
-                "Recipe pack references to bind to the child task "
-                "(validators, gates, and instructions scoped to this subtask)."
-            ),
-        },
-    },
-    "additionalProperties": True,
-}
+        "additionalProperties": True,
+    }
 _WEB_READONLY_METADATA: dict[str, object] = {
     # WebSearch / WebFetch (and aliases) only *read* remote data — no external
     # mutation. Declaring them read-only lets the fail-closed default permission
@@ -194,7 +256,7 @@ _SPECIAL_TOOL_METADATA: dict[tuple[str, str], dict[str, object]] = {
             "can only restrict, not expand) and recipeRefs to bind recipe packs "
             "(validators, gates, and instructions) scoped to that child task."
         ),
-        "input_schema": _SPAWN_AGENT_INPUT_SCHEMA,
+        "input_schema": "spawn_agent",
     },
     ("openmagi.taskboard", "TaskBoard"): {
         "permission": "write",
@@ -279,6 +341,10 @@ def _build_tool_manifest(
         )
 
         input_schema = DOCUMENT_WRITE_INPUT_SCHEMA
+    elif input_schema == "spawn_agent":
+        # Resolve at manifest-build time so the LLM sees the live registry's
+        # routes (key-aware filtered) instead of a stale literal example.
+        input_schema = _build_spawn_agent_input_schema()
     return ToolManifest(
         name=name,
         description=str(
