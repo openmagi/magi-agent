@@ -6,6 +6,8 @@ from typing import Literal, NamedTuple, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from magi_agent.ops.safety import contains_secret_marker
+
 
 ModelTier: TypeAlias = Literal[
     "cheap",
@@ -55,47 +57,25 @@ _PROVIDER_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 _MODEL_RE = re.compile(
     r"^(?=.{1,128}$)[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*){0,5}$"
 )
+# C-12: single label-shape regex. The pre-C-12 module shipped two byte-identical
+# regexes that differed only by including ``/`` in the rejected char class
+# (``_UNSAFE_LABEL_RE`` rejected ``/``; ``_UNSAFE_MODEL_LABEL_RE`` allowed it).
+# This unified regex drops ``/`` from the char class (allowing model paths like
+# ``provider/family/variant``); the provider/capability paths still reject
+# slashes via their secondary ``_PROVIDER_RE.fullmatch`` shape constraint (or by
+# being filtered out of the cleaned list silently). The generic
+# Bearer/sk-/xox-/gh*_/AIza/api_key/secret/token/password/private_key
+# alternations that previously lived here are now delegated to the C-1 redaction
+# kernel via :func:`magi_agent.ops.safety.contains_secret_marker` — a strict
+# superset (and the single source of truth for the secret-vocabulary).
 _UNSAFE_LABEL_RE = re.compile(
-    r"(?:"
-    r"^\s*$|"
-    r"\s|"
-    r"[\\/'\"`$=;|&<>]|"
-    r"\.\.|"
-    r"~|"
-    r"://|"
-    r"^sk-|"
-    r"^xox[a-z]-|"
-    r"^gh[opusr]_|"
-    r"^github_pat_|"
-    r"^AIza|"
-    r"\bbearer\b|"
-    r"api[_-]?key|"
-    r"secret|"
-    r"token|"
-    r"password|"
-    r"private[_-]?key"
-    r")",
-    re.IGNORECASE,
-)
-_UNSAFE_MODEL_LABEL_RE = re.compile(
     r"(?:"
     r"^\s*$|"
     r"\s|"
     r"[\\'\"`$=;|&<>]|"
     r"\.\.|"
     r"~|"
-    r"://|"
-    r"^sk-|"
-    r"^xox[a-z]-|"
-    r"^gh[opusr]_|"
-    r"^github_pat_|"
-    r"^AIza|"
-    r"\bbearer\b|"
-    r"api[_-]?key|"
-    r"secret|"
-    r"token|"
-    r"password|"
-    r"private[_-]?key"
+    r"://"
     r")",
     re.IGNORECASE,
 )
@@ -176,7 +156,16 @@ class _ResolveRequest(_StrictModel):
         clean: list[str] = []
         for item in value:
             text = str(item).strip()
-            if not text or _UNSAFE_LABEL_RE.search(text):
+            if (
+                not text
+                or "/" in text
+                or _UNSAFE_LABEL_RE.search(text)
+                or contains_secret_marker(text)
+            ):
+                # C-12: capability labels are simple identifiers (no slash, no
+                # secret-shape). The C-1 kernel covers the secret vocabulary
+                # uniformly; the explicit "/" reject was previously implicit in
+                # the now-folded ``_UNSAFE_LABEL_RE`` char class.
                 continue
             clean.append(text)
         return tuple(dict.fromkeys(clean))
@@ -329,14 +318,29 @@ class ModelTierRegistry:
 
 def _validate_provider(value: str) -> str:
     clean = value.strip().casefold()
-    if _UNSAFE_LABEL_RE.search(clean) or not _PROVIDER_RE.fullmatch(clean):
+    # C-12: ``_PROVIDER_RE = ^[a-z][a-z0-9-]{0,31}$`` already rejects ``/``,
+    # subsuming the pre-C-12 char-class slash reject from the now-folded
+    # ``_UNSAFE_LABEL_RE``. The C-1 kernel covers the secret vocabulary.
+    if (
+        _UNSAFE_LABEL_RE.search(clean)
+        or contains_secret_marker(clean)
+        or not _PROVIDER_RE.fullmatch(clean)
+    ):
         raise ValueError("provider label must be a safe server-side provider label")
     return clean
 
 
 def _validate_model(value: str) -> str:
     clean = value.strip().casefold()
-    if _UNSAFE_MODEL_LABEL_RE.search(clean) or not _MODEL_RE.fullmatch(clean):
+    # C-12: ``_MODEL_RE`` allows ``/`` (multi-segment model IDs like
+    # ``openai/gpt-4o``), so the unified ``_UNSAFE_LABEL_RE`` drops ``/`` from
+    # its char class to avoid false-rejecting valid model labels. The C-1
+    # kernel covers the secret vocabulary uniformly with the provider path.
+    if (
+        _UNSAFE_LABEL_RE.search(clean)
+        or contains_secret_marker(clean)
+        or not _MODEL_RE.fullmatch(clean)
+    ):
         raise ValueError("model label must be a safe server-side model label")
     return clean
 

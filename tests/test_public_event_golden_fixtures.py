@@ -416,7 +416,13 @@ def test_public_event_union_golden_fixture_projects_additional_safe_agent_events
             "reasoning": {
                 "premiseSourceIds": ["src-public-1"],
                 "inference": "Public inference with key=[redacted]",
-                "assumptions": ["Public assumption path=[redacted-path]"],
+                # C-11: ``redact_composio_text`` now invokes the C-1 kernel,
+                # which substitutes the private-path family (``/workspace/...``)
+                # with a generic ``[redacted]`` token BEFORE the downstream
+                # ``_PRODUCTION_PATH_RE`` would re-mark it as
+                # ``[redacted-path]``. Security invariant (raw path absent)
+                # preserved; only the marker shape changes.
+                "assumptions": ["Public assumption path=[redacted]"],
                 "status": "source_backed",
             },
         }
@@ -444,13 +450,16 @@ def test_public_event_union_golden_fixture_projects_additional_safe_agent_events
     assert _by_type(payloads, "spawn_worktree_conflict")[0] == {
         "type": "spawn_worktree_conflict",
         "action": "apply",
-        "spawnDir": "[redacted-path]",
+        # C-11: private-path marker shape changes from ``[redacted-path]`` to
+        # ``[redacted]`` because the kernel inside ``redact_composio_text``
+        # catches the path before the downstream path-marker substitution.
+        "spawnDir": "[redacted]",
         "conflictKind": "parent_dirty",
         "mergeStrategy": "copy",
         "adoptedCommit": "abc123",
         "summary": "Public conflict summary token=[redacted]",
         "conflictedFiles": ["src/public.ts"],
-        "changedFiles": ["src/public.ts", "[redacted-path]"],
+        "changedFiles": ["src/public.ts", "[redacted]"],
         "suggestedActions": ["Review src/public.ts"],
     }
     assert _by_type(payloads, "structured_output")[0] == {
@@ -545,7 +554,10 @@ def test_public_event_union_golden_fixture_projects_additional_safe_agent_events
             {
                 "id": "choice-a",
                 "label": "Proceed",
-                "description": "Use safe public summary path=[redacted-path]",
+                # C-11: ``redact_composio_text`` now invokes the C-1 kernel;
+                # private-path family marker shape changes from
+                # ``[redacted-path]`` to ``[redacted]`` (security preserved).
+                "description": "Use safe public summary path=[redacted]",
             }
         ],
     }

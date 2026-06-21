@@ -129,7 +129,19 @@ UNSAFE_TEXT_RE = re.compile(
 )
 
 # Default clip length for fail-open public text scrubs (C-10 homes this here).
+# Single source of truth for the two pre-existing copies that homed independent
+# ``= 200`` literals at the same boundary (REVIEW-A CC-10):
+#   - ``harness/verifier_bus.py:_MAX_PUBLIC_TEXT_CHARS = 200``
+#   - ``evidence/ledger.py:_PUBLIC_SUMMARY_MAX_STRING_LENGTH = 200``
+# Both now import this constant so the cap cannot drift across the public-text
+# boundary.
 MAX_PUBLIC_TEXT_CHARS = 200
+
+# Maximum recursion depth for the public-ref harvest walker
+# (:func:`harness.verifier_bus._collect_public_refs`). C-10 homes this here so
+# the previously-inline literal at the recursion site cannot diverge from any
+# future shared walker. Stdlib + pydantic LEAF — no ``magi_agent.*`` imports.
+PUBLIC_REF_RECURSION_DEPTH = 8
 
 # Defense-in-depth line-drop guard for marker-bearing lines. Copied verbatim
 # from the pre-C-2 ``magi_agent/web_acquisition/policy.py`` (lines 81–86) where

@@ -664,10 +664,17 @@ def test_sse_writer_normalizes_and_sanitizes_camel_preview_aliases() -> None:
     assert "/data/bots/bot-secret/output.txt" not in writer.body
     assert "inputPreview" not in payloads[0]
     assert "outputPreview" not in payloads[1]
+    # C-11: ``redact_composio_text`` now also invokes the C-1 redaction kernel
+    # (single source of truth for the secret/path vocabulary). The kernel
+    # catches the private-filesystem path family directly (``/workspace/...``,
+    # ``/data/bots/...``) and substitutes a plain ``[redacted]`` marker before
+    # the downstream ``_PRODUCTION_PATH_RE`` would otherwise re-mark them as
+    # ``[redacted-path]``. The security invariant (raw path does NOT survive)
+    # is preserved by both forms; the marker shape is the only delta.
     assert payloads[0]["input_preview"] == (
-        "Authorization: Bearer [redacted] key=[redacted] path=[redacted-path]"
+        "Authorization: Bearer [redacted] key=[redacted] path=[redacted]"
     )
-    assert payloads[1]["output_preview"] == "token=[redacted] path=[redacted-path]"
+    assert payloads[1]["output_preview"] == "token=[redacted] path=[redacted]"
 
 
 def test_sse_writer_drops_raw_output_aliases_on_public_events() -> None:

@@ -11,6 +11,10 @@ from magi_agent.evidence.types import (
     validate_evidence_type_name,
 )
 from magi_agent.ops.authority import FalseOnlyAuthorityModel
+from magi_agent.ops.safety import (
+    MAX_PUBLIC_TEXT_CHARS as _MAX_PUBLIC_TEXT_CHARS,
+    PUBLIC_REF_RECURSION_DEPTH as _PUBLIC_REF_RECURSION_DEPTH,
+)
 
 
 VerifierStage = Literal[
@@ -54,7 +58,11 @@ _STAGE_ORDER: tuple[VerifierStage, ...] = (
     "llm_critic",
 )
 _STAGE_RANK = {stage: index + 1 for index, stage in enumerate(_STAGE_ORDER)}
-_MAX_PUBLIC_TEXT_CHARS = 200
+# C-10: ``_MAX_PUBLIC_TEXT_CHARS`` is now re-bound from
+# :data:`magi_agent.ops.safety.MAX_PUBLIC_TEXT_CHARS` at import time (see import
+# alias above). The local module-level rebind kept the public-text clip identical
+# to the pre-C-10 ``200`` literal but now cannot drift from
+# ``evidence/ledger.py``'s sibling clip.
 _PUBLIC_REF_PREFIXES = ("evidence:", "verifier:", "receipt:sha256:", "sha256:")
 
 
@@ -1375,7 +1383,7 @@ def _valid_public_refs(values: Sequence[str]) -> tuple[str, ...]:
 
 
 def _collect_public_refs(value: object, refs: set[str], depth: int = 0) -> None:
-    if depth > 8:
+    if depth > _PUBLIC_REF_RECURSION_DEPTH:
         return
     if isinstance(value, str):
         if value.startswith(_PUBLIC_REF_PREFIXES):
