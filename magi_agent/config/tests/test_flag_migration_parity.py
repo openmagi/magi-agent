@@ -378,6 +378,110 @@ def test_profile_migrated_flags_are_registered_as_profile_bool() -> None:
         assert spec.default is None, spec
 
 
+# ---------------------------------------------------------------------------
+# I-1 batch 4 — tri-state ``MAGI_DOCUMENT_AUTHORING_COVERAGE`` parity.
+#
+# Batch 4 promotes the historically ``kind="bool"`` ``MAGI_DOCUMENT_AUTHORING_COVERAGE``
+# flag to ``kind="str"`` with default ``"off"`` and routes the raw read in
+# :func:`magi_agent.config.env.resolve_document_authoring_coverage_mode`
+# through :func:`magi_agent.config.flags.flag_str`. The 3-mode parsing
+# (off/advisory/block, with legacy-truthy ``1``/``true``/``yes``/``on`` →
+# ``block`` for back-compat, anything else → ``off``) stays in the resolver
+# layer; the registry only owns the env-name and the inert default. The table
+# below pins every documented outcome so any divergence in the typed-reader
+# path is loud — including the explicit ``advisory`` and ``block`` modes plus
+# the "unknown typo falls safe to ``off``" rule that protects operators from
+# accidentally hard-blocking via a misspelled value.
+# ---------------------------------------------------------------------------
+
+_DOCUMENT_AUTHORING_COVERAGE_CASES: tuple[tuple[str | None, str], ...] = (
+    # (env_value_or_None, expected_mode)
+    (None, "off"),            # unset → registry default
+    ("", "off"),              # empty string → off (resolver strips)
+    ("off", "off"),
+    ("OFF", "off"),            # case-insensitive
+    ("  off  ", "off"),        # whitespace-insensitive
+    ("advisory", "advisory"),
+    ("ADVISORY", "advisory"),
+    (" Advisory ", "advisory"),
+    ("block", "block"),
+    ("BLOCK", "block"),
+    (" Block ", "block"),
+    # Legacy truthy values → block (back-compat with the historical bool flag).
+    ("1", "block"),
+    ("true", "block"),
+    ("yes", "block"),
+    ("on", "block"),
+    ("TRUE", "block"),
+    # Legacy falsey values → off.
+    ("0", "off"),
+    ("false", "off"),
+    ("no", "off"),
+    # Unknown values fail safe to off (never silently hard-block on a typo).
+    ("bogus", "off"),
+    ("blockk", "off"),
+    ("advisroy", "off"),
+)
+
+
+@pytest.mark.parametrize(("raw", "expected"), _DOCUMENT_AUTHORING_COVERAGE_CASES)
+def test_document_authoring_coverage_tri_state_parity(
+    raw: str | None, expected: str
+) -> None:
+    """Every documented mode resolves through the new ``flag_str`` path.
+
+    Pins the resolver contract end-to-end: registry default ``"off"`` plus the
+    3-mode parsing (off/advisory/block, legacy-truthy → block, unknown → off).
+    Any future migration that misreads the registry (e.g. uses ``flag_bool``
+    by mistake) would collapse advisory/block onto False and fire this table.
+    """
+    from magi_agent.config.env import resolve_document_authoring_coverage_mode
+
+    env: dict[str, str] = (
+        {} if raw is None else {"MAGI_DOCUMENT_AUTHORING_COVERAGE": raw}
+    )
+    assert resolve_document_authoring_coverage_mode(env) == expected
+
+
+def test_document_authoring_coverage_is_enabled_wrapper_parity() -> None:
+    """The bool wrapper matches ``mode != "off"`` over the full mode space.
+
+    ``is_document_authoring_coverage_enabled`` is the bool surface above the
+    tri-state resolver. Pinning it against the same table guarantees the
+    advisory and block modes both report ``True`` (enabled) and every other
+    outcome reports ``False`` (off / unknown).
+    """
+    from magi_agent.config.env import (
+        is_document_authoring_coverage_enabled,
+        resolve_document_authoring_coverage_mode,
+    )
+
+    for raw, expected_mode in _DOCUMENT_AUTHORING_COVERAGE_CASES:
+        env: dict[str, str] = (
+            {} if raw is None else {"MAGI_DOCUMENT_AUTHORING_COVERAGE": raw}
+        )
+        assert resolve_document_authoring_coverage_mode(env) == expected_mode
+        assert is_document_authoring_coverage_enabled(env) is (expected_mode != "off")
+
+
+def test_document_authoring_coverage_is_registered_as_str() -> None:
+    """The flag is registered with ``kind="str"`` and default ``"off"``.
+
+    Pins the I-1 batch 4 change: the registration was promoted from
+    ``kind="bool"`` / ``default=False`` to ``kind="str"`` / ``default="off"``
+    so the typed reader returns the raw mode string and the resolver maps it
+    to the 3-mode space. A future rename that silently downgrades the kind to
+    ``bool`` would collapse advisory/block onto a strict-truthy True and fire
+    here.
+    """
+    from magi_agent.config.flags import FLAGS_BY_NAME
+
+    spec = FLAGS_BY_NAME["MAGI_DOCUMENT_AUTHORING_COVERAGE"]
+    assert spec.kind == "str"
+    assert spec.default == "off"
+    assert spec.scope == "public"
+
+
 def test_profile_default_env_resolves_to_on(monkeypatch: pytest.MonkeyPatch) -> None:
     """Sanity: ``env=None`` (≡ live process env unset) reads ON under full profile.
 

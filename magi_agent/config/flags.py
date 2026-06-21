@@ -974,10 +974,24 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_EVIDENCE_COMPLETION_GATE_ENABLED",
         summary="Block turn completion when required evidence is missing (default-ON full profile).",
     ),
-    _b(
-        "MAGI_DOCUMENT_AUTHORING_COVERAGE",
-        summary="Block document turns on failed DocumentCoverage (vs audit-only).",
+    # Tri-state mode flag (off/advisory/block), NOT a strict-truthy bool.
+    # ``resolve_document_authoring_coverage_mode`` parses the mode; the legacy
+    # truthy form (``1``/``true``/``yes``/``on``) is recognised at resolver level
+    # as ``block`` for back-compat. Registered as ``kind="str"`` so the typed
+    # reader returns the raw string and the resolver maps to the 3-mode space.
+    FlagSpec(
+        name="MAGI_DOCUMENT_AUTHORING_COVERAGE",
+        default="off",
         scope="public",
+        stage="stage1",
+        summary=(
+            "Tri-state document-coverage gate (off|advisory|block). off keeps the "
+            "DocumentCoverage evidence audit-only; advisory records counts without "
+            "blocking; block flips the pre-final verifier-bus decision when "
+            "coverage fails. Legacy truthy values resolve to ``block`` for "
+            "back-compat. Strict default ``off``."
+        ),
+        kind="str",
     ),
     _b(
         "MAGI_SHACL_VERIFIER_ENABLED",
@@ -1310,6 +1324,17 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_CLI_ENABLED",
         default=True,
         summary="Enable the magi CLI surface (headless NDJSON + Textual TUI); flat default-ON.",
+    ),
+    _b(
+        "CORE_AGENT_PYTHON_CHAT_ROUTE",
+        scope="hosted",
+        summary=(
+            "Hosted-runtime authority gate for the python chat route. ON routes "
+            "the hosted ``/v1/chat/*`` and gate1a selected-attempt preflight "
+            "endpoints through the Python serve path; OFF returns "
+            "``chat_route_disabled`` (legacy node fallback). Strict default-OFF; "
+            "hosted-only (excluded from the public env-reference)."
+        ),
     ),
     _b(
         "MAGI_HOSTED_GOVERNED_TURN_ENABLED",

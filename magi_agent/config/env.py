@@ -2524,9 +2524,15 @@ def resolve_document_authoring_coverage_mode(env: Mapping[str, str] | None = Non
     In ``advisory`` mode the verifier bus still computes the failed-coverage
     count (for telemetry / false-block-rate measurement) but the engine does not
     let it flip the pre-final decision to ``block``.
+
+    The raw string is read via :func:`magi_agent.config.flags.flag_str` so the
+    registry is the single source of truth for the env-name and default; the
+    3-mode parsing (with legacy-truthy → ``block`` back-compat) stays here at
+    the resolver layer.
     """
-    source = os.environ if env is None else env
-    raw = (source.get(MAGI_DOCUMENT_AUTHORING_COVERAGE_ENV) or "").strip().lower()
+    from .flags import flag_str
+
+    raw = (flag_str(MAGI_DOCUMENT_AUTHORING_COVERAGE_ENV, env=env) or "").strip().lower()
     if not raw:
         return "off"
     if raw in DOCUMENT_AUTHORING_COVERAGE_MODES:
