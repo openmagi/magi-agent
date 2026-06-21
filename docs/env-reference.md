@@ -4,6 +4,7 @@ ERROR: env-reference document missing markers '<!-- BEGIN GENERATED FLAGS (scrip
 Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/generate_env_reference.py`. Do not edit this section by hand; register the flag in the registry and regenerate.
 
 - `MAGI_APPLY_PATCH_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Enable the apply-patch tool for multi-file edits (default-ON full profile).
+- `MAGI_AUTOMATION_METHODOLOGY_ENABLED` (default off) — Append the <automation_methodology> prompt block (deliverable up front / goal->plan->evidence lifecycle / step confirmation) in build_cli_instruction. Guidance-only, not enforcing.
 - `MAGI_BROWSER_TOOL_ENABLED` (default off) — Expose the browser-use autonomous vision BrowserTask tool.
 - `MAGI_CHANNEL_LIVE_DISCORD` (default off) — Enable the live Discord channel watcher (self-host only): inbound gateway messages drive a governed turn and the reply is delivered back to the same channel. Requires MAGI_DISCORD_BOT_TOKEN and the discord extra (pip install magi-agent[discord]).
 - `MAGI_CHANNEL_LIVE_SLACK` (default off) — Enable the live Slack channel watcher (self-host only): inbound Socket Mode messages drive a governed turn and the reply is delivered back to the same channel/thread. Requires MAGI_SLACK_APP_TOKEN + MAGI_SLACK_BOT_TOKEN and the slack extra (pip install magi-agent[slack]).
@@ -12,6 +13,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_CODE_ACTION_ENABLED` (default off) — Expose the persistent PythonExec code-execution tool.
 - `MAGI_CODE_ACTION_MAX_OUTPUT_BYTES` (default `8192`) — Head+tail output cap per stream (bytes) for PythonExec results; clamped to 1024-65536.
 - `MAGI_CODE_ACTION_TIMEOUT_MS` (default `30000`) — Per-call wall-clock timeout (ms) for the PythonExec tool; clamped to 1000-120000.
+- `MAGI_CODING_CONTEXT_ENABLED` (default off) — Append the C10 <coding_context> auto-injection prompt block (repo map + recent git changes + entry points + top-level directory stats) in build_cli_instruction when workspace_root is provided. Guidance-only, not enforcing.
 - `MAGI_CODING_REPAIR_LOOP_ENABLED` (default off) — Enable the iterative coding repair loop on failing edits.
 - `MAGI_COMPACTION_ANCHORED_SUMMARY_ENABLED` (default off) — Anchored/incremental compaction summary: feed the prior injected summary as a previous-summary anchor so the model updates/merges instead of re-summarizing from scratch (requires MAGI_COMPACTION_SUMMARIZE_ENABLED). Strict default-OFF (OFF is byte-identical to today).
 - `MAGI_COMPACTION_MANUAL_ENABLED` (default off) — Make manual /compact actually force a context compaction on the next model turn (cross-turn one-shot signal consumed by the compaction plugin), regardless of token threshold. Requires MAGI_CONTEXT_COMPACTION_ENABLED. Strict default-OFF (OFF keeps the /compact stub acknowledgement byte-identical to today).
@@ -79,9 +81,13 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_OBSERVABILITY_ENABLED` (default off) — Enable the hook-tap observability module (bot-activity visibility).
 - `MAGI_OUTPUT_CONTINUATION_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Enable automatic continuation of truncated model output (default-ON full profile).
 - `MAGI_PERSISTENT_PYTHON_ENABLED` (default off) — Register + bind the neutral tools-persistent-python pack's PersistentPython tool (CodeAct: persistent interpreter namespace).
+- `MAGI_PROMPT_EXAMPLES_ENABLED` (default off) — Append the <action_discipline_examples> prompt block (positive/negative contrast pairs: act-vs-ask, finish-vs-defer) in build_cli_instruction.
+- `MAGI_PROMPT_REDFLAGS_ENABLED` (default off) — Append the <red_flags> anti-rationalization prompt block ("this thought means stop and correct course" table) in build_cli_instruction.
+- `MAGI_PROMPT_SEARCH_RULES_ENABLED` (default off) — Append the search-decision heuristics prompt block in build_cli_instruction. Even when ON the block only fires when web tools are available (BRAVE_API_KEY AND FIRECRAWL_API_KEY).
 - `MAGI_RECIPE_ROUTING_LLM_ENABLED` (default off) — Let the model select recipe packs by their when_to_use descriptions instead of the selector-membership path; strict default-OFF (OFF is byte-identical to today).
 - `MAGI_RESEARCH_FACT_GUIDANCE_ENABLED` (default off) — Enable research_fact cross-check guidance: consolidated brief header/footer plus the <web_research> system-prompt block (requires BRAVE_API_KEY + FIRECRAWL_API_KEY).
 - `MAGI_RESEARCH_GOVERNANCE_MODE` (default `off`) — Research governance mode. `off` is inert; `audit` records source/citation mismatches without blocking.
+- `MAGI_RESEARCH_METHODOLOGY_ENABLED` (default off) — Append the <research_methodology> prompt block (multi-source cross-check / grounding-first / primary-source preference / citation discipline) in build_cli_instruction. Guidance-only.
 - `MAGI_RIPGREP_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Use ripgrep for fast in-repo search when available (default-ON full profile).
 - `MAGI_RUNTIME_PROFILE` (no default) — Runtime profile selector (safe/off/minimal/conservative/eval/lab). Safe profiles disable default-ON resilience seams; lab opts into the full experimental flat-flag tier (local-full + experimental extras).
 - `MAGI_SELF_INTROSPECTION_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Advertise the InspectSelfEvidence tool (default-ON full profile).
@@ -100,6 +106,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_SUBAGENT_GOVERNED_TURN_ENABLED` (default off) — Route spawned subagents through run_governed_turn (governed turn-loop) instead of the bare run_async child loop. Default OFF keeps the legacy child path byte-identical.
 - `MAGI_SUBAGENT_TOOL_TIGHTEN_ONLY_ENABLED` (default off) — Intersect a spawned subagent's tool set with the parent's effective tools (tighten-only) at child-runtime build. Default OFF / empty parent cap is a no-op.
 - `MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED` (default off) — Live-SWE-style tool-synthesis: per-step reflection nudge + 'create your own tools' recipe block (frontier-tier models only).
+- `MAGI_TOOL_USAGE_GUIDANCE_ENABLED` (default off) — Synthesize per-tool 'Use when / Do NOT use when' usage-guidance blocks into gate5b ADK tool descriptions. OFF keeps every gate5b tool docstring byte-identical to today.
 - `MAGI_USAGE_PRICE_IN_PER_MTOK` (no default) — Local Usage dashboard: USD per 1M INPUT tokens for the active model. Set this (and the OUT counterpart) to price models litellm does not have in its map; overrides litellm pricing when set.
 - `MAGI_USAGE_PRICE_OUT_PER_MTOK` (no default) — Local Usage dashboard: USD per 1M OUTPUT tokens for the active model. Pairs with MAGI_USAGE_PRICE_IN_PER_MTOK.
 - `MAGI_VERIFY_ANSWER_QUALITY` (default off) — Block a final answer that does not genuinely address the user's task (empty / pure tool-or-JSON echo / clearly unrelated) via the LLM criterion judge; requires a critic model (MAGI_EGRESS_GATE_ENABLED). Strict default-OFF and inert unless explicitly set (or the answer-quality Customize preset is enabled).
