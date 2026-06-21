@@ -15,6 +15,25 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.63
+
+### Added
+- Memory tab now surfaces the workspace archive read-only (#819): the
+  dashboard exposes the persisted memory archive alongside the live
+  notebook so self-hosters can browse past entries without leaving the
+  Memory surface.
+- Session-end fact extraction is wired through CLI + serve boundaries
+  with new `runtime/active_sessions.py` and `runtime/session_extract_runtime.py`
+  modules (#821). Local default-ON so self-hosters benefit; hosted stays
+  default-OFF.
+
+### Changed
+- Dogfood / lab profile (`scripts/dogfood-full-on.env`) catches up with
+  25 capability flags that had already landed in the registry but weren't
+  yet flipped on for lab (#820), and arms the live Slack + Discord channel
+  watchers behind their import-safe gates (#823). Hosted and bare
+  profiles unchanged; default-OFF posture preserved everywhere else.
+
 ## 0.1.62
 
 ### Added
