@@ -312,6 +312,13 @@ async def _local_adk_chat_sse(
         local_runner_policy_routing_enabled_from_env,
     )
     from magi_agent.config.env import LOCAL_DEV_MODEL_SENTINEL
+    from magi_agent.runtime.goal_loop_policy import (
+        build_goal_loop_policy_from_request,
+    )
+    from magi_agent.runtime.per_turn_goal_loop_context import (
+        reset_per_turn_goal_loop_policy,
+        set_per_turn_goal_loop_policy,
+    )
 
     session_id = _local_chat_string(payload, "sessionId", "local-dashboard")
     turn_id = _local_chat_string(payload, "turnId", f"{session_id}:turn")
@@ -383,10 +390,15 @@ async def _local_adk_chat_sse(
     # leaves the override unset so the env path remains authoritative for this
     # turn (byte-identical to pre-PR2c behavior).
     _payload_reasoning_effort: str | None = None
+    _payload_goal_mode_requested = False
     if isinstance(payload, Mapping):
         _raw_reasoning = payload.get("reasoningEffort")
         if isinstance(_raw_reasoning, str):
             _payload_reasoning_effort = _raw_reasoning
+        # PR-B (goal-loop wire): the composer's Goal-mission toggle (#835)
+        # surfaces here as ``goalMode: true``. Phase 1 is opt-in, so absence /
+        # falsy values must keep behavior byte-identical to today.
+        _payload_goal_mode_requested = bool(payload.get("goalMode"))
     # Scope the per-turn override across the LiteLlm build (inside
     # ``build_headless_runtime``) AND the entire streaming loop. Child/subagent
     # runners can spawn during the turn and call ``_build_litellm_model`` in
@@ -394,6 +406,17 @@ async def _local_adk_chat_sse(
     # ``finally`` restores the prior ContextVar value so concurrent or
     # back-to-back turns never leak state.
     _reasoning_token = set_per_turn_reasoning_effort(_payload_reasoning_effort)
+    # Build the goal-loop policy (PR-B). Returns ``None`` unless the per-send
+    # toggle is on AND the master ``MAGI_GOAL_LOOP_ENABLED`` flag is truthy
+    # AND the objective is non-empty — i.e. default-OFF is byte-identical to
+    # today. The engine reads the policy via the ContextVar in PR-C; this PR
+    # is wiring only (no engine behavior change).
+    _goal_loop_policy = build_goal_loop_policy_from_request(
+        goal_mode_requested=_payload_goal_mode_requested,
+        objective=prompt,
+        env=os.environ,
+    )
+    _goal_loop_token = set_per_turn_goal_loop_policy(_goal_loop_policy)
     try:
         headless = build_headless_runtime(
             cwd=workspace_root,
@@ -461,6 +484,7 @@ async def _local_adk_chat_sse(
                 yield _sse_data({"choices": [{"index": 0, "delta": {"content": delta}}]})
     finally:
         reset_per_turn_reasoning_effort(_reasoning_token)
+        reset_per_turn_goal_loop_policy(_goal_loop_token)
     # ── TURN-END MEMORY HOOK (PR-B) ─────────────────────────────────────────
     # This is the turn-finalization point of the live local chat path: the
     # engine stream has drained, so the assistant turn is complete. Flush a

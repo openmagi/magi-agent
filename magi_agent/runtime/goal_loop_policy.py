@@ -1,0 +1,182 @@
+"""Runtime ``GoalLoopPolicy`` — the per-turn shape PR-C's clean-break judge
+will read to decide whether to keep the agent running until the original
+objective is complete (Hermes "Ralph loop" pattern).
+
+PR-A (#835) restored the per-send Goal-mission toggle on the composer.
+PR-B (this module + wiring): parses ``goalMode`` from the chat-completions
+payload, constructs the runtime policy, and threads it through a per-turn
+ContextVar so the engine (PR-C) can read it without signature changes
+through four layers of builders.
+
+PR-B is intentionally a NO-OP for the engine. The engine reads the policy in
+PR-C and gates the clean-break judge call on it.
+
+Design reference:
+  docs/plans/2026-06-21-magi-goal-loop-clean-break-judge-design.md (host repo)
+  Section 4.2.2 (policy shape) + Section 5.2 (backend wire).
+
+Naming separation: the older :mod:`magi_agent.harness.goal_loop` module holds
+a large pydantic *contract* schema (ownership scopes, opt-out states, spawn
+depth policies, ...). That schema is metadata for cross-system audits and is
+NOT the runtime shape the engine consumes per-turn. We intentionally keep the
+runtime shape minimal here so PR-C can wire it without first solving the
+broader scaffold-activation question.
+"""
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+
+#: Default upper bound on clean-break re-invocations within a single goal mission.
+#: Mirrors Hermes ``DEFAULT_MAX_TURNS=20`` (the production reference). Tunable
+#: per deployment via ``MAGI_GOAL_LOOP_MAX_TURNS``.
+DEFAULT_GOAL_LOOP_MAX_TURNS = 20
+
+#: Default number of judge JSON-parse failures tolerated before the engine
+#: terminates the goal mission (fail-CLOSED — we do not loop forever on a
+#: broken judge model). Mirrors Hermes' bounded fallback.
+DEFAULT_GOAL_LOOP_JUDGE_PARSE_FAILURES_BUDGET = 2
+
+#: Default continuation prompt — fed back to the SAME session when the judge
+#: returns ``complete=false``. Deliberately generic and short so the model
+#: cannot anchor on the wording and re-describe its plan again; the original
+#: system prompt + tool catalog do all the heavy lifting (matches Hermes'
+#: prefix-cache-preserving design).
+DEFAULT_CONTINUATION_TEMPLATE = (
+    "The original objective is not yet complete. Continue executing the next "
+    "concrete step now, using the available tools. Do not restate the plan or "
+    "describe what you will do — just do it."
+)
+
+#: ``MAGI_GOAL_LOOP_ENABLED`` — master kill-switch flag. Already present in
+#: ``LAB_EXPERIMENTAL_FLAGS`` (default-OFF for non-lab profiles). PR-B reads
+#: it as a strict-truthy admission to mirror existing magi flag patterns.
+_GOAL_LOOP_ENABLED_ENV = "MAGI_GOAL_LOOP_ENABLED"
+_GOAL_LOOP_MAX_TURNS_ENV = "MAGI_GOAL_LOOP_MAX_TURNS"
+_GOAL_LOOP_JUDGE_PROVIDER_ENV = "MAGI_GOAL_LOOP_JUDGE_PROVIDER"
+_GOAL_LOOP_JUDGE_MODEL_ENV = "MAGI_GOAL_LOOP_JUDGE_MODEL"
+_GOAL_LOOP_JUDGE_PARSE_FAILURES_BUDGET_ENV = (
+    "MAGI_GOAL_LOOP_JUDGE_PARSE_FAILURES_BUDGET"
+)
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+@dataclass(frozen=True)
+class GoalLoopPolicy:
+    """Per-turn goal-loop policy consumed by the engine's clean-break branch.
+
+    Fields are minimal by design — anything not strictly needed by the judge
+    call lives elsewhere (e.g. recipe / persona / model selection comes from
+    the request's existing model overlay, not from this policy). The engine
+    treats this object as opaque: presence ⇒ goal mode is on for this turn,
+    absence ⇒ existing single-turn behavior is byte-identical.
+    """
+
+    #: Always ``True`` when this object exists (a falsy ``enabled`` would mean
+    #: "policy present but disabled", which is the same as "no policy" and we
+    #: collapse that to ``None`` at the factory). Kept explicit so the engine
+    #: can defensively recheck without branching on object identity alone.
+    enabled: bool
+    #: The original user objective — fed to the judge so the model can decide
+    #: "is the objective complete?" against the agent's last final-text turn.
+    objective: str
+    #: Upper bound on clean-break re-invocations within this goal mission.
+    max_turns: int
+    #: Optional provider override for the judge call (cheap-tier preferred).
+    #: ``None`` defers selection to the engine's key-aware fallback at judge
+    #: time (chosen so PR-B can ship without making provider decisions yet).
+    judge_provider: str | None
+    #: Optional model override for the judge call.
+    judge_model: str | None
+    #: Number of judge JSON-parse failures tolerated before terminating the
+    #: goal mission (fail-CLOSED). 0 means terminate on the first parse fail.
+    judge_parse_failures_budget: int
+    #: Generic continuation prompt re-fed when the judge says not-complete.
+    continuation_template: str
+
+
+def _is_truthy(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    return value.strip().lower() in _TRUTHY
+
+
+def _parse_max_turns(raw: object) -> int:
+    if not isinstance(raw, str) or not raw.strip():
+        return DEFAULT_GOAL_LOOP_MAX_TURNS
+    try:
+        parsed = int(raw.strip(), 10)
+    except (TypeError, ValueError):
+        return DEFAULT_GOAL_LOOP_MAX_TURNS
+    if parsed <= 0:
+        return DEFAULT_GOAL_LOOP_MAX_TURNS
+    return parsed
+
+
+def _parse_parse_failures_budget(raw: object) -> int:
+    if not isinstance(raw, str) or not raw.strip():
+        return DEFAULT_GOAL_LOOP_JUDGE_PARSE_FAILURES_BUDGET
+    try:
+        parsed = int(raw.strip(), 10)
+    except (TypeError, ValueError):
+        return DEFAULT_GOAL_LOOP_JUDGE_PARSE_FAILURES_BUDGET
+    if parsed < 0:
+        return DEFAULT_GOAL_LOOP_JUDGE_PARSE_FAILURES_BUDGET
+    return parsed
+
+
+def _clean_optional_str(raw: object) -> str | None:
+    if not isinstance(raw, str):
+        return None
+    stripped = raw.strip()
+    return stripped or None
+
+
+def build_goal_loop_policy_from_request(
+    *,
+    goal_mode_requested: bool,
+    objective: str,
+    env: Mapping[str, str],
+) -> GoalLoopPolicy | None:
+    """Construct a ``GoalLoopPolicy`` for this request, or ``None`` if disabled.
+
+    Returns ``None`` (which the engine treats as "single-turn, byte-identical
+    to today") in any of:
+
+    * ``goal_mode_requested`` is false (the toggle was off — Phase 1 opt-in).
+    * ``MAGI_GOAL_LOOP_ENABLED`` is not strictly truthy in *env* (master
+      kill-switch; default-OFF outside lab/dogfood profiles).
+    * ``objective`` is empty after trimming (nothing meaningful to judge).
+
+    Otherwise returns a populated policy. Provider/model selection for the
+    judge call is left optional here so PR-B can ship without making the
+    provider decision yet; PR-C resolves it from the deployment's configured
+    keys at judge-call time.
+    """
+    if not goal_mode_requested:
+        return None
+    if not _is_truthy(env.get(_GOAL_LOOP_ENABLED_ENV)):
+        return None
+    cleaned_objective = (objective or "").strip()
+    if not cleaned_objective:
+        return None
+    return GoalLoopPolicy(
+        enabled=True,
+        objective=cleaned_objective,
+        max_turns=_parse_max_turns(env.get(_GOAL_LOOP_MAX_TURNS_ENV)),
+        judge_provider=_clean_optional_str(env.get(_GOAL_LOOP_JUDGE_PROVIDER_ENV)),
+        judge_model=_clean_optional_str(env.get(_GOAL_LOOP_JUDGE_MODEL_ENV)),
+        judge_parse_failures_budget=_parse_parse_failures_budget(
+            env.get(_GOAL_LOOP_JUDGE_PARSE_FAILURES_BUDGET_ENV)
+        ),
+        continuation_template=DEFAULT_CONTINUATION_TEMPLATE,
+    )
+
+
+__all__ = [
+    "DEFAULT_GOAL_LOOP_MAX_TURNS",
+    "DEFAULT_GOAL_LOOP_JUDGE_PARSE_FAILURES_BUDGET",
+    "DEFAULT_CONTINUATION_TEMPLATE",
+    "GoalLoopPolicy",
+    "build_goal_loop_policy_from_request",
+]
