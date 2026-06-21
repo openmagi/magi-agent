@@ -24,8 +24,8 @@
  * page route now mounts this hub.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ShieldCheck, Wrench, Layers, Webhook, Wand2 } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { ShieldCheck, Wrench, Layers, Webhook, Wand2, Plus } from "lucide-react";
 import {
   useCustomize,
   patchToolOverride,
@@ -41,17 +41,23 @@ import type {
   ShaclCompileResponse,
 } from "@/lib/customize-api";
 import { useAgentFetch } from "@/lib/local-api";
+import { AddRuleModal, type AddRuleChoice } from "./add-rule-modal";
+import {
+  CustomRulesSection,
+} from "./verification-rule-modal";
+import { CustomChecksSection } from "./custom-checks-section";
 import { CustomToolPanel } from "./custom-tool-modal";
+import { GuidancePanel } from "./guidance-panel";
 import { PageHint } from "./page-hint";
+import { RulesTable } from "./rules-table";
 import { SeamBuilderPanel } from "./seam-builder-panel";
-import { VerificationTabs } from "./verification-tabs";
 
 export type CustomizeSection =
-  | "verification"
+  | "rules"
+  | "guidance"
   | "tools"
   | "recipes"
-  | "hooks"
-  | "advanced";
+  | "hooks";
 
 const SECTIONS: ReadonlyArray<{
   id: CustomizeSection;
@@ -60,11 +66,18 @@ const SECTIONS: ReadonlyArray<{
   description: string;
 }> = [
   {
-    id: "verification",
-    label: "Verification",
+    id: "rules",
+    label: "Rules",
     icon: <ShieldCheck className="h-4 w-4" />,
     description:
-      "Built-in preset toggles, user-authored gates, and soft prompt guidance. Use the inner tabs to pick by what you want to do.",
+      "Everything that gates the agent — built-in presets, your custom rules, after-tool checks, and SeamSpec rewires, all in one list.",
+  },
+  {
+    id: "guidance",
+    label: "Guidance",
+    icon: <Wand2 className="h-4 w-4" />,
+    description:
+      "Soft prompt instructions injected into the system prompt every turn. The model is asked to follow them but is not forced to.",
   },
   {
     id: "tools",
@@ -85,16 +98,9 @@ const SECTIONS: ReadonlyArray<{
     description:
       "Read-only view of file-authored lifecycle handlers (Python entry points registered in settings.json). The dashboard does not write these by design.",
   },
-  {
-    id: "advanced",
-    label: "Advanced",
-    icon: <Wand2 className="h-4 w-4" />,
-    description:
-      "Rewire an existing built-in preset via natural language (SeamSpec). This does NOT add a new gate — it changes how an existing preset wires (opt-in/opt-out, which evidence ref it controls). For adding a new gate, use Verification → Gates. Default-OFF behind MAGI_CUSTOMIZE_SEAM_SPEC_ENABLED.",
-  },
 ];
 
-const DEFAULT_SECTION: CustomizeSection = "verification";
+const DEFAULT_SECTION: CustomizeSection = "rules";
 
 
 interface CustomizeHubProps {
@@ -323,22 +329,28 @@ export function CustomizeHub({
           <p className="mt-1 text-sm leading-6 text-secondary">{active.description}</p>
         </header>
 
-        {section === "verification" ? (
-          <VerificationTabs
-            catalog={data.catalog.verification}
+        {section === "rules" ? (
+          <RulesSectionMount
+            data={data}
+            reload={reload}
             presetOverrides={presetOverrides}
             pendingPresets={presetPending}
             onTogglePreset={handleTogglePreset}
             customRules={customRules}
+            customRuleBusy={customRuleBusy}
             onAddCustomRule={handleAddCustomRule}
             onToggleCustomRule={handleToggleCustomRule}
             onDeleteCustomRule={handleDeleteCustomRule}
-            customRuleBusy={customRuleBusy}
+            onCompileShacl={handleCompileShacl}
+            ruleError={ruleError}
+          />
+        ) : null}
+
+        {section === "guidance" ? (
+          <GuidancePanel
             userRules={userRules}
             rulesSaving={rulesSaving}
             onSaveRules={handleSaveRules}
-            onCompileShacl={handleCompileShacl}
-            error={ruleError}
           />
         ) : null}
 
@@ -355,17 +367,147 @@ export function CustomizeHub({
         {section === "recipes" ? <RecipesPanel recipes={recipes} /> : null}
 
         {section === "hooks" ? <HooksPanel /> : null}
-
-        {section === "advanced" ? (
-          <SeamBuilderPanel
-            seamSpecs={data.overrides.verification.seam_specs ?? []}
-            onChange={reload}
-          />
-        ) : null}
       </section>
     </div>
   );
 }
+
+
+/**
+ * Rules section mount — orchestrates the unified RulesTable plus the
+ * AddRuleModal + per-choice inline authoring form. The forms themselves
+ * (CustomRulesSection / CustomChecksSection / SeamBuilderPanel) are reused
+ * as-is so authoring logic stays exactly the same; this wrapper is
+ * navigation-only.
+ */
+function RulesSectionMount({
+  data,
+  reload,
+  presetOverrides,
+  pendingPresets,
+  onTogglePreset,
+  customRules,
+  customRuleBusy,
+  onAddCustomRule,
+  onToggleCustomRule,
+  onDeleteCustomRule,
+  onCompileShacl,
+  ruleError,
+}: {
+  data: NonNullable<ReturnType<typeof useCustomize>["data"]>;
+  reload: () => void;
+  presetOverrides: Record<string, boolean>;
+  pendingPresets: Set<string>;
+  onTogglePreset: (id: string, next: boolean) => void;
+  customRules: CustomRule[];
+  customRuleBusy: boolean;
+  onAddCustomRule: (rule: CustomRule) => void;
+  onToggleCustomRule: (rule: CustomRule, enabled: boolean) => void;
+  onDeleteCustomRule: (id: string) => void;
+  onCompileShacl: (
+    nlText: string,
+    sampleRecords?: unknown[],
+    priorTurns?: ConversationTurn[],
+  ) => Promise<ShaclCompileResponse>;
+  ruleError: string | null;
+}): React.ReactElement {
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [activeChoice, setActiveChoice] = useState<AddRuleChoice | null>(null);
+  const seamSpecs = data.overrides.verification.seam_specs ?? [];
+
+  return (
+    <div className="space-y-5">
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => setAddModalOpen(true)}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-primary/90"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Add rule
+        </button>
+      </div>
+
+      {ruleError ? (
+        <div className="rounded-lg border border-red-500/25 bg-red-500/[0.06] px-3 py-2 text-xs text-red-600">
+          {ruleError}
+        </div>
+      ) : null}
+
+      <RulesTable
+        catalog={data.catalog.verification}
+        presetOverrides={presetOverrides}
+        pendingPresets={pendingPresets}
+        onTogglePreset={onTogglePreset}
+        customRules={customRules}
+        customRuleBusy={customRuleBusy}
+        onToggleCustomRule={onToggleCustomRule}
+        onDeleteCustomRule={onDeleteCustomRule}
+        seamSpecs={seamSpecs}
+      />
+
+      {activeChoice ? (
+        <section
+          aria-labelledby="rules-active-form"
+          className="rounded-xl border border-primary/20 bg-primary/[0.02] p-4"
+        >
+          <header className="mb-3 flex items-center justify-between">
+            <h3
+              id="rules-active-form"
+              className="text-sm font-semibold text-foreground"
+            >
+              Authoring: {LABEL_FOR_CHOICE[activeChoice]}
+            </h3>
+            <button
+              type="button"
+              onClick={() => setActiveChoice(null)}
+              className="rounded-lg px-2 py-1 text-[11px] font-medium text-secondary hover:bg-black/[0.04]"
+            >
+              Close
+            </button>
+          </header>
+
+          {activeChoice === "block-answer" || activeChoice === "restrict-tool" ? (
+            <CustomRulesSection
+              menu={data.catalog.verification.customRuleMenu}
+              rules={customRules}
+              busy={customRuleBusy}
+              onAdd={onAddCustomRule}
+              onToggle={onToggleCustomRule}
+              onDelete={onDeleteCustomRule}
+              onCompileShacl={onCompileShacl}
+            />
+          ) : null}
+
+          {activeChoice === "filter-result" ? (
+            <CustomChecksSection busy={customRuleBusy} />
+          ) : null}
+
+          {activeChoice === "rewire-builtin" ? (
+            <SeamBuilderPanel seamSpecs={seamSpecs} onChange={reload} />
+          ) : null}
+        </section>
+      ) : null}
+
+      <AddRuleModal
+        open={addModalOpen}
+        onClose={() => setAddModalOpen(false)}
+        onPick={(choice) => {
+          setActiveChoice(choice);
+          setAddModalOpen(false);
+        }}
+      />
+    </div>
+  );
+}
+
+
+const LABEL_FOR_CHOICE: Record<AddRuleChoice, string> = {
+  "block-answer": "Block bad answer (pre-final)",
+  "restrict-tool": "Restrict tool (before-tool)",
+  "filter-result": "Filter tool result (after-tool)",
+  "rewire-builtin": "Rewire built-in preset (SeamSpec)",
+};
 
 
 /**
