@@ -25,8 +25,9 @@ describe("CustomizeHub — Phase 4 full-page sub-nav surface", () => {
     expect(src).toContain("SeamBuilderPanel");
   });
 
-  it("explains the Hook vs Gate vs Preset boundary so users do not author the wrong shape", () => {
-    expect(src).toContain("Hook vs Gate vs Preset");
+  it("renders Hooks via a PageHint card pointing to Gates/Presets for the wrong-shape cases", () => {
+    expect(src).toContain("PageHint");
+    expect(src).toContain("Hooks — Python callables");
   });
 
   it("clarifies that Advanced rewires presets rather than adding new gates", () => {

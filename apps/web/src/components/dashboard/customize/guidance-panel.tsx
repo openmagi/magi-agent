@@ -19,6 +19,8 @@
 
 import React, { useEffect, useState } from "react";
 
+import { PageHint } from "./page-hint";
+
 
 export interface GuidancePanelProps {
   userRules: string;
@@ -38,12 +40,22 @@ export function GuidancePanel({
 
   return (
     <div className="space-y-3">
-      <div className="rounded-xl border border-amber-500/30 bg-amber-50/60 px-4 py-3 text-xs leading-relaxed text-amber-900">
-        <strong>Soft instructions.</strong> Free-text injected into the system
-        prompt every turn. The model is asked to follow them but is not
-        deterministically forced to — for hard enforcement, use Presets or
-        Gates instead.
-      </div>
+      <PageHint
+        tone="warning"
+        title="Soft instructions — the model can ignore them"
+        can={[
+          { text: <>Style and tone preferences (citation format, voice)</> },
+          { text: <>Soft reminders the agent should generally follow</> },
+        ]}
+        cannot={[
+          { text: <>Safety-critical rules → use <strong>Gates</strong></> },
+          { text: <>Built-in preset toggles → use <strong>Presets</strong></> },
+        ]}
+        note={
+          <>Free-text injected into the system prompt every turn. The
+          model is not deterministically forced to obey.</>
+        }
+      />
       <textarea
         aria-label="Freeform guidance"
         value={draft}
