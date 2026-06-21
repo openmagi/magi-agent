@@ -40,6 +40,7 @@ import {
   type SeamSpecDoc,
 } from "@/lib/customize-api";
 import { useAgentFetch } from "@/lib/local-api";
+import { PageHint } from "./page-hint";
 
 
 export interface SeamBuilderPanelProps {
@@ -122,24 +123,27 @@ export function SeamBuilderPanel({
 
   return (
     <div className="space-y-6">
-      <section className="rounded-xl border border-amber-500/30 bg-amber-50/60 px-4 py-3 text-xs leading-relaxed text-amber-900">
-        <p className="font-semibold">
-          Advanced — rewires existing presets, does not add new gates
-        </p>
-        <p className="mt-1">
-          A SeamSpec mutates the live PresetSeam catalog: it can flip a built-in
-          preset between opt-in and opt-out, swap which evidence refs a preset
-          controls, or add a brand-new preset id. To author a brand-new gate
-          (deterministic check, LLM judge, tool-permission rule, after-tool
-          regex), use <strong>Verification → Gates</strong> instead — that
-          surface is the right tool for adding behavior. Use this page only
-          when you need to change how an existing preset is wired.
-          Misconfiguring a seam can silently disable an enforcement gate; the
-          compile / review / approve flow exists so a human verifies every
-          change before the runtime consumes it. Default-OFF behind{" "}
-          <code>MAGI_CUSTOMIZE_SEAM_SPEC_ENABLED</code>.
-        </p>
-      </section>
+      <PageHint
+        tone="warning"
+        title="Rewire existing presets — does NOT add new gates"
+        can={[
+          { text: <>Flip a built-in preset between <strong>opt-in</strong> and <strong>opt-out</strong></> },
+          { text: <>Swap which <code>controls_refs</code> a preset enforces</> },
+          { text: <>Add a brand-new <code>preset_id</code> that mutates wiring</> },
+        ]}
+        cannot={[
+          { text: <>Author a brand-new gate → use <strong>Verification → Gates</strong></> },
+          { text: <>Run arbitrary Python at lifecycle events → use <strong>Hooks</strong></> },
+        ]}
+        note={
+          <>
+            Misconfiguring a seam can silently disable an enforcement gate.
+            The compile → review → activate flow forces a human verdict
+            before the runtime consumes the change. Default-OFF behind{" "}
+            <code>MAGI_CUSTOMIZE_SEAM_SPEC_ENABLED</code>.
+          </>
+        }
+      />
 
       <section className="space-y-3">
         <label htmlFor="seam-nl" className="block text-sm font-semibold text-foreground">

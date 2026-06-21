@@ -79,7 +79,7 @@ const TABS: ReadonlyArray<{ id: VerificationTab; label: string; hint: string }> 
     id: "gates",
     label: "Gates",
     hint:
-      "Author your own enforcement rules: block the final answer on missing evidence, deny a tool, or strip an after-tool result.",
+      "Author your own enforcement rules. The fires-at picker on each rule decides timing: pre-final (block the answer) / before-tool (deny a tool) / after-tool (strip a result).",
   },
   {
     id: "guidance",

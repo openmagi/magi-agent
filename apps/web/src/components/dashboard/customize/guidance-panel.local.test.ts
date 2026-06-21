@@ -7,16 +7,15 @@ const src = readFileSync(
 );
 
 describe("GuidancePanel — UX restructure B soft-instructions surface", () => {
-  it("renders an amber warning banner so the reliability boundary is honest", () => {
-    expect(src).toContain("amber-500/30");
+  it("renders a structured PageHint card flagging the soft boundary", () => {
+    expect(src).toContain("PageHint");
     expect(src).toContain("Soft instructions");
-    expect(src).toContain("is not");
-    expect(src).toContain("deterministically forced");
+    expect(src).toContain("not deterministically forced");
   });
 
-  it("points users to Presets / Gates for hard enforcement", () => {
-    expect(src).toContain("Presets or");
+  it("points users to Gates and Presets for hard enforcement", () => {
     expect(src).toContain("Gates");
+    expect(src).toContain("Presets");
   });
 
   it("disables the save button until the draft diverges from the persisted value", () => {

@@ -18,10 +18,9 @@ describe("GatesPanel — UX restructure B unified gates surface", () => {
     expect(src).toContain("After-tool");
   });
 
-  it("explicitly disclaims SeamSpec so users do not look for the gate builder here", () => {
-    expect(src).toContain("SeamSpec");
+  it("points users at Advanced for SeamSpec rewires so they do not look for it here", () => {
     expect(src).toContain("Advanced");
-    expect(src).toContain("does not add a new gate");
+    expect(src).toContain("Rewire an existing built-in preset");
   });
 
   it("calls out the after-tool feature flag honestly", () => {
