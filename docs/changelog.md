@@ -15,6 +15,57 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.62
+
+### Added
+- Memory PR-1 (#806): the CLI headless turn loop now records every turn into
+  the compaction store, closing the parity gap with the existing serve-side
+  recorder.
+- Memory PR-2 (#807): production cheap-model compaction summarizer with
+  fail-open to truncation, behind its own flag.
+- Memory PR-3 (#808): optional cheap-model semantic re-rank over BM25
+  recall, default-OFF.
+- Memory PR-4 (#809): session-end auto-extraction of declarative facts,
+  default-OFF.
+- C-4 PR-I tenancy / ops / artifacts collapse onto `FalseOnlyAuthorityModel`
+  (#801), and the billing follow-up (#802). Closes the C-4 cascade across
+  tenancy + billing surfaces.
+- C-4 ratchet (#810): a meta-test forbids any new `def model_construct`
+  outside `ops/authority`, so future contributors cannot reintroduce the
+  forge-true escape hatch the cascade just removed.
+- C-10 / C-11 / C-12 cleanup bundle (#798): home redaction limits +
+  composio / model_tiers cleanups, with the gate1 SSE redaction golden
+  refreshed in the same PR.
+- Customize PageHint cards (#804): the wordy amber banners across the
+  Verification / Gates / Guidance / Hooks panels collapse into structured
+  `✓ can / ✗ cannot / ⓘ note` cards that scan in one glance.
+- Customize collapsible preset groups (#817): each domain group can fold,
+  the toggle bar offers Expand all / Collapse all, and the `enabled / total`
+  badge updates as toggles flip.
+
+### Changed
+- Dashboard Settings + Overview surfaces rebuilt (#815, follow-up to #805):
+  GlassCard wrappers and intro descriptions removed in favor of section
+  headers + hairline dividers; Provider + Model and the API-key env-var +
+  workspace-path move into 2-col grids; the duplicated Local Agent hero
+  card and the black gradient status panel disappear in favor of one
+  header row carrying title + status pill + serve command + Open chat /
+  Configure; Runtime + Workspace Inventory collapse into one 6-tile
+  strip; quick actions stay as a 3-col row with single-line cards.
+- I-1 flag-registry migration: `is_*_enabled` flags move from inline
+  callers into the shared `flag_bool` / `flag_profile_bool` registries
+  across three batches (#811 batch 1 — 8 flags, #813 batch 2 — 7 remaining
+  simple-body flags + empty inventory allowlist, #818 batch 3 — 6
+  profile-aware flags). Inventory is now empty so any future inline flag
+  read trips the gate.
+
+### Fixed
+- SpawnAgent now advertises the live model registry instead of stale
+  `claude-opus-4-5` (#816). The tool's `model` parameter description is
+  generated from `available_child_model_routes(env)` so it shares the same
+  source of truth the runner validates against; the catalog can no longer
+  drift away from what the parent LLM is taught.
+
 ## 0.1.61
 
 ### Added
