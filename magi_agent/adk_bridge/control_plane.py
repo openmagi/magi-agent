@@ -546,10 +546,14 @@ class ControlPlanePlugin(BasePlugin):
 MAX_STEPS_BRAKE_CONTROL_NAME = "magi_max_steps_brake"
 MAX_STEPS_BRAKE_ENABLED_ENV = "MAGI_MAX_STEPS_BRAKE_ENABLED"
 
-# I-2 PR A: kept as a module-local alias for the canonical leaf set so that
-# the truthy literal is spelled in exactly one place
-# (:mod:`magi_agent.config._truthy`). Used by the in-file ``_is_true`` helper.
-from magi_agent.config._truthy import TRUE_VALUES as _TRUE_VALUES  # noqa: E402
+# I-4 follow-up: the in-module ``_is_true`` helper and unused ``_TRUE_VALUES``
+# alias were a per-module re-implementation of the canonical truthy convention.
+# The ``MAGI_MAX_STEPS_BRAKE_ENABLED`` consumer now flows through ``flag_bool``
+# (single decision point with the registry). The ``MAGI_SELF_REVIEW_ENABLED``
+# consumer below — not yet registered, out of I-4 scope — delegates directly
+# to :func:`magi_agent.config._truthy.is_true`. Note: H-9 may delete the
+# MaxStepsBrakeControl seam entirely; that follow-up would also delete the
+# registry entry and this consumer in one step.
 
 
 class MaxStepsBrakeControl(BaseLoopControl):
@@ -1554,7 +1558,11 @@ def build_core_default_plane(
         plane.register(_CompactionLoopControl(compaction_plugin))
 
     # 4. MaxStepsBrake (MAGI_MAX_STEPS_BRAKE_ENABLED, default OFF — new seam).
-    if _is_true(env.get(MAX_STEPS_BRAKE_ENABLED_ENV, "")):
+    # I-4 follow-up: registry-backed via ``flag_bool``; the flag is documented
+    # in ``magi_agent/config/flags.py`` FLAGS.
+    from magi_agent.config.flags import flag_bool as _flag_bool  # noqa: PLC0415
+
+    if _flag_bool(MAX_STEPS_BRAKE_ENABLED_ENV, env=env):
         # Iteration tracking is per-invocation; default max_iterations is 0 (no-op)
         # until a runner sets a real budget. The control wires the seam; the runner
         # must update iteration/max_iterations per invocation for real brake behavior.
@@ -1566,7 +1574,13 @@ def build_core_default_plane(
         plane.register(MaxStepsBrakeControl(max_iterations=0, iteration=0))
 
     # 5. Self-review C1 (MAGI_SELF_REVIEW_ENABLED, default OFF).
-    if _is_true(env.get(SELF_REVIEW_ENABLED_ENV, "")):
+    # I-4 follow-up: ``SELF_REVIEW_ENABLED_ENV`` is not yet in the registry
+    # (out of I-4 scope); delegate to the canonical truthy leaf directly so
+    # the local re-implementation is gone. A future PR can promote this to
+    # ``flag_bool`` once the FlagSpec is registered.
+    from magi_agent.config._truthy import is_true as _is_true_leaf  # noqa: PLC0415
+
+    if _is_true_leaf(env.get(SELF_REVIEW_ENABLED_ENV, "")):
         plane.register(
             SelfReviewAfterTurnControl(
                 fork_runner=self_review_fork_runner,
@@ -1853,13 +1867,6 @@ def build_default_plugin(
         tool_synthesis_model_label=tool_synthesis_model_label,
     )
     return _ExtendedControlPlanePlugin(plane)
-
-
-def _is_true(value: str) -> bool:
-    # I-2 PR A: delegates to the canonical truthy leaf.
-    from magi_agent.config._truthy import is_true  # noqa: PLC0415
-
-    return is_true(value)
 
 
 __all__ = [

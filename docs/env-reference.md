@@ -3,6 +3,8 @@ ERROR: env-reference document missing markers '<!-- BEGIN GENERATED FLAGS (scrip
 
 Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/generate_env_reference.py`. Do not edit this section by hand; register the flag in the registry and regenerate.
 
+- `MAGI_AGENT_LOCAL_CHAT_ROUTE` (default off) — Self-host fallback gate for the local ADK chat route. ON makes ``/v1/chat/completions`` serve the local headless engine when the hosted python chat route is OFF; OFF keeps the legacy ``chat_route_disabled`` 503. Strict default-OFF.
+- `MAGI_AGENT_WORKSPACE` (no default) — Workspace directory used by the local chat route, headless CLI wiring, and per-turn memory recall; empty falls back to ``os.getcwd()`` (the historical default).
 - `MAGI_APPLY_PATCH_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Enable the apply-patch tool for multi-file edits (default-ON full profile).
 - `MAGI_AUTOMATION_METHODOLOGY_ENABLED` (default off) — Append the <automation_methodology> prompt block (deliverable up front / goal->plan->evidence lifecycle / step confirmation) in build_cli_instruction. Guidance-only, not enforcing.
 - `MAGI_BROWSER_TOOL_ENABLED` (default off) — Expose the browser-use autonomous vision BrowserTask tool.
@@ -73,6 +75,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_LEARNING_REFLECTION_ENABLED` (default off) — Enable post-turn reflection that feeds the learning loop.
 - `MAGI_LOOP_GUARD_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Enable the repetition/loop guard brake (default-ON full profile).
 - `MAGI_LSP_DIAGNOSTICS_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Surface LSP diagnostics to the coding harness (default-ON full profile).
+- `MAGI_MAX_STEPS_BRAKE_ENABLED` (default off) — Register the MaxStepsBrakeControl wrap-up brake on the control plane (the seam is wired with ``max_iterations=0``; H-9 audit may delete the seam entirely). Strict default-OFF.
 - `MAGI_MEMORY_COMPACTION_ENABLED` (default off) — Enable the 5-level compaction tree builder for stored memory.
 - `MAGI_MEMORY_ENABLED` (default off) — Master switch for the agent memory subsystem (3-tier + compaction).
 - `MAGI_MEMORY_MODE_ROUTING_ENABLED` (default off) — Honour the per-channel memory mode header (normal/read-only/incognito).
