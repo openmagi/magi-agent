@@ -53,6 +53,9 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping, MutableMapping
 
+from magi_agent.harness.memory_session_extract import (
+    MAGI_MEMORY_SESSION_EXTRACT_ENABLED_ENV,
+)
 from magi_agent.memory.config import (
     MASTER_ENV_VAR,
     PREFER_LOCAL_SEARCH_ENV_VAR,
@@ -62,18 +65,23 @@ from magi_agent.memory.config import _memory_table as _config_memory_table
 
 logger = logging.getLogger(__name__)
 
-#: Install defaults: the two memory settings a fresh install turns ON.  Mapped to
+#: Install defaults: the memory settings a fresh install turns ON.  Mapped to
 #: config keys (snake_case, mirroring ``resolve_memory_config``'s ``config_key``)
-#: and the matching ``MAGI_MEMORY_*`` env var (from the ``memory/config.py``
-#: registry — NEVER hardcode the env-var string here).
+#: and the matching ``MAGI_MEMORY_*`` env var (NEVER hardcode the env-var string
+#: here — import the registry constant).
 #:
 #: ``enabled`` (master) ON ⇒ write/recall/projection/compaction cascade ON.
 #: ``prefer_local_search`` ON ⇒ per-turn ``<memory-recall>`` recall path.
+#: ``session_extract_enabled`` ON ⇒ session-end fact extraction (a strict opt-in
+#:   that does NOT cascade from master, so it is listed explicitly). The write it
+#:   performs still requires the (cascaded-ON) write gate, and the extractor
+#:   degrades to a no-op when no provider/key is configured.
 #: Everything else absent ⇒ resolver's master cascade / opt-in defaults apply.
 _INSTALL_DEFAULT_KEYS: tuple[tuple[str, str, bool], ...] = (
     # (config_key, env_var, install_default_value)
     ("enabled", MASTER_ENV_VAR, True),
     ("prefer_local_search", PREFER_LOCAL_SEARCH_ENV_VAR, True),
+    ("session_extract_enabled", MAGI_MEMORY_SESSION_EXTRACT_ENABLED_ENV, True),
 )
 
 

@@ -510,6 +510,22 @@ async def _local_adk_chat_sse(
             used_tool=used_tool,
             memory_mode=current_memory_mode().value,
         )
+        # Serve session-end extraction: buffer this turn so the app lifespan can
+        # flush the whole transcript through the session-end extractor on
+        # shutdown (the local serve path has no per-conversation end / shared
+        # session service to enumerate). Gated no-op when the feature is OFF.
+        try:
+            from magi_agent.runtime.active_sessions import note_turn  # noqa: PLC0415
+
+            note_turn(
+                session_id=session_id,
+                workspace_root=workspace_root,
+                user_text=prompt,
+                assistant_text="".join(assistant_parts),
+                memory_mode=current_memory_mode().value,
+            )
+        except Exception:  # noqa: BLE001, S110 — best-effort; never break the turn
+            pass
     #
     # NOTE: the Hermes-style background memory *review* (re-reading the transcript
     # to "save what the model forgot") is a SEPARATE mechanism that still needs a
