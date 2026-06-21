@@ -46,6 +46,7 @@ from magi_agent.memory.compaction_tree import (
     append_daily_entry,
 )
 from magi_agent.memory.config import MemoryRuntimeConfig, resolve_memory_config
+from magi_agent.memory.summarizer_runtime import build_compaction_summarizer
 
 logger = logging.getLogger(__name__)
 
@@ -241,8 +242,18 @@ def _maybe_run_compaction(
     if session_id in _compacted_sessions:
         return
     _compacted_sessions.add(session_id)
+    # PR2: when the caller did not inject a summarizer, build the default
+    # production cheap-model summarizer so compaction ACTUALLY compresses tiers
+    # (instead of always falling back to deterministic truncation). This is
+    # gated by ``build_compaction_summarizer`` on the SAME ``compaction_enabled``
+    # switch already checked above (no new master flag), and the model itself is
+    # built lazily only on first ``summarize`` call. An explicitly-injected
+    # summarizer (the test seam) always wins.
+    active_summarizer = (
+        summarizer if summarizer is not None else build_compaction_summarizer(cfg)
+    )
     try:
-        CompactionTree(memory_dir, cfg, summarizer=summarizer).run(
+        CompactionTree(memory_dir, cfg, summarizer=active_summarizer).run(
             today=today, force=False
         )
     except Exception:

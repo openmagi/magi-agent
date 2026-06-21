@@ -365,6 +365,9 @@ async def _record_turn_memory(
     from magi_agent.runtime.memory_turn_hook import record_turn  # noqa: PLC0415
 
     turn_id = terminal.turn_id if getattr(terminal, "turn_id", None) else "cli-turn"
+    # PR2: no ``summarizer=`` passed — ``record_turn`` builds the default
+    # cheap-model summarizer only when ``compaction_enabled`` is True (default
+    # OFF), lazily, and fails open to truncation when no provider/key is set.
     await asyncio.to_thread(
         record_turn,
         workspace_root=workspace_root,
