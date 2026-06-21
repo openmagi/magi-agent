@@ -303,6 +303,56 @@ def test_memory_list_read_search(tmp_path, monkeypatch) -> None:
     assert any(r["path"] == "MEMORY.md" for r in search.json()["results"])
 
 
+def test_memory_archive_is_listed_and_readable(tmp_path, monkeypatch) -> None:
+    archive = tmp_path / "memory" / "archive"
+    archive.mkdir(parents=True)
+    (archive / "2026-06-20-daily.md").write_text("pre-compaction snapshot", encoding="utf-8")
+    client = _client(tmp_path, monkeypatch)
+
+    listing = client.get("/v1/app/memory").json()
+    assert any(f["path"] == "memory/archive/2026-06-20-daily.md" for f in listing["files"])
+
+    read = client.get(
+        "/v1/app/memory/file", params={"path": "memory/archive/2026-06-20-daily.md"}
+    )
+    assert read.status_code == 200
+    assert read.json()["content"] == "pre-compaction snapshot"
+
+
+def test_memory_archive_is_read_only_write_rejected(tmp_path, monkeypatch) -> None:
+    archive = tmp_path / "memory" / "archive"
+    archive.mkdir(parents=True)
+    target = archive / "2026-06-20-daily.md"
+    target.write_text("original snapshot", encoding="utf-8")
+    client = _client(tmp_path, monkeypatch)
+
+    res = client.put(
+        "/v1/app/workspace/file",
+        json={"path": "memory/archive/2026-06-20-daily.md", "content": "tampered"},
+    )
+    assert res.status_code == 403
+    assert res.json()["error"] == "forbidden_path"
+    # On-disk content is untouched.
+    assert target.read_text(encoding="utf-8") == "original snapshot"
+
+
+def test_memory_archive_is_read_only_delete_skipped(tmp_path, monkeypatch) -> None:
+    archive = tmp_path / "memory" / "archive"
+    archive.mkdir(parents=True)
+    target = archive / "2026-06-20-daily.md"
+    target.write_text("keep me", encoding="utf-8")
+    client = _client(tmp_path, monkeypatch)
+
+    res = client.request(
+        "DELETE",
+        "/v1/app/memory/files",
+        json={"paths": ["memory/archive/2026-06-20-daily.md"]},
+    )
+    assert res.status_code == 200
+    assert res.json()["deleted"] == []
+    assert target.exists()
+
+
 def test_app_api_uses_hosted_workspace_env_for_skills_and_memory(
     tmp_path, monkeypatch
 ) -> None:
