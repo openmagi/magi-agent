@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "magi-agent"
-version = "0.1.63"
+version = "0.1.64"
 description = "Open Magi agent runtime and CLI for personal AI agents"
 readme = "README.md"
 requires-python = ">=3.11"
