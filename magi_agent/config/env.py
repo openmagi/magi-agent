@@ -1991,9 +1991,17 @@ def is_grounded_answer_guard_enabled(env: Mapping[str, str] | None = None) -> bo
     ``is_goal_nudge_enabled`` this deliberately does NOT follow the
     runtime-profile default-ON convention — it is an additive, default-disabled
     seam.
+
+    Delegates to the canonical ``config.flags`` registry (``flag_bool``) backed
+    by the ``MAGI_GROUNDED_ANSWER_GUARD_ENABLED`` ``FlagSpec``: byte-identical
+    to the raw ``_is_true(source.get(...))`` form because the flag is
+    registered with a ``False`` default and the same strict-truthy parser.
+    Imported lazily to avoid a config<->flags import cycle.
     """
+    from .flags import flag_bool
+
     source = os.environ if env is None else env
-    return _is_true(source.get(MAGI_GROUNDED_ANSWER_GUARD_ENABLED_ENV))
+    return flag_bool(MAGI_GROUNDED_ANSWER_GUARD_ENABLED_ENV, env=source)
 
 
 MAGI_EGRESS_GATE_ENABLED_ENV = "MAGI_EGRESS_GATE_ENABLED"
@@ -2035,9 +2043,17 @@ def is_goal_nudge_enabled(env: Mapping[str, str] | None = None) -> bool:
     bounded continuation. Like ``is_egress_gate_enabled`` this deliberately does
     NOT follow the runtime-profile default-ON convention — it is an additive,
     default-disabled seam.
+
+    Delegates to the canonical ``config.flags`` registry (``flag_bool``) backed
+    by the ``MAGI_GOAL_NUDGE_ENABLED`` ``FlagSpec``: byte-identical to the raw
+    ``_is_true(source.get(...))`` form because the flag is registered with a
+    ``False`` default and the same strict-truthy parser. Imported lazily to
+    avoid a config<->flags import cycle.
     """
+    from .flags import flag_bool
+
     source = os.environ if env is None else env
-    return _is_true(source.get(MAGI_GOAL_NUDGE_ENABLED_ENV))
+    return flag_bool(MAGI_GOAL_NUDGE_ENABLED_ENV, env=source)
 
 
 MAGI_RESEARCH_FACT_GUIDANCE_ENABLED_ENV = "MAGI_RESEARCH_FACT_GUIDANCE_ENABLED"
@@ -2056,9 +2072,17 @@ def is_research_fact_guidance_enabled(env: Mapping[str, str] | None = None) -> b
     read-and-compare few-shot. Like ``is_goal_nudge_enabled`` this deliberately
     does NOT follow the runtime-profile default-ON convention — it is an
     additive, default-disabled seam (A/B evidence gates any default flip).
+
+    Delegates to the canonical ``config.flags`` registry (``flag_bool``) backed
+    by the ``MAGI_RESEARCH_FACT_GUIDANCE_ENABLED`` ``FlagSpec``: byte-identical
+    to the raw ``_is_true(source.get(...))`` form because the flag is
+    registered with a ``False`` default and the same strict-truthy parser.
+    Imported lazily to avoid a config<->flags import cycle.
     """
+    from .flags import flag_bool
+
     source = os.environ if env is None else env
-    return _is_true(source.get(MAGI_RESEARCH_FACT_GUIDANCE_ENABLED_ENV))
+    return flag_bool(MAGI_RESEARCH_FACT_GUIDANCE_ENABLED_ENV, env=source)
 
 
 MAGI_FACTS_REPLAN_ENABLED_ENV = "MAGI_FACTS_REPLAN_ENABLED"
@@ -2076,9 +2100,17 @@ def is_facts_replan_enabled(env: Mapping[str, str] | None = None) -> bool:
     ``MAGI_FACTS_REPLAN_MAX_PER_TURN``). Like ``is_goal_nudge_enabled`` this
     deliberately does NOT follow the runtime-profile default-ON convention — it
     is an additive, default-disabled seam.
+
+    Delegates to the canonical ``config.flags`` registry (``flag_bool``) backed
+    by the ``MAGI_FACTS_REPLAN_ENABLED`` ``FlagSpec``: byte-identical to the
+    raw ``_is_true(source.get(...))`` form because the flag is registered with
+    a ``False`` default and the same strict-truthy parser. Imported lazily to
+    avoid a config<->flags import cycle.
     """
+    from .flags import flag_bool
+
     source = os.environ if env is None else env
-    return _is_true(source.get(MAGI_FACTS_REPLAN_ENABLED_ENV))
+    return flag_bool(MAGI_FACTS_REPLAN_ENABLED_ENV, env=source)
 
 
 def parse_facts_replan_env(env: Mapping[str, str] | None = None):
@@ -2142,9 +2174,17 @@ def is_user_hooks_enabled(env: Mapping[str, str] | None = None) -> bool:
     before/after-tool callbacks. Like ``is_egress_gate_enabled`` / ``is_goal_nudge_enabled``
     this is an additive, default-disabled seam and does NOT follow the
     runtime-profile default-ON convention.
+
+    Delegates to the canonical ``config.flags`` registry (``flag_bool``) backed
+    by the ``MAGI_USER_HOOKS_ENABLED`` ``FlagSpec``: byte-identical to the raw
+    ``_is_true(source.get(...))`` form because the flag is registered with a
+    ``False`` default and the same strict-truthy parser. Imported lazily to
+    avoid a config<->flags import cycle.
     """
+    from .flags import flag_bool
+
     source = os.environ if env is None else env
-    return _is_true(source.get(MAGI_USER_HOOKS_ENABLED_ENV))
+    return flag_bool(MAGI_USER_HOOKS_ENABLED_ENV, env=source)
 
 
 MAGI_DASHBOARD_PACK_AUTHORING_ENABLED_ENV = "MAGI_DASHBOARD_PACK_AUTHORING_ENABLED"
@@ -2170,9 +2210,17 @@ def is_dashboard_pack_authoring_enabled(env: Mapping[str, str] | None = None) ->
     turn id WITHOUT requiring ``MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED``. Like
     ``is_user_hooks_enabled`` this is an additive, default-disabled seam and does
     NOT follow the runtime-profile default-ON convention.
+
+    Delegates to the canonical ``config.flags`` registry (``flag_bool``) backed
+    by the ``MAGI_DASHBOARD_PACK_AUTHORING_ENABLED`` ``FlagSpec``:
+    byte-identical to the raw ``_is_true(source.get(...))`` form because the
+    flag is registered with a ``False`` default and the same strict-truthy
+    parser. Imported lazily to avoid a config<->flags import cycle.
     """
+    from .flags import flag_bool
+
     source = os.environ if env is None else env
-    return _is_true(source.get(MAGI_DASHBOARD_PACK_AUTHORING_ENABLED_ENV))
+    return flag_bool(MAGI_DASHBOARD_PACK_AUTHORING_ENABLED_ENV, env=source)
 
 
 MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED_ENV = "MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED"
@@ -2191,9 +2239,17 @@ def is_tool_synthesis_nudge_enabled(env: Mapping[str, str] | None = None) -> boo
     GPT-5-Nano 44%->14%). Like ``is_goal_nudge_enabled`` this is an additive,
     default-disabled seam and does NOT follow the runtime-profile default-ON
     convention.
+
+    Delegates to the canonical ``config.flags`` registry (``flag_bool``) backed
+    by the ``MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED`` ``FlagSpec``: byte-identical
+    to the raw ``_is_true(source.get(...))`` form because the flag is
+    registered with a ``False`` default and the same strict-truthy parser.
+    Imported lazily to avoid a config<->flags import cycle.
     """
+    from .flags import flag_bool
+
     source = os.environ if env is None else env
-    return _is_true(source.get(MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED_ENV))
+    return flag_bool(MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED_ENV, env=source)
 
 
 MAGI_RECIPE_ROUTING_LLM_ENABLED_ENV = "MAGI_RECIPE_ROUTING_LLM_ENABLED"

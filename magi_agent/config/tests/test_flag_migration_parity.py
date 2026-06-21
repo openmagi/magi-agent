@@ -1,4 +1,4 @@
-"""Parity tests for the I-1 batch 1 flag migration (8 ``is_*_enabled`` flags).
+"""Parity tests for the I-1 batches 1+2 flag migration (15 ``is_*_enabled`` flags).
 
 Each ``is_*_enabled`` function under test had its inline body
 ``_is_true(source.get(NAME))`` replaced with a one-line delegation to the
@@ -34,20 +34,34 @@ import pytest
 from magi_agent.config.env import (
     MAGI_AUTOMATION_METHODOLOGY_ENABLED_ENV,
     MAGI_CODING_CONTEXT_ENABLED_ENV,
+    MAGI_DASHBOARD_PACK_AUTHORING_ENABLED_ENV,
+    MAGI_FACTS_REPLAN_ENABLED_ENV,
+    MAGI_GOAL_NUDGE_ENABLED_ENV,
+    MAGI_GROUNDED_ANSWER_GUARD_ENABLED_ENV,
     MAGI_KEY_AWARE_MODEL_ROUTES_ENABLED_ENV,
     MAGI_PROMPT_EXAMPLES_ENABLED_ENV,
     MAGI_PROMPT_REDFLAGS_ENABLED_ENV,
     MAGI_PROMPT_SEARCH_RULES_ENABLED_ENV,
+    MAGI_RESEARCH_FACT_GUIDANCE_ENABLED_ENV,
     MAGI_RESEARCH_METHODOLOGY_ENABLED_ENV,
+    MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED_ENV,
     MAGI_TOOL_USAGE_GUIDANCE_ENABLED_ENV,
+    MAGI_USER_HOOKS_ENABLED_ENV,
     is_automation_methodology_enabled,
     is_coding_context_enabled,
+    is_dashboard_pack_authoring_enabled,
+    is_facts_replan_enabled,
+    is_goal_nudge_enabled,
+    is_grounded_answer_guard_enabled,
     is_key_aware_model_routes_enabled,
     is_prompt_examples_enabled,
     is_prompt_redflags_enabled,
     is_prompt_search_rules_enabled,
+    is_research_fact_guidance_enabled,
     is_research_methodology_enabled,
+    is_tool_synthesis_nudge_enabled,
     is_tool_usage_guidance_enabled,
+    is_user_hooks_enabled,
 )
 
 
@@ -75,6 +89,7 @@ _PARITY_CASES: tuple[tuple[str | None, bool], ...] = (
 # Reader fn + env-name pair for each migrated flag. Adding a row here in a
 # future batch automatically extends the parametrized parity suite.
 _MIGRATED_FLAGS = (
+    # I-1 batch 1 (8 flags):
     (is_automation_methodology_enabled, MAGI_AUTOMATION_METHODOLOGY_ENABLED_ENV),
     (is_coding_context_enabled, MAGI_CODING_CONTEXT_ENABLED_ENV),
     (is_key_aware_model_routes_enabled, MAGI_KEY_AWARE_MODEL_ROUTES_ENABLED_ENV),
@@ -83,6 +98,14 @@ _MIGRATED_FLAGS = (
     (is_prompt_search_rules_enabled, MAGI_PROMPT_SEARCH_RULES_ENABLED_ENV),
     (is_research_methodology_enabled, MAGI_RESEARCH_METHODOLOGY_ENABLED_ENV),
     (is_tool_usage_guidance_enabled, MAGI_TOOL_USAGE_GUIDANCE_ENABLED_ENV),
+    # I-1 batch 2 (7 strict default-OFF master-switch flags):
+    (is_dashboard_pack_authoring_enabled, MAGI_DASHBOARD_PACK_AUTHORING_ENABLED_ENV),
+    (is_facts_replan_enabled, MAGI_FACTS_REPLAN_ENABLED_ENV),
+    (is_goal_nudge_enabled, MAGI_GOAL_NUDGE_ENABLED_ENV),
+    (is_grounded_answer_guard_enabled, MAGI_GROUNDED_ANSWER_GUARD_ENABLED_ENV),
+    (is_research_fact_guidance_enabled, MAGI_RESEARCH_FACT_GUIDANCE_ENABLED_ENV),
+    (is_tool_synthesis_nudge_enabled, MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED_ENV),
+    (is_user_hooks_enabled, MAGI_USER_HOOKS_ENABLED_ENV),
 )
 
 

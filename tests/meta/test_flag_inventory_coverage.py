@@ -39,21 +39,18 @@ _IS_ENABLED_RE = re.compile(r"^is_[a-z0-9_]+_enabled$")
 # Shrinking allowlist: every entry is an ``is_*_enabled`` function whose body
 # still calls ``_is_true(...)`` directly (i.e. has not been routed through the
 # ``config.flags`` registry yet). Drive this set toward empty one batch at a
-# time per the plan §I-1 ratchet. After I-1 batch 1 (migrated the 8 prompt /
-# coding-context / key-aware / tool-usage-guidance gates) the inventory is
-# the 7 strict-default-OFF master-switch gates that still need their own batch
-# (research-fact guidance, goal-nudge, facts-replan, etc).
-_UNMIGRATED_INLINE_FLAGS: frozenset[str] = frozenset(
-    {
-        "is_dashboard_pack_authoring_enabled",
-        "is_facts_replan_enabled",
-        "is_goal_nudge_enabled",
-        "is_grounded_answer_guard_enabled",
-        "is_research_fact_guidance_enabled",
-        "is_tool_synthesis_nudge_enabled",
-        "is_user_hooks_enabled",
-    }
-)
+# time per the plan §I-1 ratchet. After I-1 batch 2 the allowlist is EMPTY —
+# all 15 simple-body strict default-OFF flags (8 from batch 1: prompt /
+# coding-context / key-aware / tool-usage-guidance; 7 from batch 2: the
+# strict-default-OFF master-switch gates including grounded-answer-guard,
+# goal-nudge, research-fact-guidance, facts-replan, user-hooks,
+# dashboard-pack-authoring, tool-synthesis-nudge) now delegate to
+# ``flag_bool``. The remaining ``is_*_enabled`` bodies (profile-aware
+# default-ON via ``_runtime_feature_enabled`` + the 3-state
+# document-authoring-coverage helper) are intentionally NOT in scope for this
+# ratchet — they need different mechanisms (``flag_profile_bool`` for the
+# former, a tri-state resolver for the latter) and are slated for batch 3+.
+_UNMIGRATED_INLINE_FLAGS: frozenset[str] = frozenset()
 
 
 def _scan_inline_is_enabled_bodies() -> set[str]:
@@ -129,14 +126,19 @@ def test_unmigrated_allowlist_is_shrinking() -> None:
 
 
 def test_allowlist_count_records_post_batch_state() -> None:
-    """Pin the post-batch-1 size so we notice future batches.
+    """Pin the post-batch-2 size so we notice future batches.
 
-    After I-1 batch 1 the un-migrated set has 7 entries (the strict default-OFF
-    master-switch gates: grounded-answer-guard, goal-nudge, research-fact
-    guidance, facts-replan, user-hooks, dashboard-pack-authoring,
-    tool-synthesis-nudge). Subsequent batches MUST lower this number so the
-    debt only ratchets down. This is the "budget commit IS the ratchet"
-    pattern from the plan §I-1 step 5.
+    After I-1 batch 2 the un-migrated set is EMPTY — every simple-body
+    ``is_*_enabled`` function whose inline body was
+    ``return _is_true(source.get(NAME))`` (15 in total: 8 from batch 1 + 7
+    from batch 2) now delegates to ``config.flags.flag_bool``. The remaining
+    bodies in ``env.py`` consult ``_runtime_feature_enabled`` (profile-aware
+    default-ON; needs ``flag_profile_bool``) or
+    ``resolve_document_authoring_coverage_mode`` (3-state) instead — neither
+    is in scope for this strict-truthy ratchet. The fixed-count anchor pins
+    the bottom so a future regression that re-introduces an inline
+    ``_is_true`` body would fail :func:`test_no_new_inline_is_enabled_body`
+    AND this counter (the ratchet only ever falls).
     """
 
-    assert len(_UNMIGRATED_INLINE_FLAGS) == 7
+    assert len(_UNMIGRATED_INLINE_FLAGS) == 0
