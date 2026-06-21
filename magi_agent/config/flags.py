@@ -620,6 +620,63 @@ FLAGS: tuple[FlagSpec, ...] = (
             "read structured files fully, and run joins/dedup programmatically."
         ),
     ),
+    _b(
+        "MAGI_AUTOMATION_METHODOLOGY_ENABLED",
+        summary=(
+            "Append the <automation_methodology> prompt block (deliverable up "
+            "front / goal->plan->evidence lifecycle / step confirmation) in "
+            "build_cli_instruction. Guidance-only, not enforcing."
+        ),
+    ),
+    _b(
+        "MAGI_CODING_CONTEXT_ENABLED",
+        summary=(
+            "Append the C10 <coding_context> auto-injection prompt block "
+            "(repo map + recent git changes + entry points + top-level "
+            "directory stats) in build_cli_instruction when workspace_root is "
+            "provided. Guidance-only, not enforcing."
+        ),
+    ),
+    _b(
+        "MAGI_PROMPT_EXAMPLES_ENABLED",
+        summary=(
+            "Append the <action_discipline_examples> prompt block "
+            "(positive/negative contrast pairs: act-vs-ask, finish-vs-defer) "
+            "in build_cli_instruction."
+        ),
+    ),
+    _b(
+        "MAGI_PROMPT_REDFLAGS_ENABLED",
+        summary=(
+            "Append the <red_flags> anti-rationalization prompt block (\"this "
+            "thought means stop and correct course\" table) in "
+            "build_cli_instruction."
+        ),
+    ),
+    _b(
+        "MAGI_PROMPT_SEARCH_RULES_ENABLED",
+        summary=(
+            "Append the search-decision heuristics prompt block in "
+            "build_cli_instruction. Even when ON the block only fires when web "
+            "tools are available (BRAVE_API_KEY AND FIRECRAWL_API_KEY)."
+        ),
+    ),
+    _b(
+        "MAGI_RESEARCH_METHODOLOGY_ENABLED",
+        summary=(
+            "Append the <research_methodology> prompt block (multi-source "
+            "cross-check / grounding-first / primary-source preference / "
+            "citation discipline) in build_cli_instruction. Guidance-only."
+        ),
+    ),
+    _b(
+        "MAGI_TOOL_USAGE_GUIDANCE_ENABLED",
+        summary=(
+            "Synthesize per-tool 'Use when / Do NOT use when' usage-guidance "
+            "blocks into gate5b ADK tool descriptions. OFF keeps every gate5b "
+            "tool docstring byte-identical to today."
+        ),
+    ),
     # --- Evidence / verification gates -------------------------------------
     _pb(
         "MAGI_CUSTOMIZE_VERIFICATION_ENABLED",

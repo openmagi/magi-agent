@@ -2227,9 +2227,17 @@ def is_key_aware_model_routes_enabled(env: Mapping[str, str] | None = None) -> b
     and :func:`resolve_child_route` filter routes to only those whose provider
     has a configured API key. OFF (or no keys at all, or any error) is
     byte-identical to today (fail-open).
+
+    Delegates to the canonical ``config.flags`` registry (``flag_bool``) backed
+    by the ``MAGI_KEY_AWARE_MODEL_ROUTES_ENABLED`` ``FlagSpec``: byte-identical
+    to the raw ``_is_true(source.get(...))`` form because the flag is registered
+    with a ``False`` default and the same strict-truthy parser. Imported lazily
+    to keep the established ``env``↔``flags`` import discipline.
     """
+    from .flags import flag_bool
+
     source = os.environ if env is None else env
-    return _is_true(source.get(MAGI_KEY_AWARE_MODEL_ROUTES_ENABLED_ENV))
+    return flag_bool(MAGI_KEY_AWARE_MODEL_ROUTES_ENABLED_ENV, env=source)
 
 
 MAGI_TOOL_USAGE_GUIDANCE_ENABLED_ENV = "MAGI_TOOL_USAGE_GUIDANCE_ENABLED"
@@ -2241,9 +2249,14 @@ def is_tool_usage_guidance_enabled(env: Mapping[str, str] | None = None) -> bool
     Default OFF (strict truthy opt-in). OFF keeps every gate5b tool docstring
     byte-identical to today; ON appends a lean "Use when / Do NOT use when"
     block (``magi_agent.gates.tool_usage_guidance``) for registered tools.
+
+    Delegates to the canonical ``config.flags`` registry (``flag_bool``);
+    byte-identical to the previous inline ``_is_true(source.get(...))``.
     """
+    from .flags import flag_bool
+
     source = os.environ if env is None else env
-    return _is_true(source.get(MAGI_TOOL_USAGE_GUIDANCE_ENABLED_ENV))
+    return flag_bool(MAGI_TOOL_USAGE_GUIDANCE_ENABLED_ENV, env=source)
 
 
 MAGI_PROMPT_EXAMPLES_ENABLED_ENV = "MAGI_PROMPT_EXAMPLES_ENABLED"
@@ -2254,9 +2267,14 @@ def is_prompt_examples_enabled(env: Mapping[str, str] | None = None) -> bool:
 
     Default OFF. ON appends ``<action_discipline_examples>`` (positive/negative
     contrast pairs: act-vs-ask, finish-vs-defer) in ``build_cli_instruction``.
+
+    Delegates to the canonical ``config.flags`` registry (``flag_bool``);
+    byte-identical to the previous inline ``_is_true(source.get(...))``.
     """
+    from .flags import flag_bool
+
     source = os.environ if env is None else env
-    return _is_true(source.get(MAGI_PROMPT_EXAMPLES_ENABLED_ENV))
+    return flag_bool(MAGI_PROMPT_EXAMPLES_ENABLED_ENV, env=source)
 
 
 MAGI_PROMPT_SEARCH_RULES_ENABLED_ENV = "MAGI_PROMPT_SEARCH_RULES_ENABLED"
@@ -2268,9 +2286,14 @@ def is_prompt_search_rules_enabled(env: Mapping[str, str] | None = None) -> bool
     Default OFF. Even when ON, the block only fires when web tools are
     available (``BRAVE_API_KEY`` AND ``FIRECRAWL_API_KEY`` — same rule as
     ``web_research_guidance_block``: never direct the model to absent tools).
+
+    Delegates to the canonical ``config.flags`` registry (``flag_bool``);
+    byte-identical to the previous inline ``_is_true(source.get(...))``.
     """
+    from .flags import flag_bool
+
     source = os.environ if env is None else env
-    return _is_true(source.get(MAGI_PROMPT_SEARCH_RULES_ENABLED_ENV))
+    return flag_bool(MAGI_PROMPT_SEARCH_RULES_ENABLED_ENV, env=source)
 
 
 MAGI_PROMPT_REDFLAGS_ENABLED_ENV = "MAGI_PROMPT_REDFLAGS_ENABLED"
@@ -2281,9 +2304,14 @@ def is_prompt_redflags_enabled(env: Mapping[str, str] | None = None) -> bool:
 
     Default OFF. ON appends ``<red_flags>`` ("this thought means stop and
     correct course" table) in ``build_cli_instruction``.
+
+    Delegates to the canonical ``config.flags`` registry (``flag_bool``);
+    byte-identical to the previous inline ``_is_true(source.get(...))``.
     """
+    from .flags import flag_bool
+
     source = os.environ if env is None else env
-    return _is_true(source.get(MAGI_PROMPT_REDFLAGS_ENABLED_ENV))
+    return flag_bool(MAGI_PROMPT_REDFLAGS_ENABLED_ENV, env=source)
 
 
 MAGI_RESEARCH_METHODOLOGY_ENABLED_ENV = "MAGI_RESEARCH_METHODOLOGY_ENABLED"
@@ -2295,9 +2323,14 @@ def is_research_methodology_enabled(env: Mapping[str, str] | None = None) -> boo
     Default OFF. ON appends ``<research_methodology>`` (multi-source
     cross-check / grounding-first / primary-source preference / citation
     discipline) in ``build_cli_instruction``. Guidance only, not enforcing.
+
+    Delegates to the canonical ``config.flags`` registry (``flag_bool``);
+    byte-identical to the previous inline ``_is_true(source.get(...))``.
     """
+    from .flags import flag_bool
+
     source = os.environ if env is None else env
-    return _is_true(source.get(MAGI_RESEARCH_METHODOLOGY_ENABLED_ENV))
+    return flag_bool(MAGI_RESEARCH_METHODOLOGY_ENABLED_ENV, env=source)
 
 
 MAGI_AUTOMATION_METHODOLOGY_ENABLED_ENV = "MAGI_AUTOMATION_METHODOLOGY_ENABLED"
@@ -2309,9 +2342,14 @@ def is_automation_methodology_enabled(env: Mapping[str, str] | None = None) -> b
     Default OFF. ON appends ``<automation_methodology>`` (deliverable up
     front / goal->plan->evidence lifecycle / step confirmation) in
     ``build_cli_instruction``. Guidance only, not enforcing.
+
+    Delegates to the canonical ``config.flags`` registry (``flag_bool``);
+    byte-identical to the previous inline ``_is_true(source.get(...))``.
     """
+    from .flags import flag_bool
+
     source = os.environ if env is None else env
-    return _is_true(source.get(MAGI_AUTOMATION_METHODOLOGY_ENABLED_ENV))
+    return flag_bool(MAGI_AUTOMATION_METHODOLOGY_ENABLED_ENV, env=source)
 
 
 MAGI_CODING_CONTEXT_ENABLED_ENV = "MAGI_CODING_CONTEXT_ENABLED"
@@ -2326,9 +2364,14 @@ def is_coding_context_enabled(env: Mapping[str, str] | None = None) -> bool:
     recent git changes + entry points + top-level directory stats) in
     ``build_cli_instruction`` when ``workspace_root`` is provided. Guidance, not
     enforcing.
+
+    Delegates to the canonical ``config.flags`` registry (``flag_bool``);
+    byte-identical to the previous inline ``_is_true(source.get(...))``.
     """
+    from .flags import flag_bool
+
     source = os.environ if env is None else env
-    return _is_true(source.get(MAGI_CODING_CONTEXT_ENABLED_ENV))
+    return flag_bool(MAGI_CODING_CONTEXT_ENABLED_ENV, env=source)
 
 
 def coding_context_file_limit(env: Mapping[str, str] | None = None) -> int | None:
