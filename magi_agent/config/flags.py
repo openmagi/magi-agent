@@ -222,6 +222,15 @@ FLAGS: tuple[FlagSpec, ...] = (
         summary="Enable the autonomous goal-loop scheduler.",
     ),
     _b(
+        "MAGI_GOAL_NUDGE_ENABLED",
+        summary=(
+            "Enable the production goal-nudge: a bounded continuation that "
+            "fires when MagiEngineDriver detects a clean stop short of the "
+            "stated goal (strict default-OFF; OFF injects goal_nudge=None and "
+            "the driver behaves byte-identically to pre-PR4)."
+        ),
+    ),
+    _b(
         "MAGI_CHANNEL_LIVE_DISCORD",
         stage="stage3",
         summary=(
@@ -376,6 +385,16 @@ FLAGS: tuple[FlagSpec, ...] = (
             "Enable research_fact cross-check guidance: consolidated brief "
             "header/footer plus the <web_research> system-prompt block "
             "(requires BRAVE_API_KEY + FIRECRAWL_API_KEY)."
+        ),
+    ),
+    _b(
+        "MAGI_GROUNDED_ANSWER_GUARD_ENABLED",
+        summary=(
+            "Enable the grounded-answer guard: caller (GAIA harness / CLI "
+            "layer) may compute a GroundedAnswerVerdict against its collected "
+            "tool corpus and record verifierEvidenceStatus as out-of-band "
+            "metadata. Strict default-OFF; OFF keeps callers' prompt and "
+            "answer surfaces byte-identical."
         ),
     ),
     _b(
@@ -675,6 +694,18 @@ FLAGS: tuple[FlagSpec, ...] = (
             "Synthesize per-tool 'Use when / Do NOT use when' usage-guidance "
             "blocks into gate5b ADK tool descriptions. OFF keeps every gate5b "
             "tool docstring byte-identical to today."
+        ),
+    ),
+    _b(
+        "MAGI_USER_HOOKS_ENABLED",
+        summary=(
+            "Master gate for CC-style user settings.json hooks (self-host / "
+            "local CLI only — never hosted multi-tenant since command hooks "
+            "run operator-supplied `bash -c`). When ON the CLI engine loads "
+            "~/.magi/settings.json + <workspace>/.magi/settings.json, builds a "
+            "HookBus wired to the command executor, and bridges "
+            "PreToolUse/PostToolUse onto the ADK before/after-tool callbacks. "
+            "Strict default-OFF; OFF keeps every turn byte-identical."
         ),
     ),
     # --- Evidence / verification gates -------------------------------------
