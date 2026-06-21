@@ -47,6 +47,7 @@ import asyncio
 import hashlib
 import inspect
 import os
+import re
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -113,6 +114,59 @@ _DEGRADE_ROUTE_UNKNOWN = "child_model_route_unknown"
 _DEGRADE_KEY_MISSING = "child_provider_key_missing"
 _DEGRADE_TURN_ERROR = "child_turn_error"
 _DEGRADE_TIMEOUT = "child_turn_timeout"
+#: Common public prefix for "the provider/litellm dispatch produced an error
+#: event (no text)". The suffix is a sanitised, length-bounded slug of the
+#: original ``error_code`` so the operator can act on the actual class of
+#: failure (rate_limit / model_not_found / bad_request) instead of a single
+#: opaque ``child_turn_error`` blob.
+_DEGRADE_LLM_ERROR_PREFIX = "child_llm_"
+
+
+class _ChildLlmTurnError(Exception):
+    """Raised when the ADK model emitted a non-benign ``error_code`` event.
+
+    Carries a sanitised, fixed-shape reason token (``child_llm_<slug>``) that
+    ``run_child`` surfaces as the failed-envelope reason — replacing the prior
+    silent ``completed`` + empty-summary degrade that masked every provider
+    failure (the 0.1.62 multi-provider SpawnAgent bug where Anthropic / Gemini
+    children returned ``status=ok`` in 60-130ms with no result text).
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _classify_child_event_error(event: object) -> str | None:
+    """Return a sanitised failure reason if ``event`` reports a non-benign
+    provider error, else ``None``.
+
+    Reuses ``adk_bridge.event_adapter._all_error_fields_benign`` (the engine-
+    side classifier) so a normal finish signal like ``error_code="STOP"`` /
+    ``"end_turn"`` — which some providers populate on the LAST event — is
+    correctly NOT treated as a failure here either. Fail-soft: a classifier
+    import failure degrades to "no error" so the existing text-collection path
+    is byte-identical (we never NEW-fail a turn just because we couldn't decide).
+    """
+    error_code = getattr(event, "error_code", None)
+    error_message = getattr(event, "error_message", None)
+    if not (error_code or error_message):
+        return None
+    try:
+        from magi_agent.adk_bridge.event_adapter import (  # noqa: PLC0415
+            _all_error_fields_benign,
+        )
+    except Exception:  # noqa: BLE001 — fail-soft: leave handling to outer guard.
+        return None
+    if _all_error_fields_benign(error_code, error_message):
+        return None
+    raw = ""
+    if isinstance(error_code, str) and error_code.strip():
+        raw = error_code.strip()
+    elif isinstance(error_message, str) and error_message.strip():
+        raw = error_message.strip()
+    slug = re.sub(r"[^a-z0-9_]+", "_", raw.lower())[:60].strip("_") or "error"
+    return f"{_DEGRADE_LLM_ERROR_PREFIX}{slug}"
 
 
 #: Hard ceiling for a single child turn (seconds), regardless of the request's
@@ -229,6 +283,14 @@ class RealLocalChildRunner:
             # failed mapping (it is BaseException in 3.11 so the broad ``except
             # Exception`` below won't catch it; this is explicit for robustness).
             raise
+        except _ChildLlmTurnError as exc:
+            # Surface the actual provider-error class (rate_limit / model_not_found
+            # / bad_request / ...) instead of collapsing it into the generic
+            # child_turn_error blob the next branch ships.
+            return self._failed(
+                child_execution_id,
+                reason=exc.reason,
+            )
         except Exception:  # noqa: BLE001 — NEVER raise across the seam.
             return self._failed(
                 child_execution_id,
@@ -535,6 +597,14 @@ class RealLocalChildRunner:
             session_id=session_id,
             new_message=new_message,
         ):
+            error_reason = _classify_child_event_error(event)
+            if error_reason is not None:
+                # Provider/litellm dispatch produced a non-benign error_code
+                # event (no text). Surface it as a typed failure instead of
+                # silently collecting no text + returning status=ok — the
+                # latter masquerades the failed turn as a successful empty
+                # answer (the 0.1.62 multi-provider SpawnAgent bug).
+                raise _ChildLlmTurnError(error_reason)
             content = getattr(event, "content", None)
             event_texts: list[str] = []
             for part in getattr(content, "parts", None) or []:
