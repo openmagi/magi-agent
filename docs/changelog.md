@@ -15,6 +15,19 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.66
+
+### Changed
+- Customize hub Phase 2 (#829, follow-up to #824): the rule forms gain a
+  live English preview line that updates as you fill them out ("Every turn,
+  block the final answer unless …"), the Add-rule modal pre-fills the right
+  underlying form (e.g. "Restrict tool" opens directly on `tool_perm`
+  instead of defaulting to `deterministic_ref`), and the SeamBuilder summary
+  reads as one humanized sentence per action ("Modify existing preset
+  coding-verification: wiring → opt_in") with the raw JSON tucked behind a
+  disclosure. New `describe-draft.ts` pure-function module is the single
+  source of truth and is direct-unit-tested (28 vitest cases).
+
 ## 0.1.65
 
 ### Changed
