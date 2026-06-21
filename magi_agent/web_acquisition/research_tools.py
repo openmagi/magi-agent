@@ -55,13 +55,16 @@ LIVE_WEB_ACQUISITION_ENABLED_ENV = "CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABL
 LIVE_WEB_ACQUISITION_KILL_SWITCH_ENV = "CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_KILL_SWITCH"
 # Duplicated deliberately to match the harness/canary env-gate convention
 # (see research_first_canary.py) rather than importing a shared helper.
-_TRUE_VALUES = frozenset({"1", "on", "true", "yes"})
 # Mirrors the live-pack ref grammar so digest refs we mint stay valid public ids.
 _REF_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{1,180}$")
 
 
 def _is_true(value: object) -> bool:
-    return str(value or "").strip().casefold() in _TRUE_VALUES
+    # I-2 PR A: delegates to the canonical truthy leaf so the truthy set
+    # lives in exactly one place (was a local ``_TRUE_VALUES`` frozenset).
+    from magi_agent.config._truthy import is_true as _canonical_is_true  # noqa: PLC0415
+
+    return _canonical_is_true(str(value or ""))
 
 
 def live_web_acquisition_active(*, env: Mapping[str, str] | None = None) -> bool:

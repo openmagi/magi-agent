@@ -3,10 +3,19 @@ from __future__ import annotations
 import os
 from typing import Literal
 
+from magi_agent.config._truthy import env_bool
+
 
 def _truthy_env(name: str) -> bool:
-    value = os.environ.get(name, "").strip().lower()
-    return value in {"1", "true", "yes", "on"}
+    """Strict-allowlist env reader (I-2 PR A wrapper).
+
+    Kept as a thin public alias because several modules import this name
+    (``transport.sse``, ``transport.streaming_chat_route``, ``adk_bridge.
+    event_adapter``, ``shadow.gate5b4c3_live_runner_boundary``). Body now
+    delegates to :func:`magi_agent.config._truthy.env_bool` so the canonical
+    truthy set lives in one place; behaviour is byte-identical.
+    """
+    return env_bool(os.environ, name, default=False)
 
 
 def default_runtime_ops_health_metadata() -> dict[str, object]:

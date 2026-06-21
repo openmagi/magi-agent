@@ -586,8 +586,12 @@ _BACKGROUND_INJECT_CONSUMER_ENV = "MAGI_BACKGROUND_TASK_INJECT_CONSUMER_ENABLED"
 
 
 def _background_inject_consumer_enabled() -> bool:
-    raw = os.environ.get(_BACKGROUND_INJECT_CONSUMER_ENV, "")
-    return bool(raw) and raw.strip().lower() not in {"0", "false", "no", "off"}
+    # I-2 PR A: was a denylist check; now uses the strict-allowlist
+    # :func:`magi_agent.config._truthy.env_bool` so unknown values like
+    # ``"disabled"`` correctly read as False.
+    from magi_agent.config._truthy import env_bool  # noqa: PLC0415
+
+    return env_bool(os.environ, _BACKGROUND_INJECT_CONSUMER_ENV, default=False)
 
 
 def _format_background_inject_block(notes: list[str]) -> str:

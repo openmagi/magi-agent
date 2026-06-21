@@ -36,8 +36,12 @@ class _LoopDriverLike(Protocol):
 
 
 def is_scheduler_executor_enabled() -> bool:
-    raw = os.environ.get("MAGI_SCHEDULER_EXECUTOR_ENABLED", "")
-    return bool(raw) and raw.strip().lower() not in {"0", "false", "no", "off"}
+    # I-2 PR A: was a denylist check guarded by ``bool(raw) and ...``; now
+    # uses the strict-allowlist :func:`magi_agent.config._truthy.env_bool` so
+    # unknown values (e.g. ``"disabled"``) correctly read as False.
+    from magi_agent.config._truthy import env_bool  # noqa: PLC0415
+
+    return env_bool(os.environ, "MAGI_SCHEDULER_EXECUTOR_ENABLED", default=False)
 
 
 def _scheduler_executor_enabled() -> bool:
@@ -139,9 +143,15 @@ DEFAULT_CRON_TICK_INTERVAL_SECONDS = 60.0
 # ---------------------------------------------------------------------------
 
 def is_work_queue_executor_enabled() -> bool:
-    """Return True iff ``MAGI_WORK_QUEUE_EXECUTOR_ENABLED`` is set and truthy."""
-    raw = os.environ.get("MAGI_WORK_QUEUE_EXECUTOR_ENABLED", "")
-    return bool(raw) and raw.strip().lower() not in {"0", "false", "no", "off"}
+    """Return True iff ``MAGI_WORK_QUEUE_EXECUTOR_ENABLED`` is set and truthy.
+
+    I-2 PR A: routes through the canonical registry (the flag is registered
+    in :mod:`magi_agent.config.flags`). Strict allowlist semantics — unknown
+    values like ``"disabled"`` correctly read as False.
+    """
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_WORK_QUEUE_EXECUTOR_ENABLED")
 
 
 def _work_queue_executor_enabled() -> bool:
@@ -186,8 +196,12 @@ _BACKGROUND_LIVE_RUNNER_ENV = "MAGI_BACKGROUND_LIVE_RUNNER_ENABLED"
 
 
 def _background_live_runner_enabled() -> bool:
-    raw = os.environ.get(_BACKGROUND_LIVE_RUNNER_ENV, "")
-    return bool(raw) and raw.strip().lower() not in {"0", "false", "no", "off"}
+    # I-2 PR A: was a denylist check (``bool(raw) and ... not in {...}``);
+    # now uses the strict-allowlist :func:`magi_agent.config._truthy.env_bool`
+    # so a typo'd value cannot silently enable the live background runner.
+    from magi_agent.config._truthy import env_bool  # noqa: PLC0415
+
+    return env_bool(os.environ, _BACKGROUND_LIVE_RUNNER_ENV, default=False)
 
 
 def _build_inner_work_task_runner() -> Any:

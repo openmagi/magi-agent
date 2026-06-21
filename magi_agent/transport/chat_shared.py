@@ -616,7 +616,10 @@ def _is_sha256_digest(value: object) -> bool:
 
 
 def _is_true(value: object) -> bool:
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+    # I-2 PR A: delegates to the canonical truthy leaf.
+    from magi_agent.config._truthy import is_true  # noqa: PLC0415
+
+    return is_true(str(value or ""))
 
 
 def _env_bool_default_true(value: object) -> bool:

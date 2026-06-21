@@ -70,26 +70,25 @@ logger = logging.getLogger(__name__)
 _ENV_ENABLED = "MAGI_SELF_REVIEW_ENABLED"
 _ENV_SHADOW = "MAGI_SELF_REVIEW_SHADOW"
 
-_TRUE_STRINGS = frozenset({"1", "true", "yes", "on"})
-
-
-def _env_flag(name: str, *, default: bool) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in _TRUE_STRINGS
-
 
 def _self_review_enabled() -> bool:
-    return _env_flag(_ENV_ENABLED, default=False)
+    # I-2 PR A: delegate to the canonical truthy leaf (was a forked allowlist).
+    from magi_agent.config._truthy import env_bool  # noqa: PLC0415
+
+    return env_bool(os.environ, _ENV_ENABLED, default=False)
 
 
 def _self_review_shadow() -> bool:
-    # shadow-first: default ON unless explicitly disabled
-    raw = os.environ.get(_ENV_SHADOW)
-    if raw is None:
-        return True
-    return raw.strip().lower() not in {"0", "false", "no", "off"}
+    # shadow-first: default ON unless explicitly disabled.
+    # I-2 PR A converts this from the dangerous denylist semantic
+    # (``not in {"0","false","no","off"}`` — silently enabling any unknown
+    # value like ``"disabled"``) to the strict allowlist semantic. Default-ON
+    # is preserved: unset reads as True; explicit ``"1"/"true"/"yes"/"on"``
+    # is True; explicit ``"0"/"false"/"no"/"off"`` is False; any other
+    # value (e.g. ``"disabled"``) now correctly reads as False.
+    from magi_agent.config._truthy import env_bool  # noqa: PLC0415
+
+    return env_bool(os.environ, _ENV_SHADOW, default=True)
 
 
 # ---------------------------------------------------------------------------

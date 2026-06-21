@@ -53,7 +53,10 @@ def _availability_status(
 
 
 def _env_truthy(value: object) -> bool:
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+    # I-2 PR A: delegates to the canonical truthy leaf.
+    from magi_agent.config._truthy import is_true  # noqa: PLC0415
+
+    return is_true(str(value))
 
 
 __all__ = ["child_runner_availability_metadata"]

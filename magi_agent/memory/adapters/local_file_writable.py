@@ -493,9 +493,14 @@ class LocalFileMemoryProvider:
 
     @staticmethod
     def _resolve_compaction_enabled() -> bool:
-        """Determine whether the gated append-compactor is enabled (default OFF)."""
-        env_val = os.environ.get(MAGI_MEMORY_COMPACTION_ENABLED_ENV, "").strip().lower()
-        return env_val in {"1", "true", "yes", "on"}
+        """Determine whether the gated append-compactor is enabled (default OFF).
+
+        I-2 PR A: delegates to the canonical truthy leaf so the truthy set
+        lives in one place.
+        """
+        from magi_agent.config._truthy import env_bool  # noqa: PLC0415
+
+        return env_bool(os.environ, MAGI_MEMORY_COMPACTION_ENABLED_ENV, default=False)
 
     def _compact_file(self, target_path: Path, incoming_entry_size: int) -> int:
         """Archive then consolidate ``target_path`` in place.

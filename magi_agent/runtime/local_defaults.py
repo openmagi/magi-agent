@@ -333,4 +333,7 @@ def local_full_runtime_defaults_enabled(environ: Mapping[str, str]) -> bool:
 
 
 def _env_enabled(value: str | None) -> bool:
-    return value is not None and value.strip().lower() in {"1", "true", "yes", "on"}
+    # I-2 PR A: delegates to the canonical truthy leaf.
+    from magi_agent.config._truthy import is_true  # noqa: PLC0415
+
+    return value is not None and is_true(value)

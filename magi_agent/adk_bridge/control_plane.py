@@ -546,7 +546,10 @@ class ControlPlanePlugin(BasePlugin):
 MAX_STEPS_BRAKE_CONTROL_NAME = "magi_max_steps_brake"
 MAX_STEPS_BRAKE_ENABLED_ENV = "MAGI_MAX_STEPS_BRAKE_ENABLED"
 
-_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
+# I-2 PR A: kept as a module-local alias for the canonical leaf set so that
+# the truthy literal is spelled in exactly one place
+# (:mod:`magi_agent.config._truthy`). Used by the in-file ``_is_true`` helper.
+from magi_agent.config._truthy import TRUE_VALUES as _TRUE_VALUES  # noqa: E402
 
 
 class MaxStepsBrakeControl(BaseLoopControl):
@@ -1853,7 +1856,10 @@ def build_default_plugin(
 
 
 def _is_true(value: str) -> bool:
-    return value.strip().lower() in _TRUE_VALUES
+    # I-2 PR A: delegates to the canonical truthy leaf.
+    from magi_agent.config._truthy import is_true  # noqa: PLC0415
+
+    return is_true(value)
 
 
 __all__ = [

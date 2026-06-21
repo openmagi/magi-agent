@@ -28,7 +28,6 @@ RESEARCH_FIRST_CANARY_KILL_SWITCH_ENV = (
 )
 RESEARCH_RECIPE_ID = "openmagi.research"
 
-_TRUE_VALUES = frozenset({"1", "on", "true", "yes"})
 _SOURCE_TEXT = (
     "The selected research path inspected this local source package in read-only "
     "mode. Workspace, memory, browser, channel, scheduler, and write access stay "
@@ -373,7 +372,10 @@ def _is_sha256_digest(value: object) -> bool:
 
 
 def _is_true(value: object) -> bool:
-    return str(value or "").strip().casefold() in _TRUE_VALUES
+    # I-2 PR A: delegates to the canonical truthy leaf.
+    from magi_agent.config._truthy import is_true as _canonical_is_true  # noqa: PLC0415
+
+    return _canonical_is_true(str(value or ""))
 
 
 __all__ = [

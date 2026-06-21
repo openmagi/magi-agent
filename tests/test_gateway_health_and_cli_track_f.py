@@ -176,15 +176,24 @@ def test_gateway_start_once_with_scheduler_on_invokes_scheduler_executor_boundar
 # including for garbage / non-canonical truthy values.
 # ---------------------------------------------------------------------------
 
-def test_gate_and_health_agree_on_garbage_truthy(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`=garbage` → daemon gate ON; health must also report daemonEnabled=True."""
+def test_gate_and_health_agree_on_garbage_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`=garbage` → daemon gate OFF; health must report daemonEnabled=False.
+
+    I-2 (PR #825): the gateway-daemon gate now uses the strict-truthy convention
+    (``1``/``true``/``yes``/``on`` only) via ``env_bool``. Pre-I-2 this site used
+    a denylist (``not in {"0","false","no","off"}``) so any non-empty unknown
+    value silently ENABLED the daemon — a security footgun that this PR
+    explicitly closes. The contract here is now "gate and health agree", not
+    "gate and health agree on a permissive ON" — the agreement direction flips
+    to OFF for garbage. Operators must use a canonical truthy value to enable.
+    """
     from magi_agent.gateway.daemon import is_gateway_daemon_enabled
 
     monkeypatch.setenv("MAGI_GATEWAY_DAEMON_ENABLED", "garbage")
     gate_result = is_gateway_daemon_enabled()
     health_result = gateway_daemon_health_projection()["daemonEnabled"]
-    assert gate_result is True, "is_gateway_daemon_enabled() should be True for 'garbage'"
-    assert health_result is True, "daemonEnabled in health projection should match gate"
+    assert gate_result is False, "is_gateway_daemon_enabled() should be False for 'garbage' (strict-truthy)"
+    assert health_result is False, "daemonEnabled in health projection should match gate"
     assert gate_result == health_result, "gate and health must not diverge"
 
 

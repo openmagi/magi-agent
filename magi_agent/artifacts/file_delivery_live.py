@@ -55,7 +55,6 @@ LIVE_FILE_DELIVERY_ENABLED_ENV = "MAGI_FILE_DELIVERY_LIVE_ENABLED"
 LIVE_FILE_DELIVERY_KILL_SWITCH_ENV = "MAGI_FILE_DELIVERY_LIVE_KILL_SWITCH"
 
 _TRUTHY = {"1", "true", "yes", "on"}
-_FALSY = {"0", "false", "no", "off"}
 
 
 def is_live_file_delivery_enabled(env: Mapping[str, str] | None = None) -> bool:

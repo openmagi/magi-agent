@@ -200,10 +200,10 @@ class JobExecutionConfig(BaseModel):
 
 
 def _env_flag(name: str, *, default: bool) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+    # I-2 PR A: delegates to the canonical truthy leaf.
+    from magi_agent.config._truthy import env_bool  # noqa: PLC0415
+
+    return env_bool(os.environ, name, default=default)
 
 
 def _env_shadow_flag(name: str, *, default: bool) -> bool:

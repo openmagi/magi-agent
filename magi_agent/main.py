@@ -158,7 +158,11 @@ def _parse_runtime_config(environ: Mapping[str, str]):
 
 
 def _env_enabled(value: str | None) -> bool:
-    return value is not None and value.strip().lower() in {"1", "true", "yes", "on"}
+    # I-2 PR A: delegates to the canonical truthy leaf. ``None`` reads False
+    # (was already the behaviour); explicit truthy values read True.
+    from magi_agent.config._truthy import is_true  # noqa: PLC0415
+
+    return value is not None and is_true(value)
 
 
 def _local_runtime_defaults_active(config: RuntimeConfig) -> bool:

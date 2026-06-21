@@ -40,13 +40,12 @@ _WEBFETCH_NOT_CONFIGURED_MESSAGE = (
     "Without any key, use the browser tool to open the page and read it."
 )
 
-# Duplicated deliberately to match the env-gate truthy convention used by
-# research_tools.py / the harness-canary gates (no shared helper by design).
-_TRUE_VALUES = frozenset({"1", "on", "true", "yes"})
-
-
 def _is_true(value: object) -> bool:
-    return str(value or "").strip().casefold() in _TRUE_VALUES
+    # I-2 PR A: delegates to the canonical truthy leaf so the truthy set
+    # lives in exactly one place (was a local ``_TRUE_VALUES`` frozenset).
+    from magi_agent.config._truthy import is_true  # noqa: PLC0415
+
+    return is_true(str(value or ""))
 
 
 def _not_configured_result(tool_name: str) -> ToolResult:

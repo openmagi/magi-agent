@@ -67,10 +67,9 @@ from magi_agent.cli.protocol import (
 # importing it at module top here does NOT pull google-adk / textual into the
 # headless import graph.
 from magi_agent.cli.engine import MagiEngineDriver
+from magi_agent.config.flags import flag_bool
 from magi_agent.runtime.governed_turn import run_governed_turn
 from magi_agent.runtime.turn_context import TurnContext
-
-_FALSY = {"0", "false", "no", "off"}
 
 
 class _NoopFrameWriter:
@@ -81,13 +80,18 @@ class _NoopFrameWriter:
 def _cli_enabled() -> bool:
     """Return True unless MAGI_CLI_ENABLED is explicitly set to a falsy token.
 
-    Default-ON (Track 18 Stream F PR-F2a): unset or any non-falsy value → enabled.
-    Set ``MAGI_CLI_ENABLED=0`` (or ``false`` / ``no`` / ``off``) to disable.
+    Default-ON (Track 18 Stream F PR-F2a): unset → enabled. Set
+    ``MAGI_CLI_ENABLED=0`` (or ``false`` / ``no`` / ``off``) to disable. Reads
+    through the canonical :func:`magi_agent.config.flags.flag_bool` so the
+    truthy/falsey set lives in exactly one place (I-2): under allowlist
+    semantics, unset reads as the registry default (True), an explicit
+    ``"1"/"true"/"yes"/"on"`` reads True, and any other explicit value —
+    including ``"0"/"false"/"no"/"off"`` AND unknown values like
+    ``"enabled"`` — reads False. This is the I-2 security correction:
+    previously, under denylist semantics, an unknown value would have
+    silently enabled the surface.
     """
-    val = os.environ.get("MAGI_CLI_ENABLED")
-    if val is None:
-        return True  # default-ON (Track 18 Stream F: Kevin's decision)
-    return val.strip().lower() not in _FALSY
+    return flag_bool("MAGI_CLI_ENABLED")
 
 
 def _log(message: str) -> None:
