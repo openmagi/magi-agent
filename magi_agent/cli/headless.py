@@ -316,6 +316,67 @@ def _accumulate_text(events: list[RuntimeEvent]) -> str:
     return "".join(parts)
 
 
+def _used_tool_from_events(events: list[RuntimeEvent]) -> bool:
+    """True iff any drained event is a ``tool_start`` (parity with the SSE seam).
+
+    The text/json finalize branch drains the whole stream into ``events`` before
+    building the result, so the tool-use signal is read here (the stream-json
+    branch tracks it live inside ``_project_stream`` instead).
+    """
+    for event in events:
+        if event.type == "tool" and _inner_type(event.payload) == "tool_start":
+            return True
+    return False
+
+
+async def _record_turn_memory(
+    *,
+    workspace_root: str,
+    session_id: str,
+    terminal: EngineResult,
+    user_text: str,
+    assistant_text: str,
+    used_tool: bool,
+) -> None:
+    """Turn-end memory hook for the CLI/headless turn loop (compaction + daily-log
+    parity with the hosted ``chat_routes`` SSE seam).
+
+    Flushes a concise daily entry to ``memory/daily/YYYY-MM-DD.md`` (the compaction
+    tree's raw input) and triggers a once-per-session compaction build. Mirrors
+    ``chat_routes._local_adk_chat_sse``:
+
+      * GATED — ``record_turn`` no-ops when the (default-OFF) memory master /
+        compaction flags are unset, so a clean CLI install writes nothing.
+      * FAIL-SOFT — ``record_turn`` swallows its own errors; it can never raise
+        into or break the headless turn.
+      * OFFLOADED — run on a worker thread via ``asyncio.to_thread`` so the
+        (first-turn) compaction file IO never blocks the turn loop.
+      * SKIP-ON-ERROR — errored turns carry nothing useful to persist.
+
+    The per-request memory mode is threaded so ``incognito`` / ``read_only``
+    actually suppress the live daily flush; it stays ``NORMAL`` unless the
+    default-OFF memory-mode routing gate bound it.
+    """
+    if _is_error(terminal.terminal, terminal.error):
+        return
+    from magi_agent.runtime.memory_mode_context import (  # noqa: PLC0415
+        current_memory_mode,
+    )
+    from magi_agent.runtime.memory_turn_hook import record_turn  # noqa: PLC0415
+
+    turn_id = terminal.turn_id if getattr(terminal, "turn_id", None) else "cli-turn"
+    await asyncio.to_thread(
+        record_turn,
+        workspace_root=workspace_root,
+        session_id=session_id,
+        turn_id=turn_id,
+        user_text=user_text,
+        assistant_text=assistant_text,
+        used_tool=used_tool,
+        memory_mode=current_memory_mode().value,
+    )
+
+
 # ---------------------------------------------------------------------------
 # stream-json projection helpers
 # ---------------------------------------------------------------------------
@@ -714,17 +775,20 @@ async def _project_stream(
     research_audit: object | None = None,
     governance_mode: str = "audit",
     defer_assistant_output: bool = False,
-) -> tuple[str, EngineResult]:
+) -> tuple[str, EngineResult, bool]:
     """Consume the engine generator, emitting projected NDJSON frames live.
 
-    Returns ``(accumulated_assistant_text, terminal)``. Token runs are coalesced
-    into ONE assistant frame, flushed when a non-token event or the terminal
-    arrives. Frames are written as events arrive so a ``control_request`` emitted
-    by the gate's sink lands AFTER the tool frame that motivated it.
+    Returns ``(accumulated_assistant_text, terminal, used_tool)``. Token runs are
+    coalesced into ONE assistant frame, flushed when a non-token event or the
+    terminal arrives. Frames are written as events arrive so a ``control_request``
+    emitted by the gate's sink lands AFTER the tool frame that motivated it.
+    ``used_tool`` (any ``tool_start`` seen) feeds the turn-end memory hook so a
+    trivial tool-less turn can be skipped, parity with the hosted seam.
     """
 
     token_buf: list[str] = []
     all_text: list[str] = []
+    used_tool = False
     terminal: EngineResult | None = None
 
     async def flush_tokens() -> None:
@@ -766,6 +830,7 @@ async def _project_stream(
             await flush_tokens()
             inner = _inner_type(event.payload)
             if event.type == "tool" and inner == "tool_start":
+                used_tool = True
                 await writer.write(
                     _assistant_tool_use_frame(event.payload, session_id=session_id)
                 )
@@ -809,7 +874,7 @@ async def _project_stream(
             cost_usd=0.0,
             error="engine_driver_yielded_no_terminal_result",
         )
-    return "".join(all_text), terminal
+    return "".join(all_text), terminal, used_tool
 
 
 async def run_headless(
@@ -992,6 +1057,16 @@ async def run_headless(
         result_frame = _build_result_frame(
             session_id=sid, assistant_text=assistant_text, terminal=terminal
         )
+        # Turn-end memory hook (compaction + daily-log parity with the hosted SSE
+        # seam). Gated + fail-soft + offloaded; no-op on the default-OFF config.
+        await _record_turn_memory(
+            workspace_root=cwd,
+            session_id=sid,
+            terminal=terminal,
+            user_text=prompt,
+            assistant_text=assistant_text,
+            used_tool=_used_tool_from_events(events),
+        )
         if output == "text":
             out.write(_text_mode_body(result_frame) + "\n")
         else:
@@ -1070,7 +1145,7 @@ async def run_headless(
             assert session_log is not None
             gen = _tap_session_log(gen, session_log)
         governance_mode, research_audit = _research_governance()
-        assistant_text, terminal = await _project_stream(
+        assistant_text, terminal, used_tool = await _project_stream(
             gen,
             writer,
             session_id=sid,
@@ -1113,7 +1188,7 @@ async def run_headless(
                 if write_session_log:
                     assert session_log is not None
                     retry_gen = _tap_session_log(retry_gen, session_log)
-                assistant_text, terminal = await _project_stream(
+                assistant_text, terminal, used_tool = await _project_stream(
                     retry_gen,
                     writer,
                     session_id=sid,
@@ -1125,6 +1200,16 @@ async def run_headless(
             session_id=sid, assistant_text=assistant_text, terminal=terminal
         )
         await writer.write(result_frame)
+        # Turn-end memory hook (compaction + daily-log parity with the hosted SSE
+        # seam). Gated + fail-soft + offloaded; no-op on the default-OFF config.
+        await _record_turn_memory(
+            workspace_root=cwd,
+            session_id=sid,
+            terminal=terminal,
+            user_text=prompt,
+            assistant_text=assistant_text,
+            used_tool=used_tool,
+        )
     finally:
         if write_session_log:
             assert session_log is not None
