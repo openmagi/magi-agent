@@ -199,6 +199,11 @@ export function PresetRow({
 // deterministic) and action is block. Saved rules render as toggle/delete rows.
 const SCOPES = ["always", "coding", "research", "delivery", "memory", "task"] as const;
 
+export { describeDraft, type CustomRuleKind } from "./describe-draft";
+
+import { describeDraft, type CustomRuleKind } from "./describe-draft";
+
+
 export function CustomRulesSection({
   menu,
   rules,
@@ -207,6 +212,8 @@ export function CustomRulesSection({
   onToggle,
   onDelete,
   onCompileShacl,
+  initialKind,
+  autoOpen = false,
 }: {
   menu: CustomizeCatalog["verification"]["customRuleMenu"];
   rules: CustomRule[];
@@ -219,9 +226,25 @@ export function CustomRulesSection({
     sampleRecords?: unknown[],
     priorTurns?: ConversationTurn[],
   ) => Promise<ShaclCompileResponse>;
+  /** Phase-2 pre-fill: seed the kind picker so the user lands on the right
+   *  shape (e.g. AddRuleModal's "Restrict tool" choice → tool_perm). */
+  initialKind?: CustomRuleKind;
+  /** Phase-2: open the add-form immediately on mount so the user does not
+   *  have to click "+ Add custom rule" after picking from AddRuleModal. */
+  autoOpen?: boolean;
 }) {
-  const [adding, setAdding] = useState(false);
-  const [kind, setKind] = useState<"deterministic_ref" | "tool_perm" | "llm_criterion" | "after_tool" | "shacl_constraint">("deterministic_ref");
+  const [adding, setAdding] = useState<boolean>(autoOpen);
+  const [kind, setKind] = useState<CustomRuleKind>(initialKind ?? "deterministic_ref");
+  // Re-seed when the parent passes a new initial kind (the AddRuleModal
+  // routes user back here with a different choice). Equality-safe to avoid
+  // stomping a partially-filled draft on unrelated re-renders.
+  useEffect(() => {
+    if (initialKind) {
+      setKind(initialKind);
+      setAdding(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialKind]);
 
   // SHACL-specific state
   const [shaclMode, setShaclMode] = useState<"nl" | "raw">("nl");
@@ -380,6 +403,28 @@ export function CustomRulesSection({
       action: "block",
     };
   };
+
+  // Phase-2 live preview: build the plain-English "This rule will: ..." line
+  // from the CURRENT draft (not the persisted list). Returns null when the
+  // form is too empty to describe — the caller hides the preview in that
+  // case so it does not flash misleading text.
+  const draftPreview = describeDraft({
+    kind,
+    scope,
+    ref,
+    refLabel: ref ? menuLabel(ref) : "",
+    matchType,
+    matchValue,
+    decision,
+    criterion,
+    toolMatch,
+    contentPattern,
+    contentIsRegex,
+    contentNegate,
+    shaclMode,
+    shaclPreviewOk: !!shaclPreview?.ok,
+    rawTtlHasContent: !!rawTtl.trim(),
+  });
 
   const selectCls = "mt-1 w-full rounded-lg border border-black/[0.12] bg-white px-2 py-1.5 text-sm";
   const selectTriggerCls = "mt-1 rounded-lg px-2 py-1.5 text-sm font-normal";
@@ -1083,6 +1128,15 @@ export function CustomRulesSection({
             >
               Cancel
             </button>
+            {draftPreview ? (
+              <p
+                role="note"
+                aria-label="Live preview of the rule"
+                className="mr-auto rounded-md border border-emerald-500/20 bg-emerald-50/60 px-2.5 py-1 text-[11px] leading-snug text-emerald-900"
+              >
+                <span className="font-semibold">This rule will:</span> {draftPreview}
+              </p>
+            ) : null}
             {/* For SHACL nl mode the approve button (above) handles saving — hide generic Add rule. */}
             {kind !== "shacl_constraint" || shaclMode === "raw" ? (
               <button

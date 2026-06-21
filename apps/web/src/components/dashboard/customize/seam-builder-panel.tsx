@@ -43,6 +43,10 @@ import { useAgentFetch } from "@/lib/local-api";
 import { PageHint } from "./page-hint";
 
 
+export { describeSpecActions } from "./describe-draft";
+import { describeSpecActions } from "./describe-draft";
+
+
 export interface SeamBuilderPanelProps {
   /** The currently persisted SeamSpec docs (from
    * ``overrides.verification.seam_specs``). Empty array when none are saved
@@ -288,14 +292,26 @@ function CompileResultView({
         ? "text-secondary"
         : "text-amber-700";
 
+  const humanSummary = describeSpecActions(spec);
+
   return (
     <section className="space-y-3 rounded-xl border border-black/[0.08] bg-white px-4 py-3">
       <div>
-        <p className="text-sm font-semibold text-foreground">Compiled SeamSpec</p>
-        <pre className="mt-2 max-h-72 overflow-auto rounded-lg bg-gray-50/80 p-3 text-[11px] leading-relaxed text-foreground">
+        <p className="text-sm font-semibold text-foreground">This spec will:</p>
+        <ul className="mt-1 list-disc space-y-1 pl-5 text-xs leading-relaxed text-foreground">
+          {humanSummary.map((line, i) => (
+            <li key={i}>{line}</li>
+          ))}
+        </ul>
+      </div>
+      <details className="rounded-lg bg-gray-50/80 p-2">
+        <summary className="cursor-pointer text-[11px] font-medium text-secondary">
+          View raw SeamSpec JSON
+        </summary>
+        <pre className="mt-2 max-h-72 overflow-auto rounded-lg bg-white p-3 text-[11px] leading-relaxed text-foreground">
           {JSON.stringify(spec, null, 2)}
         </pre>
-      </div>
+      </details>
 
       {review ? (
         <div>
