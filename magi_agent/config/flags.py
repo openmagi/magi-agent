@@ -624,6 +624,54 @@ FLAGS: tuple[FlagSpec, ...] = (
             "keyword inference; strict default-OFF (OFF is byte-identical to today)."
         ),
     ),
+    # --- Runner-policy routing (cli/engine.py authority-adjacent seams) ----
+    # Authority-adjacent: route selection / blocking / recipe-intent binding
+    # are all gated default-OFF. Promoted from cli/engine.py module-local
+    # denylist parsers to the registry as part of I-2 PR A (truthy
+    # consolidation) so the strict allowlist semantics live in exactly one
+    # place. Default-OFF stays default-OFF; an unset env reads as OFF.
+    _b(
+        "MAGI_RUNNER_POLICY_ROUTING_ENABLED",
+        stage="stage2",
+        summary=(
+            "Emit and attach safe runner-policy routes during phase routing "
+            "(cli/engine._runner_policy_routing_enabled). Code default OFF; "
+            "installed/local full-runtime profiles and hosted canary profiles "
+            "opt in explicitly via env."
+        ),
+    ),
+    _b(
+        "MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED",
+        stage="stage2",
+        summary=(
+            "Hard-block denied materialised routes before provider calls "
+            "(cli/engine._runner_policy_route_blocking_enabled). Intentionally "
+            "NOT part of the default full-runtime profile: materialised denials "
+            "can be stale while the configured model is still capable. Default "
+            "OFF (route denials emit audit metadata and the turn continues)."
+        ),
+    ),
+    _b(
+        "MAGI_RECIPE_INTENT_BINDING_ENABLED",
+        stage="stage2",
+        summary=(
+            "Bind emit-only recipe intents (provider / channel / artifact / "
+            "scheduler) to hint-level runner effects (doc 05 PR-3 / A1-G2). "
+            "Strict default-OFF (OFF byte-identical to today). Hard enforcement "
+            "stays deferred to 14-controlplane."
+        ),
+    ),
+    # NOTE: flat default-ON; cli/wiring._first_party_tools_enabled treats unset
+    # as True. Promoted to the registry as part of I-2 PR A so the truthy set
+    # is read in exactly one place.
+    _b(
+        "MAGI_FIRST_PARTY_TOOLS_ENABLED",
+        default=True,
+        summary=(
+            "Mount the first-party Magi tool pack on the CLI runner; flat "
+            "default-ON. Set ``=0`` to fall back to ADK-native tools only."
+        ),
+    ),
     _b(
         "MAGI_KEY_AWARE_MODEL_ROUTES_ENABLED",
         stage="stage2",

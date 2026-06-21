@@ -4711,13 +4711,15 @@ def _runner_policy_routing_enabled() -> bool:
 
     The code-level default stays OFF. Installed/local full-runtime profiles and
     hosted canary profiles should enable this explicitly in their config/env.
-    """
-    import os
 
-    raw = os.environ.get(_RUNNER_POLICY_ROUTING_ENV)
-    if raw is None:
-        return False
-    return raw.strip().lower() not in {"0", "false", "no", "off"}
+    Reads through the canonical registry (I-2 PR A) so the truthy convention
+    lives in exactly one place: explicit ``"1"/"true"/"yes"/"on"`` enables;
+    any other value — including unset and unknown values like ``"enabled"``
+    — keeps the default-OFF authority gate closed.
+    """
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool(_RUNNER_POLICY_ROUTING_ENV)
 
 
 def _runner_policy_route_blocking_enabled() -> bool:
@@ -4728,13 +4730,12 @@ def _runner_policy_route_blocking_enabled() -> bool:
     model is still capable of finishing the user turn. By default, route denials
     are emitted as audit metadata and the turn continues on the configured model.
     Operators can explicitly re-arm the older hard-block boundary with this env.
-    """
-    import os
 
-    raw = os.environ.get(_RUNNER_POLICY_ROUTE_BLOCKING_ENV)
-    if raw is None:
-        return False
-    return raw.strip().lower() not in {"0", "false", "no", "off"}
+    Reads through the canonical registry (I-2 PR A); strict allowlist semantics.
+    """
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool(_RUNNER_POLICY_ROUTE_BLOCKING_ENV)
 
 
 def _recipe_intent_binding_enabled() -> bool:
@@ -4743,13 +4744,12 @@ def _recipe_intent_binding_enabled() -> bool:
     Stage gate for doc 05 PR-3 (A1-G2). The code-level default stays OFF, so the
     emitted runner-policy route selection is byte-identical to origin/main unless
     an operator opts in. See ``parse_recipe_intent_binding_enabled``.
-    """
-    import os
 
-    raw = os.environ.get(_RECIPE_INTENT_BINDING_ENV)
-    if raw is None:
-        return False
-    return raw.strip().lower() not in {"0", "false", "no", "off"}
+    Reads through the canonical registry (I-2 PR A); strict allowlist semantics.
+    """
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool(_RECIPE_INTENT_BINDING_ENV)
 
 
 def compile_intent_bindings(

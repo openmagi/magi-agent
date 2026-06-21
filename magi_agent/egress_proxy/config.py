@@ -5,11 +5,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
-_TRUTHY = {"1", "true", "yes", "on"}
-
-
-def _truthy(value: str | None) -> bool:
-    return str(value or "").strip().lower() in _TRUTHY
+# I-2 PR A: the per-module ``_truthy`` is removed in favour of the canonical
+# leaf so the truthy set lives in exactly one place. Use :func:`is_true`
+# directly at call sites.
+from magi_agent.config._truthy import is_true as _truthy
 
 
 def _validate_proxy_origin(value: str) -> str:

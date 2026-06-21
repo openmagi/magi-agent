@@ -24,11 +24,12 @@ DEEP_RESEARCH_MAX_QUERIES_ENV = "MAGI_DEEP_WEB_RESEARCH_MAX_QUERIES"
 DEEP_RESEARCH_MAX_ITERATIONS_ENV = "MAGI_DEEP_WEB_RESEARCH_MAX_ITERATIONS"
 DEEP_RESEARCH_CROSS_VERIFY_ENV = "MAGI_DEEP_WEB_RESEARCH_CROSS_VERIFY"
 
-_TRUE_VALUES = frozenset({"1", "on", "true", "yes"})
-
-
 def _is_true(value: object) -> bool:
-    return str(value or "").strip().casefold() in _TRUE_VALUES
+    # I-2 PR A: delegates to the canonical truthy leaf so the truthy set
+    # lives in exactly one place (was a local ``_TRUE_VALUES`` frozenset).
+    from magi_agent.config._truthy import is_true as _canonical_is_true  # noqa: PLC0415
+
+    return _canonical_is_true(str(value or ""))
 
 
 def _int_env(key: str, default: int, *, lo: int, hi: int) -> int:

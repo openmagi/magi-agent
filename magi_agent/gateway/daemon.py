@@ -58,9 +58,13 @@ def is_gateway_daemon_enabled() -> bool:
     """Return True iff ``MAGI_GATEWAY_DAEMON_ENABLED`` is truthy (default OFF).
 
     Evaluated at call time so tests/operators can flip the env without reload.
+    I-2 PR A: was a denylist check guarded by ``bool(raw) and ...`` which
+    still silently enabled the daemon on any unknown non-empty value (e.g.
+    ``"disabled"``). Now uses the canonical strict-allowlist semantics.
     """
-    raw = os.environ.get("MAGI_GATEWAY_DAEMON_ENABLED", "")
-    return bool(raw) and raw.strip().lower() not in {"0", "false", "no", "off"}
+    from magi_agent.config._truthy import env_bool  # noqa: PLC0415
+
+    return env_bool(os.environ, "MAGI_GATEWAY_DAEMON_ENABLED", default=False)
 
 
 # ---------------------------------------------------------------------------

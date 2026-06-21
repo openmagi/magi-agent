@@ -89,8 +89,6 @@ logger = logging.getLogger(__name__)
 _ENV_ENABLED = "MAGI_SKILL_CURATOR_ENABLED"
 _ENV_SHADOW = "MAGI_SKILL_CURATOR_SHADOW"
 
-_TRUE_STRINGS = frozenset({"1", "true", "yes", "on"})
-
 _DEFAULT_INTERVAL_HOURS: float = 168.0       # 7 days
 _DEFAULT_STALE_DAYS: int = 30
 _DEFAULT_IDLE_THRESHOLD_SECONDS: float = 3600.0  # 1 hour idle = "not active"
@@ -208,10 +206,10 @@ class CuratorConfig(BaseModel):
 
 
 def _env_flag(name: str, *, default: bool) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in _TRUE_STRINGS
+    # I-2 PR A: delegates to the canonical truthy leaf.
+    from magi_agent.config._truthy import env_bool  # noqa: PLC0415
+
+    return env_bool(os.environ, name, default=default)
 
 
 def _env_shadow_flag(name: str, *, default: bool) -> bool:

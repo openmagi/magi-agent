@@ -5,9 +5,9 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-
-def _truthy(value: str | None) -> bool:
-    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+# I-2 PR A: per-module ``_truthy`` removed in favour of the canonical leaf
+# so the truthy set lives in exactly one place.
+from magi_agent.config._truthy import is_true as _truthy
 
 
 def _int_env(name: str, default: int) -> int:

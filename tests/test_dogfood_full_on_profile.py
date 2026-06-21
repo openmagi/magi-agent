@@ -294,6 +294,20 @@ def test_every_profile_listed_registry_flag_is_enabled(
     # by their own mode test (test_document_authoring_coverage_is_block), so the
     # generic flag_bool cross-check would mis-flag them.
     _MODE_RESOLVED_BOOL_FLAGS = frozenset({"MAGI_DOCUMENT_AUTHORING_COVERAGE"})
+    # Flags the dogfood profile sets to an explicit OFF value (=0) on purpose
+    # — the profile docstring above each entry explains why (e.g. for
+    # MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED:
+    #   "Route DENIAL is audit metadata; hard-blocking it wedges live turns on
+    #    a conservative budget estimate, so keep blocking OFF (matches
+    #    local_defaults)."
+    # These are valid registry bool flags; the dogfood profile just opts them
+    # OUT of the default-ON sweep. Skip them in the generic "every listed bool
+    # resolves True" cross-check; their actual semantic is covered by their own
+    # contract tests. Under the I-2 strict-truthy convention `=0` resolves
+    # False, which is exactly what the profile intends.
+    _INTENTIONALLY_DISABLED_BOOL_FLAGS = frozenset(
+        {"MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED"}
+    )
 
     checked = 0
     for name, value in profile.items():
@@ -301,6 +315,8 @@ def test_every_profile_listed_registry_flag_is_enabled(
         if spec is None:
             continue
         if name in _MODE_RESOLVED_BOOL_FLAGS:
+            continue
+        if name in _INTENTIONALLY_DISABLED_BOOL_FLAGS:
             continue
         if spec.kind == "bool":
             assert flag_bool(name, env=profile) is True, (

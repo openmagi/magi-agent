@@ -84,10 +84,12 @@ def _ensure_discovery() -> None:
 
 
 def local_runner_policy_routing_enabled_from_env() -> bool:
-    raw = os.environ.get(_RUNNER_POLICY_ROUTING_ENV)
-    if raw is None:
-        return False
-    return raw.strip().lower() not in {"0", "false", "no", "off"}
+    # Reads through the canonical registry (I-2 PR A) so the truthy
+    # convention lives in one place. Default-OFF preserved; any explicit
+    # ``"1"/"true"/"yes"/"on"`` enables, unset and unknown values keep OFF.
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool(_RUNNER_POLICY_ROUTING_ENV)
 
 
 def _build_user_hook_bus_for_headless(*, workspace_root: str) -> object | None:
@@ -977,10 +979,12 @@ def _tool_context_turn_id(
 
 
 def _first_party_tools_enabled() -> bool:
-    raw = os.environ.get("MAGI_FIRST_PARTY_TOOLS_ENABLED")
-    if raw is None:
-        return True
-    return raw.strip().lower() not in {"0", "false", "no", "off"}
+    # Reads through the canonical registry (I-2 PR A); default-ON preserved.
+    # Strict allowlist semantics: unset → True (registry default), explicit
+    # ``"1"/"true"/"yes"/"on"`` → True, any other value → False.
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_FIRST_PARTY_TOOLS_ENABLED")
 
 
 def build_tui_app(

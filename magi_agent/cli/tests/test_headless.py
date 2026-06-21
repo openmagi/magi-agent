@@ -225,10 +225,21 @@ def test_cli_enabled_default_on_when_unset(monkeypatch: pytest.MonkeyPatch) -> N
     assert _cli_enabled() is True
 
 
-def test_cli_enabled_true_for_empty_string(monkeypatch: pytest.MonkeyPatch) -> None:
-    """MAGI_CLI_ENABLED='' (empty) → enabled (not a falsy token)."""
+def test_cli_enabled_false_for_empty_string(monkeypatch: pytest.MonkeyPatch) -> None:
+    """MAGI_CLI_ENABLED='' (empty) → disabled.
+
+    I-2 PR A: the empty string is in the canonical
+    :data:`magi_agent.config._truthy.FALSE_VALUES` set, so under the strict
+    allowlist semantic (and the registry flag_bool reader) an explicit
+    empty-string value reads as disabled. Previously, under the legacy
+    denylist semantic, ``""`` was accepted as enabled because it was "not
+    in the falsy set" {0,false,no,off} — but that was inconsistent with the
+    canonical convention used everywhere else and is the kind of edge case
+    the I-2 sweep corrects. To keep the surface enabled, leave the variable
+    unset (the default-True path) or set it to ``"1"``.
+    """
     monkeypatch.setenv("MAGI_CLI_ENABLED", "")
-    assert _cli_enabled() is True
+    assert _cli_enabled() is False
 
 
 def test_cli_enabled_false_for_zero(monkeypatch: pytest.MonkeyPatch) -> None:

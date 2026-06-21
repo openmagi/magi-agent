@@ -19,22 +19,19 @@ import logging
 import os
 from collections.abc import Mapping
 
+# I-2 PR A: per-module ``_truthy`` removed in favour of the canonical leaf
+# so the truthy set lives in exactly one place.
+from magi_agent.config._truthy import is_true as _truthy
 from magi_agent.credentials_admin.local_vault import LocalVault
 from magi_agent.storage.durable_store import DurableRecord
 
 logger = logging.getLogger(__name__)
-
-_TRUTHY = {"1", "true", "yes", "on"}
 
 # Marker substrings (compacted, lowercased) that indicate a value may carry
 # secret material. Used by the redaction helper as a defensive backstop; the
 # secret is never deliberately passed to any sink, but a stray value should
 # still be scrubbed rather than logged.
 _REDACTED = "[redacted]"
-
-
-def _truthy(value: str | None) -> bool:
-    return str(value or "").strip().lower() in _TRUTHY
 
 
 def vault_admin_enabled(env: Mapping[str, str] | None = None) -> bool:

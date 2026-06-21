@@ -81,26 +81,23 @@ logger = logging.getLogger(__name__)
 _ENV_PIPELINE_ENABLED = "MAGI_SELF_REVIEW_PIPELINE_ENABLED"
 _ENV_SHADOW = "MAGI_SELF_REVIEW_SHADOW"
 
-_TRUE_STRINGS = frozenset({"1", "true", "yes", "on"})
-
-
-def _env_flag(name: str, *, default: bool) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in _TRUE_STRINGS
-
 
 def _pipeline_enabled() -> bool:
-    return _env_flag(_ENV_PIPELINE_ENABLED, default=False)
+    # I-2 PR A: delegate to the canonical truthy leaf.
+    from magi_agent.config._truthy import env_bool  # noqa: PLC0415
+
+    return env_bool(os.environ, _ENV_PIPELINE_ENABLED, default=False)
 
 
 def _shadow_mode() -> bool:
-    # Shadow-first: default ON unless explicitly disabled
-    raw = os.environ.get(_ENV_SHADOW)
-    if raw is None:
-        return True
-    return raw.strip().lower() not in {"0", "false", "no", "off"}
+    # Shadow-first: default ON unless explicitly disabled.
+    # I-2 PR A converts this from denylist to allowlist semantics: unset
+    # reads True; explicit ``"1"/"true"/"yes"/"on"`` True; any other value
+    # (including ``"disabled"`` / ``"random_garbage"``) False — was True
+    # under denylist.
+    from magi_agent.config._truthy import env_bool  # noqa: PLC0415
+
+    return env_bool(os.environ, _ENV_SHADOW, default=True)
 
 
 # ---------------------------------------------------------------------------
