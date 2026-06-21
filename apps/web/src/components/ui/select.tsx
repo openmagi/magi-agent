@@ -35,7 +35,7 @@ interface SelectProps {
 }
 
 const triggerBase =
-  "flex w-full min-w-0 cursor-pointer items-center justify-between gap-2 rounded-xl border border-black/10 bg-white px-4 py-3 text-sm font-medium text-foreground outline-none transition-colors duration-200 hover:border-black/20 focus:border-primary/45 focus:ring-4 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60";
+  "flex w-full min-w-0 cursor-pointer items-center justify-between gap-2 rounded-xl border border-black/10 bg-white px-3.5 py-2.5 text-sm font-medium text-foreground outline-none transition-colors duration-200 hover:border-black/20 focus:border-primary/45 focus:ring-4 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60";
 
 export function getSelectMenuPositionClass(placement: SelectMenuPlacement): string {
   return placement === "top" ? "bottom-full mb-1.5" : "top-full mt-1.5";
@@ -231,7 +231,7 @@ export function Select({
 
   return (
     <div className="block">
-      <span id={labelId} className="mb-1.5 block text-sm font-medium text-secondary">
+      <span id={labelId} className="mb-1 block text-sm font-medium text-secondary">
         {label}
       </span>
       {trigger}

@@ -17,7 +17,7 @@ export function GlassCard({
     <div
       onClick={onClick}
       className={`
-        glass rounded-2xl p-6
+        glass rounded-2xl p-5
         ${hover ? "transition-all duration-200 hover:bg-glass-hover hover:border-primary/20 cursor-pointer" : ""}
         ${glow ? "glow-sm" : ""}
         ${className}
