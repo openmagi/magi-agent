@@ -15,6 +15,24 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.65
+
+### Changed
+- I-2 truthy convention unification: all `MAGI_*_ENABLED` reads go through a
+  single strict `env_bool` (#825 PR A — 31 files, 13 denylist sites + 16
+  allowlist sites consolidated + 3 new authority `FlagSpec`s), and the four
+  `*_live` channel gates flip from denylist to allowlist (#826 PR B), closing
+  the I-2 ratchet. `'0'` / `'false'` / `'no'` / empty / unknown values are
+  now uniformly False; only canonical truthy values flip a flag ON.
+
+  Behavior changes worth flagging:
+  - `MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED='0'` (set by the dogfood
+    profile) now stays OFF as the profile already intended; an explicit
+    `_INTENTIONALLY_DISABLED_BOOL_FLAGS` pin records the intent.
+  - `MAGI_GATEWAY_DAEMON_ENABLED='garbage'` now resolves False, where the
+    legacy permissive reader treated any non-empty as True. The gate/health
+    invariant is preserved (they still agree), but in the False direction.
+
 ## 0.1.64
 
 ### Changed
