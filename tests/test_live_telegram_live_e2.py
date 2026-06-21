@@ -141,7 +141,13 @@ def test_gate_falsy_values_are_off(monkeypatch: Any) -> None:
 def test_gate_truthy_values_are_on(monkeypatch: Any) -> None:
     from magi_agent.channels.telegram_live import is_live_telegram_enabled
 
-    for truthy in ("1", "true", "yes", "on", "enabled", "anything"):
+    # I-2 PR B: was a denylist check that silently enabled the channel on any
+    # non-empty / non-explicitly-falsey value (e.g. "enabled", "anything").
+    # Now uses the canonical strict-allowlist — only the documented truthy
+    # spellings enable. Unknown values like "enabled" / "anything" / "disabled"
+    # are covered (asserted False) by the dedicated behaviour-parity table at
+    # ``tests/channels/test_channel_live_truthy_semantic.py``.
+    for truthy in ("1", "true", "yes", "on", "TRUE", "Yes"):
         monkeypatch.setenv("MAGI_CHANNEL_LIVE_TELEGRAM", truthy)
         assert is_live_telegram_enabled() is True, f"Expected True for {truthy!r}"
 
