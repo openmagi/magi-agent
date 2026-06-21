@@ -129,16 +129,18 @@ export function buildChatInputSendOptions(
   recipeMode: ChatRecipeSelectionMode = "auto",
   recipe?: ChatRecipeOption,
   reasoningEffort?: ReasoningEffort,
+  goalMode = false,
 ): ChatInputSendOptions {
   const explicitRecipeSelection = buildExplicitRecipeSelection(
     recipeMode,
     recipe,
   )?.explicitRecipeSelection;
-  // Run-until-done (goalMode) is always on — every send runs until the task
-  // completes. The per-send toggle was removed; there is no reason to run a
-  // task only partway.
+  // Phase 1 of the goal-loop design (clawy docs/plans/2026-06-21-magi-goal-
+  // loop-clean-break-judge-design.md). Caller passes the live toggle state.
+  // Toggle OFF → no goalMode field on the payload (byte-identical to a non-
+  // goal-mode send today). Toggle ON → backend goal-loop policy activates.
   return {
-    goalMode: true,
+    ...(goalMode ? { goalMode: true } : {}),
     ...(explicitRecipeSelection ? { explicitRecipeSelection } : {}),
     ...(reasoningEffort ? { reasoningEffort } : {}),
   };
@@ -310,6 +312,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const [slashIdx, setSlashIdx] = useState(0);
   const [kbIdx, setKbIdx] = useState(0);
   const [recipeMode, setRecipeMode] = useState<ChatRecipeSelectionMode>("auto");
+  // Goal-mode toggle (Phase 1 opt-in). Default OFF — backend goal-loop policy
+  // only activates when the user explicitly opts in for a given send. Promotion
+  // to default-ON (Phase 2) is gated on the design doc's measurement criteria.
+  const [goalMode, setGoalMode] = useState<boolean>(false);
   const [selectedRecipeId, setSelectedRecipeId] = useState(
     availableRecipes[0]?.recipeId ?? "",
   );
@@ -553,6 +559,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           recipeMode,
           selectedRecipe,
           supportsReasoningEffort ? effectiveReasoningEffort : undefined,
+          goalMode,
         ),
       );
       if (result === false) return;
@@ -566,7 +573,17 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     } finally {
       setIsSubmitting(false);
     }
-  }, [text, pendingFiles, onSend, onReset, recipeMode, selectedRecipe]);
+  }, [
+    text,
+    pendingFiles,
+    onSend,
+    onReset,
+    recipeMode,
+    selectedRecipe,
+    supportsReasoningEffort,
+    effectiveReasoningEffort,
+    goalMode,
+  ]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -911,6 +928,32 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                 e.target.value = "";
               }}
             />
+
+            <button
+              type="button"
+              onClick={() => setGoalMode((v) => !v)}
+              disabled={disabled || isSubmitting}
+              aria-pressed={goalMode}
+              data-chat-goal-toggle="true"
+              className={`flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[11px] font-medium transition-all touch-manipulation disabled:cursor-not-allowed disabled:opacity-30 ${
+                goalMode
+                  ? "bg-primary/[0.08] text-primary"
+                  : "text-secondary/45 hover:bg-black/[0.04] hover:text-secondary/70"
+              }`}
+              title={t(
+                language,
+                "Run this message as a goal mission — the agent keeps acting until the task is complete (Phase 1 opt-in)",
+                "이 메시지를 목표 미션으로 실행 — 작업이 끝날 때까지 에이전트가 계속 진행합니다 (Phase 1 옵트인)",
+              )}
+            >
+              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <circle cx="12" cy="12" r="6" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v3m0 12v3m9-9h-3M6 12H3" />
+              </svg>
+              <span className="hidden whitespace-nowrap sm:inline">
+                {t(language, "Goal mission", "목표 미션")}
+              </span>
+            </button>
 
             {safeRecipeOptions.length > 0 && (
               <div
