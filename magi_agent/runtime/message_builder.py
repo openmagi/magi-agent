@@ -38,13 +38,19 @@ RUNTIME_MODEL_IDENTITY_CLOSE = "</runtime_model_identity>"
 _RUNTIME_TEMPORAL_CONTEXT_PATTERN = re.compile(
     r'<runtime_temporal_context hidden="true">[\s\S]*?</runtime_temporal_context>'
 )
+# Render order + header for each self-identity slot. Slots are populated by
+# ``magi_agent.cli.identity.load_identity`` from the ``.magi`` namespace.
+# ``soul`` is LEGACY: SOUL.md is no longer read into the prompt (IDENTITY.md is
+# the self-identity file), but the slot is retained last so hook/operator paths
+# that still inject a ``soul`` section keep rendering. An unpopulated slot is
+# skipped by ``_render_identity_system``.
 _IDENTITY_SECTION_ORDER = (
     ("bootstrap", "BOOTSTRAP"),
-    ("soul", "SOUL"),
-    ("learning", "LEARNING"),
     ("identity", "IDENTITY"),
     ("user", "USER"),
+    ("learning", "LEARNING"),
     ("agents", "AGENTS"),
+    ("soul", "SOUL"),
 )
 _KNOWN_TOKEN_LIMITS = {
     "claude-opus-4-8": 150_000,

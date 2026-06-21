@@ -127,11 +127,11 @@ def test_build_system_prompt_renders_headers_identity_order_and_addendum_without
 
     sections = [
         "# BOOTSTRAP",
-        "# SOUL",
-        "# LEARNING",
         "# IDENTITY",
         "# USER",
+        "# LEARNING",
         "# AGENTS",
+        "# SOUL",
     ]
     indexes = [out.index(section) for section in sections]
     assert indexes == sorted(indexes)
