@@ -476,6 +476,10 @@ function RulesSectionMount({
               onToggle={onToggleCustomRule}
               onDelete={onDeleteCustomRule}
               onCompileShacl={onCompileShacl}
+              autoOpen
+              initialKind={
+                activeChoice === "restrict-tool" ? "tool_perm" : "deterministic_ref"
+              }
             />
           ) : null}
 

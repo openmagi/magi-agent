@@ -34,6 +34,12 @@ describe("CustomizeHub — unified Rules redesign (Phase 1)", () => {
     expect(src).toContain("CustomChecksSection");
   });
 
+  it("pre-fills CustomRulesSection.initialKind from the AddRuleModal choice (Phase 2)", () => {
+    // restrict-tool routes to tool_perm; block-answer routes to deterministic_ref.
+    expect(src).toContain("autoOpen");
+    expect(src).toContain('"restrict-tool" ? "tool_perm" : "deterministic_ref"');
+  });
+
   it("mounts Guidance as its own top-level section (not nested inside Rules)", () => {
     expect(src).toContain('section === "guidance"');
     expect(src).toContain("GuidancePanel");

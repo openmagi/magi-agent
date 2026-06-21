@@ -28,8 +28,13 @@ describe("SeamBuilderPanel — PR-C3 rule builder surface", () => {
     expect(src).toContain("disabled={!canActivate || activateBusy}");
   });
 
-  it("renders all three signals from the compile response: spec, review, schemaIssues", () => {
-    expect(src).toContain("Compiled SeamSpec");
+  it("renders all three signals from the compile response: spec summary, review, schemaIssues", () => {
+    // Phase-2 swapped the raw "Compiled SeamSpec" JSON header for a plain-
+    // English summary list ("This spec will: ...") rendered via
+    // describeSpecActions; the raw JSON is now in a details disclosure.
+    expect(src).toContain("This spec will");
+    expect(src).toContain("describeSpecActions");
+    expect(src).toContain("View raw SeamSpec JSON");
     expect(src).toContain("Reviewer verdict");
     expect(src).toContain("Schema check (deterministic)");
   });
