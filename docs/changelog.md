@@ -15,6 +15,28 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.61
+
+### Added
+- Customize UX restructure (#800): Verification splits into inner-tabs, Gates
+  are unified across panels, and the Hooks / Advanced distinction is
+  clarified. New `GatesPanel`, `GuidancePanel`, `PresetTogglesPanel`, and
+  `VerificationTabs` headless components plug into the Phase 4 hub.
+- C10 default-OFF `<coding_context>` auto-injection block (#794): a
+  registration-time runtime module + `tool_runtime` wire that surfaces the
+  caller's current coding-mode context (env.py 3 helpers) to first-party
+  recipes. Behind its own flag; OFF path stays byte-identical and the 16
+  new tests pin the boundary.
+
+### Changed
+- Customize presets registry now keeps the 9 intended-dormant presets and
+  pins them via an `_INTENDED_DORMANT_PRESETS` constant with a per-entry
+  reason and a helper, instead of deleting them (#788, PR-A v2). The audit
+  tests (`test_autopilot_presets`, `test_harness_audit_contract`,
+  `test_harness_policy_state`, `test_customize_preset_scopes`) all stay
+  green. `coding-workspace-lock` is classified as a user-rule capability
+  rather than a preset.
+
 ## 0.1.60
 
 ### Added
