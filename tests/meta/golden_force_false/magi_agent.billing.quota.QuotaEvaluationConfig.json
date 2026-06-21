@@ -3,7 +3,22 @@
     "live_billing_system_attached",
     "production_quota_mutation_enabled"
   ],
-  "model_construct_dump": null,
+  "model_construct_dump": {
+    "authorityFlags": {
+      "liveBillingCallsEnabled": false,
+      "productionAuthority": false,
+      "quotaMutationAttached": false,
+      "spendCommitAttached": false,
+      "stripeAttached": false,
+      "supabaseAttached": false,
+      "trafficAttached": false,
+      "userVisibleOutputEnabled": false
+    },
+    "killSwitchEnabled": false,
+    "liveBillingSystemAttached": false,
+    "localEvaluationEnabled": false,
+    "productionQuotaMutationEnabled": false
+  },
   "model_construct_force_false_leaks": [],
   "model_validate_dump": {
     "authorityFlags": {

@@ -4,9 +4,10 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Literal, Self
 
-from pydantic import Field, field_serializer, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from magi_agent.billing.quota import QuotaDecision
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.ops.safety import FrozenContractModel, canonical_digest, require_digest, require_safe_ref
 from magi_agent.tenancy.context import TenantContext, TenantRuntimeAuthorityFlags
 
@@ -99,7 +100,7 @@ class SpendReservationRequest(_SpendModel):
         )
 
 
-class SpendReservationReceipt(_SpendModel):
+class SpendReservationReceipt(FalseOnlyAuthorityModel):
     schema_version: Literal["openmagi.billing.spend_receipt.v1"] = Field(
         default="openmagi.billing.spend_receipt.v1",
         alias="schemaVersion",
@@ -124,17 +125,6 @@ class SpendReservationReceipt(_SpendModel):
         alias="authorityFlags",
     )
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), alias="createdAt")
-
-    @model_validator(mode="before")
-    @classmethod
-    def _force_no_live_side_effects(cls, value: object) -> dict[str, object]:
-        payload = dict(value) if isinstance(value, Mapping) else {}
-        for alias in ("liveBillingCall", "productionBillingCommitted", "quotaMutationWritten"):
-            payload[alias] = False
-        payload.pop("live_billing_call", None)
-        payload.pop("production_billing_committed", None)
-        payload.pop("quota_mutation_written", None)
-        return payload
 
     @field_validator("reservation_id", "operation_ref")
     @classmethod
@@ -166,10 +156,6 @@ class SpendReservationReceipt(_SpendModel):
         if self.status in {"reserved", "fail_closed"} and self.parent_receipt_digest is not None:
             raise ValueError("initial spend receipt must not include parent receipt digest")
         return self
-
-    @field_serializer("live_billing_call", "production_billing_committed", "quota_mutation_written")
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
     @property
     def receipt_digest(self) -> str:
