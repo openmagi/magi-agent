@@ -38,10 +38,16 @@ describe("ChatInput", () => {
     expect(html).not.toContain("Auto-steers when possible");
   });
 
-  it("no longer renders a Run until done toggle (always on)", () => {
-    const html = renderToStaticMarkup(<ChatInput onSend={() => {}} />);
-    expect(html).not.toContain("Run until done");
-    expect(html).not.toContain('data-chat-goal-toggle="true"');
+  it("buildChatInputSendOptions emits goalMode only when toggled on", () => {
+    // 14f0c7f9 hard-coded goalMode:true on every send on the premise that
+    // it would be always-on; that PR shipped without backend wiring, so
+    // always-on was a no-op. Phase 1 of the goal-loop design
+    // (clawy docs/plans/2026-06-21-magi-goal-loop-clean-break-judge-design.md)
+    // restores opt-in until judge accuracy + latency are validated.
+    expect(buildChatInputSendOptions("auto", undefined, undefined, false))
+      .not.toHaveProperty("goalMode");
+    expect(buildChatInputSendOptions("auto", undefined, undefined, true))
+      .toMatchObject({ goalMode: true });
   });
 
   it("does not render recipe selector or fixture recipe labels by default", () => {
