@@ -20,7 +20,7 @@ interface MemoryEditorProps {
 interface MemoryFile {
   name: string;
   path: string;
-  tier: "root" | "daily" | "weekly" | "monthly" | "system";
+  tier: "root" | "daily" | "weekly" | "monthly" | "archive" | "system";
   sizeBytes?: number;
   mtimeMs?: number;
 }
@@ -38,15 +38,26 @@ const TIERS: Array<{ key: MemoryFile["tier"]; label: string }> = [
   { key: "daily", label: "Daily" },
   { key: "weekly", label: "Weekly" },
   { key: "monthly", label: "Monthly" },
+  { key: "archive", label: "Archive" },
   { key: "system", label: "Other" },
 ];
 
+// Tiers that are surfaced read-only: their files can be viewed but not edited or
+// deleted from the dashboard. ``memory/archive/`` holds pre-compaction snapshots
+// (the tree's audit trail); the backend also refuses writes/deletes there.
+const READ_ONLY_TIERS: ReadonlySet<MemoryFile["tier"]> = new Set(["archive"]);
+
 function memoryTier(path: string): MemoryFile["tier"] {
   if (path === "MEMORY.md" || path === "memory/ROOT.md") return "root";
+  if (path.startsWith("memory/archive/")) return "archive";
   if (path.startsWith("memory/daily/") || /^memory\/\d{4}-\d{2}-\d{2}\.md$/.test(path)) return "daily";
   if (path.startsWith("memory/weekly/")) return "weekly";
   if (path.startsWith("memory/monthly/")) return "monthly";
   return "system";
+}
+
+function isReadOnlyPath(path: string | null | undefined): boolean {
+  return !!path && READ_ONLY_TIERS.has(memoryTier(path));
 }
 
 function filename(path: string): string {
@@ -381,12 +392,17 @@ export function MemoryEditor({ botName, botOnline }: MemoryEditorProps) {
                       <div className="ml-3 mt-0.5 space-y-0.5">
                         {files.map(file => (
                           <div key={file.path} className="flex items-center group">
-                            <input
-                              type="checkbox"
-                              className="mr-1.5 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer accent-primary"
-                              checked={selectedFiles.has(file.path)}
-                              onChange={() => toggleSelect(file.path)}
-                            />
+                            {isReadOnlyPath(file.path) ? (
+                              // Archive snapshots are read-only: no bulk-delete checkbox.
+                              <span className="mr-1.5 w-3.5 shrink-0" aria-hidden="true" />
+                            ) : (
+                              <input
+                                type="checkbox"
+                                className="mr-1.5 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer accent-primary"
+                                checked={selectedFiles.has(file.path)}
+                                onChange={() => toggleSelect(file.path)}
+                              />
+                            )}
                             <button
                               onClick={() => loadFile(file.path)}
                               className={`flex-1 text-left px-2 py-1 rounded-md text-xs truncate transition-colors ${
@@ -423,35 +439,43 @@ export function MemoryEditor({ botName, botOnline }: MemoryEditorProps) {
                   <p className="text-sm font-semibold text-foreground truncate">{selectedFile}</p>
                 </div>
                 <div className="flex items-center gap-2 ml-4">
-                  <Button
-                    variant={editMode ? "primary" : "secondary"}
-                    size="sm"
-                    onClick={() => {
-                      if (editMode && dirty) {
-                        if (!window.confirm(t(locale, "You have unsaved changes. Switch to preview?", "저장하지 않은 변경사항이 있습니다. 미리보기로 전환하시겠습니까?"))) return;
-                        setEditContent(fileContent);
-                        setDirty(false);
-                      }
-                      setEditMode(!editMode);
-                    }}
-                    disabled={!botOnline}
-                  >
-                    {editMode ? t(locale, "Preview", "미리보기") : t(locale, "Edit", "편집")}
-                  </Button>
-                  {editMode && (
-                    <Button variant="primary" size="sm" onClick={handleSave} disabled={!dirty || saving}>
-                      {saving ? t(locale, "Saving...", "저장 중...") : t(locale, "Save", "저장")}
-                    </Button>
+                  {isReadOnlyPath(selectedFile) ? (
+                    <span className="text-xs text-secondary italic px-2 py-1">
+                      {t(locale, "Read-only (archive)", "읽기 전용 (보관)")}
+                    </span>
+                  ) : (
+                    <>
+                      <Button
+                        variant={editMode ? "primary" : "secondary"}
+                        size="sm"
+                        onClick={() => {
+                          if (editMode && dirty) {
+                            if (!window.confirm(t(locale, "You have unsaved changes. Switch to preview?", "저장하지 않은 변경사항이 있습니다. 미리보기로 전환하시겠습니까?"))) return;
+                            setEditContent(fileContent);
+                            setDirty(false);
+                          }
+                          setEditMode(!editMode);
+                        }}
+                        disabled={!botOnline}
+                      >
+                        {editMode ? t(locale, "Preview", "미리보기") : t(locale, "Edit", "편집")}
+                      </Button>
+                      {editMode && (
+                        <Button variant="primary" size="sm" onClick={handleSave} disabled={!dirty || saving}>
+                          {saving ? t(locale, "Saving...", "저장 중...") : t(locale, "Save", "저장")}
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                        onClick={() => handleDelete([selectedFile])}
+                        disabled={!botOnline}
+                      >
+                        {t(locale, "Delete", "삭제")}
+                      </Button>
+                    </>
                   )}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                    onClick={() => handleDelete([selectedFile])}
-                    disabled={!botOnline}
-                  >
-                    {t(locale, "Delete", "삭제")}
-                  </Button>
                 </div>
               </div>
 

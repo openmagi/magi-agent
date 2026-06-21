@@ -202,6 +202,25 @@ def _is_protected(path: Path) -> bool:
     return name in _SEALED_BASENAMES or bool(_SECRET_NAME_RE.search(name))
 
 
+def _is_archive_memory(path: Path | None) -> bool:
+    """``memory/archive/`` holds pre-compaction snapshots (compaction history).
+
+    They are surfaced read-only in the dashboard: editing or deleting them would
+    corrupt the tree's audit trail, so writes/deletes to anything under a
+    workspace ``memory/archive/`` directory are refused. Read/list stay allowed.
+    """
+    if path is None:
+        return False
+    for root in _workspace_roots():
+        try:
+            rel = path.resolve().relative_to(root.resolve()).as_posix()
+        except (OSError, ValueError):
+            continue
+        if rel == "memory/archive" or rel.startswith("memory/archive/"):
+            return True
+    return False
+
+
 def _file_stat(path: Path) -> dict[str, Any]:
     stat = path.stat()
     return {"sizeBytes": stat.st_size, "mtimeMs": int(stat.st_mtime * 1000)}
@@ -823,7 +842,12 @@ def register_app_api_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             if not isinstance(rel, str):
                 continue
             target = _resolve_in_workspace(rel)
-            if target is None or _is_protected(target) or not target.is_file():
+            if (
+                target is None
+                or _is_protected(target)
+                or _is_archive_memory(target)
+                or not target.is_file()
+            ):
                 continue
             try:
                 target.unlink()
@@ -855,7 +879,7 @@ def register_app_api_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         if not isinstance(rel, str) or not isinstance(content, str):
             return JSONResponse(status_code=400, content={"error": "path_and_content_required"})
         target = _resolve_in_workspace_for_write(rel)
-        if target is None or _is_protected(target):
+        if target is None or _is_protected(target) or _is_archive_memory(target):
             return JSONResponse(status_code=403, content={"error": "forbidden_path"})
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -899,7 +923,7 @@ def register_app_api_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         if not isinstance(rel, str) or not isinstance(content, str):
             return JSONResponse(status_code=400, content={"error": "path_and_content_required"})
         target = _resolve_in_workspace_for_write(rel)
-        if target is None or _is_protected(target):
+        if target is None or _is_protected(target) or _is_archive_memory(target):
             return JSONResponse(status_code=403, content={"error": "forbidden_path"})
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
