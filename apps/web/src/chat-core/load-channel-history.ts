@@ -78,6 +78,7 @@ export async function rowToMessage(
     ...(decoded.thinkingDuration !== undefined ? { thinkingDuration: decoded.thinkingDuration } : {}),
     ...(decoded.researchEvidence !== undefined ? { researchEvidence: decoded.researchEvidence } : {}),
     ...(decoded.usage !== undefined ? { usage: decoded.usage } : {}),
+    ...(decoded.activities !== undefined ? { activities: decoded.activities } : {}),
   };
 }
 

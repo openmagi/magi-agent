@@ -108,4 +108,39 @@ describe("buildPlaintextPersistRows", () => {
       client_msg_id: "u-only",
     });
   });
+
+  it("does NOT persist activities by default (flag-OFF byte-identical)", () => {
+    const rows = buildPlaintextPersistRows({
+      userText: "q",
+      assistant: {
+        content: "answer",
+        thinkingContent: "t",
+        activities: [{ id: "x", label: "WebFetch", status: "done", startedAt: 1 }],
+      },
+      userClientMsgId: "u",
+      assistantClientMsgId: "a",
+      includeAssistantMetadata: true,
+      // persistToolActivity omitted → default false
+    });
+    const assistant = rows.find((r) => r.role === "assistant");
+    expect(assistant?.content).not.toContain("activities");
+    expect(assistant?.content).toContain('"_v":2');
+  });
+
+  it("persists activities into a v4 envelope only when opted in", () => {
+    const rows = buildPlaintextPersistRows({
+      userText: "q",
+      assistant: {
+        content: "answer",
+        activities: [{ id: "x", label: "WebFetch", status: "done", startedAt: 1 }],
+      },
+      userClientMsgId: "u",
+      assistantClientMsgId: "a",
+      includeAssistantMetadata: true,
+      persistToolActivity: true,
+    });
+    const assistant = rows.find((r) => r.role === "assistant");
+    expect(assistant?.content).toContain('"_v":4');
+    expect(assistant?.content).toContain("WebFetch");
+  });
 });
