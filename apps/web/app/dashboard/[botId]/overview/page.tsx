@@ -141,14 +141,14 @@ export default function OverviewPage() {
   }, [loadRuntime]);
 
   return (
-    <div className="max-w-6xl space-y-6">
+    <div className="max-w-6xl space-y-4">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
           <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-400">
             Local Runtime Console
           </div>
-          <h1 className="text-2xl font-bold leading-tight text-foreground">Open Magi Agent</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-secondary">
+          <h1 className="text-xl font-bold leading-tight text-foreground">Open Magi Agent</h1>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-secondary">
             Manage your local Magi agent, runtime state, workspace knowledge, and operator files from one console.
           </p>
         </div>
@@ -167,15 +167,15 @@ export default function OverviewPage() {
       )}
 
       <GlassCard className="overflow-hidden bg-white/80 shadow-sm">
-        <div className="grid gap-6 lg:grid-cols-[1.4fr_0.9fr] lg:items-stretch">
-          <div className="flex min-w-0 flex-col justify-between gap-8">
+        <div className="grid gap-5 lg:grid-cols-[1.4fr_0.9fr] lg:items-stretch">
+          <div className="flex min-w-0 flex-col justify-between gap-5">
             <div>
-              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-black/[0.06] bg-black/[0.025] px-3 py-1 text-xs font-semibold text-secondary">
+              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-black/[0.06] bg-black/[0.025] px-3 py-1 text-xs font-semibold text-secondary">
                 <Bot className="h-3.5 w-3.5 text-primary-light" strokeWidth={2} />
                 Self-hosted agent workspace
               </div>
-              <h2 className="text-2xl font-semibold tracking-normal text-foreground">Local Agent</h2>
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-secondary">
+              <h2 className="text-xl font-semibold tracking-normal text-foreground">Local Agent</h2>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-secondary">
                 Run chat, inspect execution state, tune runtime rules, and work with local knowledge without leaving
                 your Magi Agent server.
               </p>
@@ -197,17 +197,17 @@ export default function OverviewPage() {
               <div className="text-xs font-semibold uppercase tracking-[0.14em] text-white/50">Runtime status</div>
               <StatusPill status={status} />
             </div>
-            <div className="mt-5 grid grid-cols-2 gap-3">
+            <div className="mt-4 grid grid-cols-2 gap-3">
               <div>
                 <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/45">Sessions</div>
-                <div className="mt-1 text-3xl font-semibold">{runtimeItemCount(runtime, "sessions")}</div>
+                <div className="mt-1 text-2xl font-semibold">{runtimeItemCount(runtime, "sessions")}</div>
               </div>
               <div>
                 <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/45">Tasks</div>
-                <div className="mt-1 text-3xl font-semibold">{runtimeItemCount(runtime, "tasks")}</div>
+                <div className="mt-1 text-2xl font-semibold">{runtimeItemCount(runtime, "tasks")}</div>
               </div>
             </div>
-            <div className="mt-6 rounded-xl border border-white/10 bg-white/10 px-3 py-2 font-mono text-xs text-white/80">
+            <div className="mt-4 rounded-xl border border-white/10 bg-white/10 px-3 py-2 font-mono text-xs text-white/80">
               magi-agent serve --port 8080
             </div>
           </div>
@@ -215,7 +215,7 @@ export default function OverviewPage() {
       </GlassCard>
 
       <GlassCard>
-        <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="mb-3 flex items-center justify-between gap-3">
           <h2 className="text-sm font-semibold text-foreground">Runtime</h2>
           <button
             type="button"
@@ -235,7 +235,7 @@ export default function OverviewPage() {
       </GlassCard>
 
       <GlassCard>
-        <h2 className="mb-4 text-sm font-semibold text-foreground">Workspace Inventory</h2>
+        <h2 className="mb-3 text-sm font-semibold text-foreground">Workspace Inventory</h2>
         <div className="grid gap-3 sm:grid-cols-3">
           <MetricTile label="Skills" value={runtimeItemCount(runtime, "skills")} icon={Puzzle} />
           <MetricTile label="Knowledge" value={runtimeItemCount(runtime, "knowledge")} icon={Database} />

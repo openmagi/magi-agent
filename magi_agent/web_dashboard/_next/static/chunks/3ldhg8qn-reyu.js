@@ -7,7 +7,7 @@
         ${r[s]}
         ${l}
       `,disabled:n,...i})}])},59438,e=>{"use strict";var t=e.i(18050);e.s(["GlassCard",0,function({children:e,className:a="",hover:r=!1,glow:s=!1,onClick:l}){return(0,t.jsx)("div",{onClick:l,className:`
-        glass rounded-2xl p-6
+        glass rounded-2xl p-5
         ${r?"transition-all duration-200 hover:bg-glass-hover hover:border-primary/20 cursor-pointer":""}
         ${s?"glow-sm":""}
         ${a}
