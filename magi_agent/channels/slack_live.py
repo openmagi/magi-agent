@@ -127,9 +127,18 @@ def is_live_slack_enabled() -> bool:
     """Return True iff ``MAGI_CHANNEL_LIVE_SLACK`` is set to a truthy value.
 
     Evaluated at call time (not import time) so tests can patch os.environ.
+
+    I-2 PR B: was a denylist check (``bool(raw) and raw.lower() not in
+    {"0","false","no","off"}``) which silently ENABLED the channel on any
+    unknown non-empty value (e.g. ``MAGI_CHANNEL_LIVE_SLACK="disabled"``).
+    Now uses the canonical strict-allowlist semantics — only the documented
+    truthy spellings (``1``/``true``/``yes``/``on``) enable the channel;
+    everything else (including the previously-enabling typos) keeps it OFF.
+    Stage-3 live side-effect: see PR body behaviour-change notice.
     """
-    raw = os.environ.get("MAGI_CHANNEL_LIVE_SLACK", "")
-    return bool(raw) and raw.lower() not in {"0", "false", "no", "off"}
+    from magi_agent.config._truthy import env_bool  # noqa: PLC0415
+
+    return env_bool(os.environ, "MAGI_CHANNEL_LIVE_SLACK", default=False)
 
 
 # ---------------------------------------------------------------------------

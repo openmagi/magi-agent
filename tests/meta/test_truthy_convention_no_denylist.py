@@ -1,7 +1,7 @@
-"""I-2 PR A meta-test: forbid the dangerous DENYLIST truthy convention outside
-an explicit, shrinking allowlist.
+"""I-2 PR B meta-test: forbid the dangerous DENYLIST truthy convention
+anywhere in :mod:`magi_agent` outside the canonical ``_truthy`` leaf.
 
-Two truthy conventions coexist in the tree:
+Two truthy conventions used to coexist in the tree:
 
 * **Allowlist**: ``value.strip().lower() in {"1", "true", "yes", "on"}`` — the
   canonical, opt-in semantic shared by :mod:`magi_agent.config._truthy`
@@ -11,18 +11,18 @@ Two truthy conventions coexist in the tree:
   the dangerous semantic where ANY non-empty, non-explicitly-falsey value
   (e.g. ``"disabled"`` / ``"random_garbage"``) silently *enables* the gate.
 
-This test scans the package and asserts that the denylist literal appears ONLY
-in the channels/*_live.py adapters that PR A defers to PR B (per the
-``2026-06-18-magi-agent-oss-main-remediation/ws-I-config-quality.md`` plan,
-"ship channels-live conversions in their own PR"). When PR B lands, the
-allowlist below shrinks to the empty set and the literal is gone from the tree.
+I-2 PR A converted every non-channel denylist site and left the four
+``channels/*_live.py`` adapters on a shrinking allowlist (stage-3 live
+side-effect — its own PR + behaviour test, per the plan
+``2026-06-18-magi-agent-oss-main-remediation/ws-I-config-quality.md``).
+
+I-2 PR B converts those four channels and **shrinks the allowlist to empty**.
+The dangerous literal is now banned everywhere in :mod:`magi_agent` outside
+the canonical ``_truthy.py`` leaf (which is the one legitimate place that
+names the ``FALSE_VALUES`` set as a constant that other readers delegate to).
 
 AST-based for the ``not in <set>`` shape, with a fallback regex for the
 ``_FALSY`` constant alias spelling.
-
-The single source of truth ``magi_agent/config/_truthy.py`` is excluded
-because it defines the canonical ``FALSE_VALUES`` constant that all readers
-should delegate to.
 """
 
 from __future__ import annotations
@@ -34,17 +34,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / "magi_agent"
 
-# Shrinking allowlist: I-2 PR A explicitly defers the four stage-3 live-channel
-# adapters to PR B (separate behaviour test + PR per plan). When PR B lands,
-# this set goes to empty and the meta-test ratchets to zero.
-_PR_B_DEFERRED: frozenset[str] = frozenset(
-    {
-        "channels/telegram_live.py",
-        "channels/slack_live.py",
-        "channels/email_live.py",
-        "channels/discord_live.py",
-    }
-)
+# Shrinking allowlist — I-2 PR B landed and converted the last four sites
+# (channels/{telegram,slack,email,discord}_live.py); the allowlist is now
+# empty. The dangerous denylist literal is banned everywhere in
+# :mod:`magi_agent` outside the canonical ``_truthy.py`` leaf. Any future
+# regression that re-introduces it (anywhere) fails ``test_no_denylist_...``.
+_PR_B_DEFERRED: frozenset[str] = frozenset()
 
 # The canonical truthy leaf is the one legitimate place that names the
 # denylist set — as the ``FALSE_VALUES`` constant that all readers delegate to.
@@ -136,10 +131,13 @@ def _denylist_offenders() -> list[str]:
 
 
 def test_no_denylist_truthy_outside_pr_b_allowlist() -> None:
-    """Only the four channels/*_live.py adapters (deferred to PR B) may keep
-    the dangerous denylist semantic. Everything else MUST use the allowlist
-    helper :func:`magi_agent.config._truthy.env_bool` / ``is_true`` so a
-    mis-configured value cannot silently enable a gate."""
+    """The dangerous denylist truthy convention is banned everywhere in
+    :mod:`magi_agent` outside the canonical ``config/_truthy.py`` leaf.
+
+    Every reader MUST use the allowlist helper
+    :func:`magi_agent.config._truthy.env_bool` / ``is_true`` so a
+    mis-configured value cannot silently enable a gate.
+    """
     offenders = _denylist_offenders()
     unexpected = sorted(set(offenders) - _PR_B_DEFERRED)
     assert not unexpected, (
@@ -153,17 +151,21 @@ def test_no_denylist_truthy_outside_pr_b_allowlist() -> None:
     )
 
 
-def test_pr_b_allowlist_ratchet_does_not_widen() -> None:
-    """Guard against accidentally re-introducing the denylist outside the four
-    channels adapters PR A defers. If a future change adds a denylist back
-    elsewhere, the previous test fails; this one ensures the deferred set
-    cannot quietly *grow* without an explicit edit to the allowlist."""
-    offenders = set(_denylist_offenders())
-    extra = offenders - _PR_B_DEFERRED
-    assert not extra, (
-        "Allowlist ratchet failed: new denylist offenders appeared outside "
-        f"PR B's deferred set. New offenders: {sorted(extra)}.\n"
-        "Either fix them to the allowlist semantic, or — if there is a "
-        "deliberate reason — extend _PR_B_DEFERRED in this test (requires "
-        "review). Do not widen silently."
+def test_pr_b_allowlist_ratchet_is_empty() -> None:
+    """The PR B ratchet is now empty: no module is allowed to keep the
+    dangerous denylist semantic. This complements
+    ``test_no_denylist_truthy_outside_pr_b_allowlist`` (which checks current
+    offenders) by guarding the ratchet itself — the constant
+    :data:`_PR_B_DEFERRED` must remain ``frozenset()`` and any attempt to
+    re-add an entry to it has to confront this test (which forces an
+    explicit review of why the denylist is being reintroduced).
+    """
+    assert _PR_B_DEFERRED == frozenset(), (
+        "The I-2 PR B ratchet is meant to stay empty: every channels/*_live.py "
+        "adapter was converted to the canonical allowlist. Adding entries back "
+        f"({sorted(_PR_B_DEFERRED)}) re-permits the dangerous denylist "
+        'semantic where MAGI_X="disabled" silently ENABLES a gate. If a '
+        "future PR genuinely needs to defer one channel during a migration, "
+        "this assertion + the meta-test above must be relaxed in the SAME PR "
+        "and reviewed jointly."
     )
