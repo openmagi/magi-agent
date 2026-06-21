@@ -1933,15 +1933,24 @@ def _csv_values(value: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in value.split(",") if item.strip())
 
 
+MAGI_READ_LEDGER_ENABLED_ENV = "MAGI_READ_LEDGER_ENABLED"
+
+
 def is_read_ledger_enabled(env: Mapping[str, str]) -> bool:
     """Single source of truth for the read-before-edit ledger activation flag.
 
     Default ON in the local full runtime profile. When enabled, the Gate 5B full
     toolhost records full reads and blocks edits/overwrites of existing files
     that were not freshly read first (read-before-edit enforcement).
-    """
 
-    return _runtime_feature_enabled(env, "MAGI_READ_LEDGER_ENABLED")
+    Delegates to ``flag_profile_bool`` so the profile-aware default-ON
+    resolution (full-profile ON / safe-profile OFF / explicit overrides win)
+    has exactly one source of truth — semantically byte-identical to the
+    previous direct ``_runtime_feature_enabled(env, NAME)`` call.
+    """
+    from .flags import flag_profile_bool
+
+    return flag_profile_bool(MAGI_READ_LEDGER_ENABLED_ENV, env=env)
 
 
 MAGI_SELF_INTROSPECTION_ENABLED_ENV = "MAGI_SELF_INTROSPECTION_ENABLED"
@@ -1953,9 +1962,14 @@ def is_self_introspection_enabled(env: Mapping[str, str] | None = None) -> bool:
     Default ON in the local full runtime profile. Explicit false/off values or
     safe runtime profiles keep the ``InspectSelfEvidence`` tool bound but not
     advertised, so the model never sees it.
+
+    Delegates to ``flag_profile_bool`` so the profile-aware default-ON
+    resolution has exactly one source of truth — semantically byte-identical
+    to the previous direct ``_runtime_feature_enabled(source, NAME)`` call.
     """
-    source = os.environ if env is None else env
-    return _runtime_feature_enabled(source, MAGI_SELF_INTROSPECTION_ENABLED_ENV)
+    from .flags import flag_profile_bool
+
+    return flag_profile_bool(MAGI_SELF_INTROSPECTION_ENABLED_ENV, env=env)
 
 
 MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED_ENV = "MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED"
@@ -1970,9 +1984,14 @@ def is_evidence_ledger_lifecycle_enabled(env: Mapping[str, str] | None = None) -
     the collector synthesizes minimal per-turn ledgers from recorded tool
     results and the factories thread those ledgers onto ``ToolContext`` so
     ``InspectSelfEvidence`` can report real local tool calls.
+
+    Delegates to ``flag_profile_bool`` so the profile-aware default-ON
+    resolution has exactly one source of truth — semantically byte-identical
+    to the previous direct ``_runtime_feature_enabled(source, NAME)`` call.
     """
-    source = os.environ if env is None else env
-    return _runtime_feature_enabled(source, MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED_ENV)
+    from .flags import flag_profile_bool
+
+    return flag_profile_bool(MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED_ENV, env=env)
 
 
 MAGI_GROUNDED_ANSWER_GUARD_ENABLED_ENV = "MAGI_GROUNDED_ANSWER_GUARD_ENABLED"
@@ -2650,6 +2669,9 @@ def hosted_session_reuse_ttl_seconds(env: Mapping[str, str] | None = None) -> fl
     return float(max(1, value))
 
 
+MAGI_EDIT_FORMAT_ON_WRITE_ENABLED_ENV = "MAGI_EDIT_FORMAT_ON_WRITE_ENABLED"
+
+
 def is_format_on_write_enabled(env: Mapping[str, str]) -> bool:
     """Single source for the format-after-edit flag.
 
@@ -2657,8 +2679,14 @@ def is_format_on_write_enabled(env: Mapping[str, str]) -> bool:
     on the written file and re-read it so the returned digest reflects the
     formatted content (keeps the model's next edit aligned). Fail-open: a
     missing/failing/timed-out formatter never fails the write.
+
+    Delegates to ``flag_profile_bool`` so the profile-aware default-ON
+    resolution has exactly one source of truth — semantically byte-identical
+    to the previous direct ``_runtime_feature_enabled(env, NAME)`` call.
     """
-    return _runtime_feature_enabled(env, "MAGI_EDIT_FORMAT_ON_WRITE_ENABLED")
+    from .flags import flag_profile_bool
+
+    return flag_profile_bool(MAGI_EDIT_FORMAT_ON_WRITE_ENABLED_ENV, env=env)
 
 
 def parse_gate3a_recorded_replay_env(env: Mapping[str, str]) -> Gate3ARecordedReplayEnv:
@@ -2690,6 +2718,7 @@ def parse_gate3a_recorded_replay_env(env: Mapping[str, str]) -> Gate3ARecordedRe
 
 
 READ_QUALITY_FLAG = "MAGI_READ_QUALITY_ENABLED"
+MAGI_READ_QUALITY_ENABLED_ENV = READ_QUALITY_FLAG
 
 
 def is_read_quality_enabled(env: Mapping[str, str] | None = None) -> bool:
@@ -2698,9 +2727,14 @@ def is_read_quality_enabled(env: Mapping[str, str] | None = None) -> bool:
     When ON, FileRead output gets 1-indexed line numbers, line/byte caps with an
     'offset=N to continue' footer, binary-file detection, and 'Did you mean?'
     filename suggestions on miss.
+
+    Delegates to ``flag_profile_bool`` so the profile-aware default-ON
+    resolution has exactly one source of truth — semantically byte-identical
+    to the previous direct ``_runtime_feature_enabled(source, NAME)`` call.
     """
-    source = os.environ if env is None else env
-    return _runtime_feature_enabled(source, READ_QUALITY_FLAG)
+    from .flags import flag_profile_bool
+
+    return flag_profile_bool(READ_QUALITY_FLAG, env=env)
 
 
 _RIPGREP_ENABLED_ENV = "MAGI_RIPGREP_ENABLED"
@@ -3276,6 +3310,9 @@ def document_qa_enabled(env: Mapping[str, str] | None = None) -> bool:
     return flag_bool("MAGI_DOCUMENT_QA_ENABLED", env=env)
 
 
+MAGI_MESSAGE_CACHE_ENABLED_ENV = "MAGI_MESSAGE_CACHE_ENABLED"
+
+
 def is_message_cache_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Single source of truth for the message-tail prompt-cache flag.
 
@@ -3284,12 +3321,17 @@ def is_message_cache_enabled(env: Mapping[str, str] | None = None) -> bool:
     Anthropic ``cache_control: {type: ephemeral}`` marker so the growing
     conversation tail is cached in addition to the system prefix.
 
+    Delegates to ``flag_profile_bool`` so the profile-aware default-ON
+    resolution has exactly one source of truth — semantically byte-identical
+    to the previous direct ``_runtime_feature_enabled(source, NAME)`` call.
+
     Args:
         env: Optional environment mapping. Defaults to ``os.environ`` so the
             flag can be evaluated against the live process environment.
     """
-    source: Mapping[str, str] = os.environ if env is None else env
-    return _runtime_feature_enabled(source, "MAGI_MESSAGE_CACHE_ENABLED")
+    from .flags import flag_profile_bool
+
+    return flag_profile_bool(MAGI_MESSAGE_CACHE_ENABLED_ENV, env=env)
 
 
 def file_tools_enabled(env: Mapping[str, str] | None = None) -> bool:
