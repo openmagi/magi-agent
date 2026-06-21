@@ -19,6 +19,16 @@ describe("local OSS customize dashboard", () => {
     expect(source).toContain("onSectionChange");
   });
 
+  it("uses the new unified Rules sub-nav as the default landing section", () => {
+    // Phase-1 unified redesign collapsed Verification + Advanced; rules is
+    // the new first sub-nav. The legacy ids must not survive in the
+    // VALID_SECTIONS list, or deep-links like ?section=verification would
+    // silently land on the wrong page.
+    expect(source).toContain('"rules"');
+    expect(source).not.toMatch(/['"]verification['"]/);
+    expect(source).not.toMatch(/['"]advanced['"]/);
+  });
+
   it("does not embed hosted-only auth/file surfaces", () => {
     expect(source).not.toContain("/v1/app/workspace/file");
     expect(source).not.toContain("useAuthFetch");

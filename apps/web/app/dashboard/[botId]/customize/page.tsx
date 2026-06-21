@@ -21,11 +21,11 @@ import {
 } from "@/components/dashboard/customize/customize-hub";
 
 const VALID_SECTIONS: ReadonlyArray<CustomizeSection> = [
-  "verification",
+  "rules",
+  "guidance",
   "tools",
   "recipes",
   "hooks",
-  "advanced",
 ];
 
 function isValidSection(value: string | null): value is CustomizeSection {
@@ -40,7 +40,7 @@ export default function CustomizePage() {
   const botId = Array.isArray(rawBotId) ? rawBotId[0] : rawBotId ?? "local";
 
   const raw = search?.get("section") ?? null;
-  const initial: CustomizeSection = isValidSection(raw) ? raw : "verification";
+  const initial: CustomizeSection = isValidSection(raw) ? raw : "rules";
 
   const handleSectionChange = useCallback(
     (next: CustomizeSection) => {
