@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useAgentFetch } from "@/lib/local-api";
-import { GlassCard } from "@/components/ui/glass-card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
@@ -168,63 +167,59 @@ export function SettingsForm(_props: SettingsFormProps) {
   }
 
   return (
-    <div className="max-w-3xl space-y-3">
+    <div className="max-w-2xl space-y-6">
       {error && (
-        <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-500">
+        <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-500">
           {error}
         </div>
       )}
       {success && (
-        <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700">
+        <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">
           {success}
         </div>
       )}
 
-      <GlassCard>
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-base font-semibold text-foreground">Local Runtime</h2>
-            <p className="mt-0.5 text-sm text-secondary">
-              Configure the self-hosted agent provider, model, token source, and workspace path.
-            </p>
-          </div>
-          {loading && (
-            <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-secondary">
-              Loading
-            </span>
-          )}
-        </div>
-
+      <section>
+        <header className="mb-3 flex items-center justify-between">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-secondary">
+            Local runtime
+          </h2>
+          {loading ? (
+            <span className="text-xs text-muted">Loading…</span>
+          ) : null}
+        </header>
         <div className="space-y-3">
-          <Select
-            label="Provider"
-            value={provider}
-            options={PROVIDER_OPTIONS}
-            onChange={(next) => {
-              const nextProvider = next as ProviderName;
-              setProvider(nextProvider);
-              // Reset to the new provider's default so the model stays valid.
-              setModel(LOCAL_RUNTIME_DEFAULT_MODEL[nextProvider]);
-              setCustomModel(false);
-            }}
-          />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Select
+              label="Provider"
+              value={provider}
+              options={PROVIDER_OPTIONS}
+              onChange={(next) => {
+                const nextProvider = next as ProviderName;
+                setProvider(nextProvider);
+                // Reset to the new provider's default so the model stays valid.
+                setModel(LOCAL_RUNTIME_DEFAULT_MODEL[nextProvider]);
+                setCustomModel(false);
+              }}
+            />
 
-          <Select
-            label="Model"
-            value={customModel ? CUSTOM_MODEL_VALUE : model}
-            options={[
-              ...LOCAL_RUNTIME_MODEL_PRESETS[provider],
-              { value: CUSTOM_MODEL_VALUE, label: "Custom… (enter model id)" },
-            ]}
-            onChange={(next) => {
-              if (next === CUSTOM_MODEL_VALUE) {
-                setCustomModel(true);
-                return;
-              }
-              setCustomModel(false);
-              setModel(next);
-            }}
-          />
+            <Select
+              label="Model"
+              value={customModel ? CUSTOM_MODEL_VALUE : model}
+              options={[
+                ...LOCAL_RUNTIME_MODEL_PRESETS[provider],
+                { value: CUSTOM_MODEL_VALUE, label: "Custom… (enter model id)" },
+              ]}
+              onChange={(next) => {
+                if (next === CUSTOM_MODEL_VALUE) {
+                  setCustomModel(true);
+                  return;
+                }
+                setCustomModel(false);
+                setModel(next);
+              }}
+            />
+          </div>
 
           {customModel ? (
             <Input
@@ -242,37 +237,40 @@ export function SettingsForm(_props: SettingsFormProps) {
             placeholder="http://127.0.0.1:11434/v1"
           />
 
-          <div className="border-t border-gray-200 pt-3">
+          <div>
             <Input
-              label="API Key"
+              label="API key"
               type="password"
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}
               placeholder={apiKeySet ? "Saved. Leave blank to keep current key." : "sk-..."}
             />
-            <p className="mt-1.5 text-xs text-muted">
-              Raw keys are written only to your local `magi-agent.yaml` and are never returned to the browser.
+            <p className="mt-1 text-xs text-muted">
+              Raw keys stay in your local `magi-agent.yaml` and never reach the browser.
             </p>
           </div>
 
-          <Input
-            label="API key env var"
-            value={apiKeyEnvVar}
-            onChange={(event) => setApiKeyEnvVar(event.target.value)}
-            placeholder="ANTHROPIC_API_KEY"
-          />
-
-          <Input
-            label="Workspace Path"
-            value={workspacePath}
-            onChange={(event) => setWorkspacePath(event.target.value)}
-            placeholder="./workspace"
-          />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Input
+              label="API key env var"
+              value={apiKeyEnvVar}
+              onChange={(event) => setApiKeyEnvVar(event.target.value)}
+              placeholder="ANTHROPIC_API_KEY"
+            />
+            <Input
+              label="Workspace path"
+              value={workspacePath}
+              onChange={(event) => setWorkspacePath(event.target.value)}
+              placeholder="./workspace"
+            />
+          </div>
         </div>
-      </GlassCard>
+      </section>
 
-      <GlassCard>
-        <h2 className="mb-3 text-base font-semibold text-foreground">Advanced</h2>
+      <section>
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-secondary">
+          Advanced
+        </h2>
         <div className="space-y-3">
           <Input
             label="Gateway token env var"
@@ -280,7 +278,7 @@ export function SettingsForm(_props: SettingsFormProps) {
             onChange={(event) => setGatewayTokenEnvVar(event.target.value)}
             placeholder="MAGI_AGENT_SERVER_TOKEN"
           />
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-2">
             <Input
               label="Context window"
               value={contextWindow}
@@ -294,7 +292,7 @@ export function SettingsForm(_props: SettingsFormProps) {
               placeholder="8192"
             />
           </div>
-          <label className="flex cursor-pointer items-center gap-3 text-sm text-secondary">
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-secondary">
             <input
               type="checkbox"
               checked={supportsThinking}
@@ -304,11 +302,13 @@ export function SettingsForm(_props: SettingsFormProps) {
             Model supports thinking blocks
           </label>
         </div>
-      </GlassCard>
+      </section>
 
-      <Button variant="cta" size="md" onClick={handleSave} disabled={saving || loading}>
-        {saving ? t.settingsPage.saving : t.settingsPage.save}
-      </Button>
+      <div className="border-t border-black/[0.06] pt-4">
+        <Button variant="cta" size="md" onClick={handleSave} disabled={saving || loading}>
+          {saving ? t.settingsPage.saving : t.settingsPage.save}
+        </Button>
+      </div>
     </div>
   );
 }
