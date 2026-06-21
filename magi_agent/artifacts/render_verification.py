@@ -6,8 +6,9 @@ import hashlib
 import json
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.ops.safety import (
     require_digest,
     require_safe_ref,
@@ -43,9 +44,7 @@ class LocalFakeRenderVerificationProvider:
         return dict(self._result)
 
 
-class RenderVerificationConfig(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class RenderVerificationConfig(FalseOnlyAuthorityModel):
     enabled: bool = False
     local_fake_renderer_enabled: bool = Field(default=False, alias="localFakeRendererEnabled")
     production_storage_writes_enabled: Literal[False] = Field(
@@ -58,35 +57,8 @@ class RenderVerificationConfig(BaseModel):
     )
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
 
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set
-        values["productionStorageWritesEnabled"] = False
-        values.pop("production_storage_writes_enabled", None)
-        values["userVisibleRenderEnabled"] = False
-        values.pop("user_visible_render_enabled", None)
-        values["routeAttached"] = False
-        values.pop("route_attached", None)
-        return cls.model_validate(values)
 
-    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
-        payload = self.model_dump(by_alias=True, mode="json")
-        if update:
-            payload.update(update)
-        payload["productionStorageWritesEnabled"] = False
-        payload["userVisibleRenderEnabled"] = False
-        payload["routeAttached"] = False
-        _ = deep
-        return type(self).model_validate(payload)
-
-
-class RenderVerificationAuthorityFlags(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class RenderVerificationAuthorityFlags(FalseOnlyAuthorityModel):
     adk_artifact_service_attached: Literal[False] = Field(
         default=False,
         alias="adkArtifactServiceAttached",
@@ -101,29 +73,6 @@ class RenderVerificationAuthorityFlags(BaseModel):
         alias="userVisibleRenderAllowed",
     )
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set, values
-        return cls()
-
-    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
-        _ = update, deep
-        return type(self)()
-
-    @field_serializer(
-        "adk_artifact_service_attached",
-        "renderer_executed",
-        "production_storage_written",
-        "user_visible_render_allowed",
-        "route_attached",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 class ArtifactRenderRequest(BaseModel):

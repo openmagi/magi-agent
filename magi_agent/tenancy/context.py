@@ -4,8 +4,9 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Literal, Self
 
-from pydantic import Field, field_serializer, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.ops.safety import (
     FrozenContractModel,
     canonical_digest,
@@ -27,7 +28,7 @@ class _TenancyModel(FrozenContractModel):
     """Frozen tenancy contract base (collapsed onto the shared kernel)."""
 
 
-class TenantRuntimeAuthorityFlags(_TenancyModel):
+class TenantRuntimeAuthorityFlags(FalseOnlyAuthorityModel):
     production_authority: Literal[False] = Field(default=False, alias="productionAuthority")
     traffic_attached: Literal[False] = Field(default=False, alias="trafficAttached")
     live_billing_calls_enabled: Literal[False] = Field(
@@ -45,40 +46,6 @@ class TenantRuntimeAuthorityFlags(_TenancyModel):
         default=False,
         alias="userVisibleOutputEnabled",
     )
-
-    @model_validator(mode="before")
-    @classmethod
-    def _force_false(cls, value: object) -> dict[str, object]:
-        payload = dict(value) if isinstance(value, Mapping) else {}
-        for field_name, field in cls.model_fields.items():
-            payload[field.alias or field_name] = False
-            payload.pop(field_name, None)
-        return payload
-
-    @field_serializer(
-        "production_authority",
-        "traffic_attached",
-        "live_billing_calls_enabled",
-        "stripe_attached",
-        "supabase_attached",
-        "quota_mutation_attached",
-        "spend_commit_attached",
-        "user_visible_output_enabled",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
-
-    def public_projection(self) -> dict[str, bool]:
-        return {
-            "productionAuthority": False,
-            "trafficAttached": False,
-            "liveBillingCallsEnabled": False,
-            "stripeAttached": False,
-            "supabaseAttached": False,
-            "quotaMutationAttached": False,
-            "spendCommitAttached": False,
-            "userVisibleOutputEnabled": False,
-        }
 
 
 class AuthorityScope(_TenancyModel):

@@ -14,7 +14,14 @@
     "userVisibleDeliveryEnabled": false
   },
   "model_construct_force_false_leaks": [],
-  "model_validate_dump": null,
+  "model_validate_dump": {
+    "enabled": false,
+    "localFakeReceiptIndexEnabled": false,
+    "productionChannelDeliveryEnabled": false,
+    "productionStorageWritesEnabled": false,
+    "routeAttached": false,
+    "userVisibleDeliveryEnabled": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.artifacts.delivery_receipts.ArtifactDeliveryReceiptConfig"
 }

@@ -6,9 +6,10 @@ import hashlib
 import json
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from magi_agent.channels.contract import ChannelDeliveryReceipt, ChannelRef
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.ops.safety import (
     require_digest,
     require_safe_ref,
@@ -31,9 +32,7 @@ _MODEL_CONFIG = ConfigDict(
 _ZERO_DIGEST = "sha256:" + "0" * 64
 
 
-class ArtifactDeliveryReceiptConfig(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class ArtifactDeliveryReceiptConfig(FalseOnlyAuthorityModel):
     enabled: bool = False
     local_fake_receipt_index_enabled: bool = Field(
         default=False,
@@ -53,38 +52,8 @@ class ArtifactDeliveryReceiptConfig(BaseModel):
     )
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
 
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set
-        values["productionStorageWritesEnabled"] = False
-        values.pop("production_storage_writes_enabled", None)
-        values["productionChannelDeliveryEnabled"] = False
-        values.pop("production_channel_delivery_enabled", None)
-        values["userVisibleDeliveryEnabled"] = False
-        values.pop("user_visible_delivery_enabled", None)
-        values["routeAttached"] = False
-        values.pop("route_attached", None)
-        return cls.model_validate(values)
 
-    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
-        payload = self.model_dump(by_alias=True, mode="json")
-        if update:
-            payload.update(update)
-        payload["productionStorageWritesEnabled"] = False
-        payload["productionChannelDeliveryEnabled"] = False
-        payload["userVisibleDeliveryEnabled"] = False
-        payload["routeAttached"] = False
-        _ = deep
-        return type(self).model_validate(payload)
-
-
-class ArtifactDeliveryAuthorityFlags(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class ArtifactDeliveryAuthorityFlags(FalseOnlyAuthorityModel):
     adk_artifact_service_attached: Literal[False] = Field(
         default=False,
         alias="adkArtifactServiceAttached",
@@ -106,30 +75,6 @@ class ArtifactDeliveryAuthorityFlags(BaseModel):
         alias="userVisibleDeliveryAllowed",
     )
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set, values
-        return cls()
-
-    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
-        _ = update, deep
-        return type(self)()
-
-    @field_serializer(
-        "adk_artifact_service_attached",
-        "channel_delivery_performed",
-        "production_storage_written",
-        "production_channel_write",
-        "user_visible_delivery_allowed",
-        "route_attached",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 class ArtifactDeliveryReceiptRequest(BaseModel):

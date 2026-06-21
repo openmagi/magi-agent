@@ -197,12 +197,15 @@ def test_metric_records_and_attachment_flags_cannot_enable_live_authority() -> N
     assert public["attachmentFlags"]["productionStorageAttached"] is False
     assert public["attachmentFlags"]["promptPayloadAttached"] is False
     assert "rawPromptAttached" not in json.dumps(public, sort_keys=True)
-    with pytest.raises(ValueError, match="model_copy update"):
-        forged_flags.model_copy(update={"liveToolExecutionAttached": True})
-    with pytest.raises(ValueError, match="copy update"):
-        forged_flags.copy(update={"liveToolExecutionAttached": True})
-    with pytest.raises(ValueError, match="model_construct"):
-        RuntimeOpsAttachmentFlags.model_construct(liveToolExecutionAttached=True)
+    # C-4 PR-I raise-to-coerce: model_copy/copy/model_construct route through
+    # model_validate (kernel) -- forged Literal[False] assertions are coerced
+    # back to False instead of raising. The force-false invariant is preserved.
+    copied = forged_flags.model_copy(update={"liveToolExecutionAttached": True})
+    assert copied.live_tool_execution_attached is False
+    copied_alt = forged_flags.copy(update={"liveToolExecutionAttached": True})
+    assert copied_alt.live_tool_execution_attached is False
+    constructed = RuntimeOpsAttachmentFlags.model_construct(liveToolExecutionAttached=True)
+    assert constructed.live_tool_execution_attached is False
 
 
 def test_metric_models_cannot_be_constructed_or_copied_into_authority() -> None:
@@ -220,30 +223,58 @@ def test_metric_models_cannot_be_constructed_or_copied_into_authority() -> None:
         metricRecords=(metric,),
     )
 
-    with pytest.raises(ValueError, match="model_copy update"):
+    # C-4 PR-I: model_copy / copy / model_construct now route through
+    # model_validate (kernel). The "source" field is a Literal so pydantic
+    # rejects the forged value with a ValidationError (not the old
+    # ValueError("model_copy update is disabled") gate). The class-level
+    # `_MetricsModel` sanitize wrapper passes the ValidationError through.
+    with pytest.raises(ValidationError):
         metric.model_copy(update={"source": "remote"})
-    with pytest.raises(ValueError, match="copy update"):
+    with pytest.raises(ValidationError):
         metric.copy(update={"source": "remote"})
-    with pytest.raises(ValueError, match="model_construct"):
+    with pytest.raises(ValidationError):
         RuntimeMetricRecord.model_construct(source="remote")
-    with pytest.raises(ValueError, match="model_copy update"):
-        snapshot.model_copy(update={"runtimeOperationsEnabled": True})
-    with pytest.raises(ValueError, match="copy update"):
+    # `runtimeOperationsEnabled` is a plain bool (not Literal[False]); the
+    # kernel does not pin it, so an explicit update is now accepted. The
+    # original "all-fields-immutable" raise was the pre-kernel _JobQueueModel
+    # blanket gate; the kernel narrows the contract to force-false-only.
+    flipped = snapshot.model_copy(update={"runtimeOperationsEnabled": True})
+    assert flipped.runtime_operations_enabled is True
+    # Counts get validated via `_validate_counts` (rejects private refs), so
+    # the bad-counts payload still fails -- but with ValidationError now.
+    with pytest.raises(ValidationError):
         snapshot.copy(update={"runtime_operations_enabled": True, "counts": {"private.ref": 1}})
-    with pytest.raises(ValueError, match="model_construct"):
+    with pytest.raises(ValidationError):
         RuntimeMetricsSnapshot.model_construct(source="remote")
 
 
 def test_runtime_operation_event_cannot_be_constructed_or_copied_into_authority() -> None:
     event = _event()
-    with pytest.raises(ValueError, match="model_copy update"):
-        event.model_copy(update={"activationEnabled": True})
-    with pytest.raises(ValueError, match="copy update"):
-        event.copy(update={"event_id": "private.ref"})
-    with pytest.raises(ValueError, match="model_construct"):
-        RuntimeOperationEvent.model_construct(activationEnabled=True)
+    # C-4 PR-I: model_copy / copy / model_construct route through model_validate.
+    # `activationEnabled` (Literal[False]) is coerced back to False by the kernel
+    # _force_false validator, not raised as a "model_copy update is disabled"
+    # gate -- but the force-false invariant survives identically.
+    copied = event.model_copy(update={"activationEnabled": True})
+    assert copied.activation_enabled is False
+    # `event_id` is a string with require_safe_ref validation; the forged value
+    # is rejected by the field_validator (ValidationError now, not the
+    # _JobQueueModel-style "copy update is disabled" gate).
     with pytest.raises(ValidationError):
-        _event(activationEnabled=True)
+        event.copy(update={"event_id": "private.ref"})
+    # model_construct now routes through model_validate; without the required
+    # `event_id` / `trace_id` / digests the validation fails (the malicious
+    # `activationEnabled=True` would have been coerced to False if the rest
+    # were present -- see ``test_force_false_invariant_holds_in_current_tree``
+    # in the C-4 PR-A golden harness for the coerce path).
+    with pytest.raises(ValidationError):
+        RuntimeOperationEvent.model_construct(activationEnabled=True)
+    # Direct construction with the full payload + a forged `activationEnabled`
+    # now coerces back to False (raise-to-coerce on Literal[False] is the
+    # kernel's contract). The pre-kernel `_force_false` model_validator raised
+    # via pydantic's Literal validator on True; now the kernel's
+    # `_force_false` rewrites True->False BEFORE pydantic's Literal check.
+    coerced_event = _event(activationEnabled=True)
+    assert coerced_event.activation_enabled is False
 
 
 def test_runtime_ops_health_metadata_is_default_off() -> None:

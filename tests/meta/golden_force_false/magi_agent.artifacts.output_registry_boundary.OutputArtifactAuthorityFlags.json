@@ -14,7 +14,13 @@
     "routeAttached": false
   },
   "model_construct_force_false_leaks": [],
-  "model_validate_dump": null,
+  "model_validate_dump": {
+    "adkArtifactServiceAttached": false,
+    "artifactWritten": false,
+    "childArtifactImported": false,
+    "productionStorageWritten": false,
+    "routeAttached": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.artifacts.output_registry_boundary.OutputArtifactAuthorityFlags"
 }

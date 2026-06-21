@@ -112,10 +112,14 @@ def test_tenant_authority_flags_cannot_be_forged() -> None:
     )
 
     assert set(flags.public_projection().values()) == {False}
-    with pytest.raises(ValueError):
-        flags.model_copy(update={"liveBillingCallsEnabled": True})
-    with pytest.raises(ValueError):
-        TenantRuntimeAuthorityFlags.model_construct(liveBillingCallsEnabled=True)
+    # C-4 PR-I raise-to-coerce: model_copy(update=...) and model_construct
+    # both route through model_validate (kernel) -- forged Literal[False]
+    # assertions are coerced back to False instead of raising. The
+    # force-false invariant is preserved.
+    copied = flags.model_copy(update={"liveBillingCallsEnabled": True})
+    assert copied.live_billing_calls_enabled is False
+    constructed = TenantRuntimeAuthorityFlags.model_construct(liveBillingCallsEnabled=True)
+    assert constructed.live_billing_calls_enabled is False
 
 
 def test_quota_evaluation_is_fail_closed_by_default() -> None:

@@ -5,8 +5,9 @@ import hashlib
 import re
 from typing import Any, Literal, Self, TypeGuard
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.ops.safety import UNSAFE_TEXT_RE
 from magi_agent.tools.output_budget import BudgetedToolResult
 
@@ -42,9 +43,7 @@ _SENSITIVE_KEY_MARKERS = (
 )
 
 
-class LocalResultStoreConfig(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class LocalResultStoreConfig(FalseOnlyAuthorityModel):
     enabled: bool = False
     local_fake_store_enabled: bool = Field(default=False, alias="localFakeStoreEnabled")
     adk_artifact_service_attached: Literal[False] = Field(
@@ -61,9 +60,7 @@ class LocalResultStoreConfig(BaseModel):
     )
 
 
-class ResultStoreAuthorityFlags(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class ResultStoreAuthorityFlags(FalseOnlyAuthorityModel):
     adk_artifact_service_attached: Literal[False] = Field(
         default=False,
         alias="adkArtifactServiceAttached",
@@ -80,34 +77,6 @@ class ResultStoreAuthorityFlags(BaseModel):
         default=False,
         alias="userVisibleOutputAllowed",
     )
-
-    @model_validator(mode="before")
-    @classmethod
-    def _force_false_inputs(cls, value: object) -> dict[str, bool]:
-        _ = value
-        return {}
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set, values
-        return cls()
-
-    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
-        _ = update, deep
-        return type(self)()
-
-    @field_serializer(
-        "adk_artifact_service_attached",
-        "production_storage_written",
-        "live_attachment_enabled",
-        "user_visible_output_allowed",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 class StoredResultBlob(BaseModel):
