@@ -1336,6 +1336,68 @@ FLAGS: tuple[FlagSpec, ...] = (
             "hosted-only (excluded from the public env-reference)."
         ),
     ),
+    # I-4 follow-up: workspace-root + local-chat-route flags promoted to the
+    # registry so the ~5 inline ``os.environ.get(...)`` reads in
+    # ``transport/chat_routes.py`` flow through ``flag_bool`` / ``flag_str``.
+    _b(
+        "MAGI_AGENT_LOCAL_CHAT_ROUTE",
+        summary=(
+            "Self-host fallback gate for the local ADK chat route. ON makes "
+            "``/v1/chat/completions`` serve the local headless engine when the "
+            "hosted python chat route is OFF; OFF keeps the legacy "
+            "``chat_route_disabled`` 503. Strict default-OFF."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_AGENT_WORKSPACE",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Workspace directory used by the local chat route, headless CLI "
+            "wiring, and per-turn memory recall; empty falls back to "
+            "``os.getcwd()`` (the historical default)."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
+        default="",
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted gate5b full-toolhost workspace root; empty falls back to "
+            "``Path.cwd()`` (the historical default). Hosted-only (excluded "
+            "from the public env-reference)."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_WORKSPACE_ROOT",
+        default="",
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted gate1a read-only toolhost workspace root; empty falls back "
+            "to ``Path.cwd()`` (the historical default). Hosted-only (excluded "
+            "from the public env-reference)."
+        ),
+        kind="str",
+    ),
+    # I-4 follow-up: control_plane MaxStepsBrake gate promoted so the inline
+    # ``_is_true(env.get(...))`` in ``adk_bridge/control_plane.py`` flows
+    # through ``flag_bool``. Coordination note (commit body): H-9 flags
+    # ``MaxStepsBrakeControl`` as an inert no-op (max_iterations=0); H-9 may
+    # delete this gate entirely. Keep the registration thin so the deletion is
+    # a one-line follow-up.
+    _b(
+        "MAGI_MAX_STEPS_BRAKE_ENABLED",
+        summary=(
+            "Register the MaxStepsBrakeControl wrap-up brake on the control "
+            "plane (the seam is wired with ``max_iterations=0``; H-9 audit may "
+            "delete the seam entirely). Strict default-OFF."
+        ),
+    ),
     _b(
         "MAGI_HOSTED_GOVERNED_TURN_ENABLED",
         scope="hosted",

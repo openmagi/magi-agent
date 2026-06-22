@@ -29,7 +29,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError
 
 from magi_agent.config.env import is_egress_gate_enabled
-from magi_agent.config.flags import flag_bool
+from magi_agent.config.flags import flag_bool, flag_str
 from magi_agent.evidence.gate1a_egress_correlation import (
     GATE1A_EGRESS_CORRELATION_MODE,
     GATE1A_EGRESS_TELEMETRY_SOURCE,
@@ -277,13 +277,18 @@ _GATE1A_EGRESS_DISCIPLINE_MODE = "bounded_provider_tunnels"
 _GATE1A_MAX_PROVIDER_TUNNELS_PER_MODEL_ATTEMPT = 2
 
 
-def _local_chat_route_enabled() -> bool:
-    return os.environ.get("MAGI_AGENT_LOCAL_CHAT_ROUTE", "off").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+def _local_chat_route_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single decision point for ``MAGI_AGENT_LOCAL_CHAT_ROUTE`` (I-4 follow-up).
+
+    Self-host fallback gate for the local ADK chat route. Delegates to
+    :func:`magi_agent.config.flags.flag_bool` so the strict-truthy convention
+    (``1``/``true``/``yes``/``on`` after trim+lower — byte-identical to the
+    legacy inline check) lives in exactly one place. The historic inline
+    default was the literal string ``"off"``; the registry FlagSpec
+    ``default=False`` plus ``flag_bool`` semantics yield the same falsey
+    resolution for an unset env.
+    """
+    return flag_bool("MAGI_AGENT_LOCAL_CHAT_ROUTE", env=env)
 
 
 def _python_chat_route_enabled(env: Mapping[str, str] | None = None) -> bool:
@@ -368,7 +373,11 @@ async def _local_adk_chat_sse(
     model_override = (
         None if configured_model == LOCAL_DEV_MODEL_SENTINEL else configured_model
     )
-    workspace_root = os.environ.get("MAGI_AGENT_WORKSPACE") or os.getcwd()
+    # I-4 follow-up: workspace root flows through the registry typed reader.
+    # ``flag_str`` returns ``""`` (the FlagSpec default) when the env is unset
+    # or empty; the ``or os.getcwd()`` keeps the historical fallback semantics
+    # byte-identical (non-empty env wins, empty/unset falls back to cwd).
+    workspace_root = flag_str("MAGI_AGENT_WORKSPACE") or os.getcwd()
     # Per-turn query-based memory recall (PR-E item 3): pass the incoming user
     # message as the recall query so build_cli_instruction can search the
     # workspace memory tree and inject a <memory-recall> block. Gated + fail-soft
@@ -1422,14 +1431,20 @@ def _gate5b_full_toolhost_bundle(
 
 
 def _gate5b_full_toolhost_workspace_root() -> Path:
-    configured = os.environ.get("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT")
+    # I-4 follow-up: hosted workspace root flows through the registry typed
+    # reader. ``flag_str`` returns ``""`` (FlagSpec default) when the env is
+    # unset or empty; the historical fallback to ``Path.cwd()`` is preserved
+    # byte-identically (non-empty env wins, empty/unset falls back to cwd).
+    configured = flag_str("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT")
     if configured:
         return Path(configured)
     return Path.cwd()
 
 
 def _gate1a_workspace_root() -> Path:
-    configured = os.environ.get("CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_WORKSPACE_ROOT")
+    # I-4 follow-up: see ``_gate5b_full_toolhost_workspace_root`` above; same
+    # registry-backed semantics, parallel hosted-scope FlagSpec.
+    configured = flag_str("CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_WORKSPACE_ROOT")
     if configured:
         return Path(configured)
     return Path.cwd()
