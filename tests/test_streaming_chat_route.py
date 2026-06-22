@@ -190,6 +190,9 @@ def _selected_runtime(
     full_toolhost: bool = False,
     authority: PythonRuntimeAuthorityConfig | None = None,
     primitives_loader=None,
+    max_daily_generation_runs: int = 4,
+    max_daily_generation_cost_usd: float = 0.05,
+    max_cost_usd: float = 0.05,
 ) -> OpenMagiRuntime:
     runtime = _make_runtime(
         authority=authority
@@ -242,9 +245,9 @@ def _selected_runtime(
             allowedShadowCredentialRefs=("gate5b-google-api-key-smoke-v1",),
             providerCredentialBindingRequired=False,
             approvedBudgets={
-                "maxDailyGenerationRuns": 4,
-                "maxDailyGenerationCostUsd": 0.05,
-                "maxCostUsd": 0.05,
+                "maxDailyGenerationRuns": max_daily_generation_runs,
+                "maxDailyGenerationCostUsd": max_daily_generation_cost_usd,
+                "maxCostUsd": max_cost_usd,
             },
         ),
     )
@@ -495,6 +498,74 @@ def test_selected_full_toolhost_duplicate_replay_surfaces_status_not_none(
     assert second_payloads[-1]["terminal"] == "error"
     assert second_payloads[-1]["error"] == "counter_duplicate_replay"
     assert "counter_none" not in second.text
+
+
+def test_selected_full_toolhost_distinct_turn_ids_same_content_both_respond(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Two genuinely distinct turns that happen to carry identical text must
+    each receive a response.
+
+    Regression for the counter idempotency key collapsing to a content hash:
+    distinct turns (different ``turnId``) with the same words used to land on
+    the same ``request_id_digest`` and the second was silently rejected as
+    ``counter_duplicate_replay``.
+    """
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT", str(tmp_path))
+    runtime = _selected_runtime(
+        tmp_path, full_toolhost=True, max_daily_generation_cost_usd=1.0, max_cost_usd=0.01
+    )
+    client = TestClient(_make_app(runtime=runtime))
+    base = {
+        "sessionId": "s-distinct",
+        "messages": [{"role": "user", "content": "Same words, different turns."}],
+    }
+
+    first = client.post(
+        "/v1/chat/stream", headers=_auth_headers(), json={**base, "turnId": "turn-1"}
+    )
+    second = client.post(
+        "/v1/chat/stream", headers=_auth_headers(), json={**base, "turnId": "turn-2"}
+    )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert _data_lines(first.text)[-1]["terminal"] == "completed"
+    assert _data_lines(second.text)[-1]["terminal"] == "completed"
+    assert "counter_duplicate_replay" not in second.text
+
+
+def test_selected_full_toolhost_same_content_without_turn_identity_both_respond(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Identical re-sends with no client-supplied turn identity must each get a
+    response rather than being dropped as a duplicate replay.
+
+    Mirrors the web chat path, which posts only ``{messages}`` (no ``turnId`` /
+    trace id). Without a turn identity the request digest is minted unique per
+    request, so the user is never left with a silent non-response.
+    """
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT", str(tmp_path))
+    runtime = _selected_runtime(
+        tmp_path, full_toolhost=True, max_daily_generation_cost_usd=1.0, max_cost_usd=0.01
+    )
+    client = TestClient(_make_app(runtime=runtime))
+    body = {"messages": [{"role": "user", "content": "Identical resend with no turn id."}]}
+
+    first = client.post("/v1/chat/stream", headers=_auth_headers(), json=body)
+    second = client.post("/v1/chat/stream", headers=_auth_headers(), json=body)
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert _data_lines(first.text)[-1]["terminal"] == "completed"
+    assert _data_lines(second.text)[-1]["terminal"] == "completed"
+    assert "counter_duplicate_replay" not in second.text
 
 
 def test_selected_gate5b_stream_emits_live_sink_events_before_completion(

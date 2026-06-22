@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 import re
 import time
+import uuid
 from typing import Any
 
 from magi_agent.gates.gate1a_readonly_tools import Gate1AReadOnlyToolBundle
@@ -110,13 +111,23 @@ def _build_user_visible_generation_request(
         payload=None if history_messages else payload,
     )
     input_digest = _sha256_digest(sanitized_text)
+    # The gate5b counter store dedups by request digest. The digest must be
+    # keyed on a per-turn identity (not on message content) so two genuinely
+    # distinct turns that happen to share identical text do not collide and get
+    # the second one silently rejected as ``counter_duplicate_replay``. When the
+    # client supplies no turn identity at all we mint a unique nonce, trading
+    # away replay dedup we cannot key correctly for the guarantee that a real
+    # user turn is never dropped without a response.
+    turn_identity = _request_turn_identity(payload, trace_id=trace_id)
     request_seed = "|".join(
         (
             runtime.config.bot_id,
             runtime.config.user_id,
             route_config.environment,
             input_digest,
-            trace_id or "",
+            turn_identity
+            if turn_identity is not None
+            else f"nonce:{uuid.uuid4().hex}",
         )
     )
     request_digest = (
@@ -238,6 +249,31 @@ def _build_user_visible_generation_request(
             },
         }
     )
+
+
+def _request_turn_identity(
+    payload: Mapping[str, object],
+    *,
+    trace_id: str | None,
+) -> str | None:
+    """Per-turn idempotency identity supplied by the client, if any.
+
+    The gate5b counter store keys replay protection on the request digest, so
+    the digest must reflect *which turn* this is rather than *what was said*.
+    A client-supplied ``turnId`` uniquely identifies a logical turn (a genuine
+    retry reuses it; distinct turns differ even with identical text); the
+    request ``trace_id`` is the next-best per-request signal. ``sessionId`` is
+    deliberately excluded because it is per-channel-stable, not per-turn.
+
+    Returns ``None`` when the client supplied no turn identity, signalling the
+    caller to mint a unique nonce so a distinct turn is never deduped away.
+    """
+    turn_id = payload.get("turnId")
+    if isinstance(turn_id, str) and turn_id.strip():
+        return f"turn:{turn_id.strip()}"
+    if trace_id and trace_id.strip():
+        return f"trace:{trace_id.strip()}"
+    return None
 
 
 def _session_key_digest_from_request(
