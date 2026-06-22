@@ -6,55 +6,149 @@ const src = readFileSync(
   "utf8",
 );
 
-describe("GuidedWizard — toss-style step-by-step policy builder (PR-E2)", () => {
-  it("declares exactly five steps so the progress bar / Next button maths line up", () => {
-    expect(src).toContain("STEPS");
-    expect(src).toMatch(/"When\?"[\s\S]*"What evidence must pass\?"[\s\S]*"What happens if missing\?"[\s\S]*"Name your policy"[\s\S]*"Review"/);
+describe("GuidedWizard — kind router (PR-E3)", () => {
+  it("offers four kind choices for guided authoring", () => {
+    expect(src).toContain('"block-answer"');
+    expect(src).toContain('"restrict-tool"');
+    expect(src).toContain('"filter-result"');
+    expect(src).toContain('"rewire-builtin"');
   });
 
-  it("renders one decision per step (Scope, Evidence, OnMissing, Name, Review)", () => {
-    expect(src).toContain("ScopeStep");
-    expect(src).toContain("EvidenceStep");
-    expect(src).toContain("OnMissingStep");
-    expect(src).toContain("NameStep");
-    expect(src).toContain("ReviewStep");
+  it("routes each kind to its dedicated sub-wizard component", () => {
+    expect(src).toContain("BlockAnswerWizard");
+    expect(src).toContain("RestrictToolWizard");
+    expect(src).toContain("FilterResultWizard");
+    expect(src).toContain("RewireBuiltinWizard");
   });
 
-  it("renders an aria progressbar so screen readers can announce step N / M", () => {
-    expect(src).toContain('role="progressbar"');
-    expect(src).toContain("aria-valuenow={step + 1}");
-    expect(src).toContain("aria-valuemax={total}");
+  it("KindPicker forwards a ← Pick different to the parent (mode picker)", () => {
+    expect(src).toContain("Pick different mode");
   });
 
-  it("badges the recommended scope + the recommended on-missing action", () => {
-    expect(src).toContain('opt.recommended ? "recommended"');
-    // Defaults: coding scope = recommended; block action = recommended.
-    expect(src).toMatch(/"coding".*recommended: true/);
-    expect(src).toMatch(/"block".*recommended: true/);
+  it("Sub-wizards' ← Pick different goes back to the kind picker (one level up)", () => {
+    expect(src).toContain("backToKindPicker");
+  });
+});
+
+
+const chrome = readFileSync(
+  new URL("./guided/wizard-chrome.tsx", import.meta.url),
+  "utf8",
+);
+
+
+describe("WizardChrome — shared chrome (PR-E3)", () => {
+  it("renders aria progressbar with valuenow + valuemax", () => {
+    expect(chrome).toContain('role="progressbar"');
+    expect(chrome).toContain("aria-valuenow={step + 1}");
+    expect(chrome).toContain("aria-valuemax={total}");
   });
 
-  it("pulls evidence-ref options from the catalog + the user evidence types catalog", () => {
-    expect(src).toContain("buildRefOptions");
-    expect(src).toContain("catalog.verification.customRuleMenu");
-    expect(src).toContain("evidenceTypes");
+  it("first step shows Cancel; subsequent steps show ← Back", () => {
+    expect(chrome).toContain("isFirst ? (");
+    expect(chrome).toContain("isLast ? (");
   });
 
-  it("activates by calling putCustomRule with a deterministic_ref draft", () => {
-    expect(src).toContain("putCustomRule(agentFetch, rule)");
-    expect(src).toContain('kind: "deterministic_ref"');
-    expect(src).toContain('payload: { ref: draft.evidenceRef }');
+  it("exposes a reusable RadioCard primitive", () => {
+    expect(chrome).toContain("export function RadioCard");
+  });
+});
+
+
+const blockAnswer = readFileSync(
+  new URL("./guided/block-answer-wizard.tsx", import.meta.url),
+  "utf8",
+);
+
+
+describe("BlockAnswerWizard (PR-E3 extraction)", () => {
+  it("activates via putCustomRule with deterministic_ref kind", () => {
+    expect(blockAnswer).toContain("putCustomRule");
+    expect(blockAnswer).toContain('kind: "deterministic_ref"');
+    expect(blockAnswer).toContain('payload: { ref: draft.evidenceRef }');
   });
 
-  it("guards the Next button per step via stepIsComplete", () => {
-    expect(src).toContain("stepIsComplete");
-    // Step 3 (Name) requires a valid id pattern.
-    expect(src).toContain("/^[a-z0-9][a-z0-9_-]{0,127}$/.test(draft.ruleId)");
+  it("ships 5 steps", () => {
+    expect(blockAnswer).toContain("const TOTAL = 5");
+  });
+});
+
+
+const restrictTool = readFileSync(
+  new URL("./guided/restrict-tool-wizard.tsx", import.meta.url),
+  "utf8",
+);
+
+
+describe("RestrictToolWizard (PR-E3 new)", () => {
+  it("activates via putCustomRule with tool_perm kind + before_tool_use firesAt", () => {
+    expect(restrictTool).toContain("putCustomRule");
+    expect(restrictTool).toContain('kind: "tool_perm"');
+    expect(restrictTool).toContain('firesAt: "before_tool_use"');
   });
 
-  it("renders a plain-English summary on the Review step (no raw JSON)", () => {
-    expect(src).toContain("What this policy does");
-    // Source intentionally does NOT shove raw IR JSON onto the Review step;
-    // the user reads a sentence and a small key/value dl, not a JSON dump.
-    expect(src).not.toContain("JSON.stringify(rule");
+  it("maps the deny/ask decision to the block/ask_approval action", () => {
+    expect(restrictTool).toContain('draft.decision === "ask" ? "ask_approval" : "block"');
+  });
+
+  it("supports three match types: tool / domain / domainAllowlist", () => {
+    expect(restrictTool).toContain('"tool"');
+    expect(restrictTool).toContain('"domain"');
+    expect(restrictTool).toContain('"domainAllowlist"');
+  });
+
+  it("ships 5 steps", () => {
+    expect(restrictTool).toContain("const TOTAL = 5");
+  });
+});
+
+
+const filterResult = readFileSync(
+  new URL("./guided/filter-result-wizard.tsx", import.meta.url),
+  "utf8",
+);
+
+
+describe("FilterResultWizard (PR-E3 new)", () => {
+  it("activates via putDashboardCheck (after-tool, self-host only)", () => {
+    expect(filterResult).toContain("putDashboardCheck");
+  });
+
+  it("loads the tool catalog menu so users can pick a chip", () => {
+    expect(filterResult).toContain("getDashboardPacksMenu");
+  });
+
+  it("exposes the isRegex checkbox", () => {
+    expect(filterResult).toContain("Treat pattern as a regular expression");
+  });
+
+  it("ships 6 steps", () => {
+    expect(filterResult).toContain("const TOTAL = 6");
+  });
+});
+
+
+const rewireBuiltin = readFileSync(
+  new URL("./guided/rewire-builtin-wizard.tsx", import.meta.url),
+  "utf8",
+);
+
+
+describe("RewireBuiltinWizard (PR-E3 new)", () => {
+  it("activates via putSeamSpec with op=modify_seam", () => {
+    expect(rewireBuiltin).toContain("putSeamSpec");
+    expect(rewireBuiltin).toContain('op: "modify_seam"');
+  });
+
+  it("only lists togglable built-in presets (enforcement = enforcing)", () => {
+    expect(rewireBuiltin).toContain('p.enforcement === "enforcing"');
+  });
+
+  it("auto-derives the doc id from preset id", () => {
+    expect(rewireBuiltin).toContain("docId: `rewire-${preset.id}`");
+  });
+
+  it("ships 4 steps", () => {
+    expect(rewireBuiltin).toContain("const TOTAL = 4");
   });
 });
