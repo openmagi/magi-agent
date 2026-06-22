@@ -1501,6 +1501,111 @@ FLAGS: tuple[FlagSpec, ...] = (
         summary="Path to the Magi config.toml file; empty uses ~/.magi/config.toml.",
         kind="str",
     ),
+    # --- Model knobs (E-15) -----------------------------------------------
+    # The per-turn LiteLlm build (``cli/real_runner._build_litellm_model``)
+    # consults eight ``MAGI_MODEL_*`` / ``MAGI_LLM_*`` knobs. They used to be
+    # read directly off ``os.environ`` inline (undiscoverable). Registering
+    # them here surfaces them in flag discovery and routes their reads
+    # through the typed registry (``flag_int``/``flag_str``).
+    FlagSpec(
+        name="MAGI_MODEL_NUM_RETRIES",
+        default=4,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "litellm ``num_retries`` for the per-turn LiteLlm build; transient "
+            "provider failures (5xx, connection drops, overloaded) are "
+            "retried this many times before the run aborts. Values < 1 fall "
+            "back to the default."
+        ),
+        kind="int",
+    ),
+    FlagSpec(
+        name="MAGI_MODEL_TIMEOUT_S",
+        default=600,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "litellm ``timeout`` (seconds) bounding a single hung request to "
+            "the model provider. Values < 1 fall back to the default."
+        ),
+        kind="int",
+    ),
+    FlagSpec(
+        name="MAGI_MODEL_THINKING_TYPE",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Highest-precedence reasoning escape hatch. Set to ``adaptive`` to "
+            "send ``thinking={'type': 'adaptive'}`` directly (Anthropic Opus "
+            "4.7/4.8 adaptive-only path). Empty = unused."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_MODEL_THINKING_BUDGET_TOKENS",
+        default=0,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Explicit Anthropic-style ``thinking={'type': 'enabled', "
+            "'budget_tokens': N}`` for budget-thinking models (Sonnet 4.5/4.6). "
+            "Adaptive-only models REJECT this shape; use "
+            "``MAGI_MODEL_THINKING_TYPE=adaptive`` instead. <= 0 = unused."
+        ),
+        kind="int",
+    ),
+    FlagSpec(
+        name="MAGI_MODEL_REASONING_EFFORT",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Cross-provider ``reasoning_effort`` (``minimal``/``low``/"
+            "``medium``/``high``/``xhigh``/``max``); ``off``/``none`` disable. "
+            "Recommended knob — litellm maps it per-provider (Opus ⇒ "
+            "adaptive, GPT/Gemini ⇒ effort). Per-provider normalization is "
+            "applied (notably ``max`` → ``xhigh`` for OpenAI/OpenRouter)."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_LLM_API_BASE",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Optional LiteLlm ``api_base`` URL routing every model build "
+            "through a gateway (in-cluster api-proxy holding provider keys). "
+            "Unset ⇒ direct-to-provider (default)."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_LLM_API_KEY",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Credential paired with ``MAGI_LLM_API_BASE``: surfaced as the "
+            "litellm ``api_key`` AND an explicit auth header so OpenAI-prefixed "
+            "models still present the gateway token. SENSITIVE — never logged "
+            "or persisted; treat as a secret like ``MAGI_DISCORD_BOT_TOKEN``."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_LLM_API_HEADER",
+        default="x-api-key",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Auth header name used to forward ``MAGI_LLM_API_KEY`` to the "
+            "gateway (default ``x-api-key``). Empty resolves to the default."
+        ),
+        kind="str",
+    ),
 )
 
 

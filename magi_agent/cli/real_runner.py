@@ -313,21 +313,28 @@ _DEFAULT_TIMEOUT_S = 600
 
 
 def _model_retry_kwargs(env: Mapping[str, str] | None = None) -> dict[str, int]:
+    """LiteLlm retry/timeout kwargs (E-15: registry-backed).
+
+    Knobs come from the typed flag registry (``flag_int``); each falls back
+    to its registered default when unset/invalid. Non-positive values
+    (``0``/negative) also fall back to the default rather than producing a
+    ``num_retries=0`` build that retries zero times — preserving the
+    pre-E-15 parse semantics byte-identically.
+    """
+
+    from magi_agent.config.flags import flag_int  # noqa: PLC0415
+
     source = os.environ if env is None else env
 
-    def _positive_int(name: str, default: int) -> int:
-        raw = source.get(name)
-        if raw is None or not str(raw).strip():
+    def _positive(name: str, default: int) -> int:
+        value = flag_int(name, env=source)
+        if not isinstance(value, int) or value < 1:
             return default
-        try:
-            value = int(str(raw).strip())
-        except ValueError:
-            return default
-        return value if value >= 1 else default
+        return value
 
     return {
-        "num_retries": _positive_int("MAGI_MODEL_NUM_RETRIES", _DEFAULT_NUM_RETRIES),
-        "timeout": _positive_int("MAGI_MODEL_TIMEOUT_S", _DEFAULT_TIMEOUT_S),
+        "num_retries": _positive("MAGI_MODEL_NUM_RETRIES", _DEFAULT_NUM_RETRIES),
+        "timeout": _positive("MAGI_MODEL_TIMEOUT_S", _DEFAULT_TIMEOUT_S),
     }
 
 
@@ -461,18 +468,15 @@ def _model_reasoning_kwargs(
     otherwise apply — operators retain a hard kill switch.
     """
 
+    from magi_agent.config.flags import flag_int, flag_str  # noqa: PLC0415
+
     source = os.environ if env is None else env
-    thinking_type = (source.get("MAGI_MODEL_THINKING_TYPE") or "").strip().lower()
+    thinking_type = (flag_str("MAGI_MODEL_THINKING_TYPE", env=source) or "").strip().lower()
     if thinking_type == "adaptive":
         return {"thinking": {"type": "adaptive"}}
-    budget_raw = (source.get("MAGI_MODEL_THINKING_BUDGET_TOKENS") or "").strip()
-    if budget_raw:
-        try:
-            budget = int(budget_raw)
-        except ValueError:
-            budget = 0
-        if budget > 0:
-            return {"thinking": {"type": "enabled", "budget_tokens": budget}}
+    budget = flag_int("MAGI_MODEL_THINKING_BUDGET_TOKENS", env=source)
+    if isinstance(budget, int) and budget > 0:
+        return {"thinking": {"type": "enabled", "budget_tokens": budget}}
     # Per-turn override (ContextVar) wins over env for the current async task.
     # The transport layer sets this from the chat-completions payload's
     # ``reasoningEffort`` field (PR2c). ``_normalize_per_turn_value`` already
@@ -483,7 +487,7 @@ def _model_reasoning_kwargs(
         if provider in _PROVIDERS_THAT_REJECT_REASONING_EFFORT:
             return {}
         return {"reasoning_effort": _normalize_reasoning_effort(override, provider)}
-    effort_raw = (source.get("MAGI_MODEL_REASONING_EFFORT") or "").strip().lower()
+    effort_raw = (flag_str("MAGI_MODEL_REASONING_EFFORT", env=source) or "").strip().lower()
     _disable_tokens = {"off", "none", "0", "false", "disable", "disabled"}
     if effort_raw in _disable_tokens:
         # Explicit operator kill switch wins over the catalog default even when
@@ -535,14 +539,16 @@ def _model_api_base_kwargs(env: Mapping[str, str] | None = None) -> dict[str, ob
     the token the gateway checks. Unset ⇒ ``{}`` ⇒ unchanged direct-to-provider.
     """
 
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
     source = os.environ if env is None else env
-    base = (source.get("MAGI_LLM_API_BASE") or "").strip()
+    base = (flag_str("MAGI_LLM_API_BASE", env=source) or "").strip()
     if not base:
         return {}
     kwargs: dict[str, object] = {"api_base": base}
-    token = (source.get("MAGI_LLM_API_KEY") or "").strip()
+    token = (flag_str("MAGI_LLM_API_KEY", env=source) or "").strip()
     if token:
-        header = (source.get("MAGI_LLM_API_HEADER") or "").strip() or "x-api-key"
+        header = (flag_str("MAGI_LLM_API_HEADER", env=source) or "").strip() or "x-api-key"
         kwargs["api_key"] = token
         kwargs["extra_headers"] = {header: token}
     return kwargs
