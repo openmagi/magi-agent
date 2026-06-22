@@ -620,6 +620,20 @@ class RealLocalChildRunner:
                     }
                 )
         evidence_refs = self._collect_evidence_refs(evidence_collector, session_id)
+        # Silent-no-op detection. The ADK stream completed with ZERO collected
+        # text AND no tool-call evidence — either the runner yielded no events
+        # at all (the anthropic/gemini 100ms repro Kevin chased for days), or
+        # it yielded only thought-only / signature-only parts that the text
+        # extractor cannot turn into a user answer. PR #827 caught the ADK
+        # ``error_code`` event shape via the in-loop classifier; this guard
+        # closes the still-silent shape (no events, no errors, no text, no
+        # tool calls). Raising the typed exception routes through the same
+        # ``run_child`` catch path as a real ``error_code`` — SpawnAgent ends
+        # up status="failed" with reason ``child_llm_empty_response`` instead
+        # of the dangerous status="ok" summary="" that triggered the parent
+        # agent's 43-action chaotic filesystem/DB spelunking on 0.1.66+.
+        if not texts and not evidence_refs:
+            raise _ChildLlmTurnError(f"{_DEGRADE_LLM_ERROR_PREFIX}empty_response")
         return "\n".join(texts), evidence_refs
 
     async def _emit_progress(self, event: Mapping[str, object]) -> None:
