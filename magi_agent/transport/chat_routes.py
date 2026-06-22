@@ -13,6 +13,7 @@ re-exports these names for compatibility.
 from __future__ import annotations
 
 import asyncio
+import collections
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from datetime import datetime, timezone
 import inspect
@@ -440,6 +441,31 @@ async def _local_adk_chat_sse(
         env=os.environ,
     )
     _goal_loop_token = set_per_turn_goal_loop_policy(_goal_loop_policy)
+    # Out-of-band agent-event channel. SpawnAgent (and any other tool that
+    # wants to surface child / subagent lifecycle into the dashboard Work
+    # pane) pushes events here from inside the tool dispatch; the SSE
+    # streaming loop below drains the deque BEFORE every engine event yield
+    # so the dashboard sees `child_started` / `child_progress` /
+    # `child_completed` in the right order alongside engine events.
+    #
+    # The pre-fix wire path never wired this on local serve — ToolContext's
+    # ``emit_agent_event`` was always ``None``, so SpawnAgent's emit-helpers
+    # no-op'd silently (the cause of Kevin's "subagents missing from right
+    # panel" report at 0.1.66). The hosted gate5b path always set it; local
+    # parity lands here.
+    _pending_agent_events: collections.deque[dict[str, object]] = collections.deque()
+
+    def _push_agent_event(event: Mapping[str, object]) -> None:
+        # SpawnAgent's _emit_agent_event invokes us with a dict. Coerce
+        # defensively (a future caller may pass a richer Mapping subtype)
+        # and skip empties — never raise across the tool boundary.
+        try:
+            if not isinstance(event, Mapping):
+                return
+            _pending_agent_events.append(dict(event))
+        except Exception:  # noqa: BLE001 — emitter must never crash a tool call.
+            return
+
     try:
         headless = build_headless_runtime(
             cwd=workspace_root,
@@ -453,6 +479,7 @@ async def _local_adk_chat_sse(
             owner_user_id=serve_owner_user_id,
             learning_live_readiness=learning_live_readiness,
             pinned_recipe_pack_ids=pinned_recipe_pack_ids,
+            agent_event_emitter=_push_agent_event,
         )
         # Route the top-level serve turn through the single ``run_governed_turn``
         # primitive (Phase 1). ``runtime=headless`` reuses the SAME runner/gate/
@@ -485,6 +512,11 @@ async def _local_adk_chat_sse(
         used_tool = False
         turn_errored = False
         async for item in stream:
+            # Drain any agent-events SpawnAgent (or other tools) pushed during
+            # the previous engine step, so the dashboard sees them in causal
+            # order alongside the engine's own events.
+            while _pending_agent_events:
+                yield _sse_event("agent", _pending_agent_events.popleft())
             if isinstance(item, EngineResult):
                 if item.error:
                     turn_errored = True
@@ -505,6 +537,10 @@ async def _local_adk_chat_sse(
             if delta:
                 assistant_parts.append(delta)
                 yield _sse_data({"choices": [{"index": 0, "delta": {"content": delta}}]})
+        # Final drain: a child event emitted during the last engine step (or
+        # after the EngineResult) would otherwise be dropped.
+        while _pending_agent_events:
+            yield _sse_event("agent", _pending_agent_events.popleft())
     finally:
         reset_per_turn_reasoning_effort(_reasoning_token)
         reset_per_turn_goal_loop_policy(_goal_loop_token)

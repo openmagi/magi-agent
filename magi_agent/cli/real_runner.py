@@ -166,6 +166,7 @@ def build_cli_model_runner(
     self_review_now: datetime | None = None,
     self_review_scheduler: Callable[[Coroutine[Any, Any, None]], None] | None = None,
     pinned_recipe_pack_ids: Sequence[str] = (),
+    agent_event_emitter: Callable[..., object] | None = None,
 ) -> CliModelRunner:
     """Build a real, model-backed CLI runner from a resolved provider config.
 
@@ -214,6 +215,7 @@ def build_cli_model_runner(
             session_id=session_id,
             general_automation_receipts=receipt_store,
             local_tool_evidence_collector=tool_evidence_collector,
+            agent_event_emitter=agent_event_emitter,
         )
     )
     effective_instruction = (

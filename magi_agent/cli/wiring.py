@@ -27,7 +27,7 @@ Importing ``cli.wiring`` is therefore safe on any cold path.
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -261,6 +261,7 @@ def build_headless_runtime(
     learning_live_readiness: object | None = None,
     tools: list[object] | None = None,
     pinned_recipe_pack_ids: Sequence[str] = (),
+    agent_event_emitter: Callable[..., object] | None = None,
 ) -> HeadlessRuntime:
     """Construct the complete headless dependency set.
 
@@ -319,6 +320,7 @@ def build_headless_runtime(
             permission_mode=permission_mode,
             tools=tools,
             pinned_recipe_pack_ids=pinned_recipe_pack_ids,
+            agent_event_emitter=agent_event_emitter,
         )
     )
     composio_bundle, composio_attached = _build_composio_bundle_for_mode(
@@ -536,6 +538,7 @@ def _build_default_runner(
     permission_mode: "PermissionMode" = "default",
     tools: list[object] | None = None,
     pinned_recipe_pack_ids: Sequence[str] = (),
+    agent_event_emitter: Callable[..., object] | None = None,
 ) -> object:
     """Build the CLI's default runner.
 
@@ -584,6 +587,7 @@ def _build_default_runner(
             permission_mode=permission_mode,
             general_automation_receipts=general_automation_receipts,
             local_tool_evidence_collector=local_tool_evidence,
+            agent_event_emitter=agent_event_emitter,
         )
     )
     try:
@@ -603,6 +607,7 @@ def _build_default_runner(
             general_automation_receipts=general_automation_receipts,
             local_tool_evidence_collector=local_tool_evidence,
             pinned_recipe_pack_ids=pinned_recipe_pack_ids,
+            agent_event_emitter=agent_event_emitter,
         )
     except CliProviderDependencyError as exc:
         # Key configured but the provider dependency is missing: keep the CLI
@@ -619,6 +624,7 @@ def _build_first_party_adk_tools(
     permission_mode: PermissionMode = "default",
     general_automation_receipts: object | None = None,
     local_tool_evidence_collector: object | None = None,
+    agent_event_emitter: Callable[..., object] | None = None,
 ) -> list[object]:
     """Build default first-party local ADK tools for the CLI real runner.
 
@@ -797,6 +803,10 @@ def _build_first_party_adk_tools(
             plugin_id=tool_name if isinstance(tool_name, str) else None,
             parent_tool_names=parent_tool_names_snapshot,
             spawn_cap=_spawn_cap_for_factory,
+            # Local-serve child-lifecycle plumbing (SpawnAgent → dashboard
+            # Work pane). Default ``None`` keeps every emit-site in
+            # ``subagents.py`` no-op via its ``callable(emitter)`` guard.
+            emit_agent_event=agent_event_emitter,
         )
 
     tools = build_adk_function_tools_for_registry(
