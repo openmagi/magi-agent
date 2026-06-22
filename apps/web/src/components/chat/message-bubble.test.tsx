@@ -307,7 +307,7 @@ describe("MessageBubble", () => {
     expect(html).not.toContain("[attachment:");
   });
 
-  it("keeps persisted assistant activity details out of the transcript", () => {
+  it("persists a collapsed activity summary in the transcript while keeping verbose detail out", () => {
     const html = renderToStaticMarkup(
       <MessageBubble
         role="assistant"
@@ -343,10 +343,14 @@ describe("MessageBubble", () => {
     );
 
     expect(html).toContain("완료했습니다.");
+    // A: the grouped activity summary now survives into the finalized transcript
+    // (collapsed by default — the record of what the agent did stays visible).
+    expect(html).toMatch(/Ran \d+ action/);
+    // ...but verbose per-tool labels stay collapsed/grouped, the live task board
+    // is gated to the live turn, and the in-progress phrasing never persists.
     expect(html).not.toContain("DocumentWrite");
     expect(html).not.toContain("FileDeliver");
     expect(html).not.toContain("Updated task board");
-    expect(html).not.toContain('data-agent-activity-row="true"');
     expect(html).not.toContain("actions in progress");
   });
 
