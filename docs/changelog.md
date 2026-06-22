@@ -15,6 +15,17 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.72
+
+### Added
+- PR-E3 Guided wizards for the remaining three policy kinds (#860,
+  follow-up to PR-E2's deterministic_ref wizard): toss-style 5-step
+  wizards now also author `tool_perm`, `llm_criterion`, and `shacl`
+  policies, plus a chrome-extraction refactor that lifts the shared
+  wizard chrome out of `guided-wizard.tsx` into reusable pieces. Each
+  wizard still routes Activate through the existing `putCustomRule`
+  path so the output is byte-identical to the matching Raw form.
+
 ## 0.1.71
 
 ### Added
