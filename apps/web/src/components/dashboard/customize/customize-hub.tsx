@@ -43,6 +43,7 @@ import type {
 import { useAgentFetch } from "@/lib/local-api";
 import { AddRulePicker, type AddRuleChoice } from "./add-rule-modal";
 import { AddPolicyModePicker, type AddPolicyMode } from "./add-policy-mode-picker";
+import { GuidedWizard } from "./guided-wizard";
 import { NlRuleCompose } from "./nl-rule-compose";
 import {
   CustomRulesSection,
@@ -438,6 +439,7 @@ function RulesSectionMount({
     | { phase: "idle" }
     | { phase: "picking_mode" }
     | { phase: "nl" }
+    | { phase: "guided" }
     | { phase: "raw_picking" }
     | { phase: "raw_authoring"; choice: AddRuleChoice };
   const [addState, setAddState] = useState<AddState>({ phase: "idle" });
@@ -505,8 +507,8 @@ function RulesSectionMount({
 
   const handleModePick = (mode: AddPolicyMode) => {
     if (mode === "nl") setAddState({ phase: "nl" });
+    else if (mode === "guided") setAddState({ phase: "guided" });
     else if (mode === "raw") setAddState({ phase: "raw_picking" });
-    // guided is disabled in the picker; no-op
   };
 
   return (
@@ -573,6 +575,20 @@ function RulesSectionMount({
             }}
           />
         </section>
+      ) : null}
+
+      {addState.phase === "guided" ? (
+        <GuidedWizard
+          catalog={data.catalog}
+          evidenceTypes={evidenceTypes}
+          onActivated={() => {
+            reload();
+            reloadDashboardChecks();
+            setAddState({ phase: "idle" });
+          }}
+          onPickDifferent={() => setAddState({ phase: "picking_mode" })}
+          onCancel={() => setAddState({ phase: "idle" })}
+        />
       ) : null}
 
       {addState.phase === "raw_picking" ? (

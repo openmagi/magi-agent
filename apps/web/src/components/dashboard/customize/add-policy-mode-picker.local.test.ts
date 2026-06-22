@@ -17,8 +17,11 @@ describe("AddPolicyModePicker — 3-mode entry (NL / Guided / Raw)", () => {
     expect(src).toContain("Recommended");
   });
 
-  it("badges Guided as Coming soon (disabled in the picker for PR-E1)", () => {
-    expect(src).toContain("Coming soon");
+  it("Guided is enabled once PR-E2 ships the wizard body", () => {
+    // PR-E2 dropped the "Coming soon" badge from the Guided card. The
+    // disabled-when-badge guard stays in the source so we can re-disable a
+    // mode by adding a "Coming soon" badge again if a future PR needs it.
+    expect(src).not.toMatch(/badge:\s*"Coming soon"/);
     expect(src).toContain('disabled={m.badge === "Coming soon"}');
   });
 

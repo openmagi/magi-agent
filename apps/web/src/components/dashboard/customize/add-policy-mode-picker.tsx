@@ -50,7 +50,6 @@ const MODES: ReadonlyArray<ModeCard> = [
       "Step-by-step picker — answer one question per screen. No NL ambiguity, no raw form burden.",
     icon: <SlidersHorizontal className="h-5 w-5" />,
     backing: "Constrained wizard",
-    badge: "Coming soon",
   },
   {
     id: "raw",

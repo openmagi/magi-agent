@@ -35,8 +35,14 @@ describe("CustomizeHub — Policy unification (PR-E1)", () => {
     expect(src).toContain("AddPolicyModePicker");
     expect(src).toContain('phase: "picking_mode"');
     expect(src).toContain('phase: "nl"');
+    expect(src).toContain('phase: "guided"');
     expect(src).toContain('phase: "raw_picking"');
     expect(src).toContain('phase: "raw_authoring"');
+  });
+
+  it("routes the Guided choice to the GuidedWizard (PR-E2)", () => {
+    expect(src).toContain("GuidedWizard");
+    expect(src).toContain('mode === "guided"');
   });
 
   it("loads DashboardChecks at hub level so they appear in the unified table", () => {
