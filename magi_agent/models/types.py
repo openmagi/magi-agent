@@ -23,6 +23,21 @@ from magi_agent.runtime.model_tiers import ModelCapability, ModelTier
 #:   catalog has no record of; never appears in ``builtin_catalog.json``.
 ModelSource = Literal["direct", "router", "product", "custom"]
 
+#: Per-model "what shape of reasoning kwargs does this model accept" tag, used
+#: by ``ModelCatalog.reasoning_default`` to source per-model default reasoning
+#: kwargs for the LiteLlm build (E-6).
+#:
+#: - ``adaptive``: Anthropic adaptive-thinking-only models (Opus 4.7/4.8) — they
+#:   require ``thinking={"type": "adaptive"}`` and REJECT the budget-enabled
+#:   shape with a 400.
+#: - ``effort``: cross-provider ``reasoning_effort`` knob (Sonnet, GPT-5.5,
+#:   Gemini 3.1 Pro) — litellm maps it per-model into the right wire shape.
+#: - ``budget``: budget-thinking-only (no shipped default — too provider
+#:   specific; reserved for future records that need explicit budgets).
+#: - ``none``: model has no reasoning surface (haiku, flash, cheap router
+#:   tiers) — default reasoning kwargs are ``{}``.
+ReasoningStyle = Literal["adaptive", "effort", "budget", "none"]
+
 
 class ModelRecord(BaseModel):
     """Immutable record for a single provider/model entry.
@@ -51,6 +66,10 @@ class ModelRecord(BaseModel):
     deprecated: bool = False
     replacement: str | None = None
     last_verified: str
+    # Per-model reasoning shape; default ``"none"`` keeps existing records that
+    # predate the field back-compatible (the catalog still ships a value per
+    # record so the meta-test below stays honest).
+    reasoning_style: ReasoningStyle = "none"
 
 
-__all__ = ["ModelRecord", "ModelSource"]
+__all__ = ["ModelRecord", "ModelSource", "ReasoningStyle"]
