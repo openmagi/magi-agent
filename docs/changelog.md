@@ -15,6 +15,52 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.73
+
+### Added
+- PR-E4 Customize audit fixes (#862): the Block-answer wizard now
+  branches across three check kinds (`evidence_ref` / `shacl_constraint`
+  / `llm_criterion`), the kind picker drops the Override card (NL/Raw
+  remain the override entry points), and the Policies table gains
+  `scope` + `firesAt` + search filters on top of `origin`. Filters
+  hide their row when only one distinct value exists. Built-in Edit
+  affordance removed in favor of toggle-off-and-recreate.
+- PR-E5 unified `AuthorWizard` (#866): a single 6-step wizard replaces
+  the four sub-wizards. Step 1 picks lifecycle + scope, step 2 the
+  archetype (block / ask / audit / strip — emit marked Coming soon),
+  step 3 the condition kind filtered by (lifecycle, archetype), step
+  4 the specifics, step 5 the name, step 6 the review. Downstream
+  fields self-reseed when an upstream axis changes. Backend routing is
+  transparent: after-tool regex → DashboardCheck, everything else →
+  CustomRule.
+- Goal-loop active policy now surfaces as an in-memory mission in the
+  Missions panel (#867): `mission_created` / `mission_event` /
+  `mission_updated` events flow from the transport layer when the
+  goal-loop is engaged. Closes the missing-mission gap when no
+  Mission store record exists.
+
+### Changed
+- E-2 / E-4 / E-3 model catalog hygiene (#856): the built-in
+  ModelCatalog defaults are now fail-loud, duplicate `_KNOWN_TOKEN_LIMITS`
+  collapsed onto a single source, and a new meta-test ratchets the
+  catalog. Fixes the test-pollution regression where
+  `importlib.reload(providers)` was re-creating ProviderConfig /
+  UnknownProviderError classes between tests; the offending reload was
+  removed from the new hardening test (`monkeypatch.setitem` is
+  sufficient and auto-restores). 43 provider tests now green together.
+- E-11 / E-12 / E-13 prompt-assembly cleanup (#869): retires the
+  OpenAI folklore strings, relocates `ProviderFamily` to its canonical
+  home, and repairs the schema validators that were drifting apart.
+- E-15 model knobs join the flag registry (#870): 8 model-side
+  `MAGI_*` reads now go through `FLAGS` instead of bare `os.getenv`,
+  so every model knob participates in the same default-OFF /
+  strict-bool / lab-seed contract as the rest of the codebase.
+
+### Fixed
+- Spawn route no longer double-prefixes a packed `provider:model`
+  string (#864). The child runner now splits `anthropic:anthropic:...`
+  back into a single canonical pair before dispatching.
+
 ## 0.1.72
 
 ### Added
