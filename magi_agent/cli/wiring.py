@@ -103,6 +103,77 @@ def _build_user_hook_bus_for_headless(*, workspace_root: str) -> object | None:
     return build_user_hook_bus(workspace_root=workspace_root)
 
 
+def _build_goal_loop_judge_factory() -> object | None:
+    """Default ``goal_loop_judge_factory`` for the engine.
+
+    The engine asks the returned factory for a :class:`JudgeCaller` ONLY when
+    PR-B publishes a :class:`GoalLoopPolicy` on the per-turn ContextVar (i.e.
+    the user opted into the composer's Goal-mission toggle AND
+    ``MAGI_GOAL_LOOP_ENABLED`` is on). Absent that, this factory is never
+    invoked and the engine remains byte-identical to pre-PR-C.
+
+    The returned factory resolves the judge's provider/model via the policy's
+    explicit ``judge_provider`` / ``judge_model`` overrides when present, else
+    falls back to the deployment's resolved provider config — the same key
+    discovery the main runner uses, so a fireworks-only bot uses Kimi to judge
+    its own turn (no extra key requirement).
+
+    Fail-soft: any error inside the factory (no keys, litellm import fails,
+    network blocked) returns ``None`` and the engine emits
+    ``goal_loop_judge_unavailable`` + terminates the turn — never crashes.
+    """
+    # The factory itself is a pure-Python closure; litellm is lazy-imported
+    # inside the judge caller so this wiring stays cold-clean.
+    def _factory(policy: object) -> object | None:
+        import os as _os  # noqa: PLC0415
+
+        try:
+            from magi_agent.cli.providers import (  # noqa: PLC0415
+                ProviderConfig,
+                resolve_provider_config,
+            )
+        except Exception:
+            return None
+
+        policy_provider = getattr(policy, "judge_provider", None)
+        policy_model = getattr(policy, "judge_model", None)
+
+        config: ProviderConfig | None = None
+        try:
+            if policy_provider and policy_model:
+                overlay = {**_os.environ, "MAGI_PROVIDER": str(policy_provider)}
+                config = resolve_provider_config(
+                    model_override=str(policy_model), env=overlay
+                )
+            else:
+                config = resolve_provider_config()
+        except Exception:
+            config = None
+        if config is None or not getattr(config, "api_key", None):
+            return None
+
+        async def _caller(prompt: str) -> str:
+            import litellm  # noqa: PLC0415
+
+            response = await litellm.acompletion(  # type: ignore[attr-defined]
+                model=config.litellm_model,
+                api_key=config.api_key,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=200,
+                temperature=0.0,
+            )
+            try:
+                choice = response.choices[0]
+                content = choice.message.content
+            except (AttributeError, IndexError, TypeError):
+                return ""
+            return content or ""
+
+        return _caller
+
+    return _factory
+
+
 def _build_criterion_model_factory() -> object | None:
     """Model factory for custom llm_criterion rules (P3 pre-final judge).
 
@@ -317,6 +388,11 @@ def build_headless_runtime(
         # pre-final. None unless MAGI_EGRESS_GATE_ENABLED + custom-rules flag →
         # llm rules stay inert (fail-open) and the turn is byte-identical.
         criterion_model_factory=_build_criterion_model_factory(),
+        # PR-C goal-loop judge factory (clean-break "is the objective complete?"
+        # check). The factory only fires when PR-B published a GoalLoopPolicy
+        # for the turn; absent that, this argument is dormant and streaming
+        # behavior is byte-identical to pre-PR-C.
+        goal_loop_judge_factory=_build_goal_loop_judge_factory(),
     )
 
     # (C) Permission gate — default stays sink-less and therefore fail-safe on

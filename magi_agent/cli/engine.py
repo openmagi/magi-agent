@@ -1228,6 +1228,15 @@ class MagiEngineDriver:
         user_hook_bus: object | None = None,
         criterion_model_factory: Callable[[], object] | None = None,
         wire_profile: object | None = None,
+        # PR-C goal-loop judge factory. Builds a ``JudgeCaller`` (str -> async
+        # str) from a :class:`GoalLoopPolicy`. ``None`` (default) means the
+        # clean-break judge call is unavailable — the engine emits
+        # ``goal_loop_judge_unavailable`` and terminates the turn as today.
+        # Production callers (transport/chat_routes.py) inject a factory that
+        # builds a cheap-tier LiteLlm completion caller from the deployment's
+        # configured provider keys; tests inject a fake judge for hermetic
+        # behavior.
+        goal_loop_judge_factory: Callable[..., object] | None = None,
     ) -> None:
         self._runner = runner
         # Optional wire profile for the HOSTED path (T4). ``None`` (default) keeps
@@ -1251,6 +1260,13 @@ class MagiEngineDriver:
         # PR4 goal-nudge continuation. ``None`` (default) -> no nudge logic;
         # ``_drive`` behaves byte-identically to pre-PR4.
         self._goal_nudge: "GoalNudge | None" = goal_nudge
+        # PR-C goal-loop judge factory (clean-break judge call). ``None``
+        # (default) keeps the clean-break branch byte-identical to pre-PR-C —
+        # the engine emits ``goal_loop_judge_unavailable`` and breaks when a
+        # ``GoalLoopPolicy`` is active for the turn but no factory is wired.
+        self._goal_loop_judge_factory: Callable[..., object] | None = (
+            goal_loop_judge_factory
+        )
         # Output-continuation: resume a response truncated at the model's
         # per-response output-token cap by re-invoking and appending. ``None``
         # (default) -> no continuation logic; streaming is byte-identical.
@@ -1934,6 +1950,7 @@ class MagiEngineDriver:
             goal_nudge=self._goal_nudge,
             output_continuation=self._output_continuation,
             empty_response_recovery=self._empty_response_recovery,
+            goal_loop_judge_factory=self._goal_loop_judge_factory,
         )
         try:
             async for item in driver_gen:
@@ -1962,6 +1979,7 @@ class MagiEngineDriver:
         goal_nudge: "GoalNudge | None" = None,
         output_continuation: "OutputContinuationConfig | None" = None,
         empty_response_recovery: "EmptyResponseRecoveryConfig | None" = None,
+        goal_loop_judge_factory: Callable[..., object] | None = None,
     ) -> AsyncGenerator[RuntimeEvent, EngineResult]:
         # PR-04-PR2 (resume rehydration): consume ``initial_messages`` by
         # synthesizing the prior transcript into a prefix on the opening user
@@ -2191,6 +2209,13 @@ class MagiEngineDriver:
         # consecutive clean stop; reset to False when a tool fires (re-arm).
         nudges_used = 0
         goal_check_pending = False
+        # PR-C goal-loop state. Only active when a GoalLoopPolicy is published
+        # on the per-turn ContextVar by PR-B (i.e. the user opted into the
+        # composer's Goal-mission toggle AND MAGI_GOAL_LOOP_ENABLED is on).
+        # Otherwise these counters never advance and the new branch is skipped.
+        goal_loop_continuations = 0
+        goal_loop_judge_parse_failures = 0
+        goal_loop_judge_caller: object | None = None
         # Output-continuation budget: how many times we've resumed a response
         # truncated at the model's per-response output-token cap this turn.
         continuations_used = 0
@@ -2497,6 +2522,137 @@ class MagiEngineDriver:
                                 turn_id=turn_id,
                             )
                             continue  # re-invoke run_async (genuine new model call)
+                    # PR-C goal-loop clean-break judge. Fires AFTER the legacy
+                    # goal_nudge branch (above) and BEFORE the final break.
+                    # Reads the per-turn policy ContextVar (PR-B). Absent
+                    # policy → byte-identical to pre-PR-C (the existing
+                    # ``break`` runs). Present policy → ask the cheap judge
+                    # whether the original objective is complete and either
+                    # terminate normally, drive a continuation, or terminate
+                    # on the parse-failure budget.
+                    from magi_agent.runtime.per_turn_goal_loop_context import (  # noqa: PLC0415
+                        current_per_turn_goal_loop_policy,
+                    )
+
+                    goal_loop_policy = current_per_turn_goal_loop_policy()
+                    if goal_loop_policy is not None:
+                        from magi_agent.runtime.goal_loop_judge import (  # noqa: PLC0415
+                            evaluate_goal_completion,
+                        )
+
+                        if goal_loop_continuations >= goal_loop_policy.max_turns:
+                            yield RuntimeEvent(
+                                type="status",
+                                payload={
+                                    "type": "goal_loop_exhausted",
+                                    "continuations": goal_loop_continuations,
+                                    "max": goal_loop_policy.max_turns,
+                                },
+                                turn_id=turn_id,
+                            )
+                            break
+                        if (
+                            goal_loop_judge_parse_failures
+                            >= goal_loop_policy.judge_parse_failures_budget
+                        ):
+                            yield RuntimeEvent(
+                                type="status",
+                                payload={
+                                    "type": "goal_loop_judge_unavailable",
+                                    "reason": "parse_failure_budget_exhausted",
+                                    "parseFailures": goal_loop_judge_parse_failures,
+                                    "budget": goal_loop_policy.judge_parse_failures_budget,
+                                },
+                                turn_id=turn_id,
+                            )
+                            break
+                        if goal_loop_judge_caller is None:
+                            if goal_loop_judge_factory is None:
+                                yield RuntimeEvent(
+                                    type="status",
+                                    payload={
+                                        "type": "goal_loop_judge_unavailable",
+                                        "reason": "no_judge_factory",
+                                    },
+                                    turn_id=turn_id,
+                                )
+                                break
+                            try:
+                                goal_loop_judge_caller = goal_loop_judge_factory(
+                                    goal_loop_policy
+                                )
+                            except Exception:  # noqa: BLE001 — fail-soft: never crash the turn.
+                                goal_loop_judge_caller = None
+                            if goal_loop_judge_caller is None:
+                                yield RuntimeEvent(
+                                    type="status",
+                                    payload={
+                                        "type": "goal_loop_judge_unavailable",
+                                        "reason": "judge_factory_returned_none",
+                                    },
+                                    turn_id=turn_id,
+                                )
+                                break
+                        verdict = await evaluate_goal_completion(
+                            policy=goal_loop_policy,
+                            final_text=emitted_text,
+                            judge_caller=goal_loop_judge_caller,  # type: ignore[arg-type]
+                        )
+                        if not verdict.parse_succeeded:
+                            goal_loop_judge_parse_failures += 1
+                        if verdict.complete:
+                            yield RuntimeEvent(
+                                type="status",
+                                payload={
+                                    "type": "goal_loop_complete",
+                                    "reason": verdict.reason,
+                                    "continuations": goal_loop_continuations,
+                                },
+                                turn_id=turn_id,
+                            )
+                            break
+                        if (
+                            goal_loop_judge_parse_failures
+                            >= goal_loop_policy.judge_parse_failures_budget
+                        ):
+                            yield RuntimeEvent(
+                                type="status",
+                                payload={
+                                    "type": "goal_loop_judge_unavailable",
+                                    "reason": "parse_failure_budget_exhausted",
+                                    "parseFailures": goal_loop_judge_parse_failures,
+                                    "budget": goal_loop_policy.judge_parse_failures_budget,
+                                },
+                                turn_id=turn_id,
+                            )
+                            break
+                        goal_loop_continuations += 1
+                        yield RuntimeEvent(
+                            type="status",
+                            payload={
+                                "type": "goal_loop_continuation",
+                                "continuation": goal_loop_continuations,
+                                "max": goal_loop_policy.max_turns,
+                                "judgeReason": verdict.reason,
+                            },
+                            turn_id=turn_id,
+                        )
+                        runner_input = runner_turn_input_cls(
+                            userId=self._user_id,
+                            sessionId=session_id,
+                            turnId=turn_id,
+                            invocationId=turn_id,
+                            newMessage=types.Content(  # type: ignore[attr-defined]
+                                role="user",
+                                parts=[
+                                    types.Part(  # type: ignore[attr-defined]
+                                        text=goal_loop_policy.continuation_template
+                                    )
+                                ],
+                            ),
+                            harnessState=effective_harness_state,
+                        )
+                        continue  # re-invoke run_async (genuine new model call)
                     break
 
                 # The run invocation raised. Decide whether to GENUINELY retry.
