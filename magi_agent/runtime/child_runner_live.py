@@ -315,9 +315,28 @@ class RealLocalChildRunner:
 
     def _resolve_route(self, request: object) -> tuple[str, str]:
         """A per-task override wins, then an injected provider_config, then the
-        historical default child route."""
+        historical default child route.
+
+        Parents sometimes pack the route into the ``model`` field alone using
+        the colon or slash convention (``"anthropic:claude-sonnet-4-6"`` /
+        ``"openai/gpt-5.5"``) — the wire forms they see elsewhere (LiteLLM,
+        the operator allowlist env). Pre-fix, those flowed verbatim into the
+        registry lookup, producing the ``anthropic:anthropic:claude-sonnet-4-6``
+        double-prefix route Kevin saw on 0.1.66+. Normalize here so either
+        convention works and the registry sees a canonical ``(provider, model)``.
+        """
         req_provider = _clean_str(getattr(request, "provider", None))
         req_model = _clean_str(getattr(request, "model", None))
+        # Split a packed ``provider:model`` / ``provider/model`` in the model
+        # field BEFORE applying provider precedence. An explicit ``provider``
+        # field still wins; the split here just strips a redundant prefix so
+        # we never assemble the double-prefix route.
+        if req_model:
+            split_provider, split_model = _split_packed_route(req_model)
+            if split_model is not None:
+                if not req_provider and split_provider:
+                    req_provider = split_provider
+                req_model = split_model
         cfg_provider = _clean_str(getattr(self._provider_config, "provider", None))
         cfg_model = _clean_str(getattr(self._provider_config, "model", None))
         provider = req_provider or cfg_provider or _DEFAULT_CHILD_PROVIDER
@@ -876,6 +895,41 @@ def _clean_str(value: Any) -> str | None:
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
+
+
+def _split_packed_route(model: str) -> tuple[str | None, str | None]:
+    """Split ``provider:model`` / ``provider/model`` packed into a single string.
+
+    Returns ``(provider, model)`` when a split was detected (so the caller
+    can decide whether to apply it given the explicit ``provider`` field).
+    Returns ``(None, None)`` when there is no delimiter — the caller treats
+    the value as a bare model id.
+
+    Both segments are stripped + lowercased to match the registry's
+    canonical case; an empty provider segment (``":model"``) returns
+    ``None`` for the provider so the caller falls back to its default.
+    The split looks for the FIRST delimiter only — model ids may legitimately
+    contain a second slash (``accounts/fireworks/models/...``), so we never
+    rsplit.
+    """
+    if not isinstance(model, str) or not model.strip():
+        return None, None
+    raw = model.strip()
+    if ":" in raw:
+        head, sep, tail = raw.partition(":")
+    elif "/" in raw:
+        head, sep, tail = raw.partition("/")
+    else:
+        return None, None
+    if not sep:
+        return None, None
+    provider = head.strip().lower() or None
+    rest = tail.strip()
+    if not rest:
+        # Provider extracted but the model segment is empty — caller falls
+        # back to its default model rather than using "" as the model id.
+        return provider, None
+    return provider, rest
 
 
 def _child_stream_progress_detail(text: str) -> str:
