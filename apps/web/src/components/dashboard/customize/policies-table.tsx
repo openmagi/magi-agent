@@ -1,0 +1,439 @@
+"use client";
+
+/**
+ * PoliciesTable — unified single-list view over the four backend stores.
+ *
+ * Replaces ``RulesTable``'s origin-grouped surface with one flat list
+ * driven by the :type:`Policy` adapter. Each row carries its own
+ * togglable/editable/deletable affordance derived from ``policy.source``
+ * so the consumer does not need per-source branching.
+ *
+ * Action routing
+ * --------------
+ * Toggle / delete callbacks dispatch by ``policy.source``:
+ *   - preset_seam     → ``onTogglePreset(id, next)``
+ *   - custom_rule     → ``onToggleCustomRule(rule, next)`` / ``onDeleteCustomRule(id)``
+ *   - dashboard_check → ``onToggleDashboardCheck(check, next)`` / ``onDeleteDashboardCheck(id)``
+ *   - seam_spec       → ``onDeleteSeamSpec(specId)`` (toggle not supported)
+ *
+ * The PoliciesSection mount is the single place that knows how to call
+ * the backend; this table is a pure render.
+ */
+
+import { ChevronRight, Trash2 } from "lucide-react";
+import React, { useMemo, useState } from "react";
+
+import type { CustomRule } from "@/lib/customize-api";
+import type { DashboardCheck } from "@/lib/packs-dashboard-api";
+import type { Policy, PolicyOrigin, PolicySource } from "@/lib/policy-model";
+
+
+export interface PoliciesTableProps {
+  policies: Policy[];
+  pendingPresets: Set<string>;
+  busy: boolean;
+  onTogglePreset: (presetId: string, next: boolean) => void;
+  onToggleCustomRule: (rule: CustomRule, next: boolean) => void;
+  onDeleteCustomRule: (id: string) => void;
+  onToggleDashboardCheck: (check: DashboardCheck, next: boolean) => void;
+  onDeleteDashboardCheck: (id: string) => void;
+  onDeleteSeamSpec: (specId: string) => void;
+  onEdit?: (policy: Policy) => void;
+}
+
+
+const ORIGIN_TONE: Record<PolicyOrigin, string> = {
+  builtin: "bg-emerald-500/10 text-emerald-700",
+  user: "bg-blue-500/10 text-blue-700",
+};
+
+
+const SOURCE_LABEL: Record<PolicySource, string> = {
+  preset_seam: "Built-in",
+  custom_rule: "Custom",
+  dashboard_check: "After-tool",
+  seam_spec: "Override",
+};
+
+
+type OriginFilter = PolicyOrigin | null;
+
+
+export function PoliciesTable({
+  policies,
+  pendingPresets,
+  busy,
+  onTogglePreset,
+  onToggleCustomRule,
+  onDeleteCustomRule,
+  onToggleDashboardCheck,
+  onDeleteDashboardCheck,
+  onDeleteSeamSpec,
+  onEdit,
+}: PoliciesTableProps): React.ReactElement {
+  const [filter, setFilter] = useState<OriginFilter>(null);
+
+  const totals = useMemo(() => {
+    let builtin = 0;
+    let user = 0;
+    for (const p of policies) {
+      if (p.origin === "builtin") builtin++;
+      else user++;
+    }
+    return { builtin, user, all: policies.length };
+  }, [policies]);
+
+  const visible = filter === null ? policies : policies.filter((p) => p.origin === filter);
+
+  // Group by origin so the head of the list is the user's own policies and
+  // the long built-in catalog can be collapsed if needed.
+  const userPolicies = visible.filter((p) => p.origin === "user");
+  const builtinPolicies = visible.filter((p) => p.origin === "builtin");
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-1">
+        <span className="mr-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+          Filter
+        </span>
+        <FilterChip
+          label="All"
+          count={totals.all}
+          active={filter === null}
+          onClick={() => setFilter(null)}
+        />
+        <FilterChip
+          label="Custom"
+          count={totals.user}
+          active={filter === "user"}
+          tone="bg-blue-500/10 text-blue-700"
+          onClick={() => setFilter(filter === "user" ? null : "user")}
+        />
+        <FilterChip
+          label="Built-in"
+          count={totals.builtin}
+          active={filter === "builtin"}
+          tone="bg-emerald-500/10 text-emerald-700"
+          onClick={() => setFilter(filter === "builtin" ? null : "builtin")}
+        />
+      </div>
+
+      {userPolicies.length > 0 ? (
+        <Group
+          title="Your policies"
+          rows={userPolicies}
+          pendingPresets={pendingPresets}
+          busy={busy}
+          onTogglePreset={onTogglePreset}
+          onToggleCustomRule={onToggleCustomRule}
+          onDeleteCustomRule={onDeleteCustomRule}
+          onToggleDashboardCheck={onToggleDashboardCheck}
+          onDeleteDashboardCheck={onDeleteDashboardCheck}
+          onDeleteSeamSpec={onDeleteSeamSpec}
+          onEdit={onEdit}
+          defaultOpen
+        />
+      ) : null}
+      {builtinPolicies.length > 0 ? (
+        <Group
+          title="Built-in"
+          rows={builtinPolicies}
+          pendingPresets={pendingPresets}
+          busy={busy}
+          onTogglePreset={onTogglePreset}
+          onToggleCustomRule={onToggleCustomRule}
+          onDeleteCustomRule={onDeleteCustomRule}
+          onToggleDashboardCheck={onToggleDashboardCheck}
+          onDeleteDashboardCheck={onDeleteDashboardCheck}
+          onDeleteSeamSpec={onDeleteSeamSpec}
+          onEdit={onEdit}
+          defaultOpen={userPolicies.length === 0}
+        />
+      ) : null}
+      {visible.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-black/[0.10] bg-gray-50/80 px-4 py-6 text-center text-xs leading-relaxed text-secondary">
+          No policies match this filter.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+
+function FilterChip({
+  label,
+  count,
+  active,
+  tone,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  tone?: string;
+  onClick: () => void;
+}): React.ReactElement {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+        active
+          ? "bg-primary text-white"
+          : tone
+            ? `${tone} hover:opacity-80`
+            : "bg-black/[0.05] text-secondary hover:bg-black/[0.10]"
+      }`}
+    >
+      <span>{label}</span>
+      <span className={`rounded px-1 ${active ? "bg-white/20" : "bg-white/40"}`}>
+        {count}
+      </span>
+    </button>
+  );
+}
+
+
+interface GroupProps extends Omit<PoliciesTableProps, "policies"> {
+  title: string;
+  rows: Policy[];
+  defaultOpen: boolean;
+}
+
+
+function Group({
+  title,
+  rows,
+  defaultOpen,
+  pendingPresets,
+  busy,
+  onTogglePreset,
+  onToggleCustomRule,
+  onDeleteCustomRule,
+  onToggleDashboardCheck,
+  onDeleteDashboardCheck,
+  onDeleteSeamSpec,
+  onEdit,
+}: GroupProps): React.ReactElement {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className="rounded-xl border border-black/[0.06] bg-white">
+      <button
+        type="button"
+        onClick={() => setOpen((p) => !p)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 px-4 py-3 text-left"
+      >
+        <ChevronRight
+          aria-hidden="true"
+          className={`h-4 w-4 shrink-0 text-secondary transition-transform ${
+            open ? "rotate-90" : ""
+          }`}
+        />
+        <span className="flex-1 text-sm font-semibold text-foreground">
+          {title}{" "}
+          <span className="text-xs font-normal text-secondary">
+            ({rows.length})
+          </span>
+        </span>
+      </button>
+      {open ? (
+        <div className="divide-y divide-black/[0.04] border-t border-black/[0.04]">
+          {rows.map((p) => (
+            <PolicyRowView
+              key={p.id}
+              policy={p}
+              pending={
+                p.rawSource.kind === "preset_seam"
+                  ? pendingPresets.has(p.rawSource.preset.id)
+                  : false
+              }
+              busy={busy}
+              onTogglePreset={onTogglePreset}
+              onToggleCustomRule={onToggleCustomRule}
+              onDeleteCustomRule={onDeleteCustomRule}
+              onToggleDashboardCheck={onToggleDashboardCheck}
+              onDeleteDashboardCheck={onDeleteDashboardCheck}
+              onDeleteSeamSpec={onDeleteSeamSpec}
+              onEdit={onEdit}
+            />
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+
+function PolicyRowView({
+  policy,
+  pending,
+  busy,
+  onTogglePreset,
+  onToggleCustomRule,
+  onDeleteCustomRule,
+  onToggleDashboardCheck,
+  onDeleteDashboardCheck,
+  onDeleteSeamSpec,
+  onEdit,
+}: {
+  policy: Policy;
+  pending: boolean;
+  busy: boolean;
+  onTogglePreset: (id: string, next: boolean) => void;
+  onToggleCustomRule: (rule: CustomRule, next: boolean) => void;
+  onDeleteCustomRule: (id: string) => void;
+  onToggleDashboardCheck: (check: DashboardCheck, next: boolean) => void;
+  onDeleteDashboardCheck: (id: string) => void;
+  onDeleteSeamSpec: (specId: string) => void;
+  onEdit?: (policy: Policy) => void;
+}): React.ReactElement {
+  const checked = policy.state === "enabled" || policy.state === "always-on";
+  const handleToggle = (next: boolean) => {
+    if (!policy.togglable) return;
+    switch (policy.rawSource.kind) {
+      case "preset_seam":
+        onTogglePreset(policy.rawSource.preset.id, next);
+        return;
+      case "custom_rule":
+        onToggleCustomRule(policy.rawSource.rule, next);
+        return;
+      case "dashboard_check":
+        onToggleDashboardCheck(policy.rawSource.check, next);
+        return;
+      case "seam_spec":
+        // Seam-spec rows don't support per-action toggling — the whole doc
+        // is enabled or deleted.
+        return;
+    }
+  };
+  const handleDelete = () => {
+    if (!policy.deletable) return;
+    switch (policy.rawSource.kind) {
+      case "custom_rule":
+        if (policy.rawSource.rule.id) onDeleteCustomRule(policy.rawSource.rule.id);
+        return;
+      case "dashboard_check":
+        onDeleteDashboardCheck(policy.rawSource.check.id);
+        return;
+      case "seam_spec":
+        if (policy.rawSource.spec.id) onDeleteSeamSpec(policy.rawSource.spec.id);
+        return;
+      case "preset_seam":
+        return; // never deletable
+    }
+  };
+
+  return (
+    <div className="flex items-start gap-3 px-4 py-3">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <p className="truncate text-sm font-medium text-foreground">{policy.name}</p>
+          <span
+            className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${ORIGIN_TONE[policy.origin]}`}
+          >
+            {SOURCE_LABEL[policy.source]}
+          </span>
+        </div>
+        {policy.description ? (
+          <p className="mt-0.5 truncate text-[11px] text-secondary/80">
+            {policy.description}
+          </p>
+        ) : null}
+        <p className="mt-1 flex gap-2 text-[10px] uppercase tracking-wider text-secondary/60">
+          <span>when: {policy.when.scope} · {policy.when.firesAt}</span>
+          <span>·</span>
+          <span>action: {policy.action}</span>
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-3">
+        <StatePill state={policy.state} />
+        {policy.togglable ? (
+          <ToggleSwitch
+            checked={checked}
+            disabled={pending || busy}
+            onChange={handleToggle}
+            label={`Toggle ${policy.name}`}
+          />
+        ) : null}
+        {policy.editable && onEdit ? (
+          <button
+            type="button"
+            onClick={() => onEdit(policy)}
+            className="rounded px-2 py-0.5 text-[11px] font-medium text-secondary hover:bg-black/[0.04] hover:text-foreground"
+          >
+            Edit
+          </button>
+        ) : null}
+        {policy.deletable ? (
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={busy}
+            aria-label={`Delete ${policy.name}`}
+            className="text-secondary transition-colors hover:text-red-600 disabled:opacity-40"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+
+function StatePill({ state }: { state: Policy["state"] }): React.ReactElement {
+  const cls: Record<Policy["state"], string> = {
+    enabled: "bg-emerald-500/15 text-emerald-700",
+    disabled: "bg-black/[0.06] text-secondary",
+    "always-on": "bg-emerald-700/15 text-emerald-800",
+    preview: "bg-amber-500/10 text-amber-700",
+  };
+  const label: Record<Policy["state"], string> = {
+    enabled: "on",
+    disabled: "off",
+    "always-on": "always-on",
+    preview: "preview",
+  };
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${cls[state]}`}
+    >
+      {label[state]}
+    </span>
+  );
+}
+
+
+function ToggleSwitch({
+  checked,
+  disabled,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  disabled: boolean;
+  onChange: (next: boolean) => void;
+  label: string;
+}): React.ReactElement {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
+        checked ? "bg-primary" : "bg-black/[0.15]"
+      }`}
+    >
+      <span
+        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+          checked ? "translate-x-4" : "translate-x-0.5"
+        }`}
+      />
+    </button>
+  );
+}
