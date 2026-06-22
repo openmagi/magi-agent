@@ -46,8 +46,109 @@ async def run_governed_turn(
         cancel=cancel,
         gate=getattr(rt, "gate", None),
     )
-    async for item in stream:
-        yield item
+
+    # Run-share bookend persistence (default-OFF). When the flag is OFF we skip
+    # ALL accumulation below so the OFF path is byte-identical and zero-cost.
+    bookend = _BookendCollector.maybe_create(ctx)
+
+    try:
+        async for item in stream:
+            if bookend is not None:
+                bookend.observe(item)
+            yield item
+    finally:
+        if bookend is not None:
+            bookend.persist()
+
+
+class _BookendCollector:
+    """Accumulates a turn's human-facing bookends off the event stream and
+    persists ONE record to the durable evidence ledger when the turn ends.
+
+    Created only when ``MAGI_PERSIST_RUN_BOOKENDS_ENABLED`` is on. Fully
+    fail-open: any error in observe/persist is swallowed so a turn never breaks
+    because of bookend bookkeeping.
+    """
+
+    __slots__ = ("_ctx", "_result_text", "_terminal")
+
+    def __init__(self, ctx: TurnContext) -> None:
+        self._ctx = ctx
+        self._result_text = ""
+        self._terminal: object | None = None
+
+    @classmethod
+    def maybe_create(cls, ctx: TurnContext) -> "_BookendCollector | None":
+        try:
+            from magi_agent.config.env import is_persist_run_bookends_enabled
+
+            if not is_persist_run_bookends_enabled():
+                return None
+            return cls(ctx)
+        except Exception:
+            return None
+
+    def observe(self, item: object) -> None:
+        try:
+            from magi_agent.cli.contracts import EngineResult
+
+            if isinstance(item, EngineResult):
+                self._terminal = item
+                return
+            payload = getattr(item, "payload", None)
+            if not isinstance(payload, dict):
+                return
+            kind = payload.get("type")
+            if kind == "response_clear":
+                self._result_text = ""
+            elif kind == "text_delta":
+                delta = payload.get("delta")
+                if isinstance(delta, str):
+                    self._result_text += delta
+        except Exception:
+            return
+
+    def persist(self) -> None:
+        try:
+            from magi_agent.evidence.ledger_store import (
+                resolve_evidence_ledger_dir,
+                write_evidence_records,
+            )
+            from magi_agent.evidence.run_bookend import build_run_bookend_record
+
+            base_dir = resolve_evidence_ledger_dir()
+            if base_dir is None:  # durable sink disabled — nothing to do.
+                return
+
+            terminal = self._terminal
+            usage = getattr(terminal, "usage", None)
+            usage = usage if isinstance(usage, dict) else {}
+            # EngineResult.usage carries ADK snake_case keys (input_tokens /
+            # output_tokens), summed by engine._fold_usage from
+            # _adk_usage_metadata. The builder re-emits them as camelCase.
+            terminal_value = getattr(getattr(terminal, "terminal", None), "value", None)
+            status = "ok" if terminal_value == "completed" else (terminal_value or "unknown")
+
+            record = build_run_bookend_record(
+                session_id=self._ctx.session_id,
+                turn_id=self._ctx.turn_id,
+                goal=self._ctx.prompt,
+                result=self._result_text or None,
+                status=status,
+                model=self._ctx.model,
+                provider=self._ctx.provider,
+                input_tokens=usage.get("input_tokens"),
+                output_tokens=usage.get("output_tokens"),
+                cost_usd=getattr(terminal, "cost_usd", None),
+            )
+            write_evidence_records(
+                base_dir,
+                session_id=self._ctx.session_id,
+                turn_id=self._ctx.turn_id,
+                records=[record],
+            )
+        except Exception:
+            return
 
 
 def _build_runtime(ctx: TurnContext) -> object:
