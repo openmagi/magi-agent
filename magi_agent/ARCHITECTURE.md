@@ -208,6 +208,7 @@ graph LR
     plugins --> tools
     plugins --> web_acquisition
     prompt --> adk_bridge
+    prompt --> shared
     recipes --> benchmarks
     recipes --> coding
     recipes --> config
@@ -261,6 +262,7 @@ graph LR
     shadow --> tools
     shadow --> transport
     shadow --> workspace
+    shared --> prompt
     tenancy --> ops
     testing --> evidence
     tools --> artifacts
@@ -351,6 +353,7 @@ graph LR
 | session_service.py | — | session_store | adk_bridge/context_compaction.py, adk_bridge/local_runner.py, cli/real_runner.py, cli/session_log.py |
 | tool_adapter.py | — | concurrency, concurrent_dispatcher, context, deferred, dispatcher, env, manifest, provider_adapter, registry | cli/tests/test_tool_runtime.py, cli/tool_runtime.py, cli/wiring.py |
 | tool_exception_reflection.py | Generic tool-exception reflection for the live ADK Runner. | context, edit_retry_reflection | adk_bridge/control_plane.py |
+| tool_schema_repair.py | E-12 — provider-specific tool-schema repair for the ADK tool bridge. | provider_family | prompt/provider_adapter.py |
 | tool_synthesis_nudge.py | Per-step tool-synthesis reflection nudge for the live ADK Runner. | tool_synthesis | adk_bridge/control_plane.py |
 | wire_profile.py | Wire profiles for ``OpenMagiEventBridge``. | public_events | adk_bridge/event_adapter.py, runtime/hosted_runtime.py |
 
@@ -1361,10 +1364,10 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | Public API for the prompt caching split package. | injection, memoizer, metrics, provider_adapter, providers, splitter, types | — |
-| injection.py | Cache control injection: convert PromptBlocks to provider-formatted dicts. | anthropic_cache_model, providers, types | prompt/__init__.py, prompt/provider_adapter.py, runtime/message_builder.py |
+| injection.py | Cache control injection: convert PromptBlocks to provider-formatted dicts. | anthropic_cache_model, providers, types | prompt/__init__.py, runtime/message_builder.py, shared/provider_family.py |
 | memoizer.py | Section memoization for the prompt caching pipeline. | — | prompt/__init__.py |
 | metrics.py | Prompt cache metrics and environment config loader. | — | prompt/__init__.py |
-| provider_adapter.py | Model-aware prompt adaptation per LLM provider. | injection | adk_bridge/tool_adapter.py, prompt/__init__.py, runtime/message_builder.py |
+| provider_adapter.py | Model-aware prompt adaptation per LLM provider. | provider_family, tool_schema_repair | adk_bridge/tool_adapter.py, prompt/__init__.py, runtime/message_builder.py |
 | providers.py | Provider-specific cache control strategies. | — | prompt/__init__.py, prompt/injection.py |
 | splitter.py | Prompt split logic: partition a flat list of prompt parts into static and | types | prompt/__init__.py, runtime/message_builder.py |
 | types.py | Frozen data models for the prompt caching split. | — | prompt/__init__.py, prompt/injection.py, prompt/splitter.py |
@@ -1671,6 +1674,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | — | — |
+| provider_family.py | E-13 — single source of truth for provider-family detection. | injection | adk_bridge/tool_schema_repair.py, prompt/provider_adapter.py |
 | token_estimation.py | — | — | adk_bridge/context_compaction.py, context/token_tracker.py, runtime/error_recovery/strategies/_token_utils.py |
 | types.py | — | — | context/types.py, runtime/error_recovery/types.py |
 | usage_metadata.py | Shared, duck-typed ADK usage-metadata extraction (single source). | — | adk_bridge/context_compaction.py, cli/engine.py, shared/tests/test_usage_metadata.py |
