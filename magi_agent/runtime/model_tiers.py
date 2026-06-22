@@ -180,98 +180,55 @@ class ModelTierRegistry:
 
     @classmethod
     def with_defaults(cls) -> Self:
-        return cls(
-            records=(
-                _ModelTierRecord(
-                    provider="google",
-                    model="gemini-3.5-flash",
-                    tier="cheap",
-                    capabilities=(
-                        "streaming",
-                        "json_schema",
-                        "function_calling",
-                        "low_latency",
-                    ),
-                ),
-                _ModelTierRecord(
-                    provider="gemini",
-                    model="gemini-3.5-flash",
-                    tier="cheap",
-                    capabilities=(
-                        "streaming",
-                        "json_schema",
-                        "function_calling",
-                        "low_latency",
-                    ),
-                ),
-                _ModelTierRecord(
-                    provider="google",
-                    model="gemini-3.1-pro-preview",
-                    tier="sota",
-                    capabilities=(
-                        "streaming",
-                        "tool_use",
-                        "long_context",
-                        "reasoning",
-                        "vision",
-                    ),
-                ),
-                _ModelTierRecord(
-                    provider="gemini",
-                    model="gemini-3.1-pro-preview",
-                    tier="sota",
-                    capabilities=(
-                        "streaming",
-                        "tool_use",
-                        "long_context",
-                        "reasoning",
-                        "vision",
-                    ),
-                ),
-                _ModelTierRecord(
-                    provider="anthropic",
-                    model="claude-opus-4-8",
-                    tier="sota",
-                    capabilities=(
-                        "streaming",
-                        "tool_use",
-                        "long_context",
-                        "coding",
-                        "reasoning",
-                    ),
-                ),
-                _ModelTierRecord(
-                    provider="anthropic",
-                    model="claude-sonnet-4-6",
-                    tier="sota",
-                    capabilities=(
-                        "streaming",
-                        "tool_use",
-                        "long_context",
-                        "coding",
-                        "reasoning",
-                    ),
-                ),
-                _ModelTierRecord(
-                    provider="anthropic",
-                    model="haiku",
-                    tier="cheap",
-                    capabilities=("streaming", "tool_use", "low_latency"),
-                ),
-                _ModelTierRecord(
-                    provider="fireworks",
-                    model="kimi-k2p6",
-                    tier="cheap",
-                    capabilities=("streaming", "coding", "long_context"),
-                ),
-                _ModelTierRecord(
-                    provider="openai",
-                    model="gpt-5.5",
-                    tier="sota",
-                    capabilities=("reasoning", "tool_use", "json_schema", "coding"),
-                ),
-            )
-        )
+        """Build the default registry from the single ``ModelCatalog`` (E-1).
+
+        Delegates to :meth:`from_catalog` so the historic hand-written
+        9-record block lives in one place (``models/builtin_catalog.json``)
+        and the gemini canonical record fans out to BOTH ``gemini`` and
+        ``google`` registry labels via the catalog's ``provider_aliases`` map.
+        Subset preserved byte-identically: every (provider, model) pair
+        ``resolve_child_route`` accepted before E-1 still resolves here.
+        """
+        from magi_agent.models.catalog import ModelCatalog  # noqa: PLC0415
+
+        return cls.from_catalog(ModelCatalog.builtin())
+
+    @classmethod
+    def from_catalog(cls, catalog: object) -> Self:
+        """Build a tier registry from a :class:`magi_agent.models.ModelCatalog`.
+
+        For every catalog record with a non-empty ``capabilities`` tuple (the
+        sota/cheap registry-eligible ones), emit a tier record under the
+        canonical provider AND under every alias mapping to that canonical
+        provider (e.g. ``google`` → ``gemini``). The catalog stores each
+        provider/model exactly once; aliases are applied here so the resulting
+        registry is byte-equivalent to the pre-E-1 ``with_defaults`` output.
+        """
+        # Late import: catalog itself imports ModelCapability/ModelTier from
+        # this module, so the runtime dep is one-way (catalog → model_tiers).
+        # Loading the catalog here is safe — by the time ``with_defaults`` is
+        # called, the typing aliases have long since been imported.
+        records: list[_ModelTierRecord] = []
+        aliases = catalog.provider_aliases()  # type: ignore[attr-defined]
+        # Reverse map: canonical → set of aliases (including itself).
+        canonical_to_labels: dict[str, set[str]] = {}
+        for alias, canonical in aliases.items():
+            canonical_to_labels.setdefault(canonical, set()).add(alias)
+        for r in catalog.all_records():  # type: ignore[attr-defined]
+            if not r.capabilities:
+                continue  # router/product entries with no tier metadata.
+            labels = {r.provider}
+            labels |= canonical_to_labels.get(r.provider, set())
+            for label in labels:
+                records.append(
+                    _ModelTierRecord(
+                        provider=label,
+                        model=r.model,
+                        tier=r.tier,
+                        capabilities=r.capabilities,
+                    )
+                )
+        return cls(records=tuple(records))
 
     @classmethod
     def from_records(cls, records: tuple[Mapping[str, object], ...]) -> Self:
@@ -352,12 +309,66 @@ class ChildRoute(NamedTuple):
     model: str
 
 
-# Registry provider labels for the gemini/google dual-alias pair.  The CLI
-# provider is "gemini"; the registry stores records under BOTH "gemini" and
-# "google".  This map expands a cli-provider name to all registry labels it covers.
-_PROVIDER_REGISTRY_ALIASES: dict[str, frozenset[str]] = {
-    "gemini": frozenset({"gemini", "google"}),
-}
+# Registry provider labels for the gemini/google dual-alias pair (and any
+# future CLI/registry alias the catalog declares).  Derived lazily from
+# ``ModelCatalog.provider_aliases`` (E-1): for every ``alias -> canonical`` pair
+# in the catalog, the CLI-side ``canonical`` covers BOTH labels in the registry.
+#
+# Lazy population avoids a circular import: ``models.types`` imports the typing
+# aliases from THIS module, so this module must finish its body before the
+# catalog can be loaded.  Callers access ``_PROVIDER_REGISTRY_ALIASES.get(...)``
+# (uniformly) so the proxy below is API-compatible with the legacy dict.
+class _LazyAliasMap(dict):
+    """A dict that populates itself from the ModelCatalog on first access."""
+
+    _initialised = False
+
+    def _populate(self) -> None:
+        if self._initialised:
+            return
+        # Set the sentinel BEFORE the catalog load so any re-entrant access
+        # (a callback hit during catalog init, etc.) short-circuits cleanly.
+        self._initialised = True
+        try:
+            from magi_agent.models.catalog import ModelCatalog  # noqa: PLC0415
+
+            catalog = ModelCatalog.builtin()
+            aliases = catalog.provider_aliases()
+        except Exception:  # noqa: BLE001 — fail-soft to empty alias map
+            return
+        out: dict[str, set[str]] = {}
+        for alias, canonical in aliases.items():
+            bucket = out.setdefault(canonical, {canonical})
+            bucket.add(alias)
+        for k, v in out.items():
+            dict.__setitem__(self, k, frozenset(v))
+
+    def get(self, key, default=None):  # type: ignore[override]
+        self._populate()
+        return dict.get(self, key, default)
+
+    def __getitem__(self, key):  # type: ignore[override]
+        self._populate()
+        return dict.__getitem__(self, key)
+
+    def __contains__(self, key) -> bool:  # type: ignore[override]
+        self._populate()
+        return dict.__contains__(self, key)
+
+    def items(self):  # type: ignore[override]
+        self._populate()
+        return dict.items(self)
+
+    def keys(self):  # type: ignore[override]
+        self._populate()
+        return dict.keys(self)
+
+    def values(self):  # type: ignore[override]
+        self._populate()
+        return dict.values(self)
+
+
+_PROVIDER_REGISTRY_ALIASES: dict[str, frozenset[str]] = _LazyAliasMap()
 
 
 def _keyed_registry_providers(

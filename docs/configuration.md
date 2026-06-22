@@ -24,13 +24,20 @@ There are no required service URLs or identity variables for local use.
 
 Option A — a single provider key in your environment:
 
+<!-- The per-provider default model ids below are sourced from
+     magi_agent/models/builtin_catalog.json (E-1). Edit that file and re-run
+     `python -m magi_agent.models.export_ts --out
+     apps/web/src/lib/models/generated-local-runtime-models.ts` if you change
+     a default. -->
+
 ```sh
 # Pick ONE of these (auto-detected in this order):
 export ANTHROPIC_API_KEY=<your-key>     # default model claude-sonnet-4-6
 # export OPENAI_API_KEY=<your-key>      # default model gpt-5.5
 # export GEMINI_API_KEY=<your-key>      # default model gemini-3.5-flash
 #   (GOOGLE_API_KEY is accepted as an alias for the gemini provider)
-# export FIREWORKS_API_KEY=<your-key>   # default model accounts/fireworks/models/kimi-k2-instruct
+# export FIREWORKS_API_KEY=<your-key>   # default model kimi-k2p6
+# export OPENROUTER_API_KEY=<your-key>  # default model openai/gpt-5.5
 ```
 
 Option B — a `~/.magi/config.toml` (override the path with `MAGI_CONFIG`):

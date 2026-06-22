@@ -184,6 +184,13 @@ magi_agent = [
   # /dashboard by `magi-agent serve`; must ship in the wheel/bottle so a clean
   # install exposes the UI with no Node runtime. See transport/web_dashboard.py.
   "web_dashboard/**/*",
+  # E-1 ModelCatalog: single source of truth for provider/model defaults.
+  # ``magi_agent/models/catalog.py`` loads ``builtin_catalog.json`` via
+  # ``importlib.resources``; without this entry the JSON is missing from the
+  # wheel/bottle and the runtime crashes at import time as soon as
+  # ``cli/providers`` queries ``_DEFAULT_MODEL``. A static coverage test
+  # guards this: ``tests/test_model_catalog_packaged.py``.
+  "models/*.json",
 ]
 
 [tool.pytest.ini_options]

@@ -49,6 +49,21 @@ from magi_agent.runtime.local_defaults import apply_local_full_runtime_defaults
 
 __all__ = ["app", "main", "resolve_headless_permission_mode"]
 
+
+def _anthropic_default_model_id() -> str:
+    """Pull anthropic's default model id from the single ``ModelCatalog`` (E-1)
+    so help strings never drift from ``cli.providers._DEFAULT_MODEL``.
+    """
+    from magi_agent.models.catalog import ModelCatalog  # noqa: PLC0415
+
+    return ModelCatalog.builtin().default_model_for("anthropic").model
+
+
+_DEFAULT_ANTHROPIC_MODEL = _anthropic_default_model_id()
+_MODEL_OPTION_HELP = (
+    f"{_DEFAULT_ANTHROPIC_MODEL} model override; provider default when unset."
+)
+
 # ---------------------------------------------------------------------------
 # Default-command group
 # ---------------------------------------------------------------------------
@@ -235,7 +250,7 @@ def agent(
     model: Optional[str] = typer.Option(
         None,
         "--model",
-        help="claude-sonnet-4-6 model override; provider default when unset.",
+        help=_MODEL_OPTION_HELP,
     ),
     mode: AgentMode = typer.Option(
         AgentMode.act,
@@ -846,7 +861,7 @@ def legalbench(
     model: Optional[str] = typer.Option(
         None,
         "--model",
-        help="claude-sonnet-4-6 model override; provider default when unset.",
+        help=_MODEL_OPTION_HELP,
     ),
     ablation: bool = typer.Option(
         False,

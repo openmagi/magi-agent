@@ -171,27 +171,27 @@ _PROVIDER_ENV_KEYS: dict[str, tuple[str, ...]] = {
     "openrouter": ("OPENROUTER_API_KEY",),
 }
 
-# Default model id per provider, overridable via config ``[model].model`` or the
-# ``MAGI_MODEL`` env var. Model ids drift over time; treat these as a best-effort
-# starting point and override when a provider retires a name. OpenRouter's model
-# is itself a routed slug (``<vendor>/<model>``) that becomes
-# ``openrouter/<vendor>/<model>`` once the litellm prefix is applied.
-_DEFAULT_MODEL: dict[str, str] = {
-    "anthropic": "claude-sonnet-4-6",
-    "openai": "gpt-5.5",
-    "gemini": "gemini-3.5-flash",
-    "fireworks": "kimi-k2p6",
-    "openrouter": "openai/gpt-5.5",
-}
+# Default model id and litellm prefix per provider, sourced from the single
+# ``ModelCatalog`` (E-1). Edit ``magi_agent/models/builtin_catalog.json`` (and
+# regenerate the TS companion via ``python -m magi_agent.models.export_ts``) to
+# change either value. Computed once at import: the catalog is itself a cached
+# singleton, so dict comprehensions here are fixed-cost startup work.
+def _provider_default_table() -> dict[str, str]:
+    from magi_agent.models.catalog import ModelCatalog  # noqa: PLC0415
 
-# litellm provider prefix per provider (``<prefix>/<model>``).
-_LITELLM_PREFIX: dict[str, str] = {
-    "anthropic": "anthropic",
-    "openai": "openai",
-    "gemini": "gemini",
-    "fireworks": "fireworks_ai",
-    "openrouter": "openrouter",
-}
+    catalog = ModelCatalog.builtin()
+    return {p: catalog.default_model_for(p).model for p in SUPPORTED_PROVIDERS}
+
+
+def _provider_litellm_prefix_table() -> dict[str, str]:
+    from magi_agent.models.catalog import ModelCatalog  # noqa: PLC0415
+
+    catalog = ModelCatalog.builtin()
+    return {p: catalog.default_model_for(p).litellm_prefix for p in SUPPORTED_PROVIDERS}
+
+
+_DEFAULT_MODEL: dict[str, str] = _provider_default_table()
+_LITELLM_PREFIX: dict[str, str] = _provider_litellm_prefix_table()
 
 
 class UnknownProviderError(ValueError):
