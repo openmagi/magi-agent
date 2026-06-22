@@ -42,6 +42,7 @@ import type {
 } from "@/lib/customize-api";
 import { useAgentFetch } from "@/lib/local-api";
 import { AddRulePicker, type AddRuleChoice } from "./add-rule-modal";
+import { AddPolicyModePicker, type AddPolicyMode } from "./add-policy-mode-picker";
 import { NlRuleCompose } from "./nl-rule-compose";
 import {
   CustomRulesSection,
@@ -50,8 +51,24 @@ import { CustomChecksSection } from "./custom-checks-section";
 import { CustomToolPanel } from "./custom-tool-modal";
 import { GuidancePanel } from "./guidance-panel";
 import { PageHint } from "./page-hint";
-import { RulesTable } from "./rules-table";
+import { PoliciesTable } from "./policies-table";
+import { ReusableEvidenceTab } from "./reusable-evidence-tab";
+import { ReusableConditionsTab } from "./reusable-conditions-tab";
 import { SeamBuilderPanel } from "./seam-builder-panel";
+import {
+  extractEvidenceTypes,
+  extractNamedConditions,
+  unifyPolicies,
+} from "@/lib/policy-model";
+import {
+  deleteDashboardCheck,
+  getDashboardChecks,
+  putDashboardCheck,
+  type DashboardCheck,
+} from "@/lib/packs-dashboard-api";
+import {
+  deleteSeamSpec as deleteSeamSpecApi,
+} from "@/lib/customize-api";
 
 export type CustomizeSection =
   | "rules"
@@ -68,10 +85,10 @@ const SECTIONS: ReadonlyArray<{
 }> = [
   {
     id: "rules",
-    label: "Rules",
+    label: "Policies",
     icon: <ShieldCheck className="h-4 w-4" />,
     description:
-      "Everything that gates the agent — built-in presets, your custom rules, after-tool checks, and SeamSpec rewires, all in one list.",
+      "Every rule that gates the agent in one list. Built-in + your own — same shape, same controls.",
   },
   {
     id: "guidance",
@@ -375,11 +392,14 @@ export function CustomizeHub({
 
 
 /**
- * Rules section mount — orchestrates the unified RulesTable plus the
- * AddRuleModal + per-choice inline authoring form. The forms themselves
- * (CustomRulesSection / CustomChecksSection / SeamBuilderPanel) are reused
- * as-is so authoring logic stays exactly the same; this wrapper is
- * navigation-only.
+ * Policies section mount — single-list view over the four backend stores
+ * unified via :func:`unifyPolicies`. Provides a 3-sub-tab surface
+ * (Policies / Evidence types / Conditions) and a 3-mode Add Policy entry
+ * (NL / Guided[placeholder] / Raw).
+ *
+ * The legacy ``RulesTable`` + 4-card AddRulePicker still mount under
+ * the Raw mode so power-users keep their direct-form path while we land
+ * the Guided wizard in PR-E2.
  */
 function RulesSectionMount({
   data,
@@ -412,89 +432,172 @@ function RulesSectionMount({
   ) => Promise<ShaclCompileResponse>;
   ruleError: string | null;
 }): React.ReactElement {
-  // Add-rule UX state machine. The previous overlay-modal shape dismissed
-  // before the authoring form appeared, leaving the user with a blank
-  // header. Inlining the picker + the form at the top of the page keeps
-  // the user's eye on the same spot.
+  // 5-phase Add state. picking_mode shows the NL/Guided/Raw cards; nl,
+  // raw_picking, and raw_authoring are the actual authoring surfaces.
   type AddState =
     | { phase: "idle" }
-    | { phase: "picking" }
-    | { phase: "authoring"; choice: AddRuleChoice };
+    | { phase: "picking_mode" }
+    | { phase: "nl" }
+    | { phase: "raw_picking" }
+    | { phase: "raw_authoring"; choice: AddRuleChoice };
   const [addState, setAddState] = useState<AddState>({ phase: "idle" });
+
+  type SubTab = "policies" | "evidence" | "conditions";
+  const [subTab, setSubTab] = useState<SubTab>("policies");
+
+  const agentFetch = useAgentFetch();
+  const [dashboardChecks, setDashboardChecks] = useState<DashboardCheck[]>([]);
+  const [dashboardBusy, setDashboardBusy] = useState(false);
+
+  const reloadDashboardChecks = useCallback(() => {
+    getDashboardChecks(agentFetch)
+      .then((resp) => setDashboardChecks(resp.checks))
+      .catch(() => setDashboardChecks([])); // 410 (flag-off) = silently empty
+  }, [agentFetch]);
+
+  useEffect(() => {
+    reloadDashboardChecks();
+  }, [reloadDashboardChecks, data]);
+
+  const handleToggleDashboardCheck = useCallback(
+    (check: DashboardCheck, next: boolean) => {
+      setDashboardBusy(true);
+      putDashboardCheck(agentFetch, { ...check, enabled: next })
+        .then((resp) => setDashboardChecks(resp.checks))
+        .catch(() => undefined)
+        .finally(() => setDashboardBusy(false));
+    },
+    [agentFetch],
+  );
+
+  const handleDeleteDashboardCheck = useCallback(
+    (id: string) => {
+      setDashboardBusy(true);
+      deleteDashboardCheck(agentFetch, id)
+        .then((resp) => setDashboardChecks(resp.checks))
+        .catch(() => undefined)
+        .finally(() => setDashboardBusy(false));
+    },
+    [agentFetch],
+  );
+
+  const handleDeleteSeamSpec = useCallback(
+    (specId: string) => {
+      deleteSeamSpecApi(agentFetch, specId)
+        .then(() => reload())
+        .catch(() => undefined);
+    },
+    [agentFetch, reload],
+  );
+
+  const policies = useMemo(
+    () =>
+      unifyPolicies({
+        catalog: data.catalog,
+        overrides: { ...data.overrides, verification: { ...data.overrides.verification, custom_rules: customRules, preset_overrides: presetOverrides } },
+        dashboardChecks,
+      }),
+    [data, customRules, presetOverrides, dashboardChecks],
+  );
+  const evidenceTypes = useMemo(() => extractEvidenceTypes(policies), [policies]);
+  const conditions = useMemo(() => extractNamedConditions(policies), [policies]);
   const seamSpecs = data.overrides.verification.seam_specs ?? [];
+
+  const handleModePick = (mode: AddPolicyMode) => {
+    if (mode === "nl") setAddState({ phase: "nl" });
+    else if (mode === "raw") setAddState({ phase: "raw_picking" });
+    // guided is disabled in the picker; no-op
+  };
 
   return (
     <div className="space-y-5">
-      <div className="flex justify-end">
-        {addState.phase === "idle" ? (
+      {/* sub-tab nav + Add button */}
+      <div className="flex items-center justify-between gap-3">
+        <nav
+          aria-label="Policy sub-tabs"
+          className="flex rounded-xl border border-black/[0.06] bg-white p-1 text-xs"
+        >
+          {(
+            [
+              { id: "policies", label: `Policies (${policies.length})` },
+              { id: "evidence", label: `Evidence (${evidenceTypes.length})` },
+              { id: "conditions", label: `Conditions (${conditions.length})` },
+            ] as ReadonlyArray<{ id: SubTab; label: string }>
+          ).map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setSubTab(t.id)}
+              aria-current={subTab === t.id ? "page" : undefined}
+              className={`rounded-lg px-3 py-1.5 font-medium transition-colors ${
+                subTab === t.id
+                  ? "bg-primary text-white"
+                  : "text-secondary hover:bg-black/[0.04] hover:text-foreground"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </nav>
+        {addState.phase === "idle" && subTab === "policies" ? (
           <button
             type="button"
-            onClick={() => setAddState({ phase: "picking" })}
+            onClick={() => setAddState({ phase: "picking_mode" })}
             className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-primary/90"
           >
             <Plus className="h-3.5 w-3.5" />
-            Add rule
+            Add policy
           </button>
         ) : null}
       </div>
 
-      {addState.phase === "picking" ? (
-        <div className="space-y-3">
+      {addState.phase === "picking_mode" ? (
+        <AddPolicyModePicker
+          onCancel={() => setAddState({ phase: "idle" })}
+          onPick={handleModePick}
+        />
+      ) : null}
+
+      {addState.phase === "nl" ? (
+        <section className="space-y-2">
+          <AuthoringHeader
+            label="Natural language"
+            onPickDifferent={() => setAddState({ phase: "picking_mode" })}
+            onClose={() => setAddState({ phase: "idle" })}
+          />
           <NlRuleCompose
             onActivated={() => {
               reload();
+              reloadDashboardChecks();
               setAddState({ phase: "idle" });
             }}
           />
-          <details className="rounded-2xl border border-black/[0.06] bg-white px-4 py-3 open:pb-4">
-            <summary className="cursor-pointer text-xs font-medium text-secondary hover:text-foreground">
-              Or build manually (pick a rule kind)
-            </summary>
-            <div className="mt-3">
-              <AddRulePicker
-                onCancel={() => setAddState({ phase: "idle" })}
-                onPick={(choice) => setAddState({ phase: "authoring", choice })}
-              />
-            </div>
-          </details>
-        </div>
+        </section>
       ) : null}
 
-      {addState.phase === "authoring" ? (
-        <section
-          aria-labelledby="rules-active-form"
-          className="rounded-2xl border border-primary/20 bg-primary/[0.02] p-4 shadow-sm"
-        >
-          <header className="mb-3 flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
-                Authoring
-              </p>
-              <h3
-                id="rules-active-form"
-                className="text-sm font-bold text-foreground"
-              >
-                {LABEL_FOR_CHOICE[addState.choice]}
-              </h3>
-            </div>
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => setAddState({ phase: "picking" })}
-                className="rounded-lg px-2 py-1 text-[11px] font-medium text-secondary hover:bg-black/[0.04]"
-              >
-                ← Pick different
-              </button>
-              <button
-                type="button"
-                onClick={() => setAddState({ phase: "idle" })}
-                className="rounded-lg px-2 py-1 text-[11px] font-medium text-secondary hover:bg-black/[0.04]"
-              >
-                Close
-              </button>
-            </div>
-          </header>
+      {addState.phase === "raw_picking" ? (
+        <section className="space-y-2">
+          <AuthoringHeader
+            label="Advanced — pick a rule kind"
+            onPickDifferent={() => setAddState({ phase: "picking_mode" })}
+            onClose={() => setAddState({ phase: "idle" })}
+          />
+          <AddRulePicker
+            onCancel={() => setAddState({ phase: "picking_mode" })}
+            onPick={(choice) =>
+              setAddState({ phase: "raw_authoring", choice })
+            }
+          />
+        </section>
+      ) : null}
 
+      {addState.phase === "raw_authoring" ? (
+        <section className="space-y-2">
+          <AuthoringHeader
+            label={`Advanced — ${LABEL_FOR_CHOICE[addState.choice]}`}
+            onPickDifferent={() => setAddState({ phase: "raw_picking" })}
+            onClose={() => setAddState({ phase: "idle" })}
+          />
           {addState.choice === "block-answer" || addState.choice === "restrict-tool" ? (
             <CustomRulesSection
               menu={data.catalog.verification.customRuleMenu}
@@ -510,11 +613,9 @@ function RulesSectionMount({
               }
             />
           ) : null}
-
           {addState.choice === "filter-result" ? (
             <CustomChecksSection busy={customRuleBusy} />
           ) : null}
-
           {addState.choice === "rewire-builtin" ? (
             <SeamBuilderPanel seamSpecs={seamSpecs} onChange={reload} />
           ) : null}
@@ -528,21 +629,30 @@ function RulesSectionMount({
       ) : null}
 
       {addState.phase === "idle" ? (
-        <RulesTable
-          catalog={data.catalog.verification}
-          presetOverrides={presetOverrides}
-          pendingPresets={pendingPresets}
-          onTogglePreset={onTogglePreset}
-          customRules={customRules}
-          customRuleBusy={customRuleBusy}
-          onToggleCustomRule={onToggleCustomRule}
-          onDeleteCustomRule={onDeleteCustomRule}
-          seamSpecs={seamSpecs}
-        />
+        <>
+          {subTab === "policies" ? (
+            <PoliciesTable
+              policies={policies}
+              pendingPresets={pendingPresets}
+              busy={customRuleBusy || dashboardBusy}
+              onTogglePreset={onTogglePreset}
+              onToggleCustomRule={onToggleCustomRule}
+              onDeleteCustomRule={onDeleteCustomRule}
+              onToggleDashboardCheck={handleToggleDashboardCheck}
+              onDeleteDashboardCheck={handleDeleteDashboardCheck}
+              onDeleteSeamSpec={handleDeleteSeamSpec}
+            />
+          ) : null}
+          {subTab === "evidence" ? (
+            <ReusableEvidenceTab entries={evidenceTypes} />
+          ) : null}
+          {subTab === "conditions" ? (
+            <ReusableConditionsTab entries={conditions} />
+          ) : null}
+        </>
       ) : (
         <div className="rounded-xl border border-dashed border-black/[0.08] bg-gray-50/60 px-4 py-3 text-xs text-secondary">
-          Catalog hidden while adding a rule. Cancel above to return to the
-          full list ({hiddenRuleCount(data, customRules, seamSpecs)} rules).
+          List hidden while adding a policy. Cancel above to return.
         </div>
       )}
     </div>
@@ -550,21 +660,41 @@ function RulesSectionMount({
 }
 
 
-/**
- * Compact "how many rules are hidden" count for the catalog-collapsed
- * note. Built-in presets + user custom rules + persisted SeamSpec actions
- * — the same union surfaced in the RulesTable so the user can tell at a
- * glance whether the catalog is empty or large.
- */
-function hiddenRuleCount(
-  data: NonNullable<ReturnType<typeof useCustomize>["data"]>,
-  customRules: CustomRule[],
-  seamSpecs: ReadonlyArray<{ actions: ReadonlyArray<unknown> }>,
-): number {
-  const builtin = data.catalog.verification.harnessPresets.length;
-  const custom = customRules.length;
-  const seam = seamSpecs.reduce((sum, s) => sum + (s.actions?.length ?? 0), 0);
-  return builtin + custom + seam;
+function AuthoringHeader({
+  label,
+  onPickDifferent,
+  onClose,
+}: {
+  label: string;
+  onPickDifferent: () => void;
+  onClose: () => void;
+}): React.ReactElement {
+  return (
+    <header className="flex items-center justify-between rounded-xl border border-primary/20 bg-primary/[0.02] px-4 py-2">
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+          Authoring
+        </p>
+        <h3 className="text-sm font-bold text-foreground">{label}</h3>
+      </div>
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={onPickDifferent}
+          className="rounded-lg px-2 py-1 text-[11px] font-medium text-secondary hover:bg-black/[0.04]"
+        >
+          ← Pick different
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-lg px-2 py-1 text-[11px] font-medium text-secondary hover:bg-black/[0.04]"
+        >
+          Close
+        </button>
+      </div>
+    </header>
+  );
 }
 
 
