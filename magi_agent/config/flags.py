@@ -1606,6 +1606,23 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
+    # --- Shadow serve token-estimate (E-14) ---------------------------------
+    _b(
+        "MAGI_SERVE_TOKEN_ESTIMATE_REAL",
+        stage="stage2",
+        summary=(
+            "Replace ``shadow/gate5b4c3_runner_input_adapter._estimate_tokens`` "
+            "from UTF-8 byte length to a real character/BPE estimate "
+            "(``shared/token_estimation.count_text_tokens``). Pre-E-14 the "
+            "byte heuristic over-counted ASCII ~4× and CJK ~3×, so the serve "
+            "path spuriously dropped Korean/CJK turns as "
+            "``input_token_budget_exceeded``. Default-OFF for soak per "
+            "AGENTS.md flag-promotion-verification — flip to default-ON "
+            "after canary verification. The byte cap "
+            "(``max_sanitized_input_bytes``) is the real DoS guard, enforced "
+            "at the contract validator and untouched by this flag."
+        ),
+    ),
 )
 
 

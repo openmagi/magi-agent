@@ -251,8 +251,9 @@ def build_gate5b4c3_runner_input(
         if _UNSAFE_INPUT_RE.search(item["content"]):
             return _result("dropped", "unsafe_input")
 
-    estimated_input_tokens = _estimate_tokens(sanitized_input) + sum(
-        _estimate_tokens(item["content"]) for item in sanitized_history
+    token_env = os.environ if env is None else env
+    estimated_input_tokens = _estimate_tokens(sanitized_input, token_env) + sum(
+        _estimate_tokens(item["content"], token_env) for item in sanitized_history
     )
     if estimated_input_tokens > request.budgets.max_estimated_input_tokens:
         return _result("dropped", "input_token_budget_exceeded")
@@ -361,9 +362,36 @@ def _sanitized_history_for_runner(
     )
 
 
-def _estimate_tokens(value: str) -> int:
+def _estimate_tokens(
+    value: str, env: Mapping[str, str] | None = None
+) -> int:
+    """Estimate token count for ``value`` against the shadow runner-input
+    budget gate.
+
+    E-14 — pre-E-14 this returned ``len(value.encode("utf-8"))`` (UTF-8
+    byte length). That over-counted ASCII ~4× and CJK ~3×, so the serve
+    path spuriously dropped Korean/CJK turns as
+    ``input_token_budget_exceeded``. Behind the soak gate
+    ``MAGI_SERVE_TOKEN_ESTIMATE_REAL``, the function now returns a real
+    character/BPE estimate via
+    ``shared.token_estimation.count_text_tokens`` (tiktoken when
+    available; ``len // 4`` otherwise).
+
+    Flag-OFF (default) preserves byte-identical behavior with the
+    legacy heuristic; the byte cap (``max_sanitized_input_bytes``) is
+    enforced at the contract validator and unchanged either way.
+    """
+
     if not value:
         return 0
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    if flag_bool("MAGI_SERVE_TOKEN_ESTIMATE_REAL", env=env):
+        from magi_agent.shared.token_estimation import (  # noqa: PLC0415
+            count_text_tokens,
+        )
+
+        return count_text_tokens(value)
     return len(value.encode("utf-8"))
 
 
