@@ -15,6 +15,23 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.71
+
+### Added
+- PR-E1 unified Policy concept on the Customize hub (#857): four
+  backend stores (preset_seam / custom_rule / dashboard_check /
+  seam_spec) merge into one Policy table through a client adapter.
+  Three sub-tabs split the surface — Policies (editable), Evidence
+  (auto-derived read-only byproduct), Conditions (auto-derived
+  read-only byproduct). Add-policy is now a 3-mode picker: NL ✨
+  (recommended), Guided ⏳, Raw ⚙️. No backend / persistence change.
+- PR-E2 toss-style 5-step guided wizard for `deterministic_ref`
+  policies (#858): when (scope) → what evidence → on failure (block /
+  ask / audit) → name → review (plain-English sentence + key/value).
+  The evidence dropdown is fed by the built-in catalog plus the user's
+  Evidence byproduct from PR-E1. Activate routes through the existing
+  `putCustomRule` path so the output is byte-identical to the Raw mode.
+
 ## 0.1.70
 
 ### Added
