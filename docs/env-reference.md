@@ -88,6 +88,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_OBSERVABILITY_ENABLED` (default off) — Enable the hook-tap observability module (bot-activity visibility).
 - `MAGI_OUTPUT_CONTINUATION_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Enable automatic continuation of truncated model output (default-ON full profile).
 - `MAGI_PERSISTENT_PYTHON_ENABLED` (default off) — Register + bind the neutral tools-persistent-python pack's PersistentPython tool (CodeAct: persistent interpreter namespace).
+- `MAGI_PERSIST_RUN_BOOKENDS_ENABLED` (default off) — Persist a per-turn run-bookend record (goal, one-line result, model, token usage, status) to the durable evidence ledger so a run-share page can render the top summary. Strict default-OFF; OFF keeps the evidence ledger byte-identical (no extra record written).
 - `MAGI_PROMPT_EXAMPLES_ENABLED` (default off) — Append the <action_discipline_examples> prompt block (positive/negative contrast pairs: act-vs-ask, finish-vs-defer) in build_cli_instruction.
 - `MAGI_PROMPT_REDFLAGS_ENABLED` (default off) — Append the <red_flags> anti-rationalization prompt block ("this thought means stop and correct course" table) in build_cli_instruction.
 - `MAGI_PROMPT_SEARCH_RULES_ENABLED` (default off) — Append the search-decision heuristics prompt block in build_cli_instruction. Even when ON the block only fires when web tools are available (BRAVE_API_KEY AND FIRECRAWL_API_KEY).
