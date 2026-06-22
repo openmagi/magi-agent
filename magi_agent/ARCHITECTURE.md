@@ -230,6 +230,7 @@ graph LR
     runtime --> adk_bridge
     runtime --> cli
     runtime --> config
+    runtime --> context
     runtime --> customize
     runtime --> evidence
     runtime --> gates
@@ -731,13 +732,14 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | — | — |
+| _token_window_table.py | E-4 — single canonical home for the model→context-window lookup table. | — | context/token_tracker.py, runtime/message_builder.py |
 | auto_compact.py | — | protected_tools, types | adk_bridge/context_compaction.py, context/hook.py |
 | content_replacement.py | — | types | context/hook.py |
 | hook.py | — | auto_compact, collapse_drain, content_replacement, context, manifest, microcompact, reactive_compact, result, scope, token_tracker, types | — |
 | microcompact.py | — | protected_tools, types | context/hook.py |
 | protected_tools.py | Track 19 PR8 — compaction-protected tool-result detection. | constants, recipe_routing_constants | adk_bridge/context_compaction.py, context/auto_compact.py, context/microcompact.py |
 | recipe_routing_constants.py | Import-boundary-safe constant for cross-family recipe routing. | — | context/protected_tools.py, recipes/recipe_routing.py |
-| token_tracker.py | — | token_estimation, types | adk_bridge/context_compaction.py, context/hook.py |
+| token_tracker.py | — | _token_window_table, token_estimation, types | adk_bridge/context_compaction.py, context/hook.py |
 | types.py | — | types | context/auto_compact.py, context/content_replacement.py, context/hook.py, context/microcompact.py, context/token_tracker.py |
 
 ### credentials_admin/
@@ -1527,7 +1529,7 @@ graph LR
 | memory_snapshot_cache.py | Session-scoped frozen snapshot cache for memory prompt projection. | prompt_projection | cli/tool_runtime.py |
 | memory_turn_hook.py | Turn-end memory hook: transcript→daily flush + compaction trigger (PR-B). | compaction_tree, config, local_file_writable, summarizer_runtime | cli/headless.py, transport/chat_routes.py |
 | memory_write_wiring.py | Gate-aware factory for the MemoryWrite tool host (Task D, PR2). | local_file_writable, memory_write_readiness, memory_write_tool | cli/tool_runtime.py, runtime/openmagi_runtime.py |
-| message_builder.py | — | bus, child_runner_live, context, env, flags, injection, manifest, model_tiers, provider_adapter, resolved, splitter, store | cli/clipboard_image.py, cli/tool_runtime.py, runtime/context_attachments.py, shadow/gate5b4c3_runner_input_adapter.py, transport/chat.py, transport/generation_request.py |
+| message_builder.py | — | _token_window_table, bus, child_runner_live, context, env, flags, injection, manifest, model_tiers, provider_adapter, resolved, splitter, store | cli/clipboard_image.py, cli/tool_runtime.py, runtime/context_attachments.py, shadow/gate5b4c3_runner_input_adapter.py, transport/chat.py, transport/generation_request.py |
 | model_tiers.py | — | catalog, env, providers, safety | evidence/final_output_gate.py, gates/tool_usage_guidance.py, harness/long_context_eval.py, models/types.py, plugins/tool_projection.py, recipes/materializer.py, recipes/phase_routing_defaults.py, recipes/reliability_policy.py, runtime/adk_turn_runner.py, runtime/child_runner_boundary.py, runtime/child_runner_live.py, runtime/context_budget.py, runtime/message_builder.py, runtime/phase_routing.py, runtime/reliability_budget.py, runtime/request_shape.py, runtime/tool_synthesis.py, tools/image_tools.py |
 | no_agent_watchdog.py | — | safety | runtime/events.py |
 | openmagi_runtime.py | — | apply, base, catalog, core_toolhost, env, manager, memory_write_wiring, models, native_catalog, persistent_python_toolhost, primitives, profiles, registry, store, todo_toolhost, tool, tool_projection | (root)/app.py, (root)/main.py, cli/tests/test_model_picker_wire.py, cli/wiring.py, transport/app_api.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/control_requests.py, transport/credentials.py, transport/customize.py, transport/gate2_sandbox_canary.py, transport/generation_request.py, transport/health.py, transport/integrations.py, transport/learning_dashboard.py, transport/plugins.py, transport/product_admin.py, transport/shadow_invocations.py, transport/tools.py, transport/web_dashboard.py |

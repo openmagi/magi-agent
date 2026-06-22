@@ -291,21 +291,59 @@ def configured_providers(
     ]
 
 
+def _validate_builtin_default(provider: str, model: str) -> None:
+    """E-2 fail-loud guard: a built-in default must resolve in the catalog
+    and be non-deprecated. Catalog/default drift, monkeypatch, or stale
+    package data surfaces here as :class:`UnknownModelError` instead of
+    silently building a LiteLlm against a not-cataloged id (which
+    downstream tier resolution then synthesizes as a ``standard``-tier
+    record with no diagnostics).
+
+    Explicit user overrides (MAGI_MODEL, ``[model].model``,
+    ``model_override``) skip this check — users are allowed to pin a new
+    id before the catalog learns about it.
+    """
+
+    from magi_agent.models.catalog import ModelCatalog, UnknownModelError  # noqa: PLC0415
+
+    catalog = ModelCatalog.builtin()
+    record = catalog.record(provider, model)
+    if record is None:
+        raise UnknownModelError(
+            f"Built-in default for provider {provider!r} is {model!r}, which "
+            "is not present in the model catalog. Update "
+            "magi_agent/models/builtin_catalog.json or set MAGI_MODEL / "
+            "[model].model to override."
+        )
+    if record.deprecated:
+        replacement = record.replacement or "(no replacement recorded)"
+        raise UnknownModelError(
+            f"Built-in default for provider {provider!r} is deprecated: "
+            f"{model!r} → replacement={replacement}. Bump _DEFAULT_MODEL via "
+            "the catalog, or set MAGI_MODEL / [model].model to override."
+        )
+
+
 def default_model_for(provider: str) -> str:
     """Return the best-effort default model id for ``provider``.
 
     Mirrors :func:`resolve_provider_config`'s handling of unsupported providers:
     an unknown provider raises :class:`UnknownProviderError` rather than guessing
     a fallback. Used by TUI dialogs to list candidate models without a key.
+
+    Also fail-loud (E-2) on a *built-in default* that doesn't resolve in
+    the catalog or is deprecated: see :func:`_validate_builtin_default`.
     """
 
     try:
-        return _DEFAULT_MODEL[provider]
+        model = _DEFAULT_MODEL[provider]
     except KeyError:
         raise UnknownProviderError(
             f"Unsupported provider {provider!r}. "
             f"Supported: {', '.join(SUPPORTED_PROVIDERS)}."
         ) from None
+    _validate_builtin_default(provider, model)
+    return model
 
 
 def _split_provider_slug(value: str | None) -> tuple[str | None, str | None]:
@@ -363,12 +401,18 @@ def resolve_provider_config(
     effective_override_model = slug_model if slug_model is not None else model_override
 
     def model_for(provider: str) -> str:
-        return (
+        # Explicit overrides stay permissive — users can pin a new id before
+        # the catalog learns about it (E-2). Built-in defaults are guarded.
+        override = (
             _clean_model(effective_override_model)
             or _clean_model(env.get("MAGI_MODEL"))
             or _clean_model(model_section.get("model"))
-            or _DEFAULT_MODEL[provider]
         )
+        if override is not None:
+            return override
+        builtin = _DEFAULT_MODEL[provider]
+        _validate_builtin_default(provider, builtin)
+        return builtin
 
     if slug_provider is not None:
         api_key = key_for(slug_provider)
