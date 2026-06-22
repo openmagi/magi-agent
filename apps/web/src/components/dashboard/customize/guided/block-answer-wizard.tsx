@@ -1,12 +1,21 @@
 "use client";
 
 /**
- * Block-bad-answer Guided wizard — deterministic_ref kind.
+ * Block-bad-answer Guided wizard — supports all three pre-final check
+ * kinds (PR-E4 audit fix).
  *
- * 5-step flow extracted from PR-E2's monolithic GuidedWizard. The chrome
- * (header / progress / nav buttons / RadioCard) lives in
- * ``wizard-chrome.tsx``; this sub-wizard owns step state + step bodies
- * + activation handler.
+ * PR-E2 originally only emitted ``deterministic_ref`` rules; the audit
+ * called out that LLM-critic and SHACL-shape policies had NO Guided
+ * path. This refactor adds a check-kind picker step + branches the
+ * payload step so a single "Block bad answer" intent covers all three.
+ *
+ * Steps:
+ *   1. When?                   (scope)
+ *   2. How should it be judged? (check kind: evidence_ref / shacl / llm)
+ *   3. Check definition         (branches by kind)
+ *   4. What if it fails?        (block / ask / audit)
+ *   5. Name your policy
+ *   6. Review
  */
 
 import React, { useMemo, useState } from "react";
@@ -24,11 +33,15 @@ import { RadioCard, WizardChrome } from "./wizard-chrome";
 
 type Scope = "always" | "coding" | "research" | "delivery" | "memory" | "task";
 type Action = "block" | "ask" | "audit";
+type CheckKind = "evidence_ref" | "shacl_constraint" | "llm_criterion";
 
 
 interface Draft {
   scope: Scope;
+  checkKind: CheckKind;
   evidenceRef: string;
+  shapeTtl: string;
+  criterion: string;
   onMissing: Action;
   ruleId: string;
   description: string;
@@ -37,14 +50,17 @@ interface Draft {
 
 const EMPTY: Draft = {
   scope: "coding",
+  checkKind: "evidence_ref",
   evidenceRef: "",
+  shapeTtl: "",
+  criterion: "",
   onMissing: "block",
   ruleId: "",
   description: "",
 };
 
 
-const TOTAL = 5;
+const TOTAL = 6;
 
 
 export interface BlockAnswerWizardProps {
@@ -99,12 +115,17 @@ export function BlockAnswerWizard({
       error={saveError}
     >
       {step === 0 ? <ScopeStep draft={draft} setDraft={setDraft} /> : null}
-      {step === 1 ? (
-        <EvidenceStep draft={draft} setDraft={setDraft} options={refOptions} />
+      {step === 1 ? <CheckKindStep draft={draft} setDraft={setDraft} /> : null}
+      {step === 2 ? (
+        <CheckDefinitionStep
+          draft={draft}
+          setDraft={setDraft}
+          refOptions={refOptions}
+        />
       ) : null}
-      {step === 2 ? <OnMissingStep draft={draft} setDraft={setDraft} /> : null}
-      {step === 3 ? <NameStep draft={draft} setDraft={setDraft} /> : null}
-      {step === 4 ? <ReviewStep draft={draft} options={refOptions} /> : null}
+      {step === 3 ? <OnMissingStep draft={draft} setDraft={setDraft} /> : null}
+      {step === 4 ? <NameStep draft={draft} setDraft={setDraft} /> : null}
+      {step === 5 ? <ReviewStep draft={draft} refOptions={refOptions} /> : null}
     </WizardChrome>
   );
 }
@@ -136,8 +157,7 @@ function ScopeStep({
     <div className="space-y-3">
       <h2 className="text-lg font-bold text-foreground">When should this policy fire?</h2>
       <p className="text-xs text-secondary">
-        Pick the agent turns where this policy gates the final answer. The
-        check runs at the pre-final moment for the selected scope.
+        Pick the agent turns where this policy gates the final answer.
       </p>
       <div className="space-y-2">
         {SCOPE_OPTIONS.map((opt) => (
@@ -157,7 +177,70 @@ function ScopeStep({
 
 
 // ---------------------------------------------------------------------------
-// Step 2 — evidence ref
+// Step 2 — check kind (PR-E4 new)
+// ---------------------------------------------------------------------------
+
+
+const CHECK_KIND_OPTIONS: ReadonlyArray<{
+  id: CheckKind;
+  label: string;
+  description: string;
+  recommended?: boolean;
+}> = [
+  {
+    id: "evidence_ref",
+    label: "Evidence reference",
+    description:
+      "Block when a known evidence ref does NOT pass this turn. Deterministic, cheapest, recommended when there is a built-in producer for the signal you care about.",
+    recommended: true,
+  },
+  {
+    id: "shacl_constraint",
+    label: "SHACL shape",
+    description:
+      "Block when an evidence record does not conform to a structural shape you author. Deterministic, no LLM call.",
+  },
+  {
+    id: "llm_criterion",
+    label: "LLM critic",
+    description:
+      "Block when an LLM judge decides the answer fails a free-text criterion. Adds an LLM call at gate time.",
+  },
+];
+
+
+function CheckKindStep({
+  draft,
+  setDraft,
+}: { draft: Draft; setDraft: React.Dispatch<React.SetStateAction<Draft>> }): React.ReactElement {
+  return (
+    <div className="space-y-3">
+      <h2 className="text-lg font-bold text-foreground">
+        How should the answer be judged?
+      </h2>
+      <p className="text-xs text-secondary">
+        Pick the kind of check this policy uses. Different kinds have
+        different cost and determinism trade-offs.
+      </p>
+      <div className="space-y-2">
+        {CHECK_KIND_OPTIONS.map((opt) => (
+          <RadioCard
+            key={opt.id}
+            checked={draft.checkKind === opt.id}
+            onClick={() => setDraft((d) => ({ ...d, checkKind: opt.id }))}
+            label={opt.label}
+            description={opt.description}
+            badge={opt.recommended ? "recommended" : undefined}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Step 3 — check definition (branches by checkKind)
 // ---------------------------------------------------------------------------
 
 
@@ -196,7 +279,26 @@ function buildRefOptions(
 }
 
 
-function EvidenceStep({
+function CheckDefinitionStep({
+  draft,
+  setDraft,
+  refOptions,
+}: {
+  draft: Draft;
+  setDraft: React.Dispatch<React.SetStateAction<Draft>>;
+  refOptions: RefOption[];
+}): React.ReactElement {
+  if (draft.checkKind === "evidence_ref") {
+    return <EvidenceRefBody draft={draft} setDraft={setDraft} options={refOptions} />;
+  }
+  if (draft.checkKind === "shacl_constraint") {
+    return <ShaclBody draft={draft} setDraft={setDraft} />;
+  }
+  return <LlmCriterionBody draft={draft} setDraft={setDraft} />;
+}
+
+
+function EvidenceRefBody({
   draft,
   setDraft,
   options,
@@ -208,12 +310,11 @@ function EvidenceStep({
   return (
     <div className="space-y-3">
       <h2 className="text-lg font-bold text-foreground">
-        What evidence must pass before the answer?
+        Which evidence ref must pass?
       </h2>
       <p className="text-xs text-secondary">
-        Pick the check that must return ok. Built-in items come from the
-        runtime; "User" items are auto-derived from policies you have
-        already authored.
+        Built-in items come from the runtime; "User" items are auto-derived
+        from policies you already authored.
       </p>
       {options.length === 0 ? (
         <p className="rounded-xl border border-dashed border-black/[0.10] bg-gray-50/80 px-4 py-6 text-center text-xs text-secondary">
@@ -239,8 +340,77 @@ function EvidenceStep({
 }
 
 
+function ShaclBody({
+  draft,
+  setDraft,
+}: { draft: Draft; setDraft: React.Dispatch<React.SetStateAction<Draft>> }): React.ReactElement {
+  return (
+    <div className="space-y-3">
+      <h2 className="text-lg font-bold text-foreground">
+        What SHACL shape should the evidence conform to?
+      </h2>
+      <p className="text-xs text-secondary">
+        Paste a SHACL Turtle (.ttl) shape that targets <code>magi:Evidence</code>.
+        For NL → SHACL compilation, use the Natural language authoring
+        mode instead — that path runs the NL compiler + reviewer for you.
+      </p>
+      <textarea
+        value={draft.shapeTtl}
+        onChange={(e) => setDraft((d) => ({ ...d, shapeTtl: e.target.value }))}
+        rows={10}
+        placeholder={SHACL_PLACEHOLDER}
+        aria-label="SHACL shape (.ttl)"
+        className="w-full resize-y rounded-lg border border-primary/30 bg-white px-3 py-2 text-xs font-mono text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+      />
+    </div>
+  );
+}
+
+
+const SHACL_PLACEHOLDER = `@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix magi: <https://openmagi.ai/ns/evidence#> .
+
+magi:MyShape
+    a sh:NodeShape ;
+    sh:targetClass magi:Evidence ;
+    sh:property [
+        sh:path magi:field_exitCode ;
+        sh:hasValue 0 ;
+    ] .`;
+
+
+function LlmCriterionBody({
+  draft,
+  setDraft,
+}: { draft: Draft; setDraft: React.Dispatch<React.SetStateAction<Draft>> }): React.ReactElement {
+  return (
+    <div className="space-y-3">
+      <h2 className="text-lg font-bold text-foreground">
+        What should the LLM judge check?
+      </h2>
+      <p className="text-xs text-secondary">
+        Write the criterion as a single sentence the critic LLM evaluates
+        against the agent's final answer + turn context.
+      </p>
+      <input
+        type="text"
+        value={draft.criterion}
+        onChange={(e) => setDraft((d) => ({ ...d, criterion: e.target.value }))}
+        placeholder="The answer cites at least one source."
+        aria-label="LLM criterion"
+        className="w-full rounded-lg border border-primary/30 bg-white px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+      />
+      <p className="text-[11px] text-secondary">
+        Fail = critic answers NO. Keep it concrete and verifiable from the
+        turn alone.
+      </p>
+    </div>
+  );
+}
+
+
 // ---------------------------------------------------------------------------
-// Step 3 — on-missing action
+// Step 4 — on-missing action
 // ---------------------------------------------------------------------------
 
 
@@ -262,9 +432,11 @@ function OnMissingStep({
 }: { draft: Draft; setDraft: React.Dispatch<React.SetStateAction<Draft>> }): React.ReactElement {
   return (
     <div className="space-y-3">
-      <h2 className="text-lg font-bold text-foreground">What happens if the check fails?</h2>
+      <h2 className="text-lg font-bold text-foreground">
+        What happens if the check fails?
+      </h2>
       <p className="text-xs text-secondary">
-        The action the gate takes when the evidence check does not return ok.
+        The action the gate takes when the check does not return ok.
       </p>
       <div className="space-y-2">
         {ACTION_OPTIONS.map((opt) => (
@@ -284,7 +456,7 @@ function OnMissingStep({
 
 
 // ---------------------------------------------------------------------------
-// Step 4 — name
+// Step 5 — name
 // ---------------------------------------------------------------------------
 
 
@@ -307,8 +479,8 @@ function NameStep({
           value={draft.ruleId}
           onChange={(e) => setDraft((d) => ({ ...d, ruleId: e.target.value }))}
           placeholder="block-on-missing-tests"
-          className="mt-1 w-full rounded-lg border border-primary/30 bg-white px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
           aria-label="Policy ID"
+          className="mt-1 w-full rounded-lg border border-primary/30 bg-white px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
         />
         <p className="mt-1 text-[11px] text-secondary">
           Alphanumeric + dash / underscore, max 128 chars.
@@ -322,9 +494,8 @@ function NameStep({
           type="text"
           value={draft.description}
           onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
-          placeholder="Block answers on coding turns when tests have not run."
-          className="mt-1 w-full rounded-lg border border-black/[0.10] bg-white px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
           aria-label="Policy description"
+          className="mt-1 w-full rounded-lg border border-black/[0.10] bg-white px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
         />
       </label>
     </div>
@@ -333,16 +504,22 @@ function NameStep({
 
 
 // ---------------------------------------------------------------------------
-// Step 5 — review
+// Step 6 — review
 // ---------------------------------------------------------------------------
 
 
 function ReviewStep({
   draft,
-  options,
-}: { draft: Draft; options: RefOption[] }): React.ReactElement {
-  const ref = options.find((o) => o.ref === draft.evidenceRef);
-  const sentence = `On ${draft.scope === "always" ? "every" : draft.scope} turn, ${draft.onMissing === "block" ? "block the final answer" : draft.onMissing === "ask" ? "require human approval" : "audit-log the turn"} when ${ref?.label ?? draft.evidenceRef} does not return ok.`;
+  refOptions,
+}: { draft: Draft; refOptions: RefOption[] }): React.ReactElement {
+  const verb =
+    draft.onMissing === "block"
+      ? "block the final answer"
+      : draft.onMissing === "ask"
+        ? "require human approval"
+        : "audit-log the turn";
+  const checkSummary = describeCheck(draft, refOptions);
+  const whenClause = draft.scope === "always" ? "Every turn" : `On ${draft.scope} turns`;
   return (
     <div className="space-y-3">
       <h2 className="text-lg font-bold text-foreground">Review</h2>
@@ -351,27 +528,41 @@ function ReviewStep({
       </p>
       <div className="rounded-xl border border-black/[0.06] bg-white p-4">
         <p className="text-sm font-semibold text-foreground">What this policy does</p>
-        <p className="mt-1 text-xs leading-relaxed text-foreground">{sentence}</p>
+        <p className="mt-1 text-xs leading-relaxed text-foreground">
+          {whenClause}, {verb} when {checkSummary}.
+        </p>
         <hr className="my-3 border-black/[0.05]" />
-        <dl className="grid grid-cols-[6rem_1fr] gap-y-1.5 text-xs">
+        <dl className="grid grid-cols-[7rem_1fr] gap-y-1.5 text-xs">
           <dt className="text-secondary">ID</dt>
           <dd className="font-mono text-foreground">{draft.ruleId || "(unnamed)"}</dd>
           <dt className="text-secondary">When</dt>
           <dd>{draft.scope} · pre-final</dd>
-          <dt className="text-secondary">Requires</dt>
-          <dd className="font-mono text-foreground">{draft.evidenceRef}</dd>
-          <dt className="text-secondary">On missing</dt>
+          <dt className="text-secondary">Check kind</dt>
+          <dd>{draft.checkKind}</dd>
+          <dt className="text-secondary">On fail</dt>
           <dd>{draft.onMissing}</dd>
           {draft.description ? (
             <>
               <dt className="text-secondary">Note</dt>
-              <dd className="text-foreground">{draft.description}</dd>
+              <dd>{draft.description}</dd>
             </>
           ) : null}
         </dl>
       </div>
     </div>
   );
+}
+
+
+function describeCheck(draft: Draft, refOptions: RefOption[]): string {
+  if (draft.checkKind === "evidence_ref") {
+    const ref = refOptions.find((o) => o.ref === draft.evidenceRef);
+    return `evidence "${ref?.label ?? draft.evidenceRef}" does not return ok`;
+  }
+  if (draft.checkKind === "shacl_constraint") {
+    return "the SHACL shape does NOT conform on any evidence record";
+  }
+  return `an LLM critic judges "${draft.criterion}" is false`;
 }
 
 
@@ -382,20 +573,40 @@ function ReviewStep({
 
 function stepIsComplete(step: number, draft: Draft): boolean {
   if (step === 0) return !!draft.scope;
-  if (step === 1) return !!draft.evidenceRef;
-  if (step === 2) return !!draft.onMissing;
-  if (step === 3) return /^[a-z0-9][a-z0-9_-]{0,127}$/.test(draft.ruleId);
+  if (step === 1) return !!draft.checkKind;
+  if (step === 2) {
+    if (draft.checkKind === "evidence_ref") return !!draft.evidenceRef;
+    if (draft.checkKind === "shacl_constraint") return draft.shapeTtl.trim().length > 0;
+    return draft.criterion.trim().length > 0;
+  }
+  if (step === 3) return !!draft.onMissing;
+  if (step === 4) return /^[a-z0-9][a-z0-9_-]{0,127}$/.test(draft.ruleId);
   return true;
 }
 
 
 function buildRule(draft: Draft): CustomRule {
-  return {
+  const base = {
     id: draft.ruleId,
     scope: draft.scope,
     enabled: true,
     firesAt: "pre_final",
     action: draft.onMissing === "audit" ? "audit" : draft.onMissing,
-    what: { kind: "deterministic_ref", payload: { ref: draft.evidenceRef } },
+  };
+  if (draft.checkKind === "evidence_ref") {
+    return {
+      ...base,
+      what: { kind: "deterministic_ref", payload: { ref: draft.evidenceRef } },
+    };
+  }
+  if (draft.checkKind === "shacl_constraint") {
+    return {
+      ...base,
+      what: { kind: "shacl_constraint", payload: { shapeTtl: draft.shapeTtl.trim() } },
+    };
+  }
+  return {
+    ...base,
+    what: { kind: "llm_criterion", payload: { criterion: draft.criterion.trim() } },
   };
 }

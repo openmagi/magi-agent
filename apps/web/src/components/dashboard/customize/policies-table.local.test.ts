@@ -39,4 +39,17 @@ describe("PoliciesTable — unified policy surface (PR-E1)", () => {
   it("hides delete button for built-in / non-deletable rows", () => {
     expect(src).toContain("policy.deletable ? (");
   });
+
+  it("ships scope + firesAt + search filters in addition to origin (PR-E4)", () => {
+    expect(src).toContain("scopeFilter");
+    expect(src).toContain("firesAtFilter");
+    expect(src).toContain('type="search"');
+    expect(src).toContain('aria-label="Search policies"');
+  });
+
+  it("matches the search needle against name + description + condition summary", () => {
+    expect(src).toContain("p.name");
+    expect(src).toContain("p.description");
+    expect(src).toContain("p.condition.summary");
+  });
 });

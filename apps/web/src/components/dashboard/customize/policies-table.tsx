@@ -71,7 +71,21 @@ export function PoliciesTable({
   onDeleteSeamSpec,
   onEdit,
 }: PoliciesTableProps): React.ReactElement {
-  const [filter, setFilter] = useState<OriginFilter>(null);
+  const [originFilter, setOriginFilter] = useState<OriginFilter>(null);
+  const [scopeFilter, setScopeFilter] = useState<string | null>(null);
+  const [firesAtFilter, setFiresAtFilter] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+
+  // Pre-compute the value sets for the chip rows so empty buckets don't
+  // surface as zero-count chips (they would mislead the user).
+  const scopes = useMemo(
+    () => [...new Set(policies.map((p) => p.when.scope))].sort(),
+    [policies],
+  );
+  const firesAts = useMemo(
+    () => [...new Set(policies.map((p) => p.when.firesAt))].sort(),
+    [policies],
+  );
 
   const totals = useMemo(() => {
     let builtin = 0;
@@ -83,7 +97,21 @@ export function PoliciesTable({
     return { builtin, user, all: policies.length };
   }, [policies]);
 
-  const visible = filter === null ? policies : policies.filter((p) => p.origin === filter);
+  const needle = search.trim().toLowerCase();
+  const visible = useMemo(
+    () =>
+      policies.filter((p) => {
+        if (originFilter !== null && p.origin !== originFilter) return false;
+        if (scopeFilter !== null && p.when.scope !== scopeFilter) return false;
+        if (firesAtFilter !== null && p.when.firesAt !== firesAtFilter) return false;
+        if (needle) {
+          const hay = `${p.name} ${p.description} ${p.condition.summary}`.toLowerCase();
+          if (!hay.includes(needle)) return false;
+        }
+        return true;
+      }),
+    [policies, originFilter, scopeFilter, firesAtFilter, needle],
+  );
 
   // Group by origin so the head of the list is the user's own policies and
   // the long built-in catalog can be collapsed if needed.
@@ -92,31 +120,83 @@ export function PoliciesTable({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-1">
-        <span className="mr-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
-          Filter
-        </span>
+      <input
+        type="search"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Search by name, description, or condition…"
+        aria-label="Search policies"
+        className="w-full rounded-lg border border-black/[0.08] bg-white px-3 py-1.5 text-xs text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+      />
+
+      <FilterRow label="Origin">
         <FilterChip
           label="All"
           count={totals.all}
-          active={filter === null}
-          onClick={() => setFilter(null)}
+          active={originFilter === null}
+          onClick={() => setOriginFilter(null)}
         />
         <FilterChip
           label="Custom"
           count={totals.user}
-          active={filter === "user"}
+          active={originFilter === "user"}
           tone="bg-blue-500/10 text-blue-700"
-          onClick={() => setFilter(filter === "user" ? null : "user")}
+          onClick={() => setOriginFilter(originFilter === "user" ? null : "user")}
         />
         <FilterChip
           label="Built-in"
           count={totals.builtin}
-          active={filter === "builtin"}
+          active={originFilter === "builtin"}
           tone="bg-emerald-500/10 text-emerald-700"
-          onClick={() => setFilter(filter === "builtin" ? null : "builtin")}
+          onClick={() => setOriginFilter(originFilter === "builtin" ? null : "builtin")}
         />
-      </div>
+      </FilterRow>
+
+      {scopes.length > 1 ? (
+        <FilterRow label="Scope">
+          <FilterChip
+            label="All"
+            count={policies.length}
+            active={scopeFilter === null}
+            onClick={() => setScopeFilter(null)}
+          />
+          {scopes.map((s) => {
+            const count = policies.filter((p) => p.when.scope === s).length;
+            return (
+              <FilterChip
+                key={s}
+                label={s}
+                count={count}
+                active={scopeFilter === s}
+                onClick={() => setScopeFilter(scopeFilter === s ? null : s)}
+              />
+            );
+          })}
+        </FilterRow>
+      ) : null}
+
+      {firesAts.length > 1 ? (
+        <FilterRow label="When">
+          <FilterChip
+            label="All"
+            count={policies.length}
+            active={firesAtFilter === null}
+            onClick={() => setFiresAtFilter(null)}
+          />
+          {firesAts.map((f) => {
+            const count = policies.filter((p) => p.when.firesAt === f).length;
+            return (
+              <FilterChip
+                key={f}
+                label={f}
+                count={count}
+                active={firesAtFilter === f}
+                onClick={() => setFiresAtFilter(firesAtFilter === f ? null : f)}
+              />
+            );
+          })}
+        </FilterRow>
+      ) : null}
 
       {userPolicies.length > 0 ? (
         <Group
@@ -155,6 +235,21 @@ export function PoliciesTable({
           No policies match this filter.
         </p>
       ) : null}
+    </div>
+  );
+}
+
+
+function FilterRow({
+  label,
+  children,
+}: { label: string; children: React.ReactNode }): React.ReactElement {
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      <span className="mr-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+        {label}
+      </span>
+      {children}
     </div>
   );
 }

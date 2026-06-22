@@ -14,7 +14,7 @@
  * UX from control-plane.
  */
 
-import { Ban, Filter, ShieldOff, Wand2, X as XIcon } from "lucide-react";
+import { Ban, Filter, ShieldOff, X as XIcon } from "lucide-react";
 import React, { useState } from "react";
 
 import type { CustomizeCatalog } from "@/lib/customize-api";
@@ -23,14 +23,12 @@ import type { EvidenceTypeEntry } from "@/lib/policy-model";
 import { BlockAnswerWizard } from "./guided/block-answer-wizard";
 import { FilterResultWizard } from "./guided/filter-result-wizard";
 import { RestrictToolWizard } from "./guided/restrict-tool-wizard";
-import { RewireBuiltinWizard } from "./guided/rewire-builtin-wizard";
 
 
 export type GuidedKind =
   | "block-answer"
   | "restrict-tool"
-  | "filter-result"
-  | "rewire-builtin";
+  | "filter-result";
 
 
 export interface GuidedWizardProps {
@@ -52,32 +50,25 @@ interface KindCard {
 
 const KINDS: ReadonlyArray<KindCard> = [
   {
-    id: "block-answer",
-    label: "Block bad answer",
-    description:
-      "Stop the final answer when a named evidence check does not return ok at pre-final time.",
-    icon: <Ban className="h-5 w-5" />,
-  },
-  {
     id: "restrict-tool",
-    label: "Restrict tool",
+    label: "Before a tool runs",
     description:
-      "Deny or require approval for a tool by name, a fetch domain, or a domain allowlist.",
+      "Lifecycle: before_tool_use. Deny or require approval for a tool by name, a fetch domain, or a domain allowlist.",
     icon: <ShieldOff className="h-5 w-5" />,
   },
   {
     id: "filter-result",
-    label: "Filter tool result",
+    label: "After a tool returns",
     description:
-      "Inspect a tool's output by literal / regex match and block or audit when it fires.",
+      "Lifecycle: after_tool_use. Inspect the tool's output by literal / regex match and block or audit when it fires.",
     icon: <Filter className="h-5 w-5" />,
   },
   {
-    id: "rewire-builtin",
-    label: "Rewire built-in preset",
+    id: "block-answer",
+    label: "Before the final answer commits",
     description:
-      "Flip an existing built-in preset's wiring (opt-in / opt-out). Does not add a new gate.",
-    icon: <Wand2 className="h-5 w-5" />,
+      "Lifecycle: pre_final. Stop the answer with an evidence-ref check, a SHACL shape, or an LLM critic.",
+    icon: <Ban className="h-5 w-5" />,
   },
 ];
 
@@ -119,18 +110,8 @@ export function GuidedWizard({
       />
     );
   }
-  if (kind === "filter-result") {
-    return (
-      <FilterResultWizard
-        onActivated={onActivated}
-        onPickDifferent={backToKindPicker}
-        onCancel={onCancel}
-      />
-    );
-  }
   return (
-    <RewireBuiltinWizard
-      catalog={catalog}
+    <FilterResultWizard
       onActivated={onActivated}
       onPickDifferent={backToKindPicker}
       onCancel={onCancel}
@@ -198,6 +179,13 @@ function KindPicker({
           </button>
         ))}
       </div>
+      <p className="mt-3 text-[11px] leading-relaxed text-secondary/80">
+        Other lifecycle events the runtime exposes via the HookBus
+        (UserPromptSubmit, Stop, SubagentStop, on_compaction, …) do not
+        yet have a Guided authoring path — they need to be wired through
+        the custom_rules contract first. For now, file-authored
+        ~/.magi/settings.json hooks cover those events.
+      </p>
     </section>
   );
 }
