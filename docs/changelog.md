@@ -15,6 +15,43 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.69
+
+### Added
+- Goal-loop trio Layer 2 PR-C (#841): clean-break goal-loop judge call now
+  closes the goal-mode planner loop end-to-end alongside PR-A toggle (#835
+  in 0.1.67) and PR-B ContextVar wire (#839 in 0.1.68).
+- Customize hub PR-D1 unified NL → rule compiler backend (#844, default-OFF
+  via `MAGI_CUSTOMIZE_NL_RULE_COMPILER_ENABLED`): `customize/rule_compiler.py`
+  routes a natural-language draft into one of six `routedKind`s
+  (deterministic_ref / tool_perm / llm_criterion / shacl_constraint /
+  seam_spec / custom_check) through a three-gate compile / review / commit
+  pipeline that dispatches to the matching validator. PR-A hardening reused
+  (nonce, precheck, distinct factory). New POST
+  `/v1/app/customize/rules/compile` endpoint.
+- Local serve wires `emit_agent_event` so subagent activity (`child_started`,
+  `child_progress`, `child_completed`) shows up in the Work pane (#845).
+- Engine now surfaces upstream error class + sanitized traceback as an
+  `engine_error_detail` status event, and each orphan tool carries
+  `errorDetail` with `errorClass` (#847). The next repro shows the real
+  trigger in one shot.
+- Chat transcript persists the activity summary line ("Ran N actions ▸",
+  collapsed by default) instead of dropping it on finalize (#846, paired
+  with #838's `_v:4` envelope from 0.1.68). Live verbose progress logs
+  (`id` starting with `llm:`) stay in the Work pane only and are filtered
+  out of the finalized summary count.
+
+### Fixed
+- Add-rule picker now renders in-place above the rules table instead of as
+  an off-screen overlay modal (#842). State machine is
+  `idle → picking → authoring → idle`; "← Pick different" affordance gets
+  the operator back to the picker. Legacy `AddRuleModal` wrapper kept for
+  back-compat.
+- Orphan `tool_end` events no longer falsely blame user cancellation (#843).
+  When the parent run has no matching `tool_start`, the event surface
+  reports a real engine error class instead of attributing the outcome to
+  the operator.
+
 ## 0.1.68
 
 ### Added
