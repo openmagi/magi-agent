@@ -1188,14 +1188,33 @@ def _contains_forbidden_production_authority(value: object) -> bool:
 
 
 def _materializer_model(*, provider: str, model_label: str) -> tuple[str, str]:
-    normalized_model = model_label.rsplit("/", 1)[-1]
-    if provider == "anthropic":
-        return "anthropic", "haiku"
-    if provider == "openai":
-        return "openai", "gpt-5.5"
-    if provider == "fireworks":
-        return "fireworks", "kimi-k2p6"
-    return "google", "gemini-3.5-flash"
+    """Pick the cheap-tier (provider, model) the recipe materializer uses.
+
+    Sourced from the single ``ModelCatalog`` (E-1). Unknown providers fall back
+    to ``("google", "<gemini cheap default>")`` so the legacy "else→google"
+    behavior is preserved without re-introducing a hand table.
+    """
+    # ``model_label`` previously normalized for the legacy implementation; the
+    # catalog lookup is by canonical provider so the label parsing is unused
+    # post-refactor. Kept in the signature for callers that still pass it.
+    _ = model_label  # noqa: F841 — preserve signature for callers
+    from magi_agent.models.catalog import ModelCatalog, UnknownModelError  # noqa: PLC0415
+
+    catalog = ModelCatalog.builtin()
+    try:
+        record = catalog.cheap_model_for(provider)
+    except UnknownModelError:
+        # Preserve the legacy "else: google fallback" behavior — the gemini
+        # canonical record is reachable via the ``google`` alias.
+        record = catalog.cheap_model_for("google")
+        return "google", record.model
+    # Legacy returned ``("google", ...)`` for the gemini cheap fallback even
+    # though the catalog canonicalizes to ``gemini``; surface the legacy alias
+    # when a caller passed ``provider="google"`` directly so the materializer
+    # call sites stay byte-identical.
+    if provider == "google":
+        return "google", record.model
+    return record.provider, record.model
 
 
 __all__ = [
