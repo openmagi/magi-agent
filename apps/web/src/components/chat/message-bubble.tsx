@@ -759,9 +759,20 @@ export function MessageBubble({ role, content, timestamp, isStreaming, inlineBef
     : displayContent;
   const hasDisplayContent = displayContentWithoutCursor.trim().length > 0;
   const hasMessageBody = hasDisplayContent || !!replyTo || hasInlineLiveContent || hasLiveTranscriptItems;
+  // The grouped activity timeline ("Ran N actions") persists on BOTH live and
+  // finalized assistant messages so the record of what the agent did stays in
+  // the transcript. Verbose live progress still lives in the WORK panel; the
+  // task board (an inherently live artifact) stays gated to the live turn.
+  //
+  // On finalized messages, drop synthetic model-progress / heartbeat rows
+  // (id prefixed "llm:" — the stream reducer's convention) so the persisted
+  // transcript counts only real tool actions, not transient progress noise.
+  const timelineActivities = showLiveWorkDetails
+    ? activities
+    : activities?.filter((a) => !a.id.startsWith("llm:"));
   const hasActivityTimeline =
-    showLiveWorkDetails &&
-    ((activities && activities.length > 0) || taskBoard);
+    (!!timelineActivities && timelineActivities.length > 0) ||
+    (showLiveWorkDetails && !!taskBoard);
   // Reasoning (extended thinking) renders as a collapsible block on BOTH live
   // and finalized assistant messages — independent of showLiveWorkDetails so it
   // persists after the turn ends.
@@ -827,9 +838,9 @@ export function MessageBubble({ role, content, timestamp, isStreaming, inlineBef
         {!isUser && hasActivityTimeline && (
           <AgentActivityTimeline
             live={showLiveWorkDetails}
-            activities={activities}
-            taskBoard={taskBoard ?? null}
-            collapsedByDefault={Boolean(isStreaming || liveAssistantTurn)}
+            activities={timelineActivities}
+            taskBoard={showLiveWorkDetails ? (taskBoard ?? null) : null}
+            collapsedByDefault
           />
         )}
 
