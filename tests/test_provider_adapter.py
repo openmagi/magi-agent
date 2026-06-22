@@ -133,54 +133,40 @@ class TestAnthropicAdapter:
 
 
 class TestOpenAIAdapter:
-    def test_strips_xml_tags(self) -> None:
+    """E-11: OpenAIAdapter is now a no-op (identity transform).
+
+    Pre-E-11 this adapter stripped XML, merged short sections, and
+    compressed whitespace — defeating the static-prefix prompt cache.
+    The current contract is identity, matching AnthropicAdapter /
+    DefaultAdapter. See tests/prompt/test_openai_adapter_noop.py for
+    the cache-prefix invariance assertions.
+    """
+
+    def test_identity_passthrough(self) -> None:
         sections = ["<rules>Be safe</rules>", "Plain text here"]
         result = OpenAIAdapter().adapt_sections(sections)
-        for section in result:
-            assert "<rules>" not in section
-            assert "</rules>" not in section
+        assert result == sections
 
-    def test_output_shorter_than_input(self) -> None:
-        sections = [
-            "# SOUL\n\n<identity>You are a helpful assistant.</identity>\n\n<rules>\nBe concise.\nBe accurate.\n</rules>",
-            "# TOOLS\n\n<tool-list>\nbash\npython\n</tool-list>",
-        ]
-        original_len = sum(len(s) for s in sections)
+    def test_preserves_xml_tags(self) -> None:
+        sections = ["<rules>Be safe</rules>"]
         result = OpenAIAdapter().adapt_sections(sections)
-        result_len = sum(len(s) for s in result)
-        assert result_len < original_len
+        assert "<rules>" in result[0]
 
-    def test_preserves_content_words(self) -> None:
-        sections = ["<rules>Be safe and helpful</rules>"]
-        result = OpenAIAdapter().adapt_sections(sections)
-        combined = " ".join(result)
-        assert "safe" in combined
-        assert "helpful" in combined
-
-    def test_merges_short_sections(self) -> None:
+    def test_does_not_merge_short_sections(self) -> None:
         sections = ["Short A", "Short B", "Short C"]
         result = OpenAIAdapter().adapt_sections(sections)
-        assert len(result) < len(sections)
-
-    def test_does_not_merge_long_sections(self) -> None:
-        long = "x" * 300
-        sections = [long, long]
-        result = OpenAIAdapter().adapt_sections(sections)
-        assert len(result) == 2
-
-    def test_removes_empty_after_strip(self) -> None:
-        sections = ["<tag></tag>", "Real content"]
-        result = OpenAIAdapter().adapt_sections(sections)
-        for section in result:
-            assert section.strip()
+        assert result == sections
 
     def test_provider_property(self) -> None:
         assert OpenAIAdapter().provider == ProviderFamily.OPENAI
 
-    def test_adaptations_applied(self) -> None:
-        adaptations = OpenAIAdapter().adaptations_applied
-        assert "strip_xml_tags" in adaptations
-        assert "merge_short_sections" in adaptations
+    def test_adaptations_applied_is_empty(self) -> None:
+        assert OpenAIAdapter().adaptations_applied == ()
+
+    def test_returns_copy_not_input_list(self) -> None:
+        sections = ["section1"]
+        result = OpenAIAdapter().adapt_sections(sections)
+        assert result is not sections
 
 
 # ---------------------------------------------------------------------------
@@ -241,10 +227,13 @@ class TestAdaptIdentitySections:
         assert "<rules>" in result[0]
 
     def test_gpt_uses_openai_adapter(self) -> None:
+        # E-11: OpenAIAdapter is now a no-op (identity), so XML tags are
+        # preserved like every other adapter.
         sections = ["<rules>Be safe</rules>"]
         result, adapter = adapt_identity_sections(sections, model="gpt-5.5")
         assert isinstance(adapter, OpenAIAdapter)
-        assert "<rules>" not in result[0]
+        assert result == sections
+        assert "<rules>" in result[0]
 
     def test_gemini_uses_google_adapter(self) -> None:
         sections = ["content\n\n\n\n\nmore"]
@@ -316,7 +305,10 @@ class TestBuildSystemPromptIntegration:
         )
         assert "<rules>" in prompt
 
-    def test_enabled_strips_xml_for_gpt(self) -> None:
+    def test_enabled_preserves_xml_for_gpt(self) -> None:
+        # E-11: OpenAIAdapter is identity. XML survives the GPT path
+        # just like the Anthropic path. This protects the static-prefix
+        # prompt cache (E-7) from a future flip-on foot-gun.
         from magi_agent.runtime.message_builder import build_system_prompt
 
         identity = {"soul": "<rules>Be safe</rules>"}
@@ -327,7 +319,7 @@ class TestBuildSystemPromptIntegration:
             model="gpt-5.5",
             model_aware_prompts_enabled=True,
         )
-        assert "<rules>" not in prompt
+        assert "<rules>" in prompt
         assert "Be safe" in prompt
 
     def test_enabled_preserves_xml_for_claude(self) -> None:
@@ -356,7 +348,16 @@ class TestBuildSystemPromptIntegration:
         )
         assert "<rules>" in prompt
 
-    def test_same_identity_different_output_per_provider(self) -> None:
+    def test_same_identity_preserves_xml_for_every_provider(self) -> None:
+        # E-11: cache-prefix invariance. The pre-E-11 test asserted that
+        # the GPT prompt differed from the Claude prompt (XML stripped).
+        # Now the user-supplied <rules> XML survives on BOTH paths —
+        # protecting the static-prefix prompt cache (E-7 family) from a
+        # future flip-on foot-gun. (The whole-prompt byte-equality
+        # cannot be asserted directly because build_system_prompt
+        # captures a current-time runtime context block; instead we
+        # assert the XML invariant per provider, which is the substance
+        # of the cache-prefix guarantee.)
         from magi_agent.runtime.message_builder import build_system_prompt
 
         identity = {
@@ -376,12 +377,11 @@ class TestBuildSystemPromptIntegration:
             model="gpt-5.5",
             model_aware_prompts_enabled=True,
         )
-        assert claude_prompt != gpt_prompt
-        # Assert on the soul section's <rules> tag, not <identity>: the
-        # hardcoded MAGI_BASE_PERSONA floor is a protected block wrapped in
-        # <identity> that (like the other protected blocks) is intentionally
-        # NOT run through the per-provider XML-stripping adapter, so its tag
-        # survives for every provider. The adapter's identity-section stripping
-        # is still verified here via the non-colliding <rules> tag.
         assert "<rules>" in claude_prompt
-        assert "<rules>" not in gpt_prompt
+        assert "<rules>" in gpt_prompt
+        # Pre-E-11 the prompt LENGTHS differed sharply because GPT was
+        # XML-stripped + section-merged. Post-E-11 the section list is
+        # passed through identically — so the two prompts differ ONLY
+        # in a small runtime context timestamp, not in the static
+        # prefix content. Loose-bound the structural divergence.
+        assert abs(len(claude_prompt) - len(gpt_prompt)) < 100

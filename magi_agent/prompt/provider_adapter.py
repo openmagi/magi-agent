@@ -15,38 +15,18 @@ formatting and length per provider.
 
 from __future__ import annotations
 
-import copy
 import re
 from dataclasses import dataclass
-from enum import Enum
 from typing import Protocol, runtime_checkable
 
-from .injection import detect_provider
-
-
-class ProviderFamily(str, Enum):
-    ANTHROPIC = "anthropic"
-    OPENAI = "openai"
-    GOOGLE = "google"
-    FIREWORKS = "fireworks"
-    DEFAULT = "default"
-
-
-def detect_provider_family(model: str) -> ProviderFamily:
-    """Map a model string to a ProviderFamily enum.
-
-    Reuses the existing ``detect_provider`` logic and extends it with
-    fireworks detection for Kimi/MiniMax models.
-    """
-    model_lower = model.lower()
-    if model_lower.startswith(("fireworks/", "kimi-", "minimax-")):
-        return ProviderFamily.FIREWORKS
-
-    provider = detect_provider(model)
-    try:
-        return ProviderFamily(provider)
-    except ValueError:
-        return ProviderFamily.DEFAULT
+# E-13: the canonical home for ``ProviderFamily`` + ``detect_provider_family``
+# is ``magi_agent.shared.provider_family``. Re-exported here for back-compat
+# with external importers (and the public ``magi_agent.prompt`` package
+# surface). New call sites should import from the shared module directly.
+from magi_agent.shared.provider_family import (
+    ProviderFamily,
+    detect_provider_family,
+)
 
 
 @runtime_checkable
@@ -81,7 +61,7 @@ class PromptRoutingConfig:
     merge_short_section_threshold: int = 200
 
 
-_XML_TAG_RE = re.compile(r"</?[a-zA-Z][a-zA-Z0-9_-]*(?:\s[^>]*)?>")
+# E-11: ``_XML_TAG_RE`` removed (OpenAI XML-strip folklore retired).
 _MULTI_NEWLINE_RE = re.compile(r"\n{3,}")
 
 
@@ -105,24 +85,31 @@ class AnthropicAdapter:
 
 
 class OpenAIAdapter:
-    """Compress and simplify prompts for GPT models.
+    """No-op adapter for GPT models (E-11).
 
-    GPT models follow shorter prompts more reliably. This adapter:
-    1. Strips XML tags (GPT doesn't benefit from them).
-    2. Merges short sections into fewer blocks.
-    3. Trims excessive whitespace.
+    Pre-E-11 this adapter stripped XML, merged short sections, and
+    compressed whitespace on the premise "GPT follows shorter prompts;
+    XML adds noise." It was dormant
+    (``PromptRoutingConfig.enabled=False``) but is now an explicit
+    identity transform to protect the static-prefix prompt cache (E-7
+    family) from a future flip-on foot-gun: rewriting the static prefix
+    produces a different byte string and defeats the cache. If a future
+    per-provider knob is desired it must operate only on dynamic blocks
+    (``cache_scope=None``), never the static prefix.
+
+    The ``PromptRoutingConfig`` constructor argument is accepted for
+    back-compat with the old call shape but its
+    ``openai_compression_ratio``/``merge_short_section_threshold``
+    fields are inert.
     """
 
     def __init__(self, config: PromptRoutingConfig | None = None) -> None:
-        cfg = config or PromptRoutingConfig()
-        self._compression_ratio = cfg.openai_compression_ratio
-        self._merge_threshold = cfg.merge_short_section_threshold
+        # Accept config for back-compat; the fields are deliberately
+        # ignored — see class docstring.
+        del config
 
     def adapt_sections(self, sections: list[str]) -> list[str]:
-        stripped = [_strip_xml_tags(s) for s in sections]
-        merged = _merge_short_sections(stripped, self._merge_threshold)
-        compressed = [_compress_text(s, self._compression_ratio) for s in merged]
-        return [s for s in compressed if s.strip()]
+        return list(sections)
 
     @property
     def provider(self) -> ProviderFamily:
@@ -130,7 +117,7 @@ class OpenAIAdapter:
 
     @property
     def adaptations_applied(self) -> tuple[str, ...]:
-        return ("strip_xml_tags", "merge_short_sections", "compress_whitespace")
+        return ()
 
 
 class GoogleAdapter:
@@ -202,143 +189,22 @@ def adapt_identity_sections(
     return adapter.adapt_sections(sections), adapter
 
 
-# ---------------------------------------------------------------------------
-# Per-provider tool-schema repair (PR9)
-#
-# magi runs on Google ADK (no LiteLLM dependency). ADK 1.33.0's
-# ``google.adk.tools._gemini_schema_util`` repairs most provider-specific
-# JSON-schema issues for the typed Gemini schema path:
-#   * ``$ref`` dereferencing (covers OpenCode's Moonshot ``$ref``-sibling case),
-#   * camelCase -> snake_case field conversion,
-#   * type-list / ``null`` normalization,
-#   * ``format`` field filtering.
-#
-# The raw ``parameters_json_schema`` passthrough used by FunctionDeclaration can
-# still carry provider-incompatible fields to the wire. This repair covers the
-# live-observed Gemini gaps: non-string enum values and additional-properties
-# keywords. All other provider families are an identity passthrough.
-# ---------------------------------------------------------------------------
-
-# JSON-schema keys whose values are themselves a (sub)schema.
-_SCHEMA_VALUE_KEYS: tuple[str, ...] = ("items",)
-# JSON-schema keys whose values are a list of (sub)schemas.
-_SCHEMA_LIST_KEYS: tuple[str, ...] = ("anyOf", "oneOf", "allOf", "prefixItems")
-# JSON-schema keys whose values map names -> (sub)schema.
-_SCHEMA_DICT_KEYS: tuple[str, ...] = ("properties", "$defs", "definitions", "patternProperties")
-_GEMINI_DROPPED_SCHEMA_KEYS: frozenset[str] = frozenset(
-    ("additionalProperties", "additional_properties")
+# E-12: per-provider tool-schema repair moved to ``adk_bridge/tool_schema_repair``
+# (schema repair is a tool/adk-bridge concern, not a prompt-assembly
+# concern). Re-exported here for back-compat with external importers
+# and the public ``magi_agent.prompt`` package surface. New call sites
+# should import from the canonical home directly.
+from magi_agent.adk_bridge.tool_schema_repair import (  # noqa: E402
+    repair_tool_schema_for_provider,
 )
 
 
-def _enum_value_to_string(value: object) -> str:
-    """Coerce a single enum value to the string form Gemini accepts.
-
-    ``None`` maps to JSON ``"null"`` (not Python's ``"None"``).
-    Booleans are mapped to JSON-style lowercase ``"true"``/``"false"`` rather
-    than Python's ``"True"``/``"False"`` so the surfaced enum reads naturally.
-    """
-    if value is None:
-        return "null"
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    return str(value)
-
-
-def _repair_gemini_schema(node: object) -> object:
-    """Recursively coerce integer/number/boolean enums to string enums."""
-    if isinstance(node, list):
-        return [_repair_gemini_schema(item) for item in node]
-    if not isinstance(node, dict):
-        return node
-
-    repaired: dict[str, object] = {}
-    for key, value in node.items():
-        if key in _GEMINI_DROPPED_SCHEMA_KEYS:
-            continue
-        if key in _SCHEMA_VALUE_KEYS:
-            repaired[key] = _repair_gemini_schema(value)
-        elif key in _SCHEMA_LIST_KEYS and isinstance(value, list):
-            repaired[key] = [_repair_gemini_schema(item) for item in value]
-        elif key in _SCHEMA_DICT_KEYS and isinstance(value, dict):
-            repaired[key] = {
-                name: _repair_gemini_schema(sub) for name, sub in value.items()
-            }
-        else:
-            repaired[key] = value
-
-    enum = repaired.get("enum")
-    if isinstance(enum, list) and enum:
-        needs_repair = any(not isinstance(item, str) for item in enum)
-        if needs_repair:
-            repaired["enum"] = [_enum_value_to_string(item) for item in enum]
-            repaired["type"] = "string"
-    return repaired
-
-
-def repair_tool_schema_for_provider(
-    schema: dict[str, object],
-    family: ProviderFamily,
-) -> dict[str, object]:
-    """Return a provider-repaired copy of a tool input JSON schema.
-
-    The input is never mutated on the Gemini path (``_repair_gemini_schema``
-    builds fresh dicts). Runtime ToolHost argument validation still runs against
-    the original manifest schema; provider repair only normalizes the schema sent
-    to the model provider.
-
-    Only ``ProviderFamily.GOOGLE`` triggers a repair today. Every other family
-    returns the *input object as-is* (callers must not mutate the returned value);
-    the ADK-native runtime / underlying provider already accepts those schemas
-    without modification.
-    """
-    if family is ProviderFamily.GOOGLE:
-        result = _repair_gemini_schema(schema)
-        if isinstance(result, dict):
-            return result
-        return dict(schema)
-    return schema
-
-
-def _strip_xml_tags(text: str) -> str:
-    """Remove XML-style tags from text."""
-    return _XML_TAG_RE.sub("", text)
+# E-11: ``_strip_xml_tags``, ``_compress_text``, ``_merge_short_sections``
+# (and the unused ``_XML_TAG_RE``) were the OpenAI-folklore helpers. Now
+# unused after ``OpenAIAdapter`` became a no-op. ``_normalize_whitespace``
+# is still used by ``GoogleAdapter``.
 
 
 def _normalize_whitespace(text: str) -> str:
     """Collapse runs of 3+ newlines to 2."""
     return _MULTI_NEWLINE_RE.sub("\n\n", text).strip()
-
-
-def _compress_text(text: str, ratio: float) -> str:
-    """Compress text by removing redundant whitespace and blank lines.
-
-    This is a conservative compression that preserves all words and
-    sentence structure — it only removes excessive formatting.
-    """
-    text = _normalize_whitespace(text)
-    lines = text.split("\n")
-    compressed: list[str] = []
-    for line in lines:
-        stripped = line.rstrip()
-        if stripped or (compressed and compressed[-1] != ""):
-            compressed.append(stripped)
-    return "\n".join(compressed).strip()
-
-
-def _merge_short_sections(
-    sections: list[str],
-    threshold: int,
-) -> list[str]:
-    """Merge consecutive short sections into larger blocks."""
-    if not sections:
-        return []
-    merged: list[str] = []
-    buffer = sections[0]
-    for section in sections[1:]:
-        if len(buffer) < threshold and len(section) < threshold:
-            buffer = f"{buffer}\n\n{section}"
-        else:
-            merged.append(buffer)
-            buffer = section
-    merged.append(buffer)
-    return merged
