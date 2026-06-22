@@ -15,6 +15,42 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.70
+
+### Added
+- Customize PR-D2 NL rule compose UI in the Rules page (#850): new
+  `nl-rule-compose.tsx` component pairs a natural-language textarea with
+  the PR-D1 compiler backend — Compile shows the routed `routedKind`,
+  the explanation, the reviewer verdict, the schema check, and a raw-JSON
+  disclosure; Activate routes the draft to the matching PUT
+  (`custom-rules` / `seams` / `dashboard-checks`). The picker phase now
+  leads with NL compose; the 4-card manual picker collapses under an
+  "Or build manually" `<details>` fold-out. No new persistence path —
+  the existing endpoints handle every `routedKind`.
+- E-1 single `ModelCatalog` source of truth (#851): 17 `ModelRecord`s now
+  drive the live-model fallback, the TS export keeps the dashboard
+  picker honest, and the flagship-drift fix realigns provider defaults.
+  Default-ON because the data lives entirely in the builtin catalog;
+  fallback behavior unchanged.
+- E-6 reasoning default-ON behind `MAGI_MODEL_REASONING_DEFAULT_ON`
+  (#853): catalog-driven `adaptive` / `effort` / `none` per provider,
+  kill-switch tokens still win. OFF path is byte-identical (35 + 12 + 15
+  tests green). Flag stays default-OFF for soak per the flag-promotion
+  rule — flip is a separate follow-up.
+- Evidence ledger persists per-turn run bookends to the durable store
+  (#848, default-OFF): new `heartbeat_contract` / `heartbeat_store` /
+  `stale_run_detector` modules wire the bookends without disturbing the
+  existing in-memory path.
+
+### Fixed
+- Child runner now surfaces silent-empty streams as failed instead of
+  silent-ok (#854, root cause for task #8). The classifier flips when
+  the upstream emits no text and no tool activity within the turn.
+- Customize Rules page hides the 38-row preset catalog while the
+  Add-rule flow is active (#855); the table reappears after the picker
+  or authoring phase closes so the operator's focus stays on one
+  surface at a time.
+
 ## 0.1.69
 
 ### Added
