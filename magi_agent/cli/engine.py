@@ -2193,6 +2193,12 @@ class MagiEngineDriver:
 
         cancelled = False
         engine_error: str | None = None
+        # PR-3: when ``engine_error`` is set, also stash the structured upstream-
+        # exception detail (errorClass + sanitized message + traceback preview)
+        # so the orphan sweep + a new ``engine_error_detail`` status event can
+        # surface the REAL trigger to the dashboard. ``None`` outside the error
+        # path; reset alongside ``engine_error``.
+        engine_error_detail: dict[str, object] | None = None
         # Number of agent RuntimeEvents actually yielded to the consumer across
         # ALL attempts. Recovery only re-invokes the run while this is 0, so a
         # mid-stream failure never replays already-delivered output.
@@ -2676,6 +2682,12 @@ class MagiEngineDriver:
                         continue  # re-invoke run_async (genuine 2nd model call)
                 # Terminal / non-retryable / budget exhausted -> surface.
                 engine_error = str(attempt_error) or attempt_error.__class__.__name__
+                # Capture the structured detail so the orphan sweep + the new
+                # engine_error_detail status event can name the real trigger
+                # (errorClass + sanitized traceback). Lost-the-trace was the
+                # exact gap that left "tool interrupted by user cancellation"
+                # as the only signal on Kevin's 0.1.66 SOTA-spawn repro.
+                engine_error_detail = self._capture_error_detail(attempt_error)
                 break
         finally:
             self._restore_runner_policy_route(route_attach)
@@ -2708,12 +2720,31 @@ class MagiEngineDriver:
             return
 
         if engine_error is not None:
+            # PR-3: surface the structured upstream-exception detail (errorClass
+            # + sanitized message + traceback preview) BEFORE the orphan sweep
+            # so the dashboard can render a single banner naming the real
+            # trigger. The orphan tool_end events also carry per-tool detail
+            # (same payload) so the Work pane can show why each specific tool
+            # was swept.
+            if engine_error_detail is not None:
+                yield RuntimeEvent(
+                    type="status",
+                    payload={
+                        "type": "engine_error_detail",
+                        "turnId": turn_id,
+                        **engine_error_detail,
+                    },
+                    turn_id=turn_id,
+                )
             # Balance the transcript on a mid-tool failure too: a runner error
             # while a tool_use is pending would otherwise leave a dangling
             # tool_use that a resuming session cannot reconcile (same hazard the
             # cancel path guards against).
             for safe in self._synthesize_orphan_tool_results(
-                pending_tool_ids, turn_id=turn_id, reason="engine_error"
+                pending_tool_ids,
+                turn_id=turn_id,
+                reason="engine_error",
+                error_detail=engine_error_detail,
             ):
                 yield RuntimeEvent(type="tool", payload=safe, turn_id=turn_id)
             yield EngineResult(  # type: ignore[misc]
@@ -3079,8 +3110,25 @@ class MagiEngineDriver:
                 )
                 return
             if attempt_error is not None:
+                # PR-3: same root-cause surface as the primary engine_error
+                # path — capture the upstream class + sanitized traceback
+                # so the dashboard can name the real repair-fork trigger
+                # instead of showing a generic "interrupted by repair restart".
+                _attempt_detail = self._capture_error_detail(attempt_error)
+                yield RuntimeEvent(
+                    type="status",
+                    payload={
+                        "type": "engine_error_detail",
+                        "turnId": turn_id,
+                        **_attempt_detail,
+                    },
+                    turn_id=turn_id,
+                )
                 for safe in self._synthesize_orphan_tool_results(
-                    pending_tool_ids, turn_id=turn_id, reason="repair_fork"
+                    pending_tool_ids,
+                    turn_id=turn_id,
+                    reason="repair_fork",
+                    error_detail=_attempt_detail,
                 ):
                     yield RuntimeEvent(type="tool", payload=safe, turn_id=turn_id)
                 yield EngineResult(  # type: ignore[misc]
@@ -3396,6 +3444,7 @@ class MagiEngineDriver:
         *,
         turn_id: str,
         reason: str = "user_interrupt",
+        error_detail: Mapping[str, object] | None = None,
     ) -> list[dict[str, object]]:
         """Build interrupted ``tool_end`` events for any unmatched tool calls.
 
@@ -3408,6 +3457,13 @@ class MagiEngineDriver:
         neutral phrasing (still not the user-cancellation literal) and the
         raw reason is carried in the event's ``reason`` field for accurate
         downstream rendering.
+
+        ``error_detail`` (optional) attaches the sanitized upstream-exception
+        detail produced by :meth:`_capture_error_detail` so the dashboard can
+        show the REAL trigger per tool instead of a generic "interrupted by
+        engine error" prose line. Omitted on user-interrupt paths (no
+        upstream exception to report) and on legacy callers that haven't
+        adopted the detail capture yet.
         """
 
         preview = MagiEngineDriver._ORPHAN_TOOL_PREVIEW_BY_REASON.get(
@@ -3415,19 +3471,103 @@ class MagiEngineDriver:
         )
         results: list[dict[str, object]] = []
         for tool_id in pending_tool_ids:
-            results.append(
-                {
-                    "type": "tool_end",
-                    "id": tool_id,
-                    "status": "error",
-                    "output_preview": preview,
-                    "reason": reason,
-                    "durationMs": 0,
-                    "interrupted": True,
-                }
-            )
+            event: dict[str, object] = {
+                "type": "tool_end",
+                "id": tool_id,
+                "status": "error",
+                "output_preview": preview,
+                "reason": reason,
+                "durationMs": 0,
+                "interrupted": True,
+            }
+            if error_detail is not None:
+                # Copy so a mutation downstream cannot poison the shared dict.
+                event["errorDetail"] = dict(error_detail)
+            results.append(event)
         pending_tool_ids.clear()
         return results
+
+    #: Hard cap on the sanitized traceback we attach to status payloads. Wide
+    #: enough to keep the inner frame + the message (where the real signal is)
+    #: but bounded so a runaway exception text cannot balloon the SSE stream.
+    _SAFE_TRACEBACK_MAX_CHARS: int = 2048
+
+    #: Regex of leaky shapes the orphan-sweep / engine_error_detail status
+    #: payload must NOT carry to the dashboard. Borrowed from the gate5b
+    #: boundary redactor and trimmed to the patterns that actually appear in
+    #: a Python traceback (paths, keys, tokens). Conservative + fail-soft;
+    #: never raises.
+    _SAFE_TRACEBACK_REDACTION_RE = re.compile(
+        r"(?:"
+        r"sk-[A-Za-z0-9_-]{8,}|"
+        r"AIza[A-Za-z0-9_-]{20,}|"
+        r"AKIA[0-9A-Z]{8,}|"
+        r"xox[a-z]-[A-Za-z0-9-]{8,}|"
+        r"gh[opusr]_[A-Za-z0-9_]+|"
+        r"github_pat_[A-Za-z0-9_]+|"
+        r"Bearer\s+[^\s,;\"']+|"
+        r"/Users/[^\s,;\"'\\)]*|"
+        r"/home/[^\s,;\"'\\)]*|"
+        r"/workspace/[^\s,;\"'\\)]*|"
+        r"/data/bots/[^\s,;\"'\\)]*"
+        r")",
+        re.IGNORECASE,
+    )
+
+    @staticmethod
+    def _sanitize_traceback_for_status(raw: object) -> str:
+        """Redact leaky shapes + cap length for a status-payload-safe string.
+
+        Empty / non-string inputs return ``""``. Truncation appends a clear
+        cap marker so the consumer can tell the trace was shortened (vs.
+        actually ended there).
+        """
+        if not isinstance(raw, str) or not raw:
+            return ""
+        redacted = MagiEngineDriver._SAFE_TRACEBACK_REDACTION_RE.sub(
+            "[redacted]", raw
+        )
+        cap = MagiEngineDriver._SAFE_TRACEBACK_MAX_CHARS
+        if len(redacted) <= cap:
+            return redacted
+        # Keep the HEAD (where the entry frame + class are) — that is what
+        # names the actual trigger. The tail (deep stack inside ADK / litellm)
+        # is the part that bloats and rarely helps a first triage.
+        head = redacted[: cap - 32]
+        return f"{head}… [truncated, {len(redacted)} chars total]"
+
+    @staticmethod
+    def _capture_error_detail(exc: BaseException) -> dict[str, object]:
+        """Capture the upstream exception's class + message + sanitized trace.
+
+        The engine's pre-existing ``engine_error = str(attempt_error) or
+        attempt_error.__class__.__name__`` collapsed all three into a single
+        string and lost the rest. This helper preserves the class (the
+        single most useful triage signal) plus a redacted preview of the
+        traceback so the operator can name the real trigger on the first
+        repro instead of having to dig through console logs.
+
+        Never raises: defensive coercions guard every read.
+        """
+        import traceback as _traceback  # noqa: PLC0415
+
+        error_class = exc.__class__.__name__
+        try:
+            message_raw = str(exc)
+        except Exception:  # noqa: BLE001 — exotic exceptions may raise in __str__.
+            message_raw = ""
+        message = MagiEngineDriver._sanitize_traceback_for_status(message_raw)
+        try:
+            tb_text = "".join(
+                _traceback.format_exception(type(exc), exc, exc.__traceback__)
+            )
+        except Exception:  # noqa: BLE001 — formatting failure must not crash sweep.
+            tb_text = ""
+        return {
+            "errorClass": error_class,
+            "message": message,
+            "tracebackPreview": MagiEngineDriver._sanitize_traceback_for_status(tb_text),
+        }
 
     def _runner_policy_payload(self) -> dict[str, object] | None:
         if self._runner_policy_assembly is None:
