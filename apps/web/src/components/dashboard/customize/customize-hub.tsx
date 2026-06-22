@@ -527,19 +527,44 @@ function RulesSectionMount({
         </div>
       ) : null}
 
-      <RulesTable
-        catalog={data.catalog.verification}
-        presetOverrides={presetOverrides}
-        pendingPresets={pendingPresets}
-        onTogglePreset={onTogglePreset}
-        customRules={customRules}
-        customRuleBusy={customRuleBusy}
-        onToggleCustomRule={onToggleCustomRule}
-        onDeleteCustomRule={onDeleteCustomRule}
-        seamSpecs={seamSpecs}
-      />
+      {addState.phase === "idle" ? (
+        <RulesTable
+          catalog={data.catalog.verification}
+          presetOverrides={presetOverrides}
+          pendingPresets={pendingPresets}
+          onTogglePreset={onTogglePreset}
+          customRules={customRules}
+          customRuleBusy={customRuleBusy}
+          onToggleCustomRule={onToggleCustomRule}
+          onDeleteCustomRule={onDeleteCustomRule}
+          seamSpecs={seamSpecs}
+        />
+      ) : (
+        <div className="rounded-xl border border-dashed border-black/[0.08] bg-gray-50/60 px-4 py-3 text-xs text-secondary">
+          Catalog hidden while adding a rule. Cancel above to return to the
+          full list ({hiddenRuleCount(data, customRules, seamSpecs)} rules).
+        </div>
+      )}
     </div>
   );
+}
+
+
+/**
+ * Compact "how many rules are hidden" count for the catalog-collapsed
+ * note. Built-in presets + user custom rules + persisted SeamSpec actions
+ * — the same union surfaced in the RulesTable so the user can tell at a
+ * glance whether the catalog is empty or large.
+ */
+function hiddenRuleCount(
+  data: NonNullable<ReturnType<typeof useCustomize>["data"]>,
+  customRules: CustomRule[],
+  seamSpecs: ReadonlyArray<{ actions: ReadonlyArray<unknown> }>,
+): number {
+  const builtin = data.catalog.verification.harnessPresets.length;
+  const custom = customRules.length;
+  const seam = seamSpecs.reduce((sum, s) => sum + (s.actions?.length ?? 0), 0);
+  return builtin + custom + seam;
 }
 
 
