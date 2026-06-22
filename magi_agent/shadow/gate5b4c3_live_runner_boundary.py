@@ -1544,20 +1544,33 @@ def _gate1a_correlated_model_or_label(
     proxy_url: str | None,
 ) -> object:
     if _is_anthropic_route(provider_label, model_label):
-        # Route Claude/anthropic models through magi's cache-aware ADK subclass
-        # so the outgoing Anthropic request carries rolling-tail cache markers
-        # (gated on MAGI_MESSAGE_CACHE_ENABLED). The ``anthropic`` package is
-        # imported lazily inside the builder, matching ADK's own gating.
-        from magi_agent.adk_bridge.anthropic_cache_model import (
-            build_cache_aware_claude,
+        # Route Claude/anthropic models through magi's cache-aware ADK
+        # subclass so the outgoing Anthropic request carries rolling-tail
+        # cache markers. E-7: this delegates to the single seam
+        # ``runtime/model_factory.maybe_build_cache_aware_anthropic`` so
+        # the CLI and serve surfaces cannot drift. ``gate_on_flag=False``
+        # preserves the hosted-serve unconditional behavior (the flag
+        # gates only the local CLI surface today). The factory's robust
+        # fallback returns ``None`` on any failure (missing ``anthropic``
+        # package, ADK import error, etc.); we surface that as the raw
+        # label so the runner falls back to its default routing.
+        from magi_agent.runtime.model_factory import (  # noqa: PLC0415
+            maybe_build_cache_aware_anthropic,
         )
 
-        try:
-            return build_cache_aware_claude(model_label)
-        except ModuleNotFoundError as exc:
-            if exc.name != "anthropic":
-                raise
-            return model_label
+        # The shadow path historically passed a bare label rather than a
+        # ProviderConfig — synthesize the minimum shape the factory's
+        # Protocol expects (it only reads ``provider``, ``model``,
+        # ``api_key``).
+        class _ShadowConfig:
+            provider = "anthropic"
+            model = model_label
+            api_key = ""  # hosted credential surfacing is handled upstream
+
+        built = maybe_build_cache_aware_anthropic(
+            _ShadowConfig(), env=None, gate_on_flag=False
+        )
+        return built if built is not None else model_label
 
     if provider_label in _GATE5B_LITELLM_PROVIDER_PREFIX:
         return _gate5b_litellm_model(provider_label, model_label)
