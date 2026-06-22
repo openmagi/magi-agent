@@ -6,19 +6,22 @@ const src = readFileSync(
   "utf8",
 );
 
-describe("GuidedWizard — kind router (PR-E3)", () => {
-  it("offers four kind choices for guided authoring", () => {
+describe("GuidedWizard — lifecycle-event router (PR-E4)", () => {
+  it("offers three lifecycle entry-points (Override moved out of Guided per PR-E4 design call)", () => {
     expect(src).toContain('"block-answer"');
     expect(src).toContain('"restrict-tool"');
     expect(src).toContain('"filter-result"');
-    expect(src).toContain('"rewire-builtin"');
+    // PR-E4: rewire-builtin no longer surfaces in the Guided picker —
+    // a user who dislikes a built-in toggles it off and authors their own.
+    // SeamSpec stays reachable via NL + Raw modes for power users.
+    expect(src).not.toContain('"rewire-builtin"');
   });
 
-  it("routes each kind to its dedicated sub-wizard component", () => {
+  it("routes each lifecycle to its dedicated sub-wizard", () => {
     expect(src).toContain("BlockAnswerWizard");
     expect(src).toContain("RestrictToolWizard");
     expect(src).toContain("FilterResultWizard");
-    expect(src).toContain("RewireBuiltinWizard");
+    expect(src).not.toContain("RewireBuiltinWizard");
   });
 
   it("KindPicker forwards a ← Pick different to the parent (mode picker)", () => {
@@ -61,15 +64,24 @@ const blockAnswer = readFileSync(
 );
 
 
-describe("BlockAnswerWizard (PR-E3 extraction)", () => {
-  it("activates via putCustomRule with deterministic_ref kind", () => {
+describe("BlockAnswerWizard (PR-E4 — 3 check kinds)", () => {
+  it("activates via putCustomRule and branches by check kind", () => {
     expect(blockAnswer).toContain("putCustomRule");
+    // All three check kinds carry their own payload shape.
     expect(blockAnswer).toContain('kind: "deterministic_ref"');
-    expect(blockAnswer).toContain('payload: { ref: draft.evidenceRef }');
+    expect(blockAnswer).toContain('kind: "shacl_constraint"');
+    expect(blockAnswer).toContain('kind: "llm_criterion"');
   });
 
-  it("ships 5 steps", () => {
-    expect(blockAnswer).toContain("const TOTAL = 5");
+  it("ships 6 steps (scope / check kind / definition / on-fail / name / review)", () => {
+    expect(blockAnswer).toContain("const TOTAL = 6");
+  });
+
+  it("step 1 (CheckKindStep) offers evidence_ref / shacl / llm options", () => {
+    expect(blockAnswer).toContain("CheckKindStep");
+    expect(blockAnswer).toContain('id: "evidence_ref"');
+    expect(blockAnswer).toContain('id: "shacl_constraint"');
+    expect(blockAnswer).toContain('id: "llm_criterion"');
   });
 });
 
@@ -134,21 +146,11 @@ const rewireBuiltin = readFileSync(
 );
 
 
-describe("RewireBuiltinWizard (PR-E3 new)", () => {
-  it("activates via putSeamSpec with op=modify_seam", () => {
+describe("RewireBuiltinWizard (kept as module but not surfaced in Guided picker)", () => {
+  it("still ships as a self-contained wizard via putSeamSpec", () => {
+    // Module stays so NL mode / future Raw mode can still reach SeamSpec
+    // authoring; PR-E4 only removed the Guided entry-point card.
     expect(rewireBuiltin).toContain("putSeamSpec");
     expect(rewireBuiltin).toContain('op: "modify_seam"');
-  });
-
-  it("only lists togglable built-in presets (enforcement = enforcing)", () => {
-    expect(rewireBuiltin).toContain('p.enforcement === "enforcing"');
-  });
-
-  it("auto-derives the doc id from preset id", () => {
-    expect(rewireBuiltin).toContain("docId: `rewire-${preset.id}`");
-  });
-
-  it("ships 4 steps", () => {
-    expect(rewireBuiltin).toContain("const TOTAL = 4");
   });
 });
