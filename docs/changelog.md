@@ -15,6 +15,31 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.74
+
+### Added
+- NL authoring guide on the Customize Rules page (#874): a collapsible
+  cheatsheet above the natural-language textarea exposes the same three
+  axes the Author wizard uses (WHEN / WHAT / CONDITION), with `✓`
+  supported phrasings and `✗` unsupported (kept honest where the
+  backend isn't wired yet). Six example chips fill the textarea on
+  click; the panel also warns that ambiguous drafts trigger a
+  clarifying-question from the compiler.
+
+### Fixed
+- Gate5b counter idempotency now keys on per-turn identity instead of
+  message content hash (#872). The same message replayed in distinct
+  turns no longer collapses to `counter_duplicate_replay`. New
+  precedence: canary digest → `turnId` → `trace_id` → freshly minted
+  nonce. `sessionId` stays excluded (it's per-channel, not per-turn).
+- Shadow serve token estimate now uses a real character / BPE pass
+  behind `MAGI_SERVE_TOKEN_ESTIMATE_REAL` (#871, default-OFF soak per
+  the flag-promotion rule). The previous UTF-8 byte heuristic
+  over-counted ASCII ~4× and CJK ~3×, so Korean / CJK turns were being
+  spuriously rejected with `input_token_budget_exceeded` on the serve
+  path. The byte cap (`max_sanitized_input_bytes`) stays as the DoS
+  guard at the contract validator.
+
 ## 0.1.73
 
 ### Added
