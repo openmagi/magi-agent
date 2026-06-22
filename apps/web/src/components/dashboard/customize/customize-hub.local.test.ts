@@ -48,6 +48,19 @@ describe("CustomizeHub — unified Rules redesign (Phase 1)", () => {
     expect(src).toContain("Or build manually");
   });
 
+  it("hides the rules table while the Add-rule flow is active so the picker/form has the page to itself", () => {
+    // RulesTable renders inside an addState.phase === "idle" guard; while
+    // picking/authoring the 38-row catalog collapses to a one-line note so
+    // the user is not buried under the existing rules they are editing
+    // around.
+    // Use a regex so indentation drift in the source file does not falsely
+    // fail this assertion — the guard order (idle → RulesTable, else note)
+    // is what matters.
+    expect(src).toMatch(/addState\.phase === "idle"\s*\?\s*\(\s*<RulesTable/);
+    expect(src).toContain("Catalog hidden while adding a rule");
+    expect(src).toContain("hiddenRuleCount");
+  });
+
   it("pre-fills CustomRulesSection.initialKind from the AddRuleModal choice (Phase 2)", () => {
     // restrict-tool routes to tool_perm; block-answer routes to deterministic_ref.
     expect(src).toContain("autoOpen");
