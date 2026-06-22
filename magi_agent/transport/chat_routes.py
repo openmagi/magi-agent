@@ -466,7 +466,40 @@ async def _local_adk_chat_sse(
         except Exception:  # noqa: BLE001 — emitter must never crash a tool call.
             return
 
+    # When the Goal-mission toggle is on AND the deployment opted in to
+    # goal_loop, surface the active policy as an in-memory mission so the
+    # dashboard's Missions panel has something to render WHILE the turn is
+    # running. The PR-B/C goal-loop is ContextVar + judge-loop (no durable
+    # mission persistence yet — see design doc Section 8 "Out of scope:
+    # Mission/Run persistence"). This emits the bare minimum the frontend
+    # needs to display a row.
+    _goal_loop_mission_id: str | None = None
+    _goal_loop_mission_status = "running"
+    _goal_loop_mission_continuations = 0
+    if _goal_loop_policy is not None:
+        _goal_loop_mission_id = f"goal:{turn_id}"
+        _goal_loop_mission_title = _goal_loop_policy.objective.strip()[:240] or "Goal mission"
     try:
+        if _goal_loop_mission_id is not None and _goal_loop_policy is not None:
+            yield _sse_event(
+                "agent",
+                {
+                    "type": "mission_created",
+                    "mission": {
+                        "id": _goal_loop_mission_id,
+                        "kind": "goal",
+                        "title": _goal_loop_mission_title,
+                        "status": _goal_loop_mission_status,
+                        "createdAt": int(time.time() * 1000),
+                        "metadata": {
+                            "objective": _goal_loop_policy.objective,
+                            "maxTurns": _goal_loop_policy.max_turns,
+                            "turnId": turn_id,
+                            "sessionId": session_id,
+                        },
+                    },
+                },
+            )
         headless = build_headless_runtime(
             cwd=workspace_root,
             # A-8: explicit, audited local-serve YOLO opt-in (see module constant).
@@ -533,6 +566,42 @@ async def _local_adk_chat_sse(
             if event_payload.get("type") == "tool_start":
                 used_tool = True
             yield _sse_event("agent", event_payload)
+            # Mirror engine goal_loop_* status events as mission_event updates
+            # so the Missions panel can render lifecycle progress for the
+            # in-memory goal mission. Terminal events (complete / exhausted /
+            # judge_unavailable) set the mission's final status.
+            if _goal_loop_mission_id is not None:
+                _gl_type = str(event_payload.get("type") or "")
+                if _gl_type.startswith("goal_loop_"):
+                    if _gl_type == "goal_loop_continuation":
+                        _goal_loop_mission_continuations += 1
+                        _mission_event_status = "running"
+                    elif _gl_type == "goal_loop_complete":
+                        _goal_loop_mission_status = "succeeded"
+                        _mission_event_status = "succeeded"
+                    elif _gl_type in (
+                        "goal_loop_exhausted",
+                        "goal_loop_judge_unavailable",
+                    ):
+                        _goal_loop_mission_status = "failed"
+                        _mission_event_status = "failed"
+                    else:
+                        _mission_event_status = "running"
+                    yield _sse_event(
+                        "agent",
+                        {
+                            "type": "mission_event",
+                            "missionId": _goal_loop_mission_id,
+                            "eventType": _gl_type.removeprefix("goal_loop_"),
+                            "status": _mission_event_status,
+                            "continuations": _goal_loop_mission_continuations,
+                            "max": _goal_loop_policy.max_turns
+                            if _goal_loop_policy is not None
+                            else None,
+                            "reason": event_payload.get("reason")
+                            or event_payload.get("judgeReason"),
+                        },
+                    )
             delta = _local_runtime_event_delta(event_payload)
             if delta:
                 assistant_parts.append(delta)
@@ -541,6 +610,31 @@ async def _local_adk_chat_sse(
         # after the EngineResult) would otherwise be dropped.
         while _pending_agent_events:
             yield _sse_event("agent", _pending_agent_events.popleft())
+        # Close the in-memory goal mission. A goal_loop_* terminal event
+        # already set the status; otherwise the turn finished without the
+        # judge firing (the model produced satisfying text on the first
+        # attempt) so we mark the mission succeeded. Turn errors mark it
+        # failed so the Missions panel surfaces the actual outcome.
+        if _goal_loop_mission_id is not None:
+            if turn_errored and _goal_loop_mission_status == "running":
+                _goal_loop_mission_status = "failed"
+            elif _goal_loop_mission_status == "running":
+                _goal_loop_mission_status = "succeeded"
+            yield _sse_event(
+                "agent",
+                {
+                    "type": "mission_updated",
+                    "mission": {
+                        "id": _goal_loop_mission_id,
+                        "status": _goal_loop_mission_status,
+                        "completedAt": int(time.time() * 1000),
+                        "metadata": {
+                            "continuations": _goal_loop_mission_continuations,
+                            "turnId": turn_id,
+                        },
+                    },
+                },
+            )
     finally:
         reset_per_turn_reasoning_effort(_reasoning_token)
         reset_per_turn_goal_loop_policy(_goal_loop_token)
