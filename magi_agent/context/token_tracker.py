@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from magi_agent.context._token_window_table import _KNOWN_TOKEN_LIMITS
 from magi_agent.context.types import (
     ContextManagementConfig,
     TokenBudgetSnapshot,
@@ -8,45 +9,6 @@ from magi_agent.context.types import (
 )
 from magi_agent.shared.token_estimation import estimate_message_tokens
 
-# Mirrors message_builder.py _KNOWN_TOKEN_LIMITS exactly
-_KNOWN_TOKEN_LIMITS: dict[str, int] = {
-    "claude-opus-4-8": 150_000,
-    "claude-opus-4-6": 150_000,
-    "claude-sonnet-4-6": 150_000,
-    "claude-haiku-4-5-20251001": 150_000,
-    "claude-haiku-4-5": 150_000,
-    "anthropic/claude-opus-4-8": 150_000,
-    "anthropic/claude-opus-4-6": 150_000,
-    "anthropic/claude-sonnet-4-6": 150_000,
-    "anthropic/claude-haiku-4-5": 150_000,
-    "openai/gpt-5.4-nano": 96_000,
-    "gpt-5.4-nano": 96_000,
-    "gpt-5-nano": 300_000,
-    "gpt-5-mini": 300_000,
-    "gpt-5.1": 300_000,
-    "gpt-5.4": 300_000,
-    "openai/gpt-5.4-mini": 96_000,
-    "gpt-5.4-mini": 96_000,
-    "openai/gpt-5.5": 750_000,
-    "gpt-5.5": 750_000,
-    "magi-smart-router/auto": 750_000,
-    "big-dic-router/auto": 196_608,
-    "openai/gpt-5.5-pro": 787_500,
-    "openai-codex/gpt-5.5": 750_000,
-    "fireworks/kimi-k2p6": 196_608,
-    "kimi-k2p6": 192_000,
-    "fireworks/minimax-m2p7": 147_456,
-    "minimax-m2p7": 192_000,
-    "google/gemini-3.5-flash": 786_432,
-    "gemini-3.5-flash": 786_432,
-    "google/gemini-3.1-flash-lite-preview": 786_432,
-    "gemini-3.1-flash-lite-preview": 750_000,
-    "google/gemini-3.1-pro-preview": 786_432,
-    "gemini-3.1-pro-preview": 750_000,
-    "local/gemma-fast": 98_304,
-    "local/gemma-max": 98_304,
-    "local/qwen-uncensored": 98_304,
-}
 _DEFAULT_CONTEXT_WINDOW = 150_000
 
 

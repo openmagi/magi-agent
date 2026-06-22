@@ -52,44 +52,18 @@ _IDENTITY_SECTION_ORDER = (
     ("agents", "AGENTS"),
     ("soul", "SOUL"),
 )
-_KNOWN_TOKEN_LIMITS = {
-    "claude-opus-4-8": 150_000,
-    "claude-opus-4-6": 150_000,
-    "claude-sonnet-4-6": 150_000,
-    "claude-haiku-4-5-20251001": 150_000,
-    "claude-haiku-4-5": 150_000,
-    "anthropic/claude-opus-4-8": 150_000,
-    "anthropic/claude-opus-4-6": 150_000,
-    "anthropic/claude-sonnet-4-6": 150_000,
-    "anthropic/claude-haiku-4-5": 150_000,
-    "openai/gpt-5.4-nano": 96_000,
-    "gpt-5.4-nano": 96_000,
-    "gpt-5-nano": 300_000,
-    "gpt-5-mini": 300_000,
-    "gpt-5.1": 300_000,
-    "gpt-5.4": 300_000,
-    "openai/gpt-5.4-mini": 96_000,
-    "gpt-5.4-mini": 96_000,
-    "openai/gpt-5.5": 750_000,
-    "gpt-5.5": 750_000,
-    "magi-smart-router/auto": 750_000,
-    "big-dic-router/auto": 196_608,
-    "openai/gpt-5.5-pro": 787_500,
-    "openai-codex/gpt-5.5": 750_000,
-    "fireworks/kimi-k2p6": 196_608,
-    "kimi-k2p6": 192_000,
-    "fireworks/minimax-m2p7": 147_456,
-    "minimax-m2p7": 192_000,
-    "google/gemini-3.5-flash": 786_432,
-    "gemini-3.5-flash": 786_432,
-    "google/gemini-3.1-flash-lite-preview": 786_432,
-    "gemini-3.1-flash-lite-preview": 750_000,
-    "google/gemini-3.1-pro-preview": 786_432,
-    "gemini-3.1-pro-preview": 750_000,
-    "local/gemma-fast": 98_304,
-    "local/gemma-max": 98_304,
-    "local/qwen-uncensored": 98_304,
-}
+# E-4: ``_KNOWN_TOKEN_LIMITS`` was a byte-identical 35-entry duplicate of
+# ``context/token_tracker._KNOWN_TOKEN_LIMITS`` kept in lockstep by a
+# comment. Both now re-export from a stdlib-only leaf module
+# (``context/_token_window_table.py``) so the dict cannot drift and so
+# the message_builder import doesn't transitively pull in
+# ``token_estimation`` (which loads ``asyncio``/``socket``/``subprocess``,
+# forbidden by the message_builder import-purity contract). The
+# structural follow-up routes everyone through ``ModelCatalog.context_window``
+# (E-1/E-3); this is the interim, byte-identical step.
+from magi_agent.context._token_window_table import (  # noqa: E402
+    _KNOWN_TOKEN_LIMITS,
+)
 _OPENAI_COMPAT_CONTEXT_WINDOW = 131_072
 _OPENAI_COMPAT_MODEL_PREFIXES = (
     "ollama/",
