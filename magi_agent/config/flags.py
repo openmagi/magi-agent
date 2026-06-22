@@ -398,6 +398,15 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_PERSIST_RUN_BOOKENDS_ENABLED",
+        summary=(
+            "Persist a per-turn run-bookend record (goal, one-line result, "
+            "model, token usage, status) to the durable evidence ledger so a "
+            "run-share page can render the top summary. Strict default-OFF; OFF "
+            "keeps the evidence ledger byte-identical (no extra record written)."
+        ),
+    ),
+    _b(
         "MAGI_BROWSER_TOOL_ENABLED",
         summary="Expose the browser-use autonomous vision BrowserTask tool.",
     ),

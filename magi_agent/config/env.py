@@ -1994,6 +1994,31 @@ def is_evidence_ledger_lifecycle_enabled(env: Mapping[str, str] | None = None) -
     return flag_profile_bool(MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED_ENV, env=env)
 
 
+MAGI_PERSIST_RUN_BOOKENDS_ENABLED_ENV = "MAGI_PERSIST_RUN_BOOKENDS_ENABLED"
+
+
+def is_persist_run_bookends_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the run-bookend persistence flag.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF, the
+    governed-turn funnel writes NO run-bookend record, so the durable evidence
+    ledger is byte-identical to today. When ON, one record (goal, one-line
+    result, model, token usage, status) is appended per turn to the same
+    ``<dir>/<session>.jsonl`` the tool evidence already uses, so a run-share page
+    can render the top summary. Like ``is_grounded_answer_guard_enabled`` this is
+    an additive, default-disabled seam and deliberately does NOT follow the
+    runtime-profile default-ON convention.
+
+    Delegates to the canonical ``config.flags`` registry (``flag_bool``) backed
+    by the ``MAGI_PERSIST_RUN_BOOKENDS_ENABLED`` ``FlagSpec``. Imported lazily to
+    avoid a config<->flags import cycle.
+    """
+    from .flags import flag_bool
+
+    source = os.environ if env is None else env
+    return flag_bool(MAGI_PERSIST_RUN_BOOKENDS_ENABLED_ENV, env=source)
+
+
 MAGI_GROUNDED_ANSWER_GUARD_ENABLED_ENV = "MAGI_GROUNDED_ANSWER_GUARD_ENABLED"
 
 
