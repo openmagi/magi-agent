@@ -17,7 +17,8 @@
       "litellm_prefix": "anthropic",
       "deprecated": false,
       "replacement": null,
-      "last_verified": "2026-06-21"
+      "last_verified": "2026-06-21",
+      "reasoning_style": "effort"
     },
     {
       "provider": "anthropic",
@@ -31,7 +32,8 @@
       "litellm_prefix": "anthropic",
       "deprecated": false,
       "replacement": null,
-      "last_verified": "2026-06-21"
+      "last_verified": "2026-06-21",
+      "reasoning_style": "adaptive"
     },
     {
       "provider": "anthropic",
@@ -45,7 +47,8 @@
       "litellm_prefix": "anthropic",
       "deprecated": false,
       "replacement": null,
-      "last_verified": "2026-06-21"
+      "last_verified": "2026-06-21",
+      "reasoning_style": "none"
     },
     {
       "provider": "anthropic",
@@ -59,7 +62,8 @@
       "litellm_prefix": "anthropic",
       "deprecated": false,
       "replacement": "claude-haiku-4-5",
-      "last_verified": "2026-06-21"
+      "last_verified": "2026-06-21",
+      "reasoning_style": "none"
     },
     {
       "provider": "anthropic",
@@ -73,7 +77,8 @@
       "litellm_prefix": "anthropic",
       "deprecated": true,
       "replacement": "claude-opus-4-8",
-      "last_verified": "2026-06-21"
+      "last_verified": "2026-06-21",
+      "reasoning_style": "adaptive"
     },
     {
       "provider": "openai",
@@ -87,7 +92,8 @@
       "litellm_prefix": "openai",
       "deprecated": false,
       "replacement": null,
-      "last_verified": "2026-06-21"
+      "last_verified": "2026-06-21",
+      "reasoning_style": "effort"
     },
     {
       "provider": "openai",
@@ -101,7 +107,8 @@
       "litellm_prefix": "openai",
       "deprecated": false,
       "replacement": null,
-      "last_verified": "2026-06-21"
+      "last_verified": "2026-06-21",
+      "reasoning_style": "effort"
     },
     {
       "provider": "openai",
@@ -115,7 +122,8 @@
       "litellm_prefix": "openai",
       "deprecated": false,
       "replacement": null,
-      "last_verified": "2026-06-21"
+      "last_verified": "2026-06-21",
+      "reasoning_style": "none"
     },
     {
       "provider": "openai",
@@ -129,7 +137,8 @@
       "litellm_prefix": "openai",
       "deprecated": false,
       "replacement": null,
-      "last_verified": "2026-06-21"
+      "last_verified": "2026-06-21",
+      "reasoning_style": "none"
     },
     {
       "provider": "gemini",
@@ -143,7 +152,8 @@
       "litellm_prefix": "gemini",
       "deprecated": false,
       "replacement": null,
-      "last_verified": "2026-06-21"
+      "last_verified": "2026-06-21",
+      "reasoning_style": "none"
     },
     {
       "provider": "gemini",
@@ -157,7 +167,8 @@
       "litellm_prefix": "gemini",
       "deprecated": false,
       "replacement": null,
-      "last_verified": "2026-06-21"
+      "last_verified": "2026-06-21",
+      "reasoning_style": "effort"
     },
     {
       "provider": "gemini",
@@ -171,7 +182,8 @@
       "litellm_prefix": "gemini",
       "deprecated": false,
       "replacement": null,
-      "last_verified": "2026-06-21"
+      "last_verified": "2026-06-21",
+      "reasoning_style": "none"
     },
     {
       "provider": "fireworks",
@@ -185,7 +197,8 @@
       "litellm_prefix": "fireworks_ai",
       "deprecated": false,
       "replacement": null,
-      "last_verified": "2026-06-21"
+      "last_verified": "2026-06-21",
+      "reasoning_style": "none"
     },
     {
       "provider": "fireworks",
@@ -199,7 +212,8 @@
       "litellm_prefix": "fireworks_ai",
       "deprecated": false,
       "replacement": "kimi-k2p6",
-      "last_verified": "2026-06-21"
+      "last_verified": "2026-06-21",
+      "reasoning_style": "none"
     },
     {
       "provider": "fireworks",
@@ -213,7 +227,8 @@
       "litellm_prefix": "fireworks_ai",
       "deprecated": false,
       "replacement": null,
-      "last_verified": "2026-06-21"
+      "last_verified": "2026-06-21",
+      "reasoning_style": "none"
     },
     {
       "provider": "openrouter",
@@ -227,7 +242,8 @@
       "litellm_prefix": "openrouter",
       "deprecated": false,
       "replacement": null,
-      "last_verified": "2026-06-21"
+      "last_verified": "2026-06-21",
+      "reasoning_style": "effort"
     },
     {
       "provider": "openrouter",
@@ -241,7 +257,8 @@
       "litellm_prefix": "openrouter",
       "deprecated": false,
       "replacement": null,
-      "last_verified": "2026-06-21"
+      "last_verified": "2026-06-21",
+      "reasoning_style": "effort"
     }
   ]
 }

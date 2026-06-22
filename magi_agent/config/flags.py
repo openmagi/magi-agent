@@ -682,6 +682,20 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_MODEL_REASONING_DEFAULT_ON",
+        stage="stage2",
+        summary=(
+            "Source per-model default reasoning kwargs (Opus adaptive thinking, "
+            "Sonnet/GPT-5.5/Gemini 3.1 Pro reasoning_effort=high) from the "
+            "ModelCatalog so a fresh install benchmarks the flagship models the "
+            "way published numbers were measured. Default-OFF for soak (OFF is "
+            "byte-identical to today); env knobs MAGI_MODEL_THINKING_TYPE / "
+            "MAGI_MODEL_THINKING_BUDGET_TOKENS / MAGI_MODEL_REASONING_EFFORT "
+            "remain overrides on top, and MAGI_MODEL_REASONING_EFFORT=off/none "
+            "is an explicit disable that wins even when the flag is on."
+        ),
+    ),
+    _b(
         "MAGI_COMPUTE_VIA_CODE_ENABLED",
         summary=(
             "Append a general prompt directive to compute arithmetic, conversions, "

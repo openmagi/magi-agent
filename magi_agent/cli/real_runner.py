@@ -420,6 +420,7 @@ def _model_reasoning_kwargs(
     env: Mapping[str, str] | None = None,
     *,
     provider: str | None = None,
+    config: ProviderConfig | None = None,
 ) -> dict[str, object]:
     """Optional extended-thinking / reasoning kwargs for the LiteLlm build.
 
@@ -429,6 +430,8 @@ def _model_reasoning_kwargs(
     signatures). Without these kwargs the runtime benchmarks the model in a
     strictly weaker mode.
 
+    Precedence (highest first):
+
     * ``MAGI_MODEL_THINKING_TYPE=adaptive`` — send ``thinking={"type":
       "adaptive"}`` directly; highest precedence. Escape hatch for adaptive-only
       models when bypassing litellm's effort mapping.
@@ -437,6 +440,7 @@ def _model_reasoning_kwargs(
       budgeted thinking (e.g. Sonnet 4.5). Adaptive-only models (Opus 4.7/4.8)
       REJECT this shape with a 400 — use ``MAGI_MODEL_REASONING_EFFORT`` (or
       ``MAGI_MODEL_THINKING_TYPE=adaptive``) for those.
+    * Per-turn ContextVar override (chat-completions ``reasoningEffort``).
     * ``MAGI_MODEL_REASONING_EFFORT`` — litellm's cross-provider
       ``reasoning_effort`` (``minimal``/``low``/``medium``/``high``/``xhigh``/
       ``max``); ``off``/``none`` disable. RECOMMENDED knob: litellm maps it
@@ -444,8 +448,17 @@ def _model_reasoning_kwargs(
       ``output_config.effort``, budget models get an enabled budget. When
       ``provider`` is supplied, values are also normalized per-provider
       (notably ``max`` → ``xhigh`` for OpenAI/OpenRouter, which reject ``max``).
+    * Catalog default (E-6, gated by ``MAGI_MODEL_REASONING_DEFAULT_ON``) —
+      lowest precedence; sourced from
+      :meth:`magi_agent.models.ModelCatalog.reasoning_default` so a fresh
+      install benchmarks Opus / GPT-5.5 / Gemini 3.1 Pro the way published
+      numbers were measured. Requires ``config`` to know which (provider,
+      model) row to consult. Default-OFF for soak — when the flag is OFF
+      this function returns ``{}`` from this branch, byte-identical to today.
 
-    Unset ⇒ ``{}`` ⇒ build byte-identical to before (default OFF).
+    ``MAGI_MODEL_REASONING_EFFORT=off`` (or ``none`` / ``0`` / etc.) is an
+    explicit disable that returns ``{}`` even when the catalog default would
+    otherwise apply — operators retain a hard kill switch.
     """
 
     source = os.environ if env is None else env
@@ -470,12 +483,43 @@ def _model_reasoning_kwargs(
         if provider in _PROVIDERS_THAT_REJECT_REASONING_EFFORT:
             return {}
         return {"reasoning_effort": _normalize_reasoning_effort(override, provider)}
-    effort = (source.get("MAGI_MODEL_REASONING_EFFORT") or "").strip().lower()
-    if effort and effort not in {"off", "none", "0", "false", "disable", "disabled"}:
+    effort_raw = (source.get("MAGI_MODEL_REASONING_EFFORT") or "").strip().lower()
+    _disable_tokens = {"off", "none", "0", "false", "disable", "disabled"}
+    if effort_raw in _disable_tokens:
+        # Explicit operator kill switch wins over the catalog default even when
+        # the default-on flag is set — preserves a hard escape hatch.
+        return {}
+    if effort_raw:
         if provider in _PROVIDERS_THAT_REJECT_REASONING_EFFORT:
             return {}
-        return {"reasoning_effort": _normalize_reasoning_effort(effort, provider)}
-    return {}
+        return {"reasoning_effort": _normalize_reasoning_effort(effort_raw, provider)}
+    # E-6: catalog-sourced default reasoning kwargs. Gated default-OFF for soak
+    # per AGENTS.md flag-promotion-verification — OFF stays byte-identical to
+    # today (no env set + no override + no flag ⇒ ``{}``). Local import keeps
+    # the catalog off the cold-start path until the flag flips.
+    if config is None:
+        return {}
+    from magi_agent.config.flags import flag_bool
+    from magi_agent.models import ModelCatalog
+
+    if not flag_bool("MAGI_MODEL_REASONING_DEFAULT_ON", env=source):
+        return {}
+    default_kwargs = dict(
+        ModelCatalog.builtin().reasoning_default(config.provider, config.model)
+    )
+    if not default_kwargs:
+        return {}
+    # The per-provider reject-list applies to catalog defaults too — fireworks
+    # rejects ``reasoning_effort`` at any value, so drop a catalog ``effort``
+    # default rather than ship a guaranteed-400 turn. (Catalog records for
+    # fireworks already carry ``reasoning_style="none"`` so this is belt and
+    # suspenders, but it guards a future authoring slip.)
+    if (
+        "reasoning_effort" in default_kwargs
+        and (provider or config.provider) in _PROVIDERS_THAT_REJECT_REASONING_EFFORT
+    ):
+        return {}
+    return default_kwargs
 
 
 def _model_api_base_kwargs(env: Mapping[str, str] | None = None) -> dict[str, object]:
@@ -561,7 +605,7 @@ def _build_litellm_model(
         model=config.litellm_model,
         api_key=api_key,
         **_model_retry_kwargs(env),
-        **_model_reasoning_kwargs(env, provider=config.provider),
+        **_model_reasoning_kwargs(env, provider=config.provider, config=config),
         **api_base_kwargs,
     )
 

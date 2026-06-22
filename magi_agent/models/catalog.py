@@ -188,6 +188,38 @@ class ModelCatalog:
                 return True
         return False
 
+    def reasoning_default(
+        self, provider: str, model: str
+    ) -> dict[str, object]:
+        """Per-model default reasoning kwargs sourced from the catalog (E-6).
+
+        Returns ``{}`` for unknown ids, for records whose ``capabilities`` lack
+        ``"reasoning"``, or for records tagged ``reasoning_style="none"``. The
+        caller (``cli/real_runner._model_reasoning_kwargs``) applies env-var
+        overrides on top — this method is the *default*, not the final value.
+
+        Tag → kwargs:
+
+        * ``adaptive`` → ``{"thinking": {"type": "adaptive"}}`` (Opus 4.7/4.8
+          accept adaptive only; they 400 on the budget-enabled shape).
+        * ``effort``   → ``{"reasoning_effort": "high"}`` (litellm maps this
+          cross-provider — adaptive models get ``thinking={"type":
+          "adaptive"}`` plus ``output_config.effort``; budget models get an
+          enabled budget; OpenAI/Gemini get their native effort knobs).
+        * ``budget``   → ``{}`` (no shipped default — too provider-specific;
+          reserved for future records that need explicit budgets).
+        * ``none``     → ``{}``.
+        """
+        record = self.record(provider, model)
+        if record is None or "reasoning" not in record.capabilities:
+            return {}
+        if record.reasoning_style == "adaptive":
+            return {"thinking": {"type": "adaptive"}}
+        if record.reasoning_style == "effort":
+            return {"reasoning_effort": "high"}
+        # ``budget`` and ``none`` ship no default (see docstring).
+        return {}
+
 
 @lru_cache(maxsize=1)
 def _cached_builtin() -> ModelCatalog:
