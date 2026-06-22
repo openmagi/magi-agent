@@ -14,8 +14,6 @@ can pin a new id before the catalog learns about it.
 
 from __future__ import annotations
 
-import importlib
-
 import pytest
 
 from magi_agent.cli import providers
@@ -57,7 +55,6 @@ def test_built_in_default_unknown_id_raises(
     start, instead of silently downgrading to a synthetic standard tier."""
 
     # Re-import providers to get a fresh cached dict, then mutate in-place.
-    importlib.reload(providers)
     monkeypatch.setitem(
         providers._DEFAULT_MODEL, "anthropic", "claude-totally-fictional-model"
     )
@@ -80,7 +77,6 @@ def test_built_in_default_deprecated_id_raises(
     (replacement=``claude-opus-4-8``), so simulate the drift by pointing
     Anthropic's built-in default at the deprecated id."""
 
-    importlib.reload(providers)
     monkeypatch.setitem(providers._DEFAULT_MODEL, "anthropic", "claude-opus-4-6")
     with pytest.raises(UnknownModelError) as excinfo:
         providers.resolve_provider_config(
@@ -154,7 +150,6 @@ def test_provider_level_default_model_for_function_raises_on_corruption(
     legacy ``UnknownProviderError`` (which is reserved for unsupported
     providers, e.g. ``mistral``)."""
 
-    importlib.reload(providers)
     monkeypatch.setitem(providers._DEFAULT_MODEL, "anthropic", "claude-not-a-real-id")
     with pytest.raises(UnknownModelError):
         providers.default_model_for("anthropic")
