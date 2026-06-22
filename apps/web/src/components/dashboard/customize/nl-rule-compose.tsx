@@ -38,6 +38,7 @@ import {
   type DashboardCheck,
 } from "@/lib/packs-dashboard-api";
 import { useAgentFetch } from "@/lib/local-api";
+import { NlRuleGuide } from "./nl-rule-guide";
 
 
 export interface NlRuleComposeProps {
@@ -132,6 +133,8 @@ export function NlRuleCompose({
           check) and surfaces a draft for you to review before activating.
         </p>
       </header>
+
+      <NlRuleGuide onPickExample={(text) => setNlText(text)} />
 
       <textarea
         value={nlText}

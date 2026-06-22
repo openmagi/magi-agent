@@ -52,4 +52,9 @@ describe("NlRuleCompose — Unified NL → rule compose surface (PR-D2)", () => 
   it("collapses the raw draft JSON behind a details disclosure", () => {
     expect(src).toContain("View raw draft JSON");
   });
+
+  it("mounts the NlRuleGuide so users see WHEN/WHAT/CONDITION axes + examples", () => {
+    expect(src).toContain("NlRuleGuide");
+    expect(src).toContain("onPickExample={(text) => setNlText(text)}");
+  });
 });
