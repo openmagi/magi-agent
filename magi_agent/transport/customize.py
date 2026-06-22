@@ -82,6 +82,35 @@ def _resolve_seam_compile_factory(body: dict) -> Any:
     return _production_shacl_compiler_model_factory()
 
 
+def _is_nl_rule_compiler_enabled() -> bool:
+    """Read ``MAGI_CUSTOMIZE_NL_RULE_COMPILER_ENABLED`` defensively (PR-D1)."""
+    try:
+        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+        return flag_bool("MAGI_CUSTOMIZE_NL_RULE_COMPILER_ENABLED")
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _resolve_nl_rule_compile_factory(body: dict) -> Any:
+    """Resolve the unified NL→Rule compiler model factory.
+
+    Same shape as :func:`_resolve_seam_compile_factory`: test injection via
+    ``body["_ruleModelFactory"]`` wins, otherwise the SHACL production
+    resolver is reused so a single provider config covers all three NL
+    compilers. Module-level so tests can monkeypatch it.
+    """
+    if isinstance(body, dict):
+        factory = body.get("_ruleModelFactory")
+        if callable(factory):
+            return factory
+    from magi_agent.customize.shacl_compiler import (  # noqa: PLC0415
+        _production_shacl_compiler_model_factory,
+    )
+
+    return _production_shacl_compiler_model_factory()
+
+
 def _make_json_safe(obj: Any) -> Any:
     """Recursively convert non-JSON-serializable objects to plain Python primitives.
 
@@ -750,3 +779,164 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
 
         overrides = delete_seam_spec(spec_id)
         return JSONResponse(content={"ok": True, "overrides": overrides})
+
+    # ------------------------------------------------------------------
+    # PR-D1 — Unified NL → rule compiler (default-OFF, gated by
+    # MAGI_CUSTOMIZE_NL_RULE_COMPILER_ENABLED). Single endpoint that
+    # auto-routes the user's NL policy to one of six backing primitives
+    # and returns a structured draft + LLM critic verdict + deterministic
+    # schemaIssues. Persistence is delegated to the matching existing PUT
+    # route (custom-rules / seams / dashboard-checks) — this endpoint
+    # NEVER saves.
+    # ------------------------------------------------------------------
+    @app.post("/v1/app/customize/rules/compile")
+    async def compile_rule_nl(request: Request) -> JSONResponse:
+        """NL → rule draft compile preview (registration-time only)."""
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+
+        if not _is_nl_rule_compiler_enabled():
+            return JSONResponse(
+                content={"ok": False, "error": "nl-rule compiler disabled"},
+                status_code=200,
+            )
+
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(
+                status_code=400, content={"ok": False, "error": "invalid_json"}
+            )
+        if not isinstance(body, dict) or not isinstance(body.get("nlText"), str):
+            return JSONResponse(
+                status_code=400, content={"ok": False, "error": "nlText_required"}
+            )
+
+        nl_text: str = body["nlText"]
+        if not nl_text.strip():
+            return JSONResponse(
+                status_code=400,
+                content={"ok": False, "error": "nlText must not be empty"},
+            )
+        if len(nl_text.encode()) > _MAX_NL_TEXT_BYTES:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "ok": False,
+                    "error": f"nlText exceeds {_MAX_NL_TEXT_BYTES}-byte limit",
+                },
+            )
+
+        # priorTurns validation — identical caps to the SHACL / seam routes.
+        _MAX_PRIOR_TURNS = 10
+        raw_prior_turns = body.get("priorTurns")
+        validated_prior_turns: list[dict] = []
+        if isinstance(raw_prior_turns, list):
+            raw_prior_turns = raw_prior_turns[:_MAX_PRIOR_TURNS]
+            total_content_bytes = 0
+            for element in raw_prior_turns:
+                if not isinstance(element, dict):
+                    continue
+                role = element.get("role")
+                content = element.get("content")
+                if role not in ("user", "assistant"):
+                    continue
+                if not isinstance(content, str) or not content:
+                    continue
+                content_bytes = len(content.encode())
+                if content_bytes > _MAX_NL_TEXT_BYTES:
+                    continue
+                total_content_bytes += content_bytes
+                validated_prior_turns.append({"role": role, "content": content})
+                if total_content_bytes > 5 * _MAX_NL_TEXT_BYTES:
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "ok": False,
+                            "error": "priorTurns total content too large",
+                        },
+                    )
+
+        validated_user_turn_count = sum(
+            1 for t in validated_prior_turns if t["role"] == "user"
+        )
+        if validated_user_turn_count >= _MAX_COMPILE_ROUNDS:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "ok": False,
+                    "error": "too many conversation rounds",
+                },
+            )
+
+        from magi_agent.customize.rule_compiler import (  # noqa: PLC0415
+            MAX_AGGREGATE_TEXT,
+            PrecheckError,
+            compile_with_review,
+        )
+        from magi_agent.customize.shacl_compiler import (  # noqa: PLC0415
+            _precheck_aggregate,
+        )
+
+        try:
+            _precheck_aggregate(nl_text, tuple(validated_prior_turns))
+        except PrecheckError as exc:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "ok": False,
+                    "error": str(exc),
+                    "limit": MAX_AGGREGATE_TEXT,
+                },
+            )
+
+        # Distinct callables for the self-review guard.
+        resolved = _resolve_nl_rule_compile_factory(body)
+        compiler_factory = (lambda: resolved()) if callable(resolved) else None
+        reviewer_factory = (lambda: resolved()) if callable(resolved) else None
+
+        try:
+            result = await asyncio.wait_for(
+                compile_with_review(
+                    nl_text,
+                    compiler_model_factory=compiler_factory,
+                    reviewer_model_factory=reviewer_factory,
+                    prior_turns=tuple(validated_prior_turns),
+                ),
+                timeout=_LLM_CALL_TIMEOUT_S,
+            )
+        except Exception as exc:  # noqa: BLE001 — never raise from compile route
+            return JSONResponse(
+                content={"ok": False, "error": f"compile error: {exc}"}
+            )
+
+        if result.get("clarifyingQuestions"):
+            return JSONResponse(
+                content={
+                    "ok": False,
+                    "clarifyingQuestions": list(result["clarifyingQuestions"]),
+                    "routedKind": None,
+                    "draft": None,
+                    "error": None,
+                }
+            )
+
+        if not result.get("ok"):
+            return JSONResponse(
+                content={
+                    "ok": False,
+                    "error": result.get("error", "compilation failed"),
+                }
+            )
+
+        return JSONResponse(
+            content={
+                "ok": True,
+                "routedKind": result["routedKind"],
+                "draft": _make_json_safe(result["draft"]),
+                "explanation": result.get("explanation", ""),
+                "review": _make_json_safe(result["review"]),
+                "schemaIssues": list(result.get("schemaIssues", [])),
+            }
+        )

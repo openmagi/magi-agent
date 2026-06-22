@@ -1035,6 +1035,23 @@ FLAGS: tuple[FlagSpec, ...] = (
         stage="stage2",
     ),
     _b(
+        "MAGI_CUSTOMIZE_NL_RULE_COMPILER_ENABLED",
+        summary=(
+            "Enable the POST /v1/app/customize/rules/compile endpoint: a "
+            "single NL → rule compiler that auto-routes the user's policy to "
+            "one of six backing primitives (deterministic_ref / tool_perm / "
+            "llm_criterion / shacl_constraint / seam_spec / custom_check). "
+            "Returns a structured draft + LLM critic verdict + deterministic "
+            "schemaIssues; the caller activates by hitting the matching "
+            "existing PUT route (custom-rules / seams / dashboard-checks). "
+            "Registration-time only — never on the runtime hot path. Requires "
+            "a configured provider/key; fail-open (returns ok=False) when no "
+            "model is available. Strict default-OFF."
+        ),
+        scope="public",
+        stage="stage2",
+    ),
+    _b(
         "MAGI_DASHBOARD_PACK_AUTHORING_ENABLED",
         summary=(
             "Self-host-only dashboard pack-builder UI/REST plus the after-tool "

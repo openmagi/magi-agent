@@ -97,6 +97,7 @@ graph LR
     customize --> evidence
     customize --> harness
     customize --> introspection
+    customize --> packs
     customize --> transport
     discovery --> cli
     egress_proxy --> config
@@ -758,14 +759,15 @@ graph LR
 | apply.py | — | flags, verification_policy | customize/__init__.py, runtime/openmagi_runtime.py, transport/customize.py |
 | catalog.py | — | app_api, preset_map, presets, what_menu | cli/real_runner.py, transport/customize.py |
 | criterion_engine.py | Generic LLM criterion-judgment engine (P3). | egress_gate | cli/engine.py, customize/after_tool_gate.py |
-| custom_rules.py | Custom verification-rule schema + validation (spec §9.1). | shacl_verifier, what_menu | transport/customize.py |
+| custom_rules.py | Custom verification-rule schema + validation (spec §9.1). | shacl_verifier, what_menu | customize/rule_compiler.py, transport/customize.py |
 | preset_map.py | Canonical preset id → runtime-seam map for the Customize verification tab. | scope, seam_apply, seam_spec | cli/real_runner.py, customize/catalog.py, customize/seam_apply.py, customize/seam_compiler.py, customize/seam_spec.py |
+| rule_compiler.py | Unified NL → Rule compiler — single LLM call that routes a natural- | custom_rules, dashboard_authored, seam_spec, shacl_compiler | transport/customize.py |
 | runtime_gate.py | Runtime-side query for Customize verification preset state. | flags, store, verification_policy | cli/engine.py, customize/what_menu.py |
 | scope.py | Single source of truth for scope vocabulary + task-type → scope mapping. | — | customize/preset_map.py, customize/verification_policy.py |
 | seam_apply.py | Apply a :class:`SeamSpec` IR to the static :data:`PRESET_SEAMS` catalog. | preset_map, seam_spec | customize/preset_map.py |
 | seam_compiler.py | NL → SeamSpec compiler — registration-time only, fail-open everywhere. | preset_map, seam_spec, shacl_compiler | transport/customize.py |
-| seam_spec.py | SeamSpec — declarative PresetSeam mutation IR for the NL rule builder. | preset_map | customize/preset_map.py, customize/seam_apply.py, customize/seam_compiler.py, transport/customize.py |
-| shacl_compiler.py | SHACL compiler module -- Tasks 3.1 + 3.2: pure helpers + NL-to-SHACL compiler. | builtin, providers, readonly_classifier, shacl_verifier, types | customize/seam_compiler.py, transport/customize.py |
+| seam_spec.py | SeamSpec — declarative PresetSeam mutation IR for the NL rule builder. | preset_map | customize/preset_map.py, customize/rule_compiler.py, customize/seam_apply.py, customize/seam_compiler.py, transport/customize.py |
+| shacl_compiler.py | SHACL compiler module -- Tasks 3.1 + 3.2: pure helpers + NL-to-SHACL compiler. | builtin, providers, readonly_classifier, shacl_verifier, types | customize/rule_compiler.py, customize/seam_compiler.py, transport/customize.py |
 | store.py | — | — | cli/engine.py, cli/real_runner.py, cli/tests/test_document_coverage_seam_wiring.py, customize/__init__.py, customize/after_tool_gate.py, customize/runtime_gate.py, customize/tool_perm.py, runtime/message_builder.py, runtime/openmagi_runtime.py, transport/customize.py |
 | tool_perm.py | Custom tool-permission rule matching (P2). | flags, store, verification_policy | tools/permission.py |
 | verification_policy.py | — | scope | cli/engine.py, cli/real_runner.py, customize/after_tool_gate.py, customize/apply.py, customize/runtime_gate.py, customize/tool_perm.py |
@@ -1272,7 +1274,7 @@ graph LR
 | catalog_build.py | Build the live ``CompileRecipePackCatalog`` from loaded pack primitives (D4). | discovery, loader, types | packs/loader.py |
 | connector_projection.py | Project loaded connector specs' ToolManifests into the live tool registry. | registries | — |
 | context.py | D5 typed-context ABI + dispatcher for the neutral microkernel. | control_plane, gate5b_full_toolhost | adk_bridge/context_compaction.py, adk_bridge/control_plane.py, adk_bridge/edit_retry_reflection.py, adk_bridge/facts_replan_control.py, adk_bridge/resilience_plugin.py, adk_bridge/schema_feedback.py, adk_bridge/tool_exception_reflection.py, firstparty/packs/callback_turn_audit/impl.py, firstparty/packs/connector_local_readonly/impl.py, firstparty/packs/control_plane_default/impl.py, firstparty/packs/evidence_firstparty_activity/impl.py, firstparty/packs/evidence_gitdiff/impl.py, firstparty/packs/goal_loop_default/impl.py, firstparty/packs/harness_coding_lean/impl.py, firstparty/packs/harness_gaia_codeact/impl.py, firstparty/packs/memory_strategies_default/impl.py, firstparty/packs/scheduler_default/impl.py, firstparty/packs/source_opened_validator/impl.py, firstparty/packs/tools_clock/impl.py, firstparty/packs/tools_persistent_python/impl.py, firstparty/packs/workspace_tools_default/impl.py, gates/gate5b_full_toolhost.py, packs/registries.py, tools/persistent_python_toolhost.py |
-| dashboard_authored.py | Compile dashboard-authored custom checks into a single user pack. | compiler | adk_bridge/dashboard_producer_control.py, transport/packs_dashboard.py |
+| dashboard_authored.py | Compile dashboard-authored custom checks into a single user pack. | compiler | adk_bridge/dashboard_producer_control.py, customize/rule_compiler.py, transport/packs_dashboard.py |
 | discovery.py | Pack discovery (D1): resolve search-path bases and rglob ``pack.toml``. | flags, manifest | adk_bridge/dashboard_producer_control.py, cli/real_runner.py, evidence/first_party_gate.py, harness/goal_loop_control.py, harness/kernel_roles.py, harness/memory_compaction.py, harness/scheduler_executor.py, packs/catalog_build.py, packs/loader.py, packs/registries.py, recipes/kernel_recipe_packs.py, tools/persistent_python_toolhost.py, transport/packs_dashboard.py |
 | harness_projection.py | Inject a pack-provided harness into the live resolved preset state. | resolved | — |
 | hook_projection.py | Expose the previously-unexposed ``HookRegistry`` discovery into the live | bus, registries | — |
@@ -1810,7 +1812,7 @@ graph LR
 | chat_shared.py | Shared primitives for the decomposed Gate5B chat serving stack. | _truthy, child_runner_live, env, gate1a_readonly_tools, gate5b4c3_live_runner_boundary, gate5b_full_toolhost, openmagi_runtime, shadow_generations, user_visible_model_routing | transport/chat.py, transport/chat_routes.py, transport/control_requests.py, transport/gate2_sandbox_canary.py, transport/generation_request.py |
 | control_requests.py | Control-request REST surface consumed by the restored web dashboard. | chat_shared, openmagi_runtime | (root)/app.py |
 | credentials.py | Dashboard "Credentials" admin routes. | credentials_admin, durable_store, openmagi_runtime, tools | (root)/app.py |
-| customize.py | — | apply, catalog, custom_rules, flags, openmagi_runtime, seam_compiler, seam_spec, shacl_compiler, store, tools, types | (root)/app.py |
+| customize.py | — | apply, catalog, custom_rules, flags, openmagi_runtime, rule_compiler, seam_compiler, seam_spec, shacl_compiler, store, tools, types | (root)/app.py |
 | debug_trace.py | Debug endpoint exposing the current turn's execution trace. | trace_context | (root)/app.py |
 | egress_critic.py | Egress critic gate and live evidence projection for the chat serving path. | egress_gate, gate1a_readonly_tools, gate5b_full_toolhost, generation_request, mapping, projection, providers, readonly_classifier, reason_safety, user_visible_model_routing | cli/wiring.py, transport/chat.py, transport/chat_routes.py |
 | gate2_sandbox_canary.py | Gate2 sandbox workspace canary chat + delivery-receipt logic. | chat_shared, gate2_activation_loop_a, gate2_durable_evidence, gate2_readiness, openmagi_runtime, user_visible_model_routing | transport/chat.py, transport/chat_routes.py |
