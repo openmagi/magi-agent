@@ -1,18 +1,23 @@
 "use client";
 
 /**
- * AddRuleModal — single entry-point that asks "What do you want to do?"
- * and routes the user to the right backing primitive's existing form.
+ * AddRulePicker — in-page picker that asks "What do you want to do?" and
+ * hands a choice back to the parent so it can mount the right authoring
+ * form in the SAME scroll position.
  *
- * Phase 1 of the unified Rules redesign: kills the "user has to know
- * which tab to author each rule type in" footgun. Phase 2 will replace
- * this picker with a guided wizard that fills the form fields
- * automatically; this PR keeps the existing rich forms exactly as they
- * are (CustomRulesSection / CustomChecksSection / SeamBuilderPanel) so
- * the diff stays scoped to navigation, not authoring logic.
+ * Earlier shape (an overlay modal) had a footgun: dismissing the modal
+ * dropped the user back at the page header with no visible follow-up —
+ * the inline authoring form rendered below the rules table, off-screen
+ * for any non-trivial customize.json. The redesign drops the modal
+ * entirely; the picker now renders in-place where the user clicked
+ * "Add rule".
+ *
+ * ``AddRuleModal`` is retained as a thin re-export so any in-flight
+ * callers that imported the old name keep compiling; new code should
+ * import ``AddRulePicker``.
  */
 
-import { Ban, Filter, ShieldOff, Wand2 } from "lucide-react";
+import { Ban, Filter, ShieldOff, Wand2, X as XIcon } from "lucide-react";
 import React from "react";
 
 
@@ -23,10 +28,13 @@ export type AddRuleChoice =
   | "rewire-builtin";
 
 
-export interface AddRuleModalProps {
-  open: boolean;
-  onClose: () => void;
+export interface AddRulePickerProps {
+  /** Called when the user picks a choice. Parent should mount the
+   *  matching authoring form and clear the picker by setting
+   *  ``hidden=true`` (or unmounting the picker). */
   onPick: (choice: AddRuleChoice) => void;
+  /** Called when the user dismisses the picker via the X button. */
+  onCancel: () => void;
 }
 
 
@@ -75,62 +83,82 @@ const CHOICES: ReadonlyArray<ChoiceCard> = [
 ];
 
 
+export function AddRulePicker({
+  onPick,
+  onCancel,
+}: AddRulePickerProps): React.ReactElement {
+  return (
+    <section
+      aria-label="Pick a rule kind"
+      className="rounded-2xl border border-primary/20 bg-primary/[0.02] p-4 shadow-sm"
+    >
+      <header className="mb-3 flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-bold text-foreground">Add a rule</h3>
+          <p className="mt-0.5 text-xs text-secondary">
+            Pick what you want the agent to do (or not do). We route you to
+            the right authoring form below.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onCancel}
+          aria-label="Close add rule picker"
+          className="rounded-lg p-1.5 text-secondary hover:bg-black/[0.04] hover:text-foreground"
+        >
+          <XIcon className="h-4 w-4" />
+        </button>
+      </header>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {CHOICES.map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            onClick={() => onPick(c.id)}
+            className="flex flex-col items-start gap-2 rounded-xl border border-black/[0.08] bg-white p-4 text-left transition-colors hover:border-primary hover:bg-primary/[0.05]"
+          >
+            <span className="rounded-lg bg-primary/10 p-2 text-primary">
+              {c.icon}
+            </span>
+            <span className="text-sm font-semibold text-foreground">
+              {c.label}
+            </span>
+            <span className="text-xs leading-relaxed text-secondary">
+              {c.description}
+            </span>
+            <span className="mt-1 rounded bg-black/[0.04] px-1.5 py-0.5 text-[10px] font-mono text-secondary/80">
+              → {c.backing}
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+
+/**
+ * Back-compat alias for the previous overlay shape. Retained so legacy
+ * imports keep compiling; new callers should import ``AddRulePicker``
+ * directly. The wrapper ignores ``open`` and forwards the picker as if
+ * it were always-open — the parent now controls visibility through its
+ * own state (rendering the picker or not).
+ *
+ * @deprecated Use ``AddRulePicker`` and let the parent toggle the mount.
+ */
+export interface AddRuleModalProps {
+  open: boolean;
+  onClose: () => void;
+  onPick: (choice: AddRuleChoice) => void;
+}
+
+
 export function AddRuleModal({
   open,
   onClose,
   onPick,
 }: AddRuleModalProps): React.ReactElement | null {
   if (!open) return null;
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Add a rule"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6"
-    >
-      <div className="w-full max-w-2xl rounded-2xl bg-white shadow-xl">
-        <header className="flex items-center justify-between border-b border-black/[0.06] px-5 py-4">
-          <div>
-            <h2 className="text-base font-bold text-foreground">Add a rule</h2>
-            <p className="mt-0.5 text-xs text-secondary">
-              Pick what you want the agent to do (or not do). We route you to
-              the right authoring form.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="rounded-lg p-1.5 text-secondary hover:bg-black/[0.04] hover:text-foreground"
-          >
-            ✕
-          </button>
-        </header>
-
-        <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2">
-          {CHOICES.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => onPick(c.id)}
-              className="flex flex-col items-start gap-2 rounded-xl border border-black/[0.06] bg-white p-4 text-left transition-colors hover:border-primary hover:bg-primary/[0.04]"
-            >
-              <span className="rounded-lg bg-primary/10 p-2 text-primary">
-                {c.icon}
-              </span>
-              <span className="text-sm font-semibold text-foreground">
-                {c.label}
-              </span>
-              <span className="text-xs leading-relaxed text-secondary">
-                {c.description}
-              </span>
-              <span className="mt-1 rounded bg-black/[0.04] px-1.5 py-0.5 text-[10px] font-mono text-secondary/80">
-                → {c.backing}
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
+  return <AddRulePicker onCancel={onClose} onPick={onPick} />;
 }

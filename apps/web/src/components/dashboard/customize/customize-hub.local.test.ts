@@ -22,10 +22,16 @@ describe("CustomizeHub — unified Rules redesign (Phase 1)", () => {
     expect(src).not.toMatch(/['"]advanced['"]/);
   });
 
-  it("renders the Rules section via RulesSectionMount + RulesTable + AddRuleModal", () => {
+  it("renders the Rules section via RulesSectionMount + RulesTable + inline AddRulePicker", () => {
     expect(src).toContain("RulesSectionMount");
     expect(src).toContain("RulesTable");
-    expect(src).toContain("AddRuleModal");
+    expect(src).toContain("AddRulePicker");
+  });
+
+  it("uses a phase state machine (idle / picking / authoring) so the picker and form share scroll position with the Add button", () => {
+    expect(src).toContain('phase: "idle"');
+    expect(src).toContain('phase: "picking"');
+    expect(src).toContain('phase: "authoring"');
   });
 
   it("keeps SeamBuilderPanel / CustomRulesSection / CustomChecksSection reachable via the Add-rule routing", () => {

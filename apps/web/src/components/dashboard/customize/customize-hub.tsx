@@ -41,7 +41,7 @@ import type {
   ShaclCompileResponse,
 } from "@/lib/customize-api";
 import { useAgentFetch } from "@/lib/local-api";
-import { AddRuleModal, type AddRuleChoice } from "./add-rule-modal";
+import { AddRulePicker, type AddRuleChoice } from "./add-rule-modal";
 import {
   CustomRulesSection,
 } from "./verification-rule-modal";
@@ -411,22 +411,99 @@ function RulesSectionMount({
   ) => Promise<ShaclCompileResponse>;
   ruleError: string | null;
 }): React.ReactElement {
-  const [addModalOpen, setAddModalOpen] = useState(false);
-  const [activeChoice, setActiveChoice] = useState<AddRuleChoice | null>(null);
+  // Add-rule UX state machine. The previous overlay-modal shape dismissed
+  // before the authoring form appeared, leaving the user with a blank
+  // header. Inlining the picker + the form at the top of the page keeps
+  // the user's eye on the same spot.
+  type AddState =
+    | { phase: "idle" }
+    | { phase: "picking" }
+    | { phase: "authoring"; choice: AddRuleChoice };
+  const [addState, setAddState] = useState<AddState>({ phase: "idle" });
   const seamSpecs = data.overrides.verification.seam_specs ?? [];
 
   return (
     <div className="space-y-5">
       <div className="flex justify-end">
-        <button
-          type="button"
-          onClick={() => setAddModalOpen(true)}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-primary/90"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          Add rule
-        </button>
+        {addState.phase === "idle" ? (
+          <button
+            type="button"
+            onClick={() => setAddState({ phase: "picking" })}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-primary/90"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Add rule
+          </button>
+        ) : null}
       </div>
+
+      {addState.phase === "picking" ? (
+        <AddRulePicker
+          onCancel={() => setAddState({ phase: "idle" })}
+          onPick={(choice) => setAddState({ phase: "authoring", choice })}
+        />
+      ) : null}
+
+      {addState.phase === "authoring" ? (
+        <section
+          aria-labelledby="rules-active-form"
+          className="rounded-2xl border border-primary/20 bg-primary/[0.02] p-4 shadow-sm"
+        >
+          <header className="mb-3 flex items-center justify-between">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+                Authoring
+              </p>
+              <h3
+                id="rules-active-form"
+                className="text-sm font-bold text-foreground"
+              >
+                {LABEL_FOR_CHOICE[addState.choice]}
+              </h3>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setAddState({ phase: "picking" })}
+                className="rounded-lg px-2 py-1 text-[11px] font-medium text-secondary hover:bg-black/[0.04]"
+              >
+                ← Pick different
+              </button>
+              <button
+                type="button"
+                onClick={() => setAddState({ phase: "idle" })}
+                className="rounded-lg px-2 py-1 text-[11px] font-medium text-secondary hover:bg-black/[0.04]"
+              >
+                Close
+              </button>
+            </div>
+          </header>
+
+          {addState.choice === "block-answer" || addState.choice === "restrict-tool" ? (
+            <CustomRulesSection
+              menu={data.catalog.verification.customRuleMenu}
+              rules={customRules}
+              busy={customRuleBusy}
+              onAdd={onAddCustomRule}
+              onToggle={onToggleCustomRule}
+              onDelete={onDeleteCustomRule}
+              onCompileShacl={onCompileShacl}
+              autoOpen
+              initialKind={
+                addState.choice === "restrict-tool" ? "tool_perm" : "deterministic_ref"
+              }
+            />
+          ) : null}
+
+          {addState.choice === "filter-result" ? (
+            <CustomChecksSection busy={customRuleBusy} />
+          ) : null}
+
+          {addState.choice === "rewire-builtin" ? (
+            <SeamBuilderPanel seamSpecs={seamSpecs} onChange={reload} />
+          ) : null}
+        </section>
+      ) : null}
 
       {ruleError ? (
         <div className="rounded-lg border border-red-500/25 bg-red-500/[0.06] px-3 py-2 text-xs text-red-600">
@@ -444,62 +521,6 @@ function RulesSectionMount({
         onToggleCustomRule={onToggleCustomRule}
         onDeleteCustomRule={onDeleteCustomRule}
         seamSpecs={seamSpecs}
-      />
-
-      {activeChoice ? (
-        <section
-          aria-labelledby="rules-active-form"
-          className="rounded-xl border border-primary/20 bg-primary/[0.02] p-4"
-        >
-          <header className="mb-3 flex items-center justify-between">
-            <h3
-              id="rules-active-form"
-              className="text-sm font-semibold text-foreground"
-            >
-              Authoring: {LABEL_FOR_CHOICE[activeChoice]}
-            </h3>
-            <button
-              type="button"
-              onClick={() => setActiveChoice(null)}
-              className="rounded-lg px-2 py-1 text-[11px] font-medium text-secondary hover:bg-black/[0.04]"
-            >
-              Close
-            </button>
-          </header>
-
-          {activeChoice === "block-answer" || activeChoice === "restrict-tool" ? (
-            <CustomRulesSection
-              menu={data.catalog.verification.customRuleMenu}
-              rules={customRules}
-              busy={customRuleBusy}
-              onAdd={onAddCustomRule}
-              onToggle={onToggleCustomRule}
-              onDelete={onDeleteCustomRule}
-              onCompileShacl={onCompileShacl}
-              autoOpen
-              initialKind={
-                activeChoice === "restrict-tool" ? "tool_perm" : "deterministic_ref"
-              }
-            />
-          ) : null}
-
-          {activeChoice === "filter-result" ? (
-            <CustomChecksSection busy={customRuleBusy} />
-          ) : null}
-
-          {activeChoice === "rewire-builtin" ? (
-            <SeamBuilderPanel seamSpecs={seamSpecs} onChange={reload} />
-          ) : null}
-        </section>
-      ) : null}
-
-      <AddRuleModal
-        open={addModalOpen}
-        onClose={() => setAddModalOpen(false)}
-        onPick={(choice) => {
-          setActiveChoice(choice);
-          setAddModalOpen(false);
-        }}
       />
     </div>
   );
