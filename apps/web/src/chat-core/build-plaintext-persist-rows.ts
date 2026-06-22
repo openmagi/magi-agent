@@ -10,7 +10,7 @@
 // `encodeHistoryPlaintext` so the history loader can decode thinking/usage back.
 
 import { encodeHistoryPlaintext } from "./history-envelope";
-import type { ResearchEvidenceSnapshot, ResponseUsage } from "./types";
+import type { ResearchEvidenceSnapshot, ResponseUsage, ToolActivity } from "./types";
 
 /** A single plaintext row accepted by POST /api/chat/messages. */
 export interface PlaintextPersistRow {
@@ -26,6 +26,8 @@ export interface CompletedAssistantMessage {
   thinkingDuration?: number;
   researchEvidence?: ResearchEvidenceSnapshot;
   usage?: ResponseUsage;
+  /** Tool/skill activities captured during the turn (persisted only when opted in). */
+  activities?: ToolActivity[];
 }
 
 export interface BuildPlaintextPersistRowsOptions {
@@ -44,6 +46,14 @@ export interface BuildPlaintextPersistRowsOptions {
    * visible message).
    */
   includeAssistantMetadata?: boolean;
+  /**
+   * When true (AND `includeAssistantMetadata`), the assistant's tool activities
+   * are encoded into the `_v:4` envelope so the "Completed N actions" timeline
+   * survives reload. Default false → activities are NOT persisted and the
+   * envelope stays byte-identical to the v2/v3 form. Gated by the app-layer
+   * flag `MAGI_PERSIST_TOOL_ACTIVITY` (default-OFF).
+   */
+  persistToolActivity?: boolean;
 }
 
 /**
@@ -88,6 +98,9 @@ export function buildPlaintextPersistRows(
             : {}),
           ...(opts.assistant.usage !== undefined
             ? { usage: opts.assistant.usage }
+            : {}),
+          ...(opts.persistToolActivity && opts.assistant.activities?.length
+            ? { activities: opts.assistant.activities }
             : {}),
         })
       : assistantText;
