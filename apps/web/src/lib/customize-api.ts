@@ -471,6 +471,83 @@ export async function deleteSeamSpec(
   return data.overrides;
 }
 
+
+// ---------------------------------------------------------------------------
+// PR-D1/D2 — Unified NL → rule compiler API client
+// ---------------------------------------------------------------------------
+
+/** The six backing primitives the unified NL compiler can route to. */
+export type RoutedKind =
+  | "deterministic_ref"
+  | "tool_perm"
+  | "llm_criterion"
+  | "shacl_constraint"
+  | "seam_spec"
+  | "custom_check";
+
+/** Same verdict shape as SHACL / SeamSpec reviewers. */
+export interface RuleReview {
+  verdict: "aligned" | "mismatch" | "overbroad" | "underbroad" | "unknown";
+  issues: string[];
+  confidence: number;
+}
+
+/**
+ * Response from `POST /v1/app/customize/rules/compile` (preview-only).
+ *
+ * On success: `ok: true` + `routedKind` + `draft` (CustomRule | SeamSpecDoc |
+ * DashboardCheck shape per kind) + `review` + `schemaIssues` + `explanation`.
+ * On clarifying-questions: `ok: false`, `clarifyingQuestions` is the list,
+ * `routedKind` / `draft` are null, `error` is explicitly null.
+ * On compile failure: `ok: false`, `error` carries the reason.
+ * Flag-OFF: `ok: false`, `error: "nl-rule compiler disabled"`.
+ */
+export interface RuleCompileResponse {
+  ok: boolean;
+  routedKind?: RoutedKind | null;
+  draft?: unknown;
+  explanation?: string;
+  review?: RuleReview;
+  schemaIssues?: string[];
+  clarifyingQuestions?: string[];
+  error?: string | null;
+}
+
+/**
+ * Compiles a natural-language policy via `POST /v1/app/customize/rules/
+ * compile`. Same error contract as `compileSeamSpec` / `compileCustomRule`:
+ * never throws on a 4xx/5xx or network error.
+ */
+export async function compileRule(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  nlText: string,
+  priorTurns?: ConversationTurn[],
+): Promise<RuleCompileResponse> {
+  try {
+    const bodyPayload: { nlText: string; priorTurns?: ConversationTurn[] } = { nlText };
+    if (priorTurns !== undefined && priorTurns.length > 0) {
+      bodyPayload.priorTurns = priorTurns;
+    }
+    const res = await fetch(`/v1/app/customize/rules/compile`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(bodyPayload),
+    });
+    if (!res.ok) {
+      let backendError = `Compile request failed (${res.status})`;
+      try {
+        const errBody = (await res.json()) as { error?: string };
+        if (typeof errBody.error === "string" && errBody.error.length > 0) backendError = errBody.error;
+      } catch { /* ignore JSON parse failure on error body */ }
+      return { ok: false, error: backendError };
+    }
+    return (await res.json()) as RuleCompileResponse;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Network error";
+    return { ok: false, error: message };
+  }
+}
+
 /**
  * Loads the local runtime customization snapshot from `/v1/app/customize`.
  *
