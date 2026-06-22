@@ -42,6 +42,7 @@ import type {
 } from "@/lib/customize-api";
 import { useAgentFetch } from "@/lib/local-api";
 import { AddRulePicker, type AddRuleChoice } from "./add-rule-modal";
+import { NlRuleCompose } from "./nl-rule-compose";
 import {
   CustomRulesSection,
 } from "./verification-rule-modal";
@@ -438,10 +439,25 @@ function RulesSectionMount({
       </div>
 
       {addState.phase === "picking" ? (
-        <AddRulePicker
-          onCancel={() => setAddState({ phase: "idle" })}
-          onPick={(choice) => setAddState({ phase: "authoring", choice })}
-        />
+        <div className="space-y-3">
+          <NlRuleCompose
+            onActivated={() => {
+              reload();
+              setAddState({ phase: "idle" });
+            }}
+          />
+          <details className="rounded-2xl border border-black/[0.06] bg-white px-4 py-3 open:pb-4">
+            <summary className="cursor-pointer text-xs font-medium text-secondary hover:text-foreground">
+              Or build manually (pick a rule kind)
+            </summary>
+            <div className="mt-3">
+              <AddRulePicker
+                onCancel={() => setAddState({ phase: "idle" })}
+                onPick={(choice) => setAddState({ phase: "authoring", choice })}
+              />
+            </div>
+          </details>
+        </div>
       ) : null}
 
       {addState.phase === "authoring" ? (

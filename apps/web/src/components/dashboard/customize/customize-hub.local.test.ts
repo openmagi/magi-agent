@@ -40,6 +40,14 @@ describe("CustomizeHub — unified Rules redesign (Phase 1)", () => {
     expect(src).toContain("CustomChecksSection");
   });
 
+  it("primaries the NL rule compose (PR-D2) and demotes the 4-card picker to a fold-out", () => {
+    // NL compose mounts at the top of the picking phase; the legacy 4-card
+    // picker still mounts but inside a <details> labelled "Or build manually"
+    // so the operator can fall back when the unified compiler is unavailable.
+    expect(src).toContain("NlRuleCompose");
+    expect(src).toContain("Or build manually");
+  });
+
   it("pre-fills CustomRulesSection.initialKind from the AddRuleModal choice (Phase 2)", () => {
     // restrict-tool routes to tool_perm; block-answer routes to deterministic_ref.
     expect(src).toContain("autoOpen");
