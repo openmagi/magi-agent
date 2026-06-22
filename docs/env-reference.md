@@ -38,7 +38,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_DEEP_WEB_RESEARCH_ENABLED` (default off) — Enable the live deep web-research harness (search + fetch + verify).
 - `MAGI_DEFERRED_TOOLS_ENABLED` (default off) — Enable deferred (lazily-loaded) tool schemas.
 - `MAGI_DISCORD_BOT_TOKEN` (no default) — Discord bot token for the live channel watcher; unset keeps the watcher fail-closed (not built). Never logged or persisted.
-- `MAGI_DOCUMENT_AUTHORING_COVERAGE` (default off) — Block document turns on failed DocumentCoverage (vs audit-only).
+- `MAGI_DOCUMENT_AUTHORING_COVERAGE` (default `off`) — Tri-state document-coverage gate (off|advisory|block). off keeps the DocumentCoverage evidence audit-only; advisory records counts without blocking; block flips the pre-final verifier-bus decision when coverage fails. Legacy truthy values resolve to ``block`` for back-compat. Strict default ``off``.
 - `MAGI_DOCUMENT_QA_ENABLED` (default off) — Expose the question-conditioned DocumentQA file-QA sidecar tool (requires MAGI_FILE_TOOLS_ENABLED); strict default-OFF in all profiles.
 - `MAGI_DOCUMENT_QA_MODEL` (no default) — Model id override for the DocumentQA sidecar call (e.g. a cheap haiku-class model); unset uses the configured provider model.
 - `MAGI_EDIT_FORMAT_ON_WRITE_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Run a formatter on files written by the coding harness (default-ON full profile).

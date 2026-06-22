@@ -8,7 +8,7 @@ CORE_AGENT_	magi_agent/adk_bridge/tool_adapter.py	4
 CORE_AGENT_	magi_agent/cli/tests/test_app.py	5
 CORE_AGENT_	magi_agent/cli/tests/test_model_picker_wire.py	2
 CORE_AGENT_	magi_agent/config/env.py	242
-CORE_AGENT_	magi_agent/config/flags.py	2
+CORE_AGENT_	magi_agent/config/flags.py	3
 CORE_AGENT_	magi_agent/config/tests/test_flags.py	1
 CORE_AGENT_	magi_agent/evidence/gate1a_egress_correlation.py	1
 CORE_AGENT_	magi_agent/evidence/observed_egress.py	3
@@ -18,7 +18,7 @@ CORE_AGENT_	magi_agent/main.py	6
 CORE_AGENT_	magi_agent/research/research_first_canary.py	2
 CORE_AGENT_	magi_agent/shadow/fixture_runner.py	1
 CORE_AGENT_	magi_agent/transport/app_api.py	2
-CORE_AGENT_	magi_agent/transport/chat_routes.py	9
+CORE_AGENT_	magi_agent/transport/chat_routes.py	5
 CORE_AGENT_	magi_agent/transport/chat_shared.py	49
 CORE_AGENT_	magi_agent/transport/gate2_sandbox_canary.py	10
 CORE_AGENT_	magi_agent/transport/health.py	1

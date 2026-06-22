@@ -286,6 +286,20 @@ def _local_chat_route_enabled() -> bool:
     }
 
 
+def _python_chat_route_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single decision point for ``CORE_AGENT_PYTHON_CHAT_ROUTE`` (I-4).
+
+    Hosted-runtime authority gate for the python chat route. Delegates to
+    :func:`magi_agent.config.flags.flag_bool` so the strict-truthy convention
+    (``1``/``true``/``yes``/``on`` after trim+lower) lives in exactly one
+    place. Replaces 6 inline ``os.environ`` reads of the flag previously
+    scattered across this module — the legacy contract accepted only ``on``;
+    the new contract is a strict superset that also accepts the other shared
+    truthy literals. See ``tests/test_chat_route_flag_registry.py``.
+    """
+    return flag_bool("CORE_AGENT_PYTHON_CHAT_ROUTE", env=env)
+
+
 def _local_adk_chat_response(
     runtime: OpenMagiRuntime,
     payload: object,
@@ -749,10 +763,7 @@ def register_chat_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
                 status_code=401,
                 content={"error": "unauthorized"},
             )
-        if (
-            _local_chat_route_enabled()
-            and os.environ.get("CORE_AGENT_PYTHON_CHAT_ROUTE", "off").lower() != "on"
-        ):
+        if _local_chat_route_enabled() and not _python_chat_route_enabled():
             try:
                 payload = await request.json()
             except (JSONDecodeError, ValueError):
@@ -761,7 +772,7 @@ def register_chat_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
                     content={"error": "malformed_json"},
                 )
             return _local_adk_chat_response(runtime, payload)
-        if os.environ.get("CORE_AGENT_PYTHON_CHAT_ROUTE", "off").lower() != "on":
+        if not _python_chat_route_enabled():
             return JSONResponse(
                 status_code=503,
                 content={
@@ -828,7 +839,7 @@ def register_chat_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
                 status_code=401,
                 content={"error": "unauthorized"},
             )
-        if os.environ.get("CORE_AGENT_PYTHON_CHAT_ROUTE", "off").lower() != "on":
+        if not _python_chat_route_enabled():
             return JSONResponse(
                 status_code=503,
                 content={
@@ -906,7 +917,7 @@ def register_chat_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
                 status_code=401,
                 content={"error": "unauthorized"},
             )
-        if os.environ.get("CORE_AGENT_PYTHON_CHAT_ROUTE", "off").lower() != "on":
+        if not _python_chat_route_enabled():
             return JSONResponse(
                 status_code=503,
                 content={
@@ -991,7 +1002,7 @@ def register_chat_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
                 status_code=401,
                 content={"error": "unauthorized"},
             )
-        if os.environ.get("CORE_AGENT_PYTHON_CHAT_ROUTE", "off").lower() != "on":
+        if not _python_chat_route_enabled():
             return _fallback_response(
                 status_code=503,
                 status="python_disabled",
@@ -1173,7 +1184,7 @@ def register_chat_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
                 status_code=401,
                 content={"error": "unauthorized"},
             )
-        if os.environ.get("CORE_AGENT_PYTHON_CHAT_ROUTE", "off").lower() != "on":
+        if not _python_chat_route_enabled():
             return _fallback_response(
                 status_code=503,
                 status="python_disabled",
