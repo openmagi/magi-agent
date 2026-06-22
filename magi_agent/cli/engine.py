@@ -2684,7 +2684,7 @@ class MagiEngineDriver:
 
         if cancelled:
             for safe in self._synthesize_orphan_tool_results(
-                pending_tool_ids, turn_id=turn_id
+                pending_tool_ids, turn_id=turn_id, reason="user_interrupt"
             ):
                 yield RuntimeEvent(type="tool", payload=safe, turn_id=turn_id)
             yield RuntimeEvent(
@@ -2713,7 +2713,7 @@ class MagiEngineDriver:
             # tool_use that a resuming session cannot reconcile (same hazard the
             # cancel path guards against).
             for safe in self._synthesize_orphan_tool_results(
-                pending_tool_ids, turn_id=turn_id
+                pending_tool_ids, turn_id=turn_id, reason="engine_error"
             ):
                 yield RuntimeEvent(type="tool", payload=safe, turn_id=turn_id)
             yield EngineResult(  # type: ignore[misc]
@@ -3056,7 +3056,7 @@ class MagiEngineDriver:
 
             if cancelled:
                 for safe in self._synthesize_orphan_tool_results(
-                    pending_tool_ids, turn_id=turn_id
+                    pending_tool_ids, turn_id=turn_id, reason="user_interrupt"
                 ):
                     yield RuntimeEvent(type="tool", payload=safe, turn_id=turn_id)
                 yield RuntimeEvent(
@@ -3080,7 +3080,7 @@ class MagiEngineDriver:
                 return
             if attempt_error is not None:
                 for safe in self._synthesize_orphan_tool_results(
-                    pending_tool_ids, turn_id=turn_id
+                    pending_tool_ids, turn_id=turn_id, reason="repair_fork"
                 ):
                     yield RuntimeEvent(type="tool", payload=safe, turn_id=turn_id)
                 yield EngineResult(  # type: ignore[misc]
@@ -3377,18 +3377,42 @@ class MagiEngineDriver:
         elif event_type == "tool_end":
             pending_tool_ids.pop(tool_id, None)
 
+    #: Reason → human-readable ``output_preview`` for orphan ``tool_end`` sweeps.
+    #: The pre-fix code hard-coded the user-cancellation phrasing on every path
+    #: (including engine error and repair-fork abort) — Kevin saw "interrupted
+    #: by user cancellation" on tools nobody cancelled. The structured ``reason``
+    #: field on each event is the authoritative signal for new consumers; the
+    #: preview string is kept for back-compat surfaces (exports, downstream
+    #: transcripts) and now matches what actually happened.
+    _ORPHAN_TOOL_PREVIEW_BY_REASON: dict[str, str] = {
+        "user_interrupt": "tool interrupted by user cancellation",
+        "engine_error": "tool interrupted by engine error",
+        "repair_fork": "tool interrupted by repair restart",
+    }
+
     @staticmethod
     def _synthesize_orphan_tool_results(
         pending_tool_ids: dict[str, str],
         *,
         turn_id: str,
+        reason: str = "user_interrupt",
     ) -> list[dict[str, object]]:
         """Build interrupted ``tool_end`` events for any unmatched tool calls.
 
         These keep the transcript balanced (every tool_use gets a tool_result)
         so a resumed session does not see a dangling tool call.
+
+        ``reason`` names what actually caused the sweep so the
+        ``output_preview`` does not falsely blame the user when the engine
+        errored or a repair fork aborted. Unknown reasons fall through to a
+        neutral phrasing (still not the user-cancellation literal) and the
+        raw reason is carried in the event's ``reason`` field for accurate
+        downstream rendering.
         """
 
+        preview = MagiEngineDriver._ORPHAN_TOOL_PREVIEW_BY_REASON.get(
+            reason, f"tool interrupted: {reason}"
+        )
         results: list[dict[str, object]] = []
         for tool_id in pending_tool_ids:
             results.append(
@@ -3396,7 +3420,8 @@ class MagiEngineDriver:
                     "type": "tool_end",
                     "id": tool_id,
                     "status": "error",
-                    "output_preview": "tool interrupted by user cancellation",
+                    "output_preview": preview,
+                    "reason": reason,
                     "durationMs": 0,
                     "interrupted": True,
                 }
