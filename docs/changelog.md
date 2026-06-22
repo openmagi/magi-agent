@@ -15,6 +15,33 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.68
+
+### Added
+- `.magi/{BOOTSTRAP,IDENTITY,USER,LEARNING,AGENTS}.md` self-identity slots
+  are wired into the prompt assembly and the legacy SOUL prompt path is
+  decoupled (#836). Fresh installs without `.magi/*` files stay
+  byte-identical; identity / prompt suites are at 248 green.
+- Tool activities now persist in the chat-core history envelope behind a
+  default-OFF `_v:4` schema bump (#838); the chat surfaces can recover the
+  full tool-event timeline on reload once it's flipped on.
+- Layer 2 PR-B (#839): `goalMode` is now wired through to a
+  `GoalLoopPolicy` ContextVar in transport, so the runtime sees a real
+  per-turn goal-mode signal instead of a hint.
+
+### Changed
+- I-4 chat-route consolidation (#833 primary + #834 follow-up): six
+  separate chat-route env reads collapse into one decision, plus the
+  workspace / control-plane truthy reads move onto the registry. I-1
+  batch 4 lands the tri-state document-authoring registry in the same
+  PR. Net effect on the raw-env-read ratchet: 89 → 70 (-19) — locked in
+  via `scripts/flag_reads_budget.txt`.
+
+### Fixed
+- `DEFERRAL_PREVENTION_BLOCK` strengthened (#832): Layer 1 anti-deferral
+  prompt instructions are more explicit so the planner is less likely to
+  punt obvious questions back to the operator instead of executing.
+
 ## 0.1.67
 
 ### Added
