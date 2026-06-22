@@ -56,6 +56,7 @@ def build_cli_tool_runtime(
     general_automation_receipts: "GeneralAutomationReceiptLedgerStore | None" = None,
     local_tool_evidence_collector: "LocalToolEvidenceCollector | None" = None,
     include_local_full_handlers: bool = True,
+    agent_event_emitter: Callable[..., object] | None = None,
 ) -> CliToolRuntime:
     """Assemble the registry, dispatcher, and tool-context factory.
 
@@ -246,6 +247,12 @@ def build_cli_tool_runtime(
             adk_tool_context=adk_tool_context,
             adk_context=adk_tool_context,
             parent_tool_names=parent_tool_names_snapshot,
+            # Local-serve child-lifecycle plumbing (SpawnAgent → dashboard
+            # Work pane). Default ``None`` keeps every emit-site in
+            # ``subagents.py`` no-op via its ``callable(emitter)`` guard
+            # (back-compat). The chat-route threads a deque-pushing closure
+            # here so child_started/progress/completed surface on SSE.
+            emit_agent_event=agent_event_emitter,
         )
 
     return CliToolRuntime(
@@ -266,6 +273,7 @@ def build_cli_adk_tools(
     general_automation_receipts: "GeneralAutomationReceiptLedgerStore | None" = None,
     local_tool_evidence_collector: "LocalToolEvidenceCollector | None" = None,
     include_local_full_handlers: bool = True,
+    agent_event_emitter: Callable[..., object] | None = None,
 ) -> list[object]:
     """Build the ADK FunctionTools exposing the real core tools for the CLI."""
 
@@ -282,6 +290,7 @@ def build_cli_adk_tools(
         general_automation_receipts=general_automation_receipts,
         local_tool_evidence_collector=local_tool_evidence_collector,
         include_local_full_handlers=include_local_full_handlers,
+        agent_event_emitter=agent_event_emitter,
     )
     tools = build_adk_function_tools_for_registry(
         runtime.registry,
