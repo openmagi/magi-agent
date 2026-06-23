@@ -24,9 +24,13 @@ describe("NlRuleGuide — same mental model as AuthorWizard", () => {
     expect(src).toContain("file-hook only");
   });
 
-  it("flags the emit-signal archetype as backend pending", () => {
-    expect(src).toContain("emit an evidence record unconditionally");
-    expect(src).toContain("backend pending");
+  it("exposes 'no condition' as an after-tool first-class phrasing (replaces the dropped 'emit unconditionally' archetype)", () => {
+    expect(src).toContain("no condition (after-tool only)");
+    expect(src).not.toContain("backend pending");
+  });
+
+  it("annotates fetch matchers as 'network tools only' so users understand the constraint", () => {
+    expect(src).toContain("network tools only");
   });
 
   it("ships clickable example chips for the four wired archetypes", () => {

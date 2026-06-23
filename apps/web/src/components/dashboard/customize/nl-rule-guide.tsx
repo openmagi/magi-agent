@@ -8,8 +8,9 @@
  *
  * Same axes as the AuthorWizard (PR-E5):
  *   1. WHEN — lifecycle event + scope
- *   2. WHAT — archetype (block / ask / audit / strip + emit coming-soon)
- *   3. CONDITION — what triggers the action
+ *   2. CONDITION — what triggers the action (or "(no condition)" for
+ *      unconditional fires at after-tool)
+ *   3. WHAT — archetype (block / ask / audit / strip)
  *
  * The user can click an EXAMPLE chip to pre-fill the parent NL textarea
  * — fastest path from "what can I write?" to "compile a real policy".
@@ -120,31 +121,29 @@ export function NlRuleGuide({
           />
 
           <Axis
+            tag="CONDITION"
+            title="what triggers the action"
+            description="Pick one. The compiler picks the right backend primitive. Pre-tool URL matchers only fire for tools that perform an HTTP fetch — name-match works for any tool."
+            yes={[
+              'tool name match: "the tool is shell_exec"',
+              'fetch domain (network tools only): "the fetch goes to example.com"',
+              'evidence ref: "tests were run" / "fact-grounding passes"',
+              'SHACL shape: "exitCode is 0 on every TestRun record"',
+              'LLM criterion: "the answer cites at least one source"',
+              'regex / literal: "the result matches AKIA[0-9A-Z]{16}"',
+              'no condition (after-tool only): "audit every tool return"',
+            ]}
+          />
+
+          <Axis
             tag="WHAT"
             title="action archetype"
-            description="What should the policy do at the trigger?"
+            description="What should the policy do when the trigger fires?"
             yes={[
               '"block / deny / refuse"',
               '"require approval / ask the user"',
               '"audit / record / just log"',
               '"strip / override the result" (after-tool only)',
-            ]}
-            no={[
-              '"emit an evidence record unconditionally" — backend pending',
-            ]}
-          />
-
-          <Axis
-            tag="CONDITION"
-            title="what triggers the action"
-            description="Pick one. The compiler picks the right backend primitive."
-            yes={[
-              'tool name match: "the tool is shell_exec"',
-              'domain match: "the fetch goes to example.com"',
-              'evidence ref: "tests were run" / "fact-grounding passes"',
-              'SHACL shape: "exitCode is 0 on every TestRun record"',
-              'LLM criterion: "the answer cites at least one source"',
-              'regex / literal: "the result matches AKIA[0-9A-Z]{16}"',
             ]}
           />
 

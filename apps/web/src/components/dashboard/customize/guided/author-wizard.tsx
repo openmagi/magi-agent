@@ -1,40 +1,45 @@
 "use client";
 
 /**
- * Unified Author wizard (PR-E5) — single 6-step flow that covers all
- * policy authoring shapes the runtime currently supports.
+ * Unified Author wizard — single 6-step flow that covers all policy
+ * authoring shapes the runtime currently supports.
  *
- * Replaces the four PR-E3 sub-wizards. Each step's options are
- * dynamically filtered by prior step choices so the user never sees an
- * unsupported combination, and the wizard internally picks the right
- * backend primitive (CustomRule kind / DashboardCheck) on Save.
+ * Step ordering follows the user's mental model: pick WHEN, pick the
+ * CONDITION, then pick what action to take when that condition fires.
  *
  * Steps
  * -----
- *   1. When?         (trigger = lifecycle + scope, two radios in one screen)
- *   2. What to do?   (action archetype, filtered by lifecycle)
- *   3. Condition kind (filtered by lifecycle + archetype; skipped for emit)
- *   4. Specifics      (form per condition kind)
- *   5. Name           (id + optional description)
- *   6. Review         (auto-built English sentence + dl)
+ *   1. When?         (lifecycle + scope)
+ *   2. Condition     (kind, filtered by lifecycle)
+ *   3. Specifics     (per-kind form; auto-skipped when conditionKind=none)
+ *   4. Action        (archetype, filtered by lifecycle; header phrasing
+ *                     reflects the chosen condition trigger so the
+ *                     positive/negative semantics survive)
+ *   5. Name          (id + optional description)
+ *   6. Review        (auto-built English sentence + dl)
+ *
+ * "(no condition)" is exposed ONLY for after_tool_use, where it routes
+ * to a DashboardCheck with pattern=".*" — the only lifecycle whose
+ * backend cleanly supports an unconditional fire today. before_tool_use
+ * tool_perm has no wildcard matcher and pre_final rules have no
+ * always-fail sentinel, so the option is omitted there rather than
+ * synthesised with a fake-condition workaround.
  *
  * Routing
  * -------
- * The save handler maps (lifecycle, archetype, condition) → primitive:
- *
- *   (before_tool, block/ask, tool|domain|allowlist) → putCustomRule {kind:tool_perm}
- *   (after_tool, audit, regex)                       → putDashboardCheck
- *   (after_tool, strip|audit, llm)                   → putCustomRule {kind:llm_criterion, firesAt:after_tool_use, action:override|audit}
- *   (pre_final, block/ask/audit, evidence_ref)       → putCustomRule {kind:deterministic_ref}
- *   (pre_final, block/ask/audit, shacl)              → putCustomRule {kind:shacl_constraint}
- *   (pre_final, block/ask/audit, llm)                → putCustomRule {kind:llm_criterion}
+ *   (after_tool, regex,                 audit|block) → putDashboardCheck
+ *   (after_tool, none,                  audit|block) → putDashboardCheck  (pattern=".*")
+ *   (before_tool, tool|domain|allowlist, any)        → putCustomRule {kind:tool_perm}
+ *   (after_tool, llm,                    any)        → putCustomRule {kind:llm_criterion, firesAt:after_tool_use}
+ *   (pre_final, evidence_ref,            any)        → putCustomRule {kind:deterministic_ref}
+ *   (pre_final, shacl,                   any)        → putCustomRule {kind:shacl_constraint}
+ *   (pre_final, llm,                     any)        → putCustomRule {kind:llm_criterion}
  */
 
 import {
   Ban,
   Filter,
   HelpCircle,
-  Megaphone,
   ShieldOff,
 } from "lucide-react";
 import React, { useMemo, useState } from "react";
@@ -62,23 +67,23 @@ import { RadioCard, WizardChrome } from "./wizard-chrome";
 
 type Lifecycle = "before_tool_use" | "after_tool_use" | "pre_final";
 type Scope = "always" | "coding" | "research" | "delivery" | "memory" | "task";
-type Archetype = "block" | "ask" | "audit" | "strip" | "emit";
+type Archetype = "block" | "ask" | "audit" | "strip";
 type ConditionKind =
+  | "none"
   | "tool_name"
   | "domain"
   | "domain_allowlist"
   | "evidence_ref"
   | "shacl"
   | "llm_criterion"
-  | "regex"
-  | "none"; // archetype=emit
+  | "regex";
 
 
 interface Draft {
   lifecycle: Lifecycle;
   scope: Scope;
-  archetype: Archetype;
   conditionKind: ConditionKind;
+  archetype: Archetype;
   // payload fields
   toolName: string;
   domain: string;
@@ -97,8 +102,8 @@ interface Draft {
 const EMPTY: Draft = {
   lifecycle: "pre_final",
   scope: "coding",
-  archetype: "block",
   conditionKind: "evidence_ref",
+  archetype: "block",
   toolName: "",
   domain: "",
   domainAllowlist: "",
@@ -113,6 +118,7 @@ const EMPTY: Draft = {
 
 
 const TOTAL = 6;
+const STEP_SPECIFICS = 2;
 
 
 export interface AuthorWizardProps {
@@ -137,19 +143,19 @@ export function AuthorWizard({
 
   // Re-validate downstream fields when an upstream axis changes. Without
   // this, going back to step 1 and switching lifecycle from pre_final to
-  // before_tool_use would leave archetype="audit" + conditionKind="shacl"
+  // before_tool_use would leave conditionKind="shacl" + archetype="audit"
   // which is no longer a valid combination.
   const reseedDownstream = (next: Partial<Draft>): Draft => {
     const merged = { ...draft, ...next };
     if ("lifecycle" in next) {
-      const archetypes = availableArchetypes(merged.lifecycle);
-      if (!archetypes.includes(merged.archetype)) {
-        merged.archetype = archetypes[0];
+      const kinds = availableConditionKinds(merged.lifecycle);
+      if (!kinds.includes(merged.conditionKind)) {
+        merged.conditionKind = kinds[0];
       }
     }
-    const kinds = availableConditionKinds(merged.lifecycle, merged.archetype);
-    if (!kinds.includes(merged.conditionKind)) {
-      merged.conditionKind = kinds[0] ?? "none";
+    const archetypes = availableArchetypes(merged.lifecycle);
+    if (!archetypes.includes(merged.archetype)) {
+      merged.archetype = archetypes[0];
     }
     return merged;
   };
@@ -160,20 +166,16 @@ export function AuthorWizard({
     [catalog, evidenceTypes],
   );
 
-  // Step 2 skips when archetype=emit (no condition) — but emit is
-  // currently disabled so this path never fires. Kept for forward-compat.
-  const skipsConditionStep = draft.archetype === "emit";
+  const skipsSpecificsStep = draft.conditionKind === "none";
 
   const handleNext = () => {
     let nextStep = step + 1;
-    if (nextStep === 2 && skipsConditionStep) nextStep = 3;
-    if (nextStep === 3 && skipsConditionStep) nextStep = 4;
+    if (nextStep === STEP_SPECIFICS && skipsSpecificsStep) nextStep += 1;
     setStep(Math.min(nextStep, TOTAL - 1));
   };
   const handleBack = () => {
     let prevStep = step - 1;
-    if (prevStep === 3 && skipsConditionStep) prevStep = 2;
-    if (prevStep === 2 && skipsConditionStep) prevStep = 1;
+    if (prevStep === STEP_SPECIFICS && skipsSpecificsStep) prevStep -= 1;
     setStep(Math.max(prevStep, 0));
   };
 
@@ -212,17 +214,17 @@ export function AuthorWizard({
         <TriggerStep draft={draft} update={updateDraft} />
       ) : null}
       {step === 1 ? (
-        <ArchetypeStep draft={draft} update={updateDraft} />
-      ) : null}
-      {step === 2 ? (
         <ConditionKindStep draft={draft} update={updateDraft} />
       ) : null}
-      {step === 3 ? (
+      {step === 2 ? (
         <SpecificsStep
           draft={draft}
           update={updateDraft}
           refOptions={refOptions}
         />
+      ) : null}
+      {step === 3 ? (
+        <ArchetypeStep draft={draft} update={updateDraft} refOptions={refOptions} />
       ) : null}
       {step === 4 ? <NameStep draft={draft} update={updateDraft} /> : null}
       {step === 5 ? (
@@ -310,131 +312,59 @@ function TriggerStep({
 
 
 // ---------------------------------------------------------------------------
-// Step 1 — What to do?  (archetype filtered by lifecycle)
+// Step 1 — Condition kind (filtered by lifecycle)
 // ---------------------------------------------------------------------------
 
 
-interface ArchetypeOption {
-  id: Archetype;
-  label: string;
-  description: string;
-  icon: React.ReactNode;
-  disabled?: boolean;
-  badge?: string;
-}
-
-
-function availableArchetypes(lifecycle: Lifecycle): Archetype[] {
-  if (lifecycle === "before_tool_use") return ["block", "ask", "audit", "emit"];
-  if (lifecycle === "after_tool_use") return ["block", "audit", "strip", "emit"];
-  return ["block", "ask", "audit", "emit"];
-}
-
-
-const ARCHETYPE_META: Record<Archetype, ArchetypeOption> = {
-  block: {
-    id: "block",
-    label: "Block / refuse",
-    description: "Reject the action when the condition fires.",
-    icon: <Ban className="h-5 w-5" />,
-  },
-  ask: {
-    id: "ask",
-    label: "Ask the user for approval",
-    description: "Pause and prompt the user when the condition fires.",
-    icon: <HelpCircle className="h-5 w-5" />,
-  },
-  audit: {
-    id: "audit",
-    label: "Audit / record evidence",
-    description: "Emit an evidence record when the condition fires — does not block.",
-    icon: <Filter className="h-5 w-5" />,
-  },
-  strip: {
-    id: "strip",
-    label: "Strip / transform output",
-    description: "Modify the tool result before the agent reads it (after-tool only).",
-    icon: <ShieldOff className="h-5 w-5" />,
-  },
-  emit: {
-    id: "emit",
-    label: "Emit a signal unconditionally",
-    description: "At the trigger, emit an evidence record every time — no condition, no fail path.",
-    icon: <Megaphone className="h-5 w-5" />,
-    disabled: true,
-    badge: "Coming soon",
-  },
-};
-
-
-function ArchetypeStep({
-  draft,
-  update,
-}: { draft: Draft; update: (patch: Partial<Draft>) => void }): React.ReactElement {
-  const ids = availableArchetypes(draft.lifecycle);
-  return (
-    <div className="space-y-3">
-      <h2 className="text-lg font-bold text-foreground">What should the policy do?</h2>
-      <p className="text-xs text-secondary">
-        Pick the action the policy takes at this lifecycle moment. Options
-        not valid for the chosen trigger are hidden.
-      </p>
-      <div className="space-y-2">
-        {ids.map((id) => {
-          const meta = ARCHETYPE_META[id];
-          return (
-            <RadioCard
-              key={meta.id}
-              checked={draft.archetype === meta.id}
-              onClick={() => {
-                if (meta.disabled) return;
-                update({ archetype: meta.id });
-              }}
-              label={meta.label}
-              description={meta.description}
-              badge={meta.badge}
-            />
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-
-// ---------------------------------------------------------------------------
-// Step 2 — Condition kind (filtered by lifecycle + archetype)
-// ---------------------------------------------------------------------------
-
-
-function availableConditionKinds(
-  lifecycle: Lifecycle,
-  archetype: Archetype,
-): ConditionKind[] {
-  if (archetype === "emit") return ["none"];
+function availableConditionKinds(lifecycle: Lifecycle): ConditionKind[] {
+  // "none" (unconditional) is only listed where backend supports it
+  // natively. after_tool_use synthesises it via DashboardCheck pattern=".*".
+  // before_tool_use's tool_perm matcher has no wildcard; pre_final rules
+  // have no always-fail sentinel — listing "none" there would require a
+  // fake-condition workaround, so we keep it out.
   if (lifecycle === "before_tool_use") {
     return ["tool_name", "domain", "domain_allowlist"];
   }
   if (lifecycle === "after_tool_use") {
-    if (archetype === "audit") return ["regex", "llm_criterion"];
-    if (archetype === "strip") return ["llm_criterion", "regex"];
-    if (archetype === "block") return ["regex", "llm_criterion"];
-    return ["regex", "llm_criterion"];
+    return ["none", "regex", "llm_criterion"];
   }
-  // pre_final
   return ["evidence_ref", "shacl", "llm_criterion"];
 }
 
 
 const CONDITION_META: Record<ConditionKind, { label: string; description: string }> = {
-  tool_name: { label: "Tool name", description: "Match a specific tool by name (e.g. shell_exec)." },
-  domain: { label: "Fetch domain", description: "Match a fetch to an exact domain." },
-  domain_allowlist: { label: "Domain allowlist", description: "Match any fetch outside a comma-separated allowlist." },
-  evidence_ref: { label: "Evidence reference", description: "Check that a named evidence ref returned ok this turn." },
-  shacl: { label: "SHACL shape", description: "Validate an evidence record against a Turtle SHACL shape." },
-  llm_criterion: { label: "LLM criterion", description: "Ask an LLM critic whether a free-text criterion holds." },
-  regex: { label: "Regex / literal pattern", description: "Match a regex or literal substring against the tool's output." },
-  none: { label: "(no condition)", description: "Fires unconditionally at the trigger." },
+  none: {
+    label: "(no condition — fire on every trigger)",
+    description: "Run the action unconditionally at this lifecycle moment.",
+  },
+  tool_name: {
+    label: "Tool name",
+    description: "Match a specific tool by name (e.g. shell_exec).",
+  },
+  domain: {
+    label: "Fetch domain (network tools only)",
+    description: "Match a fetch whose URL host equals this domain. Only fires for tools that perform an HTTP fetch.",
+  },
+  domain_allowlist: {
+    label: "Domain allowlist (network tools only)",
+    description: "Match any fetch whose URL host is NOT in this comma-separated allowlist. Only fires for tools that perform an HTTP fetch.",
+  },
+  evidence_ref: {
+    label: "Evidence reference",
+    description: "Check that a named evidence ref returned ok this turn.",
+  },
+  shacl: {
+    label: "SHACL shape",
+    description: "Validate an evidence record against a Turtle SHACL shape.",
+  },
+  llm_criterion: {
+    label: "LLM criterion",
+    description: "Ask an LLM critic whether a free-text criterion holds.",
+  },
+  regex: {
+    label: "Regex / literal pattern",
+    description: "Match a regex or literal substring against the tool's output.",
+  },
 };
 
 
@@ -442,13 +372,14 @@ function ConditionKindStep({
   draft,
   update,
 }: { draft: Draft; update: (patch: Partial<Draft>) => void }): React.ReactElement {
-  const kinds = availableConditionKinds(draft.lifecycle, draft.archetype);
+  const kinds = availableConditionKinds(draft.lifecycle);
   return (
     <div className="space-y-3">
       <h2 className="text-lg font-bold text-foreground">Under what condition does it fire?</h2>
       <p className="text-xs text-secondary">
-        Pick the kind of check that triggers the action. Options not valid
-        for your trigger / action choice are hidden.
+        Pick a check that triggers the action — or <em>(no condition)</em>{" "}
+        to fire on every trigger. Options not valid for your lifecycle are
+        hidden.
       </p>
       <div className="space-y-2">
         {kinds.map((kind) => {
@@ -470,7 +401,7 @@ function ConditionKindStep({
 
 
 // ---------------------------------------------------------------------------
-// Step 3 — Specifics (form per condition kind)
+// Step 2 — Specifics (form per condition kind; auto-skipped for "none")
 // ---------------------------------------------------------------------------
 
 
@@ -612,12 +543,6 @@ function SpecificsStep({
           </label>
         </div>
       ) : null}
-      {draft.conditionKind === "none" ? (
-        <p className="rounded-xl border border-dashed border-black/[0.10] bg-gray-50/80 px-4 py-6 text-center text-xs text-secondary">
-          No payload needed — the policy fires unconditionally at the
-          trigger.
-        </p>
-      ) : null}
     </div>
   );
 }
@@ -664,6 +589,123 @@ function TextField({
         }`}
       />
     </label>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Step 3 — Action archetype (filtered by lifecycle; header reflects trigger)
+// ---------------------------------------------------------------------------
+
+
+interface ArchetypeOption {
+  id: Archetype;
+  label: string;
+  description: string;
+  icon: React.ReactNode;
+}
+
+
+function availableArchetypes(lifecycle: Lifecycle): Archetype[] {
+  if (lifecycle === "before_tool_use") return ["block", "ask", "audit"];
+  if (lifecycle === "after_tool_use") return ["block", "audit", "strip"];
+  return ["block", "ask", "audit"];
+}
+
+
+const ARCHETYPE_META: Record<Archetype, ArchetypeOption> = {
+  block: {
+    id: "block",
+    label: "Block / refuse",
+    description: "Reject the action.",
+    icon: <Ban className="h-5 w-5" />,
+  },
+  ask: {
+    id: "ask",
+    label: "Ask the user for approval",
+    description: "Pause and prompt the user.",
+    icon: <HelpCircle className="h-5 w-5" />,
+  },
+  audit: {
+    id: "audit",
+    label: "Audit / record evidence",
+    description: "Emit an evidence record — does not block.",
+    icon: <Filter className="h-5 w-5" />,
+  },
+  strip: {
+    id: "strip",
+    label: "Strip / transform output",
+    description: "Modify the tool result before the agent reads it (after-tool only).",
+    icon: <ShieldOff className="h-5 w-5" />,
+  },
+};
+
+
+/**
+ * Human-readable description of the EVENT that fires the action. Used to
+ * compose the dynamic Action-step header so the positive/negative
+ * semantics survive the unification: pre_final rules fire on a check
+ * FAILURE; before_tool_use rules fire on a positive MATCH; after_tool_use
+ * regex fires on a positive match; an LLM criterion always fires when the
+ * critic returns NO (so the framing is consistent across lifecycles).
+ */
+function triggerEventPhrase(draft: Draft, refOptions: RefOption[]): string {
+  switch (draft.conditionKind) {
+    case "none":
+      return "On every trigger";
+    case "tool_name":
+      return `When the tool is "${draft.toolName || "…"}"`;
+    case "domain":
+      return `When the fetch domain matches "${draft.domain || "…"}"`;
+    case "domain_allowlist":
+      return "When the fetch is outside the allowlist";
+    case "regex":
+      return `When the tool output ${draft.regexIsRegex ? "matches the regex" : "contains"} "${draft.regexPattern || "…"}"`;
+    case "llm_criterion":
+      return `When the LLM critic judges "${draft.criterion || "…"}" is false`;
+    case "evidence_ref": {
+      const ref = refOptions.find((r) => r.ref === draft.evidenceRef);
+      return `When evidence "${ref?.label ?? (draft.evidenceRef || "…")}" did NOT return ok`;
+    }
+    case "shacl":
+      return "When the SHACL shape does NOT conform on any evidence record";
+  }
+}
+
+
+function ArchetypeStep({
+  draft,
+  update,
+  refOptions,
+}: {
+  draft: Draft;
+  update: (patch: Partial<Draft>) => void;
+  refOptions: RefOption[];
+}): React.ReactElement {
+  const ids = availableArchetypes(draft.lifecycle);
+  const trigger = triggerEventPhrase(draft, refOptions);
+  return (
+    <div className="space-y-3">
+      <h2 className="text-lg font-bold text-foreground">What should the policy do?</h2>
+      <p className="text-xs text-secondary">
+        <strong className="font-semibold text-foreground">{trigger}</strong>
+        , do this. Options not valid for the chosen lifecycle are hidden.
+      </p>
+      <div className="space-y-2">
+        {ids.map((id) => {
+          const meta = ARCHETYPE_META[id];
+          return (
+            <RadioCard
+              key={meta.id}
+              checked={draft.archetype === meta.id}
+              onClick={() => update({ archetype: meta.id })}
+              label={meta.label}
+              description={meta.description}
+            />
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -736,10 +778,10 @@ function ReviewStep({
           <dd className="font-mono text-foreground">{draft.ruleId || "(unnamed)"}</dd>
           <dt className="text-secondary">When</dt>
           <dd>{draft.scope} · {draft.lifecycle}</dd>
-          <dt className="text-secondary">Action</dt>
-          <dd>{draft.archetype}</dd>
           <dt className="text-secondary">Condition</dt>
           <dd>{draft.conditionKind}</dd>
+          <dt className="text-secondary">Action</dt>
+          <dd>{draft.archetype}</dd>
           {draft.description ? (
             <>
               <dt className="text-secondary">Note</dt>
@@ -759,10 +801,10 @@ function describePolicy(draft: Draft, refOptions: RefOption[]): string {
       ? whenForLifecycle(draft.lifecycle, /*scoped*/ false)
       : `On ${draft.scope} turns, ${whenForLifecycle(draft.lifecycle, true)}`;
   const archVerb = archetypeVerb(draft);
-  const condClause = conditionClause(draft, refOptions);
-  if (draft.archetype === "emit") {
-    return `${whenClause}, emit an evidence record (no condition).`;
+  if (draft.conditionKind === "none") {
+    return `${whenClause}, ${archVerb} on every trigger.`;
   }
+  const condClause = conditionClause(draft, refOptions);
   return `${whenClause}, ${archVerb} when ${condClause}.`;
 }
 
@@ -784,14 +826,14 @@ function archetypeVerb(draft: Draft): string {
       return "emit an evidence record (audit-mode, does not block)";
     case "strip":
       return "strip / override the tool result";
-    case "emit":
-      return "emit an evidence record";
   }
 }
 
 
 function conditionClause(draft: Draft, refOptions: RefOption[]): string {
   switch (draft.conditionKind) {
+    case "none":
+      return "(unconditional)";
     case "tool_name":
       return `the tool is "${draft.toolName}"`;
     case "domain":
@@ -808,8 +850,6 @@ function conditionClause(draft: Draft, refOptions: RefOption[]): string {
       return `an LLM critic judges "${draft.criterion}" is false`;
     case "regex":
       return `the result ${draft.regexIsRegex ? "matches regex" : "contains"} "${draft.regexPattern}"`;
-    case "none":
-      return "(unconditional)";
   }
 }
 
@@ -826,10 +866,11 @@ function csv(s: string): string {
 
 function stepIsComplete(step: number, draft: Draft): boolean {
   if (step === 0) return !!draft.lifecycle && !!draft.scope;
-  if (step === 1) return !!draft.archetype;
-  if (step === 2) return !!draft.conditionKind;
-  if (step === 3) {
+  if (step === 1) return !!draft.conditionKind;
+  if (step === 2) {
     switch (draft.conditionKind) {
+      case "none":
+        return true;
       case "tool_name":
         return draft.toolName.trim().length > 0;
       case "domain":
@@ -844,10 +885,9 @@ function stepIsComplete(step: number, draft: Draft): boolean {
         return draft.criterion.trim().length > 0;
       case "regex":
         return draft.regexPattern.trim().length > 0;
-      case "none":
-        return true;
     }
   }
+  if (step === 3) return !!draft.archetype;
   if (step === 4) return /^[a-z0-9][a-z0-9_-]{0,127}$/.test(draft.ruleId);
   return true;
 }
@@ -859,6 +899,27 @@ type Built =
 
 
 function buildPolicy(draft: Draft): Built {
+  // After-tool unconditional fire — synthesise pattern=".*" so the
+  // DashboardCheck regex matcher fires on every tool return.
+  if (
+    draft.lifecycle === "after_tool_use"
+    && draft.conditionKind === "none"
+    && (draft.archetype === "audit" || draft.archetype === "block")
+  ) {
+    const check: DashboardCheck = {
+      id: draft.ruleId,
+      label: draft.description || draft.ruleId,
+      scope: draft.scope as DashboardScope,
+      enabled: true,
+      trigger: {
+        tool: "*", // Dashboard pack wildcard — tool name not asked in this flow
+        match: { pattern: ".*", isRegex: true },
+      },
+      action: draft.archetype === "audit" ? "audit" : "block",
+    };
+    return { kind: "dashboard_check", check };
+  }
+
   // After-tool regex with audit OR block routes to the Dashboard pack
   // primitive (the only after-tool regex implementation today).
   if (
@@ -905,7 +966,7 @@ function customRuleKind(draft: Draft): string {
   if (draft.conditionKind === "evidence_ref") return "deterministic_ref";
   if (draft.conditionKind === "shacl") return "shacl_constraint";
   if (draft.conditionKind === "regex") return "llm_criterion"; // after-tool regex via LLM kind (the only path other than dashboard_check)
-  // llm_criterion / none
+  // llm_criterion
   return "llm_criterion";
 }
 
@@ -920,14 +981,14 @@ function customRuleAction(draft: Draft): string {
       return "audit";
     case "strip":
       return "override";
-    case "emit":
-      return "audit"; // closest backend-supported semantic until emit lands
   }
 }
 
 
 function customRulePayload(draft: Draft): Record<string, unknown> {
   switch (draft.conditionKind) {
+    case "none":
+      return {};
     case "tool_name":
       return {
         match: { tool: draft.toolName.trim() },
@@ -958,7 +1019,5 @@ function customRulePayload(draft: Draft): Record<string, unknown> {
       };
     case "llm_criterion":
       return { criterion: draft.criterion.trim() };
-    case "none":
-      return {};
   }
 }
