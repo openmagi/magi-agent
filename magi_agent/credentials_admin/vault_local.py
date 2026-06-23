@@ -22,6 +22,7 @@ from collections.abc import Mapping
 # I-2 PR A: per-module ``_truthy`` removed in favour of the canonical leaf
 # so the truthy set lives in exactly one place.
 from magi_agent.config._truthy import is_true as _truthy
+from magi_agent.config.flags import flag_str as _flag_str  # I-4 alias
 from magi_agent.credentials_admin.local_vault import LocalVault
 from magi_agent.storage.durable_store import DurableRecord
 
@@ -227,7 +228,7 @@ def _forward_to_vault(
     ``requires_approval`` belongs in the (non-secret) vault request body so B's
     real adapter can register the credential as guarded.
     """
-    url = (os.environ.get("MAGI_VAULT_ADMIN_URL") or "").strip()
+    url = (_flag_str("MAGI_VAULT_ADMIN_URL") or "").strip()
     if not url:
         raise VaultSeamError(
             "MAGI_VAULT_ADMIN_ENABLED set but MAGI_VAULT_ADMIN_URL missing"
@@ -256,7 +257,7 @@ def resolve_approval(*, approval_id: str, decision: str) -> dict[str, object]:
 
 
 def _resolve_in_vault(*, approval_id: str, decision: str) -> dict[str, object]:
-    url = (os.environ.get("MAGI_VAULT_ADMIN_URL") or "").strip()
+    url = (_flag_str("MAGI_VAULT_ADMIN_URL") or "").strip()
     if not url:
         # Enabled-but-unwired: honest no-op so the local decision still stands.
         return {"disabled": True}
@@ -265,7 +266,7 @@ def _resolve_in_vault(*, approval_id: str, decision: str) -> dict[str, object]:
 
 
 def _revoke_in_vault(*, vault_ref: str) -> None:
-    url = (os.environ.get("MAGI_VAULT_ADMIN_URL") or "").strip()
+    url = (_flag_str("MAGI_VAULT_ADMIN_URL") or "").strip()
     if not url:
         return
     # Real revoke transport lands here in sub-project B.
