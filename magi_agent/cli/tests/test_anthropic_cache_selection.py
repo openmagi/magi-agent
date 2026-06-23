@@ -1,10 +1,20 @@
-"""Tests for _maybe_build_cache_aware_anthropic in real_runner — Task 1."""
+"""Tests for _maybe_build_cache_aware_anthropic in real_runner — Task 1.
+
+E-7 refactor (2026-06-22): the actual cache-aware decision now lives in
+``runtime/model_factory.maybe_build_cache_aware_anthropic`` and the
+real_runner function is a thin shim. The patch targets here are the
+factory's bindings (``model_factory.build_cache_aware_claude`` and
+``model_factory.is_message_cache_enabled``); the legacy
+``real_runner.build_cache_aware_claude``/``is_message_cache_enabled``
+imports are still present but no longer the call site.
+"""
 
 from __future__ import annotations
 
 import pytest
 from magi_agent.cli import real_runner
 from magi_agent.cli.providers import ProviderConfig
+from magi_agent.runtime import model_factory
 
 
 _SENTINEL = object()
@@ -12,7 +22,9 @@ _SENTINEL = object()
 
 @pytest.fixture
 def cache_on(monkeypatch):
-    monkeypatch.setattr(real_runner, "is_message_cache_enabled", lambda env=None: True, raising=False)
+    monkeypatch.setattr(
+        model_factory, "is_message_cache_enabled", lambda env=None: True, raising=False
+    )
 
 
 def _fake_build(monkeypatch, *, raises=None):
@@ -24,7 +36,9 @@ def _fake_build(monkeypatch, *, raises=None):
             raise raises
         return _SENTINEL
 
-    monkeypatch.setattr(real_runner, "build_cache_aware_claude", _build, raising=False)
+    monkeypatch.setattr(
+        model_factory, "build_cache_aware_claude", _build, raising=False
+    )
     return calls
 
 
@@ -48,7 +62,9 @@ def test_non_anthropic_returns_none(monkeypatch, cache_on):
 
 
 def test_cache_off_returns_none(monkeypatch):
-    monkeypatch.setattr(real_runner, "is_message_cache_enabled", lambda env=None: False, raising=False)
+    monkeypatch.setattr(
+        model_factory, "is_message_cache_enabled", lambda env=None: False, raising=False
+    )
     _fake_build(monkeypatch)
     monkeypatch.setattr(real_runner, "_model_api_base_kwargs", lambda env=None: {})
     assert real_runner._maybe_build_cache_aware_anthropic(_cfg(), env={}) is None

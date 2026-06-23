@@ -443,8 +443,11 @@ class TestRoutingSeam:
         assert not boundary._is_anthropic_route("openai", "gpt-5")
 
     def test_claude_model_routes_to_cache_aware_builder(self, monkeypatch) -> None:
-        # No anthropic import needed: monkeypatch the builder seam.
-        import magi_agent.adk_bridge.anthropic_cache_model as cache_model
+        # E-7: the shadow boundary delegates to ``runtime/model_factory``
+        # which imports ``build_cache_aware_claude`` at module scope —
+        # patch THAT bound reference (the legacy ``cache_model.*`` patch
+        # doesn't reach the factory's call site).
+        import magi_agent.runtime.model_factory as model_factory
 
         sentinel = SimpleNamespace(magi_message_cache_aware=True, model="claude-sonnet-4-6")
         captured: dict = {}
@@ -453,7 +456,7 @@ class TestRoutingSeam:
             captured["model"] = model
             return sentinel
 
-        monkeypatch.setattr(cache_model, "build_cache_aware_claude", _fake_build)
+        monkeypatch.setattr(model_factory, "build_cache_aware_claude", _fake_build)
 
         boundary = importlib.import_module(
             "magi_agent.shadow.gate5b4c3_live_runner_boundary"
@@ -467,12 +470,13 @@ class TestRoutingSeam:
     def test_missing_optional_anthropic_dependency_falls_back_to_label(
         self, monkeypatch
     ) -> None:
-        import magi_agent.adk_bridge.anthropic_cache_model as cache_model
+        # E-7: patch the factory's bound reference (see comment above).
+        import magi_agent.runtime.model_factory as model_factory
 
         def _missing_build(model: str):
             raise ModuleNotFoundError("No module named 'anthropic'", name="anthropic")
 
-        monkeypatch.setattr(cache_model, "build_cache_aware_claude", _missing_build)
+        monkeypatch.setattr(model_factory, "build_cache_aware_claude", _missing_build)
 
         boundary = importlib.import_module(
             "magi_agent.shadow.gate5b4c3_live_runner_boundary"

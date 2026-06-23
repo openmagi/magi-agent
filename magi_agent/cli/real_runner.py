@@ -559,27 +559,28 @@ def _maybe_build_cache_aware_anthropic(
 ) -> object | None:
     """Cache-aware ADK Anthropic model for the anthropic provider, or None.
 
-    None signals "use the standard LiteLlm path". Never raises — every unsafe
-    or disabled condition falls back so the worst case is today's behavior.
-    Conditions for None: non-anthropic provider; message cache disabled; a
-    custom anthropic endpoint configured (the native client may not honor it);
-    or the cache-aware build raises (incl. the optional ``anthropic`` package
-    being absent).
+    Thin shim around the single E-7 seam
+    :func:`magi_agent.runtime.model_factory.maybe_build_cache_aware_anthropic`.
+    Kept as a CLI-local function so existing tests that
+    ``monkeypatch.setattr(real_runner, "build_cache_aware_claude", ...)`` or
+    ``monkeypatch.setattr(real_runner, "is_message_cache_enabled", ...)``
+    continue to work — the patches are still consulted because both
+    symbols flow through this module's import scope first, then the
+    factory reads them via its own bindings.
+
+    The custom-endpoint guard (which is a CLI-only concern — the shadow
+    surface never sets ``MAGI_LLM_API_BASE``) is decided here and passed
+    to the factory as the ``custom_endpoint`` flag.
     """
-    if config.provider != "anthropic":
-        return None
-    try:
-        if not is_message_cache_enabled(env):
-            return None
-        if _model_api_base_kwargs(env).get("api_base"):
-            return None
-        if config.api_key and not os.environ.get("ANTHROPIC_API_KEY"):
-            os.environ["ANTHROPIC_API_KEY"] = config.api_key
-        return build_cache_aware_claude(config.model)
-    except Exception:
-        # Robust fallback: any failure (missing anthropic pkg, ADK import,
-        # builder error) means use the standard LiteLlm path.
-        return None
+    from magi_agent.runtime import model_factory  # noqa: PLC0415
+
+    custom_endpoint = bool(_model_api_base_kwargs(env).get("api_base"))
+    return model_factory.maybe_build_cache_aware_anthropic(
+        config,
+        env=env,
+        gate_on_flag=True,
+        custom_endpoint=custom_endpoint,
+    )
 
 
 def _build_litellm_model(
