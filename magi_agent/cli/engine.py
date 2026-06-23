@@ -3613,11 +3613,12 @@ class MagiEngineDriver:
         phase_routes = _phase_routes(assembly.phase_routing)
         if not phase_routes:
             return None
-        phase = _select_policy_phase(
+        phase, classified_pick = _classify_policy_phase_with_softening(
             phases=tuple(phase_routes.keys()),
             prompt=prompt,
             harness_state=harness_state,
             assembly=assembly,
+            phase_routes=phase_routes,
         )
         route = phase_routes.get(phase)
         if not isinstance(route, Mapping):
@@ -3666,6 +3667,13 @@ class MagiEngineDriver:
                 "externalIntegrationAttached": False,
             },
         }
+        # E-8: when the keyword classifier picked a denied phase and we
+        # soft-failed to the conversational fallback, surface both so
+        # observability sees the softening event without losing the
+        # "what was classified" signal.
+        if classified_pick is not None and classified_pick != phase:
+            selection["phaseSoftened"] = True
+            selection["phaseClassified"] = classified_pick
         if intent_bindings:
             selection["intentBindings"] = intent_bindings
         return selection
@@ -5129,7 +5137,45 @@ def _select_policy_phase(
     prompt: str,
     harness_state: object | None,
     assembly: RunnerPolicyAssembly,
+    phase_routes: Mapping[str, Mapping[str, object]] | None = None,
 ) -> str:
+    """E-8: classifier returns a phase whose route is NOT denied when
+    ``phase_routes`` is supplied (soft-fail to conversational on denial).
+
+    Back-compat: pre-E-8 callers omit ``phase_routes`` and get the
+    legacy "return the keyword phase even if denied" behavior. See
+    :func:`_classify_policy_phase_with_softening` for the variant that
+    also reports whether soft-fail fired (observability).
+    """
+
+    phase, _ = _classify_policy_phase_with_softening(
+        phases=phases,
+        prompt=prompt,
+        harness_state=harness_state,
+        assembly=assembly,
+        phase_routes=phase_routes,
+    )
+    return phase
+
+
+def _classify_policy_phase_with_softening(
+    *,
+    phases: tuple[str, ...],
+    prompt: str,
+    harness_state: object | None,
+    assembly: RunnerPolicyAssembly,
+    phase_routes: Mapping[str, Mapping[str, object]] | None = None,
+) -> tuple[str, str | None]:
+    """E-8: classify + report softening for observability.
+
+    Returns ``(resolved_phase, classified_phase_if_softened)``. When the
+    keyword classifier picks a phase whose route is denied,
+    ``resolved_phase`` is the conversational fallback and
+    ``classified_phase_if_softened`` is the original (denied) phase the
+    classifier would have picked pre-E-8. When no softening fires
+    (route available, or no ``phase_routes`` supplied), the second
+    element is ``None``.
+    """
     phase_set = set(phases)
     # Only the live harness state describes the CURRENT task. ``assembly.task_profile``
     # is the bot's static CAPABILITY superset (every taskType it could ever do — it
@@ -5144,27 +5190,55 @@ def _select_policy_phase(
         for item in (_extract_task_types(harness_state) or ())
     }
     prompt_lower = prompt.lower()
+
+    # E-8 — soft-fail: never return a phase whose route is denied for the
+    # current model when a conversational fallback is available. Pre-E-8
+    # the classifier could pick a denied phase that then failed-CLOSED as
+    # ``runner_policy_route_denied``. Now the classifier filters denied
+    # phases out of every short-circuit so the worst case is "answer
+    # conversationally" instead of "block the turn". We only soften when
+    # the route is *denied* — we never weaken an *enforceable* gate.
+    def _route_denied(phase: str) -> bool:
+        if phase_routes is None:
+            return False
+        route = phase_routes.get(phase)
+        if not isinstance(route, Mapping):
+            return False
+        return bool(route.get("routeDenied") or route.get("route_denied"))
+
+    def _available(phase: str) -> bool:
+        return phase in phase_set and not _route_denied(phase)
+
+    # Track the keyword classifier's *first* pick — used for the
+    # ``phase_misclassification_softened`` observability hint when its
+    # route is denied and we soft-fail to conversational.
+    classified_pick: str | None = None
+
     coding_requested = bool(task_types & _CODING_TASK_TYPES) or any(
         marker in prompt_lower for marker in _CODING_PROMPT_MARKERS
     )
     if coding_requested:
         for phase in ("patch_generation", "code_search", "test_interpretation"):
-            if phase in phase_set:
-                return phase
+            if phase in phase_set and classified_pick is None:
+                classified_pick = phase
+            if _available(phase):
+                return (phase, None)
 
     research_requested = bool(
         task_types & {"research", "web-acquisition", "browser-automation"}
     ) or any(marker in prompt_lower for marker in ("research", "source", "cite", "web"))
     if research_requested:
         for phase in ("source_acquisition", "source_extraction"):
-            if phase in phase_set:
-                return phase
+            if phase in phase_set and classified_pick is None:
+                classified_pick = phase
+            if _available(phase):
+                return (phase, None)
 
     if "final_answer_drafting" in phase_set:
-        return "final_answer_drafting"
+        return ("final_answer_drafting", classified_pick)
     if "intent_classification" in phase_set:
-        return "intent_classification"
-    return phases[0]
+        return ("intent_classification", classified_pick)
+    return (phases[0], classified_pick)
 
 
 def _local_tool_names_for_route(
