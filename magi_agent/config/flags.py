@@ -1713,6 +1713,66 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
+    # --- Document agentic authoring (I-4 batch 3) ---------------------------
+    FlagSpec(
+        name="MAGI_DOCUMENT_AGENTIC_MODEL",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Model id for the agentic document writer "
+            "(``tools/document_write/agentic.LiteLLMAgenticDocumentWriter``). "
+            "Empty disables the agentic path; the document write tool falls "
+            "back to its deterministic builder."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_DOCUMENT_AGENTIC_TEMPERATURE",
+        default="0.2",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "litellm ``temperature`` for the agentic document writer "
+            "(parsed as float; default 0.2)."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_DOCUMENT_AGENTIC_TIMEOUT_S",
+        default=90,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "litellm ``timeout`` (seconds) for the agentic document writer "
+            "(default 90)."
+        ),
+        kind="int",
+    ),
+    # --- Work-queue store paths (I-4 batch 3) -------------------------------
+    FlagSpec(
+        name="MAGI_WORK_QUEUE_DB_PATH",
+        default="",
+        scope="public",
+        stage="stage2",
+        summary=(
+            "Explicit path to the work-queue SQLite db. Empty uses "
+            "``<MAGI_STATE_DIR>/work_queue.db`` (default "
+            "``~/.magi/work_queue.db``)."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_STATE_DIR",
+        default="~/.magi",
+        scope="public",
+        stage="stage2",
+        summary=(
+            "Root directory for per-user runtime state (work-queue db, "
+            "session caches, etc). ``~`` is expanded."
+        ),
+        kind="str",
+    ),
 )
 
 

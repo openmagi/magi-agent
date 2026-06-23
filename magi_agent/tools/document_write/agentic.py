@@ -38,7 +38,10 @@ _writer_factory: Callable[[], AgenticDocumentWriter | None] | None = None
 
 def get_agentic_writer() -> AgenticDocumentWriter | None:
     if _writer_factory is None:
-        model = os.environ.get("MAGI_DOCUMENT_AGENTIC_MODEL", "").strip()
+        # I-4: routed through the typed flag registry.
+        from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+        model = (flag_str("MAGI_DOCUMENT_AGENTIC_MODEL") or "").strip()
         if not model:
             return None
         return LiteLLMAgenticDocumentWriter(model=model)
@@ -77,6 +80,12 @@ class LiteLLMAgenticDocumentWriter:
         except Exception as error:
             raise RuntimeError("litellm unavailable for agentic document authoring") from error
 
+        # I-4: typed flag registry aliases used for the litellm kwargs below.
+        from magi_agent.config.flags import (  # noqa: PLC0415
+            flag_int as _flag_int,
+            flag_str as _flag_str,
+        )
+
         source = request.source.markdown
         system = (
             "You are Magi Agent's document authoring worker. Rewrite the source "
@@ -102,8 +111,13 @@ class LiteLLMAgenticDocumentWriter:
                     ),
                 },
             ],
-            temperature=float(os.environ.get("MAGI_DOCUMENT_AGENTIC_TEMPERATURE", "0.2")),
-            timeout=int(os.environ.get("MAGI_DOCUMENT_AGENTIC_TIMEOUT_S", "90")),
+            # I-4: routed through the typed flag registry. ``flag_str`` /
+            # ``flag_int`` apply the registered defaults when env is empty
+            # / unparseable (0.2 / 90), preserving legacy parse semantics.
+            temperature=float(
+                _flag_str("MAGI_DOCUMENT_AGENTIC_TEMPERATURE") or "0.2"
+            ),
+            timeout=_flag_int("MAGI_DOCUMENT_AGENTIC_TIMEOUT_S") or 90,
         )
         content = response.choices[0].message.content  # type: ignore[attr-defined]
         if not isinstance(content, str) or not content.strip():

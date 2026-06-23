@@ -25,10 +25,13 @@ def work_queue_db_path_from_env() -> Path:
     1. ``MAGI_WORK_QUEUE_DB_PATH`` env var (if set and non-blank).
     2. ``<MAGI_STATE_DIR>/work_queue.db`` (defaults to ``~/.magi/work_queue.db``).
     """
-    raw = os.environ.get("MAGI_WORK_QUEUE_DB_PATH", "")
+    # I-4: routed through the typed flag registry.
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    raw = flag_str("MAGI_WORK_QUEUE_DB_PATH") or ""
     if raw.strip():
         return Path(raw).expanduser()
-    state_dir = Path(os.environ.get("MAGI_STATE_DIR", "~/.magi")).expanduser()
+    state_dir = Path(flag_str("MAGI_STATE_DIR") or "~/.magi").expanduser()
     return state_dir / "work_queue.db"
 
 
