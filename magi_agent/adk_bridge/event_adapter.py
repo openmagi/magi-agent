@@ -16,6 +16,7 @@ from magi_agent.runtime.events import (
     public_refs,
     public_terminal_refs,
 )
+from magi_agent.config.flags import flag_bool
 from magi_agent.ops.health import _truthy_env
 from magi_agent.runtime.transcript import (
     AssistantTextEntry,
@@ -914,7 +915,9 @@ def _project_function_call_part(
 
     if wire_profile is not None:
         tool_use_id = wire_profile.tool_id(name, args, adk_id, index)
-        agent_event = wire_profile.build_tool_start(tool_use_id, public_name, _public_preview(args))
+        agent_event = wire_profile.build_tool_start(
+            tool_use_id, public_name, _public_preview(args, safe_keys=_rich_preview_safe_keys(name))
+        )
         # Record the call-side id for correlation on the response side.
         # Mirrors gate5b4c3's ``_remember_live_tool_event_id`` pattern.
         if hosted_tool_ids_by_adk_id is not None and pending_hosted_ids_by_name is not None:
@@ -941,7 +944,7 @@ def _project_function_call_part(
             "type": "tool_start",
             "id": tool_use_id,
             "name": public_name,
-            "input_preview": _public_preview(args),
+            "input_preview": _public_preview(args, safe_keys=_rich_preview_safe_keys(name)),
         }
         if live_compatible:
             agent_event["eventId"] = _public_event_id(
@@ -1505,8 +1508,45 @@ def _json_safe_preview_value(value: object) -> object:
     return value
 
 
-def _public_preview(value: object) -> str:
-    public_value = _public_json_safe_preview_value(value)
+# ── Rich tool preview (MAGI_RICH_TOOL_PREVIEW, default-OFF) ──────────────────
+# Per-tool allowlist of TOP-LEVEL argument keys (normalized: lowercase, alnum
+# only) that are safe to surface as a human-readable summary in the public
+# activity timeline. These are the agent's OWN task/target inputs, not system /
+# user / raw-provider context. The values still pass the full secret/PII
+# sanitizer (`_public_text`); only the blanket private-key DIGESTING is skipped,
+# and ONLY at the top level (nested dicts keep the normal redaction so a nested
+# "prompt" can never leak). System/user/raw/child-transcript prompt keys are NOT
+# in any allowlist and stay digested even when the flag is on.
+_RICH_PREVIEW_TOOL_ARG_ALLOWLIST: dict[str, frozenset[str]] = {
+    "spawnagent": frozenset(
+        {"task", "prompt", "persona", "role", "agentroute", "instructions", "message", "objective"}
+    ),
+    "bash": frozenset({"command"}),
+    "execcommand": frozenset({"command"}),
+    "shell": frozenset({"command"}),
+    "filewrite": frozenset({"path", "content"}),
+    "write": frozenset({"path", "content"}),
+    "fileedit": frozenset({"path", "oldstring", "newstring"}),
+    "edit": frozenset({"path", "oldstring", "newstring"}),
+    "websearch": frozenset({"query"}),
+    "webfetch": frozenset({"url", "query"}),
+    "browser": frozenset({"url", "action"}),
+}
+
+
+def _normalize_preview_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", value.lower())
+
+
+def _rich_preview_safe_keys(tool_name: str) -> frozenset[str]:
+    """Top-level arg keys to surface for *tool_name*, or empty when the flag is off."""
+    if not flag_bool("MAGI_RICH_TOOL_PREVIEW"):
+        return frozenset()
+    return _RICH_PREVIEW_TOOL_ARG_ALLOWLIST.get(_normalize_preview_key(tool_name), frozenset())
+
+
+def _public_preview(value: object, *, safe_keys: frozenset[str] = frozenset()) -> str:
+    public_value = _public_json_safe_preview_value(value, safe_keys=safe_keys)
     preview = (
         public_value
         if isinstance(public_value, str)
@@ -1523,7 +1563,9 @@ def _public_preview(value: object) -> str:
     return redacted
 
 
-def _public_json_safe_preview_value(value: object) -> object:
+def _public_json_safe_preview_value(
+    value: object, *, safe_keys: frozenset[str] = frozenset()
+) -> object:
     if isinstance(value, bool):
         return value
     if isinstance(value, float) and not math.isfinite(value):
@@ -1532,7 +1574,10 @@ def _public_json_safe_preview_value(value: object) -> object:
         result: dict[str, object] = {}
         for key, item_value in value.items():
             key_text = str(key)
-            if _is_private_preview_key(key_text):
+            # safe_keys un-redacts ONLY these top-level tool-arg keys; nested
+            # values always recurse WITHOUT safe_keys so a nested private key
+            # (e.g. an embedded system prompt) can never be surfaced.
+            if _is_private_preview_key(key_text) and _normalize_preview_key(key_text) not in safe_keys:
                 result[f"{_public_text(key_text)}Digest"] = metadata_digest(item_value)
                 continue
             result[key_text] = _public_json_safe_preview_value(item_value)
