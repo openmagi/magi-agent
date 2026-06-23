@@ -192,6 +192,13 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     "MAGI_DOCUMENT_QA_ENABLED",
     "MAGI_EDIT_RETRY_REFLECTION_ENABLED",
     "MAGI_EGRESS_GATE_ENABLED",
+    # Empty-response recovery (Hermes mechanism 3). When the main agent
+    # streams tool calls but ends the turn with zero text, the engine
+    # re-invokes once with "produce your final answer now". Default OFF
+    # in the registry because the corrective message persists in session
+    # history — fine in production but the wrong default for lab where
+    # the alternative is a frontend fallback banner. Lab opts in.
+    "MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED",
     "MAGI_FACTS_REPLAN_ENABLED",
     "MAGI_FACT_GROUNDING_VERIFICATION_ENABLED",
     "MAGI_FILE_DELIVERY_LIVE_ENABLED",

@@ -222,6 +222,17 @@ FLAGS: tuple[FlagSpec, ...] = (
         summary="Enable the autonomous goal-loop scheduler.",
     ),
     _b(
+        "MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED",
+        summary=(
+            "Enable PR4 R2 corrective recovery: when the main agent ends "
+            "a turn with zero text after tool calls, the engine re-invokes "
+            "once with a 'produce your final answer now' nudge. Default-OFF "
+            "in the registry; LAB_EXPERIMENTAL_FLAGS opts it in for lab / "
+            "dogfood profiles so the dashboard stops showing the "
+            "'no final answer text arrived' fallback banner."
+        ),
+    ),
+    _b(
         "MAGI_GOAL_NUDGE_ENABLED",
         summary=(
             "Enable the production goal-nudge: a bounded continuation that "

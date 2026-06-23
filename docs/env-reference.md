@@ -48,6 +48,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_EDIT_FUZZY_MATCH_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Use the 9-stage fuzzy-match cascade for FileEdit (default-ON full profile).
 - `MAGI_EDIT_RETRY_REFLECTION_ENABLED` (default off) — Reflect on failed edits before retrying (coding repair loop).
 - `MAGI_EGRESS_GATE_ENABLED` (default off) — Run the evidence-grounded critic gate before chat egress.
+- `MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED` (default off) — Enable PR4 R2 corrective recovery: when the main agent ends a turn with zero text after tool calls, the engine re-invokes once with a 'produce your final answer now' nudge. Default-OFF in the registry; LAB_EXPERIMENTAL_FLAGS opts it in for lab / dogfood profiles so the dashboard stops showing the 'no final answer text arrived' fallback banner.
 - `MAGI_ERROR_RECOVERY_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Enable automatic error-recovery retries (default-ON full profile).
 - `MAGI_EVIDENCE_COMPLETION_GATE_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Block turn completion when required evidence is missing (default-ON full profile).
 - `MAGI_EVIDENCE_LEDGER_DIR` (no default) — Directory for opt-in durable per-session JSONL evidence ledgers; unset keeps the lean in-memory live view only.
