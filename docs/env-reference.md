@@ -68,6 +68,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_FACT_GROUNDING_VERIFICATION_ENABLED` (default off) — Run semantic grounding verification on the live evidence gate: a research answer asserting a specific numeric/identifier value not present in the opened-source corpus stays ungrounded and blocks. Strict default-OFF and inert unless explicitly set.
 - `MAGI_FILE_DELIVERY_LIVE_ENABLED` (default off) — Enable the live file-delivery tool (vs receipt-only).
 - `MAGI_FIRST_PARTY_TOOLS_ENABLED` (default on) — Mount the first-party Magi tool pack on the CLI runner; flat default-ON. Set ``=0`` to fall back to ADK-native tools only.
+- `MAGI_FORK_CACHE_ENABLED` (default off) — Enable the per-child fork-runner output cache (skips re-computation when an identical child invocation already produced a result this run). Default-OFF.
 - `MAGI_FORMAT_ADHERENCE_ENABLED` (default off) — Append a general prompt self-check for exact requested units, scale, rounding precision, names, and answer format.
 - `MAGI_GATE5B_GOVERNANCE_ENABLED` (default off) — Run cli/engine-parity governance on the gate5b serving path: attach the control-plane plugin (loop-guard / compaction / edit-retry / self-review / max-steps / tool-synthesis etc., each behind its own existing flag) to the gate5b runner AND run a pre-final evidence/fact-grounding check over the turn's tool evidence before emitting the user-visible response. Strict default-OFF: when unset the gate5b path is byte-identical to today.
 - `MAGI_GA_DELIVERABLE_GATE_ENABLED` (default off) — Enable the GA artifact-deliverable pre-final gate; strict default-OFF and inert unless explicitly set.
@@ -90,6 +91,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_LLM_API_KEY` (no default) — Credential paired with ``MAGI_LLM_API_BASE``: surfaced as the litellm ``api_key`` AND an explicit auth header so OpenAI-prefixed models still present the gateway token. SENSITIVE — never logged or persisted; treat as a secret like ``MAGI_DISCORD_BOT_TOKEN``.
 - `MAGI_LOOP_GUARD_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Enable the repetition/loop guard brake (default-ON full profile).
 - `MAGI_LSP_DIAGNOSTICS_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Surface LSP diagnostics to the coding harness (default-ON full profile).
+- `MAGI_MAX_RECOVERY_ATTEMPTS` (default `3`) — Maximum retry attempts the error-recovery framework will make for a recoverable category (default 3).
 - `MAGI_MAX_STEPS_BRAKE_ENABLED` (default off) — Register the MaxStepsBrakeControl wrap-up brake on the control plane (the seam is wired with ``max_iterations=0``; H-9 audit may delete the seam entirely). Strict default-OFF.
 - `MAGI_MEMORY_COMPACTION_ENABLED` (default off) — Enable the 5-level compaction tree builder for stored memory.
 - `MAGI_MEMORY_ENABLED` (default off) — Master switch for the agent memory subsystem (3-tier + compaction).
@@ -140,6 +142,8 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_SPAWN_RECIPE_CAP_ENABLED` (default off) — Apply the orchestrator's spawn_cap as the innermost tool-name ceiling in _resolve_turn_toolset, after profile and parent-cap filtering. Default OFF / None spawn_cap is a no-op (byte-identical).
 - `MAGI_STATE_DIR` (default `~/.magi`) — Root directory for per-user runtime state (work-queue db, session caches, etc). ``~`` is expanded.
 - `MAGI_STEP_DECOMPOSITION_ENABLED` (default off) — Inject a light first-pass guidance asking the agent to enumerate dependent sub-steps up front and confirm each before proceeding (prompt-only nudge; reuses existing planning seams).
+- `MAGI_STREAM_WITHHOLDING_ENABLED` (default off) — Enable the runtime stream-withholding buffer. When ON the streaming chat path holds tokens in a per-turn buffer so a tool-call retry can suppress + replay them; OFF emits directly.
+- `MAGI_STREAM_WITHHOLDING_MAX_RETRIES` (default `2`) — Maximum suppress-and-retry attempts for the withholding buffer (default 2).
 - `MAGI_SUBAGENT_GOVERNED_TURN_ENABLED` (default off) — Route spawned subagents through run_governed_turn (governed turn-loop) instead of the bare run_async child loop. Default OFF keeps the legacy child path byte-identical.
 - `MAGI_SUBAGENT_TOOL_TIGHTEN_ONLY_ENABLED` (default off) — Intersect a spawned subagent's tool set with the parent's effective tools (tighten-only) at child-runtime build. Default OFF / empty parent cap is a no-op.
 - `MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED` (default off) — Live-SWE-style tool-synthesis: per-step reflection nudge + 'create your own tools' recipe block (frontier-tier models only).

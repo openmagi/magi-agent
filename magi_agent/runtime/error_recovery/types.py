@@ -131,11 +131,19 @@ class ErrorRecoveryConfig(BaseModel):
     @classmethod
     def from_env(cls) -> ErrorRecoveryConfig:
         """Construct config from environment variables with safe defaults."""
-        enabled = os.environ.get("MAGI_ERROR_RECOVERY_ENABLED", "").lower() in ("1", "true")
-        try:
-            max_attempts = int(os.environ.get("MAGI_MAX_RECOVERY_ATTEMPTS", "3"))
-        except ValueError:
-            max_attempts = 3
+        # I-4: routed through the typed flag registry.
+        # ``MAGI_ERROR_RECOVERY_ENABLED`` is registered as
+        # ``profile_bool`` (default-ON in the full runtime profile,
+        # OFF under safe/eval); the legacy ``"".lower() in ("1","true")``
+        # read defaulted OFF on missing env. Preserve the legacy
+        # "strict opt-in" semantics by reading the raw value and
+        # applying the same set: profile-aware default-ON is a
+        # behavior change that belongs in a separate ON-path soak PR.
+        from magi_agent.config.flags import flag_int  # noqa: PLC0415
+
+        raw_enabled = (os.environ.get("MAGI_ERROR_RECOVERY_ENABLED") or "").lower()
+        enabled = raw_enabled in ("1", "true")
+        max_attempts = flag_int("MAGI_MAX_RECOVERY_ATTEMPTS") or 3
         return cls(
             recovery_enabled=enabled,
             max_recovery_attempts=max_attempts,

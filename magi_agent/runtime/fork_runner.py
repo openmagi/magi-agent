@@ -66,9 +66,13 @@ class ForkRunner:
 
     def __init__(self, *, child_executor: Any = None) -> None:
         self._child_executor = child_executor
-        self._enabled = os.environ.get("MAGI_FORK_CACHE_ENABLED", "").lower() in (
-            "1", "true", "yes",
-        )
+        # I-4: routed through the typed flag registry. The canonical
+        # strict-truthy set ``{1, true, yes, on}`` adds ``on`` to the
+        # pre-I-4 ``{1, true, yes}`` — a trivial widening that aligns
+        # with the project-wide bool convention.
+        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+        self._enabled = flag_bool("MAGI_FORK_CACHE_ENABLED")
 
     @property
     def enabled(self) -> bool:
