@@ -1,6 +1,8 @@
 """Tests for GET /v1/app/customize and PATCH /v1/app/customize/tools/{name} endpoints."""
 from __future__ import annotations
 
+import os
+
 from fastapi.testclient import TestClient
 
 from magi_agent.app import create_app
@@ -241,12 +243,55 @@ def test_customize_returns_catalog_and_overrides(tmp_path, monkeypatch) -> None:
     assert res.status_code == 200
     body = res.json()
     assert set(body.keys()) == {"catalog", "overrides"}
-    assert set(body["catalog"].keys()) == {"verification", "tools"}
+    assert set(body["catalog"].keys()) == {"verification", "tools", "controlPlane"}
     assert set(body["catalog"]["verification"].keys()) == {
         "recipes",
         "harnessPresets",
         "hooks",
         "customRuleMenu",
     }
+    # Control-plane behavior catalog includes the facts-survey toggle.
+    assert any(e["id"] == "facts-replan" for e in body["catalog"]["controlPlane"])
     # No customize.json → tools overrides default to empty dict
     assert body["overrides"]["tools"] == {}
+
+
+def test_patch_control_plane_persists_and_projects_to_env(tmp_path, monkeypatch) -> None:
+    cfile = tmp_path / "customize.json"
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
+    # Simulate the lab profile seed having turned the flag ON.
+    monkeypatch.setenv("MAGI_FACTS_REPLAN_ENABLED", "1")
+    client = TestClient(create_app(_build_runtime(tmp_path)))
+    client.headers.update({"x-gateway-token": _TOKEN})
+
+    resp = client.patch(
+        "/v1/app/customize/control-plane/facts-replan", json={"enabled": False}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["overrides"]["control_plane"]["facts-replan"] is False
+    # Persisted to disk...
+    import json
+
+    assert json.loads(cfile.read_text())["control_plane"]["facts-replan"] is False
+    # ...and projected onto the live env so the next turn honors it immediately.
+    assert os.environ["MAGI_FACTS_REPLAN_ENABLED"] == "0"
+
+
+def test_patch_control_plane_unknown_behavior_404(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
+    client = TestClient(create_app(_build_runtime(tmp_path)))
+    client.headers.update({"x-gateway-token": _TOKEN})
+    resp = client.patch(
+        "/v1/app/customize/control-plane/MAGI_EGRESS_GATE_ENABLED",
+        json={"enabled": False},
+    )
+    assert resp.status_code == 404
+
+
+def test_patch_control_plane_requires_auth(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
+    client = _client(tmp_path)  # no token
+    resp = client.patch(
+        "/v1/app/customize/control-plane/facts-replan", json={"enabled": False}
+    )
+    assert resp.status_code == 401

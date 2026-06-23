@@ -81,6 +81,7 @@ function buildOverrides(): Parameters<typeof unifyPolicies>[0]["overrides"] {
     },
     tools: {},
     user_rules: "",
+    control_plane: {},
   };
 }
 

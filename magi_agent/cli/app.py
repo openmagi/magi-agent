@@ -279,6 +279,17 @@ def agent(
         apply_lab_runtime_defaults(os.environ)
     else:
         apply_local_full_runtime_defaults(os.environ)
+    # User-facing control-plane behavior toggles (~/.magi/customize.json) win
+    # over the profile seed just applied: project them as an explicit overwrite.
+    try:
+        from magi_agent.customize.control_plane_overrides import (  # noqa: PLC0415
+            apply_control_plane_overrides_to_env,
+        )
+        from magi_agent.customize.store import load_overrides  # noqa: PLC0415
+
+        apply_control_plane_overrides_to_env(os.environ, load_overrides())
+    except Exception:  # noqa: BLE001 - never let a customize read break startup
+        pass
     runner_policy_routing_enabled = local_runner_policy_routing_enabled_from_env()
 
     # ------------------------------------------------------------------ #

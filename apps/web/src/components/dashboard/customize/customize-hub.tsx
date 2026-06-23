@@ -25,11 +25,12 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ShieldCheck, Wrench, Layers, Webhook, Wand2, Plus } from "lucide-react";
+import { ShieldCheck, Wrench, Layers, Webhook, Wand2, Plus, SlidersHorizontal } from "lucide-react";
 import {
   useCustomize,
   patchToolOverride,
   patchVerificationOverride,
+  patchControlPlaneOverride,
   putRules,
   putCustomRule,
   deleteCustomRule,
@@ -50,6 +51,7 @@ import {
 } from "./verification-rule-modal";
 import { CustomChecksSection } from "./custom-checks-section";
 import { CustomToolPanel } from "./custom-tool-modal";
+import { BehaviorsPanel } from "./behaviors-panel";
 import { GuidancePanel } from "./guidance-panel";
 import { PageHint } from "./page-hint";
 import { PoliciesTable } from "./policies-table";
@@ -75,6 +77,7 @@ export type CustomizeSection =
   | "rules"
   | "guidance"
   | "tools"
+  | "behaviors"
   | "recipes"
   | "hooks";
 
@@ -103,6 +106,13 @@ const SECTIONS: ReadonlyArray<{
     label: "Tools",
     icon: <Wrench className="h-4 w-4" />,
     description: "Enable or disable individual tools.",
+  },
+  {
+    id: "behaviors",
+    label: "Behaviors",
+    icon: <SlidersHorizontal className="h-4 w-4" />,
+    description:
+      "In-context runtime behaviors (periodic facts survey, goal nudge, tool-synthesis nudge, empty-response recovery). These are seeded ON by the lab/dogfood profile; a toggle here overrides that.",
   },
   {
     id: "recipes",
@@ -283,6 +293,41 @@ export function CustomizeHub({
     [agentFetch],
   );
 
+  // --- Control-plane behavior toggles (facts-survey replan, goal nudge, …) ---
+  const [behaviorOverrides, setBehaviorOverrides] = useState<Record<string, boolean>>({});
+  const [behaviorPending, setBehaviorPending] = useState<Set<string>>(new Set());
+  const [behaviorError, setBehaviorError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setBehaviorOverrides(data?.overrides.control_plane ?? {});
+  }, [data]);
+
+  const handleToggleBehavior = useCallback(
+    (id: string, enabled: boolean) => {
+      setBehaviorOverrides((prev) => ({ ...prev, [id]: enabled }));
+      setBehaviorError(null);
+      setBehaviorPending((prev) => new Set(prev).add(id));
+      patchControlPlaneOverride(agentFetch, id, enabled)
+        .then((overrides) => {
+          setBehaviorOverrides(overrides.control_plane);
+        })
+        .catch((err: unknown) => {
+          setBehaviorOverrides((prev) => ({ ...prev, [id]: !enabled }));
+          setBehaviorError(
+            err instanceof Error ? err.message : `Failed to update behavior "${id}"`,
+          );
+        })
+        .finally(() => {
+          setBehaviorPending((prev) => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+        });
+    },
+    [agentFetch],
+  );
+
   const recipes = useMemo(() => data?.catalog.verification.recipes ?? [], [data]);
 
   if (loading) {
@@ -380,6 +425,16 @@ export function CustomizeHub({
             onToggle={handleToggleTool}
             pendingNames={toolPending}
             error={toolError}
+          />
+        ) : null}
+
+        {section === "behaviors" ? (
+          <BehaviorsPanel
+            behaviors={data.catalog.controlPlane ?? []}
+            overrides={behaviorOverrides}
+            onToggle={handleToggleBehavior}
+            pendingIds={behaviorPending}
+            error={behaviorError}
           />
         ) : null}
 

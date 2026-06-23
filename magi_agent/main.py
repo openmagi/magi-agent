@@ -107,6 +107,10 @@ def main(argv: Sequence[str] | None = None) -> None:
             apply_lab_runtime_defaults(os.environ)
         else:
             apply_local_full_runtime_defaults(os.environ)
+        # User-facing control-plane behavior toggles (~/.magi/customize.json)
+        # win over the profile seed just applied: project them onto os.environ
+        # as an explicit overwrite. Fail-soft; a no-op when the section is empty.
+        _apply_local_control_plane_overrides(os.environ)
         _maybe_start_local_vault_proxy(os.environ)
         _print_local_startup_notice(port)
     else:
@@ -171,6 +175,23 @@ def _local_runtime_defaults_active(config: RuntimeConfig) -> bool:
         and config.user_id == "local-user"
         and config.gateway_token == "local-dev-token"
     )
+
+
+def _apply_local_control_plane_overrides(environ) -> None:
+    """Project ``customize.json`` control-plane toggles onto the environment.
+
+    Runs after the profile (lab/full) seed so an explicit user toggle wins.
+    Fail-soft: any failure to load/apply leaves the profile defaults in place.
+    """
+    try:
+        from .customize.control_plane_overrides import (
+            apply_control_plane_overrides_to_env,
+        )
+        from .customize.store import load_overrides
+
+        apply_control_plane_overrides_to_env(environ, load_overrides())
+    except Exception:  # noqa: BLE001 - never let a customize read break startup
+        return
 
 
 def _maybe_start_local_vault_proxy(environ) -> None:

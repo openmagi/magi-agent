@@ -28,6 +28,14 @@ DEFAULT_OVERRIDES: dict[str, Any] = {
     },
     "tools": {},
     "user_rules": "",
+    # Explicit per-behavior enable state for the in-context control-plane loop
+    # controls (facts-survey replan, goal nudge, tool-synthesis nudge,
+    # empty-response recovery). Tri-state like ``preset_overrides``: a behavior
+    # id present with True/False projects onto its ``MAGI_*_ENABLED`` flag as an
+    # overwrite (user toggle beats the lab/dogfood profile seed); an absent id
+    # leaves the env flag untouched. Empty by default so OFF is byte-identical.
+    # Catalog + projection live in ``customize.control_plane_overrides``.
+    "control_plane": {},
 }
 
 _USER_RULES_MAX = 20_000
@@ -63,6 +71,15 @@ def _normalize(data: dict[str, Any]) -> dict[str, Any]:
     user_rules = data.get("user_rules")
     if isinstance(user_rules, str):
         merged["user_rules"] = user_rules[:_USER_RULES_MAX]
+    control_plane = data.get("control_plane")
+    if isinstance(control_plane, dict):
+        # Keep only explicit booleans (tri-state). Non-bool values are dropped
+        # so the projection step never has to guess at a malformed entry.
+        merged["control_plane"] = {
+            key: value
+            for key, value in control_plane.items()
+            if isinstance(key, str) and isinstance(value, bool)
+        }
     return merged
 
 
@@ -103,6 +120,23 @@ def set_tool_override(name: str, enabled: bool, path: Path | None = None) -> dic
     target = path or customize_path()
     overrides = load_overrides(target)
     overrides["tools"][name] = bool(enabled)
+    save_overrides(overrides, target)
+    return overrides
+
+
+def set_control_plane_override(
+    behavior_id: str, enabled: bool, path: Path | None = None
+) -> dict[str, Any]:
+    """Set one control-plane behavior's enable override, save, return overrides.
+
+    The bool is RETAINED on disable (tri-state) so an opt-out of a profile-
+    seeded behavior persists across restarts. Validation that ``behavior_id`` is
+    a real catalog entry is the API layer's job; the store records what it is
+    given (the projection step ignores unknown ids anyway).
+    """
+    target = path or customize_path()
+    overrides = load_overrides(target)
+    overrides.setdefault("control_plane", {})[behavior_id] = bool(enabled)
     save_overrides(overrides, target)
     return overrides
 

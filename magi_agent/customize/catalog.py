@@ -191,4 +191,17 @@ def build_catalog(runtime: Any) -> dict[str, Any]:
             "customRuleMenu": what_menu(),
         },
         "tools": _tool_entries(runtime),
+        # In-context control-plane behavior toggles (facts-survey replan, goal
+        # nudge, etc.). Orthogonal to the verification gate layer above; each
+        # maps to a single ``MAGI_*_ENABLED`` flag that the lab/dogfood profiles
+        # seed ON, so without this surface the dashboard could not turn them off.
+        "controlPlane": _control_plane_entries(),
     }
+
+
+def _control_plane_entries() -> list[dict[str, str]]:
+    from magi_agent.customize.control_plane_overrides import (  # noqa: PLC0415
+        control_plane_behavior_catalog,
+    )
+
+    return control_plane_behavior_catalog()
