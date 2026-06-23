@@ -2359,6 +2359,27 @@ def is_tool_usage_guidance_enabled(env: Mapping[str, str] | None = None) -> bool
     return flag_bool(MAGI_TOOL_USAGE_GUIDANCE_ENABLED_ENV, env=source)
 
 
+MAGI_HOSTED_FULL_ACCESS_ENV = "MAGI_HOSTED_FULL_ACCESS"
+
+
+def is_hosted_full_access_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Operator opt-in: full-access tool execution on the local headless engine.
+
+    Default OFF (strict truthy opt-in). When ON a hosted bot served via the
+    local headless engine path runs with ``bypassPermissions`` (like the
+    loopback local owner) so mutating/execution tools (Bash, SpawnAgent,
+    FileWrite) run without an interactive approver instead of being safe-denied
+    headless. Intended for single-tenant / trusted self-host bots whose gateway
+    token is the sole access boundary. Only effective when the request reaches
+    the local engine path (hosted-streaming-serve OFF and no gate5b user-visible
+    canary gate). Delegates to the canonical ``config.flags`` registry.
+    """
+    from .flags import flag_bool
+
+    source = os.environ if env is None else env
+    return flag_bool(MAGI_HOSTED_FULL_ACCESS_ENV, env=source)
+
+
 MAGI_PROMPT_EXAMPLES_ENABLED_ENV = "MAGI_PROMPT_EXAMPLES_ENABLED"
 
 

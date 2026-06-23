@@ -2428,6 +2428,45 @@ def test_default_stream_builder_keeps_default_permissions_for_hosted_runtime(
     assert captured["permission_mode"] == "default"
 
 
+def test_default_stream_builder_bypasses_permissions_for_hosted_full_access(
+    monkeypatch,
+) -> None:
+    """MAGI_HOSTED_FULL_ACCESS=1 opts a hosted bot into bypassPermissions."""
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("MAGI_HOSTED_FULL_ACCESS", "1")
+    captured: dict[str, object] = {}
+
+    class FakeEngine:
+        async def run_turn_stream(self, runtime, turn_input, *, cancel, gate):
+            yield EngineResult(
+                terminal=Terminal.completed,
+                session_id=turn_input["session_id"],
+                turn_id=turn_input["turn_id"],
+            )
+
+    def fake_build_headless_runtime(**kwargs: object) -> SimpleNamespace:
+        captured.update(kwargs)
+        return SimpleNamespace(engine=FakeEngine(), gate=None)
+
+    import magi_agent.cli.wiring as wiring
+
+    monkeypatch.setattr(wiring, "build_headless_runtime", fake_build_headless_runtime)
+    client = TestClient(_make_app())
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={
+            "sessionId": "s-hosted-full",
+            "turnId": "t-hosted-full",
+            "messages": [{"role": "user", "content": "spawn a subagent"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["permission_mode"] == "bypassPermissions"
+
+
 # ---------------------------------------------------------------------------
 # Test 9 — malformed JSON → 400
 # ---------------------------------------------------------------------------
@@ -2807,4 +2846,6 @@ def test_default_builder_prefers_override_over_config(monkeypatch) -> None:
         },
     )
     assert r2.status_code == 200
-    assert seen[-1] == "gpt-5.2"
+    # The serve-config model is used; a bare non-anthropic id is provider-
+    # normalized for the local engine (gpt-5.2 -> openai/gpt-5.2).
+    assert seen[-1] == "openai/gpt-5.2"

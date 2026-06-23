@@ -793,6 +793,19 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_HOSTED_FULL_ACCESS",
+        summary=(
+            "Grant the local headless engine path 'bypassPermissions' for a "
+            "trusted hosted bot (single-tenant / self-host) so mutating and "
+            "execution tools (Bash, SpawnAgent, FileWrite) run without an "
+            "interactive approver. OFF keeps the normal 'default' gate where "
+            "mutating tools are safe-denied headless. Only effective when the "
+            "request reaches the local engine path (hosted-streaming-serve OFF "
+            "and no gate5b user-visible canary gate); the gateway token remains "
+            "the sole access boundary."
+        ),
+    ),
+    _b(
         "MAGI_USER_HOOKS_ENABLED",
         summary=(
             "Master gate for CC-style user settings.json hooks (self-host / "
