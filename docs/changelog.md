@@ -15,6 +15,14 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.77
+
+### Added
+- **Agent Vault credentials are now wired end-to-end on local serve (#900).** Registered credentials surface in the agent's message-builder context (redacted metadata only — the secret value never leaves the broker). Hosted sidecar admin API has been aligned to the chat-proxy contract; producer/admin store split is fixed (#901).
+
+### Changed
+- **I-4 cluster — flag-registry consolidation (batches 6–7).** 8 more raw `os.environ.get` reads in TUI (#898) and vault/recipe/observability (#899) modules now route through the typed flag registry. 8 new `FlagSpec` entries. Flag-reads budget tightened **48 → 40** (cumulative since 0.1.75 release: **70 → 40**).
+
 ## 0.1.76
 
 ### Changed
