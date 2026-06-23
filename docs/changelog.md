@@ -15,6 +15,17 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.76
+
+### Changed
+- **I-4 cluster — flag-registry consolidation.** 18 raw `os.environ.get` reads in transport, context, evidence-ledger, document, work-queue, audio/video, and runtime modules now route through the typed `flag_bool` / `flag_str` / `flag_int` registry (`magi_agent.config.flags`). 18 new `FlagSpec` entries registered. Flag-reads budget tightened **70 → 48**.
+  - Batch 1 — transport security gates (3 reads): #887.
+  - Batch 2 — context-mgmt + evidence-ledger reads (7): #892.
+  - Batch 3 — document agentic + work-queue store reads (5): #894.
+  - Batch 4 — audio/video tool gates (3): #895.
+  - Batch 5 — runtime stream-withholding + fork-cache + recovery (4): #896.
+- **F-10 coding-verification.** Twin hard-gate paths collapsed into a single parameterized contract (#886).
+
 ## 0.1.75
 
 ### Added
