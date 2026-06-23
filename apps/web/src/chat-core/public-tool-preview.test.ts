@@ -766,4 +766,35 @@ describe("derivePublicToolPreview", () => {
     expect(preview?.target).toBe("Running network request");
     expect(preview?.snippet?.length).toBeLessThanOrEqual(240);
   });
+
+  it("surfaces PersistentPython stdout as the snippet", () => {
+    const preview = derivePublicToolPreview({
+      label: "PersistentPython",
+      inputPreview: JSON.stringify({ code: "print(1 + 1)" }),
+      outputPreview: JSON.stringify({ output: { stdout: "2\n", stderr: "" } }),
+    });
+    expect(preview?.action).toBe("Ran Python");
+    expect(preview?.snippet).toContain("2");
+    // Not the opaque generic fallback.
+    expect(preview?.target).not.toBe("Processing tool result");
+  });
+
+  it("falls back to PersistentPython stderr, then code, when there is no stdout", () => {
+    const preview = derivePublicToolPreview({
+      label: "PersistentPython",
+      inputPreview: JSON.stringify({ code: "raise ValueError('boom')" }),
+      outputPreview: JSON.stringify({ stdout: "", stderr: "ValueError: boom" }),
+    });
+    expect(preview?.action).toBe("Ran Python");
+    expect(preview?.snippet).toContain("boom");
+  });
+
+  it("extracts a result snippet for unknown structured tools instead of 'Processing tool result'", () => {
+    const preview = derivePublicToolPreview({
+      label: "SomeUnknownTool",
+      outputPreview: JSON.stringify({ result: "the useful answer", durationMs: 12 }),
+    });
+    expect(preview?.snippet).toContain("the useful answer");
+    expect(preview?.target).not.toBe("Processing tool result");
+  });
 });
