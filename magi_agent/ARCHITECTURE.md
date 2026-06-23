@@ -833,13 +833,14 @@ graph LR
 | gate2_durable_evidence.py | Durable evidence store for Gate 2 selected sandbox canary. | — | transport/chat.py, transport/gate2_sandbox_canary.py |
 | ledger.py | — | authority, builtin, safety, types | cli/engine.py, evidence/__init__.py, evidence/first_party_activity.py, evidence/local_tool_collector.py, evidence/run_bookend.py, harness/general_automation/constraint_reinjection.py, harness/general_automation/live_gate.py, harness/general_automation/task_completion.py, harness/verifier_bus.py, introspection/projection.py, introspection/tool.py, shadow/audit_reporter.py |
 | ledger_semantics.py | — | — | — |
-| ledger_store.py | Reader + retention for the durable evidence-ledger files. | — | evidence/local_tool_collector.py, runtime/governed_turn.py, shadow/gate5b4c3_live_runner_boundary.py |
+| ledger_store.py | Reader + retention for the durable evidence-ledger files. | — | evidence/local_tool_collector.py, evidence/run_view.py, runtime/governed_turn.py, shadow/gate5b4c3_live_runner_boundary.py |
 | local_tool_collector.py | — | env, extraction, first_party_activity, ledger, ledger_store, result, source_ledger, types | cli/real_runner.py, cli/tests/test_evidence_turn_id_reconciliation.py, cli/tests/test_local_tool_evidence_wiring.py, cli/tests/test_real_runner.py, cli/tests/test_tool_runtime.py, cli/tool_runtime.py, cli/wiring.py, runtime/child_runner_live.py, tools/dispatcher.py, tools/tests/test_core_toolhost_source_projection.py |
 | observed_egress.py | — | gate1a_egress_correlation | (root)/main.py, transport/chat.py, transport/chat_routes.py, transport/health.py |
 | reports.py | — | authority, tool_preview, types | evidence/citation_audit.py, evidence/coding_verification.py, evidence/event_projection.py, evidence/source_ledger.py, evidence/subagent.py, shadow/audit_reporter.py |
 | research_final_gate.py | — | authority, citation_audit, source_ledger, types | research/research_first_canary.py |
 | rollout.py | — | authority, types | harness/resolved.py |
-| run_bookend.py | Build a durable evidence-ledger record for a turn's human-facing bookends. | ledger | runtime/governed_turn.py |
+| run_bookend.py | Build a durable evidence-ledger record for a turn's human-facing bookends. | ledger | evidence/run_view.py, runtime/governed_turn.py |
+| run_view.py | Serialize a session's durable evidence into ONE stable per-run view. | ledger_store, run_bookend | — |
 | runtime_issuance.py | — | — | evidence/child_runtime_envelope.py, evidence/event_projection.py, evidence/subagent.py, research/action_claims.py, research/boundary_enforcement.py, research/claim_graph.py, research/event_projection.py, research/source_proof.py, runtime/child_runner_boundary.py, testing/runtime_issuance_support.py, web_acquisition/cross_verifier.py, web_acquisition/deep_research.py, web_acquisition/tests/test_cross_verifier.py, web_acquisition/tests/test_deep_research_orchestrator.py |
 | runtime_receipts.py | — | authority | tools/local_readonly.py |
 | shacl_ontology.py | evidence → RDF ontology flattener. | types | evidence/shacl_verifier.py |
