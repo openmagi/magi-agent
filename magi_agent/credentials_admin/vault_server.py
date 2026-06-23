@@ -229,11 +229,26 @@ def build_vault_admin_app(*, admin_token: str, store_dir: Path | str) -> FastAPI
             content={"vault_ref": vault_ref, "credential": projection}
         )
 
-    @app.post("/v1/vault/credentials/{vault_ref}/revoke")
-    async def revoke_credential(vault_ref: str, request: Request) -> JSONResponse:
+    @app.post("/v1/vault/credentials/revoke")
+    async def revoke_credential(request: Request) -> JSONResponse:
         unauthorized = _auth(request)
         if unauthorized is not None:
             return unauthorized
+        # Contract: the opaque vault_ref is carried in the BODY (not the path) so
+        # the chat-proxy SSRF allowlist is a small set of FIXED paths with no
+        # caller-controlled path segments. Mirrors vault-client.revokeCredential.
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        if not isinstance(body, dict):
+            return JSONResponse(status_code=400, content={"error": "object_required"})
+        vault_ref = body.get("vaultRef")
+        if not isinstance(vault_ref, str) or not vault_ref:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "field_invalid", "field": "vaultRef"},
+            )
         existing = next(
             (
                 c
@@ -263,6 +278,43 @@ def build_vault_admin_app(*, admin_token: str, store_dir: Path | str) -> FastAPI
             )
         return JSONResponse(content={"credential": updated})
 
+    @app.post("/v1/vault/credentials/requires-approval")
+    async def set_requires_approval(request: Request) -> JSONResponse:
+        unauthorized = _auth(request)
+        if unauthorized is not None:
+            return unauthorized
+        # Contract: { vaultRef, requiresApproval } in the body. Mirrors
+        # vault-client.setRequiresApproval. No secret is involved.
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        if not isinstance(body, dict):
+            return JSONResponse(status_code=400, content={"error": "object_required"})
+        vault_ref = body.get("vaultRef")
+        if not isinstance(vault_ref, str) or not vault_ref:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "field_invalid", "field": "vaultRef"},
+            )
+        requires_approval = body.get("requiresApproval")
+        if not isinstance(requires_approval, bool):
+            return JSONResponse(
+                status_code=400,
+                content={"error": "field_invalid", "field": "requiresApproval"},
+            )
+        updated = store.set_requires_approval_by_ref(
+            vault_ref,
+            requires_approval,
+            path=_credentials_path(store_path),
+        )
+        if updated is None:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "not_found", "message": "credential not found"},
+            )
+        return JSONResponse(content={"credential": updated})
+
     @app.get("/v1/vault/approvals")
     async def list_approvals(request: Request) -> JSONResponse:
         unauthorized = _auth(request)
@@ -274,17 +326,25 @@ def build_vault_admin_app(*, admin_token: str, store_dir: Path | str) -> FastAPI
         )
         return JSONResponse(content={"approvals": approvals})
 
-    @app.post("/v1/vault/approvals/{approval_id}")
-    async def decide_approval(approval_id: str, request: Request) -> JSONResponse:
+    @app.post("/v1/vault/approvals/resolve")
+    async def resolve_approval(request: Request) -> JSONResponse:
         unauthorized = _auth(request)
         if unauthorized is not None:
             return unauthorized
+        # Contract: { approvalId, decision } in the body. Mirrors
+        # vault-client.resolveApproval. No secret is involved.
         try:
             body = await request.json()
         except Exception:  # noqa: BLE001
             return JSONResponse(status_code=400, content={"error": "invalid_json"})
         if not isinstance(body, dict):
             return JSONResponse(status_code=400, content={"error": "object_required"})
+        approval_id = body.get("approvalId")
+        if not isinstance(approval_id, str) or not approval_id:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "field_invalid", "field": "approvalId"},
+            )
         decision = body.get("decision")
         if decision not in approvals_store.DECISION_STATUSES:
             return JSONResponse(
@@ -429,7 +489,13 @@ def run_vault_server(
     # 2) Credential-injection proxy on 127.0.0.1:<listen_port> (same confdir CA).
     from magi_agent.credentials_admin.local_proxy import start_local_proxy
 
-    handle = start_local_proxy(config.store_dir / "vault", port=config.listen_port)
+    handle = start_local_proxy(
+        config.store_dir / "vault",
+        port=config.listen_port,
+        # Pin the addon's credential + approval files to the sidecar store so the
+        # proxy producer and the admin API the dashboard reads share ONE store.
+        store_dir=config.store_dir,
+    )
     logger.info(
         "Agent Vault proxy listening on 127.0.0.1:%s (bot=%s)",
         handle.port,

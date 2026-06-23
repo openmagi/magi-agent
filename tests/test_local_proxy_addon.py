@@ -51,6 +51,54 @@ class _FakeFlow:
 # -- inject path (no mitmproxy needed) ------------------------------------
 
 
+def test_build_injection_addon_pins_store_dir(tmp_path: Path) -> None:
+    """HOSTED loop: when start_local_proxy is given a store_dir, the addon must
+    read credentials AND read/write approvals from THAT dir (the sidecar store),
+    not the default ~/.magi. Otherwise the producer and the admin API diverge and
+    the dashboard never sees a blocked egress.
+    """
+    from magi_agent.credentials_admin import approvals_store, store
+    from magi_agent.credentials_admin.local_proxy import _build_injection_addon
+
+    store_dir = tmp_path / "sidecar-store"
+    store_dir.mkdir()
+    creds_path = store_dir / "credentials.json"
+    approvals_path = store_dir / "credential_approvals.json"
+
+    store.add_credential(
+        service="notion",
+        label="k",
+        auth_scheme="bearer",
+        status=store.STATUS_ACTIVE,
+        vault_ref="ref-1",
+        requires_approval=True,
+        host="api.notion.com",
+        path=creds_path,
+    )
+
+    addon = _build_injection_addon(vault_path=store_dir / "vault", store_dir=store_dir)
+
+    # 1) credentials_loader reads the sidecar store (not the empty default).
+    loaded = addon._credentials_loader()
+    assert [c["service"] for c in loaded] == ["notion"]
+
+    # 2) approval_enqueue writes into the sidecar approvals file.
+    addon._approval_enqueue(
+        credential_id="cred-x",
+        requested_action="egress_credential_use",
+        target_host="api.notion.com",
+    )
+    enqueued = approvals_store.list_approvals(path=approvals_path)
+    assert [a["credential_id"] for a in enqueued] == ["cred-x"]
+
+    # 3) approvals_lookup reads grants from the sidecar approvals file.
+    assert addon._approvals_lookup("cred-x") is False  # still pending
+    approvals_store.decide_approval(
+        enqueued[0]["id"], approvals_store.STATUS_APPROVED, path=approvals_path
+    )
+    assert addon._approvals_lookup("cred-x") is True
+
+
 def test_addon_injects_secret_into_header(monkeypatch) -> None:
     creds = [
         {

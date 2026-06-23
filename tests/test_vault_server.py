@@ -205,8 +205,9 @@ def test_revoke_marks_metadata_revoked(tmp_path: Path) -> None:
     vault_ref = created["vault_ref"]
 
     resp = client.post(
-        f"/v1/vault/credentials/{vault_ref}/revoke",
+        "/v1/vault/credentials/revoke",
         headers={"x-gateway-token": _TOKEN},
+        json={"vaultRef": vault_ref},
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["credential"]["status"] == "revoked"
@@ -224,8 +225,65 @@ def test_revoke_marks_metadata_revoked(tmp_path: Path) -> None:
 def test_revoke_unknown_ref_404(tmp_path: Path) -> None:
     client = _make_client(tmp_path)
     resp = client.post(
-        "/v1/vault/credentials/does-not-exist/revoke",
+        "/v1/vault/credentials/revoke",
         headers={"x-gateway-token": _TOKEN},
+        json={"vaultRef": "does-not-exist"},
+    )
+    assert resp.status_code == 404
+
+
+def test_revoke_missing_vault_ref_400(tmp_path: Path) -> None:
+    client = _make_client(tmp_path)
+    resp = client.post(
+        "/v1/vault/credentials/revoke",
+        headers={"x-gateway-token": _TOKEN},
+        json={},
+    )
+    assert resp.status_code == 400
+
+
+# -- requires-approval --------------------------------------------------------
+
+
+def test_set_requires_approval_flips_flag(tmp_path: Path) -> None:
+    client = _make_client(tmp_path)
+    created = client.post(
+        "/v1/vault/credentials",
+        headers={"x-gateway-token": _TOKEN},
+        json={
+            "service": "github",
+            "label": "ci",
+            "auth_scheme": "bearer",
+            "secret": _SECRET,
+        },
+    ).json()
+    vault_ref = created["vault_ref"]
+    assert created["credential"]["requires_approval"] is False
+
+    resp = client.post(
+        "/v1/vault/credentials/requires-approval",
+        headers={"x-gateway-token": _TOKEN},
+        json={"vaultRef": vault_ref, "requiresApproval": True},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["credential"]["requires_approval"] is True
+
+
+def test_set_requires_approval_requires_token(tmp_path: Path) -> None:
+    client = _make_client(tmp_path)
+    resp = client.post(
+        "/v1/vault/credentials/requires-approval",
+        json={"vaultRef": "x", "requiresApproval": True},
+    )
+    assert resp.status_code == 401
+
+
+def test_set_requires_approval_unknown_ref_404(tmp_path: Path) -> None:
+    client = _make_client(tmp_path)
+    resp = client.post(
+        "/v1/vault/credentials/requires-approval",
+        headers={"x-gateway-token": _TOKEN},
+        json={"vaultRef": "nope", "requiresApproval": True},
     )
     assert resp.status_code == 404
 
@@ -264,9 +322,9 @@ def test_approvals_list_and_resolve(tmp_path: Path) -> None:
     assert all(a["status"] == "pending" for a in pending.json()["approvals"])
 
     resolved = client.post(
-        f"/v1/vault/approvals/{approval['id']}",
+        "/v1/vault/approvals/resolve",
         headers={"x-gateway-token": _TOKEN},
-        json={"decision": "approved"},
+        json={"approvalId": approval["id"], "decision": "approved"},
     )
     assert resolved.status_code == 200, resolved.text
     assert resolved.json()["approval"]["status"] == "approved"
@@ -275,17 +333,28 @@ def test_approvals_list_and_resolve(tmp_path: Path) -> None:
 def test_approvals_resolve_requires_token(tmp_path: Path) -> None:
     client = _make_client(tmp_path)
     resp = client.post(
-        "/v1/vault/approvals/whatever", json={"decision": "approved"}
+        "/v1/vault/approvals/resolve",
+        json={"approvalId": "whatever", "decision": "approved"},
     )
     assert resp.status_code == 401
+
+
+def test_approvals_resolve_missing_id_400(tmp_path: Path) -> None:
+    client = _make_client(tmp_path)
+    resp = client.post(
+        "/v1/vault/approvals/resolve",
+        headers={"x-gateway-token": _TOKEN},
+        json={"decision": "approved"},
+    )
+    assert resp.status_code == 400
 
 
 def test_approvals_invalid_decision_400(tmp_path: Path) -> None:
     client = _make_client(tmp_path)
     resp = client.post(
-        "/v1/vault/approvals/whatever",
+        "/v1/vault/approvals/resolve",
         headers={"x-gateway-token": _TOKEN},
-        json={"decision": "maybe"},
+        json={"approvalId": "whatever", "decision": "maybe"},
     )
     assert resp.status_code == 400
 

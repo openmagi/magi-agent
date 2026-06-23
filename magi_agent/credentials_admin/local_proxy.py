@@ -116,16 +116,20 @@ class ProxyHandle:
                 logger.debug("local proxy stop raised; ignoring", exc_info=True)
 
 
-def _approval_granted(credential_id: str) -> bool:
+def _approval_granted(
+    credential_id: str, *, approvals_path: Path | None = None
+) -> bool:
     """True when a current (pending-or-approved... actually approved) approval
     grants use of ``credential_id``.
 
     The dashboard's approvals store is the source of truth. A credential is usable
-    when it has at least one approval in the ``approved`` state.
+    when it has at least one approval in the ``approved`` state. ``approvals_path``
+    pins the store file (the hosted sidecar passes its ``AGENT_VAULT_STORE_DIR``
+    path; local serve leaves it None for the default ``~/.magi`` store).
     """
     try:
         approvals = approvals_store.list_approvals(
-            status=approvals_store.STATUS_APPROVED
+            status=approvals_store.STATUS_APPROVED, path=approvals_path
         )
     except Exception:  # noqa: BLE001 - fail closed: no approval => block
         logger.warning("approvals lookup failed; treating as not approved")
@@ -274,7 +278,36 @@ def _load_active_credentials() -> Sequence[dict[str, object]]:
     return store.load_credentials()["credentials"]
 
 
-def start_local_proxy(vault_dir: Path | str, port: int = 0) -> ProxyHandle:
+def _build_injection_addon(
+    *, vault_path: Path, store_dir: Path | None
+) -> "CredentialInjectionAddon":
+    """Construct the addon, pinning credential/approval files to ``store_dir``
+    when given so the proxy producer and the admin API share ONE store. With no
+    store_dir, the default (``~/.magi``) callables are used (local serve)."""
+    if store_dir is None:
+        return CredentialInjectionAddon(vault_dir=vault_path)
+    credentials_path = store_dir / "credentials.json"
+    approvals_path = store_dir / "credential_approvals.json"
+    return CredentialInjectionAddon(
+        vault_dir=vault_path,
+        credentials_loader=lambda: store.load_credentials(credentials_path)[
+            "credentials"
+        ],
+        approvals_lookup=lambda credential_id: _approval_granted(
+            credential_id, approvals_path=approvals_path
+        ),
+        approval_enqueue=lambda **kwargs: approvals_store.add_approval(
+            **kwargs, path=approvals_path
+        ),
+    )
+
+
+def start_local_proxy(
+    vault_dir: Path | str,
+    port: int = 0,
+    *,
+    store_dir: Path | str | None = None,
+) -> ProxyHandle:
     """Start the local credential-injecting forward proxy on 127.0.0.1.
 
     Runs a headless mitmproxy ``DumpMaster`` in a background thread with its own
@@ -282,6 +315,14 @@ def start_local_proxy(vault_dir: Path | str, port: int = 0) -> ProxyHandle:
     so the generated CA + its private key live inside our protected vault dir; the
     CA private key files are chmod'd 0600. Returns a :class:`ProxyHandle` carrying
     the bound port and the path to ``mitmproxy-ca-cert.pem``.
+
+    ``store_dir`` pins where the addon reads redacted credential metadata and
+    reads/writes approval requests. The HOSTED sidecar MUST pass it (its store is
+    ``AGENT_VAULT_STORE_DIR``, not ``~/.magi``) so the proxy producer and the
+    admin API the dashboard reads share ONE set of files; without it the proxy
+    would silently read an empty credential list and enqueue approvals the
+    dashboard never sees. Local serve omits it and keeps the default paths,
+    byte-identical to before.
 
     Lazily imports mitmproxy; raises :class:`LocalProxyUnavailable` (with an
     install hint) if the optional ``magi-agent[vault]`` extra is not installed.
@@ -293,6 +334,7 @@ def start_local_proxy(vault_dir: Path | str, port: int = 0) -> ProxyHandle:
         raise LocalProxyUnavailable(_VAULT_INSTALL_HINT) from exc
 
     vault_path = Path(vault_dir)
+    store_path = Path(store_dir) if store_dir is not None else None
     confdir = vault_path / "mitmproxy"
     confdir.mkdir(parents=True, exist_ok=True, mode=0o700)
     try:
@@ -314,7 +356,9 @@ def start_local_proxy(vault_dir: Path | str, port: int = 0) -> ProxyHandle:
                 confdir=str(confdir),
             )
             master = DumpMaster(options, loop=loop, with_termlog=False, with_dumper=False)
-            master.addons.add(CredentialInjectionAddon(vault_dir=vault_path))
+            master.addons.add(
+                _build_injection_addon(vault_path=vault_path, store_dir=store_path)
+            )
             result["master"] = master
 
             async def _serve() -> None:
