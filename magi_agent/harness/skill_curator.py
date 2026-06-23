@@ -172,27 +172,30 @@ class CuratorConfig(BaseModel):
         enabled = _env_flag(_ENV_ENABLED, default=False)
         shadow = _env_shadow_flag(_ENV_SHADOW, default=True)
 
-        stale_days_raw = os.environ.get("MAGI_SKILL_CURATOR_STALE_DAYS")
-        stale_days = _DEFAULT_STALE_DAYS
-        if stale_days_raw:
-            try:
-                stale_days = int(stale_days_raw)
-            except (TypeError, ValueError):
-                pass
+        # I-4: routed through the typed flag registry. ``flag_int`` /
+        # ``flag_str`` apply the registered defaults on missing /
+        # unparseable values; the two float knobs are parsed at this
+        # call site (no ``flag_float`` kind exists).
+        from magi_agent.config.flags import (  # noqa: PLC0415
+            flag_int,
+            flag_str,
+        )
 
-        interval_hours_raw = os.environ.get("MAGI_SKILL_CURATOR_INTERVAL_HOURS")
+        stale_days = flag_int("MAGI_SKILL_CURATOR_STALE_DAYS") or _DEFAULT_STALE_DAYS
+
         interval_hours = _DEFAULT_INTERVAL_HOURS
-        if interval_hours_raw:
+        interval_raw = flag_str("MAGI_SKILL_CURATOR_INTERVAL_HOURS")
+        if interval_raw:
             try:
-                interval_hours = float(interval_hours_raw)
+                interval_hours = float(interval_raw)
             except (TypeError, ValueError):
                 pass
 
-        idle_threshold_raw = os.environ.get("MAGI_SKILL_CURATOR_IDLE_THRESHOLD_SECONDS")
         idle_threshold_seconds = _DEFAULT_IDLE_THRESHOLD_SECONDS
-        if idle_threshold_raw:
+        idle_raw = flag_str("MAGI_SKILL_CURATOR_IDLE_THRESHOLD_SECONDS")
+        if idle_raw:
             try:
-                idle_threshold_seconds = float(idle_threshold_raw)
+                idle_threshold_seconds = float(idle_raw)
             except (TypeError, ValueError):
                 pass
 
