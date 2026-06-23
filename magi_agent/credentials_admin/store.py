@@ -160,3 +160,29 @@ def set_status(
         return None
     save_credentials(data, target)
     return updated
+
+
+def set_requires_approval_by_ref(
+    vault_ref: str,
+    requires_approval: bool,
+    *,
+    path: Path | None = None,
+) -> dict[str, Any] | None:
+    """Flip a credential's ``requires_approval`` flag, located by its opaque
+    ``vault_ref``; return its redacted projection or None if absent.
+
+    No secret is involved: ``requires_approval`` is non-secret metadata. Keyed by
+    vault_ref (not id) because that is the opaque handle the control plane holds.
+    """
+    target = path or credentials_path()
+    data = load_credentials(target)
+    updated: dict[str, Any] | None = None
+    for item in data["credentials"]:
+        if item.get("vault_ref") == vault_ref:
+            item["requires_approval"] = bool(requires_approval)
+            updated = public_metadata(item)
+            break
+    if updated is None:
+        return None
+    save_credentials(data, target)
+    return updated
