@@ -309,7 +309,10 @@ def _healthz_gate5b_full_toolhost_bundle(
 
 
 def _gate5b_full_toolhost_workspace_root() -> Path:
-    configured = os.environ.get("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT")
+    # I-4: routed through the typed flag registry.
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    configured = flag_str("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT")
     if configured:
         return Path(configured)
     return Path.cwd()

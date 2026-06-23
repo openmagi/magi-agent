@@ -317,8 +317,16 @@ def _extract_prompt_text(body: object) -> str:
 
 
 def _python_chat_route_on() -> bool:
-    """True when the hosted python chat-route authority gate env flag is on."""
-    return os.environ.get("CORE_AGENT_PYTHON_CHAT_ROUTE", "off").lower() == "on"
+    """True when the hosted python chat-route authority gate env flag is on.
+
+    I-4: routed through the typed flag registry so this security-adjacent
+    gate has a single discoverable definition instead of the
+    "off"/"on"-string inline read.
+    """
+
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("CORE_AGENT_PYTHON_CHAT_ROUTE")
 
 
 def _selected_gate5b_stream_active(runtime: object) -> bool:
@@ -778,7 +786,10 @@ def register_streaming_chat_routes(
             getattr(runtime, "config", None), "model", None
         )
         model = _normalize_model_provider(model)
-        cwd = os.environ.get("MAGI_AGENT_WORKSPACE") or os.getcwd()
+        # I-4: routed through the typed flag registry.
+        from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+        cwd = flag_str("MAGI_AGENT_WORKSPACE") or os.getcwd()
         full_access = _local_full_access(runtime) or _hosted_full_access(runtime)
         permission_mode = "bypassPermissions" if full_access else "default"
         runner_policy_routing_enabled = (
