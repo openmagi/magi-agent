@@ -59,7 +59,10 @@ _genai_client_key: str | None = None
 
 
 def _resolve_classifier_model(context: HookContext) -> str:
-    env_model = os.environ.get("MAGI_LLM_HOOK_CLASSIFIER_MODEL", "").strip()
+    # I-4: routed through the typed flag registry.
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    env_model = (flag_str("MAGI_LLM_HOOK_CLASSIFIER_MODEL") or "").strip()
     if env_model:
         return env_model
     if context.classifier_model:
