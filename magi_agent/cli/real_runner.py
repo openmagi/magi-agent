@@ -590,13 +590,27 @@ def _build_litellm_model(
     if cache_aware is not None:
         return cache_aware
     try:
-        from google.adk.models.lite_llm import LiteLlm  # noqa: PLC0415
+        from google.adk.models.lite_llm import LiteLlm  # noqa: PLC0415, F401
     except Exception as exc:  # ImportError or downstream litellm import errors.
         raise CliProviderDependencyError(
             f"Provider '{config.provider}' is configured but the 'litellm' "
             "dependency is not installed. Reinstall magi-agent so its default "
             "runtime dependencies are present."
         ) from exc
+    # ADK silently drops the provider's finish_reason when the completion
+    # carries no text + no tool calls (lite_llm.py:2418-2445 only finalizes
+    # an LlmResponse when ``text or reasoning_parts``). That swallows the
+    # signal the operator needs to know WHY anthropic/google returned empty
+    # in 100ms (model_id rejection, content_filter, 0-token response, ...).
+    # Wrap LiteLlm so a zero-yield stream surfaces a synthetic LlmResponse
+    # with ``error_code=EMPTY_PROVIDER_STREAM``; the in-loop child-runner
+    # classifier (PR #827) catches it and surfaces a typed
+    # ``child_llm_empty_provider_stream`` failure with the model name —
+    # actionable on the first repro instead of an opaque empty turn.
+    from magi_agent.cli.litellm_empty_observer import (  # noqa: PLC0415
+        EmptyProviderStreamObserverLiteLlm,
+    )
+
     # litellm otherwise prints its own "Give Feedback / Get Help" banner and
     # debug info to stdout on errors, which corrupts ``--output text``. Errors
     # are already surfaced through the engine's terminal result.
@@ -608,7 +622,7 @@ def _build_litellm_model(
         pass
     api_base_kwargs = _model_api_base_kwargs(env)
     api_key = api_base_kwargs.pop("api_key", config.api_key)
-    return LiteLlm(
+    return EmptyProviderStreamObserverLiteLlm(
         model=config.litellm_model,
         api_key=api_key,
         **_model_retry_kwargs(env),
