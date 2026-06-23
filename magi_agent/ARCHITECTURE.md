@@ -755,9 +755,10 @@ graph LR
 | local_proxy.py | mitmproxy addon + lifecycle for the local credential-injecting forward proxy. | credentials_admin, local_proxy_decision, local_vault | (root)/main.py, credentials_admin/vault_server.py |
 | local_proxy_decision.py | Pure decision core for the local credential-injecting forward proxy. | — | credentials_admin/local_proxy.py |
 | local_vault.py | Native encrypted local vault backend for the dashboard "Credentials" feature. | — | (root)/main.py, channels/channel_credentials.py, channels/telegram_credentials.py, credentials_admin/local_proxy.py, credentials_admin/vault_local.py, credentials_admin/vault_server.py, transport/integrations.py |
+| payload.py | J-10 — single source of truth for credential-register payload validation. | — | credentials_admin/vault_server.py, transport/credentials.py |
 | store.py | Local redacted-metadata store for registered credentials. | — | — |
 | vault_local.py | Local vault seam for the dashboard "Credentials" registration feature. | _truthy, durable_store, local_vault | (root)/main.py |
-| vault_server.py | Standalone Agent Vault server — the per-bot hosted sidecar process. | credentials_admin, local_proxy, local_vault | (root)/main.py |
+| vault_server.py | Standalone Agent Vault server — the per-bot hosted sidecar process. | credentials_admin, local_proxy, local_vault, payload | (root)/main.py |
 
 ### customize/
 
@@ -1831,7 +1832,7 @@ graph LR
 | chat_routes.py | Chat route registration and the Gate5B user-visible serving engine. | _truthy, active_sessions, active_turn, chat_shared, child_runner_status, compiler, contracts, egress_critic, egress_gate, env, flags, gate1a_egress_correlation, gate1a_readonly_tools, gate2_sandbox_canary, gate5b4c3_live_runner_boundary, gate5b4c3_runner_input_adapter, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, gate5b_full_toolhost, gate5b_governance, gate8_readiness, generation_request, goal_loop_policy, governed_turn, hosted_engine_result, hosted_runtime, hosted_turn_context, kernel_recipe_packs, learning_live_readiness, materializer, memory_mode_context, memory_turn_hook, observed_egress, openmagi_runtime, per_turn_goal_loop_context, public_events, real_runner, research_first_canary, session_identity, shadow_generations, turn_context, usage_receipt_emit, user_visible_model_routing, wiring, work_queue | transport/chat.py |
 | chat_shared.py | Shared primitives for the decomposed Gate5B chat serving stack. | _truthy, child_runner_live, env, gate1a_readonly_tools, gate5b4c3_live_runner_boundary, gate5b_full_toolhost, openmagi_runtime, shadow_generations, user_visible_model_routing | transport/chat.py, transport/chat_routes.py, transport/control_requests.py, transport/gate2_sandbox_canary.py, transport/generation_request.py |
 | control_requests.py | Control-request REST surface consumed by the restored web dashboard. | chat_shared, openmagi_runtime | (root)/app.py |
-| credentials.py | Dashboard "Credentials" admin routes. | credentials_admin, durable_store, openmagi_runtime, tools | (root)/app.py |
+| credentials.py | Dashboard "Credentials" admin routes. | credentials_admin, durable_store, openmagi_runtime, payload, tools | (root)/app.py |
 | customize.py | — | apply, catalog, custom_rules, flags, openmagi_runtime, rule_compiler, seam_compiler, seam_spec, shacl_compiler, store, tools, types | (root)/app.py |
 | debug_trace.py | Debug endpoint exposing the current turn's execution trace. | trace_context | (root)/app.py |
 | egress_critic.py | Egress critic gate and live evidence projection for the chat serving path. | egress_gate, gate1a_readonly_tools, gate5b_full_toolhost, generation_request, mapping, projection, providers, readonly_classifier, reason_safety, user_visible_model_routing | cli/wiring.py, transport/chat.py, transport/chat_routes.py |

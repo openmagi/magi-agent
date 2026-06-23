@@ -28,7 +28,9 @@ from magi_agent.transport.tools import _unauthorized_response
 
 logger = logging.getLogger(__name__)
 
-_MAX_FIELD_LEN = 256
+# J-10: ``_MAX_FIELD_LEN`` retired here — the canonical home is
+# ``credentials_admin/payload.MAX_FIELD_LEN`` (imported via
+# ``validate_register_body``).
 
 
 def register_credentials_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
@@ -194,58 +196,30 @@ def register_credentials_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
 def _validate_body(
     body: object,
 ) -> tuple[str, str, str, str, bool, str | None] | JSONResponse:
-    if not isinstance(body, dict):
-        return JSONResponse(status_code=400, content={"error": "object_required"})
-    service = body.get("service")
-    label = body.get("label")
-    auth_scheme = body.get("auth_scheme")
-    secret = body.get("secret")
-    requires_approval_raw = body.get("requires_approval", False)
-    if not isinstance(requires_approval_raw, bool):
-        return JSONResponse(
-            status_code=400,
-            content={"error": "field_invalid", "field": "requires_approval"},
-        )
-    for name, value in (
-        ("service", service),
-        ("label", label),
-        ("auth_scheme", auth_scheme),
-        ("secret", secret),
-    ):
-        if not isinstance(value, str) or not value.strip():
-            return JSONResponse(
-                status_code=400,
-                content={"error": "field_required", "field": name},
-            )
-        if len(value) > _MAX_FIELD_LEN and name != "secret":
-            return JSONResponse(
-                status_code=400,
-                content={"error": "field_too_long", "field": name},
-            )
-    # Optional, non-secret target host for the local egress proxy. Validated like
-    # the other string fields but allowed to be absent (→ None, resolved from the
-    # service map at proxy time).
-    host_raw = body.get("host")
-    host: str | None = None
-    if host_raw is not None:
-        if not isinstance(host_raw, str) or not host_raw.strip():
-            return JSONResponse(
-                status_code=400,
-                content={"error": "field_invalid", "field": "host"},
-            )
-        if len(host_raw) > _MAX_FIELD_LEN:
-            return JSONResponse(
-                status_code=400,
-                content={"error": "field_too_long", "field": "host"},
-            )
-        host = host_raw.strip()
+    """J-10: thin wrapper delegating to the single seam in
+    ``credentials_admin/payload.validate_register_body``. Maps the typed
+    validator outcome onto this surface's ``JSONResponse`` shape
+    (byte-identical to pre-J-10).
+    """
+
+    from magi_agent.credentials_admin.payload import (
+        RegisterPayloadError,
+        validate_register_body,
+    )
+
+    result = validate_register_body(body)
+    if isinstance(result, RegisterPayloadError):
+        content: dict[str, object] = {"error": result.error}
+        if result.field is not None:
+            content["field"] = result.field
+        return JSONResponse(status_code=400, content=content)
     return (
-        str(service).strip(),
-        str(label).strip(),
-        str(auth_scheme).strip(),
-        str(secret),
-        bool(requires_approval_raw),
-        host,
+        result.service,
+        result.label,
+        result.auth_scheme,
+        result.secret,
+        result.requires_approval,
+        result.host,
     )
 
 
