@@ -2064,6 +2064,62 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="int",
     ),
+    # --- External hooks framework (I-4 batch 11) ----------------------------
+    _b(
+        "MAGI_EXTERNAL_HOOKS_ENABLED",
+        summary=(
+            "Master switch for the external hooks framework "
+            "(LLM-classified + HTTP webhook tap callbacks). Default-OFF."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_LLM_HOOKS_ENABLED",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Sub-switch for LLM-classified hook executors. **Default-ON** "
+            "when unset / empty; only an explicit non-truthy value "
+            "(anything outside ``{1, true, yes}``) disables. ``str`` "
+            "kind because the default-ON-when-unset semantics differ "
+            "from ``flag_bool``'s strict default-OFF."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_LLM_HOOK_CLASSIFIER_MODEL",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Override the LLM classifier model for the hook executor. "
+            "Empty falls back to the per-hook ``classifier_model`` "
+            "context value."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_HOOK_HTTP_VERIFY_TLS",
+        default="true",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Whether HTTP hook executors verify the upstream TLS cert. "
+            "Default ``true``; only the literal ``false`` disables "
+            "verification. ``str`` kind because the default-TRUE-when-unset "
+            "semantics + literal-only-disable differ from "
+            "``flag_bool``'s strict default-OFF + truthy-set."
+        ),
+        kind="str",
+    ),
+    _b(
+        "MAGI_HOOK_ALLOW_INTERNAL_URLS",
+        summary=(
+            "Allow hook URLs to point at internal / private network "
+            "addresses. Default-OFF (SSRF guard); only enable when "
+            "the operator trusts the configured hook URLs."
+        ),
+    ),
 )
 
 

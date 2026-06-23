@@ -53,7 +53,12 @@ logger = logging.getLogger(__name__)
 
 def _tls_verify() -> bool:
     """Return True unless ``MAGI_HOOK_HTTP_VERIFY_TLS=false`` is set (case-insensitive)."""
-    raw = os.environ.get("MAGI_HOOK_HTTP_VERIFY_TLS", "true").strip().lower()
+    # I-4: routed through the typed flag registry. Registered as
+    # ``str`` because the default-TRUE-when-unset + literal-only-disable
+    # semantics differ from ``flag_bool``'s strict default-OFF.
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    raw = (flag_str("MAGI_HOOK_HTTP_VERIFY_TLS") or "true").strip().lower()
     return raw != "false"
 
 

@@ -204,10 +204,15 @@ class ExternalHookConfig(BaseModel):
     def from_env(cls) -> "ExternalHookConfig":
         """Build config by reading ``MAGI_EXTERNAL_HOOKS_ENABLED`` and
         ``MAGI_LLM_HOOKS_ENABLED`` from the environment."""
-        raw = os.environ.get("MAGI_EXTERNAL_HOOKS_ENABLED", "false").strip().lower()
-        enabled = raw in ("1", "true", "yes")
+        # I-4: routed through the typed flag registry.
+        from magi_agent.config.flags import flag_bool, flag_str  # noqa: PLC0415
+
+        enabled = flag_bool("MAGI_EXTERNAL_HOOKS_ENABLED")
         # LLM hooks default to enabled (True) unless explicitly disabled.
-        llm_raw = os.environ.get("MAGI_LLM_HOOKS_ENABLED", "").strip().lower()
+        # ``MAGI_LLM_HOOKS_ENABLED`` is registered as ``str`` so the
+        # default-ON-when-unset semantics are preserved (``flag_bool``
+        # would default-OFF and silently flip live behavior).
+        llm_raw = (flag_str("MAGI_LLM_HOOKS_ENABLED") or "").strip().lower()
         llm_enabled = llm_raw in ("1", "true", "yes") if llm_raw else True
         return cls(enabled=enabled, llm_hooks_enabled=llm_enabled)
 
@@ -265,10 +270,12 @@ def _build_manifest_from_yaml_entry(entry: dict[str, Any]) -> HookManifest:
     if "url" in normalised and isinstance(normalised["url"], str):
         resolved_url = _resolve_env_vars(normalised["url"])
         # SSRF protection: reject URLs targeting internal/private networks unless
-        # the operator explicitly opts out via MAGI_HOOK_ALLOW_INTERNAL_URLS=true.
-        allow_internal = os.environ.get("MAGI_HOOK_ALLOW_INTERNAL_URLS", "false").strip().lower() in (
-            "1", "true", "yes"
-        )
+        # the operator explicitly opts out via MAGI_HOOK_ALLOW_INTERNAL_URLS.
+        # I-4: routed through the typed flag registry (canonical truthy
+        # set widens trivially from ``{1, true, yes}`` to add ``on``).
+        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+        allow_internal = flag_bool("MAGI_HOOK_ALLOW_INTERNAL_URLS")
         if not allow_internal and _is_internal_url(resolved_url):
             raise ValueError(
                 f"hook url '{resolved_url}' resolves to an internal/private address; "
