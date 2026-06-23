@@ -85,6 +85,7 @@ graph LR
     connectors --> ops
     connectors --> plugins
     connectors --> storage
+    context --> config
     context --> harness
     context --> hooks
     context --> runtime
@@ -712,7 +713,7 @@ graph LR
 | __init__.py | — | env, models | config/tests/test_flags.py, config/tests/test_truthy.py |
 | _truthy.py | Dependency-free leaf for the canonical truthy convention + profile defaults. | — | (root)/main.py, adk_bridge/control_plane.py, channels/discord_live.py, channels/email_live.py, channels/slack_live.py, channels/telegram_live.py, config/env.py, config/flags.py, config/tests/test_truthy.py, credentials_admin/vault_local.py, egress_proxy/config.py, gateway/daemon.py, gateway/watchers.py, harness/scheduler_job_execution.py, harness/self_review.py, harness/self_review_pipeline.py, harness/skill_curator.py, memory/adapters/local_file_writable.py, observability/config.py, ops/health.py, plugins/native/web.py, research/research_first_canary.py, runtime/child_runner_status.py, runtime/local_defaults.py, transport/chat_routes.py, transport/chat_shared.py, web_acquisition/deep_research_config.py, web_acquisition/research_tools.py |
 | env.py | — | _truthy, facts_replan, flags, gate3a_replay, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, hosted_defaults, models, pregate8_continuity_canary, shadow_generations | (root)/main.py, adk_bridge/anthropic_cache_model.py, adk_bridge/control_plane.py, adk_bridge/dashboard_producer_control.py, adk_bridge/tool_adapter.py, browser/autonomous/config.py, cli/app.py, cli/engine.py, cli/goal_nudge_wiring.py, cli/headless.py, cli/hook_wiring.py, cli/permissions.py, cli/providers.py, cli/real_runner.py, cli/tests/test_app.py, cli/tool_runtime.py, cli/wiring.py, computer/autonomous/config.py, config/__init__.py, config/tests/test_flag_migration_parity.py, evidence/local_tool_collector.py, firstparty/packs/workspace_tools_default/impl.py, gates/gate5b_full_toolhost.py, gates/tool_usage_guidance.py, harness/general_automation/constraint_reinjection.py, harness/general_automation/delegation.py, harness/general_automation/live_gate.py, harness/general_automation/plan_act_switch.py, harness/general_automation/question_tool.py, harness/general_automation/recipe_disclosure.py, harness/general_automation/task_completion.py, introspection/tool.py, plugins/native/missions.py, plugins/native/scheduled_work.py, plugins/native/skills.py, plugins/native/taskboard.py, recipes/coding_mutation.py, recipes/compiler.py, recipes/ledger_workforce.py, recipes/recipe_routing.py, runtime/coding_context.py, runtime/facts_replan.py, runtime/governed_turn.py, runtime/message_builder.py, runtime/model_factory.py, runtime/model_tiers.py, runtime/openmagi_runtime.py, runtime/prompt_guidance.py, runtime/tool_synthesis.py, shadow/gate5b4c3_live_runner_boundary.py, shadow/gate5b4c3_runner_input_adapter.py, shadow/session_service_registry.py, tools/ask_user_question_toolhost.py, tools/core_toolhost.py, tools/dispatcher.py, tools/document_tools.py, tools/file_tool_manifests.py, tools/file_toolhost.py, tools/image_tools.py, tools/local_readonly.py, tools/plan_mode_toolhost.py, tools/safety.py, tools/web_search_tools.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/gate5b_governance.py, transport/packs_dashboard.py, transport/streaming_chat_route.py |
-| flags.py | Canonical feature-flag registry + typed reader (single source of truth). | _truthy | (root)/main.py, adk_bridge/control_plane.py, adk_bridge/event_adapter.py, cli/engine.py, cli/headless.py, cli/real_runner.py, cli/wiring.py, config/env.py, config/tests/test_flag_migration_parity.py, config/tests/test_flags.py, customize/after_tool_gate.py, customize/apply.py, customize/runtime_gate.py, customize/tool_perm.py, customize/what_menu.py, gateway/watchers.py, harness/kernel_roles.py, harness/verifier_bus.py, missions/work_queue/board_api.py, observability/transcript.py, packs/discovery.py, recipes/kernel_recipe_packs.py, runtime/child_runner_live.py, runtime/message_builder.py, shadow/gate5b4c3_live_runner_boundary.py, shadow/gate5b4c3_runner_input_adapter.py, tools/document_qa_tools.py, tools/image_tools.py, tools/python_exec.py, transport/chat_routes.py, transport/customize.py, transport/streaming_chat_route.py |
+| flags.py | Canonical feature-flag registry + typed reader (single source of truth). | _truthy | (root)/main.py, adk_bridge/control_plane.py, adk_bridge/event_adapter.py, cli/engine.py, cli/headless.py, cli/real_runner.py, cli/wiring.py, config/env.py, config/tests/test_flag_migration_parity.py, config/tests/test_flags.py, context/hook.py, customize/after_tool_gate.py, customize/apply.py, customize/runtime_gate.py, customize/tool_perm.py, customize/what_menu.py, gateway/watchers.py, harness/kernel_roles.py, harness/verifier_bus.py, missions/work_queue/board_api.py, observability/transcript.py, packs/discovery.py, plugins/native/missions.py, recipes/kernel_recipe_packs.py, research/live_audit.py, runtime/child_runner_live.py, runtime/message_builder.py, shadow/gate5b4c3_live_runner_boundary.py, shadow/gate5b4c3_runner_input_adapter.py, tools/document_qa_tools.py, tools/image_tools.py, tools/python_exec.py, transport/chat_routes.py, transport/customize.py, transport/streaming_chat_route.py |
 | models.py | — | authority, pregate8_continuity_canary | (root)/main.py, cli/tests/test_model_picker_wire.py, config/__init__.py, config/env.py, gates/gate2_readiness.py, gates/gate3_readiness.py, gates/gate4_readiness.py, gates/gate5_readiness.py, gates/gate7_readiness.py, gates/gate8_readiness.py, runtime/openmagi_runtime.py |
 
 ### config/tests/
@@ -741,7 +742,7 @@ graph LR
 | _token_window_table.py | E-4 — single canonical home for the model→context-window lookup table. | — | context/token_tracker.py, runtime/message_builder.py |
 | auto_compact.py | — | protected_tools, types | adk_bridge/context_compaction.py, context/hook.py |
 | content_replacement.py | — | types | context/hook.py |
-| hook.py | — | auto_compact, collapse_drain, content_replacement, context, manifest, microcompact, reactive_compact, result, scope, token_tracker, types | — |
+| hook.py | — | auto_compact, collapse_drain, content_replacement, context, flags, manifest, microcompact, reactive_compact, result, scope, token_tracker, types | — |
 | microcompact.py | — | protected_tools, types | context/hook.py |
 | protected_tools.py | Track 19 PR8 — compaction-protected tool-result detection. | constants, recipe_routing_constants | adk_bridge/context_compaction.py, context/auto_compact.py, context/microcompact.py |
 | recipe_routing_constants.py | Import-boundary-safe constant for cross-family recipe routing. | — | context/protected_tools.py, recipes/recipe_routing.py |
@@ -1357,7 +1358,7 @@ graph LR
 | coding.py | — | _common, context, result | — |
 | documents.py | — | _common, _file_delivery_fakes, context, contract, file_delivery, file_delivery_live, orchestrator, result, spreadsheet_tools | — |
 | knowledge.py | — | _common, context, policy, provider_boundary, result, source_tools | — |
-| missions.py | — | _common, context, env, policy, result | — |
+| missions.py | — | _common, context, env, flags, policy, result | — |
 | scheduled_work.py | — | _common, context, env, models, policy, result, store | — |
 | skills.py | — | _common, context, env, result | cli/commands/builtins.py, transport/app_api.py |
 | source_ledger.py | — | _common, context, result | — |
@@ -1469,7 +1470,7 @@ graph LR
 | evidence_graph.py | — | acceptance_criteria, action_claims, child_runtime_envelope, claim_graph, source_proof | research/boundary_enforcement.py, research/final_projection_gate.py, research/repair.py |
 | final_projection_gate.py | — | action_claims, boundary_enforcement, evidence_graph | cli/engine.py |
 | grounded_answer_guard.py | General grounded-answer guard (anti-fabrication lever). | — | evidence/claim_grounding.py, transport/gate5b_governance.py |
-| live_audit.py | Live, observe-only research-governance audit (audit-first). | — | cli/headless.py |
+| live_audit.py | Live, observe-only research-governance audit (audit-first). | flags | cli/headless.py |
 | meta_adapter.py | — | child_acceptance, child_roles, task_plan | — |
 | output_contract_gate.py | Output-Contract Adherence Gate — general format-discipline gate for final answers. | — | — |
 | policy_pack.py | — | acceptance_criteria, action_claims, repair | — |
