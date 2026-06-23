@@ -2846,4 +2846,6 @@ def test_default_builder_prefers_override_over_config(monkeypatch) -> None:
         },
     )
     assert r2.status_code == 200
-    assert seen[-1] == "gpt-5.2"
+    # The serve-config model is used; a bare non-anthropic id is provider-
+    # normalized for the local engine (gpt-5.2 -> openai/gpt-5.2).
+    assert seen[-1] == "openai/gpt-5.2"

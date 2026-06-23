@@ -128,6 +128,30 @@ def _local_full_access(runtime: object) -> bool:
     )
 
 
+def _normalize_model_provider(model: str | None) -> str | None:
+    """Qualify a bare model id with its inferred provider for the local engine.
+
+    A chat picker may send a bare model id (e.g. ``gemini-3.5-flash``). The local
+    headless engine defaults an unqualified id to anthropic, so a non-anthropic
+    bare id (gemini / openai / fireworks) routes to the wrong provider and 404s.
+    Map the bare id to its provider family via ``_infer_provider_for_model`` and
+    prefix it (``gemini/gemini-3.5-flash``). Anthropic ids stay bare (the
+    prompt-cache model path expects the bare ``claude-*`` id); already-qualified
+    ids (containing ``/``) and unknown families pass through unchanged.
+    """
+    if not model or "/" in model:
+        return model
+    try:
+        from magi_agent.cli.providers import _infer_provider_for_model
+
+        provider = _infer_provider_for_model(model)
+    except Exception:  # noqa: BLE001 — never break the build over inference.
+        provider = None
+    if provider and provider != "anthropic":
+        return f"{provider}/{model}"
+    return model
+
+
 def _hosted_full_access(runtime: object) -> bool:
     """Return True when the operator opted this hosted deployment into full access.
 
@@ -753,6 +777,7 @@ def register_streaming_chat_routes(
         model = model_override or getattr(
             getattr(runtime, "config", None), "model", None
         )
+        model = _normalize_model_provider(model)
         cwd = os.environ.get("MAGI_AGENT_WORKSPACE") or os.getcwd()
         full_access = _local_full_access(runtime) or _hosted_full_access(runtime)
         permission_mode = "bypassPermissions" if full_access else "default"
