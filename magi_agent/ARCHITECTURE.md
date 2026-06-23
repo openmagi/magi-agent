@@ -233,6 +233,7 @@ graph LR
     runtime --> cli
     runtime --> config
     runtime --> context
+    runtime --> credentials_admin
     runtime --> customize
     runtime --> evidence
     runtime --> gates
@@ -759,7 +760,7 @@ graph LR
 | local_proxy_decision.py | Pure decision core for the local credential-injecting forward proxy. | — | credentials_admin/local_proxy.py |
 | local_vault.py | Native encrypted local vault backend for the dashboard "Credentials" feature. | — | (root)/main.py, channels/channel_credentials.py, channels/telegram_credentials.py, credentials_admin/local_proxy.py, credentials_admin/vault_local.py, credentials_admin/vault_server.py, transport/integrations.py |
 | payload.py | J-10 — single source of truth for credential-register payload validation. | — | credentials_admin/vault_server.py, transport/credentials.py |
-| store.py | Local redacted-metadata store for registered credentials. | — | — |
+| store.py | Local redacted-metadata store for registered credentials. | — | runtime/message_builder.py |
 | vault_local.py | Local vault seam for the dashboard "Credentials" registration feature. | _truthy, durable_store, flags, local_vault | (root)/main.py |
 | vault_server.py | Standalone Agent Vault server — the per-bot hosted sidecar process. | credentials_admin, local_proxy, local_vault, payload | (root)/main.py |
 
