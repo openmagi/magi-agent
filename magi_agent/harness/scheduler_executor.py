@@ -68,7 +68,10 @@ _ONCE_EXHAUSTED_NEXT_RUN: datetime = datetime(9999, 12, 31, tzinfo=UTC)
 
 # Default lock dir under ~/.magi/scheduler/
 def _default_lock_dir() -> Path:
-    override = os.environ.get("MAGI_SCHEDULER_LOCK_DIR")
+    # I-4: routed through the typed flag registry.
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    override = flag_str("MAGI_SCHEDULER_LOCK_DIR") or None
     if override:
         return _validate_lock_dir_confinement(Path(override).expanduser().resolve(strict=False))
     return Path.home() / ".magi" / "scheduler"

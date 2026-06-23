@@ -481,10 +481,12 @@ def execute_due_jobs(
         from magi_agent.gates.scheduler_executor_readiness import (
             check_oc_cron_transition_guard,
         )
+        # I-4: routed through the typed flag registry.
+        from magi_agent.config.flags import flag_bool as _flag_bool  # noqa: PLC0415
+
         _guard = check_oc_cron_transition_guard(
             oss_scheduler_enabled=True,
-            oc_cron_active=os.environ.get("MAGI_OC_CRON_ACTIVE", "").lower()
-            in {"1", "true", "yes", "on"},
+            oc_cron_active=_flag_bool("MAGI_OC_CRON_ACTIVE"),
         )
         if _guard.get("conflict"):
             # Both schedulers active — true no-op. Do not tick/advance next_run.
@@ -516,10 +518,10 @@ def execute_due_jobs(
     #     environmentAllowlist) is intentionally deferred to the loop driver (Track F
     #     daemon) which has bot/user identity. Only env-wide kill-switch is enforced here.
     if resolved_config.executor_enabled:
-        import os as _os
-        _kill_switch = _os.environ.get("MAGI_SCHEDULER_KILL_SWITCH_ENABLED", "").lower() in {
-            "1", "true", "yes", "on"
-        }
+        # I-4: routed through the typed flag registry.
+        from magi_agent.config.flags import flag_bool as _flag_bool_ks  # noqa: PLC0415
+
+        _kill_switch = _flag_bool_ks("MAGI_SCHEDULER_KILL_SWITCH_ENABLED")
         if _kill_switch:
             # Kill-switch active: force shadow so the runner is never called.
             resolved_config = JobExecutionConfig(

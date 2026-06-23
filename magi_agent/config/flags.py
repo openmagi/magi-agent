@@ -1949,11 +1949,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         summary="Observability event replay buffer size.",
         kind="int",
     ),
-    # --- Skill curator (I-4 batch 9) ----------------------------------------
-    # ``harness/skill_curator`` reads these 3 cadence knobs to schedule
-    # learned-skill pruning. ``stale_days`` is an int; the two float knobs
-    # are registered as ``str`` and parsed at the call site (the registry
-    # has no ``flag_float`` kind today).
+    # --- Skill curator (I-4 batch 9, on main) ------------------------------
     FlagSpec(
         name="MAGI_SKILL_CURATOR_STALE_DAYS",
         default=30,
@@ -1984,6 +1980,54 @@ FLAGS: tuple[FlagSpec, ...] = (
         summary=(
             "Seconds of agent idle time before the curator considers a "
             "tick, parsed as a float (default 3600.0 = 1 hour)."
+        ),
+        kind="str",
+    ),
+    # --- Scheduler runtime knobs (I-4 batch 12) ----------------------------
+    _b(
+        "MAGI_OC_CRON_ACTIVE",
+        summary=(
+            "Operator-set signal that the legacy OC cron daemon is "
+            "currently active. When ON the OSS scheduler's transition "
+            "guard short-circuits ticks as ``oc_cron_conflict`` to "
+            "avoid double-firing jobs."
+        ),
+    ),
+    _b(
+        "MAGI_SCHEDULER_KILL_SWITCH_ENABLED",
+        summary=(
+            "Force the scheduler executor into shadow mode regardless of "
+            "per-bot config — emergency kill-switch for runaway jobs."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_SCHEDULER_LOCK_DIR",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Override directory for scheduler advisory lock files. Empty "
+            "uses ``~/.magi/scheduler/``. ``~`` is expanded and the path "
+            "is confined to a safe parent at resolve time."
+        ),
+        kind="str",
+    ),
+    # --- Prompt cache (I-4 batch 12) ---------------------------------------
+    _b(
+        "MAGI_PROMPT_CACHE_ENABLED",
+        summary=(
+            "Emit prompt-cache metrics from the prompt-build path. "
+            "Default-OFF; ON adds bookkeeping per request."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_PROMPT_CACHE_PROVIDER",
+        default="auto",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Provider id to report in prompt-cache metrics. Default "
+            "``auto`` picks per-request based on the resolved model."
         ),
         kind="str",
     ),

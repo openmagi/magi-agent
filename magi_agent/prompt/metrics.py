@@ -97,6 +97,10 @@ def load_cache_config() -> tuple[bool, str]:
     Returns:
         A ``(enabled, provider)`` tuple.
     """
-    enabled = os.environ.get("MAGI_PROMPT_CACHE_ENABLED", "0") in ("1", "true", "yes")
-    provider = os.environ.get("MAGI_PROMPT_CACHE_PROVIDER", "auto")
+    # I-4: routed through the typed flag registry. Pre-I-4 truthy set
+    # ``{1, true, yes}`` widens to canonical ``{1, true, yes, on}``.
+    from magi_agent.config.flags import flag_bool, flag_str  # noqa: PLC0415
+
+    enabled = flag_bool("MAGI_PROMPT_CACHE_ENABLED")
+    provider = flag_str("MAGI_PROMPT_CACHE_PROVIDER") or "auto"
     return enabled, provider
