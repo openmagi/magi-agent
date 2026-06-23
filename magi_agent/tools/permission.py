@@ -4,6 +4,11 @@ from dataclasses import dataclass
 from typing import Literal
 from uuid import uuid4
 
+from magi_agent.credentials_admin.approval_resolver import (
+    CredentialApprovalResolver,
+    default_credential_approval_resolver,
+    extract_egress_host,
+)
 from magi_agent.customize.tool_perm import matched_decision
 from magi_agent.runtime.control import ControlRequest
 
@@ -93,8 +98,21 @@ def base_tool_metadata(
 
 
 class ToolPermissionPolicy:
-    def __init__(self, runtime_arbiter: RuntimePermissionArbiter | None = None) -> None:
+    def __init__(
+        self,
+        runtime_arbiter: RuntimePermissionArbiter | None = None,
+        *,
+        credential_resolver: CredentialApprovalResolver | None = None,
+    ) -> None:
         self.runtime_arbiter = runtime_arbiter or RuntimePermissionArbiter()
+        # Resolves whether a tool call's egress host is guarded by a
+        # require-approval Agent Vault credential. Inert (null) unless a local
+        # vault is enabled, so default deployments are byte-identical.
+        self._credential_resolver = (
+            credential_resolver
+            if credential_resolver is not None
+            else default_credential_approval_resolver()
+        )
 
     def decide(
         self,
@@ -136,6 +154,19 @@ class ToolPermissionPolicy:
                 reason=safety_decision.reason,
                 metadata=metadata,
             )
+
+        # Agent Vault credential-use approval. If this call would egress to a host
+        # guarded by a require-approval credential that has no current grant, ask
+        # the user inline (in chat) BEFORE the handler runs. Runs ahead of the
+        # bypass/preapproval short-circuits below so an explicit per-credential
+        # "require approval" is honored even under bypass/YOLO; inert (returns
+        # None) when no local vault / no matching credential. The egress proxy
+        # remains the hard backstop.
+        credential_decision = self._credential_approval_decision(
+            manifest, arguments, context, mode=mode
+        )
+        if credential_decision is not None:
+            return credential_decision
 
         # Custom tool_perm rules (P2) layer on top of immutable safety: they can
         # deny/ask a call safety would allow, but never loosen a safety deny/ask
@@ -200,6 +231,72 @@ class ToolPermissionPolicy:
             reason="allowed",
             metadata=base_tool_metadata(manifest, mode=mode, reason="allowed"),
         )
+
+    def _credential_approval_decision(
+        self,
+        manifest: ToolManifest,
+        arguments: dict[str, object],
+        context: ToolContext,
+        *,
+        mode: RuntimeMode,
+    ) -> ToolPermissionDecision | None:
+        """Ask for approval when the call egresses to a guarded credential host.
+
+        Returns an ``ask`` decision (carrying a control request + a non-secret
+        ``credentialApproval`` marker the kernel reads to record the grant on
+        allow) or None when no approval is needed.
+        """
+        try:
+            host = extract_egress_host(manifest.name, arguments)
+            if not host:
+                return None
+            need = self._credential_resolver.needs_approval(host)
+            if need is None:
+                return None
+            if self._credential_resolver.is_granted(need.credential_id):
+                return None
+        except Exception:  # noqa: BLE001 - resolver issues must not break the turn
+            return None
+
+        reason = (
+            f"Use the '{need.label}' credential for {need.service} "
+            f"({need.host})? The vault injects the secret; the agent never sees it."
+        )
+        metadata = base_tool_metadata(manifest, mode=mode, reason=reason)
+        metadata["controlRequest"] = make_control_request(
+            manifest, arguments, context, reason=reason
+        ).model_dump(by_alias=True)
+        # Non-secret marker the kernel reads at resume-accept to write the grant.
+        metadata["credentialApproval"] = {
+            "credentialId": need.credential_id,
+            "service": need.service,
+            "label": need.label,
+            "host": need.host,
+        }
+        return ToolPermissionDecision(action="ask", reason=reason, metadata=metadata)
+
+    def apply_credential_grant(
+        self, metadata: object, *, persistent: bool = False
+    ) -> None:
+        """Record a credential grant after the user approved its use in chat.
+
+        Reads the ``credentialApproval`` marker placed by
+        :meth:`_credential_approval_decision`; no-op when absent. Called by the
+        kernel at the approval-resume accept point, before the handler egresses,
+        so the egress proxy injects the secret. Never raises.
+        """
+        if not isinstance(metadata, dict):
+            return
+        marker = metadata.get("credentialApproval")
+        if not isinstance(marker, dict):
+            return
+        credential_id = marker.get("credentialId")
+        if not isinstance(credential_id, str) or not credential_id:
+            return
+        try:
+            self._credential_resolver.grant(credential_id, persistent=persistent)
+        except Exception:  # noqa: BLE001 - a grant-write failure must not crash the turn
+            return
 
 
 def approval_required_reason(manifest: ToolManifest) -> str | None:
