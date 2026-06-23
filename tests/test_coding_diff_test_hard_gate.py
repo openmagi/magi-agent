@@ -14,11 +14,25 @@ from typing import Any
 
 import pytest
 
+from functools import partial
+
 from magi_agent.evidence.coding_verification import (
     CodingVerificationAuditRequest,
-    build_coding_verification_hard_gate_contract,
+    build_coding_verification_contract,
+    evaluate_coding_verification,
     evaluate_coding_verification_audit,
-    evaluate_coding_verification_hard_gate,
+)
+
+# F-10: the legacy ``_hard_gate`` builder/evaluator were collapsed into
+# the parameterized ``build_coding_verification_contract`` /
+# ``evaluate_coding_verification`` with an ``enforcement="block_final_answer"``
+# kwarg. Local aliases keep the test bodies readable without re-writing
+# every call site.
+build_coding_verification_hard_gate_contract = partial(
+    build_coding_verification_contract, enforcement="block_final_answer"
+)
+evaluate_coding_verification_hard_gate = partial(
+    evaluate_coding_verification, enforcement="block_final_answer"
 )
 from magi_agent.evidence.contracts import (
     evaluate_evidence_contract,

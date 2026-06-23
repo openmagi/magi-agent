@@ -164,9 +164,21 @@ class CodingVerificationAuditResult(FalseOnlyAuthorityModel):
         )
 
 
-def build_coding_verification_audit_contract(
+def build_coding_verification_contract(
     request: CodingVerificationAuditRequest | Mapping[str, object],
+    *,
+    enforcement: Literal["audit", "block_final_answer"] = "audit",
 ) -> EvidenceContract:
+    """F-10: parameterized coding-verification contract.
+
+    Pre-F-10 there were two byte-identical builders
+    (``..._audit_contract`` / ``..._hard_gate_contract``) differing only
+    in ``onMissing`` and the description/retry strings. The hard-gate
+    twin had no live caller and contradicted itself (claiming "hard
+    gate" while its result reported ``auditOnly=True``). This single
+    builder derives the differing fields from the ``enforcement`` kwarg.
+    """
+
     parsed = _parse_request(request)
     requirements: list[EvidenceRequirement] = [
         EvidenceRequirement(
@@ -189,65 +201,86 @@ def build_coding_verification_audit_contract(
                 fields={"checkpointId": EvidenceFieldMatcher(exists=True)},
             )
         )
+    if enforcement == "audit":
+        description = "Audit-only coding verification evidence contract."
+        retry_message = (
+            "Record post-mutation GitDiff and TestRun evidence before "
+            "claiming coding verification."
+        )
+    else:
+        description = (
+            "Hard-gate coding verification: diff and test evidence required."
+        )
+        retry_message = (
+            "Missing diff or test evidence. Run GitDiff and "
+            "TestRun(exit_code=0) after the last code mutation before "
+            "claiming completion."
+        )
     return EvidenceContract(
         id=parsed.contract_id,
-        description="Audit-only coding verification evidence contract.",
+        description=description,
         triggers=("beforeCommit",),
         when={"lastCodeMutation": parsed.last_code_mutation_at},
         requirements=tuple(requirements),
-        onMissing="audit",
-        retryMessage=(
-            "Record post-mutation GitDiff and TestRun evidence before claiming coding "
-            "verification."
-        ),
+        onMissing=enforcement,
+        retryMessage=retry_message,
     )
 
 
-def build_coding_verification_hard_gate_contract(
+def build_coding_verification_audit_contract(
     request: CodingVerificationAuditRequest | Mapping[str, object],
 ) -> EvidenceContract:
-    """Build a block_final_answer contract for coding diff and test evidence.
+    """F-10 back-compat alias for ``build_coding_verification_contract(...,
+    enforcement="audit")``. Kept because external importers
+    (``evidence/__init__.py`` re-export, live verifier-bus path) still
+    reference the audit name."""
 
-    Unlike the audit contract, this uses ``onMissing="block_final_answer"`` so
-    that missing or failed evidence prevents the model from claiming completion.
+    return build_coding_verification_contract(request, enforcement="audit")
 
-    - "I changed X" requires a fresh ``GitDiff`` record.
-    - "Tests passed" requires a fresh ``TestRun`` with ``exit_code=0``.
-    - Stale or failed evidence cannot satisfy the contract.
+
+def evaluate_coding_verification(
+    request: CodingVerificationAuditRequest | Mapping[str, object],
+    evidence_records: Iterable[EvidenceRecord] | None = None,
+    *,
+    enforcement: Literal["audit", "block_final_answer"] = "audit",
+) -> CodingVerificationAuditResult:
+    """F-10: parameterized coding-verification evaluator.
+
+    Pre-F-10 there were two byte-identical evaluators
+    (``..._audit`` / ``..._hard_gate``) that differed only by which
+    builder they called. The hard_gate evaluator had no live caller.
+
+    The result's ``auditOnly``/``blockModeEnabled`` flags are
+    ``Literal[True]``/``Literal[False]`` authority invariants on
+    ``CodingVerificationAuditResult`` — they encode the structural
+    constraint that this Python scaffold never attaches live blocking
+    side-effects. The ``enforcement`` kwarg differentiates the
+    *contract*'s ``onMissing`` policy (``audit`` vs
+    ``block_final_answer``); the harness consuming the contract is
+    responsible for any live blocking.
     """
-    parsed = _parse_request(request)
-    requirements: list[EvidenceRequirement] = [
-        EvidenceRequirement(
-            type="GitDiff",
-            after="last_code_mutation",
-            fields={"changedFiles": EvidenceFieldMatcher(exists=True)},
-        ),
-        EvidenceRequirement(
-            type="TestRun",
-            after="last_code_mutation",
-            exitCode=0,
-            fields={"command": EvidenceFieldMatcher(exists=True)},
-        ),
-    ]
-    if parsed.require_commit_checkpoint:
-        requirements.append(
-            EvidenceRequirement(
-                type="CommitCheckpoint",
-                after="last_code_mutation",
-                fields={"checkpointId": EvidenceFieldMatcher(exists=True)},
-            )
-        )
-    return EvidenceContract(
-        id=parsed.contract_id,
-        description="Hard-gate coding verification: diff and test evidence required.",
-        triggers=("beforeCommit",),
-        when={"lastCodeMutation": parsed.last_code_mutation_at},
-        requirements=tuple(requirements),
-        onMissing="block_final_answer",
-        retryMessage=(
-            "Missing diff or test evidence. Run GitDiff and TestRun(exit_code=0) "
-            "after the last code mutation before claiming completion."
-        ),
+
+    parsed = _parse_request(request, evidence_records=evidence_records)
+    contract = build_coding_verification_contract(parsed, enforcement=enforcement)
+    verdict = evaluate_evidence_contract(contract, parsed.evidence_records)
+    verifier_result = _verifier_result(parsed, verdict)
+    audit_evidence = _audit_evidence(parsed, verdict, verifier_result)
+    return CodingVerificationAuditResult(
+        contract=contract,
+        verdict=verdict,
+        verifierResult=verifier_result,
+        auditEvidence=audit_evidence,
+        publicVerdictReport=public_evidence_verdict_report(verdict),
+        publicAuditEvidenceReport=public_evidence_record_report(audit_evidence),
+        attachmentFlags=CodingVerificationAuditAttachmentFlags(),
+        auditOnly=True,
+        blockModeEnabled=False,
+        finalAnswerBlocked=False,
+        trafficAttached=False,
+        executionAttached=False,
+        runnerAttached=False,
+        routeAttached=False,
+        canaryAttached=False,
     )
 
 
@@ -255,66 +288,12 @@ def evaluate_coding_verification_audit(
     request: CodingVerificationAuditRequest | Mapping[str, object],
     evidence_records: Iterable[EvidenceRecord] | None = None,
 ) -> CodingVerificationAuditResult:
-    parsed = _parse_request(request, evidence_records=evidence_records)
-    contract = build_coding_verification_audit_contract(parsed)
-    verdict = evaluate_evidence_contract(contract, parsed.evidence_records)
-    verifier_result = _verifier_result(parsed, verdict)
-    audit_evidence = _audit_evidence(parsed, verdict, verifier_result)
-    return CodingVerificationAuditResult(
-        contract=contract,
-        verdict=verdict,
-        verifierResult=verifier_result,
-        auditEvidence=audit_evidence,
-        publicVerdictReport=public_evidence_verdict_report(verdict),
-        publicAuditEvidenceReport=public_evidence_record_report(audit_evidence),
-        attachmentFlags=CodingVerificationAuditAttachmentFlags(),
-        auditOnly=True,
-        blockModeEnabled=False,
-        finalAnswerBlocked=False,
-        trafficAttached=False,
-        executionAttached=False,
-        runnerAttached=False,
-        routeAttached=False,
-        canaryAttached=False,
-    )
+    """F-10 back-compat alias for ``evaluate_coding_verification(...,
+    enforcement="audit")``. Live verifier-bus path + F-9 still call this
+    name, so it stays."""
 
-
-def evaluate_coding_verification_hard_gate(
-    request: CodingVerificationAuditRequest | Mapping[str, object],
-    evidence_records: Iterable[EvidenceRecord] | None = None,
-) -> CodingVerificationAuditResult:
-    """Evaluate coding evidence using block_final_answer enforcement.
-
-    This is the hard-gate variant.  When evidence is missing or stale the
-    verdict state will be ``block_ready`` instead of ``missing``, signalling
-    that the final answer should be blocked.
-
-    The result still carries ``auditOnly=True`` and ``blockModeEnabled=False``
-    because this Python scaffold never attaches live blocking side-effects;
-    the ``block_final_answer`` policy is expressed only inside the contract /
-    verdict and consumed by the harness.
-    """
-    parsed = _parse_request(request, evidence_records=evidence_records)
-    contract = build_coding_verification_hard_gate_contract(parsed)
-    verdict = evaluate_evidence_contract(contract, parsed.evidence_records)
-    verifier_result = _verifier_result(parsed, verdict)
-    audit_evidence = _audit_evidence(parsed, verdict, verifier_result)
-    return CodingVerificationAuditResult(
-        contract=contract,
-        verdict=verdict,
-        verifierResult=verifier_result,
-        auditEvidence=audit_evidence,
-        publicVerdictReport=public_evidence_verdict_report(verdict),
-        publicAuditEvidenceReport=public_evidence_record_report(audit_evidence),
-        attachmentFlags=CodingVerificationAuditAttachmentFlags(),
-        auditOnly=True,
-        blockModeEnabled=False,
-        finalAnswerBlocked=False,
-        trafficAttached=False,
-        executionAttached=False,
-        runnerAttached=False,
-        routeAttached=False,
-        canaryAttached=False,
+    return evaluate_coding_verification(
+        request, evidence_records, enforcement="audit"
     )
 
 
@@ -492,8 +471,8 @@ __all__ = [
     "CodingVerificationAuditRequest",
     "CodingVerificationAuditResult",
     "build_coding_verification_audit_contract",
-    "build_coding_verification_hard_gate_contract",
+    "build_coding_verification_contract",
     "build_edit_confidence_contract",
+    "evaluate_coding_verification",
     "evaluate_coding_verification_audit",
-    "evaluate_coding_verification_hard_gate",
 ]
