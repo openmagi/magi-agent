@@ -1,0 +1,63 @@
+/* GENERATED FILE — DO NOT EDIT.
+   Source: magi-agent/design-system. Regenerate via scripts/sync-design-system.sh.
+   DS_VERSION: 0.1.0 */
+@theme {
+  /* ---- surfaces ---- */
+  --color-surface-base:    #FAFAFA; /* page background */
+  --color-surface-raised:  #FFFFFF; /* cards, sidebar, inputs-on-card */
+  --color-surface-overlay: #F4F0FF; /* accent-tinted hover / nav-active */
+  --color-surface-input:   #FFFFFF;
+
+  /* ---- borders ---- */
+  --color-border-subtle: rgba(0, 0, 0, 0.06);
+  --color-border-strong: rgba(0, 0, 0, 0.10);
+  --color-border-focus:  #7C3AED;   /* = accent */
+
+  /* ---- text ---- */
+  --color-text-primary:   #1A1A2E;
+  --color-text-secondary: #475569;
+  --color-text-tertiary:  #64748B;
+  --color-text-disabled:  #94A3B8;
+  --color-text-on-accent: #FFFFFF;
+
+  /* ---- accent (purple) ---- */
+  --color-accent:       #7C3AED; /* purple-600 */
+  --color-accent-light: #6D28D9; /* purple-700 */
+  --color-accent-hover: #6D28D9;
+  --color-accent-press: #5B21B6;
+
+  /* ---- semantic status ---- */
+  --color-pass-fg:   #047857; --color-pass-bg:   rgba(16, 185, 129, 0.10);
+  --color-review-fg: #B45309; --color-review-bg: #FEF3C7;
+  --color-deny-fg:   #B91C1C; --color-deny-bg:   #FEE2E2;
+  --color-info-fg:   #2563EB; --color-info-bg:   #DBEAFE;
+
+  /* ---- typography ---- */
+  --font-sans: "Plus Jakarta Sans", "Pretendard Variable", "Pretendard",
+               "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic",
+               -apple-system, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --text-xs:   11px; --text-xs--line-height:   16px;
+  --text-sm:   13px; --text-sm--line-height:   20px;
+  --text-base: 14px; --text-base--line-height: 22px;
+  --text-md:   16px; --text-md--line-height:   24px;
+  --text-lg:   18px; --text-lg--line-height:   28px;
+  --text-xl:   24px; --text-xl--line-height:   32px;
+  --text-2xl:  32px; --text-2xl--line-height:  40px;
+
+  /* ---- radius / shadow / motion ---- */
+  --radius-sm: 6px; --radius-md: 10px; --radius-lg: 14px; --radius-xl: 20px;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 16px 32px rgba(15, 23, 42, 0.12);
+  --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* ---- spacing / layout ---- */
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  --space-6: 24px; --space-8: 32px;
+  --header-height: 56px;
+  --sidebar-width: 288px;
+  --content-max:   1280px;
+}

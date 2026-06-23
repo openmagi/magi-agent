@@ -357,7 +357,7 @@ function subagentDotClass(status: SubagentActivity["status"]): string {
       return "bg-red-500";
     case "running":
     default:
-      return "bg-[#7C3AED]";
+      return "bg-[var(--color-accent)]";
   }
 }
 

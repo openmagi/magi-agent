@@ -1,0 +1,168 @@
+/* Open Magi — Canonical Design Tokens (single source of truth).
+ *
+ * This file is the ONE token contract shared by every Open Magi web surface:
+ *   - magi-agent  apps/web        (OSS dashboard, served at /dashboard)
+ *   - clawy       openmagi.ai     (landing + hosted dashboard + chat)
+ *   - magi-cp     cp.openmagi.ai  (control-plane console)
+ *
+ * Do NOT edit the copies vendored into those repos. Edit THIS file, bump
+ * DS_VERSION in design-system/MANIFEST.json, then run
+ * `scripts/sync-design-system.sh` to propagate.
+ *
+ * The sync script slices this file on the exact `@ds:core` / `@ds:brand`
+ * sentinel comments below — keep them intact and unindented.
+ */
+
+/* ===== @ds:core BEGIN ===== */
+@theme {
+  /* ---- surfaces ---- */
+  --color-surface-base:    #FAFAFA; /* page background */
+  --color-surface-raised:  #FFFFFF; /* cards, sidebar, inputs-on-card */
+  --color-surface-overlay: #F4F0FF; /* accent-tinted hover / nav-active */
+  --color-surface-input:   #FFFFFF;
+
+  /* ---- borders ---- */
+  --color-border-subtle: rgba(0, 0, 0, 0.06);
+  --color-border-strong: rgba(0, 0, 0, 0.10);
+  --color-border-focus:  #7C3AED;   /* = accent */
+
+  /* ---- text ---- */
+  --color-text-primary:   #1A1A2E;
+  --color-text-secondary: #475569;
+  --color-text-tertiary:  #64748B;
+  --color-text-disabled:  #94A3B8;
+  --color-text-on-accent: #FFFFFF;
+
+  /* ---- accent (purple) ---- */
+  --color-accent:       #7C3AED; /* purple-600 */
+  --color-accent-light: #6D28D9; /* purple-700 */
+  --color-accent-hover: #6D28D9;
+  --color-accent-press: #5B21B6;
+
+  /* ---- semantic status ---- */
+  --color-pass-fg:   #047857; --color-pass-bg:   rgba(16, 185, 129, 0.10);
+  --color-review-fg: #B45309; --color-review-bg: #FEF3C7;
+  --color-deny-fg:   #B91C1C; --color-deny-bg:   #FEE2E2;
+  --color-info-fg:   #2563EB; --color-info-bg:   #DBEAFE;
+
+  /* ---- typography ---- */
+  --font-sans: "Plus Jakarta Sans", "Pretendard Variable", "Pretendard",
+               "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic",
+               -apple-system, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --text-xs:   11px; --text-xs--line-height:   16px;
+  --text-sm:   13px; --text-sm--line-height:   20px;
+  --text-base: 14px; --text-base--line-height: 22px;
+  --text-md:   16px; --text-md--line-height:   24px;
+  --text-lg:   18px; --text-lg--line-height:   28px;
+  --text-xl:   24px; --text-xl--line-height:   32px;
+  --text-2xl:  32px; --text-2xl--line-height:  40px;
+
+  /* ---- radius / shadow / motion ---- */
+  --radius-sm: 6px; --radius-md: 10px; --radius-lg: 14px; --radius-xl: 20px;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 16px 32px rgba(15, 23, 42, 0.12);
+  --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* ---- spacing / layout ---- */
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  --space-6: 24px; --space-8: 32px;
+  --header-height: 56px;
+  --sidebar-width: 288px;
+  --content-max:   1280px;
+}
+/* ===== @ds:core END ===== */
+
+/* ===== @ds:brand BEGIN ===== */
+/* Landing-only marketing extension. ONLY clawy's landing surfaces load this
+ * block; dashboards (magi-agent, cp) use @ds:core alone. Teal brand for
+ * eyebrows/links/surfaces, dark "policy/contract" panel, and the glow/glass
+ * marketing utilities. CTAs still use the core purple --color-accent. */
+@theme {
+  --color-brand:        #0F766E;
+  --color-brand-strong: #115E59;
+  --color-brand-tint:   #F0FDFA;
+  --color-brand-ring:   #5EEAD4;
+
+  --color-ink:       #0B0F19;
+  --color-night:     #111827;
+  --color-night-dim: #CBD5E1;
+  --color-body:      #334155;
+  --color-canvas:    #F7F7F4;
+  --color-mist:      #F9FAFB;
+
+  /* dark policy/contract panel */
+  --color-panel:        #0E120B;
+  --color-panel-2:      #12170D;
+  --color-panel-border: #2A3119;
+  --color-panel-text:   #C7D2A8;
+  --color-panel-bright: #E7ECD9;
+  --color-panel-dim:    #8A937A;
+}
+
+/* gradient text */
+.text-gradient {
+  background: linear-gradient(135deg, var(--color-accent-light), var(--color-accent));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* glass card */
+.glass {
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* gradient border via pseudo-element */
+.gradient-border { position: relative; }
+.gradient-border::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  padding: 1px;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.3), rgba(94, 234, 212, 0.3));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* neon glow */
+.glow     { box-shadow: 0 0 20px rgba(124, 58, 237, 0.08), 0 0 40px rgba(94, 234, 212, 0.04); }
+.glow-sm  { box-shadow: 0 0 8px rgba(124, 58, 237, 0.04); }
+.glow-cta { box-shadow: 0 0 16px rgba(124, 58, 237, 0.3), 0 0 32px rgba(124, 58, 237, 0.1); }
+
+/* page background glow */
+.page-glow {
+  background:
+    radial-gradient(ellipse 60% 40% at 50% 0%, rgba(124, 58, 237, 0.06), transparent),
+    radial-gradient(ellipse 40% 30% at 65% 0%, rgba(15, 118, 110, 0.03), transparent),
+    var(--color-surface-base);
+}
+
+/* shimmer for loading */
+@keyframes ds-shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+.shimmer {
+  background: linear-gradient(90deg, transparent, rgba(124, 58, 237, 0.08), rgba(15, 118, 110, 0.08), transparent);
+  background-size: 200% auto;
+  animation: ds-shimmer 3s linear infinite;
+}
+
+/* pulse glow for active indicators */
+@keyframes ds-pulse-glow {
+  0%, 100% { box-shadow: 0 0 6px rgba(124, 58, 237, 0.4); }
+  50%      { box-shadow: 0 0 16px rgba(124, 58, 237, 0.7), 0 0 24px rgba(15, 118, 110, 0.2); }
+}
+.pulse-glow { animation: ds-pulse-glow 2s ease-in-out infinite; }
+/* ===== @ds:brand END ===== */

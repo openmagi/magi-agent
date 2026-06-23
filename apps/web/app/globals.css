@@ -1,4 +1,6 @@
 @import "tailwindcss";
+/* Canonical Open Magi design tokens (vendored, do not edit _ds). */
+@import "../src/components/ui/_ds/tokens.css";
 
 :root {
   --background: #FAFAFA;

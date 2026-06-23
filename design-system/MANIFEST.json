@@ -1,0 +1,11 @@
+{
+  "name": "@openmagi/design-system",
+  "version": "0.1.0",
+  "bundle": "ui",
+  "description": "Canonical Open Magi design tokens + primitives. Edit here, bump version, run scripts/sync-design-system.sh to propagate into clawy and magi-cp-dashboard.",
+  "consumers": [
+    { "repo": "magi-agent", "ds": "apps/web/src/components/ui/_ds", "globals": "apps/web/app/globals.css", "brand": false },
+    { "repo": "clawy", "ds": "src/components/ui/_ds", "globals": "src/app/globals.css", "brand": true },
+    { "repo": "magi-control-plane/web", "ds": "components/ui/_ds", "globals": "app/globals.css", "brand": false }
+  ]
+}

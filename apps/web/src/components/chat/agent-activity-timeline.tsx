@@ -28,8 +28,8 @@ function StatusDot({ status }: { status: AgentActivityItem["status"] }) {
   if (status === "running") {
     return (
       <span className="relative mt-[5px] flex h-2.5 w-2.5 shrink-0 items-center justify-center">
-        <span className="absolute inline-flex h-full w-full rounded-full bg-[#7C3AED]/25 animate-ping" />
-        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[#7C3AED]/70" />
+        <span className="absolute inline-flex h-full w-full rounded-full bg-[var(--color-accent)]/25 animate-ping" />
+        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--color-accent)]/70" />
       </span>
     );
   }

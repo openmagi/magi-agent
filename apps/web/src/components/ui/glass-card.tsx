@@ -1,3 +1,5 @@
+// Frosted card using the `.glass` / `.glow-sm` utilities from the canonical
+// @ds:brand token extension. Re-tokened to canonical accent.
 interface GlassCardProps {
   children: React.ReactNode;
   className?: string;
@@ -18,7 +20,7 @@ export function GlassCard({
       onClick={onClick}
       className={`
         glass rounded-2xl p-5
-        ${hover ? "transition-all duration-200 hover:bg-glass-hover hover:border-primary/20 cursor-pointer" : ""}
+        ${hover ? "transition-all duration-200 hover:border-[var(--color-accent)]/20 cursor-pointer" : ""}
         ${glow ? "glow-sm" : ""}
         ${className}
       `}

@@ -1,33 +1,37 @@
+import { Badge as DsBadge, type BadgeVariant as DsVariant } from "./_ds/Badge";
+
+// Historical variant names; standard ones route through the canonical Badge
+// (status palette shared with cp). Landing-only `gradient` keeps its styling.
 interface BadgeProps {
   children: React.ReactNode;
   variant?: "default" | "success" | "warning" | "error" | "gradient";
   className?: string;
 }
 
-const variants = {
-  default: "bg-black/[0.04] text-secondary border-black/[0.08]",
-  success: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-  warning: "bg-amber-500/10 text-amber-400 border-amber-500/20",
-  error: "bg-red-500/10 text-red-400 border-red-500/20",
-  gradient:
-    "bg-gradient-to-r from-primary/10 to-cta/10 text-primary-light border-primary/20",
+const TO_DS: Record<Exclude<BadgeProps["variant"], "gradient" | undefined>, DsVariant> = {
+  default: "default",
+  success: "ok",
+  warning: "review",
+  error: "deny",
 };
+
+const GRADIENT_CLASS =
+  "inline-flex items-center px-2.5 py-0.5 text-xs font-medium rounded-full border " +
+  "bg-gradient-to-r from-[var(--color-accent)]/10 to-[var(--color-accent)]/10 " +
+  "text-[var(--color-accent-light)] border-[var(--color-accent)]/20";
 
 export function Badge({
   children,
   variant = "default",
   className = "",
 }: BadgeProps) {
+  if (variant === "gradient") {
+    return <span className={`${GRADIENT_CLASS} ${className}`.trim()}>{children}</span>;
+  }
   return (
-    <span
-      className={`
-        inline-flex items-center px-2.5 py-0.5 text-xs font-medium rounded-full border
-        ${variants[variant]}
-        ${className}
-      `}
-    >
+    <DsBadge variant={TO_DS[variant]} className={className}>
       {children}
-    </span>
+    </DsBadge>
   );
 }
 

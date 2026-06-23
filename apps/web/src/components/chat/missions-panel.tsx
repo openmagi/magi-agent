@@ -98,7 +98,7 @@ function statusDotClass(status: MissionStatus): string {
   switch (status) {
     case "running":
     case "queued":
-      return "bg-[#7C3AED]";
+      return "bg-[var(--color-accent)]";
     case "completed":
       return "bg-emerald-500";
     case "failed":
@@ -117,7 +117,7 @@ function sectionClass(section: MissionWorkQueueSection): string {
     return "border-amber-500/20 bg-amber-50/80";
   }
   if (section.kind === "running") {
-    return "border-[#7C3AED]/15 bg-[#F8F6FF]";
+    return "border-[var(--color-accent)]/15 bg-[#F8F6FF]";
   }
   return "border-black/[0.06] bg-white/75";
 }
@@ -607,7 +607,7 @@ export function MissionsPanel({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search mission title, kind, or status"
-            className="h-8 w-full rounded-md border border-black/[0.06] bg-white/80 px-2 text-[11px] text-foreground outline-none transition-colors placeholder:text-secondary/35 focus:border-[#7C3AED]/40 focus:bg-white"
+            className="h-8 w-full rounded-md border border-black/[0.06] bg-white/80 px-2 text-[11px] text-foreground outline-none transition-colors placeholder:text-secondary/35 focus:border-[var(--color-accent)]/40 focus:bg-white"
           />
         </label>
       </div>
@@ -620,10 +620,10 @@ export function MissionsPanel({
         )}
 
         {queue.activeGoal ? (
-          <div className="mb-2 rounded-lg border border-[#7C3AED]/20 bg-[#F8F6FF] px-2.5 py-2">
+          <div className="mb-2 rounded-lg border border-[var(--color-accent)]/20 bg-[#F8F6FF] px-2.5 py-2">
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-[#6D28D9]/70">
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-accent-light)]/70">
                   Active goal
                 </div>
                 <div className="mt-0.5 truncate text-[12px] font-medium text-foreground/85">
@@ -651,10 +651,10 @@ export function MissionsPanel({
             )}
           </div>
         ) : pendingGoalTitle ? (
-          <div className="mb-2 rounded-lg border border-[#7C3AED]/20 bg-[#F8F6FF] px-2.5 py-2">
+          <div className="mb-2 rounded-lg border border-[var(--color-accent)]/20 bg-[#F8F6FF] px-2.5 py-2">
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-[#6D28D9]/70">
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-accent-light)]/70">
                   Active goal
                 </div>
                 <div className="mt-0.5 truncate text-[12px] font-medium text-foreground/85">
@@ -950,7 +950,7 @@ function MissionDetailLedger({
               value={commentDraft}
               onChange={(event) => onCommentDraftChange(event.target.value)}
               rows={2}
-              className="mt-1 w-full resize-none rounded-md border border-black/[0.06] bg-white px-2 py-1.5 text-[11px] text-foreground outline-none placeholder:text-secondary/35 focus:border-[#7C3AED]/40"
+              className="mt-1 w-full resize-none rounded-md border border-black/[0.06] bg-white px-2 py-1.5 text-[11px] text-foreground outline-none placeholder:text-secondary/35 focus:border-[var(--color-accent)]/40"
               placeholder="Leave an unblock note, retry reason, or audit comment"
             />
             <button
@@ -971,7 +971,7 @@ function MissionDetailLedger({
                 value={actionReasonDraft}
                 onChange={(event) => onActionReasonDraftChange(event.target.value)}
                 rows={2}
-                className="mt-1 w-full resize-none rounded-md border border-black/[0.06] bg-white px-2 py-1.5 text-[11px] text-foreground outline-none placeholder:text-secondary/35 focus:border-[#7C3AED]/40"
+                className="mt-1 w-full resize-none rounded-md border border-black/[0.06] bg-white px-2 py-1.5 text-[11px] text-foreground outline-none placeholder:text-secondary/35 focus:border-[var(--color-accent)]/40"
                 placeholder="Record why this mission is being retried, resumed, or cancelled"
               />
               <div className="mt-1 flex flex-wrap gap-1">

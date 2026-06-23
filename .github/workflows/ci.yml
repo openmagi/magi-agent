@@ -50,6 +50,8 @@ jobs:
         run: bash scripts/check_module_map.sh
       - name: env-reference drift gate
         run: bash scripts/check_env_reference.sh
+      - name: Design-system drift gate
+        run: node scripts/check-ds-drift.mjs apps/web/src/components/ui/_ds
       - name: xfail budget ratchet gate
         run: uv run --no-sync python scripts/check_xfail_budget.py
       - name: direct flag-read ratchet gate

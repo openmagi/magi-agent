@@ -132,7 +132,7 @@ export function BrowserFramePreview({
               aria-haspopup="dialog"
               title={expandLabel}
               onClick={() => setExpanded(true)}
-              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-secondary/45 transition-colors hover:bg-black/[0.05] hover:text-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED]/40"
+              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-secondary/45 transition-colors hover:bg-black/[0.05] hover:text-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/40"
               data-browser-frame-expand-trigger="true"
             >
               <ExpandIcon />
@@ -145,7 +145,7 @@ export function BrowserFramePreview({
           aria-haspopup="dialog"
           title={expandLabel}
           onClick={() => setExpanded(true)}
-          className="group relative block w-full cursor-zoom-in bg-black/[0.03] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#7C3AED]/40"
+          className="group relative block w-full cursor-zoom-in bg-black/[0.03] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/40"
           data-browser-frame-expand-trigger="true"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -186,7 +186,7 @@ export function BrowserFramePreview({
                 aria-label={closeLabel}
                 title={closeLabel}
                 onClick={() => setExpanded(false)}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-secondary/55 transition-colors hover:bg-black/[0.05] hover:text-secondary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED]/40"
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-secondary/55 transition-colors hover:bg-black/[0.05] hover:text-secondary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/40"
               >
                 <CloseIcon />
               </button>

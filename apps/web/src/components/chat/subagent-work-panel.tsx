@@ -19,7 +19,7 @@ function t(language: ChatResponseLanguage | undefined, en: string, ko: string): 
 function statusDotClass(status: WorkConsoleRowStatus | SubagentProgressEvent["status"]): string {
   switch (status) {
     case "running":
-      return "bg-[#7C3AED]";
+      return "bg-[var(--color-accent)]";
     case "done":
       return "bg-emerald-500";
     case "waiting":
@@ -168,7 +168,7 @@ export function SubagentWorkPanel({
             onClick={() => setSelectedTaskId(MAIN_AGENT_TASK_ID)}
             className={`min-w-[8.5rem] max-w-[11rem] rounded-lg border px-2 py-2 text-left transition-colors ${
               mainSelected
-                ? "border-[#7C3AED]/25 bg-[#7C3AED]/[0.06] shadow-[0_1px_4px_rgba(124,58,237,0.08)]"
+                ? "border-[var(--color-accent)]/25 bg-[var(--color-accent)]/[0.06] shadow-[0_1px_4px_rgba(124,58,237,0.08)]"
                 : "border-black/[0.06] bg-white/70 hover:bg-black/[0.03]"
             }`}
           >
@@ -199,7 +199,7 @@ export function SubagentWorkPanel({
               onClick={() => setSelectedTaskId(taskId)}
               className={`min-w-[8.5rem] max-w-[11rem] rounded-lg border px-2 py-2 text-left transition-colors ${
                 selected
-                  ? "border-[#7C3AED]/25 bg-[#7C3AED]/[0.06] shadow-[0_1px_4px_rgba(124,58,237,0.08)]"
+                  ? "border-[var(--color-accent)]/25 bg-[var(--color-accent)]/[0.06] shadow-[0_1px_4px_rgba(124,58,237,0.08)]"
                   : "border-black/[0.06] bg-white/70 hover:bg-black/[0.03]"
               }`}
             >
@@ -240,7 +240,7 @@ export function SubagentWorkPanel({
               <button
                 type="button"
                 onClick={() => toggleProgressExpanded(effectiveTaskId)}
-                className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-primary/65 transition-colors hover:bg-[#7C3AED]/[0.06] hover:text-primary"
+                className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-primary/65 transition-colors hover:bg-[var(--color-accent)]/[0.06] hover:text-primary"
                 aria-expanded={progressExpanded}
                 data-work-console-subagent-progress-toggle={effectiveTaskId}
               >
