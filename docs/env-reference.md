@@ -46,6 +46,9 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_DEEP_WEB_RESEARCH_ENABLED` (default off) — Enable the live deep web-research harness (search + fetch + verify).
 - `MAGI_DEFERRED_TOOLS_ENABLED` (default off) — Enable deferred (lazily-loaded) tool schemas.
 - `MAGI_DISCORD_BOT_TOKEN` (no default) — Discord bot token for the live channel watcher; unset keeps the watcher fail-closed (not built). Never logged or persisted.
+- `MAGI_DOCUMENT_AGENTIC_MODEL` (no default) — Model id for the agentic document writer (``tools/document_write/agentic.LiteLLMAgenticDocumentWriter``). Empty disables the agentic path; the document write tool falls back to its deterministic builder.
+- `MAGI_DOCUMENT_AGENTIC_TEMPERATURE` (default `0.2`) — litellm ``temperature`` for the agentic document writer (parsed as float; default 0.2).
+- `MAGI_DOCUMENT_AGENTIC_TIMEOUT_S` (default `90`) — litellm ``timeout`` (seconds) for the agentic document writer (default 90).
 - `MAGI_DOCUMENT_AUTHORING_COVERAGE` (default `off`) — Tri-state document-coverage gate (off|advisory|block). off keeps the DocumentCoverage evidence audit-only; advisory records counts without blocking; block flips the pre-final verifier-bus decision when coverage fails. Legacy truthy values resolve to ``block`` for back-compat. Strict default ``off``.
 - `MAGI_DOCUMENT_QA_ENABLED` (default off) — Expose the question-conditioned DocumentQA file-QA sidecar tool (requires MAGI_FILE_TOOLS_ENABLED); strict default-OFF in all profiles.
 - `MAGI_DOCUMENT_QA_MODEL` (no default) — Model id override for the DocumentQA sidecar call (e.g. a cheap haiku-class model); unset uses the configured provider model.
@@ -134,6 +137,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED` (default off) — Project the live turn's inspected-source ledger into the engine's harvested public refs as the named ref 'verifier:research-source-evidence' so a recipe can require source grounding: a turn that read >=1 source passes, a turn that read none blocks. Strict default-OFF and inert unless explicitly set.
 - `MAGI_SPAWN_RECIPE_BIND_ENABLED` (default off) — Thread recipeRefs from request.metadata into the child runner as pinned_recipe_pack_ids so the child's ProfileResolver binds the parent-supplied recipe packs. Default OFF / empty refs is a no-op (byte-identical to passing pinned_recipe_pack_ids=()).
 - `MAGI_SPAWN_RECIPE_CAP_ENABLED` (default off) — Apply the orchestrator's spawn_cap as the innermost tool-name ceiling in _resolve_turn_toolset, after profile and parent-cap filtering. Default OFF / None spawn_cap is a no-op (byte-identical).
+- `MAGI_STATE_DIR` (default `~/.magi`) — Root directory for per-user runtime state (work-queue db, session caches, etc). ``~`` is expanded.
 - `MAGI_STEP_DECOMPOSITION_ENABLED` (default off) — Inject a light first-pass guidance asking the agent to enumerate dependent sub-steps up front and confirm each before proceeding (prompt-only nudge; reuses existing planning seams).
 - `MAGI_SUBAGENT_GOVERNED_TURN_ENABLED` (default off) — Route spawned subagents through run_governed_turn (governed turn-loop) instead of the bare run_async child loop. Default OFF keeps the legacy child path byte-identical.
 - `MAGI_SUBAGENT_TOOL_TIGHTEN_ONLY_ENABLED` (default off) — Intersect a spawned subagent's tool set with the parent's effective tools (tighten-only) at child-runtime build. Default OFF / empty parent cap is a no-op.
@@ -155,6 +159,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_VISION_PROVIDER` (no default) — Optional provider for MAGI_VISION_MODEL (anthropic|openai|gemini|fireworks); unset inherits the main provider's credentials.
 - `MAGI_WORKER_ROUTING_LLM_ENABLED` (default off) — Honour a planner-emitted worker_role for subagent routing instead of keyword inference; strict default-OFF (OFF is byte-identical to today).
 - `MAGI_WORK_QUEUE_BOARD_API_ENABLED` (default off) — Mount the read-only work-queue board HTTP API.
+- `MAGI_WORK_QUEUE_DB_PATH` (no default) — Explicit path to the work-queue SQLite db. Empty uses ``<MAGI_STATE_DIR>/work_queue.db`` (default ``~/.magi/work_queue.db``).
 - `MAGI_WORK_QUEUE_ENABLED` (default off) — Enable the durable multi-agent work-queue (task board + dispatcher).
 - `MAGI_WORK_QUEUE_EXECUTOR_ENABLED` (default off) — Enable the durable work-queue dispatcher tick loop.
 - `MAGI_WORK_QUEUE_NOTIFY_ENABLED` (default off) — Enable the work-queue terminal-event notifier gateway watcher: polls for newly-completed/blocked/failed tasks and pushes each through the injected delivery sink (default sink = logging-only; real channel sinks are wired in P6). Default-OFF; when off the daemon does not poll.
