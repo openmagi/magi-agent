@@ -1949,6 +1949,44 @@ FLAGS: tuple[FlagSpec, ...] = (
         summary="Observability event replay buffer size.",
         kind="int",
     ),
+    # --- Skill curator (I-4 batch 9) ----------------------------------------
+    # ``harness/skill_curator`` reads these 3 cadence knobs to schedule
+    # learned-skill pruning. ``stale_days`` is an int; the two float knobs
+    # are registered as ``str`` and parsed at the call site (the registry
+    # has no ``flag_float`` kind today).
+    FlagSpec(
+        name="MAGI_SKILL_CURATOR_STALE_DAYS",
+        default=30,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Days since last skill use after which a learned skill is "
+            "considered stale and surfaced for pruning (default 30)."
+        ),
+        kind="int",
+    ),
+    FlagSpec(
+        name="MAGI_SKILL_CURATOR_INTERVAL_HOURS",
+        default="168.0",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Hours between skill-curator runs, parsed as a float "
+            "(default 168.0 = 7 days)."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_SKILL_CURATOR_IDLE_THRESHOLD_SECONDS",
+        default="3600.0",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Seconds of agent idle time before the curator considers a "
+            "tick, parsed as a float (default 3600.0 = 1 hour)."
+        ),
+        kind="str",
+    ),
 )
 
 
