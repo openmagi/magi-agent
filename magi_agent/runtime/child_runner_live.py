@@ -551,6 +551,16 @@ class RealLocalChildRunner:
         summary, evidence_refs, _status = await collect_governed_child_turn(
             run_governed_turn(ctx, runtime=rt, cancel=cancel)
         )
+        # Silent-no-op detection (governed-path parity with PR #854's legacy
+        # guard). The governed collector returned ``("", (), "completed")``
+        # which is the same shape as the anthropic/google 100ms repro Kevin
+        # chased on 0.1.74 — under MAGI_SUBAGENT_GOVERNED_TURN_ENABLED=1 (lab
+        # profile auto-enables it), the legacy collector's empty-response
+        # guard is bypassed, so the same protection has to live here too.
+        # Raises the typed exception that ``run_child`` routes to a typed
+        # ``failed`` envelope with reason ``child_llm_empty_response``.
+        if not summary and not evidence_refs:
+            raise _ChildLlmTurnError(f"{_DEGRADE_LLM_ERROR_PREFIX}empty_response")
         return summary, evidence_refs
 
     async def _collect_turn_text_legacy(
