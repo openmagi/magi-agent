@@ -1835,7 +1835,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="int",
     ),
-    # --- TUI surface knobs (I-4 batch) --------------------------------------
+    # --- TUI surface knobs (I-4 batch 6) ------------------------------------
     _b(
         "MAGI_TUI_FILE_MENTIONS",
         summary=(
@@ -1857,6 +1857,31 @@ FLAGS: tuple[FlagSpec, ...] = (
             "Render Edit-tool diffs side-by-side in the TUI activity "
             "timeline. Default-OFF (unified diff)."
         ),
+    ),
+    # --- Vault admin URL + forced recipe (I-4 batch 7) ----------------------
+    FlagSpec(
+        name="MAGI_VAULT_ADMIN_URL",
+        default="",
+        scope="public",
+        stage="stage2",
+        summary=(
+            "External vault admin URL (when set, the credentials admin "
+            "path delegates to a hosted vault instead of the local "
+            "sidecar). Empty keeps the local vault sidecar overlay."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_FORCE_RECIPE",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Pin a recipe pack id for every CLI turn — reuses the "
+            "compiler's ``explicitRecipeSelection`` path. Unset / blank "
+            "keeps automatic selection (byte-identical to today)."
+        ),
+        kind="str",
     ),
 )
 

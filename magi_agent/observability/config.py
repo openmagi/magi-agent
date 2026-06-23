@@ -34,8 +34,11 @@ class ObservabilityConfig(BaseModel):
 
     @classmethod
     def from_env(cls, *, home: Path) -> "ObservabilityConfig":
+        # I-4: routed through the typed flag registry.
+        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
         return cls(
-            enabled=_truthy(os.environ.get("MAGI_OBSERVABILITY_ENABLED")),
+            enabled=flag_bool("MAGI_OBSERVABILITY_ENABLED"),
             db_path=home / "observability.db",
             retention_days=_int_env("MAGI_OBS_RETENTION_DAYS", 7),
             max_events=_int_env("MAGI_OBS_MAX_EVENTS", 200_000),

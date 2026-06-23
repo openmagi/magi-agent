@@ -1038,7 +1038,10 @@ def _build_default_runner_policy_assembly(
     # reusing the compiler's existing explicit-selection path (the same
     # ``explicitRecipeSelection`` block the hosted surface uses). Unset/blank ⇒
     # no key added ⇒ automatic selection is byte-identical to today.
-    forced_recipe = os.environ.get("MAGI_FORCE_RECIPE", "").strip()
+    # I-4: routed through the typed flag registry.
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    forced_recipe = (flag_str("MAGI_FORCE_RECIPE") or "").strip()
     from magi_agent.recipes.kernel_recipe_packs import (  # noqa: PLC0415
         build_runtime_pack_registry,
     )
