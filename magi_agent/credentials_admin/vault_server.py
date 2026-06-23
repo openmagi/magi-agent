@@ -60,7 +60,9 @@ _DEFAULT_STORE_DIR = "/var/lib/agent-vault"
 _MITM_CA_CERT_NAME = "mitmproxy-ca-cert.pem"
 _SHARED_CA_CERT_NAME = "ca.pem"
 
-_MAX_FIELD_LEN = 256
+# J-10: ``_MAX_FIELD_LEN`` retired here — the canonical home is
+# ``credentials_admin/payload.MAX_FIELD_LEN`` (imported via
+# ``validate_register_body``).
 
 
 class VaultServerConfigError(RuntimeError):
@@ -305,60 +307,34 @@ def build_vault_admin_app(*, admin_token: str, store_dir: Path | str) -> FastAPI
 def _validate_body(
     body: object,
 ) -> tuple[str, str, str, str, bool, str | None] | JSONResponse:
-    """Validate the register payload. Mirrors transport.credentials' validation.
+    """J-10: thin wrapper delegating to the single seam in
+    ``credentials_admin/payload.validate_register_body``. Pre-J-10 this
+    function carried a byte-identical copy of the validator (the
+    leading comment said "Mirrors transport.credentials' validation").
+    The dedup now means the two HTTP surfaces can never drift.
 
-    Never echoes the secret in an error (the secret field is checked for
-    presence only).
+    Never echoes the secret in an error (the secret field is checked
+    for presence only — its value never lands in an error response).
     """
-    if not isinstance(body, dict):
-        return JSONResponse(status_code=400, content={"error": "object_required"})
-    service = body.get("service")
-    label = body.get("label")
-    auth_scheme = body.get("auth_scheme")
-    secret = body.get("secret")
-    requires_approval_raw = body.get("requires_approval", False)
-    if not isinstance(requires_approval_raw, bool):
-        return JSONResponse(
-            status_code=400,
-            content={"error": "field_invalid", "field": "requires_approval"},
-        )
-    for name, value in (
-        ("service", service),
-        ("label", label),
-        ("auth_scheme", auth_scheme),
-        ("secret", secret),
-    ):
-        if not isinstance(value, str) or not value.strip():
-            return JSONResponse(
-                status_code=400,
-                content={"error": "field_required", "field": name},
-            )
-        if len(value) > _MAX_FIELD_LEN and name != "secret":
-            return JSONResponse(
-                status_code=400,
-                content={"error": "field_too_long", "field": name},
-            )
-    host_raw = body.get("host")
-    host: str | None = None
-    if host_raw is not None:
-        if not isinstance(host_raw, str) or not host_raw.strip():
-            return JSONResponse(
-                status_code=400,
-                content={"error": "field_invalid", "field": "host"},
-            )
-        if len(host_raw) > _MAX_FIELD_LEN:
-            return JSONResponse(
-                status_code=400,
-                content={"error": "field_too_long", "field": "host"},
-            )
-        host = host_raw.strip()
+
+    from magi_agent.credentials_admin.payload import (
+        RegisterPayloadError,
+        validate_register_body,
+    )
+
+    result = validate_register_body(body)
+    if isinstance(result, RegisterPayloadError):
+        content: dict[str, object] = {"error": result.error}
+        if result.field is not None:
+            content["field"] = result.field
+        return JSONResponse(status_code=400, content=content)
     return (
-        str(service).strip(),
-        str(label).strip(),
-        str(auth_scheme).strip(),
-        str(secret),
-        bool(requires_approval_raw),
-        host,
+        result.service,
+        result.label,
+        result.auth_scheme,
+        result.secret,
+        result.requires_approval,
+        result.host,
     )
 
 
