@@ -466,7 +466,14 @@ def register_integrations_routes(
 # ---------------------------------------------------------------------------
 
 def _composio_status() -> dict[str, Any]:
-    return {"configured": _resolve_composio_api_key() is not None}
+    # `credentialSource` lets the dashboard tell hosted (platform-brokered
+    # master key) apart from self-host BYO-key, so the hosted UI can hide the
+    # key-entry controls. Additive + optional on the wire for back-compat.
+    config = resolve_composio_config(os.environ)
+    return {
+        "configured": _resolve_composio_api_key() is not None,
+        "credentialSource": config.credential_source,
+    }
 
 
 def _telegram_status() -> dict[str, Any]:
