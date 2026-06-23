@@ -1835,6 +1835,29 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="int",
     ),
+    # --- TUI surface knobs (I-4 batch) --------------------------------------
+    _b(
+        "MAGI_TUI_FILE_MENTIONS",
+        summary=(
+            "Enable the TUI ``@``-mention file picker (the input bar "
+            "suggests workspace paths). Default-OFF."
+        ),
+    ),
+    _b(
+        "MAGI_TUI_LEGACY_RICHLOG",
+        summary=(
+            "Force the TUI to render the transcript via the legacy "
+            "RichLog widget instead of the streaming buffer. "
+            "Default-OFF; used for diagnosing render issues."
+        ),
+    ),
+    _b(
+        "MAGI_TUI_DIFF_SPLIT",
+        summary=(
+            "Render Edit-tool diffs side-by-side in the TUI activity "
+            "timeline. Default-OFF (unified diff)."
+        ),
+    ),
 )
 
 

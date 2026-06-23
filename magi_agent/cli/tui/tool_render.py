@@ -86,11 +86,13 @@ _GUTTER_STYLE = "dim #569cd6"
 
 
 def _diff_split_enabled() -> bool:
-    """Whether Edit diffs render side-by-side (``MAGI_TUI_DIFF_SPLIT=1``)."""
+    """Whether Edit diffs render side-by-side (``MAGI_TUI_DIFF_SPLIT``)."""
 
-    import os  # noqa: PLC0415
+    # I-4: routed through the typed flag registry. Pre-I-4 strict
+    # ``=="1"`` widens to canonical ``flag_bool`` truthy set.
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
 
-    return os.environ.get("MAGI_TUI_DIFF_SPLIT", "") == "1"
+    return flag_bool("MAGI_TUI_DIFF_SPLIT")
 
 
 # ---------------------------------------------------------------------------

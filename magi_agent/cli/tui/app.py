@@ -1147,11 +1147,13 @@ class MagiTuiApp(App[None]):
 
     @staticmethod
     def _legacy_richlog() -> bool:
-        """Whether the legacy RichLog backing is forced (MAGI_TUI_LEGACY_RICHLOG=1)."""
+        """Whether the legacy RichLog backing is forced (``MAGI_TUI_LEGACY_RICHLOG``)."""
 
-        import os  # noqa: PLC0415
+        # I-4: routed through the typed flag registry. Pre-I-4 strict
+        # ``=="1"`` widens to canonical ``flag_bool`` truthy set.
+        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
 
-        return os.environ.get("MAGI_TUI_LEGACY_RICHLOG", "") == "1"
+        return flag_bool("MAGI_TUI_LEGACY_RICHLOG")
 
     @staticmethod
     def _keybindings_path() -> str | None:

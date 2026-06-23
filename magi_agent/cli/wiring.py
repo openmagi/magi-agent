@@ -1154,7 +1154,11 @@ def build_tui_app(
     # concept). The provider import is LAZY to keep the cold-start contract.
     effective_cwd = str(cwd) if cwd is not None else os.getcwd()
     file_provider: object | None = None
-    if os.environ.get("MAGI_TUI_FILE_MENTIONS", "") == "1":
+    # I-4: routed through the typed flag registry. Pre-I-4 strict
+    # ``=="1"`` widens to canonical ``flag_bool`` truthy set.
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    if flag_bool("MAGI_TUI_FILE_MENTIONS"):
         from magi_agent.cli.tui.file_provider import (  # noqa: PLC0415
             WorkspaceFileProvider,
         )
