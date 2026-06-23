@@ -279,8 +279,14 @@ def build_headless_runtime(
         tests (inject a mock) or future production callers that pre-build the
         runner before calling here.
     model:
-        Reserved for future model-selection wiring; accepted but not yet
-        forwarded (no Stream F model plumbing yet).
+        Optional model override forwarded into the provider config used to
+        build the default runner. When set, it reaches
+        ``cli.providers.resolve_provider_config(model_override=model)``,
+        flowing through ``_build_default_runner`` (and
+        ``_build_runner_policy_assembly``) to the per-turn LiteLlm build.
+        ``None`` keeps the provider's catalog default. Slug-prefixed forms
+        (e.g. ``"anthropic/claude-sonnet-4-6"``) also switch the resolved
+        provider.
     mode:
         ``"act"`` (default) exposes the full tool set; ``"plan"`` exposes only
         read-only tools (mutating tools are excluded) for plan-mode turns.
@@ -1101,7 +1107,10 @@ def build_tui_app(
     runner:
         Optional explicit ADK runner.
     model:
-        Reserved for future model-selection wiring.
+        Optional model override forwarded into the provider config used to
+        build the default runner (same plumbing as
+        ``build_headless_runtime``). ``None`` keeps the provider's catalog
+        default.
     runtime:
         Optional runtime object forwarded to ``MagiTuiApp`` (for tests /
         production callers that pre-build a runtime).
