@@ -33,7 +33,10 @@ def _local_mission_ledger_dir() -> "object | None":
     """
     from pathlib import Path  # noqa: PLC0415
 
-    raw_dir = (os.environ.get("MAGI_EVIDENCE_LEDGER_DIR") or "").strip()
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    # I-4: routed through the typed flag registry.
+    raw_dir = (flag_str("MAGI_EVIDENCE_LEDGER_DIR") or "").strip()
     if raw_dir.lower() in ("off", "0", "false", "none", "disable", "disabled"):
         return None
     return Path(raw_dir) if raw_dir else Path.cwd() / ".magi" / "evidence"

@@ -1657,6 +1657,62 @@ FLAGS: tuple[FlagSpec, ...] = (
             "at the contract validator and untouched by this flag."
         ),
     ),
+    # --- Context management hook (I-4 batch) --------------------------------
+    # ``context/hook.py`` resolves the per-turn ``ContextManagementConfig``
+    # from 5 inline env reads. Registered here so the knobs are
+    # discoverable in flag-discovery + the env-reference.
+    _b(
+        "MAGI_CONTEXT_MGMT_ENABLED",
+        summary=(
+            "Master switch for the per-turn context management hook "
+            "(threshold-driven proactive compaction). Default-OFF; the "
+            "hook is a no-op until enabled."
+        ),
+    ),
+    _b(
+        "MAGI_CONTEXT_PROACTIVE_RECOVERY_ENABLED",
+        summary=(
+            "Enable proactive context recovery (compaction triggered "
+            "before the model errors out on context). Honored only when "
+            "``MAGI_CONTEXT_MGMT_ENABLED`` is ON."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_CONTEXT_MODERATE_THRESHOLD",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Float utilization threshold (0.0-1.0) for the ``moderate`` "
+            "context level (default 0.60). Parsed via ``_safe_float`` in "
+            "``context/hook.py``; empty / unparseable falls back to default."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_CONTEXT_HIGH_THRESHOLD",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Float utilization threshold (0.0-1.0) for the ``high`` "
+            "context level (default 0.75). Parsed via ``_safe_float`` in "
+            "``context/hook.py``; empty / unparseable falls back to default."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_CONTEXT_CRITICAL_THRESHOLD",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Float utilization threshold (0.0-1.0) for the ``critical`` "
+            "context level (default 0.90). Parsed via ``_safe_float`` in "
+            "``context/hook.py``; empty / unparseable falls back to default."
+        ),
+        kind="str",
+    ),
 )
 
 
