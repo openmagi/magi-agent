@@ -15,6 +15,31 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.75
+
+### Added
+- E-7 cache-aware Anthropic single seam (#865).
+- E-17 judge structured-output Pydantic schemas (#873).
+- `openmagi.runView.v1` per-run view serializer over the durable ledger (#884).
+- P2 public redactor + allowlist projection for run-share (#890).
+- Rich tool-arg previews in activity timeline, default-OFF behind `MAGI_RICH_TOOL_PREVIEW` (#877).
+- Python output + generic result snippets in activity timeline (#891).
+- Raw provider response tap for empty-completion diagnostics (#888).
+- ADK upgrade regression guard for empty-stream observer (#881).
+- Hosted full-capability path behind `MAGI_HOSTED_FULL_ACCESS` (#889).
+- Lab profile default-ON empty-response recovery (#863).
+- Channel dispatcher uses `ProviderExecutionBoundary.execute_sync` (J-9, #885).
+
+### Fixed
+- ADK-dropped `finish_reason` surfaces as an error event at the deepest root (#880).
+- E-8 phase classifier soft-fails to conversational when route is denied (#878).
+- Child-runner governed branch — silent-empty surfaces as failed (#876).
+- `email_live.deliver` accepts `port=None` for signature parity (J-7, #879).
+
+### Changed
+- `model` parameter docstring tells the truth about wiring (J-2 docstring half, #882).
+- Single seam for credential register-payload validation (J-10, #883).
+
 ## 0.1.74
 
 ### Added
