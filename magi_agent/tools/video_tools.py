@@ -525,8 +525,10 @@ def _seconds_to_hms(seconds: float) -> str:
 
 
 def _is_video_download_enabled() -> bool:
-    val = os.environ.get("MAGI_VIDEO_DOWNLOAD_ENABLED", "").strip().lower()
-    return val in ("1", "true", "yes", "on")
+    # I-4: routed through the typed flag registry.
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_VIDEO_DOWNLOAD_ENABLED")
 
 
 def _str_arg(arguments: Mapping[str, object], name: str) -> str | None:
