@@ -1419,13 +1419,24 @@ def test_engine_audits_active_phase_denial_and_continues_configured_route(
         for event in events
         if event.payload.get("type") == "runner_policy_route_selection"
     )
+    # E-8: when the keyword classifier picks a denied phase
+    # (``source_acquisition`` here, route denied for the resolved model),
+    # ``_classify_policy_phase_with_softening`` soft-fails to
+    # ``final_answer_drafting`` so the turn does not dead-end as
+    # ``runner_policy_route_denied``. The selection event now records:
+    # - ``phase`` = the resolved (non-denied) fallback,
+    # - ``phaseSoftened`` + ``phaseClassified`` = the softening signal,
+    # - ``phaseRouteDenied`` = False (selected phase's route is OK),
+    # - ``planRouteDenied`` = True (top-level plan denial preserved),
+    # - ``reasonCodes`` = the plan-level codes only (the keyword-picked
+    #   ``source_acquisition`` route's codes drop out, since we no
+    #   longer route through it).
     assert route_event["routeDenied"] is True
-    assert route_event["phase"] == "source_acquisition"
-    assert route_event["reasonCodes"] == [
-        "phase:source_acquisition:budget_denied",
-        "python_phase_route_budget_too_low",
-    ]
-    assert route_event["phaseRouteDenied"] is True
+    assert route_event["phase"] == "final_answer_drafting"
+    assert route_event["phaseSoftened"] is True
+    assert route_event["phaseClassified"] == "source_acquisition"
+    assert route_event["reasonCodes"] == ["python_phase_route_budget_too_low"]
+    assert route_event["phaseRouteDenied"] is False
     assert route_event["planRouteDenied"] is True
     phase_event = next(
         event.payload
@@ -1440,14 +1451,15 @@ def test_engine_audits_active_phase_denial_and_continues_configured_route(
         for event in events
         if event.payload.get("type") == "runner_policy_route_blocked"
     )
+    # E-8: ``runner_policy_route_blocked`` follows the selection's
+    # resolved phase (soft-failed to ``final_answer_drafting``); the
+    # ``reasonCodes`` mirror the selection event (plan-level only,
+    # because the selected phase's own ``reasonCodes`` is empty).
     assert block_event == {
         "type": "runner_policy_route_blocked",
         "turnId": "t-route-denied",
-        "phase": "source_acquisition",
-        "reasonCodes": [
-            "phase:source_acquisition:budget_denied",
-            "python_phase_route_budget_too_low",
-        ],
+        "phase": "final_answer_drafting",
+        "reasonCodes": ["python_phase_route_budget_too_low"],
         "routeDecision": "audited_configured_model_continues",
         "authority": {
             "providerCalled": False,
