@@ -110,7 +110,10 @@ _PROVIDER_OVERRIDE: AudioTranscribeProviderPort | None = None
 def _get_provider() -> AudioTranscribeProviderPort | None:
     if _PROVIDER_OVERRIDE is not None:
         return _PROVIDER_OVERRIDE
-    provider_name = os.environ.get("MAGI_ASR_PROVIDER", "openai_whisper").strip()
+    # I-4: routed through the typed flag registry.
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    provider_name = (flag_str("MAGI_ASR_PROVIDER") or "openai_whisper").strip()
     if provider_name == "openai_whisper":
         return OpenAIWhisperProvider()
     return None
@@ -400,8 +403,10 @@ def _audio_transcribe_url(
 
 
 def _is_video_download_enabled() -> bool:
-    val = os.environ.get("MAGI_VIDEO_DOWNLOAD_ENABLED", "").strip().lower()
-    return val in ("1", "true", "yes", "on")
+    # I-4: routed through the typed flag registry.
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_VIDEO_DOWNLOAD_ENABLED")
 
 
 def _str_arg(arguments: Mapping[str, object], name: str) -> str | None:

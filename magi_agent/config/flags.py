@@ -1773,6 +1773,27 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
+    # --- Audio / Video tool gates (I-4 batch 4) -----------------------------
+    FlagSpec(
+        name="MAGI_ASR_PROVIDER",
+        default="openai_whisper",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Provider id for the audio transcription tool "
+            "(``tools/audio_tools``). Default ``openai_whisper`` keeps the "
+            "OpenAI Whisper provider; unknown values disable the path."
+        ),
+        kind="str",
+    ),
+    _b(
+        "MAGI_VIDEO_DOWNLOAD_ENABLED",
+        summary=(
+            "Enable the video download tool path (consumed by "
+            "``tools/video_tools`` and the audio-side fallback). "
+            "Default-OFF — the tool returns ``disabled`` without it."
+        ),
+    ),
 )
 
 
