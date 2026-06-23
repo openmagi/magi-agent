@@ -92,6 +92,28 @@ def test_aggregate_reports_unconfigured(monkeypatch, tmp_path) -> None:
     assert body["vault_status"]["present"] is True
 
 
+def test_aggregate_reports_credential_source_missing_by_default(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.delenv("COMPOSIO_API_KEY", raising=False)
+    monkeypatch.delenv("MAGI_COMPOSIO_CREDENTIAL_SOURCE", raising=False)
+    client = _client(monkeypatch, tmp_path)
+    composio = client.get("/v1/admin/integrations", headers=HEADERS).json()["composio"]
+    # Self-host with no key configured: not hosted, so the UI keeps the BYO card.
+    assert composio["credentialSource"] == "missing"
+
+
+def test_aggregate_reports_hosted_credential_source(monkeypatch, tmp_path) -> None:
+    # Platform-brokered: a managed master key in env + hosted source. The hosted
+    # dashboard branches on this to hide the BYO-key controls.
+    monkeypatch.setenv("COMPOSIO_API_KEY", "comp_master_key")
+    monkeypatch.setenv("MAGI_COMPOSIO_CREDENTIAL_SOURCE", "hosted")
+    client = _client(monkeypatch, tmp_path)
+    composio = client.get("/v1/admin/integrations", headers=HEADERS).json()["composio"]
+    assert composio["configured"] is True
+    assert composio["credentialSource"] == "hosted"
+
+
 def test_composio_key_round_trips_through_vault(monkeypatch, tmp_path) -> None:
     client = _client(monkeypatch, tmp_path)
     put = client.put(
