@@ -87,6 +87,21 @@ export interface CustomRuleMenuItem {
   allowedActions: string[];
 }
 
+/**
+ * An in-context control-plane *behavior* toggle (facts-survey replan, goal
+ * nudge, etc.). Orthogonal to the verification gate layer: each maps to a
+ * single `MAGI_*_ENABLED` flag that the lab/dogfood profile seeds ON, so this
+ * is the only surface that can turn the behavior off.
+ */
+export interface ControlPlaneBehaviorItem {
+  id: string;
+  env_var: string;
+  label: string;
+  description: string;
+  /** Current effective state (env-flag truthiness) — shown when no explicit override is set. */
+  enabled: boolean;
+}
+
 export interface CustomizeCatalog {
   verification: {
     recipes: RecipeItem[];
@@ -95,6 +110,7 @@ export interface CustomizeCatalog {
     customRuleMenu: CustomRuleMenuItem[];
   };
   tools: ToolItem[];
+  controlPlane: ControlPlaneBehaviorItem[];
 }
 
 /** A structured custom verification rule (spec §9.1). P1 builds deterministic_ref. */
@@ -123,6 +139,12 @@ export interface CustomizeOverrides {
   tools: Record<string, boolean>;
   /** Free-text USER-RULES.md body injected into the system prompt. */
   user_rules: string;
+  /**
+   * Explicit per-behavior enable state for control-plane loop controls
+   * (tri-state: present true/false, or absent → profile default). An explicit
+   * value wins over the lab/dogfood env seed.
+   */
+  control_plane: Record<string, boolean>;
 }
 
 export interface CustomizeResponse {
@@ -155,6 +177,33 @@ export async function patchToolOverride(
     body: JSON.stringify({ enabled }),
   });
   if (!res.ok) throw new Error(`Failed to update tool (${res.status})`);
+  const data = (await res.json()) as { overrides: CustomizeOverrides };
+  return data.overrides;
+}
+
+/**
+ * Persists a control-plane behavior toggle via
+ * `PATCH /v1/app/customize/control-plane/{behaviorId}`.
+ *
+ * Records an explicit tri-state in `control_plane` (so an opt-out of a
+ * profile-seeded behavior persists) and projects it onto the live process env
+ * so the next turn honors it. Returns the updated overrides; throws on non-2xx
+ * so the caller can surface the error and revert.
+ */
+export async function patchControlPlaneOverride(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  behaviorId: string,
+  enabled: boolean,
+): Promise<CustomizeOverrides> {
+  const res = await fetch(
+    `/v1/app/customize/control-plane/${encodeURIComponent(behaviorId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    },
+  );
+  if (!res.ok) throw new Error(`Failed to update behavior (${res.status})`);
   const data = (await res.json()) as { overrides: CustomizeOverrides };
   return data.overrides;
 }

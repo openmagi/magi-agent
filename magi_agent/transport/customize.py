@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 import types
 import uuid
@@ -23,6 +24,7 @@ from magi_agent.customize.shacl_compiler import (
 from magi_agent.customize.store import (
     delete_custom_rule,
     load_overrides,
+    set_control_plane_override,
     set_custom_rule,
     set_tool_override,
     set_user_rules,
@@ -186,6 +188,37 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         mode = body["mode"] if isinstance(body.get("mode"), str) else None
         overrides = set_verification_override(kind, item_id, body["enabled"], mode=mode)
         apply_verification_overrides(runtime, overrides)
+        return JSONResponse(content={"overrides": overrides})
+
+    @app.patch("/v1/app/customize/control-plane/{behavior_id}")
+    async def patch_control_plane(behavior_id: str, request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        if not isinstance(body, dict) or not isinstance(body.get("enabled"), bool):
+            return JSONResponse(status_code=400, content={"error": "enabled_bool_required"})
+        from magi_agent.customize.control_plane_overrides import (  # noqa: PLC0415
+            CONTROL_PLANE_BEHAVIORS,
+            apply_control_plane_overrides_to_env,
+        )
+
+        if behavior_id not in {b.id for b in CONTROL_PLANE_BEHAVIORS}:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "not_found", "message": f'behavior "{behavior_id}" not found'},
+            )
+        enabled = body["enabled"]
+        overrides = set_control_plane_override(behavior_id, enabled)
+        # Project onto the live process env so the next turn's control-plane
+        # build reflects the toggle without a restart (build_*_controls read
+        # ``dict(os.environ)`` per call). Overwrite beats the profile seed.
+        apply_control_plane_overrides_to_env(
+            os.environ, {"control_plane": {behavior_id: enabled}}
+        )
         return JSONResponse(content={"overrides": overrides})
 
     @app.put("/v1/app/customize/rules")
