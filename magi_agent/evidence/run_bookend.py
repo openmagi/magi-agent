@@ -9,7 +9,7 @@ shape :func:`magi_agent.evidence.ledger_store.write_evidence_records` accepts
 
 Safety: the payload is **allowlist fail-closed**. It is constructed key-by-key
 from typed scalars, so an unrecognized structure can never reach a shared link.
-Free-text ``goal``/``result`` are redacted (the ledger's public-summary redactor)
+Free-text ``goal``/``result`` are redacted (the run-share public redactor)
 and truncated before inclusion. Numeric/identity fields are emitted only when
 present; absent values are OMITTED, never serialized as ``null``.
 
@@ -17,10 +17,7 @@ Pure and side-effect free: the caller decides whether/where to persist.
 """
 from __future__ import annotations
 
-from magi_agent.evidence.ledger import (
-    _redact_public_summary_text,
-    _truncate_public_strings,
-)
+from magi_agent.evidence.run_redaction import redact_public_text
 
 __all__ = [
     "RUN_BOOKEND_SCHEMA_VERSION",
@@ -40,33 +37,19 @@ _KNOWN_STATUSES = frozenset(
     {"ok", "completed", "aborted", "error", "max_turns", "partial", "unknown"}
 )
 
-# Backtracking guard: the public-summary redactor is super-linear in input
-# length (a latent issue tracked for the dedicated redaction phase). We bound
-# the redaction window before running it. The bound is generous relative to the
-# published cap (``_truncate_public_strings`` keeps ~200 chars) so a secret that
-# appears inside the published window still has its closing delimiter inside the
-# redaction window and gets scrubbed. ~600 chars is ~60ms worst case.
-_REDACT_INPUT_CAP = 600
-
-
 def _coerce_str(value: object) -> str:
     return value if isinstance(value, str) else str(value)
 
 
 def _safe_text(value: str) -> str:
-    """Redact, then truncate, a free-text string for a public share surface.
+    """Redact + clip a free-text string for a public share surface.
 
-    Redaction runs BEFORE truncation so a secret near the published-cap boundary
-    cannot survive by having its closing delimiter cut off (which would defeat
-    the quoted ``key="..."`` redaction patterns). The input is first bounded to
-    ``_REDACT_INPUT_CAP`` purely to cap the redactor's super-linear cost; that
-    bound has wide headroom over the published cap so the published window is
-    always fully redacted.
+    Delegates to the run-share public redactor (kernel scrub + quoted-credential
+    + URL-userinfo + PII), which is comprehensive AND linear, so no input pre-cap
+    is needed. Redaction runs before clipping, so a secret near the published cap
+    cannot survive by losing its closing delimiter.
     """
-    bounded = _coerce_str(value)[:_REDACT_INPUT_CAP]
-    redacted = _redact_public_summary_text(bounded)
-    final = _truncate_public_strings(redacted)
-    return _coerce_str(final)
+    return redact_public_text(_coerce_str(value))
 
 
 def _coerce_status(status: object) -> str:
