@@ -186,6 +186,11 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     # in every non-safe profile (full AND lab) on their own. The lab seed only
     # forces the strict-truthy ``_b`` experimental flags whose registry default is
     # OFF.
+    # Customize NL → rule compiler endpoint. Registration-time only (never on
+    # the hot path) and fail-open when no provider key is configured, so safe to
+    # opt in for lab. Without this the dashboard "Compile" button returns
+    # ``nl-rule compiler disabled`` even though the user already has the UI.
+    "MAGI_CUSTOMIZE_NL_RULE_COMPILER_ENABLED",
     "MAGI_DASHBOARD_PACK_AUTHORING_ENABLED",
     "MAGI_DEEP_WEB_RESEARCH_ENABLED",
     "MAGI_DEFERRED_TOOLS_ENABLED",
