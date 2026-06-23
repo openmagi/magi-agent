@@ -3,6 +3,7 @@ ERROR: env-reference document missing markers '<!-- BEGIN GENERATED FLAGS (scrip
 
 Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/generate_env_reference.py`. Do not edit this section by hand; register the flag in the registry and regenerate.
 
+- `MAGI_ADK_STREAMING` (no default) — ADK streaming mode. Default-ON; explicit ``0``/``false``/``no``/``off`` disables. Unset / blank → ON. ``str`` kind because the deny-set is wider than ``flag_bool``'s strict truthy convention.
 - `MAGI_AGENT_LOCAL_CHAT_ROUTE` (default off) — Self-host fallback gate for the local ADK chat route. ON makes ``/v1/chat/completions`` serve the local headless engine when the hosted python chat route is OFF; OFF keeps the legacy ``chat_route_disabled`` 503. Strict default-OFF.
 - `MAGI_AGENT_WORKSPACE` (no default) — Workspace directory used by the local chat route, headless CLI wiring, and per-turn memory recall; empty falls back to ``os.getcwd()`` (the historical default).
 - `MAGI_APPLY_PATCH_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Enable the apply-patch tool for multi-file edits (default-ON full profile).
@@ -47,6 +48,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_DASHBOARD_PACK_AUTHORING_ENABLED` (default off) — Self-host-only dashboard pack-builder UI/REST plus the after-tool dashboard producer control and the pre-final dashboard deny-on-present gate. When a dashboard 'block' check matches an after-tool result the producer emits a custom:DashboardCheck evidence record with top-level status='failed' and the verifier-bus gate flips the pre-final decision to 'block' (audit checks emit status='ok' and never block). This flag also arms the engine's invocation-id reconciliation fold, so the pre-final block is self-contained and does NOT require MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED. With no dashboard checks authored the runtime is byte-identical to before. Strict default-OFF.
 - `MAGI_DEEP_WEB_RESEARCH_ENABLED` (default off) — Enable the live deep web-research harness (search + fetch + verify).
 - `MAGI_DEFERRED_TOOLS_ENABLED` (default off) — Enable deferred (lazily-loaded) tool schemas.
+- `MAGI_DEFERRED_TOOL_THRESHOLD` (default `30`) — Number of tools above which the deferred-load path activates (only meaningful when ``MAGI_DEFERRED_TOOLS_ENABLED`` is ON; default 30).
 - `MAGI_DISCORD_BOT_TOKEN` (no default) — Discord bot token for the live channel watcher; unset keeps the watcher fail-closed (not built). Never logged or persisted.
 - `MAGI_DOCUMENT_AGENTIC_MODEL` (no default) — Model id for the agentic document writer (``tools/document_write/agentic.LiteLLMAgenticDocumentWriter``). Empty disables the agentic path; the document write tool falls back to its deterministic builder.
 - `MAGI_DOCUMENT_AGENTIC_TEMPERATURE` (default `0.2`) — litellm ``temperature`` for the agentic document writer (parsed as float; default 0.2).
@@ -143,6 +145,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_SELF_INTROSPECTION_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Advertise the InspectSelfEvidence tool (default-ON full profile).
 - `MAGI_SERVE_EVIDENCE_ENABLED` (default off) — Write per-turn tool evidence JSONL from the hosted gate5b4c3 serving runner (default-OFF; default dir = observability home/evidence, overridable via MAGI_EVIDENCE_LEDGER_DIR).
 - `MAGI_SERVE_TOKEN_ESTIMATE_REAL` (default off) — Replace ``shadow/gate5b4c3_runner_input_adapter._estimate_tokens`` from UTF-8 byte length to a real character/BPE estimate (``shared/token_estimation.count_text_tokens``). Pre-E-14 the byte heuristic over-counted ASCII ~4× and CJK ~3×, so the serve path spuriously dropped Korean/CJK turns as ``input_token_budget_exceeded``. Default-OFF for soak per AGENTS.md flag-promotion-verification — flip to default-ON after canary verification. The byte cap (``max_sanitized_input_bytes``) is the real DoS guard, enforced at the contract validator and untouched by this flag.
+- `MAGI_SESSION_PERSISTENCE_ENABLED` (default off) — Enable the SQLite-backed ADK session store. Default-OFF; sessions live in process memory.
 - `MAGI_SESSION_TRANSCRIPT_ENABLED` (default off) — Write per-session JSONL debug transcripts (turn stages, tool calls, subagent spawns, messages) under the observability home.
 - `MAGI_SESSION_TRANSCRIPT_MAX_FILES` (default `500`) — Max session-transcript files kept; oldest beyond this are pruned.
 - `MAGI_SESSION_TRANSCRIPT_RETENTION_DAYS` (default `14`) — Session-transcript retention in days; older files are pruned.
