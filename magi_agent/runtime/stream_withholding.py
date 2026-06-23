@@ -13,8 +13,14 @@ from magi_agent.runtime.error_taxonomy import (
 from magi_agent.transport.sse_buffer import SseEventBuffer
 
 
-STREAM_WITHHOLDING_ENABLED = os.environ.get("MAGI_STREAM_WITHHOLDING_ENABLED", "") == "1"
-STREAM_WITHHOLDING_MAX_RETRIES = int(os.environ.get("MAGI_STREAM_WITHHOLDING_MAX_RETRIES", "2"))
+# I-4: routed through the typed flag registry. The bool migration
+# widens the truthy convention from strict ``=="1"`` to the canonical
+# ``flag_bool`` set (``1``/``true``/``yes``/``on``), bringing this
+# knob in line with every other Magi bool flag.
+from magi_agent.config.flags import flag_bool, flag_int  # noqa: E402
+
+STREAM_WITHHOLDING_ENABLED = flag_bool("MAGI_STREAM_WITHHOLDING_ENABLED")
+STREAM_WITHHOLDING_MAX_RETRIES = flag_int("MAGI_STREAM_WITHHOLDING_MAX_RETRIES") or 2
 
 _RECOVERABLE_CATEGORIES: frozenset[ErrorCategory] = frozenset(
     {

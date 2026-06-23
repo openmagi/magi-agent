@@ -1713,6 +1713,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
+
     # --- Document agentic authoring (I-4 batch 3) ---------------------------
     FlagSpec(
         name="MAGI_DOCUMENT_AGENTIC_MODEL",
@@ -1793,6 +1794,46 @@ FLAGS: tuple[FlagSpec, ...] = (
             "``tools/video_tools`` and the audio-side fallback). "
             "Default-OFF — the tool returns ``disabled`` without it."
         ),
+    ),
+    # --- Runtime stream-withholding + fork-cache + recovery (I-4 batch 5) ---
+    _b(
+        "MAGI_STREAM_WITHHOLDING_ENABLED",
+        summary=(
+            "Enable the runtime stream-withholding buffer. When ON the "
+            "streaming chat path holds tokens in a per-turn buffer so a "
+            "tool-call retry can suppress + replay them; OFF emits "
+            "directly."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_STREAM_WITHHOLDING_MAX_RETRIES",
+        default=2,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Maximum suppress-and-retry attempts for the withholding "
+            "buffer (default 2)."
+        ),
+        kind="int",
+    ),
+    _b(
+        "MAGI_FORK_CACHE_ENABLED",
+        summary=(
+            "Enable the per-child fork-runner output cache (skips re-"
+            "computation when an identical child invocation already "
+            "produced a result this run). Default-OFF."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_MAX_RECOVERY_ATTEMPTS",
+        default=3,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Maximum retry attempts the error-recovery framework will "
+            "make for a recoverable category (default 3)."
+        ),
+        kind="int",
     ),
 )
 
