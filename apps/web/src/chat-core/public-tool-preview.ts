@@ -1254,6 +1254,23 @@ function structuredFallbackPreview(
     };
   }
 
+  // Last resort before the opaque "Processing tool result": pull a snippet from
+  // common result-bearing keys so unknown tools still show *something* useful.
+  const resultSnippet = snippetFrom(
+    stringValue(parsePreviewObject(outputPreview), [
+      "stdout",
+      "result",
+      "output",
+      "summary",
+      "answer",
+      "message",
+      "text",
+    ]),
+  );
+  if (resultSnippet) {
+    return { action: label, snippet: resultSnippet };
+  }
+
   return {
     action: label,
     target: localized(language, "Processing tool result", "도구 결과 처리 중"),
@@ -1332,6 +1349,30 @@ export function derivePublicToolPreview(
       action: resultPreview.action ?? localized(language, "Assigning helper", "도우미 배정"),
       ...(summary ? { target: summary } : {}),
       ...(resultPreview.snippet ? { snippet: resultPreview.snippet } : {}),
+    };
+  }
+
+  if (
+    tool === "persistentpython" ||
+    tool === "python" ||
+    tool === "pythonexec" ||
+    tool === "runpython" ||
+    tool === "codeexecution"
+  ) {
+    // Python tools return { stdout, stderr } (sometimes nested under "output").
+    // Surface stdout (then stderr, then the code) as the snippet.
+    const rawOut = parsedOutput?.output;
+    const outObj =
+      rawOut && typeof rawOut === "object" && !Array.isArray(rawOut)
+        ? (rawOut as PreviewObject)
+        : parsedOutput;
+    const stdout = stringValue(outObj, ["stdout", "result", "output", "value", "text"]);
+    const stderr = stringValue(outObj, ["stderr", "error"]);
+    const code = stringValue(parsedInput, ["code", "source", "script", "command", "cell"]);
+    const snippet = snippetFrom(stdout) ?? snippetFrom(stderr) ?? snippetFrom(code);
+    return {
+      action: localized(language, "Ran Python", "파이썬 실행"),
+      ...(snippet ? { snippet } : {}),
     };
   }
 
