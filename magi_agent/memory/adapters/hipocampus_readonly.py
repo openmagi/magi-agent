@@ -450,12 +450,28 @@ def _empty_result(
     )
 
 
+#: Operator opt-in (default OFF) that lets the local memory adapter point at the
+#: bot's own production-style workspace root (e.g. a hosted ``/workspace`` PVC).
+#: Intended for a trusted single-tenant / full-access hosted bot (see
+#: ``MAGI_HOSTED_FULL_ACCESS``) where reading and projecting its OWN workspace
+#: memory is the intended behavior, not an exfiltration surface. When unset/falsy
+#: the production-path guard is byte-identical to before.
+MAGI_MEMORY_ALLOW_PRODUCTION_WORKSPACE_ENV = "MAGI_MEMORY_ALLOW_PRODUCTION_WORKSPACE"
+
+
+def _allow_production_workspace_root() -> bool:
+    return os.environ.get(
+        MAGI_MEMORY_ALLOW_PRODUCTION_WORKSPACE_ENV, ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _validate_workspace_root(path: Path) -> Path:
+    allow_production = _allow_production_workspace_root()
     raw = str(path)
-    if _PRODUCTION_PATH_RE.search(raw):
+    if not allow_production and _PRODUCTION_PATH_RE.search(raw):
         raise UnsafeMemoryPathError("read-only memory adapter cannot point at production paths")
     resolved = path.expanduser().resolve(strict=False)
-    if _PRODUCTION_PATH_RE.search(str(resolved)):
+    if not allow_production and _PRODUCTION_PATH_RE.search(str(resolved)):
         raise UnsafeMemoryPathError("read-only memory adapter cannot resolve to production paths")
     return resolved
 
