@@ -3618,6 +3618,7 @@ class MagiEngineDriver:
             prompt=prompt,
             harness_state=harness_state,
             assembly=assembly,
+            phase_routes=phase_routes,
         )
         route = phase_routes.get(phase)
         if not isinstance(route, Mapping):
@@ -5129,6 +5130,7 @@ def _select_policy_phase(
     prompt: str,
     harness_state: object | None,
     assembly: RunnerPolicyAssembly,
+    phase_routes: Mapping[str, Mapping[str, object]] | None = None,
 ) -> str:
     phase_set = set(phases)
     # Only the live harness state describes the CURRENT task. ``assembly.task_profile``
@@ -5144,12 +5146,31 @@ def _select_policy_phase(
         for item in (_extract_task_types(harness_state) or ())
     }
     prompt_lower = prompt.lower()
+
+    # E-8 — soft-fail: never return a phase whose route is denied for the
+    # current model when a conversational fallback is available. Pre-E-8
+    # the classifier could pick a denied phase that then failed-CLOSED as
+    # ``runner_policy_route_denied``. Now the classifier filters denied
+    # phases out of every short-circuit so the worst case is "answer
+    # conversationally" instead of "block the turn". We only soften when
+    # the route is *denied* — we never weaken an *enforceable* gate.
+    def _route_denied(phase: str) -> bool:
+        if phase_routes is None:
+            return False
+        route = phase_routes.get(phase)
+        if not isinstance(route, Mapping):
+            return False
+        return bool(route.get("routeDenied") or route.get("route_denied"))
+
+    def _available(phase: str) -> bool:
+        return phase in phase_set and not _route_denied(phase)
+
     coding_requested = bool(task_types & _CODING_TASK_TYPES) or any(
         marker in prompt_lower for marker in _CODING_PROMPT_MARKERS
     )
     if coding_requested:
         for phase in ("patch_generation", "code_search", "test_interpretation"):
-            if phase in phase_set:
+            if _available(phase):
                 return phase
 
     research_requested = bool(
@@ -5157,7 +5178,7 @@ def _select_policy_phase(
     ) or any(marker in prompt_lower for marker in ("research", "source", "cite", "web"))
     if research_requested:
         for phase in ("source_acquisition", "source_extraction"):
-            if phase in phase_set:
+            if _available(phase):
                 return phase
 
     if "final_answer_drafting" in phase_set:
