@@ -290,7 +290,18 @@ def test_flag_on_passes_restricted_toolset_not_full_default(
         ctx: object, *, runtime: object | None = None, cancel: object | None = None
     ) -> AsyncGenerator[Any, None]:
         from magi_agent.cli.contracts import EngineResult, Terminal
+        from magi_agent.runtime.events import RuntimeEvent
 
+        # Yield a real text event so the governed collector's summary is
+        # non-empty — otherwise this PR's new empty-response guard would
+        # surface ``child_llm_empty_response`` + ``status == "failed"``
+        # (correct for a genuinely-empty stream) and mask the security
+        # invariant this test owns (restricted toolset passed to
+        # build_headless_runtime).
+        yield RuntimeEvent(
+            type="token",
+            payload={"type": "text_delta", "delta": "ok"},
+        )
         yield EngineResult(terminal=Terminal.completed)
 
     monkeypatch.setattr(
