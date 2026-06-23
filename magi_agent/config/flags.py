@@ -854,6 +854,19 @@ FLAGS: tuple[FlagSpec, ...] = (
             "them)."
         ),
     ),
+    _pb(
+        "MAGI_CREDENTIAL_AWARENESS_ENABLED",
+        stage="stage2",
+        summary=(
+            "Inject a redacted summary of registered Agent Vault credentials into "
+            "the system prompt each turn so the agent can acknowledge that a "
+            "credential EXISTS (service / auth scheme / approval requirement) "
+            "without ever seeing the secret value (the broker injects it on "
+            "egress). Profile-aware default-ON (full runtime profile; OFF under "
+            "safe/eval). With no registered credentials this is byte-identical "
+            "(the block is empty)."
+        ),
+    ),
     _b(
         "MAGI_EGRESS_GATE_ENABLED",
         summary="Run the evidence-grounded critic gate before chat egress.",
