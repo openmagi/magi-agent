@@ -135,15 +135,29 @@ _DEFAULT_SUBJECT = "Magi Agent notification"
 # Outbound delivery
 # ---------------------------------------------------------------------------
 
+def _default_port_from_env() -> EmailProviderPort | None:
+    """J-7 out-of-box fallback (signature parity with ``slack_live`` /
+    ``telegram_live``).
+
+    No bundled SMTP provider exists today, so this resolves to ``None``
+    and the caller's ``deliver(port=None, ...)`` records ``no_provider``
+    instead of ``TypeError`` ing on the previously non-optional ``port``
+    parameter. A future provider can be wired by changing only this
+    function.
+    """
+
+    return None
+
+
 def deliver(
-    port: EmailProviderPort,
+    port: EmailProviderPort | None,
     to: str,
     text: str,
     *,
     evidence: dict[str, object],
     subject: str = _DEFAULT_SUBJECT,
 ) -> bool:
-    """Send ``text`` to ``to`` (email address) via the injected email provider.
+    """Send ``text`` to ``to`` (email address) via the live email provider.
 
     Respects the [SILENT] delivery contract: if ``text`` (stripped+uppercased)
     equals exactly ``"[SILENT]"`` the send is suppressed (audit-only, no
@@ -153,8 +167,12 @@ def deliver(
 
     Parameters
     ----------
-    port : EmailProviderPort
-        The injected live email provider.  Never constructed here.
+    port : EmailProviderPort | None
+        The injected live email provider (always wins when provided).
+        With ``None`` the out-of-box default (env-resolved) is used; if
+        no provider can be built, the call is recorded as
+        ``no_provider`` and returns ``False`` rather than raising —
+        mirroring the ``slack_live`` / ``telegram_live`` contract (J-7).
     to : str
         Recipient email address.
     text : str
@@ -169,7 +187,8 @@ def deliver(
     -------
     bool
         True if the message was sent (or suppressed by [SILENT]).
-        False if gated or if the provider raised an error.
+        False if gated, if no provider is available, or if the provider
+        raised an error.
     """
     # Always record the recipient digest and text length — never raw address.
     evidence["deliverRecipientDigest"] = _recipient_digest(to)
@@ -186,8 +205,14 @@ def deliver(
         evidence["deliverSuppressReason"] = "silent_marker"
         return True  # suppressed = successfully handled, no provider call
 
+    resolved = port if port is not None else _default_port_from_env()
+    if resolved is None:
+        evidence["deliverSkipped"] = True
+        evidence["deliverSkipReason"] = "no_provider"
+        return False
+
     try:
-        result = port.send(to=to, subject=subject, body=text)
+        result = resolved.send(to=to, subject=subject, body=text)
         evidence["deliverSuppressed"] = False
         evidence["deliverMessageId"] = (
             str(result.get("messageId", ""))[:64]
