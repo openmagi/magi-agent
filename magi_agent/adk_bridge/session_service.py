@@ -58,9 +58,12 @@ class WorkspaceSessionService(BaseSessionService):
         workspace_root: str = "",
         event_sink: Callable[[Event], None] | None = None,
     ) -> WorkspaceSessionService:
-        enabled = os.environ.get("MAGI_SESSION_PERSISTENCE_ENABLED", "").lower() in (
-            "1", "true", "yes",
-        )
+        # I-4: routed through the typed flag registry. Pre-I-4 truthy
+        # set ``{1, true, yes}`` widens to canonical
+        # ``{1, true, yes, on}`` (the project bool convention).
+        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+        enabled = flag_bool("MAGI_SESSION_PERSISTENCE_ENABLED")
         if not enabled:
             return cls(app_name=app_name, event_sink=event_sink)
 

@@ -2031,6 +2031,39 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
+    # --- adk_bridge runtime knobs (I-4 batch 10) ----------------------------
+    FlagSpec(
+        name="MAGI_ADK_STREAMING",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "ADK streaming mode. Default-ON; explicit ``0``/``false``/"
+            "``no``/``off`` disables. Unset / blank → ON. ``str`` kind "
+            "because the deny-set is wider than ``flag_bool``'s strict "
+            "truthy convention."
+        ),
+        kind="str",
+    ),
+    _b(
+        "MAGI_SESSION_PERSISTENCE_ENABLED",
+        summary=(
+            "Enable the SQLite-backed ADK session store. Default-OFF; "
+            "sessions live in process memory."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_DEFERRED_TOOL_THRESHOLD",
+        default=30,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Number of tools above which the deferred-load path activates "
+            "(only meaningful when ``MAGI_DEFERRED_TOOLS_ENABLED`` is ON; "
+            "default 30)."
+        ),
+        kind="int",
+    ),
 )
 
 

@@ -14,7 +14,14 @@ _STREAMING_DISABLED_VALUES = frozenset({"0", "false", "no", "off"})
 
 
 def _adk_streaming_enabled() -> bool:
-    return os.environ.get("MAGI_ADK_STREAMING", "").strip().lower() not in _STREAMING_DISABLED_VALUES
+    # I-4: routed through the typed flag registry. The deny-set
+    # ``_STREAMING_DISABLED_VALUES`` is wider than ``flag_bool``'s
+    # strict-truthy set, so the helper reads ``flag_str`` and applies
+    # the same deny check (default-ON when unset).
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    raw = (flag_str("MAGI_ADK_STREAMING") or "").strip().lower()
+    return raw not in _STREAMING_DISABLED_VALUES
 
 
 ADK_RUNNER_KWARG_ALLOWLIST = frozenset(

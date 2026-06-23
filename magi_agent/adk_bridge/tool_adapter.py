@@ -436,11 +436,11 @@ class DeferredToolManager:
 
 
 def build_deferred_tool_threshold() -> int:
-    raw = os.environ.get("MAGI_DEFERRED_TOOL_THRESHOLD", "30")
-    try:
-        threshold = int(raw)
-    except ValueError:
-        return 30
+    # I-4: routed through the typed flag registry. ``flag_int`` returns
+    # the registered default (30) on missing / unparseable values.
+    from magi_agent.config.flags import flag_int  # noqa: PLC0415
+
+    threshold = flag_int("MAGI_DEFERRED_TOOL_THRESHOLD") or 30
     return max(1, threshold)
 
 
@@ -450,7 +450,12 @@ def build_deferred_adk_tools(
     threshold: int | None = None,
     exposed_tool_names: tuple[str, ...] | None = None,
 ) -> DeferredToolManager | None:
-    if os.environ.get("MAGI_DEFERRED_TOOLS_ENABLED", "0") != "1":
+    # I-4: routed through the typed flag registry. ``MAGI_DEFERRED_TOOLS_ENABLED``
+    # was already registered (``_b``); the strict-``=="1"`` check
+    # widens trivially to ``flag_bool``'s canonical set.
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    if not flag_bool("MAGI_DEFERRED_TOOLS_ENABLED"):
         return None
     deferred_registry = DeferredToolRegistry(registry)
     initial_tool_set = deferred_registry.get_initial_tools(
