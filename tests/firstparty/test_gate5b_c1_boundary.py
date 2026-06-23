@@ -26,7 +26,7 @@ MIGRATED_WORKSPACE_TOOLS = frozenset({"Clock", "Calculation", "FileEdit"})
 #: Legacy _handle branches still in the kernel, awaiting the MIGRATION.md
 #: template. Shrink this set as each tool moves (and update MIGRATION.md).
 PENDING_WORKSPACE_TOOLS = frozenset(
-    {"FileRead", "Glob", "Grep", "FileWrite", "PatchApply", "Bash", "TestRun", "GitDiff"}
+    {"FileRead", "Glob", "Grep", "FileWrite", "PatchApply", "Bash", "TestRun", "GitDiff", "ListCredentials"}
 )
 
 
