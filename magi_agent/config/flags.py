@@ -1896,6 +1896,59 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
+    # --- Observability knobs (I-4 batch) ------------------------------------
+    # ``observability/config.ObservabilityConfig.from_env`` resolves these
+    # six int knobs via a local ``_int_env`` helper that read
+    # ``os.environ`` directly. Registering them lets the helper delegate
+    # to ``flag_int`` and removes the last raw env access in the module.
+    FlagSpec(
+        name="MAGI_OBS_RETENTION_DAYS",
+        default=7,
+        scope="public",
+        stage="stage1",
+        summary="Observability event-store retention horizon (days).",
+        kind="int",
+    ),
+    FlagSpec(
+        name="MAGI_OBS_MAX_EVENTS",
+        default=200_000,
+        scope="public",
+        stage="stage1",
+        summary="Maximum events kept in the observability store before pruning.",
+        kind="int",
+    ),
+    FlagSpec(
+        name="MAGI_OBS_HEALTH_INTERVAL_S",
+        default=5,
+        scope="public",
+        stage="stage1",
+        summary="Seconds between observability health snapshots.",
+        kind="int",
+    ),
+    FlagSpec(
+        name="MAGI_OBS_MISSION_INTERVAL_S",
+        default=30,
+        scope="public",
+        stage="stage1",
+        summary="Seconds between observability mission snapshots.",
+        kind="int",
+    ),
+    FlagSpec(
+        name="MAGI_OBS_CHANNEL_INTERVAL_S",
+        default=10,
+        scope="public",
+        stage="stage1",
+        summary="Seconds between observability channel snapshots.",
+        kind="int",
+    ),
+    FlagSpec(
+        name="MAGI_OBS_REPLAY_BUFFER",
+        default=200,
+        scope="public",
+        stage="stage1",
+        summary="Observability event replay buffer size.",
+        kind="int",
+    ),
 )
 
 

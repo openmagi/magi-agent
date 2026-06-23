@@ -111,6 +111,12 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_MODEL_TIMEOUT_S` (default `600`) — litellm ``timeout`` (seconds) bounding a single hung request to the model provider. Values < 1 fall back to the default.
 - `MAGI_MULTI_FILE_JOIN_ENABLED` (default off) — Append multi-file cross-reference guidance: enumerate archives, read structured files fully, and run joins/dedup programmatically.
 - `MAGI_OBSERVABILITY_ENABLED` (default off) — Enable the hook-tap observability module (bot-activity visibility).
+- `MAGI_OBS_CHANNEL_INTERVAL_S` (default `10`) — Seconds between observability channel snapshots.
+- `MAGI_OBS_HEALTH_INTERVAL_S` (default `5`) — Seconds between observability health snapshots.
+- `MAGI_OBS_MAX_EVENTS` (default `200000`) — Maximum events kept in the observability store before pruning.
+- `MAGI_OBS_MISSION_INTERVAL_S` (default `30`) — Seconds between observability mission snapshots.
+- `MAGI_OBS_REPLAY_BUFFER` (default `200`) — Observability event replay buffer size.
+- `MAGI_OBS_RETENTION_DAYS` (default `7`) — Observability event-store retention horizon (days).
 - `MAGI_OUTPUT_CONTINUATION_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Enable automatic continuation of truncated model output (default-ON full profile).
 - `MAGI_PERSISTENT_PYTHON_ENABLED` (default off) — Register + bind the neutral tools-persistent-python pack's PersistentPython tool (CodeAct: persistent interpreter namespace).
 - `MAGI_PERSIST_RUN_BOOKENDS_ENABLED` (default off) — Persist a per-turn run-bookend record (goal, one-line result, model, token usage, status) to the durable evidence ledger so a run-share page can render the top summary. Strict default-OFF; OFF keeps the evidence ledger byte-identical (no extra record written).

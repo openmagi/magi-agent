@@ -11,13 +11,35 @@ from magi_agent.config._truthy import is_true as _truthy
 
 
 def _int_env(name: str, default: int) -> int:
-    raw = os.environ.get(name)
-    if raw is None or not raw.strip():
-        return default
+    """I-4: delegate to the typed flag registry for registered names;
+    fall back to raw env for unregistered names (preserves the legacy
+    "any name works" contract that the unit tests rely on).
+
+    All six observability int knobs are registered in
+    ``config/flags.py`` with their canonical defaults; ``flag_int``
+    falls back to the registered default on missing / unparseable
+    values, preserving the pre-I-4 parse semantics. The ``default``
+    argument is kept for the bootstrap / test path where a caller
+    passes a name that has no FlagSpec yet.
+    """
+
+    from magi_agent.config.flags import flag_int  # noqa: PLC0415
+
     try:
-        return int(raw)
-    except ValueError:
+        value = flag_int(name)
+    except KeyError:
+        # Unregistered name (tests + bootstrap callers) — preserve the
+        # legacy direct-env parse with the caller's default.
+        raw = os.environ.get(name)
+        if raw is None or not raw.strip():
+            return default
+        try:
+            return int(raw)
+        except ValueError:
+            return default
+    if value is None:
         return default
+    return value
 
 
 class ObservabilityConfig(BaseModel):
