@@ -304,6 +304,16 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_RICH_TOOL_PREVIEW",
+        summary=(
+            "Expose human-readable tool-call argument summaries in the public "
+            "activity timeline (e.g. SpawnAgent task/persona, Bash command, file "
+            "path/content head). Default-OFF: when off, private-key args stay "
+            "digested (byte-identical to today). Allowlisted keys still pass the "
+            "full secret/PII sanitizer; system/user/raw prompts stay redacted."
+        ),
+    ),
+    _b(
         "MAGI_WORK_QUEUE_ENABLED",
         summary="Enable the durable multi-agent work-queue (task board + dispatcher).",
     ),
