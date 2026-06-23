@@ -124,6 +124,7 @@ graph LR
     firstparty --> tools
     gates --> coding
     gates --> config
+    gates --> credentials_admin
     gates --> egress_proxy
     gates --> evidence
     gates --> learning
@@ -760,7 +761,7 @@ graph LR
 | local_proxy_decision.py | Pure decision core for the local credential-injecting forward proxy. | — | credentials_admin/local_proxy.py |
 | local_vault.py | Native encrypted local vault backend for the dashboard "Credentials" feature. | — | (root)/main.py, channels/channel_credentials.py, channels/telegram_credentials.py, credentials_admin/local_proxy.py, credentials_admin/vault_local.py, credentials_admin/vault_server.py, transport/integrations.py |
 | payload.py | J-10 — single source of truth for credential-register payload validation. | — | credentials_admin/vault_server.py, transport/credentials.py |
-| store.py | Local redacted-metadata store for registered credentials. | — | runtime/message_builder.py |
+| store.py | Local redacted-metadata store for registered credentials. | — | gates/gate5b_full_toolhost.py, runtime/message_builder.py |
 | vault_local.py | Local vault seam for the dashboard "Credentials" registration feature. | _truthy, durable_store, flags, local_vault | (root)/main.py |
 | vault_server.py | Standalone Agent Vault server — the per-bot hosted sidecar process. | credentials_admin, local_proxy, local_vault, payload | (root)/main.py |
 
@@ -993,7 +994,7 @@ graph LR
 | gate3_readiness.py | — | models | transport/health.py |
 | gate4_readiness.py | — | models | transport/health.py |
 | gate5_readiness.py | — | models | transport/health.py |
-| gate5b_full_toolhost.py | — | _bounded_pipe, async_shell_runner, code_diagnostics_receipts, coding_tool_receipts, config, context, deadline, dispatcher, edit_match_receipts, edit_matching, env, first_party_gate, formatter_runner, injection, lsp_client, main_agent_profile, manifest, memory_mode_guard, patch_apply, permission, public_events, read_format, read_ledger, registries, registry, result, ripgrep, session_identity, tool_usage_guidance | firstparty/packs/gates_policy_default/impl.py, firstparty/packs/workspace_tools_default/impl.py, packs/context.py, tools/core_toolhost.py, tools/tests/test_core_toolhost_source_projection.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/egress_critic.py, transport/generation_request.py, transport/health.py, transport/streaming_chat_route.py |
+| gate5b_full_toolhost.py | — | _bounded_pipe, async_shell_runner, code_diagnostics_receipts, coding_tool_receipts, config, context, deadline, dispatcher, edit_match_receipts, edit_matching, env, first_party_gate, formatter_runner, injection, lsp_client, main_agent_profile, manifest, memory_mode_guard, patch_apply, permission, public_events, read_format, read_ledger, registries, registry, result, ripgrep, session_identity, store, tool_usage_guidance | firstparty/packs/gates_policy_default/impl.py, firstparty/packs/workspace_tools_default/impl.py, packs/context.py, tools/core_toolhost.py, tools/tests/test_core_toolhost_source_projection.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/egress_critic.py, transport/generation_request.py, transport/health.py, transport/streaming_chat_route.py |
 | gate7_readiness.py | — | models | transport/health.py |
 | gate8_readiness.py | — | gate1a_egress_correlation, models | transport/chat.py, transport/chat_routes.py, transport/health.py |
 | learning_live_readiness.py | Learning-layer LIVE adapter readiness gate — PR7. | config | harness/memory_recall.py, harness/memory_write.py, learning/live.py, transport/chat_routes.py |

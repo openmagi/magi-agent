@@ -229,6 +229,7 @@ _TEST_RUN_TIMEOUT_S = 300.0
 _GATE5B_LEGACY_FULL_TOOLHOST_TOOL_NAMES = (
     "Clock",
     "Calculation",
+    "ListCredentials",
     "FileRead",
     "Glob",
     "Grep",
@@ -1255,6 +1256,8 @@ class Gate5BFullToolHost:
             return {"nowMs": self.now_ms()}
         if tool_name == "Calculation":
             return {"value": _evaluate_expression(str(args.get("expression", "0")))}
+        if tool_name == "ListCredentials":
+            return _list_credentials_output()
         if tool_name == "FileRead":
             return self._handle_file_read(args)
         if tool_name == "Glob":
@@ -2287,6 +2290,14 @@ def _legacy_tool_manifest(tool_name: str) -> ToolManifest:
             tags=("utility", "meta"),
             parallel_safe=True,
         )
+    if tool_name == "ListCredentials":
+        return _legacy_manifest(
+            tool_name,
+            permission="meta",
+            modes=("plan", "act"),
+            tags=("credentials", "read", "meta"),
+            parallel_safe=True,
+        )
     if tool_name in {"FileRead", "Glob", "Grep"}:
         return _legacy_manifest(
             tool_name,
@@ -2408,6 +2419,29 @@ def _apply_patch_tool_swap(
     return swapped
 
 
+def _list_credentials_output() -> dict[str, object]:
+    """Redacted, secret-free projection of the agent's registered credentials.
+
+    Reads ONLY the non-secret metadata store (never the encrypted vault), drops
+    revoked entries and the opaque vault_ref, and returns just the fields the
+    agent needs to recognise a credential without ever seeing its value. Never
+    raises: a metadata read must not fail a turn.
+    """
+    from magi_agent.credentials_admin.store import load_credentials
+
+    try:
+        records = load_credentials().get("credentials") or []
+    except Exception:  # noqa: BLE001 - never fail a turn on a metadata read
+        return {"credentials": []}
+    fields = ("service", "label", "auth_scheme", "status", "requires_approval", "host")
+    rows = [
+        {key: cred.get(key) for key in fields}
+        for cred in records
+        if isinstance(cred, Mapping) and str(cred.get("status")) != "revoked"
+    ]
+    return {"credentials": rows}
+
+
 def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
     def function_tool(func: Callable[..., object], description: str | None = None) -> FunctionTool:
         return _function_tool(
@@ -2433,6 +2467,28 @@ def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
             return await _dispatch_adk_tool(host, "Calculation", {"expression": expression}, tool_context)
 
         return function_tool(invoke_calculation)
+
+    if name == "ListCredentials":
+
+        async def invoke_list_credentials(
+            tool_context: object | None = None,
+        ) -> dict[str, object]:
+            return await _dispatch_adk_tool(host, "ListCredentials", {}, tool_context)
+
+        return function_tool(
+            invoke_list_credentials,
+            description=(
+                "List the third-party credentials registered for this agent "
+                "(redacted: service, label, auth scheme, status, approval "
+                "requirement, host). You CANNOT see the secret values: the vault "
+                "injects each secret automatically when you make an outbound "
+                "request to the matching service, so you never handle the raw "
+                "key. Call this to check whether a credential exists instead of "
+                "searching files/memory or asking the user for the value. If a "
+                "credential is marked approval-required, your request is held "
+                "until the user approves it in the dashboard."
+            ),
+        )
 
     if name == "FileRead":
 

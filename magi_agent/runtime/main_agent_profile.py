@@ -20,18 +20,27 @@ ORCHESTRATOR_PROFILE = "orchestrator"
 #: Registered name of the spawn-agent tool (native_catalog.py:704).
 _SPAWN_AGENT_TOOL_NAME = "SpawnAgent"
 
+#: Read-only, secret-free credential-listing tool. Included alongside the
+#: read-only file tools so the orchestrator main-agent can recognise a
+#: registered credential (and explain that the vault injects its value on
+#: egress) without spawning a child. It never reveals a secret.
+_LIST_CREDENTIALS_TOOL_NAME = "ListCredentials"
+
 
 def orchestrator_tool_names() -> tuple[str, ...]:
     """Return the restricted toolset for the orchestrator main-agent.
 
     The set is the union of the read-only tool allowlist (imported from the
-    single canonical source in :mod:`magi_agent.runtime.child_toolset`) and
-    the SpawnAgent tool name.  No other tools are included; mutation tools
-    (FileWrite, FileEdit, Bash, …) and web tools (WebSearch, …) are
-    intentionally absent so all non-read, non-spawn work is forced through a
-    spawned child.
+    single canonical source in :mod:`magi_agent.runtime.child_toolset`), the
+    read-only ``ListCredentials`` tool, and the SpawnAgent tool name.  No other
+    tools are included; mutation tools (FileWrite, FileEdit, Bash, …) and web
+    tools (WebSearch, …) are intentionally absent so all non-read, non-spawn
+    work is forced through a spawned child.
     """
-    return READONLY_TOOL_NAMES + (_SPAWN_AGENT_TOOL_NAME,)
+    return READONLY_TOOL_NAMES + (
+        _LIST_CREDENTIALS_TOOL_NAME,
+        _SPAWN_AGENT_TOOL_NAME,
+    )
 
 
 def apply_orchestrator_filter(
