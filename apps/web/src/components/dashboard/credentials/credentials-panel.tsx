@@ -70,6 +70,7 @@ export function CredentialsPanel({ botId }: CredentialsPanelProps): React.JSX.El
   const [service, setService] = useState("");
   const [label, setLabel] = useState("");
   const [authScheme, setAuthScheme] = useState<string>(AUTH_SCHEMES[0]);
+  const [host, setHost] = useState("");
   const [requiresApproval, setRequiresApproval] = useState(false);
   // Write-only: this field is never populated from server data.
   const [secret, setSecret] = useState("");
@@ -102,12 +103,16 @@ export function CredentialsPanel({ botId }: CredentialsPanelProps): React.JSX.El
         auth_scheme: authScheme.trim(),
         secret,
         requires_approval: requiresApproval,
+        // Only send a host when set. The backend rejects an empty string and
+        // treats an absent host as "resolve from the built-in service map".
+        host: host.trim() || undefined,
       })
         .then(() => {
           // Clear the write-only secret immediately; never echo it back.
           setSecret("");
           setService("");
           setLabel("");
+          setHost("");
           setRequiresApproval(false);
           reload();
         })
@@ -124,6 +129,7 @@ export function CredentialsPanel({ botId }: CredentialsPanelProps): React.JSX.El
       agentFetch,
       authScheme,
       canSubmit,
+      host,
       label,
       reload,
       requiresApproval,
@@ -218,6 +224,22 @@ export function CredentialsPanel({ botId }: CredentialsPanelProps): React.JSX.El
           autoComplete="new-password"
           disabled={!vaultReady || submitting}
         />
+        <div>
+          <Input
+            label="Host (optional)"
+            placeholder="api.example.com"
+            value={host}
+            onChange={(e) => setHost(e.target.value)}
+            autoComplete="off"
+            disabled={!vaultReady || submitting}
+          />
+          <p className="mt-1 text-xs text-secondary">
+            The credential is only injected on outbound requests to this host.
+            Built-in services (slack, notion, stripe, google, github) resolve
+            their host automatically. For any other service, set the host here or
+            the credential is never matched.
+          </p>
+        </div>
         <label className="flex items-start gap-3 text-sm text-foreground">
           <input
             type="checkbox"

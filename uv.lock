@@ -3244,6 +3244,9 @@ dependencies = [
     { name = "litellm" },
     { name = "lxml" },
     { name = "markdownify" },
+    { name = "mitmproxy", version = "11.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "mitmproxy", version = "11.1.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.12.*'" },
+    { name = "mitmproxy", version = "12.2.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
     { name = "pydantic" },
     { name = "pyshacl" },
     { name = "python-docx" },
@@ -3299,11 +3302,6 @@ slack = [
 telegram-easy = [
     { name = "telethon" },
 ]
-vault = [
-    { name = "mitmproxy", version = "11.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "mitmproxy", version = "11.1.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.12.*'" },
-    { name = "mitmproxy", version = "12.2.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
-]
 video = [
     { name = "ffmpeg-python" },
     { name = "yt-dlp" },
@@ -3330,7 +3328,7 @@ requires-dist = [
     { name = "lxml", specifier = ">=6.0" },
     { name = "markdownify", specifier = "==1.2.2" },
     { name = "mcp", marker = "extra == 'computer'", specifier = ">=1.27,<2" },
-    { name = "mitmproxy", marker = "extra == 'vault'", specifier = ">=10" },
+    { name = "mitmproxy", specifier = ">=10" },
     { name = "mypy", marker = "extra == 'dev'", specifier = "==2.1.0" },
     { name = "openai", marker = "extra == 'audio'", specifier = ">=1.0" },
     { name = "openpyxl", marker = "extra == 'files'", specifier = ">=3.1" },

@@ -59,6 +59,14 @@ export interface RegisterCredentialInput {
   auth_scheme: string;
   secret: string;
   requires_approval?: boolean;
+  /**
+   * Optional target host (e.g. `api.example.com`). The local egress proxy only
+   * injects this credential on outbound requests to a matching host. Built-in
+   * services (slack/notion/stripe/google/github) resolve their host
+   * automatically; any other service needs an explicit host or it is never
+   * matched. Omit (leave undefined) when unset; never send an empty string.
+   */
+  host?: string;
 }
 
 interface UseCredentialsResult {

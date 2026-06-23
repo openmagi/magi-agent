@@ -477,6 +477,61 @@ def _user_rules_block() -> str:
     )
 
 
+def _credentials_awareness_block() -> str:
+    """Redacted summary of registered Agent Vault credentials, injected each turn.
+
+    Flag-gated by ``MAGI_CREDENTIAL_AWARENESS_ENABLED`` (profile-aware default-ON
+    in the full runtime profile, OFF under safe/eval). Lets the agent acknowledge
+    that a credential EXISTS (service, auth scheme, approval requirement) while
+    NEVER exposing the secret value: the vault injects it on egress to the
+    matching service and the agent never sees it. Empty (no section) when the
+    flag is off, on any error, or with no usable credentials, so the prompt stays
+    byte-identical to before. Fail-soft to "".
+    """
+    from magi_agent.config.flags import flag_profile_bool
+
+    if not flag_profile_bool("MAGI_CREDENTIAL_AWARENESS_ENABLED"):
+        return ""
+    try:
+        from magi_agent.credentials_admin.store import load_credentials
+
+        credentials = load_credentials().get("credentials") or []
+    except Exception:
+        return ""
+    rows = [
+        cred
+        for cred in credentials
+        if isinstance(cred, Mapping) and str(cred.get("status")) != "revoked"
+    ]
+    if not rows:
+        return ""
+    lines: list[str] = []
+    for cred in rows:
+        service = str(cred.get("service") or "unknown")
+        label = str(cred.get("label") or "").strip()
+        scheme = str(cred.get("auth_scheme") or "").strip()
+        host = str(cred.get("host") or "").strip()
+        identifier = f"{service}/{label}" if label else service
+        detail_parts = [part for part in (scheme, f"via {host}" if host else "") if part]
+        detail = f" ({', '.join(detail_parts)})" if detail_parts else ""
+        approval = (
+            " (approval required before each use)" if cred.get("requires_approval") else ""
+        )
+        lines.append(f"- {identifier}{detail}{approval}")
+    body = "\n".join(lines)
+    return (
+        "## Registered Credentials (Agent Vault)\n\n"
+        "These third-party credentials are registered for this agent. You CANNOT "
+        "see their secret values. The vault injects each secret automatically "
+        "when you make an outbound request to the matching service, so you never "
+        "handle the raw key. If a credential is marked \"approval required\", your "
+        "request is held until the user approves it in the dashboard Credentials "
+        "tab. Never tell the user a listed credential is missing or that you have "
+        "no record of it; instead explain that it exists and is used on egress.\n\n"
+        f"{body}"
+    )
+
+
 def _assemble_prompt_sections(
     *,
     session_key: str,
@@ -554,6 +609,9 @@ def _assemble_prompt_sections(
     user_rules_block = _user_rules_block()
     if user_rules_block:
         dynamic_parts.append(user_rules_block)
+    credentials_block = _credentials_awareness_block()
+    if credentials_block:
+        dynamic_parts.append(credentials_block)
 
     return static_parts, dynamic_parts
 
