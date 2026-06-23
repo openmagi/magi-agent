@@ -757,10 +757,11 @@ graph LR
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
-| __init__.py | Local "Credentials" registration admin surface for the OSS dashboard. | credentials_admin | channels/channel_credentials.py, channels/telegram_credentials.py, credentials_admin/local_proxy.py, credentials_admin/vault_server.py, transport/credentials.py, transport/integrations.py |
+| __init__.py | Local "Credentials" registration admin surface for the OSS dashboard. | credentials_admin | channels/channel_credentials.py, channels/telegram_credentials.py, credentials_admin/approval_resolver.py, credentials_admin/local_proxy.py, credentials_admin/vault_server.py, transport/credentials.py, transport/integrations.py |
+| approval_resolver.py | Credential-use approval resolver seam (in-chat approval, phase 1). | credentials_admin, local_proxy_decision | — |
 | approvals_store.py | Local approval-request store for guarded credentials. | — | — |
 | local_proxy.py | mitmproxy addon + lifecycle for the local credential-injecting forward proxy. | credentials_admin, local_proxy_decision, local_vault | (root)/main.py, credentials_admin/vault_server.py |
-| local_proxy_decision.py | Pure decision core for the local credential-injecting forward proxy. | — | credentials_admin/local_proxy.py |
+| local_proxy_decision.py | Pure decision core for the local credential-injecting forward proxy. | — | credentials_admin/approval_resolver.py, credentials_admin/local_proxy.py |
 | local_vault.py | Native encrypted local vault backend for the dashboard "Credentials" feature. | — | (root)/main.py, channels/channel_credentials.py, channels/telegram_credentials.py, credentials_admin/local_proxy.py, credentials_admin/vault_local.py, credentials_admin/vault_server.py, transport/integrations.py |
 | payload.py | J-10 — single source of truth for credential-register payload validation. | — | credentials_admin/vault_server.py, transport/credentials.py |
 | store.py | Local redacted-metadata store for registered credentials. | — | gates/gate5b_full_toolhost.py, runtime/message_builder.py |
