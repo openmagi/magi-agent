@@ -240,6 +240,87 @@ class ProviderExecutionBoundary:
             provider_called=True,
         )
 
+    def execute_sync(
+        self,
+        request: ProviderExecutionRequest,
+        *,
+        provider: ProviderPort | None = None,
+    ) -> ProviderExecutionResult:
+        """J-9: synchronous entry point mirroring :meth:`execute`.
+
+        The :class:`channels.dispatcher.ChannelDispatcher` path is
+        effectively sync — its provider port is synchronous and never
+        returns awaitables. Pre-J-9 the dispatcher invoked the async
+        :meth:`execute` and drove the coroutine manually via
+        ``coro.send(None)`` + ``StopIteration.value``, papered over by
+        ``# type: ignore[attr-defined]``. That only worked because the
+        await branch never fired; a real ``async def`` provider would
+        have silently misbehaved.
+
+        ``execute_sync`` is the same logic without the await branch:
+        the gate / disabled / error paths are identical to :meth:`execute`,
+        and the success path requires the provider to return a non-
+        awaitable value (an awaitable returned here is classified as a
+        ``provider_execution_error`` rather than silently discarded).
+        """
+
+        diagnostics = _diagnostics(self.config, request)
+        if not self.config.enabled:
+            return _result(
+                request,
+                "disabled",
+                ("provider_execution_disabled",),
+                diagnostics,
+                receipt_status="disabled",
+            )
+
+        gate_error = _provider_gate_error(self.config, request, provider)
+        if gate_error is not None:
+            return _result(
+                request,
+                "blocked",
+                (gate_error,),
+                diagnostics,
+                receipt_status="blocked",
+            )
+
+        started = time.perf_counter()
+        try:
+            assert provider is not None
+            raw_response = provider.execute(request)
+            if inspect.isawaitable(raw_response):
+                # A real async provider must use ``execute`` (not
+                # ``execute_sync``). Surface this as an error rather
+                # than silently swallowing the awaitable.
+                raise TypeError(
+                    "execute_sync called with an async provider; "
+                    "use ``await execute(...)`` instead."
+                )
+        except Exception as exc:
+            duration_ms = _duration_ms(started)
+            return _result(
+                request,
+                "error",
+                ("provider_execution_error",),
+                {**diagnostics, "providerError": _safe_error(exc)},
+                receipt_status="error",
+                response_payload={"error": _safe_error(exc)},
+                duration_ms=duration_ms,
+                provider_called=True,
+            )
+
+        duration_ms = _duration_ms(started)
+        return _result(
+            request,
+            "ok",
+            (),
+            diagnostics,
+            receipt_status="ok",
+            response_payload=raw_response,
+            duration_ms=duration_ms,
+            provider_called=True,
+        )
+
 
 def _provider_gate_error(
     config: ProviderExecutionConfig,

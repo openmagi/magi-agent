@@ -218,27 +218,32 @@ class ChannelDispatcher:
             )
 
         captured = _CapturingDispatchProvider(provider, request)
-        execution_result = _run_provider_execution(
-            ProviderExecutionBoundary(
-                ProviderExecutionConfig(
-                    enabled=True,
-                    localFakeProviderEnabled=self.config.local_fake_provider_enabled,
-                )
-            ).execute(
-                ProviderExecutionRequest(
-                    providerName=request.provider_name,
-                    operation=f"channel.{request.operation}",
-                    payload=_provider_payload(request),
-                    scope=ProviderExecutionScope(
-                        environment="local-test",
-                        botIdDigest=request.bot_id_digest,
-                        ownerIdDigest=request.user_id_digest,
-                        selectedScope=True,
-                        sessionIdDigest=request.session_key_digest,
-                    ),
-                ),
-                provider=captured,
+        # J-9: ``ProviderExecutionBoundary.execute_sync`` is the sync
+        # entry point for the synchronous-provider path the dispatcher
+        # actually uses. Pre-J-9 the boundary's async ``execute`` was
+        # driven manually by hand-stepping the coroutine and unpacking
+        # ``StopIteration.value`` — that worked only because the await
+        # branch never fired in the fake-provider path and would have
+        # silently misbehaved on any real async I/O.
+        execution_result = ProviderExecutionBoundary(
+            ProviderExecutionConfig(
+                enabled=True,
+                localFakeProviderEnabled=self.config.local_fake_provider_enabled,
             )
+        ).execute_sync(
+            ProviderExecutionRequest(
+                providerName=request.provider_name,
+                operation=f"channel.{request.operation}",
+                payload=_provider_payload(request),
+                scope=ProviderExecutionScope(
+                    environment="local-test",
+                    botIdDigest=request.bot_id_digest,
+                    ownerIdDigest=request.user_id_digest,
+                    selectedScope=True,
+                    sessionIdDigest=request.session_key_digest,
+                ),
+            ),
+            provider=captured,
         )
         if execution_result.status != "ok" or captured.output is None:
             return _decision(
@@ -296,13 +301,6 @@ def _validation_error(
     if getattr(provider, "openmagi_local_fake_provider", False) is not True:
         return "local_fake_channel_provider_untrusted"
     return None
-
-
-def _run_provider_execution(coro: object) -> object:
-    try:
-        return coro.send(None)  # type: ignore[attr-defined]
-    except StopIteration as exc:
-        return exc.value
 
 
 def _decision(
