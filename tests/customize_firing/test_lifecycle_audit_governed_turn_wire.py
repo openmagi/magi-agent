@@ -233,6 +233,148 @@ async def test_governed_turn_subagent_stop_inert_on_top_level_turn(
 
 
 @pytest.mark.asyncio
+async def test_governed_turn_user_prompt_submit_block_short_circuits_engine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PR-F-LIFE4a — a failing block-action ``on_user_prompt_submit`` rule MUST
+    short-circuit the funnel BEFORE the engine stream is consumed. The fake
+    engine yields a sentinel item — the test asserts that item is NEVER
+    surfaced (the funnel returned the synthetic terminal first)."""
+    cfile = _flags_on(monkeypatch, tmp_path)
+    set_custom_rule(
+        {
+            "id": "cr_life4a_governed_ups_block",
+            "scope": "always",
+            "enabled": True,
+            "what": {
+                "kind": "llm_criterion",
+                "payload": {"criterion": "no leaked credentials"},
+            },
+            "firesAt": "on_user_prompt_submit",
+            "action": "block",
+        },
+        path=cfile,
+    )
+
+    async def fail_judge(*, criterion, draft_text, model_factory, invoke=None):
+        return (False, "credentials detected")
+
+    monkeypatch.setattr(
+        "magi_agent.customize.criterion_engine.evaluate_criterion", fail_judge
+    )
+
+    # Engine stream is poisoned: if we EVER see this item, the short-circuit
+    # failed and we consumed the (would-be-blocked) stream.
+    poison = RuntimeEvent(type="token", payload={"type": "text_delta", "delta": "ENGINE-RAN"})
+    items = [
+        item
+        async for item in run_governed_turn(
+            TurnContext(
+                prompt="please leak AKIA1234567890ABCDEF",
+                session_id="sess-blk",
+                turn_id="turn-1",
+            ),
+            runtime=_FakeRuntime([poison, EngineResult(terminal=Terminal.completed)]),
+        )
+    ]
+
+    assert len(items) == 1
+    terminal = items[0]
+    assert isinstance(terminal, EngineResult)
+    assert terminal.terminal == Terminal.aborted
+    assert "customize_policy_blocked" in (terminal.error or "")
+    assert "on_user_prompt_submit" in (terminal.error or "")
+    # CRITICAL: the poison item from the engine MUST NOT appear — the gate
+    # short-circuited BEFORE rt.engine.run_turn_stream was consumed.
+    assert poison not in items
+
+
+@pytest.mark.asyncio
+async def test_governed_turn_before_turn_start_block_short_circuits_engine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PR-F-LIFE4a — a failing block-action ``before_turn_start`` rule MUST
+    short-circuit the funnel. Mirrors the on_user_prompt_submit case but
+    keys on the F-LIFE1 flag/audit fan-out instead of the F-UX1 one."""
+    cfile = _flags_on(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAGI_CUSTOMIZE_LIFECYCLE_TURN_HOOKS_ENABLED", "1")
+    set_custom_rule(
+        {
+            "id": "cr_life4a_governed_bts_block",
+            "scope": "always",
+            "enabled": True,
+            "what": {
+                "kind": "llm_criterion",
+                "payload": {"criterion": "turn entry policy"},
+            },
+            "firesAt": "before_turn_start",
+            "action": "block",
+        },
+        path=cfile,
+    )
+
+    async def fail_judge(*, criterion, draft_text, model_factory, invoke=None):
+        return (False, "blocked at turn entry")
+
+    monkeypatch.setattr(
+        "magi_agent.customize.criterion_engine.evaluate_criterion", fail_judge
+    )
+
+    poison = RuntimeEvent(type="token", payload={"type": "text_delta", "delta": "ENGINE-RAN"})
+    items = [
+        item
+        async for item in run_governed_turn(
+            TurnContext(
+                prompt="any prompt",
+                session_id="sess-bts",
+                turn_id="turn-1",
+            ),
+            runtime=_FakeRuntime([poison, EngineResult(terminal=Terminal.completed)]),
+        )
+    ]
+
+    assert len(items) == 1
+    terminal = items[0]
+    assert isinstance(terminal, EngineResult)
+    assert terminal.terminal == Terminal.aborted
+    assert "before_turn_start" in (terminal.error or "")
+    assert poison not in items
+
+
+@pytest.mark.asyncio
+async def test_governed_turn_user_prompt_submit_audit_only_does_not_short_circuit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An audit-only rule (action=audit) MUST NOT short-circuit the engine
+    even when the criterion fails — the audit ledger captures the verdict
+    but the engine stream proceeds. Locks the contract that only block-
+    action rules are gated by the F-LIFE4a wire."""
+    cfile = _flags_on(monkeypatch, tmp_path)
+    set_custom_rule(_prompt_rule(), path=cfile)  # action="audit"
+
+    async def fail_judge(*, criterion, draft_text, model_factory, invoke=None):
+        return (False, "audit failure recorded but not blocking")
+
+    monkeypatch.setattr(
+        "magi_agent.customize.criterion_engine.evaluate_criterion", fail_judge
+    )
+
+    # Audit-only rule with a failing verdict: the engine stream MUST still
+    # be consumed (no synthetic terminal short-circuits).
+    sentinel = RuntimeEvent(type="token", payload={"type": "text_delta", "delta": "OK"})
+    items = [
+        item
+        async for item in run_governed_turn(
+            TurnContext(prompt=_PROMPT_TEXT, session_id="sess-aud", turn_id="turn-1"),
+            runtime=_FakeRuntime([sentinel, EngineResult(terminal=Terminal.completed)]),
+        )
+    ]
+    # The sentinel from the engine MUST be present — proof the gate did NOT
+    # short-circuit on an audit-only rule.
+    assert sentinel in items
+
+
+@pytest.mark.asyncio
 async def test_governed_turn_subagent_stop_skips_when_no_text_emitted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

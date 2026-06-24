@@ -89,6 +89,55 @@ def _emit_task_checkpoint_sync(
     return None
 
 
+def _check_task_checkpoint_gate_sync(
+    *, task_id: str, checkpoint_kind: str, summary_text: str
+) -> str:
+    """PR-F-LIFE4a sync helper: consult the ``on_task_checkpoint`` gate.
+
+    Returns one of ``"proceed"`` / ``"block"`` / ``"ask"`` (strings) so
+    the caller can short-circuit further state advancement on a block
+    verdict or surface an approval directive on ``"ask"``. Fail-open at
+    every step (import error, busy event loop, fan-out raise) returns
+    ``"proceed"`` so a misbehaving rule cannot wedge dispatch.
+
+    Wrapped in ``asyncio.run`` (matches the sibling audit helper) so the
+    sync dispatcher tick can call it without collision with an outer
+    event loop. Built as a peer-of, not replacement-for, the audit
+    helper above so existing operators authoring audit-only checkpoint
+    rules continue to see audit records flow regardless of gate state.
+    """
+    try:
+        from magi_agent.customize.lifecycle_audit import (
+            lifecycle_extra_emitters_enabled,
+            run_on_task_checkpoint_gate,
+        )
+
+        if not lifecycle_extra_emitters_enabled():
+            return "proceed"
+        try:
+            from magi_agent.adk_bridge.lifecycle_llm_call_control import (
+                _build_critic_factory,
+            )
+
+            factory = _build_critic_factory()
+        except Exception:
+            factory = None
+        try:
+            verdict = asyncio.run(
+                run_on_task_checkpoint_gate(
+                    task_id=task_id,
+                    checkpoint_kind=checkpoint_kind,
+                    summary_text=summary_text,
+                    model_factory=factory,
+                )
+            )
+        except RuntimeError:
+            return "proceed"
+        return verdict if isinstance(verdict, str) else "proceed"
+    except Exception:
+        return "proceed"
+
+
 class WorkQueueTickResult(BaseModel):
     """Immutable tally returned by a single ``run_once`` tick."""
 
@@ -175,6 +224,32 @@ class WorkQueueDriver:
                 checkpoint_kind="claimed",
                 summary_text=claimed_task.title,
             )
+
+            # PR-F-LIFE4a: on_task_checkpoint gate consult — on block,
+            # mark the task as policy_blocked (recorded as a failure with
+            # a deterministic error string) and skip further state
+            # advancement for this task this tick. Honest-degrade for
+            # ``"ask"``: today we record the verdict in the audit ledger
+            # and PROCEED — a real approval surface (pause + resume) is
+            # a follow-up. Fail-open via the helper.
+            gate_verdict = _check_task_checkpoint_gate_sync(
+                task_id=claimed_task.id,
+                checkpoint_kind="claimed",
+                summary_text=claimed_task.title,
+            )
+            if gate_verdict == "block":
+                self._store.record_failure(
+                    claimed_task.id,
+                    outcome="failed",
+                    error="customize_policy_blocked: slot=on_task_checkpoint; reason=llm_criterion verdict=block",
+                )
+                failed += 1
+                _emit_task_checkpoint_sync(
+                    task_id=claimed_task.id,
+                    checkpoint_kind="failed",
+                    summary_text="customize policy blocked task",
+                )
+                continue
 
             # Exactly-once at dispatch: keyed tasks must be enqueued via
             # store.create_idempotent (unique idempotency_key constraint).

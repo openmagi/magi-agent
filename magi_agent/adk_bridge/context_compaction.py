@@ -588,6 +588,20 @@ class MagiContextCompactionPlugin(BasePlugin):
             # Audit failure must never break a live model turn.
             pass
 
+        # PR-F-LIFE4a: before_compaction gate consult. On block verdict,
+        # SKIP the tail-drop entirely so the compaction is honestly held
+        # off. The audit already ran above so the verdict is recorded; here
+        # we just decline to mutate ``llm_request.contents``. Fail-open
+        # via the surrounding try/except — any error returns proceed.
+        try:
+            if await self._maybe_compaction_blocked(
+                contents=contents,
+                llm_request=llm_request,
+            ):
+                return None
+        except Exception:
+            pass
+
         keep = min(self.tail_events, len(contents))
         split_index = len(contents) - keep
         split_index = _adjust_split_to_avoid_orphan_response(contents, split_index)
@@ -703,6 +717,42 @@ class MagiContextCompactionPlugin(BasePlugin):
                 model_factory=factory,
             )
         return None
+
+    async def _maybe_compaction_blocked(
+        self,
+        *,
+        contents: list[Any],
+        llm_request: Any,
+    ) -> bool:
+        """PR-F-LIFE4a — consult the ``before_compaction`` gate; return True on block.
+
+        Fast OFF-path: the triple-gate inside the helper short-circuits when
+        the master flag is OFF, so this call is one helper roundtrip + one
+        comparison on the OFF path. Fail-open: any exception returns False
+        (proceed with the tail-drop).
+        """
+        try:
+            from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+                lifecycle_extra_emitters_enabled,
+                run_before_compaction_gate,
+            )
+
+            if not lifecycle_extra_emitters_enabled():
+                return False
+            try:
+                model_id = _resolve_model_id(llm_request) or "(unknown)"
+            except Exception:
+                model_id = "(unknown)"
+            size = len(contents) if isinstance(contents, list) else 0
+            frame = f"pre_compaction: contents={size}, model={model_id[:64]}"
+            factory = self._build_lifecycle_critic_factory()
+            verdict = await run_before_compaction_gate(
+                pre_compaction_text=frame,
+                model_factory=factory,
+            )
+            return verdict == "block"
+        except Exception:
+            return False
 
     @staticmethod
     def _build_lifecycle_critic_factory() -> Any | None:

@@ -181,6 +181,76 @@ describe("AuthorWizard — variable-length policy authoring (F1.5 + F-UX3)", () 
     expect(src).toMatch(/after_tool_use[\s\S]*?"block", "audit", "strip"/);
   });
 
+  // -------------------------------------------------------------------------
+  // PR-F-LIFE4a — action matrix normalization across lifecycle slots. Each
+  // pin-test mirrors the backend ``_LEGAL`` lift exactly so wizard drafts
+  // assemble actions the validator accepts. The fan-through tests in
+  // tests/test_customize_custom_rules.py + tests/customize_firing/
+  // test_life4a_gate_firing.py prove the runtime end of the same matrix.
+  // -------------------------------------------------------------------------
+
+  it("F-LIFE4a — on_user_prompt_submit lifts to block + audit + mutate", () => {
+    // Backend: _LEGAL["llm_criterion"]["on_user_prompt_submit"] = {audit, block}
+    // Wizard preserves "mutate" because prompt_injection wires here.
+    expect(src).toMatch(
+      /lifecycle === "on_user_prompt_submit"\)\s*\{\s*return \["block", "audit", "mutate"\]/,
+    );
+  });
+
+  it("F-LIFE4a — before_turn_start lifts to block + ask + audit", () => {
+    // Backend: _LEGAL["llm_criterion"]["before_turn_start"] = {audit, block, ask_approval}
+    expect(src).toMatch(
+      /lifecycle === "before_turn_start"\)\s*\{\s*return \["block", "ask", "audit"\]/,
+    );
+  });
+
+  it("F-LIFE4a — after_turn_end stays audit-only (no honest block target)", () => {
+    expect(src).toMatch(
+      /lifecycle === "after_turn_end"\)\s*\{\s*return \["audit"\]/,
+    );
+  });
+
+  it("F-LIFE4a — before_llm_call + after_llm_call lift to block + audit", () => {
+    // Backend: _LEGAL["llm_criterion"]["before_llm_call"|"after_llm_call"] = {audit, block}
+    expect(src).toMatch(
+      /lifecycle === "before_llm_call" \|\| lifecycle === "after_llm_call"\)\s*\{\s*return \["block", "audit"\]/,
+    );
+  });
+
+  it("F-LIFE4a — before_compaction lifts to block + audit", () => {
+    // Backend: _LEGAL["llm_criterion"]["before_compaction"] = {audit, block}
+    expect(src).toMatch(
+      /lifecycle === "before_compaction"\)\s*\{\s*return \["block", "audit"\]/,
+    );
+  });
+
+  it("F-LIFE4a — after_compaction stays audit-only", () => {
+    expect(src).toMatch(
+      /lifecycle === "after_compaction"\)\s*\{\s*return \["audit"\]/,
+    );
+  });
+
+  it("F-LIFE4a — on_task_checkpoint lifts to block + ask + audit", () => {
+    // Backend: _LEGAL["llm_criterion"]["on_task_checkpoint"] = {audit, block, ask_approval}
+    expect(src).toMatch(
+      /lifecycle === "on_task_checkpoint"\)\s*\{\s*return \["block", "ask", "audit"\]/,
+    );
+  });
+
+  it("F-LIFE4a — on_artifact_created lifts to ask + audit only (block honestly impossible)", () => {
+    // Backend: _LEGAL["llm_criterion"]["on_artifact_created"] = {audit, ask_approval}
+    expect(src).toMatch(
+      /lifecycle === "on_artifact_created"\)\s*\{\s*return \["ask", "audit"\]/,
+    );
+  });
+
+  it("F-LIFE4a — ask archetype carries honest-degrade tooltip about provisional approval surface", () => {
+    // The ask card's description must explain that ask records
+    // requires_approval=true today and approval surfaces are a follow-up.
+    expect(src).toContain("requires_approval=true");
+    expect(src).toContain("follow-up");
+  });
+
   it("action step header composes a per-trigger phrase (target + condition together)", () => {
     expect(src).toContain("triggerEventPhrase");
     expect(src).toContain("targetEventPhrase");
@@ -901,15 +971,16 @@ describe("AuthorWizard — PR-F-UX1 lifecycle audit + Tier 2 expansion", () => {
     expect(src).toMatch(/disabledReason:\s*\n?\s*"No custom_rule gate yet/);
   });
 
-  it("Tier 2 entries describe themselves as audit-only", () => {
-    // Backend matrix restricts the two new slots to llm_criterion + audit;
-    // the description must telegraph that contract so the operator sees
-    // up-front that block isn't an option here.
+  it("Tier 2 entries telegraph their action contract honestly", () => {
+    // PR-F-LIFE4a lifted on_user_prompt_submit past audit-only — the
+    // description now mentions block short-circuits the engine stream so
+    // operators see the new contract up-front. on_subagent_stop was
+    // lifted in F-LIFE1 (block / ask actions accepted).
     expect(src).toMatch(
-      /id: "on_user_prompt_submit"[\s\S]*?Audit-only/,
+      /id: "on_user_prompt_submit"[\s\S]*?block action/,
     );
     expect(src).toMatch(
-      /id: "on_subagent_stop"[\s\S]*?Audit-only/,
+      /id: "on_subagent_stop"[\s\S]*?block \/ ask actions/,
     );
   });
 
@@ -950,15 +1021,15 @@ describe("AuthorWizard — PR-F-UX1 lifecycle audit + Tier 2 expansion", () => {
     );
   });
 
-  it("availableArchetypes(on_user_prompt_submit) adds mutate to audit (PR-F-MUT3)", () => {
+  it("availableArchetypes(on_user_prompt_submit) — PR-F-LIFE4a lifts to block + audit + mutate", () => {
     // The Tier 2 slot on_user_prompt_submit accepts prompt_injection
     // (system-prompt section append) — the wizard surfaces it via the
-    // friendly "Inject / Rewrite" archetype card. The backend
-    // ``_LEGAL`` matrix still restricts the resulting action to audit
-    // (the mutation has already taken effect by the time the audit row
-    // is written), so customRuleAction forces action=audit downstream.
+    // friendly "Inject / Rewrite" archetype card. PR-F-LIFE4a lifted the
+    // backend matrix from {audit} to {audit, block}: the gate fan-out
+    // short-circuits the engine stream when a block-action criterion
+    // fails. Mutate is still surfaced for prompt_injection authoring.
     expect(src).toMatch(
-      /lifecycle === "on_user_prompt_submit"\) \{[\s\S]*?return \["audit", "mutate"\]/,
+      /lifecycle === "on_user_prompt_submit"\) \{[\s\S]*?return \["block", "audit", "mutate"\]/,
     );
   });
 
@@ -1004,12 +1075,12 @@ describe("AuthorWizard — PR-F-LIFE1 turn-boundary lifecycle expansion", () => 
     expect(src).toMatch(/id: "after_turn_end"[\s\S]*?tier: "tier2"/);
   });
 
-  it("LIFECYCLE_OPTIONS describes the turn-boundary slots as audit-only", () => {
-    // Backend ``_LEGAL`` matrix entries restrict both turn-boundary slots
-    // to audit; the friendly label must telegraph that contract so the
-    // operator sees up-front that block isn't an option here.
+  it("LIFECYCLE_OPTIONS turn-boundary slots — PR-F-LIFE4a lifted before_turn_start; after_turn_end stays audit-only", () => {
+    // PR-F-LIFE4a updated the descriptions:
+    //   * before_turn_start now telegraphs block / ask accepted
+    //   * after_turn_end stays audit-only (no honest block target)
     expect(src).toMatch(
-      /id: "before_turn_start"[\s\S]*?\(audit-only\)/,
+      /id: "before_turn_start"[\s\S]*?block \/ ask actions/,
     );
     expect(src).toMatch(
       /id: "after_turn_end"[\s\S]*?\(audit-only\)/,
@@ -1038,13 +1109,18 @@ describe("AuthorWizard — PR-F-LIFE1 turn-boundary lifecycle expansion", () => 
     );
   });
 
-  it("availableArchetypes(turn-boundary) returns ONLY audit", () => {
-    // Mirrors the backend matrix entries
-    // (llm_criterion × before_turn_start × {audit}) /
-    // (llm_criterion × after_turn_end × {audit}). Block / ask are deferred
-    // (no honest runtime target at top-level boundaries).
+  it("availableArchetypes(turn-boundary) — PR-F-LIFE4a lifted before_turn_start, after_turn_end stays audit-only", () => {
+    // PR-F-LIFE4a updated the matrix:
+    //   * before_turn_start → {audit, block, ask_approval} (gate fan-out
+    //     short-circuits the engine stream BEFORE rt.engine.run_turn_stream)
+    //   * after_turn_end stays {audit} (emission already completed, no
+    //     honest target for block / ask)
+    // The two slots therefore live in separate if-branches now.
     expect(src).toMatch(
-      /lifecycle === "before_turn_start" \|\| lifecycle === "after_turn_end"\) \{[\s\S]*?return \["audit"\]/,
+      /lifecycle === "before_turn_start"\)\s*\{\s*return \["block", "ask", "audit"\]/,
+    );
+    expect(src).toMatch(
+      /lifecycle === "after_turn_end"\)\s*\{\s*return \["audit"\]/,
     );
   });
 
@@ -1090,11 +1166,11 @@ describe("AuthorWizard — PR-F-LIFE2 per-LLM-call lifecycle expansion", () => {
     expect(src).toMatch(/id: "after_llm_call"[\s\S]*?tier: "tier2"/);
   });
 
-  it("LIFECYCLE_OPTIONS describes the per-LLM-call slots as audit-only", () => {
-    // Backend ``_LEGAL`` matrix entries restrict both slots to audit;
-    // friendly label must telegraph that contract.
-    expect(src).toMatch(/id: "before_llm_call"[\s\S]*?\(audit-only\)/);
-    expect(src).toMatch(/id: "after_llm_call"[\s\S]*?\(audit-only\)/);
+  it("LIFECYCLE_OPTIONS per-LLM-call descriptions telegraph PR-F-LIFE4a lift to block + audit", () => {
+    // PR-F-LIFE4a lifted both slots to {audit, block}. Description must
+    // explain that block short-circuits / replaces (still budget-gated).
+    expect(src).toMatch(/id: "before_llm_call"[\s\S]*?block short-circuits/);
+    expect(src).toMatch(/id: "after_llm_call"[\s\S]*?block REPLACES/);
   });
 
   it("LIFECYCLE_OPTIONS surfaces the per-turn cost ceiling in the option description", () => {
@@ -1125,13 +1201,14 @@ describe("AuthorWizard — PR-F-LIFE2 per-LLM-call lifecycle expansion", () => {
     );
   });
 
-  it("availableArchetypes(per-LLM-call) returns ONLY audit", () => {
-    // Mirrors the backend matrix entries
-    // (llm_criterion × before_llm_call × {audit}) /
-    // (llm_criterion × after_llm_call × {audit}). Block / ask are deferred
-    // (would amplify runaway-cost risk on the per-call hot path).
+  it("availableArchetypes(per-LLM-call) lifted to block + audit (PR-F-LIFE4a)", () => {
+    // PR-F-LIFE4a lifted the per-call slots to {audit, block}. The same
+    // per-turn critic budget that gates the audit fan-out also gates the
+    // block decision (cannot block on a call the critic was never paid
+    // to evaluate), so a single misbehaving rule cannot blow past the
+    // cost ceiling.
     expect(src).toMatch(
-      /lifecycle === "before_llm_call" \|\| lifecycle === "after_llm_call"\) \{[\s\S]*?return \["audit"\]/,
+      /lifecycle === "before_llm_call" \|\| lifecycle === "after_llm_call"\)\s*\{\s*return \["block", "audit"\]/,
     );
   });
 
@@ -1188,14 +1265,16 @@ describe("AuthorWizard — PR-F-LIFE3 four new emitter slots", () => {
     expect(src).toMatch(/id: "on_artifact_created"[\s\S]*?tier: "tier2"/);
   });
 
-  it("LIFECYCLE_OPTIONS describes the four new slots as audit-only", () => {
-    // Backend ``_LEGAL`` matrix entries restrict all four slots to audit;
-    // friendly label must telegraph that contract so the operator sees
-    // up-front that block isn't an option here.
-    expect(src).toMatch(/id: "before_compaction"[\s\S]*?\(audit-only\)/);
+  it("LIFECYCLE_OPTIONS F-LIFE3 slots — PR-F-LIFE4a lifted subset per honest runtime contract", () => {
+    // PR-F-LIFE4a updated three of four descriptions:
+    //   * before_compaction telegraphs block (plugin SKIPs tail-drop)
+    //   * after_compaction stays audit-only (already applied)
+    //   * on_task_checkpoint telegraphs block (driver halts) + ask
+    //   * on_artifact_created telegraphs ask only (block impossible)
+    expect(src).toMatch(/id: "before_compaction"[\s\S]*?block tells the plugin to SKIP/);
     expect(src).toMatch(/id: "after_compaction"[\s\S]*?\(audit-only\)/);
-    expect(src).toMatch(/id: "on_task_checkpoint"[\s\S]*?\(audit-only\)/);
-    expect(src).toMatch(/id: "on_artifact_created"[\s\S]*?\(audit-only\)/);
+    expect(src).toMatch(/id: "on_task_checkpoint"[\s\S]*?block halts further state advancement/);
+    expect(src).toMatch(/id: "on_artifact_created"[\s\S]*?ask returns a delivery_intent/);
   });
 
   it("stepPlan(F-LIFE3 slots) drops the target step (6-step plan)", () => {
@@ -1215,14 +1294,23 @@ describe("AuthorWizard — PR-F-LIFE3 four new emitter slots", () => {
     );
   });
 
-  it("availableArchetypes(F-LIFE3 slots) returns ONLY audit", () => {
-    // Mirrors the backend matrix entries — block/ask/retry have no honest
-    // semantics at the compaction / task-checkpoint / artifact-created
-    // chokepoints (the underlying runtime decision has already been made
-    // by the time the audit fires). The if-block must close on
-    // on_artifact_created and short-circuit to return ["audit"].
+  it("availableArchetypes(F-LIFE3 slots) — PR-F-LIFE4a lifts subset per honest runtime contract", () => {
+    // PR-F-LIFE4a per-slot lift:
+    //   * before_compaction → {audit, block} (plugin skips tail-drop)
+    //   * after_compaction stays {audit} (already applied)
+    //   * on_task_checkpoint → {audit, block, ask_approval} (driver halts)
+    //   * on_artifact_created → {audit, ask_approval} (artifact already written)
     expect(src).toMatch(
-      /lifecycle === "on_artifact_created"\s*\)\s*\{\s*return \["audit"\];?\s*\}/,
+      /lifecycle === "before_compaction"\)\s*\{\s*return \["block", "audit"\]/,
+    );
+    expect(src).toMatch(
+      /lifecycle === "after_compaction"\)\s*\{\s*return \["audit"\]/,
+    );
+    expect(src).toMatch(
+      /lifecycle === "on_task_checkpoint"\)\s*\{\s*return \["block", "ask", "audit"\]/,
+    );
+    expect(src).toMatch(
+      /lifecycle === "on_artifact_created"\)\s*\{\s*return \["ask", "audit"\]/,
     );
   });
 
@@ -1782,12 +1870,14 @@ describe("AuthorWizard — F-MUT3 'Inject / Rewrite' archetype card", () => {
     );
   });
 
-  it("availableArchetypes(on_user_prompt_submit) exposes mutate beside audit", () => {
+  it("availableArchetypes(on_user_prompt_submit) exposes mutate beside block + audit", () => {
     // prompt_injection (system-prompt section append) is wired here; the
-    // card is the operator's entry point. on_subagent_stop intentionally
-    // stays audit-only (no mutator hook).
+    // mutate card is the operator's entry point. PR-F-LIFE4a added "block"
+    // alongside (gate fan-out short-circuits the engine stream when a
+    // block-action criterion fails). on_subagent_stop keeps its own set
+    // (block + ask + audit) from F-LIFE1.
     expect(src).toMatch(
-      /lifecycle === "on_user_prompt_submit"\) \{[\s\S]*?return \["audit", "mutate"\]/,
+      /lifecycle === "on_user_prompt_submit"\) \{[\s\S]*?return \["block", "audit", "mutate"\]/,
     );
   });
 
@@ -1796,7 +1886,7 @@ describe("AuthorWizard — F-MUT3 'Inject / Rewrite' archetype card", () => {
     // fires after the child has already emitted — mutation has no honest
     // target. The wizard must not surface a card the operator cannot save.
     expect(src).toMatch(
-      /lifecycle === "on_subagent_stop"\) \{[\s\S]*?return \["audit"\]/,
+      /lifecycle === "on_subagent_stop"\) \{[\s\S]*?return \["block", "ask", "audit"\]/,
     );
     // The default-branch fallback (used by pre_final + any unknown lifecycle)
     // remains the original 3 archetypes — no mutate.

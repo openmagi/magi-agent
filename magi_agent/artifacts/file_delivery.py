@@ -19,6 +19,48 @@ from magi_agent.runtime.provider_receipts import (
 )
 
 
+def _check_artifact_created_gate_sync(
+    *, artifact_ref: str, artifact_excerpt: str = ""
+) -> str:
+    """PR-F-LIFE4a sync helper: consult the ``on_artifact_created`` gate.
+
+    Returns one of ``"proceed"`` / ``"ask"`` (block is NOT possible at this
+    slot — the artifact has already been written by the provider). The
+    caller augments the delivery receipt with ``requires_approval=true``
+    when this returns ``"ask"`` so a follow-up approval surface can hold
+    downstream delivery. Fail-open: any exception returns ``"proceed"``.
+    """
+    try:
+        from magi_agent.customize.lifecycle_audit import (
+            lifecycle_extra_emitters_enabled,
+            run_on_artifact_created_gate,
+        )
+
+        if not lifecycle_extra_emitters_enabled():
+            return "proceed"
+        try:
+            from magi_agent.adk_bridge.lifecycle_llm_call_control import (
+                _build_critic_factory,
+            )
+
+            factory = _build_critic_factory()
+        except Exception:
+            factory = None
+        try:
+            verdict = asyncio.run(
+                run_on_artifact_created_gate(
+                    artifact_ref=artifact_ref,
+                    artifact_excerpt=artifact_excerpt,
+                    model_factory=factory,
+                )
+            )
+        except RuntimeError:
+            return "proceed"
+        return verdict if isinstance(verdict, str) else "proceed"
+    except Exception:
+        return "proceed"
+
+
 def _emit_artifact_created_sync(
     *, artifact_ref: str, artifact_excerpt: str = ""
 ) -> None:
@@ -434,6 +476,7 @@ class FileDeliveryBoundary:
             # critic gets the artifact ref + a bounded excerpt frame, not
             # the raw artifact bytes. The helper triple-gate short-circuits
             # when the master flag is OFF so the OFF path is byte-identical.
+            artifact_gate_verdict: str = "proceed"
             try:
                 ref_for_emit = (
                     artifact_ref
@@ -449,10 +492,35 @@ class FileDeliveryBoundary:
                     artifact_ref=ref_for_emit,
                     artifact_excerpt=f"operation={op_label}",
                 )
+                # PR-F-LIFE4a: on_artifact_created gate consult. The artifact
+                # has already been written by the provider — block is honestly
+                # impossible here, so the matrix only exposes ``ask_approval``.
+                # On ``"ask"`` we return a ``delivery_intent`` decision with
+                # ``artifact_review_pending`` so downstream channel delivery
+                # is HELD until a follow-up approval surface releases it.
+                artifact_gate_verdict = _check_artifact_created_gate_sync(
+                    artifact_ref=ref_for_emit,
+                    artifact_excerpt=f"operation={op_label}",
+                )
             except Exception:
                 # Fail-open at the emit boundary so an audit fan-out raise
                 # cannot abort the artifact write.
                 pass
+
+            if artifact_gate_verdict == "ask":
+                return _decision(
+                    request,
+                    "delivery_intent",
+                    artifact_ref=artifact_ref,
+                    content_digest=content_digest,
+                    artifact_receipt=artifact_receipt,
+                    reason_codes=("artifact_review_pending",),
+                    diagnostics={
+                        **dict(diagnostics),
+                        "requires_approval": True,
+                        "approval_slot": "on_artifact_created",
+                    },
+                )
 
         if artifact_receipt is None:
             return _decision(

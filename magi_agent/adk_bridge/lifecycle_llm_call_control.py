@@ -165,6 +165,46 @@ def _extract_request_text(llm_request: Any) -> str:
         return ""
 
 
+def _build_policy_blocked_llm_response(*, reason: str) -> Any:
+    """PR-F-LIFE4a — synthesize an ADK ``LlmResponse`` carrying a policy
+    refusal so the model call is honestly suppressed.
+
+    The lazy import keeps this file's import-time cost zero on the OFF
+    path (the call site only hits this helper when a block-action gate
+    actually fires). On any import failure we fall back to ``None`` —
+    returning ``None`` from on_before_model / on_after_model is the
+    "no override" signal, which fails OPEN (the model call proceeds).
+    That tradeoff is intentional: a missing google.genai import on a
+    block path is already a system-level failure; silently degrading
+    to proceed is consistent with the rest of the lifecycle audit's
+    fail-open contract.
+    """
+    try:
+        from google.adk.models.llm_response import LlmResponse  # noqa: PLC0415
+        from google.genai import types  # noqa: PLC0415
+    except Exception:
+        return None
+    try:
+        return LlmResponse(
+            content=types.Content(
+                role="model",
+                parts=[
+                    types.Part.from_text(
+                        text=(
+                            "[customize_policy_blocked] "
+                            "This response was suppressed by a Customize "
+                            "llm_criterion gate. "
+                            f"reason={reason}"
+                        )
+                    )
+                ],
+            ),
+            error_message=f"customize_policy_blocked: {reason}",
+        )
+    except Exception:
+        return None
+
+
 def _build_critic_factory() -> Any | None:
     """Build the Haiku-class critic model factory used by the per-call
     audits. Mirrors the helper in
@@ -244,11 +284,12 @@ class LifecycleLlmCallAuditControl(BaseLoopControl):
         *,
         callback_context: Any,
         llm_request: Any,
-    ) -> None:
+    ) -> Any:
         # Fast OFF-path: triple-gate check FIRST so the per-call cost when
         # the master flag is OFF is one helper call + one comparison. No
         # policy load, no factory build, no audit work.
         from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+            derive_gate_verdict_from_audits,
             llm_call_hooks_enabled,
             run_before_llm_call_audit,
         )
@@ -285,6 +326,26 @@ class LifecycleLlmCallAuditControl(BaseLoopControl):
                     state.remaining -= 1
                     if state.remaining < 0:
                         state.remaining = 0
+            # PR-F-LIFE4a review pass: derive the gate verdict from the
+            # audits we just computed instead of re-invoking the fan-out
+            # (which would call the criterion judge a SECOND time on the
+            # same prompt — doubling per-call cost when block rules are
+            # configured). The reducer reads passed/status off each record;
+            # no extra critic invocation, no extra budget decrement.
+            try:
+                gate_verdict = derive_gate_verdict_from_audits(
+                    audits,
+                    fires_at="before_llm_call",
+                    allowed_actions=frozenset({"block"}),
+                    enabled_fn=llm_call_hooks_enabled,
+                )
+                if gate_verdict == "block":
+                    return _build_policy_blocked_llm_response(
+                        reason="before_llm_call llm_criterion verdict=block",
+                    )
+            except Exception:
+                # Fail-open: gate evaluation errors never block a call.
+                pass
         except Exception:
             logger.debug(
                 "lifecycle-llm-call before_model audit failed; skipping",
@@ -297,8 +358,9 @@ class LifecycleLlmCallAuditControl(BaseLoopControl):
         *,
         callback_context: Any,
         llm_response: Any,
-    ) -> None:
+    ) -> Any:
         from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+            derive_gate_verdict_from_audits,
             llm_call_hooks_enabled,
             run_after_llm_call_audit,
         )
@@ -326,6 +388,26 @@ class LifecycleLlmCallAuditControl(BaseLoopControl):
                     state.remaining -= 1
                     if state.remaining < 0:
                         state.remaining = 0
+            # PR-F-LIFE4a review pass: derive verdict from the already-
+            # computed audits (no second criterion-judge call). On block we
+            # REPLACE the just-emitted response with a synthetic refusal
+            # so the downstream consumer never sees the offending text.
+            # ADK after_model supports returning a new LlmResponse for
+            # exactly this use case (tokens already streamed cannot be
+            # un-rung; honest-degrade for streaming surfaces).
+            try:
+                gate_verdict = derive_gate_verdict_from_audits(
+                    audits,
+                    fires_at="after_llm_call",
+                    allowed_actions=frozenset({"block"}),
+                    enabled_fn=llm_call_hooks_enabled,
+                )
+                if gate_verdict == "block":
+                    return _build_policy_blocked_llm_response(
+                        reason="after_llm_call llm_criterion verdict=block",
+                    )
+            except Exception:
+                pass
         except Exception:
             logger.debug(
                 "lifecycle-llm-call after_model audit failed; skipping",

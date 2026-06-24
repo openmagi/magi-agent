@@ -686,12 +686,12 @@ const LIFECYCLE_OPTIONS: ReadonlyArray<LifecycleOption> = [
     description: "Fires just before the runtime accepts the agent's final answer.",
     tier: "tier1",
   },
-  // --- Tier 2 — wired in PR-F-UX1, audit-only ------------------------------
+  // --- Tier 2 — wired in PR-F-UX1; PR-F-LIFE4a lifted to {audit, block} ----
   {
     id: "on_user_prompt_submit",
-    label: "When the user submits a prompt (audit-only)",
+    label: "When the user submits a prompt",
     description:
-      "Fires at BEFORE_SYSTEM_PROMPT — adjacent to system-prompt assembly. Audit-only: records the criterion verdict without mutating the assembled prompt.",
+      "Fires at BEFORE_SYSTEM_PROMPT — adjacent to system-prompt assembly. PR-F-LIFE4a: block action short-circuits the engine stream BEFORE the model is called when a block-action criterion fails.",
     tier: "tier2",
   },
   {
@@ -701,12 +701,12 @@ const LIFECYCLE_OPTIONS: ReadonlyArray<LifecycleOption> = [
       "Fires after a spawned child agent's turn completes. Audit-only by default; block / ask actions are now accepted so an operator can require the child to produce a summary the parent caller can act on.",
     tier: "tier2",
   },
-  // --- Tier 2 — wired in PR-F-LIFE1, audit-only ----------------------------
+  // --- Tier 2 — wired in PR-F-LIFE1; PR-F-LIFE4a lifted before_turn_start --
   {
     id: "before_turn_start",
-    label: "When a top-level turn starts (audit-only)",
+    label: "When a top-level turn starts",
     description:
-      "Fires once per top-level turn before the engine stream starts — use for session-level checks (rare). Audit-only: records the criterion verdict without mutating the inbound prompt or blocking the turn.",
+      "Fires once per top-level turn before the engine stream starts. PR-F-LIFE4a: block / ask actions are honored — the gate consult short-circuits the funnel BEFORE rt.engine.run_turn_stream is invoked.",
     tier: "tier2",
   },
   {
@@ -716,27 +716,27 @@ const LIFECYCLE_OPTIONS: ReadonlyArray<LifecycleOption> = [
       "Fires once per top-level turn after the engine stream completes — use for session-level checks (rare). Audit-only: the top-level emission has already completed, so blocks aren't honest at this slot.",
     tier: "tier2",
   },
-  // --- Tier 2 — wired in PR-F-LIFE2, audit-only with per-turn cost ceiling -
+  // --- Tier 2 — wired in PR-F-LIFE2; PR-F-LIFE4a lifted to {audit, block} --
   {
     id: "before_llm_call",
-    label: "Before each LLM call (audit-only)",
+    label: "Before each LLM call",
     description:
-      "Fires once per LLM call within a turn — capped at 3 invocations per turn by default (env MAGI_CUSTOMIZE_LLM_CALL_AUDIT_BUDGET) to prevent runaway critic cost. Audit-only: records the criterion verdict without mutating the outbound prompt or blocking the call.",
+      "Fires once per LLM call within a turn — capped at 3 invocations per turn by default (env MAGI_CUSTOMIZE_LLM_CALL_AUDIT_BUDGET) to prevent runaway critic cost. PR-F-LIFE4a: block short-circuits the model call via the ADK before_model boundary (still budget-gated).",
     tier: "tier2",
   },
   {
     id: "after_llm_call",
-    label: "After each LLM call (audit-only)",
+    label: "After each LLM call",
     description:
-      "Fires once per LLM call within a turn — capped at 3 invocations per turn by default (env MAGI_CUSTOMIZE_LLM_CALL_AUDIT_BUDGET) to prevent runaway critic cost. Audit-only: inspects the model's just-emitted text without rewriting it.",
+      "Fires once per LLM call within a turn — capped at 3 invocations per turn by default (env MAGI_CUSTOMIZE_LLM_CALL_AUDIT_BUDGET) to prevent runaway critic cost. PR-F-LIFE4a: block REPLACES the model output with a synthetic refusal (streamed tokens cannot be un-rung).",
     tier: "tier2",
   },
-  // --- Tier 2 — wired in PR-F-LIFE3, audit-only ----------------------------
+  // --- Tier 2 — wired in PR-F-LIFE3; PR-F-LIFE4a lifted per-slot ----------
   {
     id: "before_compaction",
-    label: "Before compaction (audit-only)",
+    label: "Before compaction",
     description:
-      "Fires immediately before the context-compaction plugin trims the model request — covers both the automatic threshold/real-token decision path and the manual /compact force path. Audit-only: inspects the about-to-be-trimmed context size without altering the compaction decision.",
+      "Fires immediately before the context-compaction plugin trims the model request — covers both the automatic threshold/real-token decision path and the manual /compact force path. PR-F-LIFE4a: block tells the plugin to SKIP the tail-drop.",
     tier: "tier2",
   },
   {
@@ -748,16 +748,16 @@ const LIFECYCLE_OPTIONS: ReadonlyArray<LifecycleOption> = [
   },
   {
     id: "on_task_checkpoint",
-    label: "On task checkpoint (audit-only)",
+    label: "On task checkpoint",
     description:
-      "Fires at each durable work-queue task status transition — claimed / completed / failed / short_circuited — inside the dispatcher tick. Audit-only: inspects per-task summaries / errors without interfering with dispatch.",
+      "Fires at each durable work-queue task status transition — claimed / completed / failed / short_circuited — inside the dispatcher tick. PR-F-LIFE4a: block halts further state advancement for the task; ask is honest-degrade (records requires_approval=true).",
     tier: "tier2",
   },
   {
     id: "on_artifact_created",
-    label: "On artifact created (audit-only)",
+    label: "On artifact created",
     description:
-      "Fires immediately after a successful artifact write through the file-delivery boundary (ok-status branch only). Audit-only: inspects the artifact ref + a bounded excerpt without rewriting the written bytes.",
+      "Fires immediately after a successful artifact write through the file-delivery boundary (ok-status branch only). PR-F-LIFE4a: ask returns a delivery_intent decision with artifact_review_pending so downstream channel delivery is HELD until a follow-up approval surface releases it. Block is honestly impossible here (artifact already written).",
     tier: "tier2",
   },
   {
@@ -2204,14 +2204,16 @@ function availableArchetypes(lifecycle: Lifecycle): Archetype[] {
   // reseedDownstream so the SpecificsStep renders the F-MUT picker.
   if (lifecycle === "before_tool_use") return ["block", "ask", "audit", "mutate"];
   if (lifecycle === "after_tool_use") return ["block", "audit", "strip", "mutate"];
-  // PR-F-UX1 Tier 2 — both new slots are audit-only at the backend matrix.
-  // Surfacing "block" here would let the wizard assemble a draft the backend
-  // ``_LEGAL`` table rejects (cleaner to refuse the action here than at PUT).
-  // PR-F-MUT3 — on_user_prompt_submit additionally accepts "mutate" because
-  // prompt_injection is wired there (system-prompt section append). The
-  // sibling slot on_subagent_stop stays audit-only (no mutator hook).
+  // PR-F-UX1 Tier 2 — wired at the canonical governed-turn funnel.
+  // PR-F-LIFE4a lifted the matrix to {audit, block}: a block-action
+  // criterion can short-circuit the engine stream BEFORE rt.engine
+  // .run_turn_stream is invoked. "ask" was deliberately left out at this
+  // slot (no honest approval surface for the inbound-prompt boundary
+  // today — the design matrix lists {audit, block} only).
+  // PR-F-MUT3 keeps "mutate" because prompt_injection is wired here
+  // (system-prompt section append).
   if (lifecycle === "on_user_prompt_submit") {
-    return ["audit", "mutate"];
+    return ["block", "audit", "mutate"];
   }
   // PR-F-LIFE1 — ``on_subagent_stop`` is lifted past audit-only: the
   // backend ``_LEGAL`` matrix now accepts (llm_criterion × on_subagent_stop
@@ -2222,37 +2224,59 @@ function availableArchetypes(lifecycle: Lifecycle): Archetype[] {
   if (lifecycle === "on_subagent_stop") {
     return ["block", "ask", "audit"];
   }
-  // PR-F-LIFE1 — both turn-boundary slots stay audit-only at the wizard
-  // (matches the backend ``_LEGAL`` entries). Block at top-level turn entry
-  // would require a runtime contract change (the engine stream has not
-  // started yet) and at top-level turn end the emission has already
-  // completed, so the conservative wire is audit-only.
-  if (lifecycle === "before_turn_start" || lifecycle === "after_turn_end") {
+  // PR-F-LIFE4a — ``before_turn_start`` lifted to {audit, block, ask} so
+  // the operator can author a "block this turn if (criterion)" rule that
+  // ACTUALLY short-circuits the turn at the canonical funnel BEFORE the
+  // engine stream is started. ``ask`` is honest-degrade today (records
+  // requires_approval=true and proceeds — see ASK tooltip note). The
+  // sibling ``after_turn_end`` stays audit-only (emission has already
+  // completed by the time the audit fires).
+  if (lifecycle === "before_turn_start") {
+    return ["block", "ask", "audit"];
+  }
+  if (lifecycle === "after_turn_end") {
     return ["audit"];
   }
-  // PR-F-LIFE2 — per-LLM-call slots are audit-only. Block at the per-call
-  // boundary would amplify the runaway-cost risk (one bad rule blocks
-  // every LLM call within a turn) and the surrounding plugin's per-turn
-  // critic budget already enforces the cost ceiling for audit verdicts.
+  // PR-F-LIFE4a — per-LLM-call slots lifted to {audit, block}. The same
+  // per-turn critic budget that gates the audit fan-out also gates the
+  // block decision (cannot block on a call the critic was never paid to
+  // evaluate), so a misbehaving rule cannot multiply cost beyond the
+  // existing budget. ADK before_model_callback short-circuits the model
+  // call; after_model_callback REPLACES the response with a synthetic
+  // refusal (note: streamed tokens cannot be un-rung).
   if (lifecycle === "before_llm_call" || lifecycle === "after_llm_call") {
+    return ["block", "audit"];
+  }
+  // PR-F-LIFE4a — four new emitter slots, lifted per the runtime contract
+  // each chokepoint honestly supports:
+  // * before_compaction: {audit, block} — the gate consult tells the
+  //   compaction plugin to SKIP the tail-drop on block.
+  // * after_compaction: {audit} only — compaction has already taken
+  //   effect on llm_request.contents by the time the audit fires.
+  // * on_task_checkpoint: {audit, block, ask} — the gate consult tells
+  //   the work-queue driver to halt further state advancement on block;
+  //   ask is honest-degrade today (proceeds + records requires_approval).
+  //   PR-F-LIFE4a review pass NOTE: block / ask only fire at the
+  //   ``claimed`` transition (pre-execution gate). At completed / failed /
+  //   short_circuited transitions the verdict is recorded as audit-only —
+  //   post-execution revert needs a compensating-action wire (follow-up).
+  //   The block-card subtext below carries this caveat so an operator
+  //   picking block at this slot is not surprised.
+  // * on_artifact_created: {audit, ask} — the artifact has already been
+  //   written by the provider, so block is honestly impossible; ask
+  //   surfaces a requires_approval directive on the delivery receipt so
+  //   a follow-up approval surface can hold downstream channel delivery.
+  if (lifecycle === "before_compaction") {
+    return ["block", "audit"];
+  }
+  if (lifecycle === "after_compaction") {
     return ["audit"];
   }
-  // PR-F-LIFE3 — four new emitter slots are audit-only. Block at the
-  // compaction / task-checkpoint / artifact-created chokepoints has no
-  // honest meaning: the compaction has already been decided by the
-  // surrounding plugin (the audit wraps the call, it does not gate it),
-  // a task transition has already been recorded by the work-queue store
-  // (the audit fires AFTER the state write), and an artifact has already
-  // been written by the provider (the audit fires AFTER the ok-status
-  // branch). Surfacing block would let the operator assemble a draft the
-  // backend ``_LEGAL`` matrix rejects.
-  if (
-    lifecycle === "before_compaction"
-    || lifecycle === "after_compaction"
-    || lifecycle === "on_task_checkpoint"
-    || lifecycle === "on_artifact_created"
-  ) {
-    return ["audit"];
+  if (lifecycle === "on_task_checkpoint") {
+    return ["block", "ask", "audit"];
+  }
+  if (lifecycle === "on_artifact_created") {
+    return ["ask", "audit"];
   }
   return ["block", "ask", "audit"];
 }
@@ -2268,7 +2292,10 @@ const ARCHETYPE_META: Record<Archetype, ArchetypeOption> = {
   ask: {
     id: "ask",
     label: "Ask the user for approval",
-    description: "Pause and prompt the user.",
+    description:
+      "Pause and prompt the user. PR-F-LIFE4a note: records 'awaiting approval' "
+      + "(requires_approval=true) in the audit ledger today. Approval surfaces "
+      + "(dashboard prompts, push notifications) coming in a follow-up.",
     icon: <HelpCircle className="h-5 w-5" />,
   },
   audit: {

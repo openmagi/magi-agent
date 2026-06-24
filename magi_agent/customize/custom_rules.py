@@ -168,13 +168,14 @@ _LEGAL: dict[str, dict[str, frozenset[str]]] = {
     "llm_criterion": {
         "pre_final": frozenset({"block", "retry", "audit"}),
         "after_tool_use": frozenset({"override"}),
-        # PR-F-UX1 Tier 2 — audit-only at the two new bus-emitted gates.
-        # ``block`` would require a runtime contract change at message_builder
-        # (would mutate the byte-identical prompt assembly invariant) and
-        # post-turn-end (turn already emitted), so the conservative wire is
-        # audit-only: the criterion judge is invoked and the verdict recorded,
-        # the surrounding runtime contract is unchanged.
-        "on_user_prompt_submit": frozenset({"audit"}),
+        # PR-F-UX1 Tier 2 — wired at the canonical governed-turn funnel.
+        # PR-F-LIFE4a lifted the matrix from audit-only to ``{audit, block}``:
+        # the gate fan-out in ``lifecycle_audit.run_user_prompt_submit_gate``
+        # signals the runtime to short-circuit the engine stream (synthetic
+        # "policy blocked" turn) when a block-action criterion fails. The
+        # audit-only sibling fan-out is unchanged. Fail-open everywhere —
+        # any exception in the gate path returns ``"proceed"``.
+        "on_user_prompt_submit": frozenset({"audit", "block"}),
         # PR-F-LIFE1 — ``on_subagent_stop`` validator accepts
         # ``block`` / ``ask_approval`` IN ADDITION to ``audit`` so an operator
         # can author a "subagent must produce a summary"-style rule. The audit
@@ -186,31 +187,52 @@ _LEGAL: dict[str, dict[str, frozenset[str]]] = {
         # authorability-lift-only; runtime surfacing arrives in a follow-up.
         # ``audit`` stays the conservative honest action.
         "on_subagent_stop": frozenset({"audit", "block", "ask_approval"}),
-        # PR-F-LIFE1 — audit-only at the new turn-boundary slots. See the
-        # deterministic_ref note above; the rationale matches.
-        "before_turn_start": frozenset({"audit"}),
+        # PR-F-LIFE1 wired the audit fan-out at the turn-boundary funnel.
+        # PR-F-LIFE4a lifts ``before_turn_start`` to ``{audit, block,
+        # ask_approval}`` — the gate fan-out
+        # (``lifecycle_audit.run_before_turn_start_gate``) signals the
+        # governed-turn entry to short-circuit before the engine stream
+        # starts; ``ask_approval`` is honest-degrade today (the runtime
+        # records ``requires_approval=true`` and proceeds — surface comes in
+        # a follow-up). ``after_turn_end`` stays audit-only: the turn has
+        # already emitted by the time the audit fires, so block / ask have
+        # no honest runtime target.
+        "before_turn_start": frozenset({"audit", "block", "ask_approval"}),
         "after_turn_end": frozenset({"audit"}),
-        # PR-F-LIFE2 — audit-only at the new per-LLM-call slots. The
-        # surrounding ADK plugin caps fan-out at
-        # ``MAGI_CUSTOMIZE_LLM_CALL_AUDIT_BUDGET`` invocations per turn
-        # (default 3) to prevent runaway critic cost — block / retry are
-        # deferred until a stricter cost-ceiling story lands. As with the
-        # turn-boundary slots, deterministic_ref / mutator kinds are NOT
-        # added here (honest-degrade — no runtime fan-out).
-        "before_llm_call": frozenset({"audit"}),
-        "after_llm_call": frozenset({"audit"}),
-        # PR-F-LIFE3 — audit-only at the four new emitter slots. The
-        # surrounding runtime sites (context_compaction plugin / work-queue
-        # driver / file-delivery boundary) call the lifecycle_audit fan-out
-        # helpers behind a try/except envelope so an audit failure cannot
-        # break the live compaction / task dispatch / artifact write. As
-        # with the turn-boundary and per-LLM-call slots,
-        # deterministic_ref / tool_perm / mutator kinds are NOT added
-        # here (honest-degrade — no runtime fan-out at these chokepoints).
-        "before_compaction": frozenset({"audit"}),
+        # PR-F-LIFE2 wired the audit fan-out under a per-turn critic budget.
+        # PR-F-LIFE4a lifts both slots to ``{audit, block}`` — the ADK
+        # before_model / after_model callbacks consult the gate AFTER the
+        # existing audit and short-circuit the model call (before) or
+        # suppress the response (after) on a block verdict. The same per-
+        # turn budget still applies (block decision does not bypass it),
+        # so a single misbehaving rule cannot blow past the cost ceiling.
+        "before_llm_call": frozenset({"audit", "block"}),
+        "after_llm_call": frozenset({"audit", "block"}),
+        # PR-F-LIFE3 wired the audit fan-out around the four new emitter
+        # chokepoints. PR-F-LIFE4a lifts the subset where the runtime
+        # contract supports a true gate:
+        # * ``before_compaction``: gate fan-out tells the compaction plugin
+        #   to skip the tail-drop on block.
+        # * ``on_task_checkpoint``: gate fan-out tells the work-queue
+        #   driver to halt further state advancement on block; ``ask``
+        #   surfaces a requires_approval directive (honest-degrade).
+        #   PR-F-LIFE4a review pass NOTE: block / ask only fire at the
+        #   ``claimed`` transition today (the only honest pre-execution
+        #   gate target). The completed / failed / short_circuited
+        #   transitions still emit audit records but the gate verdict is
+        #   recorded as audit-only — post-execution revert requires a
+        #   compensating-action wire (separate follow-up). The wizard
+        #   tooltip on the block / ask cards calls this limitation out.
+        # * ``on_artifact_created``: only ``ask_approval`` is meaningful —
+        #   the artifact was already written by the provider, so a true
+        #   block requires moving the emit earlier (separate follow-up).
+        # ``after_compaction`` stays audit-only (compaction already
+        # decided + applied). deterministic_ref / tool_perm / mutator
+        # kinds remain absent (no runtime fan-out at these chokepoints).
+        "before_compaction": frozenset({"audit", "block"}),
         "after_compaction": frozenset({"audit"}),
-        "on_task_checkpoint": frozenset({"audit"}),
-        "on_artifact_created": frozenset({"audit"}),
+        "on_task_checkpoint": frozenset({"audit", "block", "ask_approval"}),
+        "on_artifact_created": frozenset({"audit", "ask_approval"}),
     },
     # audit/retry deferred: runtime always blocks on a failed shacl record regardless
     # of the stored action, so promising audit/retry here is a false contract.

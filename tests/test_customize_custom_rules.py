@@ -300,9 +300,24 @@ def test_llm_criterion_audit_at_on_subagent_stop_accepted():
     assert validate_custom_rule(rule) == []
 
 
-def test_llm_criterion_block_at_on_user_prompt_submit_rejected():
-    """Block at Tier 2 slot is rejected: audit-only matrix entry."""
+def test_llm_criterion_block_at_on_user_prompt_submit_accepted():
+    """PR-F-LIFE4a — ``on_user_prompt_submit`` lifted to {audit, block}.
+
+    The gate fan-out
+    (:func:`magi_agent.customize.lifecycle_audit.run_user_prompt_submit_gate`)
+    is wired in ``runtime/governed_turn.run_governed_turn`` so the runtime
+    short-circuits the engine stream when a block-action criterion fails.
+    """
     rule = _llm(firesAt="on_user_prompt_submit", action="block")
+    assert validate_custom_rule(rule) == []
+
+
+def test_llm_criterion_ask_at_on_user_prompt_submit_still_rejected():
+    """PR-F-LIFE4a leaves ``ask_approval`` out of the lift at
+    ``on_user_prompt_submit`` — the design matrix targets ``{audit, block}``
+    only (no honest approval surface at the inbound-prompt boundary today).
+    """
+    rule = _llm(firesAt="on_user_prompt_submit", action="ask_approval")
     errs = validate_custom_rule(rule)
     assert any("on_user_prompt_submit" in e and "audit" in e for e in errs), errs
 
@@ -392,12 +407,21 @@ def test_deterministic_ref_at_after_turn_end_rejected_no_runtime_fanout():
     assert any("after_turn_end" in e for e in errs), errs
 
 
-def test_llm_criterion_block_at_before_turn_start_rejected():
-    """Block at top-level turn entry would require a runtime contract change
-    (engine stream has not started yet) — keep wire audit-only."""
+def test_llm_criterion_block_at_before_turn_start_accepted():
+    """PR-F-LIFE4a — ``before_turn_start`` lifted to {audit, block,
+    ask_approval}. The gate fan-out is consulted at the TOP of the
+    governed-turn funnel so the runtime short-circuits the engine stream
+    BEFORE ``rt.engine.run_turn_stream`` starts."""
     rule = _llm(firesAt="before_turn_start", action="block")
-    errs = validate_custom_rule(rule)
-    assert any("before_turn_start" in e and "audit" in e for e in errs), errs
+    assert validate_custom_rule(rule) == []
+
+
+def test_llm_criterion_ask_at_before_turn_start_accepted():
+    """PR-F-LIFE4a — ``ask_approval`` is also lifted at ``before_turn_start``.
+    Honest-degrade today: the runtime records ``requires_approval=true`` on
+    the audit ledger and proceeds — a real approval UI is a follow-up."""
+    rule = _llm(firesAt="before_turn_start", action="ask_approval")
+    assert validate_custom_rule(rule) == []
 
 
 def test_llm_criterion_block_at_after_turn_end_rejected():
@@ -406,6 +430,14 @@ def test_llm_criterion_block_at_after_turn_end_rejected():
     rule = _llm(firesAt="after_turn_end", action="block")
     errs = validate_custom_rule(rule)
     assert any("after_turn_end" in e and "audit" in e for e in errs), errs
+
+
+def test_llm_criterion_retry_at_before_turn_start_still_rejected():
+    """PR-F-LIFE4a leaves ``retry`` out of the lift at ``before_turn_start``
+    — retry has no honest runtime wire at top-level turn entry."""
+    rule = _llm(firesAt="before_turn_start", action="retry")
+    errs = validate_custom_rule(rule)
+    assert any("before_turn_start" in e for e in errs), errs
 
 
 def test_tool_perm_at_before_turn_start_rejected():
@@ -449,19 +481,21 @@ def test_llm_criterion_audit_at_after_llm_call_accepted():
     assert validate_custom_rule(rule) == []
 
 
-def test_llm_criterion_block_at_before_llm_call_rejected():
-    """Block at the per-call boundary would amplify the runaway-cost risk
-    (one bad rule blocks every LLM call within a turn) — keep audit-only
-    in v1."""
+def test_llm_criterion_block_at_before_llm_call_accepted():
+    """PR-F-LIFE4a — ``before_llm_call`` lifted to {audit, block}. The same
+    per-turn critic budget that gates the audit fan-out also gates the
+    block decision (cannot block on a call the critic was never paid to
+    evaluate), so a single misbehaving rule cannot multiply cost."""
     rule = _llm(firesAt="before_llm_call", action="block")
-    errs = validate_custom_rule(rule)
-    assert any("before_llm_call" in e and "audit" in e for e in errs), errs
+    assert validate_custom_rule(rule) == []
 
 
-def test_llm_criterion_block_at_after_llm_call_rejected():
+def test_llm_criterion_block_at_after_llm_call_accepted():
+    """PR-F-LIFE4a — ``after_llm_call`` lifted to {audit, block}. Block
+    verdict signals the ADK after_model boundary to suppress the just-
+    emitted response."""
     rule = _llm(firesAt="after_llm_call", action="block")
-    errs = validate_custom_rule(rule)
-    assert any("after_llm_call" in e and "audit" in e for e in errs), errs
+    assert validate_custom_rule(rule) == []
 
 
 def test_llm_criterion_retry_at_before_llm_call_rejected():
@@ -548,19 +582,35 @@ def test_llm_criterion_audit_at_on_artifact_created_accepted():
     assert validate_custom_rule(rule) == []
 
 
-def test_llm_criterion_block_at_before_compaction_rejected():
-    """Block at a compaction chokepoint has no honest meaning: the
-    compaction decision is owned by the surrounding plugin, not the audit
-    fan-out — keep audit-only in v1."""
+def test_llm_criterion_block_at_before_compaction_accepted():
+    """PR-F-LIFE4a — ``before_compaction`` lifted to {audit, block}. The
+    compaction plugin's gate consult sits at the same chokepoint as the
+    audit emit; block verdict tells the plugin to skip the tail-drop."""
     rule = _llm(firesAt="before_compaction", action="block")
-    errs = validate_custom_rule(rule)
-    assert any("before_compaction" in e and "audit" in e for e in errs), errs
+    assert validate_custom_rule(rule) == []
 
 
 def test_llm_criterion_block_at_after_compaction_rejected():
+    """``after_compaction`` stays audit-only — the compaction has already
+    taken effect on ``llm_request.contents`` by the time the audit fires."""
     rule = _llm(firesAt="after_compaction", action="block")
     errs = validate_custom_rule(rule)
     assert any("after_compaction" in e and "audit" in e for e in errs), errs
+
+
+def test_llm_criterion_block_at_on_task_checkpoint_accepted():
+    """PR-F-LIFE4a — ``on_task_checkpoint`` lifted to {audit, block,
+    ask_approval}. Block verdict tells the work-queue driver to halt
+    further state advancement for the task this tick."""
+    rule = _llm(firesAt="on_task_checkpoint", action="block")
+    assert validate_custom_rule(rule) == []
+
+
+def test_llm_criterion_ask_at_on_task_checkpoint_accepted():
+    """PR-F-LIFE4a — ``ask_approval`` is the honest treatment for the
+    "pause for human review" use case at the work-queue boundary."""
+    rule = _llm(firesAt="on_task_checkpoint", action="ask_approval")
+    assert validate_custom_rule(rule) == []
 
 
 def test_llm_criterion_retry_at_on_task_checkpoint_rejected():
@@ -569,16 +619,25 @@ def test_llm_criterion_retry_at_on_task_checkpoint_rejected():
     fires)."""
     rule = _llm(firesAt="on_task_checkpoint", action="retry")
     errs = validate_custom_rule(rule)
-    assert any("on_task_checkpoint" in e and "audit" in e for e in errs), errs
+    assert any("on_task_checkpoint" in e for e in errs), errs
 
 
 def test_llm_criterion_block_at_on_artifact_created_rejected():
     """Block at on_artifact_created is honestly impossible — the artifact
     has already been written by the provider by the time this emit
-    fires. Keep audit-only."""
+    fires. PR-F-LIFE4a only lifts ``ask_approval`` (review-pending)."""
     rule = _llm(firesAt="on_artifact_created", action="block")
     errs = validate_custom_rule(rule)
-    assert any("on_artifact_created" in e and "audit" in e for e in errs), errs
+    assert any("on_artifact_created" in e for e in errs), errs
+
+
+def test_llm_criterion_ask_at_on_artifact_created_accepted():
+    """PR-F-LIFE4a — ``ask_approval`` is the honest verdict for
+    ``on_artifact_created``: the artifact exists but the receipt is
+    augmented with ``requires_approval=true`` so a follow-up approval
+    surface can hold delivery."""
+    rule = _llm(firesAt="on_artifact_created", action="ask_approval")
+    assert validate_custom_rule(rule) == []
 
 
 def test_deterministic_ref_at_before_compaction_rejected_no_runtime_fanout():
