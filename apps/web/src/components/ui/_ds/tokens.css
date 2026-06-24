@@ -1,6 +1,6 @@
 /* GENERATED FILE — DO NOT EDIT.
    Source: magi-agent/design-system. Regenerate via scripts/sync-design-system.sh.
-   DS_VERSION: 0.1.0 */
+   DS_VERSION: 0.2.0 */
 @theme {
   /* ---- surfaces ---- */
   --color-surface-base:    #FAFAFA; /* page background */
@@ -60,4 +60,40 @@
   --header-height: 56px;
   --sidebar-width: 288px;
   --content-max:   1280px;
+
+  /* ---- liquid glass material (tier = opacity, so body stays readable) ---- */
+  --glass-clear-bg:    rgba(255, 255, 255, 0.38); /* nav / floating chrome */
+  --glass-regular-bg:  rgba(255, 255, 255, 0.55); /* panels / modals / cards */
+  --glass-thick-bg:    rgba(255, 255, 255, 0.82); /* body / tables (near-opaque) */
+  --glass-blur:        20px;
+  --glass-saturate:    200%;
+  --glass-rim:         inset 0 1px 0 rgba(255, 255, 255, 0.70); /* top specular */
+  --glass-edge:        0 1px 0 rgba(0, 0, 0, 0.05), 0 8px 24px -8px rgba(15, 23, 42, 0.18);
+  --glass-radius:      var(--radius-lg);
+  --glass-tint:        var(--color-accent); /* applied faintly, interactive only */
+}
+
+/* Accessibility: solid fallback when the user reduces transparency or the
+   browser lacks backdrop-filter. One place covers every glass surface. */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass-clear-bg:   var(--color-surface-raised);
+    --glass-regular-bg: var(--color-surface-raised);
+    --glass-thick-bg:   var(--color-surface-raised);
+    --glass-blur:       0px;
+    --glass-saturate:   100%;
+  }
+}
+@supports not (backdrop-filter: blur(1px)) {
+  :root {
+    --glass-clear-bg:   var(--color-surface-raised);
+    --glass-regular-bg: var(--color-surface-raised);
+    --glass-thick-bg:   var(--color-surface-raised);
+  }
+}
+
+/* Slow drift for the MeshBackdrop blobs (frozen by prefers-reduced-motion). */
+@keyframes ds-mesh-drift {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50%      { transform: translate3d(2%, -2%, 0) scale(1.08); }
 }

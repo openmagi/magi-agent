@@ -140,7 +140,7 @@ export default function HookMarketplacePage() {
         {filtered.map((hook) => (
           <div
             key={hook.id}
-            className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5 space-y-3"
+            className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-[var(--glass-regular-bg)] backdrop-blur-xl dark:bg-zinc-900 p-5 space-y-3"
           >
             <div className="flex items-start justify-between">
               <div>

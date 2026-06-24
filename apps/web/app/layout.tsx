@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Plus_Jakarta_Sans, Geist_Mono } from "next/font/google";
 import { I18nProvider } from "@/lib/i18n";
+import { MeshBackdrop } from "@/components/ui/_ds";
 import { PUBLIC_BRAND } from "@/lib/brand";
 import "katex/dist/katex.min.css";
 import "./globals.css";
@@ -63,6 +64,7 @@ export default function RootLayout({
       <body
         className={`${plusJakarta.variable} ${geistMono.variable} antialiased`}
       >
+        <MeshBackdrop intensity="subtle" />
         <I18nProvider>
           {children}
         </I18nProvider>

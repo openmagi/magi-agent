@@ -1382,7 +1382,7 @@ function ReviewStep({
       <p className="text-xs text-secondary">
         Saving applies the policy to the runtime immediately.
       </p>
-      <div className="rounded-xl border border-black/[0.06] bg-white p-4">
+      <div className="rounded-xl border border-black/[0.06] bg-[var(--glass-regular-bg)] backdrop-blur-xl p-4">
         <div className="flex items-center gap-2">
           <p className="text-sm font-semibold text-foreground">What this policy does</p>
           <TrustBadge trustClass={trust} />

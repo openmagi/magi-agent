@@ -117,7 +117,7 @@ export function NlRuleGuide({
   return (
     <section
       aria-label="NL authoring guide"
-      className="rounded-xl border border-black/[0.08] bg-white text-xs"
+      className="rounded-xl border border-black/[0.08] bg-[var(--glass-regular-bg)] backdrop-blur-xl text-xs"
     >
       <button
         type="button"

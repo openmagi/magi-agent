@@ -305,7 +305,7 @@ function CompileResultView({
         : "text-amber-700";
 
   return (
-    <section className="space-y-3 rounded-xl border border-black/[0.08] bg-white px-4 py-3">
+    <section className="space-y-3 rounded-xl border border-black/[0.08] bg-[var(--glass-regular-bg)] backdrop-blur-xl px-4 py-3">
       <div>
         <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
           Routed to
