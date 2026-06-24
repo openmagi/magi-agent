@@ -12,8 +12,13 @@ COPY magi_agent/ ./magi_agent/
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
+# 0.1.77 promoted mitmproxy from the [vault] extra into core deps, which
+# pushes pip's resolver into resolution-too-deep when combined with the
+# composio + openai + playwright + adk transitive graph. The legacy
+# resolver picks a working set without exploring the full backtrack tree.
+# This is the pragmatic fix until the constraint set is tightened.
 RUN python -m pip install --no-cache-dir --upgrade pip \
-  && python -m pip install --no-cache-dir ".[browser,cli,composio,providers,waf]" \
+  && python -m pip install --no-cache-dir --use-deprecated=legacy-resolver ".[browser,cli,composio,providers,waf]" \
   && python -m playwright install --with-deps chromium \
   && chmod -R a+rX "${PLAYWRIGHT_BROWSERS_PATH}" \
   && rm -rf /var/lib/apt/lists/*
