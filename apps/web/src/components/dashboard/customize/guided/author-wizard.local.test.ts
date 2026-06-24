@@ -1548,3 +1548,86 @@ describe("AuthorWizard — F-MUT1 prompt_injection kind", () => {
     );
   });
 });
+
+
+describe("AuthorWizard — F-MUT2 output_rewrite kind", () => {
+  it("adds output_rewrite to the ConditionKind union", () => {
+    expect(src).toMatch(/type ConditionKind[\s\S]*?\| "output_rewrite"/);
+  });
+
+  it("availableConditionKinds surfaces output_rewrite on after_tool_use (both target modes)", () => {
+    // target=specific: ["none", "regex", "llm_criterion", "output_rewrite"]
+    expect(src).toMatch(
+      /toolTarget === "specific"\) \{[\s\S]*?return \["none", "regex", "llm_criterion", "output_rewrite"\]/,
+    );
+    // target=any: same list (the toolMatch.include filter rides on the
+    // payload, not the wizard's top-level Target step).
+    expect(src).toMatch(
+      /return \["none", "regex", "llm_criterion", "output_rewrite"\]/,
+    );
+  });
+
+  it("CONDITION_META exposes an output_rewrite entry labelled as a mutator", () => {
+    expect(src).toMatch(
+      /output_rewrite: \{[\s\S]*?label: "Rewrite tool output \(mutator\)"/,
+    );
+    expect(src).toMatch(/output_rewrite: \{[\s\S]*?redact/);
+  });
+
+  it("SpecificsStep renders a dedicated branch for output_rewrite", () => {
+    expect(src).toMatch(
+      /draft\.conditionKind === "output_rewrite"[\s\S]*?OutputRewriteRedactPicker/,
+    );
+  });
+
+  it("ships the output_rewrite picker as a named component", () => {
+    expect(src).toContain("function OutputRewriteRedactPicker");
+  });
+
+  it("Draft + EMPTY carry the new or* fields with safe defaults", () => {
+    expect(src).toMatch(/orPattern:\s*string/);
+    expect(src).toMatch(/orReplacement:\s*string/);
+    expect(src).toMatch(/orScope:\s*"match_only"\s*\|\s*"full_output"/);
+    expect(src).toMatch(/orIsRegex:\s*boolean/);
+    expect(src).toMatch(/orPattern:\s*""/);
+    expect(src).toMatch(/orReplacement:\s*""/);
+    expect(src).toMatch(/orScope:\s*"match_only"/);
+    expect(src).toMatch(/orIsRegex:\s*true/);
+  });
+
+  it("customRuleKind routes output_rewrite to its own backend kind", () => {
+    expect(src).toMatch(
+      /draft\.conditionKind === "output_rewrite"\)\s*return "output_rewrite"/,
+    );
+  });
+
+  it("customRuleAction forces audit for output_rewrite (backend _LEGAL matrix)", () => {
+    expect(src).toMatch(
+      /draft\.conditionKind === "output_rewrite"\)\s*return "audit"/,
+    );
+  });
+
+  it("customRulePayload emits the v1 redact shape with mode locked to 'redact'", () => {
+    expect(src).toMatch(
+      /draft\.conditionKind === "output_rewrite"[\s\S]*?mode: "redact"[\s\S]*?pattern: draft\.orPattern\.trim\(\)[\s\S]*?replacement: draft\.orReplacement/,
+    );
+  });
+
+  it("customRulePayload auto-derives toolMatch.include from draft.toolName when target=specific", () => {
+    expect(src).toMatch(
+      /draft\.conditionKind === "output_rewrite"[\s\S]*?toolMatch = \{ include: \[draft\.toolName\.trim\(\)\] \}/,
+    );
+  });
+
+  it("stepIsComplete gates the Specifics step on pattern + replacement", () => {
+    expect(src).toMatch(
+      /case "output_rewrite":[\s\S]*?draft\.orPattern\.trim\(\)\.length > 0[\s\S]*?draft\.orReplacement\.length > 0/,
+    );
+  });
+
+  it("conditionClause Review summary covers the output_rewrite redact surface", () => {
+    expect(src).toMatch(
+      /case "output_rewrite":[\s\S]*?redact \$\{verb\}.*?in tool output/,
+    );
+  });
+});
