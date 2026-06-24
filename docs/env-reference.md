@@ -33,6 +33,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_COMPACTION_SUMMARY_MODEL` (no default) — Optional model override for the G1 compaction summary; empty uses the session model (llm_request.model). Only consulted when MAGI_COMPACTION_SUMMARIZE_ENABLED is on.
 - `MAGI_COMPACTION_SUMMARY_TIMEOUT` (default `30`) — Timeout in seconds for the G1 compaction summary model call (> 0); on timeout the tail-drop falls back to the pure prefix drop. Only consulted when MAGI_COMPACTION_SUMMARIZE_ENABLED is on.
 - `MAGI_COMPACTION_TOOL_PRUNE_ENABLED` (default off) — Content-clear OLD tool-output (function_response) payloads as a deterministic pre-tier before the context-compaction tail-drop decision, protecting the recent tail and protected tool results. Strict default-OFF (OFF is byte-identical to today).
+- `MAGI_COMPUTER_TOOL_ENABLED` (default off) — Live desktop GUI ComputerTool (cua-driver-backed) activation. Default-OFF; macOS-only; opt-in per the rollout under ``[[project-magi-computer-use]]``.
 - `MAGI_COMPUTE_VIA_CODE_ENABLED` (default off) — Append a general prompt directive to compute arithmetic, conversions, statistics, and checksums by running code instead of mental math.
 - `MAGI_CONFIG` (no default) — Path to the Magi config.toml file; empty uses ~/.magi/config.toml.
 - `MAGI_CONTEXT_COMPACTION_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Compact the working context when the token threshold is hit (default-ON full profile).
@@ -73,6 +74,8 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_EGRESS_GATE_ENABLED` (default off) — Run the evidence-grounded critic gate before chat egress.
 - `MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED` (default off) — Enable PR4 R2 corrective recovery: when the main agent ends a turn with zero text after tool calls, the engine re-invokes once with a 'produce your final answer now' nudge. Default-OFF in the registry; LAB_EXPERIMENTAL_FLAGS opts it in for lab / dogfood profiles so the dashboard stops showing the 'no final answer text arrived' fallback banner.
 - `MAGI_ERROR_RECOVERY_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Enable automatic error-recovery retries (default-ON full profile).
+- `MAGI_EVAL_AUTONOMY_ENABLED` (default off) — Eval-profile autonomy seam: opts the eval profile into looser-permission autonomous loops via ``EVAL_RUNTIME_ENV_DEFAULTS``. Default-OFF.
+- `MAGI_EVAL_ZERO_EDIT_GUARD_ENABLED` (default off) — Eval-profile zero-edit re-prompt guard: when a coding turn ends with no file mutations the engine fires a single 'apply it' re-invocation. Default-OFF; eval profile opts in via ``EVAL_RUNTIME_ENV_DEFAULTS``.
 - `MAGI_EVIDENCE_COMPLETION_GATE_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Block turn completion when required evidence is missing (default-ON full profile).
 - `MAGI_EVIDENCE_LEDGER_DIR` (no default) — Directory for opt-in durable per-session JSONL evidence ledgers; unset keeps the lean in-memory live view only.
 - `MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Build per-turn EvidenceLedger objects (default-ON full profile).
@@ -88,6 +91,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_FORK_CACHE_ENABLED` (default off) — Enable the per-child fork-runner output cache (skips re-computation when an identical child invocation already produced a result this run). Default-OFF.
 - `MAGI_FORMAT_ADHERENCE_ENABLED` (default off) — Append a general prompt self-check for exact requested units, scale, rounding precision, names, and answer format.
 - `MAGI_GATE5B_GOVERNANCE_ENABLED` (default off) — Run cli/engine-parity governance on the gate5b serving path: attach the control-plane plugin (loop-guard / compaction / edit-retry / self-review / max-steps / tool-synthesis etc., each behind its own existing flag) to the gate5b runner AND run a pre-final evidence/fact-grounding check over the turn's tool evidence before emitting the user-visible response. Strict default-OFF: when unset the gate5b path is byte-identical to today.
+- `MAGI_GATE5B_LIVE_SUBAGENTS_ENABLED` (default off) — Hosted gate5b serve-path live sub-agents flag (AND-ed with the live child-runner master gate to reconstruct ``transport.live_subagents_serve_enabled``). Default-OFF.
 - `MAGI_GA_DELIVERABLE_GATE_ENABLED` (default off) — Enable the GA artifact-deliverable pre-final gate; strict default-OFF and inert unless explicitly set.
 - `MAGI_GOAL_LOOP_ENABLED` (default off) — Enable the autonomous goal-loop scheduler.
 - `MAGI_GOAL_NUDGE_ENABLED` (default off) — Enable the production goal-nudge: a bounded continuation that fires when MagiEngineDriver detects a clean stop short of the stated goal (strict default-OFF; OFF injects goal_nudge=None and the driver behaves byte-identically to pre-PR4).
@@ -142,6 +146,8 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_OUTPUT_CONTINUATION_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Enable automatic continuation of truncated model output (default-ON full profile).
 - `MAGI_PERSISTENT_PYTHON_ENABLED` (default off) — Register + bind the neutral tools-persistent-python pack's PersistentPython tool (CodeAct: persistent interpreter namespace).
 - `MAGI_PERSIST_RUN_BOOKENDS_ENABLED` (default off) — Persist a per-turn run-bookend record (goal, one-line result, model, token usage, status) to the durable evidence ledger so a run-share page can render the top summary. Strict default-OFF; OFF keeps the evidence ledger byte-identical (no extra record written).
+- `MAGI_PLAN_ACT_GATE_ENABLED` (default off) — Live ``plan_gate -> plan_act_switch -> delegation`` chain activation. Default-OFF leaves the chain inert and byte-identical to main.
+- `MAGI_PLAN_MODE_TOOLS_ENABLED` (default off) — Plan-mode read-only toolset activation. Default-OFF keeps the full toolset on every turn regardless of declared mode.
 - `MAGI_PROMPT_CACHE_ENABLED` (default off) — Emit prompt-cache metrics from the prompt-build path. Default-OFF; ON adds bookkeeping per request.
 - `MAGI_PROMPT_CACHE_PROVIDER` (default `auto`) — Provider id to report in prompt-cache metrics. Default ``auto`` picks per-request based on the resolved model.
 - `MAGI_PROMPT_EXAMPLES_ENABLED` (default off) — Append the <action_discipline_examples> prompt block (positive/negative contrast pairs: act-vs-ask, finish-vs-defer) in build_cli_instruction.
@@ -150,6 +156,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_PROMPT_TRANSFORM_HOOKS_ENABLED` (default off) — Run runtime/message_builder's prompt-transform hooks around each turn's prompt build. Default-OFF.
 - `MAGI_READ_LEDGER_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Record full reads in the per-turn ledger and enforce read-before-edit on the gate5b full toolhost (default-ON full profile).
 - `MAGI_READ_QUALITY_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Quality-of-life FileRead output: 1-indexed line numbers, line/byte caps with continue-offset footer, binary detection, did-you-mean filename suggestions on miss (default-ON full profile).
+- `MAGI_RECIPE_DEFAULT_PACKS_EXPANDED` (default off) — When ON, expand the default-selected first-party pack set to include additional ``openmagi.evidence`` etc. Default-OFF preserves the minimal default selection.
 - `MAGI_RECIPE_INTENT_BINDING_ENABLED` (default off) — Bind emit-only recipe intents (provider / channel / artifact / scheduler) to hint-level runner effects (doc 05 PR-3 / A1-G2). Strict default-OFF (OFF byte-identical to today). Hard enforcement stays deferred to 14-controlplane.
 - `MAGI_RECIPE_ROUTING_LLM_ENABLED` (default off) — Let the model select recipe packs by their when_to_use descriptions instead of the selector-membership path; strict default-OFF (OFF is byte-identical to today).
 - `MAGI_RESEARCH_FACT_GUIDANCE_ENABLED` (default off) — Enable research_fact cross-check guidance: consolidated brief header/footer plus the <web_research> system-prompt block (requires BRAVE_API_KEY + FIRECRAWL_API_KEY).
