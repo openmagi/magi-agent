@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 import hashlib
 import inspect
-import logging
 import os
 import re
 from typing import Any, Literal, Self
@@ -1347,15 +1346,31 @@ def _digest(value: str) -> str:
 # entire dispatch path so the operator can see exactly which step produced
 # the silent-empty envelope. Default-OFF; every helper swallows internal
 # exceptions so logging can never break a turn).
+#
+# Output goes to ``sys.stderr`` directly (NOT through the logging system).
+# Reason: ``magi-serve`` does not call ``logging.basicConfig`` /
+# ``dictConfig``, so a ``_logger.warning(...)`` would never reach the
+# operator's serve log (exactly the 0.1.84 repro: traces called, never
+# written). The same stream uvicorn/pydantic warnings use is the one the
+# operator actually tails.
 # ---------------------------------------------------------------------------
 
-_TRACE_LOGGER = logging.getLogger(__name__)
 CHILD_RUNNER_EMPTY_DEBUG_ENV = "MAGI_CHILD_RUNNER_EMPTY_DEBUG"
 
 
 def _trace_enabled(env: Mapping[str, str]) -> bool:
     raw = env.get(CHILD_RUNNER_EMPTY_DEBUG_ENV, "")
     return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _emit_trace(line: str) -> None:
+    """Write ``line`` to ``sys.stderr`` and flush. Never raise."""
+    try:
+        import sys  # noqa: PLC0415 (kept LOCAL to preserve module import discipline).
+
+        print(line, file=sys.stderr, flush=True)
+    except Exception:  # noqa: BLE001
+        return
 
 
 def _maybe_log_trace_boundary_output(
@@ -1372,11 +1387,11 @@ def _maybe_log_trace_boundary_output(
         return
     try:
         data = output if isinstance(output, Mapping) else {}
-        _TRACE_LOGGER.warning(
-            "[boundary.trace] boundary_output status=%r summary_len=%d evidence_refs=%d",
-            data.get("status"),
-            len(str(data.get("summary") or "")),
-            len(data.get("evidenceRefs") or ()),
+        _emit_trace(
+            f"[boundary.trace] boundary_output "
+            f"status={data.get('status')!r} "
+            f"summary_len={len(str(data.get('summary') or ''))} "
+            f"evidence_refs={len(data.get('evidenceRefs') or ())}"
         )
     except Exception:  # noqa: BLE001 (logging must never break a turn).
         return
@@ -1398,11 +1413,10 @@ def _maybe_log_trace_envelope_coercion(
     if not _trace_enabled(env):
         return
     try:
-        _TRACE_LOGGER.warning(
-            "[boundary.trace] envelope_coercion input_status=%r coerced_status=%r summary_len=%d",
-            input_status,
-            coerced_status,
-            summary_len,
+        _emit_trace(
+            f"[boundary.trace] envelope_coercion "
+            f"input_status={input_status!r} coerced_status={coerced_status!r} "
+            f"summary_len={summary_len}"
         )
     except Exception:  # noqa: BLE001
         return

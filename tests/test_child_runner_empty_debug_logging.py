@@ -12,13 +12,15 @@ ending with ``llmOutput={status:"ok"}`` + empty result even though PRs
      from a reasoning chunk's metadata) → guard ``not evidence_refs``
      falsy → no raise.
 
-Without production observability we can't tell which. These tests pin
-the new diagnostic surface so the operator's next repro logs the actual
-values without needing a debug wheel build.
+0.1.84 repro with the flag ON still produced ZERO log lines: the
+helpers were using ``_logger.warning(...)`` but ``magi-serve`` doesn't
+call ``logging.basicConfig`` / ``dictConfig`` so the root logger had
+no handler attached. Emit goes through ``sys.stderr`` now (same stream
+uvicorn/pydantic warnings use); these tests pin that channel via
+``capsys`` instead of ``caplog``.
 """
-from __future__ import annotations
 
-import logging
+from __future__ import annotations
 
 from magi_agent.runtime.child_runner_live import (
     CHILD_RUNNER_EMPTY_DEBUG_ENV,
@@ -27,8 +29,7 @@ from magi_agent.runtime.child_runner_live import (
 )
 
 
-def test_governed_log_silent_when_flag_off(caplog) -> None:
-    caplog.set_level(logging.DEBUG)
+def test_governed_log_silent_when_flag_off(capsys) -> None:
     _maybe_log_governed_collect_result(
         {},
         provider="anthropic",
@@ -37,36 +38,35 @@ def test_governed_log_silent_when_flag_off(caplog) -> None:
         evidence_refs=(),
         status="completed",
     )
-    assert caplog.records == []
+    captured = capsys.readouterr()
+    assert captured.err == ""
 
 
-def test_governed_log_fires_when_flag_on(caplog) -> None:
-    caplog.set_level(logging.WARNING)
+def test_governed_log_fires_when_flag_on(capsys) -> None:
     _maybe_log_governed_collect_result(
         {CHILD_RUNNER_EMPTY_DEBUG_ENV: "1"},
         provider="anthropic",
         model="claude-opus-4-8",
-        summary="  ",  # whitespace — would bypass the `not summary` guard if any.
+        summary="  ",  # whitespace, would bypass the `not summary` guard if any.
         evidence_refs=("evidence:abc", "evidence:def"),
         status="completed",
     )
-    assert len(caplog.records) == 1
-    msg = caplog.records[0].getMessage()
-    assert "governed_branch" in msg
-    assert "anthropic" in msg
-    assert "claude-opus-4-8" in msg
+    err = capsys.readouterr().err
+    assert err.count("\n") == 1
+    assert "governed_branch" in err
+    assert "anthropic" in err
+    assert "claude-opus-4-8" in err
     # summary_len reflects RAW length; summary_stripped_len reflects what
-    # the guard's `not summary.strip()` would see — both matter for the
+    # the guard's `not summary.strip()` would see, both matter for the
     # bypass diagnosis.
-    assert "summary_len=2" in msg
-    assert "summary_stripped_len=0" in msg
-    assert "evidence_refs_count=2" in msg
-    assert "first_ref='evidence:abc'" in msg
-    assert "status=completed" in msg
+    assert "summary_len=2" in err
+    assert "summary_stripped_len=0" in err
+    assert "evidence_refs_count=2" in err
+    assert "first_ref='evidence:abc'" in err
+    assert "status=completed" in err
 
 
-def test_legacy_log_silent_when_flag_off(caplog) -> None:
-    caplog.set_level(logging.DEBUG)
+def test_legacy_log_silent_when_flag_off(capsys) -> None:
     _maybe_log_legacy_collect_result(
         {},
         provider="fireworks",
@@ -75,11 +75,10 @@ def test_legacy_log_silent_when_flag_off(caplog) -> None:
         text_total_len=0,
         evidence_refs=(),
     )
-    assert caplog.records == []
+    assert capsys.readouterr().err == ""
 
 
-def test_legacy_log_fires_when_flag_on(caplog) -> None:
-    caplog.set_level(logging.WARNING)
+def test_legacy_log_fires_when_flag_on(capsys) -> None:
     _maybe_log_legacy_collect_result(
         {CHILD_RUNNER_EMPTY_DEBUG_ENV: "true"},
         provider="fireworks",
@@ -88,22 +87,21 @@ def test_legacy_log_fires_when_flag_on(caplog) -> None:
         text_total_len=0,
         evidence_refs=(),
     )
-    assert len(caplog.records) == 1
-    msg = caplog.records[0].getMessage()
-    assert "legacy_branch" in msg
-    assert "fireworks" in msg
-    assert "kimi-k2p6" in msg
-    # 3 chunks but zero total length — exactly the silent-whitespace
+    err = capsys.readouterr().err
+    assert err.count("\n") == 1
+    assert "legacy_branch" in err
+    assert "fireworks" in err
+    assert "kimi-k2p6" in err
+    # 3 chunks but zero total length: exactly the silent-whitespace
     # bypass shape the operator needs to spot.
-    assert "text_chunks=3" in msg
-    assert "text_total_len=0" in msg
-    assert "evidence_refs_count=0" in msg
+    assert "text_chunks=3" in err
+    assert "text_total_len=0" in err
+    assert "evidence_refs_count=0" in err
 
 
-def test_log_never_raises_on_exotic_inputs(caplog) -> None:
+def test_log_never_raises_on_exotic_inputs(capsys) -> None:
     """Logging must never crash the turn even on weird inputs (provider/
     model as None, evidence_refs that aren't a tuple, etc.)."""
-    caplog.set_level(logging.WARNING)
     # Should NOT raise.
     _maybe_log_governed_collect_result(
         {CHILD_RUNNER_EMPTY_DEBUG_ENV: "1"},
@@ -121,5 +119,6 @@ def test_log_never_raises_on_exotic_inputs(caplog) -> None:
         text_total_len=0,
         evidence_refs=(),
     )
-    # Two warning lines emitted, no exception.
-    assert len(caplog.records) == 2
+    err = capsys.readouterr().err
+    # Two lines emitted, no exception.
+    assert err.count("\n") == 2
