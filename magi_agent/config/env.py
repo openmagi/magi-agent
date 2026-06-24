@@ -226,7 +226,10 @@ class ToolExceptionReflectionEnv:
 def parse_tool_exception_reflection_env(
     env: Mapping[str, str],
 ) -> ToolExceptionReflectionEnv:
-    enabled = _is_true(env.get(TOOL_EXCEPTION_REFLECTION_ENABLED_ENV))
+    # I-1: route the enabled bool through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    enabled = flag_bool(TOOL_EXCEPTION_REFLECTION_ENABLED_ENV, env=env)
     max_attempts = _int_env(
         env,
         TOOL_EXCEPTION_MAX_ATTEMPTS_ENV,
@@ -265,7 +268,10 @@ class ToolSchemaFeedbackEnv:
 def parse_tool_schema_feedback_env(
     env: Mapping[str, str],
 ) -> ToolSchemaFeedbackEnv:
-    enabled = _is_true(env.get(TOOL_SCHEMA_FEEDBACK_ENABLED_ENV))
+    # I-1: route the enabled bool through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    enabled = flag_bool(TOOL_SCHEMA_FEEDBACK_ENABLED_ENV, env=env)
     max_attempts = _int_env(
         env,
         TOOL_SCHEMA_FEEDBACK_MAX_ATTEMPTS_ENV,
@@ -415,7 +421,10 @@ class EmptyResponseRecoveryEnv:
 def parse_empty_response_recovery_env(
     env: Mapping[str, str],
 ) -> EmptyResponseRecoveryEnv:
-    enabled = _is_true(env.get(EMPTY_RESPONSE_RECOVERY_ENABLED_ENV))
+    # I-1: route the enabled bool through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    enabled = flag_bool(EMPTY_RESPONSE_RECOVERY_ENABLED_ENV, env=env)
     max_recoveries = _int_env(env, EMPTY_RESPONSE_MAX_RECOVERIES_ENV, 1)
     if max_recoveries < 1:
         raise RuntimeEnvError(f"{EMPTY_RESPONSE_MAX_RECOVERIES_ENV} must be >= 1")
@@ -517,7 +526,10 @@ def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv
     if tail_events < 1:
         raise RuntimeEnvError(f"{COMPACTION_TAIL_EVENTS_ENV} must be >= 1")
     # G2: strict default-OFF real-token accounting (NOT profile-aware).
-    real_tokens_enabled = _is_true(env.get(COMPACTION_REAL_TOKENS_ENABLED_ENV))
+    # I-1: route through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    real_tokens_enabled = flag_bool(COMPACTION_REAL_TOKENS_ENABLED_ENV, env=env)
     real_tokens_pct = _float_env(
         env,
         COMPACTION_REAL_TOKENS_PCT_ENV,
@@ -536,7 +548,8 @@ def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv
         raise RuntimeEnvError(f"{COMPACTION_OUTPUT_RESERVE_ENV} must be >= 0")
     # G4: strict default-OFF tool-output prune pre-tier (NOT profile-aware,
     # matching the real-tokens master switch convention above).
-    tool_prune_enabled = _is_true(env.get(COMPACTION_TOOL_PRUNE_ENABLED_ENV))
+    # I-1: route through the typed flag registry (imported above).
+    tool_prune_enabled = flag_bool(COMPACTION_TOOL_PRUNE_ENABLED_ENV, env=env)
     prune_protect = _int_env(
         env,
         COMPACTION_PRUNE_PROTECT_ENV,
@@ -553,7 +566,8 @@ def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv
         raise RuntimeEnvError(f"{COMPACTION_PRUNE_MINIMUM_ENV} must be >= 1")
     # G1: strict default-OFF summary injection (NOT profile-aware, matching the
     # real-tokens / tool-prune master switches above).
-    summarize_enabled = _is_true(env.get(COMPACTION_SUMMARIZE_ENABLED_ENV))
+    # I-1: route through the typed flag registry (imported above).
+    summarize_enabled = flag_bool(COMPACTION_SUMMARIZE_ENABLED_ENV, env=env)
     summary_model = _trimmed(env.get(COMPACTION_SUMMARY_MODEL_ENV)) or ""
     summary_timeout = _float_env(
         env,
@@ -564,8 +578,9 @@ def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv
         raise RuntimeEnvError(f"{COMPACTION_SUMMARY_TIMEOUT_ENV} must be > 0")
     # G5/G6: strict default-OFF anchored summary + configurable failure breaker
     # (NOT profile-aware, matching the summarize master switch above).
-    anchored_summary_enabled = _is_true(
-        env.get(COMPACTION_ANCHORED_SUMMARY_ENABLED_ENV)
+    # I-1: route through the typed flag registry (imported above).
+    anchored_summary_enabled = flag_bool(
+        COMPACTION_ANCHORED_SUMMARY_ENABLED_ENV, env=env
     )
     summary_max_failures = _int_env(
         env,
@@ -578,7 +593,8 @@ def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv
         )
     # G7: strict default-OFF manual /compact force-compaction (NOT profile-aware,
     # matching the summarize / real-tokens / tool-prune master switches above).
-    manual_enabled = _is_true(env.get(COMPACTION_MANUAL_ENABLED_ENV))
+    # I-1: route through the typed flag registry (imported above).
+    manual_enabled = flag_bool(COMPACTION_MANUAL_ENABLED_ENV, env=env)
     return ContextCompactionEnv(
         enabled=enabled,
         token_threshold=token_threshold,
@@ -660,7 +676,10 @@ def gate5b_live_subagents_flag_on(env: Mapping[str, str]) -> bool:
     flag-read allowlist) so a consumer above the transport layer can gate on the
     flag without an inline env read.
     """
-    return _is_true(env.get("MAGI_GATE5B_LIVE_SUBAGENTS_ENABLED"))
+    # I-1: route through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_GATE5B_LIVE_SUBAGENTS_ENABLED", env=env)
 
 
 def operator_allowed_model_routes(
@@ -2858,7 +2877,10 @@ def parse_eval_autonomy_enabled(env: Mapping[str, str]) -> bool:
     running existing tests before concluding. Default OFF so non-eval sessions
     are byte-identical to origin/main. The eval profile opts in by setting
     ``MAGI_EVAL_AUTONOMY_ENABLED=1`` in ``EVAL_RUNTIME_ENV_DEFAULTS``."""
-    return _is_true(env.get("MAGI_EVAL_AUTONOMY_ENABLED"))
+    # I-1: route through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_EVAL_AUTONOMY_ENABLED", env=env)
 
 
 # Single source of truth for the compute-via-code directive flag.
@@ -2907,7 +2929,10 @@ def parse_eval_zero_edit_guard_enabled(env: Mapping[str, str]) -> bool:
     describing a fix without applying it. Default OFF so non-eval sessions are
     byte-identical to origin/main. The eval profile opts in by setting
     ``MAGI_EVAL_ZERO_EDIT_GUARD_ENABLED=1`` in ``EVAL_RUNTIME_ENV_DEFAULTS``."""
-    return _is_true(env.get("MAGI_EVAL_ZERO_EDIT_GUARD_ENABLED"))
+    # I-1: route through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_EVAL_ZERO_EDIT_GUARD_ENABLED", env=env)
 
 
 def multi_file_join_enabled(env: Mapping[str, str] | None = None) -> bool:
@@ -2947,7 +2972,10 @@ def parse_recipe_default_packs_expanded(env: Mapping[str, str]) -> bool:
     only the two ``hardSafety`` packs (``openmagi.context-safety`` /
     ``openmagi.evidence``) are default-selected.
     """
-    return _is_true(env.get("MAGI_RECIPE_DEFAULT_PACKS_EXPANDED"))
+    # I-1: route through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_RECIPE_DEFAULT_PACKS_EXPANDED", env=env)
 
 
 def parse_recipe_intent_binding_enabled(env: Mapping[str, str]) -> bool:
@@ -2971,7 +2999,10 @@ def parse_recipe_intent_binding_enabled(env: Mapping[str, str]) -> bool:
     deferred to 14-controlplane. OFF (default) keeps the emitted route selection
     byte-identical to origin/main.
     """
-    return _is_true(env.get("MAGI_RECIPE_INTENT_BINDING_ENABLED"))
+    # I-1: route through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_RECIPE_INTENT_BINDING_ENABLED", env=env)
 
 
 # Single source of truth for the CLI session-log write path (PR-04-PR1).
@@ -3091,7 +3122,10 @@ def plan_act_gate_enabled(env: Mapping[str, str] | None = None) -> bool:
         import os as _os
 
         env = _os.environ
-    return _is_true(env.get("MAGI_PLAN_ACT_GATE_ENABLED"))
+    # I-1: route through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_PLAN_ACT_GATE_ENABLED", env=env)
 
 
 def parse_ga_deliverable_gate_enabled(env: Mapping[str, str]) -> bool:
@@ -3342,7 +3376,10 @@ def plan_mode_tools_enabled(env: Mapping[str, str] | None = None) -> bool:
         import os as _os
 
         env = _os.environ
-    return _is_true(env.get("MAGI_PLAN_MODE_TOOLS_ENABLED"))
+    # I-1: route through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_PLAN_MODE_TOOLS_ENABLED", env=env)
 
 
 def document_qa_enabled(env: Mapping[str, str] | None = None) -> bool:
@@ -3436,7 +3473,12 @@ def computer_tool_enabled(env: Mapping[str, str] | None = None) -> bool:
         import os as _os
 
         env = _os.environ
-    return _is_true(env.get("MAGI_COMPUTER_TOOL_ENABLED")) and not _is_true(
+    # I-1: route the enable bool through the typed flag registry. The
+    # kill-switch knob is NOT yet registered (security-critical override;
+    # registration deferred to a focused PR) so stays a raw read for now.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_COMPUTER_TOOL_ENABLED", env=env) and not _is_true(
         env.get("MAGI_COMPUTER_TOOL_KILL_SWITCH")
     )
 

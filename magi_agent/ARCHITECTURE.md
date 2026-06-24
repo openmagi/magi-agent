@@ -344,7 +344,7 @@ graph LR
 | anthropic_cache_model.py | Cache-aware Anthropic (Claude) model for the ADK runner boundary — PR11. | env | cli/real_runner.py, prompt/injection.py, runtime/model_factory.py |
 | artifact_service.py | — | — | — |
 | callback_adapter.py | — | bus, context, manifest, resolved | — |
-| context_compaction.py | Live context-compaction wiring for the ADK Runner (PR13). | auto_compact, context, context_lifecycle, manual_compaction_context, protected_tools, providers, query_state, readonly_classifier, session_service, token_estimation, token_tracker, usage_metadata | adk_bridge/control_plane.py |
+| context_compaction.py | Live context-compaction wiring for the ADK Runner (PR13). | auto_compact, context, context_lifecycle, manual_compaction_context, protected_tools, providers, query_state, readonly_classifier, session_service, token_estimation, token_tracker, transcript_render, usage_metadata | adk_bridge/control_plane.py |
 | control_plane.py | ADK loop control-plane abstraction (PR2, goose-parity). | _truthy, constraint_reinjection, context, context_compaction, edit_retry_reflection, env, facts_replan_control, flags, fork_runner, gemini_content_ordering, manifest, registries, resilience_plugin, schema_feedback, self_review, tool_exception_reflection, tool_synthesis, tool_synthesis_nudge, turn_policy | adk_bridge/dashboard_producer_control.py, adk_bridge/facts_replan_control.py, adk_bridge/local_runner.py, adk_bridge/schema_feedback.py, cli/real_runner.py, cli/tests/test_real_runner.py, customize/after_tool_gate.py, firstparty/packs/control_plane_default/impl.py, packs/context.py, packs/registries.py, transport/gate5b_governance.py |
 | dashboard_producer_control.py | Deny-on-present after-tool producer for dashboard-authored custom checks. | control_plane, dashboard_authored, discovery, env, types | cli/real_runner.py |
 | edit_retry_reflection.py | Edit-failure reflection / retry wiring for the live ADK Runner. | context, retry_repair_policies, turn_utilities | adk_bridge/control_plane.py, adk_bridge/schema_feedback.py, adk_bridge/tool_exception_reflection.py |
@@ -748,13 +748,14 @@ graph LR
 |---|---|---|---|
 | __init__.py | — | — | — |
 | _token_window_table.py | E-4 — single canonical home for the model→context-window lookup table. | — | context/token_tracker.py, runtime/message_builder.py |
-| auto_compact.py | — | protected_tools, types | adk_bridge/context_compaction.py, context/hook.py |
+| auto_compact.py | — | protected_tools, transcript_render, types | adk_bridge/context_compaction.py, context/hook.py |
 | content_replacement.py | — | types | context/hook.py |
 | hook.py | — | auto_compact, collapse_drain, content_replacement, context, flags, manifest, microcompact, reactive_compact, result, scope, token_tracker, types | — |
 | microcompact.py | — | protected_tools, types | context/hook.py |
 | protected_tools.py | Track 19 PR8 — compaction-protected tool-result detection. | constants, recipe_routing_constants | adk_bridge/context_compaction.py, context/auto_compact.py, context/microcompact.py |
 | recipe_routing_constants.py | Import-boundary-safe constant for cross-family recipe routing. | — | context/protected_tools.py, recipes/recipe_routing.py |
 | token_tracker.py | — | _token_window_table, token_estimation, types | adk_bridge/context_compaction.py, context/hook.py |
+| transcript_render.py | D-13 — single source of truth for transcript rendering. | — | adk_bridge/context_compaction.py, context/auto_compact.py |
 | types.py | — | types | context/auto_compact.py, context/content_replacement.py, context/hook.py, context/microcompact.py, context/token_tracker.py |
 
 ### credentials_admin/

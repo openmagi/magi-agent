@@ -1,3 +1,30 @@
+# 0.1.83 (2026-06-24)
+
+## Dashboard
+- Drop purple mesh backdrop, use clean grid background (#974).
+
+## Flag registry (I-1 series)
+- Batch 1: 6 compaction/recovery parse_env reads through flag_bool (#975).
+- Batch 2: 2 tool-reflection parse_env reads + 2 FlagSpec registrations (#976).
+- Batch 3: 8 literal-string parse_env reads + 7 FlagSpec registrations (#977).
+
+Cumulative since 0.1.82: 16 raw _is_true(env.get(...)) reads collapsed to typed flag_bool; 9 new FlagSpecs in the registry.
+
+# 0.1.82 (2026-06-24)
+
+## Customize (F-UX series wrap)
+- F-UX1: lifecycle audit + Tier 2 hook expansion in author wizard (#962).
+- F-UX2: runtime-fields endpoint + variable chip picker (F8 core) (#963).
+- F-UX3+F-UX4: trigger collapse + condition matrix loosening + round-trip guard (#971).
+- F-UX6: interview-driven NL authoring + hybrid primitive proposals (#967).
+
+## Refactors / cleanup
+- D-10: collapse 7 pure passthrough methods on event bridge (#965).
+- D-13: unify transcript rendering into context/transcript_render (#968).
+
+## Tests
+- J-2 step 1: meta-test locking wiring docstring honesty for model plumbing (#970).
+
 # 0.1.81 (2026-06-24)
 
 ## Customize

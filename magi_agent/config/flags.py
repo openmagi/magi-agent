@@ -2399,6 +2399,90 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
+    # I-1: tool-reflection / tool-schema-feedback enable knobs (hermes mech-1).
+    # Strict default-OFF; per their existing docstrings they intentionally do
+    # NOT follow ``_runtime_feature_enabled`` profile-default-ON semantics so
+    # benchmark/eval profiles can opt in explicitly.
+    _b(
+        "MAGI_TOOL_EXCEPTION_REFLECTION_ENABLED",
+        summary=(
+            "Convert a raising tool (except FileEdit/PatchApply, which keep "
+            "their specialized edit-retry handler) into a model-visible "
+            "corrective tool_result with retry guidance + per-invocation "
+            "attempt budget instead of killing the whole turn. Default-OFF."
+        ),
+    ),
+    _b(
+        "MAGI_TOOL_SCHEMA_FEEDBACK_ENABLED",
+        summary=(
+            "Enrich a dispatcher result with errorCode "
+            "``tool_input_schema_invalid`` with plain-text missing/unknown "
+            "argument NAMES (vocabulary the model already sees; argument "
+            "VALUES are never surfaced) plus hermes-style retry guidance, "
+            "under a per-invocation attempt budget. Default-OFF."
+        ),
+    ),
+    # I-1: register the seven 1-liner ``parse_*_*`` flags so the typed
+    # registry inventories them and ``flag_bool`` is the single read path.
+    # Each kept strictly default-OFF per its function docstring's existing
+    # "byte-identical to main when OFF" contract; profile semantics
+    # intentionally NOT applied (eval/lab profiles opt in via their env seeds).
+    _b(
+        "MAGI_GATE5B_LIVE_SUBAGENTS_ENABLED",
+        summary=(
+            "Hosted gate5b serve-path live sub-agents flag (AND-ed with the "
+            "live child-runner master gate to reconstruct "
+            "``transport.live_subagents_serve_enabled``). Default-OFF."
+        ),
+    ),
+    _b(
+        "MAGI_EVAL_AUTONOMY_ENABLED",
+        summary=(
+            "Eval-profile autonomy seam: opts the eval profile into "
+            "looser-permission autonomous loops via "
+            "``EVAL_RUNTIME_ENV_DEFAULTS``. Default-OFF."
+        ),
+    ),
+    _b(
+        "MAGI_EVAL_ZERO_EDIT_GUARD_ENABLED",
+        summary=(
+            "Eval-profile zero-edit re-prompt guard: when a coding turn ends "
+            "with no file mutations the engine fires a single 'apply it' "
+            "re-invocation. Default-OFF; eval profile opts in via "
+            "``EVAL_RUNTIME_ENV_DEFAULTS``."
+        ),
+    ),
+    _b(
+        "MAGI_RECIPE_DEFAULT_PACKS_EXPANDED",
+        summary=(
+            "When ON, expand the default-selected first-party pack set to "
+            "include additional ``openmagi.evidence`` etc. Default-OFF "
+            "preserves the minimal default selection."
+        ),
+    ),
+    _b(
+        "MAGI_PLAN_ACT_GATE_ENABLED",
+        summary=(
+            "Live ``plan_gate -> plan_act_switch -> delegation`` chain "
+            "activation. Default-OFF leaves the chain inert and "
+            "byte-identical to main."
+        ),
+    ),
+    _b(
+        "MAGI_PLAN_MODE_TOOLS_ENABLED",
+        summary=(
+            "Plan-mode read-only toolset activation. Default-OFF keeps the "
+            "full toolset on every turn regardless of declared mode."
+        ),
+    ),
+    _b(
+        "MAGI_COMPUTER_TOOL_ENABLED",
+        summary=(
+            "Live desktop GUI ComputerTool (cua-driver-backed) activation. "
+            "Default-OFF; macOS-only; opt-in per the rollout under "
+            "``[[project-magi-computer-use]]``."
+        ),
+    ),
 )
 
 
