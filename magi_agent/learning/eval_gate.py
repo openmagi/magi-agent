@@ -111,11 +111,68 @@ class PairedVerdict(BaseModel):
     n: int
 
 
+#: H-29 step 1 (NEW) — two-sided 95% Student-t critical values keyed by
+#: degrees of freedom (df = n - 1). At df=3 (n=4) the t-critical is ~3.18,
+#: well above the asymptotic normal ``z=1.96``; the old fixed-``z`` CI
+#: under-covered at small n (anti-conservative). For df > 30 the t→z
+#: limit is close enough that 1.96 is acceptable. Caller code may still
+#: pass an explicit ``z`` to override, but the default now auto-selects
+#: the conservative per-n multiplier.
+_T_CRITICAL_TWO_SIDED_95: dict[int, float] = {
+    1: 12.706,
+    2: 4.303,
+    3: 3.182,
+    4: 2.776,
+    5: 2.571,
+    6: 2.447,
+    7: 2.365,
+    8: 2.306,
+    9: 2.262,
+    10: 2.228,
+    11: 2.201,
+    12: 2.179,
+    13: 2.160,
+    14: 2.145,
+    15: 2.131,
+    16: 2.120,
+    17: 2.110,
+    18: 2.101,
+    19: 2.093,
+    20: 2.086,
+    21: 2.080,
+    22: 2.074,
+    23: 2.069,
+    24: 2.064,
+    25: 2.060,
+    26: 2.056,
+    27: 2.052,
+    28: 2.048,
+    29: 2.045,
+    30: 2.042,
+}
+#: Large-sample asymptote: at df > 30 the t-critical is within ~3% of the
+#: standard normal multiplier, so we fall back to the textbook ``z=1.96``.
+_LARGE_N_Z_TWO_SIDED_95: float = 1.96
+
+
+def t_critical_two_sided_95(df: int) -> float:
+    """H-29 — two-sided 95% Student-t critical value for ``df`` degrees of
+    freedom. ``df < 1`` defers to ``df=1`` (the most conservative tabulated
+    value, ~12.7), ``df > 30`` returns the large-sample normal multiplier
+    ``z=1.96``. Pure, hermetic, no scipy dependency."""
+
+    if df < 1:
+        df = 1
+    if df > 30:
+        return _LARGE_N_Z_TWO_SIDED_95
+    return _T_CRITICAL_TWO_SIDED_95[df]
+
+
 def paired_verdict(
     before: tuple[float, ...],
     after: tuple[float, ...],
     *,
-    z: float = 1.96,
+    z: float | None = None,
     min_n: int = MIN_EVAL_SAMPLE_SIZE,
 ) -> PairedVerdict:
     """Paired one-sided significance verdict on per-case deltas.
@@ -142,14 +199,15 @@ def paired_verdict(
     This function is pure (no I/O, no store, no policy) and is NOT yet wired
     into ``run_eval_gate`` — Task 1 is the dormant foundation only.
 
-    STATISTICAL CAVEAT (small-n): the CI uses a normal-approximation ``z``
-    multiplier, which is valid only asymptotically.  At the default
-    ``min_sample_size=4`` (df=3) a proper two-sided 95% t-interval multiplier is
-    ~3.18, so ``z=1.96`` yields a CI that is too NARROW (anti-conservative) —
-    it UNDER-COVERS at small n.  For a true 95% no-regression posture at small
-    samples, raise ``z`` (e.g. ``>=3`` for n≈4) or raise ``min_sample_size``.
-    Implementing a proper per-n t-multiplier is a deliberate follow-up (it would
-    change tested verdict semantics) and is NOT done here.
+    SMALL-n CORRECTNESS (H-29 step 1): when ``z`` is ``None`` (default) the
+    multiplier is auto-selected as the two-sided 95% Student-t critical value
+    for ``df = n - 1`` via :func:`t_critical_two_sided_95`. At ``n=4`` (df=3)
+    that yields ``z≈3.18``, well above the asymptotic normal ``z=1.96`` — the
+    old fixed default under-covered at small n (anti-conservative). For
+    ``n > 31`` (df > 30) the t-multiplier converges to the textbook
+    ``z=1.96``. Callers that need to pin the multiplier (e.g. a soak test
+    that wants exactly the legacy ``1.96`` for byte-identical legacy output)
+    can still pass ``z=1.96`` explicitly.
 
     NOTE(PR7): scores are assumed in ``[0, 1]``.  Non-finite (NaN/inf) inputs
     now DEFER as ``"underpowered"`` (see above) rather than silently classifying
@@ -192,6 +250,11 @@ def paired_verdict(
         )
 
     se = statistics.stdev(deltas) / math.sqrt(n)
+    # H-29 step 1: when caller did not pin an explicit ``z``, auto-select the
+    # two-sided 95% t-critical value for ``df = n - 1`` so the CI is
+    # statistically valid at small n (the old fixed ``z=1.96`` under-covered).
+    if z is None:
+        z = t_critical_two_sided_95(df=n - 1)
     ci_low = delta - z * se
     ci_high = delta + z * se
 
