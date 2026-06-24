@@ -90,7 +90,12 @@ describe("AuthorWizard — variable-length policy authoring (F1.5 + F-UX3)", () 
     expect(src).not.toContain("Coming soon");
     expect(src).not.toContain("Megaphone");
     expect(src).not.toMatch(/id:\s*"emit"/);
-    expect(src).toContain('type Archetype = "block" | "ask" | "audit" | "strip"');
+    // PR-F-MUT3 — extends the union with 'mutate' (Inject / Rewrite card).
+    // The 4 original archetypes remain wired; 'mutate' joins as a friendly
+    // grouping for the two mutator conditionKinds.
+    expect(src).toContain(
+      'type Archetype = "block" | "ask" | "audit" | "strip" | "mutate"',
+    );
   });
 
   it("ConditionKind drops 'tool_name' (now promoted to TargetStep)", () => {
@@ -922,12 +927,28 @@ describe("AuthorWizard — PR-F-UX1 lifecycle audit + Tier 2 expansion", () => {
     );
   });
 
-  it("availableArchetypes(Tier 2) returns ONLY audit", () => {
+  it("availableArchetypes(on_subagent_stop) returns ONLY audit", () => {
     // Mirrors the backend matrix: block/retry would change the surrounding
-    // runtime contract (byte-identical prompt assembly / already-emitted
-    // child output) and is deferred to a later PR.
+    // runtime contract (already-emitted child output cannot be mutated
+    // without violating the audit-only invariant) and is deferred to a
+    // later PR. PR-F-MUT3 splits the on_user_prompt_submit case out
+    // because the prompt_injection (system-prompt section append) mutator
+    // is wired there — the operator picks "mutate" via the Inject /
+    // Rewrite card.
     expect(src).toMatch(
-      /lifecycle === "on_user_prompt_submit" \|\| lifecycle === "on_subagent_stop"[\s\S]*?return \["audit"\]/,
+      /lifecycle === "on_subagent_stop"\) \{[\s\S]*?return \["audit"\]/,
+    );
+  });
+
+  it("availableArchetypes(on_user_prompt_submit) adds mutate to audit (PR-F-MUT3)", () => {
+    // The Tier 2 slot on_user_prompt_submit accepts prompt_injection
+    // (system-prompt section append) — the wizard surfaces it via the
+    // friendly "Inject / Rewrite" archetype card. The backend
+    // ``_LEGAL`` matrix still restricts the resulting action to audit
+    // (the mutation has already taken effect by the time the audit row
+    // is written), so customRuleAction forces action=audit downstream.
+    expect(src).toMatch(
+      /lifecycle === "on_user_prompt_submit"\) \{[\s\S]*?return \["audit", "mutate"\]/,
     );
   });
 
@@ -1429,6 +1450,131 @@ describe("AuthorWizard — F-MUT2 output_rewrite kind", () => {
   it("conditionClause Review summary covers the output_rewrite redact surface", () => {
     expect(src).toMatch(
       /case "output_rewrite":[\s\S]*?redact \$\{verb\}.*?in tool output/,
+    );
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// PR-F-MUT3 — Mutator archetype card + auto-snap conditionKind
+// ---------------------------------------------------------------------------
+
+
+describe("AuthorWizard — F-MUT3 'Inject / Rewrite' archetype card", () => {
+  it("extends the Archetype union with 'mutate'", () => {
+    // The card is a friendly grouping for the two mutator conditionKinds
+    // (prompt_injection + output_rewrite). The backend customRuleKind +
+    // customRuleAction wiring already routes by conditionKind, so adding
+    // 'mutate' costs nothing at save time.
+    expect(src).toMatch(
+      /type Archetype[\s\S]*?\| "mutate"/,
+    );
+  });
+
+  it("availableArchetypes(before_tool_use) appends 'mutate' for the prompt_injection card", () => {
+    // before_tool_use → prompt_injection (append to tool args). The card sits
+    // last so the existing block / ask / audit picks stay first in the visual
+    // order operators are used to.
+    expect(src).toMatch(
+      /lifecycle === "before_tool_use"\) return \["block", "ask", "audit", "mutate"\]/,
+    );
+  });
+
+  it("availableArchetypes(after_tool_use) appends 'mutate' for the output_rewrite card", () => {
+    // after_tool_use → output_rewrite (redact tool result). Sits beside the
+    // existing 'strip' card; both are surface-level "modify the output" verbs
+    // but 'strip' routes to dashboard_check action=override and 'mutate'
+    // routes to the new output_rewrite kind.
+    expect(src).toMatch(
+      /lifecycle === "after_tool_use"\) return \["block", "audit", "strip", "mutate"\]/,
+    );
+  });
+
+  it("availableArchetypes(on_user_prompt_submit) exposes mutate beside audit", () => {
+    // prompt_injection (system-prompt section append) is wired here; the
+    // card is the operator's entry point. on_subagent_stop intentionally
+    // stays audit-only (no mutator hook).
+    expect(src).toMatch(
+      /lifecycle === "on_user_prompt_submit"\) \{[\s\S]*?return \["audit", "mutate"\]/,
+    );
+  });
+
+  it("availableArchetypes hides 'mutate' on pre_final and on_subagent_stop (no mutator hook)", () => {
+    // pre_final has no tool boundary or system-prompt slot. on_subagent_stop
+    // fires after the child has already emitted — mutation has no honest
+    // target. The wizard must not surface a card the operator cannot save.
+    expect(src).toMatch(
+      /lifecycle === "on_subagent_stop"\) \{[\s\S]*?return \["audit"\]/,
+    );
+    // The default-branch fallback (used by pre_final + any unknown lifecycle)
+    // remains the original 3 archetypes — no mutate.
+    expect(src).toMatch(/return \["block", "ask", "audit"\];\s*\n\}/);
+  });
+
+  it("ARCHETYPE_META registers a 'mutate' entry labelled 'Inject / Rewrite (mutator)'", () => {
+    expect(src).toMatch(/mutate:\s*\{[\s\S]*?id:\s*"mutate"/);
+    expect(src).toMatch(
+      /mutate:\s*\{[\s\S]*?label:\s*"Inject \/ Rewrite \(mutator\)"/,
+    );
+    // The description must explicitly say "Modifies traffic" so the operator
+    // sees the same wording the trust badge tooltip will surface.
+    expect(src).toMatch(/mutate:\s*\{[\s\S]*?Modifies traffic/);
+  });
+
+  it("reseedDownstream snaps conditionKind=output_rewrite when archetype=mutate + after_tool_use", () => {
+    // The downstream auto-snap is what makes the card a single-click entry
+    // point: picking 'mutate' on after_tool_use sets conditionKind to
+    // output_rewrite so SpecificsStep renders the F-MUT2 redact picker
+    // immediately on the next step.
+    expect(src).toMatch(
+      /merged\.archetype === "mutate"[\s\S]*?lifecycle === "after_tool_use"[\s\S]*?merged\.conditionKind = "output_rewrite"/,
+    );
+  });
+
+  it("reseedDownstream snaps conditionKind=prompt_injection on before_tool_use + on_user_prompt_submit", () => {
+    // Both lifecycle slots share the same backend kind (prompt_injection);
+    // SpecificsStep already branches on lifecycle to render the tool-arg vs
+    // system-prompt picker, so the snap target is the same kind.
+    expect(src).toMatch(
+      /merged\.archetype === "mutate"[\s\S]*?lifecycle === "before_tool_use"[\s\S]*?lifecycle === "on_user_prompt_submit"[\s\S]*?merged\.conditionKind = "prompt_injection"/,
+    );
+  });
+
+  it("reseedDownstream promotes archetype to 'mutate' when conditionKind is a mutator kind (reverse path)", () => {
+    // Operator may pick prompt_injection / output_rewrite via the
+    // ConditionKindStep directly (skipping the archetype card). Reverse-snap
+    // archetype to 'mutate' so the Action step + Review trust badge stay
+    // honest about the rule shape (otherwise the badge would say Audit /
+    // Block while the rule actually mutates traffic).
+    expect(src).toMatch(
+      /conditionKind === "prompt_injection"[\s\S]*?conditionKind === "output_rewrite"[\s\S]*?archetypes\.includes\("mutate"\)[\s\S]*?merged\.archetype = "mutate"/,
+    );
+  });
+
+  it("archetypeVerb renders a mutator-honest sentence for the Review summary", () => {
+    // The verb keys off lifecycle so after_tool_use says "rewrite the tool
+    // output" and the inject lifecycles say "inject context into the agent's
+    // next call". No vague "mutate" verb — the operator should see WHAT the
+    // mutation does in plain English.
+    expect(src).toMatch(
+      /case "mutate":[\s\S]*?after_tool_use"[\s\S]*?rewrite the tool output/,
+    );
+    expect(src).toMatch(
+      /case "mutate":[\s\S]*?inject context into the agent's next call/,
+    );
+  });
+
+  it("customRuleKind continues to route by conditionKind (mutate archetype does not downcast)", () => {
+    // The 'mutate' archetype is a friendly grouping — the backend kind
+    // routing is still keyed on conditionKind so an operator who picked the
+    // card lands on prompt_injection / output_rewrite at save time. This
+    // matches the comment that the precedence-protected mutator branches
+    // come BEFORE any lifecycle fallback in customRuleKind.
+    expect(src).toMatch(
+      /draft\.conditionKind === "prompt_injection"\)\s*return "prompt_injection"/,
+    );
+    expect(src).toMatch(
+      /draft\.conditionKind === "output_rewrite"\)\s*return "output_rewrite"/,
     );
   });
 });

@@ -100,7 +100,15 @@ type Lifecycle =
   | "on_user_prompt_submit"
   | "on_subagent_stop";
 type Scope = "always" | "coding" | "research" | "delivery" | "memory" | "task";
-type Archetype = "block" | "ask" | "audit" | "strip";
+// PR-F-MUT3 — "mutate" is a friendly grouping archetype that surfaces the
+// two mutator conditionKinds (prompt_injection + output_rewrite) as a
+// first-class entry on the action picker. Selecting it routes the operator
+// to the matching SpecificsStep picker (auto-set conditionKind based on
+// lifecycle: before_tool_use / on_user_prompt_submit → prompt_injection;
+// after_tool_use → output_rewrite). The backend customRuleKind /
+// customRuleAction wiring already routes by conditionKind, so adding
+// "mutate" here costs nothing at save time.
+type Archetype = "block" | "ask" | "audit" | "strip" | "mutate";
 type ToolTarget = "any" | "specific";
 type ConditionKind =
   | "none"
@@ -337,6 +345,40 @@ export function AuthorWizard({
     const archetypes = availableArchetypes(merged.lifecycle);
     if (!archetypes.includes(merged.archetype)) {
       merged.archetype = archetypes[0];
+    }
+    // PR-F-MUT3 — when the operator picks the "Inject / Rewrite" archetype,
+    // snap conditionKind to the matching mutator kind so the SpecificsStep
+    // renders the right F-MUT picker without a second click. The map is
+    // lifecycle-keyed because the two mutator kinds split by lifecycle:
+    //   * after_tool_use      → output_rewrite (F-MUT2 redact picker)
+    //   * before_tool_use     → prompt_injection (F-MUT1 tool-arg picker)
+    //   * on_user_prompt_submit → prompt_injection (F-MUT1 system-prompt picker)
+    // Reverse path: if conditionKind moves AWAY from a mutator kind (e.g. the
+    // operator manually picks llm_criterion via the ConditionKind step), snap
+    // archetype back to a non-mutate default so the Review summary stays
+    // honest about which axis is driving the rule.
+    if (merged.archetype === "mutate") {
+      if (merged.lifecycle === "after_tool_use") {
+        merged.conditionKind = "output_rewrite";
+      } else if (
+        merged.lifecycle === "before_tool_use"
+        || merged.lifecycle === "on_user_prompt_submit"
+      ) {
+        merged.conditionKind = "prompt_injection";
+      }
+    } else if (
+      merged.conditionKind === "prompt_injection"
+      || merged.conditionKind === "output_rewrite"
+    ) {
+      // Operator picked a mutator conditionKind directly via ConditionKindStep
+      // — promote archetype to "mutate" so the Action step + Review trust
+      // badge agree with the actual rule shape. Hidden when the lifecycle
+      // does not expose the "mutate" archetype card (defensive — should not
+      // happen because availableConditionKinds + availableArchetypes are
+      // gated by the same lifecycle set).
+      if (archetypes.includes("mutate")) {
+        merged.archetype = "mutate";
+      }
     }
     return merged;
   };
@@ -1865,12 +1907,27 @@ interface ArchetypeOption {
 
 
 function availableArchetypes(lifecycle: Lifecycle): Archetype[] {
-  if (lifecycle === "before_tool_use") return ["block", "ask", "audit"];
-  if (lifecycle === "after_tool_use") return ["block", "audit", "strip"];
+  // PR-F-MUT3 — "mutate" appears in three lifecycle slots that carry a
+  // mutator conditionKind today:
+  //   * before_tool_use      → prompt_injection (append to tool args)
+  //   * after_tool_use       → output_rewrite (redact tool result)
+  //   * on_user_prompt_submit → prompt_injection (append system-prompt section)
+  // The card is hidden on pre_final + on_subagent_stop because no mutator
+  // hook is wired there (a turn that already emitted has no honest mutation
+  // target). Selecting "mutate" snaps conditionKind to the matching kind in
+  // reseedDownstream so the SpecificsStep renders the F-MUT picker.
+  if (lifecycle === "before_tool_use") return ["block", "ask", "audit", "mutate"];
+  if (lifecycle === "after_tool_use") return ["block", "audit", "strip", "mutate"];
   // PR-F-UX1 Tier 2 — both new slots are audit-only at the backend matrix.
   // Surfacing "block" here would let the wizard assemble a draft the backend
   // ``_LEGAL`` table rejects (cleaner to refuse the action here than at PUT).
-  if (lifecycle === "on_user_prompt_submit" || lifecycle === "on_subagent_stop") {
+  // PR-F-MUT3 — on_user_prompt_submit additionally accepts "mutate" because
+  // prompt_injection is wired there (system-prompt section append). The
+  // sibling slot on_subagent_stop stays audit-only (no mutator hook).
+  if (lifecycle === "on_user_prompt_submit") {
+    return ["audit", "mutate"];
+  }
+  if (lifecycle === "on_subagent_stop") {
     return ["audit"];
   }
   return ["block", "ask", "audit"];
@@ -1900,6 +1957,20 @@ const ARCHETYPE_META: Record<Archetype, ArchetypeOption> = {
     id: "strip",
     label: "Strip / transform output",
     description: "Modify the tool result before the agent reads it (after-tool only).",
+    icon: <ShieldOff className="h-5 w-5" />,
+  },
+  // PR-F-MUT3 — friendly grouping card that surfaces the two mutator
+  // conditionKinds (prompt_injection + output_rewrite) as a first-class
+  // action archetype. Selecting it sets conditionKind based on the active
+  // lifecycle (handled by reseedDownstream) so the SpecificsStep picker
+  // appears next. The label is intentionally "Inject / Rewrite" so the
+  // operator sees the two concrete shapes the choice covers — the trust
+  // badge in Review then renders Mutator (amber-yellow) honestly.
+  mutate: {
+    id: "mutate",
+    label: "Inject / Rewrite (mutator)",
+    description:
+      "Inject a value into a tool call or system prompt, or rewrite a tool's output before the model reads it. Modifies traffic — the trust badge will show Mutator.",
     icon: <ShieldOff className="h-5 w-5" />,
   },
 };
@@ -2204,6 +2275,14 @@ function archetypeVerb(draft: Draft): string {
       return "emit an evidence record (audit-mode, does not block)";
     case "strip":
       return "strip / override the tool result";
+    case "mutate":
+      // PR-F-MUT3 — the SpecificsStep picker emits the exact mutation verb
+      // (append / redact / inject); this verb sits in the Review summary
+      // sentence and stays honest about the trust-class without restating
+      // the specifics (those render via conditionClause below).
+      return draft.lifecycle === "after_tool_use"
+        ? "rewrite the tool output before the model reads it"
+        : "inject context into the agent's next call";
   }
 }
 
@@ -2552,6 +2631,16 @@ function customRuleAction(draft: Draft): string {
       return "audit";
     case "strip":
       return "override";
+    case "mutate":
+      // PR-F-MUT3 — defensive fallback. When the operator picks the
+      // "Inject / Rewrite" card, reseedDownstream snaps conditionKind to
+      // prompt_injection / output_rewrite, both of which are intercepted by
+      // the early-return mutator branches above. This case only fires if
+      // an upstream caller hands customRuleAction a draft with
+      // archetype="mutate" but a non-mutator conditionKind (today
+      // unreachable; staying audit keeps the resulting rule honest with
+      // the backend ``_LEGAL`` matrix).
+      return "audit";
   }
 }
 

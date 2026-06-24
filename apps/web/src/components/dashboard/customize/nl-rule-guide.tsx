@@ -28,7 +28,10 @@ export interface NlRuleGuideProps {
 
 
 interface ExampleChip {
-  archetype: "block" | "ask" | "audit" | "strip";
+  // PR-F-MUT3 — "mutate" surfaces the mutator examples (output_rewrite /
+  // prompt_injection) so the operator sees that NL inputs CAN compose
+  // traffic-rewriting policies, not just deny / audit gates.
+  archetype: "block" | "ask" | "audit" | "strip" | "mutate";
   label: string;
   text: string;
 }
@@ -106,6 +109,22 @@ const EXAMPLES: ReadonlyArray<ExampleChip> = [
     archetype: "audit",
     label: "Audit broken fetches (field comparator)",
     text: "On research turns, audit when SourceInspection.statusCode is greater than 399",
+  },
+  // PR-F-MUT3 — mutator examples. The NL compiler's F-UX6 interview now
+  // recognises 'redact' / 'scrub' / 'mask' (→ output_rewrite) and 'inject'
+  // / 'append' / 'always add' (→ prompt_injection). Seed an example for
+  // each so the operator sees that NL can compose a traffic-rewriting
+  // policy, not just deny / audit gates. The trust badge in the proposal
+  // card will render as Mutator (amber-yellow).
+  {
+    archetype: "mutate",
+    label: "Redact AWS keys from tool output",
+    text: "After any tool returns, redact the pattern AKIA[0-9A-Z]{16} from the output.",
+  },
+  {
+    archetype: "mutate",
+    label: "Always inject --dry-run on shell_exec",
+    text: "Before shell_exec is called, always inject --dry-run into the command argument.",
   },
 ];
 
@@ -187,6 +206,14 @@ export function NlRuleGuide({
               '"require approval / ask the user"',
               '"audit / record / just log"',
               '"strip / override the result" (after-tool only)',
+              // PR-F-MUT3 — mutator verbs the F-UX6 interview now recognises.
+              // 'redact' / 'scrub' / 'mask' → after_tool_use output_rewrite;
+              // 'inject' / 'append' / 'always add' → before_tool_use or
+              // on_user_prompt_submit prompt_injection. Surfaces the
+              // Mutator trust badge in the proposal card.
+              '"redact / scrub / mask <pattern> from the output" (mutator, after-tool)',
+              '"inject / append / always add <value> to <tool arg>" (mutator, before-tool)',
+              '"remind / tell the model / add to context <text>" (mutator, user-prompt-submit)',
             ]}
           />
 
@@ -227,6 +254,10 @@ const ARCHETYPE_TONE: Record<ExampleChip["archetype"], string> = {
   ask: "bg-amber-500/10 text-amber-800",
   audit: "bg-blue-500/10 text-blue-700",
   strip: "bg-violet-500/10 text-violet-700",
+  // PR-F-MUT3 — mirrors the TrustBadge mutator palette (amber-yellow ramp)
+  // so chip + downstream proposal badge render the same hue. Distinct from
+  // both 'ask' (advisory amber-800) and 'block' (destructive red).
+  mutate: "bg-yellow-400/15 text-yellow-900",
 };
 
 
