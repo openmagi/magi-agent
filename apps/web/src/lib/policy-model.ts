@@ -69,11 +69,6 @@ export type PolicyConditionKind =
   // the Mutator trust class via :func:`trustClassForPolicy` (amber-yellow
   // badge styled by F-MUT3 in trust-badge.tsx).
   | "prompt_injection"
-  // F-MUT2 — second mutator kind. Rewrites a tool's output text AFTER
-  // dispatch but BEFORE the model reads it (re.sub-based redact). Same
-  // Mutator trust class as ``prompt_injection`` — surfaces "this policy
-  // modifies traffic" via :func:`trustClassForPolicy`.
-  | "output_rewrite"
   | "seam_action"       // built-in preset seam rewire (compound)
   | "none";             // built-in preview / always-on, condition is implicit
 
@@ -235,30 +230,6 @@ function customRuleCondition(
       kind,
       summary: `${mode} "${valuePreview}" to ${target}`,
       payload: { mode, target, value, condition: payload.condition },
-    };
-  }
-  if (kind === "output_rewrite") {
-    // F-MUT2 — round-trip a persisted output_rewrite rule into a Policy
-    // condition. Mode is locked to "redact" in v1; pattern + replacement
-    // ride along verbatim so the dashboard sentence reads honestly without
-    // re-loading the rule's lifecycle slot.
-    const mode = typeof payload.mode === "string" ? payload.mode : "redact";
-    const pattern = typeof payload.pattern === "string" ? payload.pattern : "";
-    const replacement =
-      typeof payload.replacement === "string" ? payload.replacement : "";
-    const patternPreview =
-      pattern.length > 60 ? `${pattern.slice(0, 60)}…` : pattern;
-    return {
-      kind,
-      summary: `${mode} /${patternPreview}/ → "${replacement}"`,
-      payload: {
-        mode,
-        pattern,
-        replacement,
-        scope: payload.scope ?? "match_only",
-        isRegex: payload.isRegex ?? true,
-        toolMatch: payload.toolMatch,
-      },
     };
   }
   if (kind === "capability_scope") {
@@ -540,13 +511,11 @@ export function trustClassForPolicy(policy: PolicyTrustInput): TrustClass {
       // therefore reads as Hybrid.
       return policy.action === "override" ? "hybrid" : "deterministic";
     case "prompt_injection":
-    case "output_rewrite":
-      // F-MUT1 (prompt_injection) + F-MUT2 (output_rewrite) — both kinds
-      // are explicit mutators. They rewrite/augment traffic the model
-      // sees, so the operator must see "this policy modifies traffic"
+      // F-MUT1 — first explicit mutator kind. Rewrites/augments inbound
+      // data, so the operator must see "this policy modifies traffic"
       // before activating. F-MUT3 lights the amber-yellow palette in
       // trust-badge.tsx; until then the badge falls through to its
-      // default rendering for these literals.
+      // default rendering for this literal.
       return "mutator";
     case "none":
       // Built-in preset_seam: fall through to the preset's enforcement

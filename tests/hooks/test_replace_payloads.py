@@ -1,16 +1,12 @@
-"""Smoke tests for typed replace payloads (F-MUT prerequisite, default-OFF).
+"""Smoke tests for typed replace payloads.
 
-The payloads in :mod:`magi_agent.hooks.replace_payloads` only define shapes —
-they MUST NOT be wired into any emitter yet. These tests assert (a) the typed
-schemas accept the documented shape per HookPoint, (b) malformed values
-fail-safe to ``None`` (matching ``_apply_prompt_transform`` semantics), and
-(c) no current emitter imports ``coerce_replace_payload`` so production
-behavior is byte-identical to today.
+The payloads in :mod:`magi_agent.hooks.replace_payloads` define typed shapes
+consumed by F-MUT1+ wiring. These tests assert (a) the typed schemas accept
+the documented shape per HookPoint and (b) malformed values fail-safe to
+``None`` (matching ``_apply_prompt_transform`` semantics).
 """
 
 from __future__ import annotations
-
-import pathlib
 
 import pytest
 
@@ -90,32 +86,4 @@ class TestReplacePayloadFailSafe:
         assert (
             coerce_replace_payload(HookPoint.ON_ERROR, {"recovery": "nuke-from-orbit"})
             is None
-        )
-
-
-class TestNoConsumerWiredYet:
-    """Guard: shipping this module must not change runtime behavior.
-
-    F-MUT1/F-MUT2 will add the actual ``coerce_replace_payload`` call sites in
-    ``facades.py`` and ``adk_bridge/callback_adapter.py``. Until then, this
-    test pins that the module is purely additive — no production code path
-    references it, so emitting a replace value remains inert exactly as the
-    audit documented.
-    """
-
-    def test_no_runtime_module_imports_coerce_replace_payload(self) -> None:
-        repo_root = pathlib.Path(__file__).resolve().parents[2] / "magi_agent"
-        offenders: list[str] = []
-        for path in repo_root.rglob("*.py"):
-            if path.name == "replace_payloads.py":
-                continue
-            try:
-                text = path.read_text(encoding="utf-8")
-            except OSError:
-                continue
-            if "coerce_replace_payload" in text or "REPLACE_PAYLOAD_BY_POINT" in text:
-                offenders.append(str(path.relative_to(repo_root.parent)))
-        assert offenders == [], (
-            "Replace payloads must remain unwired in this PR; F-MUT1/F-MUT2 "
-            f"will add consumers. Found references in: {offenders}"
         )
