@@ -21,7 +21,6 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 from magi_agent.hooks.manifest import HookPoint
-from magi_agent.tools.result import ToolStatus
 
 
 class BeforeToolUseReplace(BaseModel):
@@ -32,19 +31,12 @@ class BeforeToolUseReplace(BaseModel):
 
 
 class AfterToolUseReplace(BaseModel):
-    """Replace ``ToolResult`` fields after dispatch (F-MUT2 output-rewrite).
-
-    ``status`` aligns with :data:`magi_agent.tools.result.ToolStatus` so the
-    F-MUT2 facades projection (``result.model_copy(update={'status': ...})``,
-    which bypasses pydantic validation) cannot land an out-of-vocabulary
-    status. The earlier draft used ``Literal['ok','failed']`` which silently
-    leaked ``'failed'`` into ToolResult.status (illegal per ToolStatus).
-    """
+    """Replace ``ToolResult`` fields after dispatch (F-MUT2 output-rewrite)."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
     result_text: str | None = None
     structured_data: dict[str, object] | None = None
-    status: ToolStatus | None = None
+    status: Literal["ok", "failed"] | None = None
 
 
 class BeforeLlmCallReplace(BaseModel):
