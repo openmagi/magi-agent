@@ -212,7 +212,10 @@ class ProviderConfig:
 
 
 def _config_path() -> Path:
-    override = os.environ.get("MAGI_CONFIG")
+    # I-4: routed through the typed flag registry.
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    override = flag_str("MAGI_CONFIG") or None
     if override and override.strip():
         return Path(override).expanduser()
     return Path.home() / ".magi" / "config.toml"
