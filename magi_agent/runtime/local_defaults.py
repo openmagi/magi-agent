@@ -204,13 +204,6 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     # default-OFF in the registry so a fresh install / hosted serve stays
     # byte-identical.
     "MAGI_CUSTOMIZE_PROMPT_INJECTION_ENABLED",
-    # PR-F-MUT2 output_rewrite mutator: re.sub-based redact of a tool's
-    # output text AFTER dispatch but BEFORE the model reads it. Same gating
-    # shape as F-MUT1 — wire is a no-op without authored rules; lab opts in
-    # so dogfood turns can exercise the wizard's second mutator kind
-    # end-to-end. Strict default-OFF in the registry so a fresh install /
-    # hosted serve stays byte-identical.
-    "MAGI_CUSTOMIZE_OUTPUT_REWRITE_ENABLED",
     # PR-F-UX2 (F8 core) runtime-fields endpoint: backs the wizard's chip
     # picker shown above regex / contentMatch / llm_criterion / SHACL inputs.
     # Pure derivation (no I/O, no LLM), registration-time only, fail-open on

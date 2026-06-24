@@ -34,14 +34,6 @@ KINDS = frozenset(
         # flag. See magi_agent/customize/prompt_injection.py for the validator
         # + apply helpers.
         "prompt_injection",
-        # F-MUT2: output_rewrite — mutator that rewrites a tool's output text
-        # AFTER dispatch but BEFORE the model reads it. v1 ships a single
-        # ``redact`` mode (re.sub-based pattern → replacement); summarize/replace
-        # are deferred to v2 with an admin-tier flag. See
-        # magi_agent/customize/output_rewrite.py for the validator + apply
-        # helpers, and magi_agent.facades.execute_tool_with_hooks for the
-        # runtime wire (parallel to the F-MUT1 BEFORE_TOOL_USE consumer).
-        "output_rewrite",
     }
 )
 ACTIONS = frozenset({"block", "retry", "ask_approval", "audit", "override"})
@@ -136,17 +128,6 @@ _LEGAL: dict[str, dict[str, frozenset[str]]] = {
     "prompt_injection": {
         "before_tool_use": frozenset({"audit"}),
         "on_user_prompt_submit": frozenset({"audit"}),
-    },
-    # F-MUT2: output_rewrite is a mutator (rewrites tool output text). The
-    # persisted action is ``audit`` — the runtime applier records the
-    # mutation as an audit event (no separate block/retry verdict because
-    # the mutation already happened by the time the audit record is
-    # written). Only legal at after_tool_use (the rewrite has no honest
-    # target at other lifecycle slots: no tool result text exists yet at
-    # before_tool_use; pre_final already passed by the time the final
-    # answer commits).
-    "output_rewrite": {
-        "after_tool_use": frozenset({"audit"}),
     },
 }
 
@@ -298,16 +279,6 @@ def validate_custom_rule(rule: Any) -> list[str]:
         )
 
         errors.extend(validate_prompt_injection_payload(payload, fires_at))
-    elif kind == "output_rewrite":
-        # F-MUT2: operator-authored mutator (re.sub-based redact of tool
-        # output text BEFORE the model reads it). Only valid at
-        # after_tool_use; the validator returns the slot mismatch as a
-        # first-class error string so the wizard surfaces it inline.
-        from magi_agent.customize.output_rewrite import (  # noqa: PLC0415
-            validate_output_rewrite_payload,
-        )
-
-        errors.extend(validate_output_rewrite_payload(payload, fires_at))
 
     # (f) projection ⊆ whitelist (conversation rejected)
     projection = rule.get("projection")
