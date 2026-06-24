@@ -47,6 +47,13 @@ async def run_governed_turn(
     # map can never break a turn — see budgets_apply.apply_budgets_if_enabled.
     _maybe_apply_customize_budgets()
 
+    # PR-F-UX1: Tier 2 ``on_user_prompt_submit`` audit-only fan-out. Wired at
+    # the TOP of the canonical CLI/serve/child funnel (BEFORE the engine
+    # stream starts) so it runs on every real governed turn. Triple-gated +
+    # fail-open: returns silently when the master flag is OFF, when no rules
+    # are authored, or on any error path — never blocks turn execution.
+    await _maybe_run_user_prompt_submit_audit(ctx)
+
     rt = runtime if runtime is not None else _build_runtime(ctx)
     cancel = cancel if cancel is not None else asyncio.Event()
     stream = rt.engine.run_turn_stream(  # type: ignore[union-attr]
@@ -60,14 +67,23 @@ async def run_governed_turn(
     # ALL accumulation below so the OFF path is byte-identical and zero-cost.
     bookend = _BookendCollector.maybe_create(ctx)
 
+    # PR-F-UX1: Tier 2 ``on_subagent_stop`` final-text collector. Only created
+    # for CHILD turns (``ctx.depth > 0``) when the master flag resolves ON so
+    # the parent / top-level turn path stays byte-identical and zero-cost.
+    subagent_collector = _SubagentStopCollector.maybe_create(ctx)
+
     try:
         async for item in stream:
             if bookend is not None:
                 bookend.observe(item)
+            if subagent_collector is not None:
+                subagent_collector.observe(item)
             yield item
     finally:
         if bookend is not None:
             bookend.persist()
+        if subagent_collector is not None:
+            await subagent_collector.run_audit()
 
 
 class _BookendCollector:
@@ -186,6 +202,119 @@ def _maybe_apply_customize_budgets() -> None:
         apply_budgets_if_enabled(env=os.environ, policy=policy)
     except Exception:
         return
+
+
+def _build_lifecycle_critic_factory() -> object | None:
+    """Build the Haiku-class critic model factory used by both Tier 2 audit
+    fan-outs. Reuses the same constructor the engine uses for built-in /
+    Customize llm_criterion rules (``cli.wiring._build_criterion_model_factory``).
+    Returns ``None`` (and the audit fan-out then records ``status="skipped"``
+    with reason ``no critic model available``) when the egress / custom-rules
+    flags are off, when the provider key is missing, or on any import error.
+    """
+    try:
+        from magi_agent.cli.wiring import (  # noqa: PLC0415
+            _build_criterion_model_factory,
+        )
+
+        return _build_criterion_model_factory()
+    except Exception:
+        return None
+
+
+async def _maybe_run_user_prompt_submit_audit(ctx: TurnContext) -> None:
+    """PR-F-UX1 Tier 2 ``on_user_prompt_submit`` audit-only fan-out.
+
+    Invoked at the TOP of :func:`run_governed_turn`. Triple-gated +
+    fail-open: bails silently when the master flag resolves OFF, when no
+    matching rules are authored, or on any exception. Never mutates
+    ``ctx`` and never blocks turn execution — the audit verdicts are
+    recorded by the lifecycle_audit module and discarded by this wire (a
+    later PR will route them to a durable evidence sink).
+
+    Threads the same critic model factory the engine builds for built-in
+    llm_criterion rules so the audit actually invokes the judge when an
+    operator has authored a rule + flipped the master flag + has a
+    provider key configured.
+    """
+    try:
+        from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+            lifecycle_expansion_enabled,
+            run_user_prompt_submit_audit,
+        )
+
+        if not lifecycle_expansion_enabled():
+            return
+        await run_user_prompt_submit_audit(
+            prompt_text=ctx.prompt or "",
+            model_factory=_build_lifecycle_critic_factory(),
+        )
+    except Exception:
+        return
+
+
+class _SubagentStopCollector:
+    """Accumulates the child's final assistant text off the event stream and
+    runs the ``on_subagent_stop`` audit fan-out at turn end.
+
+    Created only for CHILD turns (``ctx.depth > 0``) when the master flag
+    resolves ON, so the parent / top-level path stays byte-identical and
+    zero-cost. Reuses the same text-aggregation pattern as
+    :class:`_BookendCollector` (``response_clear`` / ``text_delta`` events).
+    Fully fail-open: any observation or audit error is swallowed so a
+    governed turn never breaks because of audit bookkeeping.
+    """
+
+    __slots__ = ("_ctx", "_result_text")
+
+    def __init__(self, ctx: TurnContext) -> None:
+        self._ctx = ctx
+        self._result_text = ""
+
+    @classmethod
+    def maybe_create(cls, ctx: TurnContext) -> "_SubagentStopCollector | None":
+        # Top-level turns (depth == 0) are NOT subagent turns — the
+        # ``on_subagent_stop`` slot fires only for spawned child agents.
+        if getattr(ctx, "depth", 0) <= 0:
+            return None
+        try:
+            from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+                lifecycle_expansion_enabled,
+            )
+
+            if not lifecycle_expansion_enabled():
+                return None
+            return cls(ctx)
+        except Exception:
+            return None
+
+    def observe(self, item: object) -> None:
+        try:
+            payload = getattr(item, "payload", None)
+            if not isinstance(payload, dict):
+                return
+            kind = payload.get("type")
+            if kind == "response_clear":
+                self._result_text = ""
+            elif kind == "text_delta":
+                delta = payload.get("delta")
+                if isinstance(delta, str):
+                    self._result_text += delta
+        except Exception:
+            return
+
+    async def run_audit(self) -> None:
+        try:
+            from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+                run_subagent_stop_audit,
+            )
+
+            await run_subagent_stop_audit(
+                final_text=self._result_text,
+                model_factory=_build_lifecycle_critic_factory(),
+            )
+        except Exception:
+            return
 
 
 def _build_runtime(ctx: TurnContext) -> object:

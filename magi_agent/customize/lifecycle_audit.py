@@ -1,0 +1,237 @@
+"""Customize Tier 2 lifecycle audit gates (PR-F-UX1).
+
+Two NEW audit-only ``custom_rule`` gate sites ride on top of the single
+``run_governed_turn`` funnel that every governed turn (top-level serve, CLI
+REPL, child agents) flows through:
+
+* ``on_user_prompt_submit`` — invoked at the TOP of
+  :func:`magi_agent.runtime.governed_turn.run_governed_turn`, BEFORE the
+  engine stream is started. The inbound user prompt text (``ctx.prompt``) is
+  audited against each enabled ``llm_criterion`` rule with
+  ``firesAt == "on_user_prompt_submit"``. Verdicts are recorded audit-only
+  (no block, no prompt mutation).
+* ``on_subagent_stop`` — invoked at the END of ``run_governed_turn`` when the
+  turn is a CHILD turn (``ctx.depth > 0``). The child's final assistant text
+  is collected off the event stream (mirroring ``_BookendCollector``) and
+  audited against each enabled ``llm_criterion`` rule with
+  ``firesAt == "on_subagent_stop"``. Audit-only — the child output has
+  already been emitted to the parent.
+
+Both wires live in ``governed_turn`` (the canonical CLI/serve/child funnel)
+so the audit FAN-OUT runs on real production turns rather than a dead ADK
+callback adapter path.
+
+Triple-gated:
+
+* :func:`magi_agent.config.flags.flag_bool` ``MAGI_CUSTOMIZE_LIFECYCLE_EXPANSION_ENABLED``
+  (the strict-truthy F-UX1 master switch),
+* profile-aware :func:`magi_agent.config.flags.flag_profile_bool`
+  ``MAGI_CUSTOMIZE_VERIFICATION_ENABLED``,
+* profile-aware :func:`magi_agent.config.flags.flag_profile_bool`
+  ``MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED``.
+
+Fail-open everywhere: any exception (missing module, broken overrides file,
+critic model unavailable) returns silently so a buggy rule cannot wedge a
+turn. Audit-only contract: this module never returns a "block" verdict — only
+records the per-rule judgment.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable
+from typing import Any
+
+AuditRecord = dict[str, Any]
+
+InvokeFn = Callable[[Any, str], Awaitable[str]]
+
+
+def lifecycle_expansion_enabled(env: dict[str, str] | None = None) -> bool:
+    """Triple-gate check used by both wire sites.
+
+    Returns ``True`` only when:
+
+    * ``MAGI_CUSTOMIZE_LIFECYCLE_EXPANSION_ENABLED`` is strict-truthy ON,
+    * ``MAGI_CUSTOMIZE_VERIFICATION_ENABLED`` resolves ON via the profile-aware
+      reader (full / lab profile; OFF under safe/eval),
+    * ``MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED`` resolves ON via the profile-aware
+      reader.
+
+    Fail-open: any import error returns ``False`` so the call site stays a
+    no-op when the flag layer cannot be read.
+    """
+    try:
+        from magi_agent.config.flags import flag_bool, flag_profile_bool  # noqa: PLC0415
+    except Exception:
+        return False
+    try:
+        return (
+            flag_bool("MAGI_CUSTOMIZE_LIFECYCLE_EXPANSION_ENABLED", env=env)
+            and flag_profile_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", env=env)
+            and flag_profile_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", env=env)
+        )
+    except Exception:
+        return False
+
+
+def _default_policy_loader() -> Any:
+    from magi_agent.customize.store import load_overrides  # noqa: PLC0415
+    from magi_agent.customize.verification_policy import (  # noqa: PLC0415
+        CustomizeVerificationPolicy,
+    )
+
+    return CustomizeVerificationPolicy.from_overrides(load_overrides())
+
+
+async def _audit_one_rule(
+    rule: dict[str, Any],
+    *,
+    draft_text: str,
+    model_factory: Callable[[], Any] | None,
+    invoke: InvokeFn | None,
+) -> AuditRecord:
+    """Run a single ``llm_criterion`` rule against ``draft_text``; return audit dict.
+
+    On any failure — bad payload, missing critic model, judge exception — the
+    audit dict carries ``passed=True`` with a status describing why the rule
+    short-circuited. This matches the fail-open contract from
+    :func:`magi_agent.customize.criterion_engine.evaluate_criterion`.
+    """
+    rule_id = rule.get("id")
+    payload = rule.get("what", {}).get("payload", {}) if isinstance(rule.get("what"), dict) else {}
+    criterion = payload.get("criterion") if isinstance(payload, dict) else None
+    if not isinstance(criterion, str) or not criterion.strip():
+        return {
+            "rule_id": rule_id,
+            "passed": True,
+            "reason": "rule has no criterion text",
+            "status": "skipped",
+        }
+    # Finding #3 guard: an empty draft_text means there is nothing to judge
+    # (no user prompt / no child final text). Short-circuit to a "skipped"
+    # verdict rather than invoking the critic against an empty string, which
+    # would emit meaningless "status=evaluated" records.
+    if not isinstance(draft_text, str) or not draft_text.strip():
+        return {
+            "rule_id": rule_id,
+            "passed": True,
+            "reason": "no content to judge",
+            "status": "skipped",
+        }
+    if model_factory is None:
+        return {
+            "rule_id": rule_id,
+            "passed": True,
+            "reason": "no critic model available",
+            "status": "skipped",
+        }
+    try:
+        from magi_agent.customize.criterion_engine import (  # noqa: PLC0415
+            evaluate_criterion,
+        )
+
+        passed, reason = await evaluate_criterion(
+            criterion=criterion,
+            draft_text=draft_text,
+            model_factory=model_factory,
+            invoke=invoke,
+        )
+        return {
+            "rule_id": rule_id,
+            "passed": bool(passed),
+            "reason": reason or "",
+            "status": "evaluated",
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "rule_id": rule_id,
+            "passed": True,
+            "reason": f"audit short-circuited: {exc!r}",
+            "status": "error",
+        }
+
+
+async def run_user_prompt_submit_audit(
+    *,
+    prompt_text: str,
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> list[AuditRecord]:
+    """Audit fan-out for ``firesAt == "on_user_prompt_submit"`` llm_criterion rules.
+
+    Called at the TOP of :func:`magi_agent.runtime.governed_turn.run_governed_turn`
+    (the canonical CLI/serve/child funnel), BEFORE the engine stream starts.
+    Returns the per-rule audit list (empty when the flag is OFF, when no rules
+    are authored, or on any fail-open path). Never mutates ``prompt_text`` and
+    never blocks turn execution.
+    """
+    if not lifecycle_expansion_enabled(env=env):
+        return []
+    try:
+        loader = policy_loader or _default_policy_loader
+        policy = loader()
+        rules = policy.enabled_llm_criterion_rules(fires_at="on_user_prompt_submit")
+    except Exception:
+        return []
+    if not rules:
+        return []
+    audits: list[AuditRecord] = []
+    for rule in rules:
+        audit = await _audit_one_rule(
+            rule,
+            draft_text=prompt_text,
+            model_factory=model_factory,
+            invoke=invoke,
+        )
+        audits.append(audit)
+    return audits
+
+
+async def run_subagent_stop_audit(
+    *,
+    final_text: str,
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> list[AuditRecord]:
+    """Audit fan-out for ``firesAt == "on_subagent_stop"`` llm_criterion rules.
+
+    Called at the END of :func:`magi_agent.runtime.governed_turn.run_governed_turn`
+    (the canonical funnel) WHEN the turn is a child turn (``ctx.depth > 0``).
+    The child's final assistant text is collected off the event stream by the
+    governed_turn wire and threaded in as ``final_text``. Returns the per-rule
+    audit list (empty when the flag is OFF, when no rules are authored, when
+    ``final_text`` is empty, or on any fail-open path). Never blocks emission —
+    the child output is already on its way back to the parent.
+    """
+    if not lifecycle_expansion_enabled(env=env):
+        return []
+    try:
+        loader = policy_loader or _default_policy_loader
+        policy = loader()
+        rules = policy.enabled_llm_criterion_rules(fires_at="on_subagent_stop")
+    except Exception:
+        return []
+    if not rules:
+        return []
+    audits: list[AuditRecord] = []
+    for rule in rules:
+        audit = await _audit_one_rule(
+            rule,
+            draft_text=final_text,
+            model_factory=model_factory,
+            invoke=invoke,
+        )
+        audits.append(audit)
+    return audits
+
+
+__all__ = [
+    "AuditRecord",
+    "lifecycle_expansion_enabled",
+    "run_user_prompt_submit_audit",
+    "run_subagent_stop_audit",
+]

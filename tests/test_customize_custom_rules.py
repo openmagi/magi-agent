@@ -280,3 +280,56 @@ def test_pre_final_llm_still_requires_criterion():
     rule = _llm(what={"kind": "llm_criterion", "payload": {}})
     errs = validate_custom_rule(rule)
     assert any("criterion is required" in e for e in errs)
+
+
+# ---------------------------------------------------------------------------
+# PR-F-UX1 Tier 2 lifecycle expansion — validate the two new firesAt slots
+# (on_user_prompt_submit + on_subagent_stop) accept llm_criterion + audit AND
+# nothing else. The matrix is intentionally narrow: block/retry/override on the
+# Tier 2 slots is a runtime contract change deferred to a later PR.
+# ---------------------------------------------------------------------------
+
+
+def test_llm_criterion_audit_at_on_user_prompt_submit_accepted():
+    rule = _llm(firesAt="on_user_prompt_submit", action="audit")
+    assert validate_custom_rule(rule) == []
+
+
+def test_llm_criterion_audit_at_on_subagent_stop_accepted():
+    rule = _llm(firesAt="on_subagent_stop", action="audit")
+    assert validate_custom_rule(rule) == []
+
+
+def test_llm_criterion_block_at_on_user_prompt_submit_rejected():
+    """Block at Tier 2 slot is rejected: audit-only matrix entry."""
+    rule = _llm(firesAt="on_user_prompt_submit", action="block")
+    errs = validate_custom_rule(rule)
+    assert any("on_user_prompt_submit" in e and "audit" in e for e in errs), errs
+
+
+def test_llm_criterion_block_at_on_subagent_stop_rejected():
+    """Block at Tier 2 slot is rejected: audit-only matrix entry."""
+    rule = _llm(firesAt="on_subagent_stop", action="block")
+    errs = validate_custom_rule(rule)
+    assert any("on_subagent_stop" in e and "audit" in e for e in errs), errs
+
+
+def test_deterministic_ref_at_on_user_prompt_submit_rejected():
+    """Only llm_criterion is wired to the two Tier 2 slots; other kinds reject."""
+    rule = _det(firesAt="on_user_prompt_submit", action="audit")
+    errs = validate_custom_rule(rule)
+    assert any("on_user_prompt_submit" in e for e in errs), errs
+
+
+def test_deterministic_ref_at_on_subagent_stop_rejected():
+    rule = _det(firesAt="on_subagent_stop", action="audit")
+    errs = validate_custom_rule(rule)
+    assert any("on_subagent_stop" in e for e in errs), errs
+
+
+def test_tier2_firesat_slots_listed_in_FIRES_AT():
+    """Guard against drift — both new slots must be members of FIRES_AT."""
+    from magi_agent.customize.custom_rules import FIRES_AT
+
+    assert "on_user_prompt_submit" in FIRES_AT
+    assert "on_subagent_stop" in FIRES_AT
