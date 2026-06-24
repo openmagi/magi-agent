@@ -942,6 +942,46 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_CUSTOMIZE_LLM_CALL_HOOKS_ENABLED",
+        stage="stage2",
+        summary=(
+            "PR-F-LIFE2 Tier 2 lifecycle expansion (per-LLM-call boundaries): "
+            "activate the two new audit-only custom_rule gate sites — "
+            "before_llm_call (wired adjacent to the ADK "
+            "before_model_callback boundary inside the runner stream) and "
+            "after_llm_call (sibling adjacent to after_model_callback). "
+            "Both fan-outs invoke the existing llm_criterion judge per "
+            "matching rule and record audit verdicts only; a per-"
+            "(session, turn) critic budget (env "
+            "MAGI_CUSTOMIZE_LLM_CALL_AUDIT_BUDGET, default 3) hard-caps "
+            "the combined before+after critic invocations per turn so a "
+            "misbehaving rule cannot multiply cost without bound. "
+            "Triple-gated with MAGI_CUSTOMIZE_VERIFICATION_ENABLED + "
+            "MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED; fail-open on any "
+            "customize-store fault. With no before_llm_call / after_llm_call "
+            "rules authored, runtime stays byte-identical (the new fan-outs "
+            "are no-ops and the surrounding ADK plugin's per-call work "
+            "short-circuits at the helper). Strict default-OFF."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_CUSTOMIZE_LLM_CALL_AUDIT_BUDGET",
+        default=3,
+        scope="public",
+        stage="stage2",
+        summary=(
+            "PR-F-LIFE2 per-turn cost ceiling: maximum combined "
+            "before_llm_call + after_llm_call critic invocations within a "
+            "single logical turn (per (session_id, turn_id) tuple). When "
+            "the budget reaches zero the lifecycle_audit fan-outs short-"
+            "circuit to a single budget_exhausted skip record per call "
+            "(no critic invocation) so a misbehaving rule cannot multiply "
+            "critic cost without bound. Default 3. Read raw from the env "
+            "on each turn (no flag_int wrapper needed)."
+        ),
+        kind="int",
+    ),
+    _b(
         "MAGI_CUSTOMIZE_PROMPT_INJECTION_ENABLED",
         stage="stage2",
         summary=(
