@@ -1961,21 +1961,7 @@ function availableArchetypes(lifecycle: Lifecycle): Archetype[] {
   if (lifecycle === "on_user_prompt_submit") {
     return ["audit", "mutate"];
   }
-  // PR-F-LIFE1 — ``on_subagent_stop`` is lifted past audit-only: the
-  // backend ``_LEGAL`` matrix now accepts (llm_criterion × on_subagent_stop
-  // × {audit, block, ask}). Block / ask are directives to the PARENT
-  // caller (the child output has already been emitted, so the wizard reads
-  // the verb as "tell the parent the subagent failed the criterion"). The
-  // audit row is still recorded in either case.
   if (lifecycle === "on_subagent_stop") {
-    return ["block", "ask", "audit"];
-  }
-  // PR-F-LIFE1 — both turn-boundary slots stay audit-only at the wizard
-  // (matches the backend ``_LEGAL`` entries). Block at top-level turn entry
-  // would require a runtime contract change (the engine stream has not
-  // started yet) and at top-level turn end the emission has already
-  // completed, so the conservative wire is audit-only.
-  if (lifecycle === "before_turn_start" || lifecycle === "after_turn_end") {
     return ["audit"];
   }
   return ["block", "ask", "audit"];
