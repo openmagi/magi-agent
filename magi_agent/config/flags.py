@@ -2294,6 +2294,32 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="int",
     ),
+    # --- Split-line additions (I-4 batch 17) --------------------------------
+    FlagSpec(
+        name="MAGI_STREAM_FALLBACK_MODEL",
+        default="claude-haiku-4-5-20251001",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Model id used by ``runtime/stream_fallback`` when a primary "
+            "stream is reclassified as unrecoverable. Snapshotted at "
+            "import time."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_LABEL",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Hosted gate5b shadow-generation provider label override "
+            "(e.g. ``anthropic``, ``openai``). Empty falls back to the "
+            "model-derived family. Hosted-only (excluded from the public "
+            "env-reference)."
+        ),
+        kind="str",
+    ),
 )
 
 
