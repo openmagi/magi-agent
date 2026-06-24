@@ -344,4 +344,97 @@ describe("loadChannelHistory", () => {
     expect(result.messages[0].content).toBe("plain text message");
     expect(result.decryptFailures).toBe(0);
   });
+
+  it("filters out server-readable user-turn marker rows so they never render", async () => {
+    // chat-proxy/core-agent-resume persists Python-ADK user turns as a
+    // hidden HTML-comment marker. loadChannelHistory must drop these so
+    // every caller (StreamChatContainer, legacy view-client, …) is
+    // covered uniformly without per-call filtering.
+    const markerContent =
+      "<!-- openmagi:server-readable-user-turn:v1:eyJjb250ZW50IjoiaGVsbG8ifQ -->";
+    const visibleContent = "real user message";
+
+    const markerRow: E2EEApiMessage = {
+      id: "srv-marker",
+      channel_name: "ch",
+      role: "user",
+      encrypted_content: wrapPlaintext(
+        encodeHistoryPlaintext({ role: "user", content: markerContent }),
+      ),
+      iv: "",
+      created_at: new Date(1000).toISOString(),
+      client_msg_id: "c-marker",
+    };
+    const visibleRow: E2EEApiMessage = {
+      id: "srv-visible",
+      channel_name: "ch",
+      role: "user",
+      encrypted_content: wrapPlaintext(
+        encodeHistoryPlaintext({ role: "user", content: visibleContent }),
+      ),
+      iv: "",
+      created_at: new Date(2000).toISOString(),
+      client_msg_id: "c-visible",
+    };
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        messages: [markerRow, visibleRow],
+        deletions: [],
+        hasMore: false,
+        nextBefore: null,
+      }),
+    } as unknown as Response);
+
+    const result = await loadChannelHistory({
+      botId: "b",
+      channelName: "ch",
+      keys: [],
+      token: "tok",
+      fetchImpl: mockFetch,
+    });
+
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0].content).toBe(visibleContent);
+    expect(result.decryptFailures).toBe(0);
+  });
+
+  it("tolerates trailing whitespace around the marker (regex is anchored with \\s*)", async () => {
+    const markerRow: E2EEApiMessage = {
+      id: "srv-marker-ws",
+      channel_name: "ch",
+      role: "user",
+      encrypted_content: wrapPlaintext(
+        encodeHistoryPlaintext({
+          role: "user",
+          content:
+            "  <!-- openmagi:server-readable-user-turn:v1:eyJjb250ZW50IjoieCJ9 -->  \n",
+        }),
+      ),
+      iv: "",
+      created_at: new Date(3000).toISOString(),
+      client_msg_id: "c-marker-ws",
+    };
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        messages: [markerRow],
+        deletions: [],
+        hasMore: false,
+        nextBefore: null,
+      }),
+    } as unknown as Response);
+
+    const result = await loadChannelHistory({
+      botId: "b",
+      channelName: "ch",
+      keys: [],
+      token: "tok",
+      fetchImpl: mockFetch,
+    });
+
+    expect(result.messages).toHaveLength(0);
+  });
 });

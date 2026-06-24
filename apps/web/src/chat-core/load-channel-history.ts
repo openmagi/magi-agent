@@ -6,6 +6,19 @@ import { decryptMessage } from "./e2ee";
 import { decodeHistoryPlaintext } from "./history-envelope";
 import type { ChatMessage } from "./types";
 
+/**
+ * chat-proxy/core-agent-resume wraps Python-ADK user turns as a hidden
+ * channel-history row whose content is a `<!-- openmagi:server-readable-
+ * user-turn:v1:... -->` HTML comment (base64url-encoded user content). It
+ * lets the server re-read the user's original input on resume without
+ * exposing it to the chat UI. Loaders MUST filter these rows out so they
+ * never render as visible bubbles.
+ *
+ * Same regex as chat-store (receivePushMessage) — see PR #1457 for context.
+ */
+const SERVER_READABLE_USER_TURN_MARKER_RE =
+  /^\s*<!-- openmagi:server-readable-user-turn:v1:[A-Za-z0-9_-]+ -->\s*$/;
+
 export interface E2EEApiMessage {
   id: string;
   channel_name: string;
@@ -149,6 +162,8 @@ export async function loadChannelHistory(
         decryptFailures++;
         return false;
       }
+      // Drop server-readable user-turn marker rows so they never render.
+      if (SERVER_READABLE_USER_TURN_MARKER_RE.test(m.content)) return false;
       return true;
     })
     .sort((a, b) => a.timestamp - b.timestamp);
