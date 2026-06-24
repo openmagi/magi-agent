@@ -1,3 +1,16 @@
+# 0.1.85 (2026-06-24)
+
+## Flag registry (I-1 series)
+- Batch 4: 5 _truthy_env call sites through flag_bool + 2 new FlagSpec (MAGI_STREAMING_CHAT, MAGI_STREAM_THINKING) (#980).
+- Batch 5: 2 runtime _is_true reads through flag_bool (MAGI_GATE5B_LIVE_SUBAGENTS_ENABLED, MAGI_DEEP_WEB_RESEARCH_ENABLED) (#981).
+- Batch 6: 6 gate-readiness ENABLED reads + 6 hosted-scope FlagSpec registrations (#996).
+
+## Child runner
+- emit trace + empty-debug to sys.stderr when logging.basicConfig is absent (#994).
+
+## Dashboard
+- remove grid background from the console (#995).
+
 # 0.1.84 (2026-06-24)
 
 ## Customize (F-MUT mutator hook series)
