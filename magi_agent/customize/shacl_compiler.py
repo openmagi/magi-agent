@@ -155,13 +155,18 @@ _BUILTIN_FIELD_HINTS: dict[str, list[str]] = {
     "EditMatch":                   ["tier", "tierIndex", "confidence", "ambiguous", "fileDigest", "spanDigest"],
     "DocumentCoverage":            ["totalUnits", "coveredUnits", "coverageRatio", "threshold", "status", "sourceDigest", "docDigest"],
     # Producer not found or fields not confidently verifiable — honest empty hint.
-    "GitDiff":                     [],
-    "FileDeliver":                 [],
-    "ArtifactVerify":              [],
-    "PlanVerifier":                [],
-    "Calculation":                 [],
-    "DateRange":                   [],
-    "TelegramDeliveryAck":         [],
+    # F2 task re-verification (2026-06-23): each empty entry below was reviewed
+    # against current producer source.  None constructs ``EvidenceRecord(fields={...})``
+    # nor sets ``ToolResult.metadata["evidence"]["fields"] = {...}``.  Adding a
+    # guessed key here corrupts NL→SHACL compilation (silent non-firing shapes).
+    # See tests/test_builtin_field_hints_match_producer.py for the policy lock.
+    "GitDiff":                     [],  # tool handlers return raw dict; no metadata["evidence"] declaration
+    "FileDeliver":                 [],  # file_deliver sets toolName/handler/digests but no "evidence" key
+    "ArtifactVerify":              [],  # no producer construction site located in magi_agent/
+    "PlanVerifier":                [],  # only catalog + verifier-bus refs; no concrete producer
+    "Calculation":                 [],  # _calculation returns raw {"value": ...}, never lifted to evidence.fields
+    "DateRange":                   [],  # date_range uses ok_result() which omits the "evidence" metadata key
+    "TelegramDeliveryAck":         [],  # external_ack source.kind is dropped by extraction.py before record build
 }
 
 

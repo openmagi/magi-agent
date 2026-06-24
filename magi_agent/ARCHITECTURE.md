@@ -780,6 +780,7 @@ graph LR
 | control_plane_overrides.py | User-facing toggles for in-context control-plane *behaviors*. | _truthy | (root)/main.py, cli/app.py, customize/catalog.py, transport/customize.py |
 | criterion_engine.py | Generic LLM criterion-judgment engine (P3). | egress_gate | cli/engine.py, customize/after_tool_gate.py |
 | custom_rules.py | Custom verification-rule schema + validation (spec §9.1). | shacl_verifier, what_menu | customize/rule_compiler.py, transport/customize.py |
+| live_catalog.py | Live evidence-catalog view (PR-F2). | ledger_store, shacl_compiler, store, what_menu | transport/customize.py |
 | preset_map.py | Canonical preset id → runtime-seam map for the Customize verification tab. | scope, seam_apply, seam_spec | cli/real_runner.py, customize/catalog.py, customize/seam_apply.py, customize/seam_compiler.py, customize/seam_spec.py |
 | rule_compiler.py | Unified NL → Rule compiler — single LLM call that routes a natural- | custom_rules, dashboard_authored, seam_spec, shacl_compiler | transport/customize.py |
 | runtime_gate.py | Runtime-side query for Customize verification preset state. | flags, store, verification_policy | cli/engine.py, customize/what_menu.py |
@@ -787,11 +788,11 @@ graph LR
 | seam_apply.py | Apply a :class:`SeamSpec` IR to the static :data:`PRESET_SEAMS` catalog. | preset_map, seam_spec | customize/preset_map.py |
 | seam_compiler.py | NL → SeamSpec compiler — registration-time only, fail-open everywhere. | preset_map, seam_spec, shacl_compiler | transport/customize.py |
 | seam_spec.py | SeamSpec — declarative PresetSeam mutation IR for the NL rule builder. | preset_map | customize/preset_map.py, customize/rule_compiler.py, customize/seam_apply.py, customize/seam_compiler.py, transport/customize.py |
-| shacl_compiler.py | SHACL compiler module -- Tasks 3.1 + 3.2: pure helpers + NL-to-SHACL compiler. | builtin, providers, readonly_classifier, shacl_verifier, types | customize/rule_compiler.py, customize/seam_compiler.py, transport/customize.py |
-| store.py | — | — | (root)/main.py, cli/app.py, cli/engine.py, cli/real_runner.py, cli/tests/test_document_coverage_seam_wiring.py, customize/__init__.py, customize/after_tool_gate.py, customize/runtime_gate.py, customize/tool_perm.py, runtime/message_builder.py, runtime/openmagi_runtime.py, transport/customize.py |
+| shacl_compiler.py | SHACL compiler module -- Tasks 3.1 + 3.2: pure helpers + NL-to-SHACL compiler. | builtin, providers, readonly_classifier, shacl_verifier, types | customize/live_catalog.py, customize/rule_compiler.py, customize/seam_compiler.py, transport/customize.py |
+| store.py | — | — | (root)/main.py, cli/app.py, cli/engine.py, cli/real_runner.py, cli/tests/test_document_coverage_seam_wiring.py, customize/__init__.py, customize/after_tool_gate.py, customize/live_catalog.py, customize/runtime_gate.py, customize/tool_perm.py, runtime/message_builder.py, runtime/openmagi_runtime.py, transport/customize.py |
 | tool_perm.py | Custom tool-permission rule matching (P2). | flags, store, verification_policy | tools/permission.py |
 | verification_policy.py | — | scope | cli/engine.py, cli/real_runner.py, customize/after_tool_gate.py, customize/apply.py, customize/runtime_gate.py, customize/tool_perm.py, runtime/message_builder.py |
-| what_menu.py | WHAT-menu for deterministic custom rules. | flags, runtime_gate | cli/real_runner.py, customize/catalog.py, customize/custom_rules.py |
+| what_menu.py | WHAT-menu for deterministic custom rules. | flags, runtime_gate | cli/real_runner.py, customize/catalog.py, customize/custom_rules.py, customize/live_catalog.py |
 
 ### discovery/
 
@@ -844,7 +845,7 @@ graph LR
 | gate2_durable_evidence.py | Durable evidence store for Gate 2 selected sandbox canary. | — | transport/chat.py, transport/gate2_sandbox_canary.py |
 | ledger.py | — | authority, builtin, safety, types | cli/engine.py, evidence/__init__.py, evidence/first_party_activity.py, evidence/local_tool_collector.py, harness/general_automation/constraint_reinjection.py, harness/general_automation/live_gate.py, harness/general_automation/task_completion.py, harness/verifier_bus.py, introspection/projection.py, introspection/tool.py, shadow/audit_reporter.py |
 | ledger_semantics.py | — | — | — |
-| ledger_store.py | Reader + retention for the durable evidence-ledger files. | — | evidence/local_tool_collector.py, evidence/run_view.py, runtime/governed_turn.py, shadow/gate5b4c3_live_runner_boundary.py |
+| ledger_store.py | Reader + retention for the durable evidence-ledger files. | — | customize/live_catalog.py, evidence/local_tool_collector.py, evidence/run_view.py, runtime/governed_turn.py, shadow/gate5b4c3_live_runner_boundary.py |
 | local_tool_collector.py | — | env, extraction, first_party_activity, ledger, ledger_store, result, source_ledger, types | cli/real_runner.py, cli/tests/test_evidence_turn_id_reconciliation.py, cli/tests/test_local_tool_evidence_wiring.py, cli/tests/test_real_runner.py, cli/tests/test_tool_runtime.py, cli/tool_runtime.py, cli/wiring.py, runtime/child_runner_live.py, tools/dispatcher.py, tools/tests/test_core_toolhost_source_projection.py |
 | observed_egress.py | — | gate1a_egress_correlation | (root)/main.py, transport/chat.py, transport/chat_routes.py, transport/health.py |
 | reports.py | — | authority, tool_preview, types | evidence/citation_audit.py, evidence/coding_verification.py, evidence/event_projection.py, evidence/source_ledger.py, evidence/subagent.py, shadow/audit_reporter.py |
@@ -1846,7 +1847,7 @@ graph LR
 | chat_shared.py | Shared primitives for the decomposed Gate5B chat serving stack. | _truthy, child_runner_live, env, gate1a_readonly_tools, gate5b4c3_live_runner_boundary, gate5b_full_toolhost, openmagi_runtime, shadow_generations, user_visible_model_routing | transport/chat.py, transport/chat_routes.py, transport/control_requests.py, transport/gate2_sandbox_canary.py, transport/generation_request.py |
 | control_requests.py | Control-request REST surface consumed by the restored web dashboard. | chat_shared, openmagi_runtime | (root)/app.py |
 | credentials.py | Dashboard "Credentials" admin routes. | credentials_admin, durable_store, openmagi_runtime, payload, tools | (root)/app.py |
-| customize.py | — | apply, catalog, control_plane_overrides, custom_rules, flags, openmagi_runtime, rule_compiler, seam_compiler, seam_spec, shacl_compiler, store, tools, types | (root)/app.py |
+| customize.py | — | apply, catalog, control_plane_overrides, custom_rules, flags, live_catalog, openmagi_runtime, rule_compiler, seam_compiler, seam_spec, shacl_compiler, store, tools, types | (root)/app.py |
 | debug_trace.py | Debug endpoint exposing the current turn's execution trace. | trace_context | (root)/app.py |
 | egress_critic.py | Egress critic gate and live evidence projection for the chat serving path. | egress_gate, gate1a_readonly_tools, gate5b_full_toolhost, generation_request, mapping, projection, providers, readonly_classifier, reason_safety, user_visible_model_routing | cli/wiring.py, transport/chat.py, transport/chat_routes.py |
 | gate2_sandbox_canary.py | Gate2 sandbox workspace canary chat + delivery-receipt logic. | chat_shared, gate2_activation_loop_a, gate2_durable_evidence, gate2_readiness, openmagi_runtime, user_visible_model_routing | transport/chat.py, transport/chat_routes.py |

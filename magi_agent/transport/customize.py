@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from magi_agent.customize.apply import apply_tool_overrides, apply_verification_overrides
 from magi_agent.customize.catalog import build_catalog
 from magi_agent.customize.custom_rules import validate_custom_rule
+from magi_agent.customize.live_catalog import build_live_catalog
 from magi_agent.customize.shacl_compiler import (
     _resolve_shacl_compile_factory,
     available_fields,
@@ -150,6 +151,36 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
                 "overrides": load_overrides(),
             }
         )
+
+    @app.get("/v1/app/customize/evidence/live-catalog")
+    async def get_live_catalog(request: Request) -> JSONResponse:
+        """Per-evidence-type live view fused from hints + ledger + WHAT-menu.
+
+        Read-only, fail-open. Reports for each built-in evidence type the
+        registered fields, the fields populated over the last 100 turns, the
+        sample-population count, the WHAT-menu refs that surface the type, and
+        the user-authored custom rules that reference one of those refs.
+
+        Query params:
+          sessionId   str (required)   ledger is partitioned per session
+        """
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        session_id = request.query_params.get("sessionId")
+        if not session_id:
+            return JSONResponse(
+                status_code=400, content={"error": "sessionId_required"}
+            )
+        try:
+            view = build_live_catalog(session_id=session_id)
+        except Exception:  # noqa: BLE001 — fail-open per spec
+            view = {
+                "evidenceTypes": [],
+                "samplingWindow": "last 100 turns",
+                "asOf": "",
+            }
+        return JSONResponse(content=_make_json_safe(view))
 
     @app.patch("/v1/app/customize/tools/{name}")
     async def patch_tool(name: str, request: Request) -> JSONResponse:
