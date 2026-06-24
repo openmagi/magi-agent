@@ -1055,6 +1055,100 @@ describe("AuthorWizard — PR-F-LIFE1 turn-boundary lifecycle expansion", () => 
 
 
 // ---------------------------------------------------------------------------
+// PR-F-LIFE2 — per-LLM-call lifecycle expansion. Backend matrix in
+// magi_agent/customize/custom_rules.py adds the two new firesAt slots
+// (before_llm_call + after_llm_call) under (llm_criterion + audit) ONLY.
+// The surrounding ADK plugin (magi_agent/adk_bridge/lifecycle_llm_call_control.py)
+// enforces a per-turn critic budget (env MAGI_CUSTOMIZE_LLM_CALL_AUDIT_BUDGET,
+// default 3) so a misbehaving rule cannot multiply critic cost without
+// bound. The wizard mirrors that restriction.
+// ---------------------------------------------------------------------------
+
+
+describe("AuthorWizard — PR-F-LIFE2 per-LLM-call lifecycle expansion", () => {
+  it("Lifecycle union gains before_llm_call + after_llm_call", () => {
+    expect(src).toMatch(/type Lifecycle[\s\S]*?\| "before_llm_call"/);
+    expect(src).toMatch(/type Lifecycle[\s\S]*?\| "after_llm_call"/);
+  });
+
+  it("LIFECYCLE_OPTIONS lists the two new per-LLM-call slots as Tier 2", () => {
+    // Both slots ride on top of the ADK before/after model callback
+    // boundary via the LifecycleLlmCallAuditControl plugin — active wire,
+    // not a Tier 3 file-hook-only entry.
+    expect(src).toMatch(/id: "before_llm_call"[\s\S]*?tier: "tier2"/);
+    expect(src).toMatch(/id: "after_llm_call"[\s\S]*?tier: "tier2"/);
+  });
+
+  it("LIFECYCLE_OPTIONS describes the per-LLM-call slots as audit-only", () => {
+    // Backend ``_LEGAL`` matrix entries restrict both slots to audit;
+    // friendly label must telegraph that contract.
+    expect(src).toMatch(/id: "before_llm_call"[\s\S]*?\(audit-only\)/);
+    expect(src).toMatch(/id: "after_llm_call"[\s\S]*?\(audit-only\)/);
+  });
+
+  it("LIFECYCLE_OPTIONS surfaces the per-turn cost ceiling in the option description", () => {
+    // The operator must see the cost-ceiling story up-front so they
+    // understand why a single LLM call cannot fan-out unboundedly.
+    expect(src).toMatch(
+      /id: "before_llm_call"[\s\S]*?capped at 3 invocations per turn/,
+    );
+    expect(src).toMatch(
+      /id: "after_llm_call"[\s\S]*?capped at 3 invocations per turn/,
+    );
+  });
+
+  it("stepPlan(per-LLM-call) drops the target step (6-step plan)", () => {
+    // Per-LLM-call slots fire OUTSIDE any tool boundary so they have no
+    // tool target axis — same step shape as pre_final / turn-boundary.
+    expect(src).toMatch(
+      /lifecycle === "before_llm_call" \|\| lifecycle === "after_llm_call"[\s\S]*?\["trigger", "condition", "specifics", "action", "name", "review"\]/,
+    );
+  });
+
+  it("availableConditionKinds(per-LLM-call) returns ONLY llm_criterion", () => {
+    // Backend ``_LEGAL`` has fan-out only for llm_criterion at the per-
+    // LLM-call slots. deterministic_ref / mutator kinds are honest-degrade
+    // omitted (no runtime consumer).
+    expect(src).toMatch(
+      /lifecycle === "before_llm_call" \|\| lifecycle === "after_llm_call"[\s\S]*?return \["llm_criterion"\]/,
+    );
+  });
+
+  it("availableArchetypes(per-LLM-call) returns ONLY audit", () => {
+    // Mirrors the backend matrix entries
+    // (llm_criterion × before_llm_call × {audit}) /
+    // (llm_criterion × after_llm_call × {audit}). Block / ask are deferred
+    // (would amplify runaway-cost risk on the per-call hot path).
+    expect(src).toMatch(
+      /lifecycle === "before_llm_call" \|\| lifecycle === "after_llm_call"\) \{[\s\S]*?return \["audit"\]/,
+    );
+  });
+
+  it("reseedDownstream forces toolTarget=any for the per-LLM-call lifecycles", () => {
+    // Per-LLM-call slots have no tool layer; a stale "specific" pick must
+    // not bleed into payloads / Review summaries.
+    expect(src).toMatch(
+      /merged\.lifecycle === "before_llm_call"[\s\S]*?merged\.lifecycle === "after_llm_call"[\s\S]*?merged\.toolTarget = "any"/,
+    );
+  });
+
+  it("targetEventPhrase + whenForLifecycle describe both per-LLM-call slots in plain English", () => {
+    expect(src).toContain('"Before each LLM call"');
+    expect(src).toContain('"After each LLM call"');
+  });
+
+  it("ReviewStep target row is skipped for the per-LLM-call lifecycles", () => {
+    // The Review summary must not show a Target row for slots that have
+    // no tool axis — the exclusion list must include both per-LLM-call
+    // lifecycles.
+    expect(src).toMatch(
+      /draft\.lifecycle !== "before_llm_call"[\s\S]*?draft\.lifecycle !== "after_llm_call"/,
+    );
+  });
+});
+
+
+// ---------------------------------------------------------------------------
 // PR-F-UX2 (F8 core) — RuntimeFieldChips wiring in SpecificsStep.
 //
 // The chip picker is rendered above every wizard text input that accepts a

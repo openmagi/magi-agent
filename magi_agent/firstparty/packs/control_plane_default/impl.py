@@ -9,13 +9,14 @@ preserved exactly), their order, and their collaborators are byte-identical to
 the pre-Phase-6 hand-assembly (the Phase-0 golden regression stays green).
 
 The de-privileging: these controls are discovered+loaded from ``pack.toml``
-through the same loader a user ``~/.magi/packs`` control_plane pack uses. The 3
-main-side features (loop-resilience 6b7cd40e, facts-replan #510, tool-synthesis
-nudge #512) are SEPARATE ``provides`` entries — ordered by the manifest
-``priority`` field (the nudge entry is highest = registered LAST so edit-retry /
-resilience overrides win the after-tool fan-out) — so a user pack can override
-or forbid each one individually with no first-party-only handle and no
-hardcoded ``plane.register`` inside ``build_default_plugin``.
+through the same loader a user ``~/.magi/packs`` control_plane pack uses. The
+main-side features (loop-resilience 6b7cd40e, facts-replan #510, F-LIFE2
+per-LLM-call audit, tool-synthesis nudge #512) are SEPARATE ``provides``
+entries — ordered by the manifest ``priority`` field (the nudge entry is
+highest = registered LAST so edit-retry / resilience overrides win the
+after-tool fan-out) — so a user pack can override or forbid each one
+individually with no first-party-only handle and no hardcoded
+``plane.register`` inside ``build_default_plugin``.
 """
 from __future__ import annotations
 
@@ -62,6 +63,31 @@ def provide_facts_replan_control(context: ControlPlaneProvideContext) -> None:
     from magi_agent.adk_bridge.control_plane import build_facts_replan_controls
 
     for control in build_facts_replan_controls(dict(context.env)):
+        context.register(control)
+
+
+def provide_lifecycle_llm_call_audit_controls(
+    context: ControlPlaneProvideContext,
+) -> None:
+    """``control_plane:lifecycle-llm-call-audit@1``: PR-F-LIFE2 per-LLM-call
+    audit fan-out, strict default-OFF (``MAGI_CUSTOMIZE_LLM_CALL_HOOKS_ENABLED``).
+
+    Production wiring keystone: ``build_default_plugin`` →
+    ``build_control_plane_from_packs`` is the live runner path (cli/real_runner
+    + transport/gate5b_governance). Without this pack entry the
+    :class:`LifecycleLlmCallAuditControl` would only register through the
+    legacy/compat ``build_default_plane`` composition surface, so authored
+    ``before_llm_call`` / ``after_llm_call`` rules would silently never fire
+    on operator-facing serve/REPL/child paths. Delegates to the same
+    single-source builder used by ``build_default_plane`` so the controls,
+    env gates, and per-turn budget defaults are byte-identical between both
+    composition paths.
+    """
+    from magi_agent.adk_bridge.control_plane import (
+        build_lifecycle_llm_call_audit_controls,
+    )
+
+    for control in build_lifecycle_llm_call_audit_controls(dict(context.env)):
         context.register(control)
 
 

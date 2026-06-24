@@ -424,3 +424,88 @@ def test_life1_firesat_slots_listed_in_FIRES_AT():
 
     assert "before_turn_start" in FIRES_AT
     assert "after_turn_end" in FIRES_AT
+
+
+# ---------------------------------------------------------------------------
+# PR-F-LIFE2 — per-LLM-call slots. before_llm_call + after_llm_call accept
+# (llm_criterion + audit) ONLY (audit-only contract — surrounding ADK plugin
+# enforces a per-turn critic budget via
+# MAGI_CUSTOMIZE_LLM_CALL_AUDIT_BUDGET, default 3). deterministic_ref /
+# tool_perm / mutator kinds have no runtime fan-out at these slots
+# (honest-degrade — review pass on F-LIFE1 established the same pattern).
+# Wired in magi_agent/adk_bridge/lifecycle_llm_call_control.py via
+# magi_agent.customize.lifecycle_audit.{run_before_llm_call_audit,
+# run_after_llm_call_audit}.
+# ---------------------------------------------------------------------------
+
+
+def test_llm_criterion_audit_at_before_llm_call_accepted():
+    rule = _llm(firesAt="before_llm_call", action="audit")
+    assert validate_custom_rule(rule) == []
+
+
+def test_llm_criterion_audit_at_after_llm_call_accepted():
+    rule = _llm(firesAt="after_llm_call", action="audit")
+    assert validate_custom_rule(rule) == []
+
+
+def test_llm_criterion_block_at_before_llm_call_rejected():
+    """Block at the per-call boundary would amplify the runaway-cost risk
+    (one bad rule blocks every LLM call within a turn) — keep audit-only
+    in v1."""
+    rule = _llm(firesAt="before_llm_call", action="block")
+    errs = validate_custom_rule(rule)
+    assert any("before_llm_call" in e and "audit" in e for e in errs), errs
+
+
+def test_llm_criterion_block_at_after_llm_call_rejected():
+    rule = _llm(firesAt="after_llm_call", action="block")
+    errs = validate_custom_rule(rule)
+    assert any("after_llm_call" in e and "audit" in e for e in errs), errs
+
+
+def test_llm_criterion_retry_at_before_llm_call_rejected():
+    """retry has no honest meaning per-LLM-call (the call is already
+    happening / has already happened)."""
+    rule = _llm(firesAt="before_llm_call", action="retry")
+    errs = validate_custom_rule(rule)
+    assert any("before_llm_call" in e and "audit" in e for e in errs), errs
+
+
+def test_llm_criterion_retry_at_after_llm_call_rejected():
+    rule = _llm(firesAt="after_llm_call", action="retry")
+    errs = validate_custom_rule(rule)
+    assert any("after_llm_call" in e and "audit" in e for e in errs), errs
+
+
+def test_deterministic_ref_at_before_llm_call_rejected_no_runtime_fanout():
+    """deterministic_ref has no fan-out at the per-LLM-call slots — the
+    surrounding ADK plugin only wires the criterion judge. Reject so
+    operators don't persist inert rules."""
+    rule = _det(firesAt="before_llm_call", action="audit")
+    errs = validate_custom_rule(rule)
+    assert any("before_llm_call" in e for e in errs), errs
+
+
+def test_deterministic_ref_at_after_llm_call_rejected_no_runtime_fanout():
+    rule = _det(firesAt="after_llm_call", action="audit")
+    errs = validate_custom_rule(rule)
+    assert any("after_llm_call" in e for e in errs), errs
+
+
+def test_tool_perm_at_before_llm_call_rejected():
+    """tool_perm has no honest mapping at a per-LLM-call slot (no tool
+    invocation is in flight at the model-callback boundary)."""
+    rule = _tool(firesAt="before_llm_call", action="block")
+    errs = validate_custom_rule(rule)
+    assert any("before_llm_call" in e for e in errs), errs
+
+
+def test_life2_firesat_slots_listed_in_FIRES_AT():
+    """Guard against drift — both per-LLM-call slots must be members of
+    FIRES_AT so the validator's ``firesAt must be one of …`` check
+    accepts them."""
+    from magi_agent.customize.custom_rules import FIRES_AT
+
+    assert "before_llm_call" in FIRES_AT
+    assert "after_llm_call" in FIRES_AT

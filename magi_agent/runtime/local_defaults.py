@@ -204,6 +204,18 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     # wizard's new lifecycle options end-to-end. Strict default-OFF in the
     # registry so a fresh install / hosted serve stays byte-identical.
     "MAGI_CUSTOMIZE_LIFECYCLE_TURN_HOOKS_ENABLED",
+    # PR-F-LIFE2 Tier 2 lifecycle expansion (per-LLM-call boundaries):
+    # activate the two new audit-only custom_rule gate sites
+    # (before_llm_call + after_llm_call) wired adjacent to the ADK
+    # before/after model callback boundary. Hard-capped at
+    # MAGI_CUSTOMIZE_LLM_CALL_AUDIT_BUDGET combined invocations per turn
+    # (default 3) to prevent runaway critic cost on the per-call hot
+    # path; both fan-outs are no-ops without authored rules. Lab opts in
+    # so dogfood turns can exercise the wizard's new lifecycle options
+    # end-to-end. Strict default-OFF in the registry so a fresh install /
+    # hosted serve stays byte-identical (the ADK plugin is not
+    # registered when the master flag is OFF).
+    "MAGI_CUSTOMIZE_LLM_CALL_HOOKS_ENABLED",
     # PR-F-MUT1 prompt_injection mutator: append to a tool's arguments before
     # dispatch OR append a new section to the assembled system prompt. Both
     # wires are no-ops without authored rules; lab opts in so dogfood turns
