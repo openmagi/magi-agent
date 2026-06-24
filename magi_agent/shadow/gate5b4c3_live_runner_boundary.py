@@ -1975,12 +1975,15 @@ def _output_continuation_config_from_env() -> OutputContinuationConfig | None:
 
 def _stream_event_limit(*, selected_full_toolhost: bool) -> int:
     if selected_full_toolhost:
-        raw = os.environ.get("MAGI_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT", "").strip()
-        if not raw:
-            return _DEFAULT_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT
-        try:
-            parsed = int(raw)
-        except ValueError:
+        # I-4: routed through the typed flag registry. ``flag_int``
+        # falls back to the registered default (0 sentinel) on missing
+        # / unparseable values; the in-module
+        # ``_DEFAULT_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT`` then
+        # takes over (preserving the pre-I-4 parse semantics).
+        from magi_agent.config.flags import flag_int  # noqa: PLC0415
+
+        parsed = flag_int("MAGI_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT") or 0
+        if parsed <= 0:
             return _DEFAULT_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT
         if parsed < _MANUAL_TOOL_EVENT_LIMIT:
             return _MANUAL_TOOL_EVENT_LIMIT

@@ -2263,6 +2263,20 @@ FLAGS: tuple[FlagSpec, ...] = (
             "around each turn's prompt build. Default-OFF."
         ),
     ),
+    # --- Shadow stream-event limit (I-4 batch 16) ---------------------------
+    FlagSpec(
+        name="MAGI_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT",
+        default=0,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Maximum text events streamed per selected-full-toolhost "
+            "turn. ``0`` (default) defers to the in-module "
+            "``_DEFAULT_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT``; values "
+            "below the manual-tool floor are clamped up at the call site."
+        ),
+        kind="int",
+    ),
 )
 
 
