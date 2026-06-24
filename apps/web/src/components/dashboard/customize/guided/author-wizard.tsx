@@ -84,7 +84,14 @@ import { RadioCard, WizardChrome } from "./wizard-chrome";
 // ---------------------------------------------------------------------------
 
 
-type Lifecycle = "before_tool_use" | "after_tool_use" | "pre_final";
+type Lifecycle =
+  | "before_tool_use"
+  | "after_tool_use"
+  | "pre_final"
+  // PR-F-UX1 Tier 2 — bus-emitted gates with custom_rule paths wired in
+  // magi_agent.customize.lifecycle_audit (audit-only, llm_criterion only).
+  | "on_user_prompt_submit"
+  | "on_subagent_stop";
 type Scope = "always" | "coding" | "research" | "delivery" | "memory" | "task";
 type Archetype = "block" | "ask" | "audit" | "strip";
 type ToolTarget = "any" | "specific";
@@ -218,6 +225,13 @@ type StepKey = "trigger" | "target" | "condition" | "specifics" | "action" | "na
 
 function stepPlan(lifecycle: Lifecycle): StepKey[] {
   if (lifecycle === "pre_final") {
+    return ["trigger", "condition", "specifics", "action", "name", "review"];
+  }
+  // PR-F-UX1 Tier 2 — the two new lifecycle slots fire OUTSIDE the tool
+  // boundary (one before the system prompt is assembled, the other after the
+  // child's turn has emitted) so they have no tool target axis. Same step
+  // shape as pre_final.
+  if (lifecycle === "on_user_prompt_submit" || lifecycle === "on_subagent_stop") {
     return ["trigger", "condition", "specifics", "action", "name", "review"];
   }
   return ["trigger", "target", "condition", "specifics", "action", "name", "review"];
@@ -402,14 +416,107 @@ export function AuthorWizard({
 // ---------------------------------------------------------------------------
 
 
-const LIFECYCLE_OPTIONS: ReadonlyArray<{
-  id: Lifecycle;
+// PR-F-UX1: lifecycle audit results.
+//
+// Tier 1 (gate exists, custom_rule wired today): before_tool_use, after_tool_use,
+// pre_final. These are the legacy slots — every kind/action combo in
+// custom_rules._LEGAL is authored against one of these three.
+//
+// Tier 2 (gate exists, custom_rule path wired in this PR): on_user_prompt_submit
+// (BEFORE_SYSTEM_PROMPT bus event in runtime/message_builder) and
+// on_subagent_stop (AFTER_TURN_END callback in the child runner). Both are
+// audit-only at launch — backend ``_LEGAL`` restricts these slots to
+// ``llm_criterion`` + ``audit``. Block at these slots would change the
+// surrounding runtime contract (byte-identical prompt assembly /
+// already-emitted child output) and is deferred to a later PR.
+//
+// Tier 3 (hook exists but no runtime emitter, OR audit-redundant): rendered as
+// DISABLED radio cards with an honest tooltip pointing operators at file hooks
+// (~/.magi/settings.json). Surfacing them keeps the UI honest about what the
+// runtime can/cannot enforce; hiding them would invite operators to assume
+// they don't exist.
+type LifecycleTier = "tier1" | "tier2" | "tier3";
+
+interface LifecycleOption {
+  id: Lifecycle | string;
   label: string;
   description: string;
-}> = [
-  { id: "before_tool_use", label: "Before a tool runs", description: "Fires at PreToolUse — before the agent invokes a tool." },
-  { id: "after_tool_use", label: "After a tool returns", description: "Fires at PostToolUse — before the agent reads the tool's output." },
-  { id: "pre_final", label: "Before the final answer commits", description: "Fires just before the runtime accepts the agent's final answer." },
+  tier: LifecycleTier;
+  disabledReason?: string;
+}
+
+const LIFECYCLE_OPTIONS: ReadonlyArray<LifecycleOption> = [
+  // --- Tier 1 — wired today ------------------------------------------------
+  {
+    id: "before_tool_use",
+    label: "Before a tool runs",
+    description: "Fires at PreToolUse — before the agent invokes a tool.",
+    tier: "tier1",
+  },
+  {
+    id: "after_tool_use",
+    label: "After a tool returns",
+    description: "Fires at PostToolUse — before the agent reads the tool's output.",
+    tier: "tier1",
+  },
+  {
+    id: "pre_final",
+    label: "Before the final answer commits",
+    description: "Fires just before the runtime accepts the agent's final answer.",
+    tier: "tier1",
+  },
+  // --- Tier 2 — wired in PR-F-UX1, audit-only ------------------------------
+  {
+    id: "on_user_prompt_submit",
+    label: "When the user submits a prompt (audit-only)",
+    description:
+      "Fires at BEFORE_SYSTEM_PROMPT — adjacent to system-prompt assembly. Audit-only: records the criterion verdict without mutating the assembled prompt.",
+    tier: "tier2",
+  },
+  {
+    id: "on_subagent_stop",
+    label: "When a subagent finishes a turn (audit-only)",
+    description:
+      "Fires at AFTER_TURN_END — adjacent to the child-runner's turn-end callback. Audit-only: the child output has already been emitted, so blocks aren't honest at this slot.",
+    tier: "tier2",
+  },
+  // --- Tier 3 — visible but disabled (file hook only) ----------------------
+  {
+    id: "before_llm_call",
+    label: "Before each LLM call",
+    description:
+      "(file hook only — author via ~/.magi/settings.json) Fires every LLM call inside a turn; high blast radius, mostly subsumed by pre_final.",
+    tier: "tier3",
+    disabledReason:
+      "No custom_rule gate yet — file hooks via ~/.magi/settings.json instead.",
+  },
+  {
+    id: "after_llm_call",
+    label: "After each LLM call",
+    description:
+      "(file hook only — author via ~/.magi/settings.json) Per-LLM-call inspection; redundant with pre_final's egress gate.",
+    tier: "tier3",
+    disabledReason:
+      "No custom_rule gate yet — file hooks via ~/.magi/settings.json instead.",
+  },
+  {
+    id: "on_session_start",
+    label: "When a session starts",
+    description:
+      "(file hook only — author via ~/.magi/settings.json) No runtime emitter; CC SessionStart hook fires from the loader.",
+    tier: "tier3",
+    disabledReason:
+      "No custom_rule gate yet — file hooks via ~/.magi/settings.json instead.",
+  },
+  {
+    id: "on_session_stop",
+    label: "When a session stops",
+    description:
+      "(file hook only — author via ~/.magi/settings.json) No runtime emitter; CC Stop hook fires from the loader.",
+    tier: "tier3",
+    disabledReason:
+      "No custom_rule gate yet — file hooks via ~/.magi/settings.json instead.",
+  },
 ];
 
 
@@ -443,15 +550,23 @@ function TriggerStep({
         <legend className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
           Lifecycle event
         </legend>
-        {LIFECYCLE_OPTIONS.map((opt) => (
-          <RadioCard
-            key={opt.id}
-            checked={draft.lifecycle === opt.id}
-            onClick={() => update({ lifecycle: opt.id })}
-            label={opt.label}
-            description={opt.description}
-          />
-        ))}
+        {LIFECYCLE_OPTIONS.map((opt) => {
+          // Tier 3 entries render visible-but-disabled with an honest tooltip;
+          // the operator sees the option exists in the runtime but learns it
+          // needs a file hook authored via ~/.magi/settings.json instead.
+          const isDisabled = opt.tier === "tier3";
+          return (
+            <RadioCard
+              key={opt.id}
+              checked={draft.lifecycle === (opt.id as Lifecycle)}
+              onClick={() => update({ lifecycle: opt.id as Lifecycle })}
+              label={opt.label}
+              description={opt.description}
+              disabled={isDisabled}
+              disabledReason={opt.disabledReason}
+            />
+          );
+        })}
       </fieldset>
 
       <fieldset className="space-y-2">
@@ -524,6 +639,14 @@ function availableConditionKinds(
   lifecycle: Lifecycle,
   toolTarget: ToolTarget,
 ): ConditionKind[] {
+  // PR-F-UX1 Tier 2 — both new slots accept ``llm_criterion`` ONLY (backend
+  // ``_LEGAL`` matrix restricts these slots to llm_criterion + audit). No
+  // deterministic kinds today: deterministic_ref needs an evidence ledger
+  // (pre_final), tool_perm needs a tool (before_tool_use), and shacl shapes
+  // need pre-final evidence records.
+  if (lifecycle === "on_user_prompt_submit" || lifecycle === "on_subagent_stop") {
+    return ["llm_criterion"];
+  }
   // pre_final has no tool layer; target is ignored.
   if (lifecycle === "pre_final") {
     // PR-F3: field_constraint is the deterministic SHACL-via-picker path
@@ -1241,6 +1364,12 @@ interface ArchetypeOption {
 function availableArchetypes(lifecycle: Lifecycle): Archetype[] {
   if (lifecycle === "before_tool_use") return ["block", "ask", "audit"];
   if (lifecycle === "after_tool_use") return ["block", "audit", "strip"];
+  // PR-F-UX1 Tier 2 — both new slots are audit-only at the backend matrix.
+  // Surfacing "block" here would let the wizard assemble a draft the backend
+  // ``_LEGAL`` table rejects (cleaner to refuse the action here than at PUT).
+  if (lifecycle === "on_user_prompt_submit" || lifecycle === "on_subagent_stop") {
+    return ["audit"];
+  }
   return ["block", "ask", "audit"];
 }
 
@@ -1337,6 +1466,14 @@ function fieldConstraintTriggerPhrase(draft: Draft): string {
 
 function targetEventPhrase(draft: Draft): string {
   if (draft.lifecycle === "pre_final") return "Before the final answer commits";
+  // PR-F-UX1 Tier 2 — surface the new lifecycle slots in plain English so the
+  // ArchetypeStep header and the Review-step sentence stay honest.
+  if (draft.lifecycle === "on_user_prompt_submit") {
+    return "When the user submits a prompt";
+  }
+  if (draft.lifecycle === "on_subagent_stop") {
+    return "When a subagent finishes a turn";
+  }
   if (draft.lifecycle === "before_tool_use") {
     return draft.toolTarget === "specific"
       ? `Before "${draft.toolName || "…"}" runs`
@@ -1482,7 +1619,9 @@ function ReviewStep({
           <dd className="font-mono text-foreground">{draft.ruleId || "(unnamed)"}</dd>
           <dt className="text-secondary">When</dt>
           <dd>{draft.scope} · {draft.lifecycle}</dd>
-          {draft.lifecycle !== "pre_final" ? (
+          {draft.lifecycle !== "pre_final"
+            && draft.lifecycle !== "on_user_prompt_submit"
+            && draft.lifecycle !== "on_subagent_stop" ? (
             <>
               <dt className="text-secondary">Target</dt>
               <dd>{draft.toolTarget === "any" ? "any tool" : draft.toolName || "(unnamed tool)"}</dd>
@@ -1521,6 +1660,13 @@ function describePolicy(draft: Draft, refOptions: RefOption[]): string {
 
 function whenForLifecycle(draft: Draft): string {
   if (draft.lifecycle === "pre_final") return "Before the final answer commits";
+  // PR-F-UX1 Tier 2 — describe the two new audit-only lifecycle slots.
+  if (draft.lifecycle === "on_user_prompt_submit") {
+    return "When the user submits a prompt";
+  }
+  if (draft.lifecycle === "on_subagent_stop") {
+    return "When a subagent finishes a turn";
+  }
   if (draft.lifecycle === "before_tool_use") {
     return draft.toolTarget === "specific"
       ? `Before "${draft.toolName}" runs`

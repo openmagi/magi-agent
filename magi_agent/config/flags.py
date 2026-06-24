@@ -897,6 +897,26 @@ FLAGS: tuple[FlagSpec, ...] = (
             "overrides file never blocks a spawn."
         ),
     ),
+    _b(
+        "MAGI_CUSTOMIZE_LIFECYCLE_EXPANSION_ENABLED",
+        stage="stage2",
+        summary=(
+            "PR-F-UX1 Tier 2 lifecycle expansion: activate the two new "
+            "audit-only custom_rule gate sites — on_user_prompt_submit "
+            "(wired adjacent to BEFORE_SYSTEM_PROMPT in "
+            "runtime/message_builder) and on_subagent_stop (wired adjacent "
+            "to AFTER_TURN_END in the child runner). Both fan-outs invoke "
+            "the existing llm_criterion judge per matching rule and record "
+            "audit verdicts only; the surrounding runtime contract is "
+            "byte-identical (no mutation of the assembled prompt, no block "
+            "of the post-turn emission). Triple-gated with "
+            "MAGI_CUSTOMIZE_VERIFICATION_ENABLED + "
+            "MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED; fail-open on any "
+            "customize-store fault. With no on_user_prompt_submit / "
+            "on_subagent_stop rules authored, runtime stays byte-identical "
+            "(the new fan-out is a no-op). Strict default-OFF."
+        ),
+    ),
     _pb(
         "MAGI_CREDENTIAL_AWARENESS_ENABLED",
         stage="stage2",

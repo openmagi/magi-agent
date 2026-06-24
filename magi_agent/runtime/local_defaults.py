@@ -192,6 +192,11 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     # registry so a fresh install / hosted serve stays byte-identical; lab opts
     # in so dogfood turns honor operator-authored budgets out-of-the-box.
     "MAGI_CUSTOMIZE_BUDGETS_ENABLED",
+    # PR-F-UX1 Tier 2 lifecycle expansion: activate the two new audit-only
+    # custom_rule gate sites (on_user_prompt_submit + on_subagent_stop).
+    # Both fan-outs are no-ops without authored rules; lab opts in so dogfood
+    # turns can exercise the wizard's new lifecycle options end-to-end.
+    "MAGI_CUSTOMIZE_LIFECYCLE_EXPANSION_ENABLED",
     # NOTE: MAGI_CUSTOMIZE_VERIFICATION_ENABLED / MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED
     # are NOT here: they are profile-aware default-ON (``_pb``), so they resolve ON
     # in every non-safe profile (full AND lab) on their own. The lab seed only

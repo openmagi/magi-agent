@@ -770,3 +770,104 @@ describe("AuthorWizard — PR-F-UX5 evidence_ref vs verifier_passed split", () =
     );
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// PR-F-UX1 — lifecycle audit (Tier 2 expansion + Tier 3 honest-disabled
+// surfacing). Backend matrix in magi_agent/customize/custom_rules.py restricts
+// the two new firesAt slots to llm_criterion + audit; the wizard mirrors that
+// restriction so an operator cannot assemble a draft the backend rejects.
+// ---------------------------------------------------------------------------
+
+
+describe("AuthorWizard — PR-F-UX1 lifecycle audit + Tier 2 expansion", () => {
+  it("Lifecycle union gains on_user_prompt_submit + on_subagent_stop", () => {
+    expect(src).toMatch(/type Lifecycle[\s\S]*?\| "on_user_prompt_submit"/);
+    expect(src).toMatch(/type Lifecycle[\s\S]*?\| "on_subagent_stop"/);
+  });
+
+  it("LIFECYCLE_OPTIONS lists Tier 1 (legacy 3) + Tier 2 (2 new) + Tier 3 (file-hook-only) entries", () => {
+    // Tier 1 — Tier markers must be present so renderers can distinguish
+    // active-vs-disabled and downstream test assertions can read the tier.
+    expect(src).toMatch(/id: "before_tool_use"[\s\S]*?tier: "tier1"/);
+    expect(src).toMatch(/id: "after_tool_use"[\s\S]*?tier: "tier1"/);
+    expect(src).toMatch(/id: "pre_final"[\s\S]*?tier: "tier1"/);
+    // Tier 2 — both new active slots
+    expect(src).toMatch(/id: "on_user_prompt_submit"[\s\S]*?tier: "tier2"/);
+    expect(src).toMatch(/id: "on_subagent_stop"[\s\S]*?tier: "tier2"/);
+    // Tier 3 — at least the four file-hook-only entries from the audit
+    expect(src).toMatch(/id: "before_llm_call"[\s\S]*?tier: "tier3"/);
+    expect(src).toMatch(/id: "after_llm_call"[\s\S]*?tier: "tier3"/);
+    expect(src).toMatch(/id: "on_session_start"[\s\S]*?tier: "tier3"/);
+    expect(src).toMatch(/id: "on_session_stop"[\s\S]*?tier: "tier3"/);
+  });
+
+  it("Tier 3 entries carry the honest 'file hook only' disabledReason tooltip", () => {
+    // The disabledReason becomes a native HTML tooltip so operators see WHY
+    // they cannot pick this option (Tier 3 = no custom_rule gate today).
+    expect(src).toContain("No custom_rule gate yet — file hooks via ~/.magi/settings.json instead.");
+    expect(src).toMatch(/disabledReason:\s*\n?\s*"No custom_rule gate yet/);
+  });
+
+  it("Tier 2 entries describe themselves as audit-only", () => {
+    // Backend matrix restricts the two new slots to llm_criterion + audit;
+    // the description must telegraph that contract so the operator sees
+    // up-front that block isn't an option here.
+    expect(src).toMatch(
+      /id: "on_user_prompt_submit"[\s\S]*?Audit-only/,
+    );
+    expect(src).toMatch(
+      /id: "on_subagent_stop"[\s\S]*?Audit-only/,
+    );
+  });
+
+  it("TriggerStep renders Tier 3 entries DISABLED with onClick suppressed", () => {
+    // The renderer flips ``disabled`` on tier3 entries; RadioCard then ignores
+    // clicks and dims the card so the option is visible-but-not-selectable.
+    expect(src).toMatch(/opt\.tier === "tier3"/);
+    expect(src).toMatch(/disabled=\{isDisabled\}/);
+    expect(src).toMatch(/disabledReason=\{opt\.disabledReason\}/);
+  });
+
+  it("stepPlan(on_user_prompt_submit) drops the target step (6-step plan)", () => {
+    // The two Tier 2 slots fire OUTSIDE the tool boundary so they have no
+    // tool target axis — same step shape as pre_final.
+    expect(src).toMatch(
+      /lifecycle === "on_user_prompt_submit" \|\| lifecycle === "on_subagent_stop"[\s\S]*?\["trigger", "condition", "specifics", "action", "name", "review"\]/,
+    );
+  });
+
+  it("availableConditionKinds(Tier 2) returns ONLY llm_criterion", () => {
+    // Backend ``_LEGAL`` matrix entry: only llm_criterion + audit at these
+    // slots. The wizard mirrors the restriction so an operator cannot
+    // assemble a draft the backend rejects.
+    expect(src).toMatch(
+      /lifecycle === "on_user_prompt_submit" \|\| lifecycle === "on_subagent_stop"[\s\S]*?return \["llm_criterion"\]/,
+    );
+  });
+
+  it("availableArchetypes(Tier 2) returns ONLY audit", () => {
+    // Mirrors the backend matrix: block/retry would change the surrounding
+    // runtime contract (byte-identical prompt assembly / already-emitted
+    // child output) and is deferred to a later PR.
+    expect(src).toMatch(
+      /lifecycle === "on_user_prompt_submit" \|\| lifecycle === "on_subagent_stop"[\s\S]*?return \["audit"\]/,
+    );
+  });
+
+  it("targetEventPhrase + whenForLifecycle describe both new lifecycles in plain English", () => {
+    // The Review step's sentence and the ArchetypeStep header must stay
+    // honest when the operator picks a Tier 2 slot — the existing wording
+    // assumes a tool boundary that does not exist here.
+    expect(src).toContain('"When the user submits a prompt"');
+    expect(src).toContain('"When a subagent finishes a turn"');
+  });
+
+  it("Review step skips the Target row for both new lifecycles", () => {
+    // The Target row is tool-bearing-only; the two Tier 2 slots have no
+    // tool axis so the row would render "(unnamed tool)" which is a lie.
+    expect(src).toMatch(
+      /lifecycle !== "pre_final"[\s\S]*?lifecycle !== "on_user_prompt_submit"[\s\S]*?lifecycle !== "on_subagent_stop"[\s\S]*?Target/,
+    );
+  });
+});

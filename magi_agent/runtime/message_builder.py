@@ -815,6 +815,17 @@ def _apply_prompt_transform(
         except Exception:  # a sink error must never break prompt assembly
             logger.warning("promptTransform evidence sink raised; ignoring", exc_info=True)
 
+    # PR-F-UX1 NOTE: The Tier 2 ``on_user_prompt_submit`` audit-only custom_rule
+    # fan-out lives in :mod:`magi_agent.customize.lifecycle_audit` and is
+    # invoked at the TOP of :func:`magi_agent.runtime.governed_turn.run_governed_turn`
+    # — the canonical CLI/serve/child funnel — so the wire runs on real
+    # production turns. This file's forbidden-import boundary
+    # (``test_message_builder_source_forbids_live_runtime_side_effect_boundaries``)
+    # stays intact because the audit module is never imported here. See
+    # ``magi_agent/customize/lifecycle_audit.py`` for the audit semantics and
+    # ``tests/customize_firing/test_user_prompt_submit_firing.py`` for the
+    # end-to-end firing contract.
+
     return final_sections
 
 
