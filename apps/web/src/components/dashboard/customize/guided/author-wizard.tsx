@@ -848,6 +848,17 @@ function availableConditionKinds(
   if (lifecycle === "on_subagent_stop") {
     return ["llm_criterion"];
   }
+  // PR-F-LIFE1 Tier 2 — turn-boundary slots accept ``llm_criterion`` only.
+  // evidence_ref / verifier_passed compile to ``deterministic_ref``, which
+  // has no runtime fan-out at the turn-boundary slots (see custom_rules.py
+  // _LEGAL). Exposing them in the wizard would let the operator persist a
+  // rule the runtime cannot honor. Mutator kinds (prompt_injection /
+  // output_rewrite) are NOT exposed at turn boundaries in v1 because there
+  // is no honest mutation target at top-level turn entry (engine has not
+  // started) or exit (the emission has already completed).
+  if (lifecycle === "before_turn_start" || lifecycle === "after_turn_end") {
+    return ["llm_criterion"];
+  }
   // pre_final has no tool layer; target is ignored.
   if (lifecycle === "pre_final") {
     // PR-F3: field_constraint is the deterministic SHACL-via-picker path
@@ -1961,7 +1972,21 @@ function availableArchetypes(lifecycle: Lifecycle): Archetype[] {
   if (lifecycle === "on_user_prompt_submit") {
     return ["audit", "mutate"];
   }
+  // PR-F-LIFE1 — ``on_subagent_stop`` is lifted past audit-only: the
+  // backend ``_LEGAL`` matrix now accepts (llm_criterion × on_subagent_stop
+  // × {audit, block, ask}). Block / ask are directives to the PARENT
+  // caller (the child output has already been emitted, so the wizard reads
+  // the verb as "tell the parent the subagent failed the criterion"). The
+  // audit row is still recorded in either case.
   if (lifecycle === "on_subagent_stop") {
+    return ["block", "ask", "audit"];
+  }
+  // PR-F-LIFE1 — both turn-boundary slots stay audit-only at the wizard
+  // (matches the backend ``_LEGAL`` entries). Block at top-level turn entry
+  // would require a runtime contract change (the engine stream has not
+  // started yet) and at top-level turn end the emission has already
+  // completed, so the conservative wire is audit-only.
+  if (lifecycle === "before_turn_start" || lifecycle === "after_turn_end") {
     return ["audit"];
   }
   return ["block", "ask", "audit"];

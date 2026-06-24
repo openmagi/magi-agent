@@ -918,6 +918,30 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_CUSTOMIZE_LIFECYCLE_TURN_HOOKS_ENABLED",
+        stage="stage2",
+        summary=(
+            "PR-F-LIFE1 Tier 2 lifecycle expansion (turn boundaries): "
+            "activate the two new audit-only custom_rule gate sites — "
+            "before_turn_start (wired at the TOP of "
+            "runtime/governed_turn.run_governed_turn, BEFORE the engine "
+            "stream is started) and after_turn_end (wired in the same "
+            "function's ``finally`` block alongside the existing "
+            "on_subagent_stop collector). Both fan-outs invoke the "
+            "existing llm_criterion judge per matching rule and record "
+            "audit verdicts only by default; the backend ``_LEGAL`` "
+            "matrix additionally exposes "
+            "(llm_criterion, on_subagent_stop, block|ask) so an operator "
+            "can author 'subagent must produce a summary'-style rules "
+            "whose verdict the parent caller can act on. Triple-gated "
+            "with MAGI_CUSTOMIZE_VERIFICATION_ENABLED + "
+            "MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED; fail-open on any "
+            "customize-store fault. With no before_turn_start / "
+            "after_turn_end rules authored, runtime stays byte-identical "
+            "(the new fan-outs are no-ops). Strict default-OFF."
+        ),
+    ),
+    _b(
         "MAGI_CUSTOMIZE_PROMPT_INJECTION_ENABLED",
         stage="stage2",
         summary=(

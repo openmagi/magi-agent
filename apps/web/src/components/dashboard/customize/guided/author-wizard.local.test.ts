@@ -927,16 +927,15 @@ describe("AuthorWizard — PR-F-UX1 lifecycle audit + Tier 2 expansion", () => {
     );
   });
 
-  it("availableArchetypes(on_subagent_stop) returns ONLY audit", () => {
-    // Mirrors the backend matrix: block/retry would change the surrounding
-    // runtime contract (already-emitted child output cannot be mutated
-    // without violating the audit-only invariant) and is deferred to a
-    // later PR. PR-F-MUT3 splits the on_user_prompt_submit case out
-    // because the prompt_injection (system-prompt section append) mutator
-    // is wired there — the operator picks "mutate" via the Inject /
-    // Rewrite card.
+  it("availableArchetypes(on_subagent_stop) is lifted to [block, ask, audit] (PR-F-LIFE1)", () => {
+    // PR-F-LIFE1 lifts ``on_subagent_stop`` past audit-only — the backend
+    // ``_LEGAL`` matrix now accepts (llm_criterion × on_subagent_stop ×
+    // {audit, block, ask_approval}). The block / ask verbs are directives
+    // to the PARENT caller (the child output has already been emitted),
+    // not a mutation of the already-emitted output. The audit row is
+    // recorded in either case.
     expect(src).toMatch(
-      /lifecycle === "on_subagent_stop"\) \{[\s\S]*?return \["audit"\]/,
+      /lifecycle === "on_subagent_stop"\) \{[\s\S]*?return \["block", "ask", "audit"\]/,
     );
   });
 
