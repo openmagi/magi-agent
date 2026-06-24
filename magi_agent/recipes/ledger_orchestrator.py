@@ -276,9 +276,21 @@ def _assemble_answer(task_ledger: TaskLedgerContract) -> str:
     """Assemble the best available answer from verified facts in the task ledger.
 
     Concatenates all known facts and verified intermediates into a structured
-    summary.  In a full production implementation this would call the LLM with
-    the ledger projection; here it produces a deterministic structured string
-    suitable for testing.
+    summary.
+
+    H-36 (item 5, REVIEW-A ``review/recipes-orchestration.md`` L6): this
+    function is currently **benchmark-only / deterministic test fixture**, NOT
+    a production assistant projection. The intended production path is an
+    LLM call over the ledger projection; until that lands, the structured
+    string below is the dormant default. ``LedgerOrchestrator`` itself is
+    default-OFF (``MAGI_LEDGER_ORCHESTRATOR_ENABLED``), so no live user
+    surface ships this output today — it appears only in GAIA-style
+    benchmark harness runs and recipe tests.
+
+    DO NOT wire this into a live answer-emit path without first replacing
+    the body with the real LLM projection: a benchmark-shaped
+    "deterministic structured string" leaked into a user-visible surface
+    would be a clear regression.
     """
     known = task_ledger.known_facts()
     if not known:
