@@ -11,6 +11,11 @@
  *                    but the badge is forward-compatible so adding such an
  *                    action later lights it up automatically.
  *  * preview       — visible but inert; not feeding the runtime
+ *  * mutator       — actively rewrites or injects traffic (PR-F-MUT1 +
+ *                    PR-F-MUT2). Distinct amber-yellow palette so an
+ *                    operator never mistakes a mutator for a passive
+ *                    advisory critic. Carries an explicit "modifies
+ *                    traffic" tooltip (PR-F-MUT3).
  *
  * The component intentionally lives under `customize/` (not the generic
  * `ui/_ds/Badge`) because the trust-class semantics belong to this domain,
@@ -55,6 +60,11 @@ export interface TrustBadgeProps {
    *  description (e.g. "Trust class for this policy") so screen-reader
    *  users get unambiguous context. */
   ariaLabel?: string;
+  /** Override the hover tooltip (rendered as ``title``). Defaults to the
+   *  variant-specific :const:`DEFAULT_TOOLTIP` — empty string for variants
+   *  that have no warning to surface, the explicit "modifies traffic"
+   *  warning for ``mutator``. */
+  tooltip?: string;
   /** Caller-supplied utility classes appended after the variant palette. */
   className?: string;
 }
@@ -64,12 +74,13 @@ const PALETTE: Record<TrustClass, string> = {
   advisory: "bg-amber-500/10 text-amber-700",
   hybrid: "bg-violet-500/10 text-violet-700",
   preview: "bg-blue-500/10 text-blue-700",
-  // F-MUT1 — first mutator entry. F-MUT3 will tune the exact amber-yellow
-  // ramp + add an explicit "modifies traffic" tooltip; until then this
-  // distinct yellow-orange tone keeps the badge visibly different from the
-  // advisory amber and the deterministic emerald so an operator never
-  // confuses a mutator policy for a gate.
-  mutator: "bg-yellow-500/10 text-yellow-800",
+  // F-MUT3 — distinct amber-yellow ramp (yellow-400 tint + yellow-900 ink)
+  // so the badge reads as "warmer / more alarming than advisory" without
+  // colliding with the destructive red palette used elsewhere in the
+  // dashboard. Carries an explicit "modifies traffic" title (tooltip) so an
+  // operator hovering the badge sees the honest mutation warning before
+  // activating the policy.
+  mutator: "bg-yellow-400/15 text-yellow-900 ring-1 ring-inset ring-yellow-500/30",
 };
 
 const DEFAULT_LABEL: Record<TrustClass, string> = {
@@ -80,17 +91,43 @@ const DEFAULT_LABEL: Record<TrustClass, string> = {
   mutator: "Mutator",
 };
 
+
+/**
+ * Tooltip text shown on hover. Today only the ``mutator`` variant ships a
+ * non-empty tooltip because it is the only variant that REWRITES traffic the
+ * model sees — the operator needs an explicit "modifies traffic" warning
+ * before activating. The other four variants are self-describing via the
+ * existing aria-label so the badge stays visually clean.
+ */
+const DEFAULT_TOOLTIP: Record<TrustClass, string> = {
+  deterministic: "",
+  advisory: "",
+  hybrid: "",
+  preview: "",
+  mutator:
+    "Modifies inbound or outbound traffic. Verify the mutation does not break downstream tools or the model reasoning.",
+};
+
 export function TrustBadge({
   trustClass,
   label,
   ariaLabel,
+  tooltip,
   className,
 }: TrustBadgeProps): ReactElement {
   const text = label ?? DEFAULT_LABEL[trustClass];
   const aria = ariaLabel ?? `Trust class: ${DEFAULT_LABEL[trustClass]}`;
+  // F-MUT3 — empty default tooltip for non-mutator variants is OMITTED from
+  // the DOM (``title={undefined}``) so the existing four variants render
+  // byte-equivalently to their pre-F-MUT3 markup; only ``mutator`` carries
+  // the explicit "modifies traffic" hover warning.
+  const resolvedTooltip = tooltip ?? DEFAULT_TOOLTIP[trustClass];
+  const titleAttr =
+    resolvedTooltip && resolvedTooltip.length > 0 ? resolvedTooltip : undefined;
   return (
     <span
       aria-label={aria}
+      title={titleAttr}
       className={cn(
         "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
         PALETTE[trustClass],

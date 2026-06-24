@@ -7,6 +7,10 @@ Walks the full architect loop:
 
 ZERO network. Reuses the FakeModel sequencing pattern from
 ``tests/test_rule_compile_route.py``.
+
+PR-F-MUT3 (2026-06-24): adds mutator-shaped tests at the bottom — the
+interview can now propose ``prompt_injection`` / ``output_rewrite``
+primitives with ``trustClass: 'mutator'`` and a one-line ``description``.
 """
 
 from __future__ import annotations
@@ -21,7 +25,10 @@ from fastapi.testclient import TestClient
 from magi_agent.app import create_app
 from magi_agent.config.models import BuildInfo, RuntimeConfig
 from magi_agent.customize.rule_compiler import (
+    PROPOSAL_KINDS,
+    PROPOSAL_TRUST_CLASSES,
     compile_interview_step,
+    propose_primitive_or_hybrid,
 )
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 
@@ -349,3 +356,265 @@ def test_route_flag_on_returns_hybrid_proposal(tmp_path, monkeypatch) -> None:
     assert len(body["proposal"]["primitives"]) == 2
     trust = {p["trustClass"] for p in body["proposal"]["primitives"]}
     assert trust == {"deterministic", "advisory"}
+
+
+# ---------------------------------------------------------------------------
+# PR-F-MUT3 — Mutator vocabulary, intent recognition, and proposal kinds
+# ---------------------------------------------------------------------------
+
+
+def test_proposal_trust_classes_includes_mutator() -> None:
+    """The trust-class vocab MUST include ``mutator`` so the parser accepts
+    prompt_injection / output_rewrite proposals — without this widening the
+    architect could only express deterministic / advisory and would have to
+    downgrade mutators to a lie."""
+
+    assert "mutator" in PROPOSAL_TRUST_CLASSES
+    # Existing buckets remain — additive only.
+    assert "deterministic" in PROPOSAL_TRUST_CLASSES
+    assert "advisory" in PROPOSAL_TRUST_CLASSES
+
+
+def test_proposal_kinds_widens_routed_kinds_with_two_mutator_kinds() -> None:
+    """The proposal-kind set widens the legacy ROUTED_KINDS set with the
+    two mutator kinds (prompt_injection + output_rewrite) so the parser
+    accepts mutator-shaped primitives end-to-end."""
+
+    assert "prompt_injection" in PROPOSAL_KINDS
+    assert "output_rewrite" in PROPOSAL_KINDS
+    # The legacy 8 ROUTED_KINDS are still members — additive only.
+    for kind in (
+        "deterministic_ref",
+        "tool_perm",
+        "llm_criterion",
+        "shacl_constraint",
+        "seam_spec",
+        "custom_check",
+        "field_constraint",
+        "capability_scope",
+    ):
+        assert kind in PROPOSAL_KINDS
+
+
+def test_discover_intent_prompt_carries_mutator_recognition_vocab() -> None:
+    """The Stage A system prompt MUST teach the model the 3 mutator verb
+    families (redact/scrub/mask, inject/append/always-add, remind/tell) so
+    it routes the right lifecycle + whatToDoOnFail. Asserts the prompt text
+    directly so a future refactor cannot silently drop the vocab."""
+
+    from magi_agent.customize.rule_compiler import (
+        _DISCOVER_INTENT_SYSTEM_INSTRUCTION_TMPL,
+    )
+
+    prompt = _DISCOVER_INTENT_SYSTEM_INSTRUCTION_TMPL
+    # The 3 mutator verb families.
+    assert "redact" in prompt
+    assert "scrub" in prompt
+    assert "mask" in prompt
+    assert "inject" in prompt
+    assert "append" in prompt
+    assert "always add" in prompt
+    assert "remind" in prompt
+    assert "tell the model" in prompt
+    assert "add to context" in prompt
+    # The three lifecycle hooks the architect should map them to.
+    assert "after_tool_use" in prompt
+    assert "before_tool_use" in prompt
+    assert "on_user_prompt_submit" in prompt
+    # The whatToDoOnFail vocabulary additions.
+    assert "inject" in prompt
+    assert "rewrite" in prompt
+    assert "redact" in prompt
+    # The honest-degrade warning — the architect must NOT silently downgrade
+    # a mutator intent to audit / llm_criterion.
+    assert "do not downgrade" in prompt.lower() or "not downgrade" in prompt.lower()
+
+
+def test_propose_primitive_prompt_carries_the_two_mutator_kind_payload_shapes() -> None:
+    """The Stage B proposal prompt MUST teach the model both mutator payload
+    shapes (output_rewrite + prompt_injection tool-args + prompt_injection
+    system-prompt) AND ship the two canonical examples from the spec so the
+    proposed primitives are pre-flight valid against the backend validators."""
+
+    from magi_agent.customize.rule_compiler import (
+        _PROPOSE_PRIMITIVE_SYSTEM_INSTRUCTION_TMPL,
+    )
+
+    prompt = _PROPOSE_PRIMITIVE_SYSTEM_INSTRUCTION_TMPL
+    # Mutator kind names appear in the kind enum.
+    assert "prompt_injection" in prompt
+    assert "output_rewrite" in prompt
+    # Trust class enum carries the mutator bucket.
+    assert "mutator" in prompt
+    # output_rewrite canonical example (the spec sentence).
+    assert "redact AKIA" in prompt
+    assert "mode: 'redact'" in prompt
+    assert "scope:" in prompt
+    # prompt_injection canonical example (the spec sentence).
+    assert "--dry-run" in prompt
+    assert "shell_exec" in prompt
+    assert "target_arg_key" in prompt
+    assert "target: 'system_prompt'" in prompt
+    # The "modifies traffic" honesty hint.
+    assert "modifies traffic" in prompt.lower() or "Mutator badge" in prompt
+
+
+# ---------------------------------------------------------------------------
+# PR-F-MUT3 — propose_primitive_or_hybrid round-trip with mutator primitives
+# ---------------------------------------------------------------------------
+
+
+_OUTPUT_REWRITE_PROPOSAL_RESPONSE = json.dumps(
+    {
+        "mode": "single",
+        "primitives": [
+            {
+                "kind": "output_rewrite",
+                "payload": {
+                    "mode": "redact",
+                    "pattern": "AKIA[0-9A-Z]{16}",
+                    "replacement": "***",
+                    "scope": "match_only",
+                    "isRegex": True,
+                },
+                "trustClass": "mutator",
+                "rationale": "Redact AKIA-shaped keys in tool output before the model reads them.",
+                "description": "Redacts AWS access-key-shaped patterns in tool output (match_only).",
+            }
+        ],
+        "summary": "Redact AWS keys in tool output.",
+        "explanation": "Mutator-only — no advisory critic needed; the pattern is unambiguous.",
+    }
+)
+
+
+_PROMPT_INJECTION_PROPOSAL_RESPONSE = json.dumps(
+    {
+        "mode": "single",
+        "primitives": [
+            {
+                "kind": "prompt_injection",
+                "payload": {
+                    "mode": "append",
+                    "target_arg_key": "command",
+                    "value": "--dry-run",
+                    "condition": {"tool": "shell_exec"},
+                    "toolMatch": {"include": ["shell_exec"]},
+                },
+                "trustClass": "mutator",
+                "rationale": "Append the --dry-run flag to every shell_exec command.",
+                "description": "Injects --dry-run into shell_exec command args.",
+            }
+        ],
+        "summary": "Always inject --dry-run on shell_exec.",
+        "explanation": "Mutator-only — the operator wants every shell call gated to dry-run.",
+    }
+)
+
+
+@pytest.mark.asyncio
+async def test_propose_emits_output_rewrite_mutator_for_redact_intent() -> None:
+    """Resolved intent 'redact AKIA keys from tool output' → Stage B emits an
+    output_rewrite primitive with trustClass=mutator and the spec-sentence
+    payload shape (pattern + replacement + scope + isRegex)."""
+
+    factory = _factory_seq(_OUTPUT_REWRITE_PROPOSAL_RESPONSE)
+    intent = {
+        "whatToCheck": "redact AKIA keys from tool output",
+        "whereInLifecycle": "after_tool_use",
+        "whatToDoOnFail": "redact",
+        "openQuestions": [],
+        "confidence": 0.95,
+    }
+    result = await propose_primitive_or_hybrid(intent, model_factory=factory)
+    assert result["ok"] is True, result
+    proposal = result["proposal"]
+    assert proposal["mode"] == "single"
+    assert len(proposal["primitives"]) == 1
+    prim = proposal["primitives"][0]
+    assert prim["kind"] == "output_rewrite"
+    assert prim["trustClass"] == "mutator"
+    # Payload shape must match the F-MUT2 validator contract.
+    payload = prim["payload"]
+    assert payload["mode"] == "redact"
+    assert payload["pattern"] == "AKIA[0-9A-Z]{16}"
+    assert payload["replacement"] == "***"
+    assert payload["scope"] == "match_only"
+    assert payload["isRegex"] is True
+    # The one-line description rides through the parser.
+    assert isinstance(prim["description"], str)
+    assert "Redacts" in prim["description"]
+
+
+@pytest.mark.asyncio
+async def test_propose_emits_prompt_injection_mutator_for_inject_intent() -> None:
+    """Resolved intent 'inject --dry-run on shell_exec' → Stage B emits a
+    prompt_injection primitive with trustClass=mutator and the spec-sentence
+    payload shape (mode=append + target_arg_key + value + condition.tool)."""
+
+    factory = _factory_seq(_PROMPT_INJECTION_PROPOSAL_RESPONSE)
+    intent = {
+        "whatToCheck": "always inject --dry-run flag on shell_exec commands",
+        "whereInLifecycle": "before_tool_use",
+        "whatToDoOnFail": "inject",
+        "openQuestions": [],
+        "confidence": 0.95,
+    }
+    result = await propose_primitive_or_hybrid(intent, model_factory=factory)
+    assert result["ok"] is True, result
+    proposal = result["proposal"]
+    assert proposal["mode"] == "single"
+    assert len(proposal["primitives"]) == 1
+    prim = proposal["primitives"][0]
+    assert prim["kind"] == "prompt_injection"
+    assert prim["trustClass"] == "mutator"
+    payload = prim["payload"]
+    assert payload["mode"] == "append"
+    assert payload["target_arg_key"] == "command"
+    assert payload["value"] == "--dry-run"
+    assert payload["condition"]["tool"] == "shell_exec"
+    # toolMatch.include filter (auto-derived from the tool name) rides
+    # through the parser too.
+    assert payload["toolMatch"]["include"] == ["shell_exec"]
+    assert "shell_exec" in prim["description"]
+
+
+@pytest.mark.asyncio
+async def test_propose_rejects_invalid_trust_class() -> None:
+    """Honest-degrade: if the model emits a trustClass outside the vocab
+    (e.g. 'inject' as a trust class), the parser returns ``None`` and the
+    orchestrator surfaces ok=False rather than silently activating a
+    mis-typed mutator."""
+
+    bad_response = json.dumps(
+        {
+            "mode": "single",
+            "primitives": [
+                {
+                    "kind": "output_rewrite",
+                    "payload": {
+                        "mode": "redact",
+                        "pattern": "x",
+                        "replacement": "*",
+                        "scope": "match_only",
+                        "isRegex": False,
+                    },
+                    "trustClass": "inject",  # invalid — not in PROPOSAL_TRUST_CLASSES
+                    "rationale": "bad",
+                }
+            ],
+            "summary": "",
+            "explanation": "",
+        }
+    )
+    factory = _factory_seq(bad_response)
+    intent = {
+        "whatToCheck": "redact",
+        "whereInLifecycle": "after_tool_use",
+        "whatToDoOnFail": "redact",
+        "openQuestions": [],
+        "confidence": 0.9,
+    }
+    result = await propose_primitive_or_hybrid(intent, model_factory=factory)
+    assert result["ok"] is False
+    assert "unparseable" in result["error"]
