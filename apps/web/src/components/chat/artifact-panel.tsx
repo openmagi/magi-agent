@@ -299,9 +299,9 @@ export function ArtifactCard({ artifact, onOpen }: { artifact: ArtifactRef; onOp
   return (
     <button
       onClick={onOpen}
-      className="group flex w-full items-start gap-3 rounded-xl border border-black/[0.08] bg-white px-3 py-2.5 text-left transition-[border-color,box-shadow,background-color] hover:border-[#7C3AED] hover:shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7C3AED] cursor-pointer"
+      className="group flex w-full items-start gap-3 rounded-xl border border-black/[0.08] bg-white px-3 py-2.5 text-left transition-[border-color,box-shadow,background-color] hover:border-[var(--color-accent)] hover:shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] cursor-pointer"
     >
-      <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-[#7C3AED] to-[#A78BFA] flex items-center justify-center shrink-0">
+      <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-[var(--color-accent)] to-[#A78BFA] flex items-center justify-center shrink-0">
         <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <polyline points="16 18 22 12 16 6" />
           <polyline points="8 6 2 12 8 18" />
@@ -312,7 +312,7 @@ export function ArtifactCard({ artifact, onOpen }: { artifact: ArtifactRef; onOp
         <div className="text-[11px] text-secondary/60">Interactive HTML · click to open</div>
         <ProductPlaneArtifactSummary artifact={artifact} surface="card" />
       </div>
-      <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mt-1 shrink-0 text-secondary/40 transition-colors group-hover:text-[#7C3AED]">
+      <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mt-1 shrink-0 text-secondary/40 transition-colors group-hover:text-[var(--color-accent)]">
         <path d="M7 17L17 7" />
         <path d="M7 7h10v10" />
       </svg>
@@ -394,7 +394,7 @@ export function ArtifactPanel({ artifact, onClose }: { artifact: ArtifactRef | n
         aria-label="HTML artifact"
       >
         <header className="flex items-center gap-3 px-4 py-3 border-b border-black/[0.06] shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#7C3AED] to-[#A78BFA] flex items-center justify-center shrink-0">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--color-accent)] to-[#A78BFA] flex items-center justify-center shrink-0">
             <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="16 18 22 12 16 6" />
               <polyline points="8 6 2 12 8 18" />
@@ -409,7 +409,7 @@ export function ArtifactPanel({ artifact, onClose }: { artifact: ArtifactRef | n
             href={downloadUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="p-2 rounded-lg hover:bg-black/[0.04] transition-colors text-secondary/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7C3AED]"
+            className="p-2 rounded-lg hover:bg-black/[0.04] transition-colors text-secondary/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]"
             title="Open raw (new tab, auth via browser)"
             aria-label="Open raw"
           >
@@ -421,7 +421,7 @@ export function ArtifactPanel({ artifact, onClose }: { artifact: ArtifactRef | n
           </a>
           <button
             onClick={onClose}
-            className="p-2 rounded-lg hover:bg-black/[0.04] transition-colors text-secondary/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7C3AED]"
+            className="p-2 rounded-lg hover:bg-black/[0.04] transition-colors text-secondary/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]"
             aria-label="Close"
           >
             <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -430,7 +430,7 @@ export function ArtifactPanel({ artifact, onClose }: { artifact: ArtifactRef | n
             </svg>
           </button>
         </header>
-        <div className="flex-1 min-h-0 bg-[#FAFAFA] relative">
+        <div className="flex-1 min-h-0 bg-[var(--color-surface-base)] relative">
           {loading && (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="text-xs text-secondary/60">Loading artifact…</div>

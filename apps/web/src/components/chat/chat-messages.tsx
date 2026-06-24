@@ -508,7 +508,7 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
             className="flex items-center gap-2 text-sm text-secondary/70 hover:text-foreground transition-colors cursor-pointer"
           >
             <div className={`w-4.5 h-4.5 rounded border-2 flex items-center justify-center transition-colors ${
-              allSelected ? "bg-[#7C3AED] border-[#7C3AED]" : selectedCount > 0 ? "bg-[#7C3AED]/30 border-[#7C3AED]" : "border-black/20 bg-white"
+              allSelected ? "bg-[var(--color-accent)] border-[var(--color-accent)]" : selectedCount > 0 ? "bg-[var(--color-accent)]/30 border-[var(--color-accent)]" : "border-black/20 bg-white"
             }`}>
               {(allSelected || selectedCount > 0) && (
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">

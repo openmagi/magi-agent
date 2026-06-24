@@ -213,7 +213,7 @@ export function DocumentDraftPreviewCard({
   if (surface === "run-inspector") {
     return (
       <div
-        className="mt-2 overflow-hidden rounded-lg border border-[#7C3AED]/15 bg-white"
+        className="mt-2 overflow-hidden rounded-lg border border-[var(--color-accent)]/15 bg-white"
         data-run-inspector-document-draft="true"
       >
         <DocumentDraftPreviewContents draft={draft} language={language} surface={surface} />
@@ -223,7 +223,7 @@ export function DocumentDraftPreviewCard({
 
   return (
     <section
-      className="mb-3 overflow-hidden rounded-xl border border-[#7C3AED]/15 bg-white shadow-[0_1px_6px_rgba(124,58,237,0.08)]"
+      className="mb-3 overflow-hidden rounded-xl border border-[var(--color-accent)]/15 bg-white shadow-[0_1px_6px_rgba(124,58,237,0.08)]"
       data-work-console-document-draft="true"
     >
       <DocumentDraftPreviewContents draft={draft} language={language} surface={surface} />

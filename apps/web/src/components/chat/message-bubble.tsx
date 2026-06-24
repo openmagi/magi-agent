@@ -182,7 +182,7 @@ function ExpandableImageAttachment({
         e.stopPropagation();
         onOpen({ url, filename });
       }}
-      className="group/image relative overflow-hidden rounded-xl border border-black/[0.08] bg-black/[0.03] transition hover:border-black/[0.18] hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED]/50"
+      className="group/image relative overflow-hidden rounded-xl border border-black/[0.08] bg-black/[0.03] transition hover:border-black/[0.18] hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/50"
     >
       <AuthImage
         url={url}
@@ -246,7 +246,7 @@ function ImageLightbox({
           type="button"
           onClick={onClose}
           aria-label="Close image preview"
-          className="absolute -right-2 -top-2 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white text-foreground shadow-lg transition hover:bg-white/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED]/60"
+          className="absolute -right-2 -top-2 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white text-foreground shadow-lg transition hover:bg-white/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
         >
           <svg
             width="18"
@@ -449,7 +449,7 @@ function ResearchEvidenceSummary({
     <div className="mt-1 max-w-full text-[11px] leading-snug text-secondary/70">
       <button
         type="button"
-        className="flex max-w-full cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-black/[0.06] bg-black/[0.025] px-2.5 py-1.5 text-left transition-colors hover:bg-black/[0.04] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED]/45"
+        className="flex max-w-full cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-black/[0.06] bg-black/[0.025] px-2.5 py-1.5 text-left transition-colors hover:bg-black/[0.04] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/45"
         data-research-evidence-toggle="true"
         aria-expanded={expanded}
         aria-controls={panelId}
@@ -816,7 +816,7 @@ export function MessageBubble({ role, content, timestamp, isStreaming, inlineBef
       {selectionMode && (
         <div className="flex items-center mr-2 shrink-0">
           <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-colors ${
-            selected ? "bg-[#7C3AED] border-[#7C3AED]" : "border-black/20 bg-white"
+            selected ? "bg-[var(--color-accent)] border-[var(--color-accent)]" : "border-black/20 bg-white"
           }`}>
             {selected && (
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -1038,7 +1038,7 @@ export function MessageBubble({ role, content, timestamp, isStreaming, inlineBef
           <span className={`text-[10px] text-secondary/40 px-1 flex items-center gap-1 ${isUser ? "justify-end" : "justify-start"}`}>
             {injected && isUser && (
               <span
-                className="inline-flex items-center gap-0.5 text-[9px] uppercase tracking-wide font-medium text-[#7C3AED]/70"
+                className="inline-flex items-center gap-0.5 text-[9px] uppercase tracking-wide font-medium text-[var(--color-accent)]/70"
                 title="Accepted by the running task"
               >
                 <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

@@ -1,0 +1,20 @@
+/* GENERATED FILE — DO NOT EDIT.
+   Source: magi-agent/design-system. Regenerate via scripts/sync-design-system.sh. */
+// Open Magi design-system primitives — canonical barrel.
+// Vendored verbatim into each consumer repo's components/ui/_ds/.
+export { cn, type ClassValue } from "./cn"
+export { Button, type ButtonProps, type ButtonVariant, type ButtonSize } from "./Button"
+export { Card, CardHeader, type CardProps } from "./Card"
+export { Badge, type BadgeProps, type BadgeVariant } from "./Badge"
+export { Input, Textarea, type InputProps, type TextareaProps } from "./Input"
+export { Select, type SelectProps, type SelectOption } from "./Select"
+export { Switch, type SwitchProps } from "./Switch"
+export { Skeleton, SkeletonKPI } from "./Skeleton"
+export { EmptyState, type EmptyStateProps } from "./EmptyState"
+export { ErrorState, type ErrorStateProps } from "./ErrorState"
+export { PageHeader, type PageHeaderProps } from "./PageHeader"
+export { KPI, type KPIProps } from "./KPI"
+export { Code, CodeBlock, type CodeProps, type CodeBlockProps } from "./Code"
+export { CopyButton, type CopyButtonProps } from "./CopyButton"
+export { Modal } from "./Modal"
+export { GlassCard } from "./GlassCard"

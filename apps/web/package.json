@@ -7,7 +7,8 @@
     "dev": "next dev --port 3001",
     "build": "next build",
     "check": "tsc --noEmit",
-    "check:chat-core-boundary": "node scripts/check-chat-core-boundary.mjs"
+    "check:chat-core-boundary": "node scripts/check-chat-core-boundary.mjs",
+    "check:ds-drift": "node ../../scripts/check-ds-drift.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

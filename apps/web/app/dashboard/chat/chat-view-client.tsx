@@ -2078,7 +2078,7 @@ export function ChatViewClient({
               <button
                 onClick={() => void handleCreatePublicExport()}
                 disabled={creatingExportLink}
-                className="w-full flex items-center justify-between gap-3 rounded-xl border border-[#7C3AED]/20 bg-[#7C3AED]/5 px-4 py-3 text-left hover:bg-[#7C3AED]/10 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                className="w-full flex items-center justify-between gap-3 rounded-xl border border-[var(--color-accent)]/20 bg-[var(--color-accent)]/5 px-4 py-3 text-left hover:bg-[var(--color-accent)]/10 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <span>
                   <span className="block text-sm font-semibold text-foreground">{t.chat.createPublicLink}</span>
@@ -2087,11 +2087,11 @@ export function ChatViewClient({
                   </span>
                 </span>
                 {creatingExportLink ? (
-                  <svg className="w-4 h-4 text-[#7C3AED] animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <svg className="w-4 h-4 text-[var(--color-accent)] animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                     <circle cx="12" cy="12" r="10" strokeDasharray="31.4 31.4" strokeLinecap="round" />
                   </svg>
                 ) : (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-[#7C3AED]">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--color-accent)]">
                     <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
                     <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
                   </svg>
@@ -2124,7 +2124,7 @@ export function ChatViewClient({
                     href={exportLink}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="rounded-lg bg-[#7C3AED] px-2.5 py-1.5 text-xs font-medium text-white hover:bg-[#6D28D9] transition-colors"
+                    className="rounded-lg bg-[var(--color-accent)] px-2.5 py-1.5 text-xs font-medium text-white hover:bg-[var(--color-accent-light)] transition-colors"
                   >
                     {t.chat.open}
                   </a>
@@ -2189,7 +2189,7 @@ export function ChatViewClient({
             <span className="text-sm">{t.chat.messagesDeleted}</span>
             <button
               onClick={handleUndo}
-              className="text-sm font-medium text-[#7C3AED] hover:text-[#9b6aed] transition-colors cursor-pointer"
+              className="text-sm font-medium text-[var(--color-accent)] hover:text-[#9b6aed] transition-colors cursor-pointer"
             >
               {t.chat.undo}
             </button>

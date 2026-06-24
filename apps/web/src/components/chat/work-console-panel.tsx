@@ -199,7 +199,7 @@ function groupLabel(group: WorkConsoleRowGroup, language?: ChatResponseLanguage)
 function statusClass(status: WorkConsoleRowStatus): string {
   switch (status) {
     case "running":
-      return "bg-[#7C3AED]";
+      return "bg-[var(--color-accent)]";
     case "done":
       return "bg-emerald-500";
     case "waiting":
@@ -963,7 +963,7 @@ function sectionTone(
 function sectionClass(group: WorkConsoleRowGroup): string {
   switch (sectionTone(group)) {
     case "status":
-      return "mb-3 min-h-0 rounded-xl border border-[#7C3AED]/15 bg-[#F8F6FF] p-2 shadow-[0_1px_6px_rgba(124,58,237,0.08)]";
+      return "mb-3 min-h-0 rounded-xl border border-[var(--color-accent)]/15 bg-[#F8F6FF] p-2 shadow-[0_1px_6px_rgba(124,58,237,0.08)]";
     case "mission":
       return "mb-3 min-h-0 rounded-xl border border-sky-500/20 bg-sky-50/70 p-2 shadow-[0_1px_6px_rgba(14,165,233,0.08)]";
     case "agents":
@@ -981,7 +981,7 @@ function sectionClass(group: WorkConsoleRowGroup): string {
 function actionRowToneClass(status: WorkConsoleRowStatus): string {
   switch (status) {
     case "running":
-      return "border-[#7C3AED]/20 bg-[#F7F4FF] shadow-[0_1px_6px_rgba(124,58,237,0.08)]";
+      return "border-[var(--color-accent)]/20 bg-[#F7F4FF] shadow-[0_1px_6px_rgba(124,58,237,0.08)]";
     case "done":
       return "border-emerald-500/15 bg-emerald-50/50 shadow-[0_1px_4px_rgba(16,185,129,0.06)]";
     case "error":
@@ -1099,7 +1099,7 @@ function WorkConsoleRowItem({
     <li
       className={
         isStatusRow
-          ? `work-console-row-motion flex min-w-0 items-start gap-2 rounded-lg border border-[#7C3AED]/20 bg-white/70 px-2.5 py-2.5 shadow-[0_1px_4px_rgba(124,58,237,0.08)] ${runningMotionClass(row.status)}`
+          ? `work-console-row-motion flex min-w-0 items-start gap-2 rounded-lg border border-[var(--color-accent)]/20 bg-white/70 px-2.5 py-2.5 shadow-[0_1px_4px_rgba(124,58,237,0.08)] ${runningMotionClass(row.status)}`
           : isMissionRow
             ? `work-console-row-motion flex min-w-0 items-start gap-2 rounded-lg border border-sky-500/20 bg-white/75 px-2.5 py-2 shadow-[0_1px_4px_rgba(14,165,233,0.08)] ${runningMotionClass(row.status)}`
           : isActionRow
@@ -1119,7 +1119,7 @@ function WorkConsoleRowItem({
       style={motionStyle(motionDelayMs)}
     >
       <span
-        className={`${isStatusRow ? "mt-2 h-2.5 w-2.5 ring-4 ring-[#7C3AED]/10" : isMissionRow || isActionRow ? "mt-2 h-2 w-2" : "mt-1.5 h-1.5 w-1.5"} shrink-0 rounded-full ${statusClass(row.status)} ${runningDotMotionClass(row.status)}`}
+        className={`${isStatusRow ? "mt-2 h-2.5 w-2.5 ring-4 ring-[var(--color-accent)]/10" : isMissionRow || isActionRow ? "mt-2 h-2 w-2" : "mt-1.5 h-1.5 w-1.5"} shrink-0 rounded-full ${statusClass(row.status)} ${runningDotMotionClass(row.status)}`}
         aria-hidden="true"
       />
       <div className="min-w-0 flex-1">
@@ -1302,12 +1302,12 @@ function BrowserWorkStream({
         <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-secondary/45">
           {t(language, "Live browser", "실시간 브라우저")}
         </span>
-        <span className="shrink-0 rounded-full bg-[#7C3AED]/10 px-1.5 py-0.5 text-[9px] font-semibold text-[#7C3AED]">
+        <span className="shrink-0 rounded-full bg-[var(--color-accent)]/10 px-1.5 py-0.5 text-[9px] font-semibold text-[var(--color-accent)]">
           {t(language, "Active", "실행 중")}
         </span>
       </div>
       <div className="flex aspect-video min-h-[8rem] flex-col items-center justify-center gap-2 bg-black/[0.03] px-3 text-center">
-        <span className="h-2.5 w-2.5 rounded-full bg-[#7C3AED] work-console-running-dot" aria-hidden="true" />
+        <span className="h-2.5 w-2.5 rounded-full bg-[var(--color-accent)] work-console-running-dot" aria-hidden="true" />
         <span className="text-[12px] font-medium text-foreground/70">
           {t(language, "Waiting for browser frame", "브라우저 프레임 대기 중")}
         </span>
@@ -1459,7 +1459,7 @@ export function WorkConsolePanel({
               >
                 <span>{groupLabel(group, language)}</span>
                 {tone === "status" && (
-                  <span className="rounded-full bg-[#7C3AED]/10 px-1.5 py-0.5 text-[9px] font-semibold text-[#7C3AED]">
+                  <span className="rounded-full bg-[var(--color-accent)]/10 px-1.5 py-0.5 text-[9px] font-semibold text-[var(--color-accent)]">
                     {t(language, "Live", "실시간")}
                   </span>
                 )}

@@ -1,39 +1,12 @@
-import type { InputHTMLAttributes, TextareaHTMLAttributes } from "react";
+// Input + Textarea route through the canonical design-system fields (shared
+// look + a11y with cp). The custom combobox stays in ./select.tsx.
+import { Input as DsInput, type InputProps } from "./_ds/Input";
+import { Textarea as DsTextarea, type TextareaProps } from "./_ds/Input";
 
-interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
-  label?: string;
+export function Input(props: InputProps) {
+  return <DsInput {...props} />;
 }
 
-const inputBase =
-  "w-full bg-white border border-black/10 rounded-xl px-3.5 py-2.5 text-foreground placeholder:text-gray-400 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-colors duration-200";
-
-export function Input({ label, className = "", ...props }: InputProps) {
-  return (
-    <label className="block">
-      {label && (
-        <span className="block text-sm font-medium text-secondary mb-1">
-          {label}
-        </span>
-      )}
-      <input className={`${inputBase} ${className}`} {...props} />
-    </label>
-  );
+export function Textarea(props: TextareaProps) {
+  return <DsTextarea {...props} />;
 }
-
-interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
-  label?: string;
-}
-
-export function Textarea({ label, className = "", ...props }: TextareaProps) {
-  return (
-    <label className="block">
-      {label && (
-        <span className="block text-sm font-medium text-secondary mb-1">
-          {label}
-        </span>
-      )}
-      <textarea className={`${inputBase} resize-none ${className}`} {...props} />
-    </label>
-  );
-}
-
