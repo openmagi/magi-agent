@@ -15,6 +15,9 @@
 - F-UX-EXTRA: inline condition chips + Policy ID auto-fill + friendly variable tooltips (#987).
 - F-HANDOFF: wizard → NL bidirectional context handoff (Continue-in-NL button) (#988).
 
+## Child runner observability
+- MAGI_CHILD_RUNNER_EMPTY_DEBUG now covers dispatch + boundary trace (#990).
+
 ## CLI bootstrap
 - Embed install-default profile so live subagents work out of the box (#989).
 
