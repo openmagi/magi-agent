@@ -676,7 +676,10 @@ def gate5b_live_subagents_flag_on(env: Mapping[str, str]) -> bool:
     flag-read allowlist) so a consumer above the transport layer can gate on the
     flag without an inline env read.
     """
-    return _is_true(env.get("MAGI_GATE5B_LIVE_SUBAGENTS_ENABLED"))
+    # I-1: route through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_GATE5B_LIVE_SUBAGENTS_ENABLED", env=env)
 
 
 def operator_allowed_model_routes(
@@ -2874,7 +2877,10 @@ def parse_eval_autonomy_enabled(env: Mapping[str, str]) -> bool:
     running existing tests before concluding. Default OFF so non-eval sessions
     are byte-identical to origin/main. The eval profile opts in by setting
     ``MAGI_EVAL_AUTONOMY_ENABLED=1`` in ``EVAL_RUNTIME_ENV_DEFAULTS``."""
-    return _is_true(env.get("MAGI_EVAL_AUTONOMY_ENABLED"))
+    # I-1: route through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_EVAL_AUTONOMY_ENABLED", env=env)
 
 
 # Single source of truth for the compute-via-code directive flag.
@@ -2923,7 +2929,10 @@ def parse_eval_zero_edit_guard_enabled(env: Mapping[str, str]) -> bool:
     describing a fix without applying it. Default OFF so non-eval sessions are
     byte-identical to origin/main. The eval profile opts in by setting
     ``MAGI_EVAL_ZERO_EDIT_GUARD_ENABLED=1`` in ``EVAL_RUNTIME_ENV_DEFAULTS``."""
-    return _is_true(env.get("MAGI_EVAL_ZERO_EDIT_GUARD_ENABLED"))
+    # I-1: route through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_EVAL_ZERO_EDIT_GUARD_ENABLED", env=env)
 
 
 def multi_file_join_enabled(env: Mapping[str, str] | None = None) -> bool:
@@ -2963,7 +2972,10 @@ def parse_recipe_default_packs_expanded(env: Mapping[str, str]) -> bool:
     only the two ``hardSafety`` packs (``openmagi.context-safety`` /
     ``openmagi.evidence``) are default-selected.
     """
-    return _is_true(env.get("MAGI_RECIPE_DEFAULT_PACKS_EXPANDED"))
+    # I-1: route through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_RECIPE_DEFAULT_PACKS_EXPANDED", env=env)
 
 
 def parse_recipe_intent_binding_enabled(env: Mapping[str, str]) -> bool:
@@ -2987,7 +2999,10 @@ def parse_recipe_intent_binding_enabled(env: Mapping[str, str]) -> bool:
     deferred to 14-controlplane. OFF (default) keeps the emitted route selection
     byte-identical to origin/main.
     """
-    return _is_true(env.get("MAGI_RECIPE_INTENT_BINDING_ENABLED"))
+    # I-1: route through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_RECIPE_INTENT_BINDING_ENABLED", env=env)
 
 
 # Single source of truth for the CLI session-log write path (PR-04-PR1).
@@ -3107,7 +3122,10 @@ def plan_act_gate_enabled(env: Mapping[str, str] | None = None) -> bool:
         import os as _os
 
         env = _os.environ
-    return _is_true(env.get("MAGI_PLAN_ACT_GATE_ENABLED"))
+    # I-1: route through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_PLAN_ACT_GATE_ENABLED", env=env)
 
 
 def parse_ga_deliverable_gate_enabled(env: Mapping[str, str]) -> bool:
@@ -3358,7 +3376,10 @@ def plan_mode_tools_enabled(env: Mapping[str, str] | None = None) -> bool:
         import os as _os
 
         env = _os.environ
-    return _is_true(env.get("MAGI_PLAN_MODE_TOOLS_ENABLED"))
+    # I-1: route through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_PLAN_MODE_TOOLS_ENABLED", env=env)
 
 
 def document_qa_enabled(env: Mapping[str, str] | None = None) -> bool:
@@ -3452,7 +3473,12 @@ def computer_tool_enabled(env: Mapping[str, str] | None = None) -> bool:
         import os as _os
 
         env = _os.environ
-    return _is_true(env.get("MAGI_COMPUTER_TOOL_ENABLED")) and not _is_true(
+    # I-1: route the enable bool through the typed flag registry. The
+    # kill-switch knob is NOT yet registered (security-critical override;
+    # registration deferred to a focused PR) so stays a raw read for now.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_COMPUTER_TOOL_ENABLED", env=env) and not _is_true(
         env.get("MAGI_COMPUTER_TOOL_KILL_SWITCH")
     )
 
