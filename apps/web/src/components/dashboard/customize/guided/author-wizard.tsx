@@ -82,6 +82,7 @@ import type { EvidenceTypeEntry } from "@/lib/policy-model";
 
 import { TrustBadge, type TrustClass } from "../trust-badge";
 
+import { serializeDraftToPrimer, type HandoffStepKey } from "./handoff";
 import { RuntimeFieldChips } from "./runtime-field-chips";
 import { RadioCard, WizardChrome } from "./wizard-chrome";
 
@@ -365,6 +366,14 @@ export interface AuthorWizardProps {
   evidenceTypes: EvidenceTypeEntry[];
   onActivated: () => void;
   onCancel: () => void;
+  /** PR-F-HANDOFF — optional handoff to the NL compose surface. When
+   *  provided the WizardChrome renders a persistent "Continue in NL"
+   *  button on every step that serializes the current draft + step into
+   *  a friendly primer string. The parent (customize-hub) is expected to
+   *  flip the add-state to ``nl`` and seed NlRuleCompose's textarea with
+   *  the primer. Hidden when undefined so the wizard remains usable
+   *  standalone (e.g. in tests). */
+  onContinueInNl?: (primer: string) => void;
 }
 
 
@@ -373,6 +382,7 @@ export function AuthorWizard({
   evidenceTypes,
   onActivated,
   onCancel,
+  onContinueInNl,
 }: AuthorWizardProps): React.ReactElement {
   const agentFetch = useAgentFetch();
   const [step, setStep] = useState(0);
@@ -551,6 +561,19 @@ export function AuthorWizard({
     }
   };
 
+  // PR-F-HANDOFF — only forward the chrome callback when the parent wired
+  // one. The serializer reads the live draft + the currently-open step so
+  // the primer carries the operator's last-known position into NL mode.
+  const handleContinueInNl = onContinueInNl
+    ? () => {
+        const primer = serializeDraftToPrimer(
+          draft,
+          currentKey as HandoffStepKey,
+        );
+        onContinueInNl(primer);
+      }
+    : undefined;
+
   return (
     <WizardChrome
       step={step}
@@ -563,6 +586,7 @@ export function AuthorWizard({
       canAdvance={stepIsComplete(currentKey, draft)}
       saving={saving}
       error={saveError}
+      onContinueInNl={handleContinueInNl}
     >
       {currentKey === "trigger" ? (
         <TriggerStep
