@@ -53,6 +53,10 @@ const KIND_LABEL: Record<NamedConditionEntry["kind"], string> = {
   // kinds so an operator scanning the table sees "this rewrites traffic"
   // before opening the row.
   prompt_injection: "Prompt injection (mutator)",
+  // PR-F-MUT2 — second mutator kind; same labelling treatment as F-MUT1 so
+  // the Conditions tab honestly signals "rewrites traffic" before the row
+  // opens.
+  output_rewrite: "Output rewrite (mutator)",
   seam_action: "Seam action",
   none: "Built-in",
 };
