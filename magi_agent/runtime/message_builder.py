@@ -453,10 +453,28 @@ def _available_subagent_models_block() -> str:
 
 
 def _user_rules_block() -> str:
-    """USER-RULES.md section configured in the Customize tab, injected each turn.
+    """Operator-supplied advisory text configured in the Customize Guidance tab.
 
-    Flag-gated by ``MAGI_CUSTOMIZE_VERIFICATION_ENABLED``: empty (no section) when
-    off or unset, so the prompt is byte-identical to main. Fail-soft to "".
+    Reads the trimmed text via
+    :meth:`CustomizeVerificationPolicy.user_rules_advisory_text` (the canonical
+    accessor over the ``user_rules`` overrides field). Wraps it in a
+    ``<user_advisory_rules>`` fence with an honest header that tells the model
+    these rules are NOT enforced by a hard gate — they are operator advisory
+    only. The honest framing is deliberate: the model should know the
+    difference between advisory text and the deterministic ``custom_rules``
+    gates (gap 5 of the Customize Depth Enrichment design).
+
+    Replaces the prior ``## User Rules ... Follow them`` markdown framing
+    introduced in PR #603, which overstated enforcement strength and shared the
+    same body with the new envelope, double-injecting the same text. Single
+    source of truth for ``user_rules`` injection; ``guidance-panel.tsx``'s
+    Advisory badge mirrors this framing for operators.
+
+    Flag-gated by ``MAGI_CUSTOMIZE_VERIFICATION_ENABLED`` (profile-aware
+    default-ON in the full runtime profile, OFF under safe/eval). Empty (no
+    section) when the flag is off, when the field is unset, on any error, or
+    when the trimmed text is empty, so the prompt stays byte-identical under
+    safe profiles. Fail-soft to ``""``.
     """
     from magi_agent.config.flags import flag_profile_bool
 
@@ -464,16 +482,26 @@ def _user_rules_block() -> str:
         return ""
     try:
         from magi_agent.customize.store import load_overrides
+        from magi_agent.customize.verification_policy import (
+            CustomizeVerificationPolicy,
+        )
 
-        rules = (load_overrides().get("user_rules") or "").strip()
+        policy = CustomizeVerificationPolicy.from_overrides(load_overrides())
+        text = policy.user_rules_advisory_text()
     except Exception:
         return ""
-    if not rules:
+    if not text:
         return ""
+    # Sanitize a literal closing fence in the body so an operator can't
+    # prematurely close the envelope and confuse the model.
+    safe_text = text.replace("</user_advisory_rules>", "</user_advisory_rules_>")
     return (
-        "## User Rules\n\n"
-        "The user has configured the following rules for you. Follow them:\n\n"
-        f"{rules}"
+        "<user_advisory_rules>\n"
+        "Operator advisory rules (advisory: not enforced by a hard gate; "
+        "the model is asked to honor these where applicable).\n"
+        "\n"
+        f"{safe_text}\n"
+        "</user_advisory_rules>"
     )
 
 
