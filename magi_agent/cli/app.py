@@ -929,25 +929,15 @@ def legalbench(
         raise typer.Exit(code=1)
 
     def _real_complete(prompt: str) -> str:
-        """Single-turn completion via litellm.completion (no tools).
+        """Single-turn completion via ``litellm.completion`` (no tools).
 
-        Wire: litellm.completion(model=provider_cfg.litellm_model,
-        api_key=provider_cfg.api_key, messages=[{role:user, content:prompt}])
-        -> response.choices[0].message.content
-
-        provider_cfg.litellm_model is built by ProviderConfig.litellm_model
-        (magi_agent/cli/providers.py:75) as "<litellm_prefix>/<model>".
-        The same litellm dependency is already used by
-        magi_agent/cli/real_runner.py:_build_litellm_model().
+        ``litellm`` presence is guaranteed by the ``importlib.util.find_spec``
+        guard at the top of ``legalbench()`` — the previously-present inner
+        ``try: import litellm ... except ImportError: raise NotImplementedError``
+        was unreachable defensive scaffolding and was deleted under H-36.
         """
-        try:
-            import litellm  # noqa: PLC0415
-        except ImportError as exc:
-            raise NotImplementedError(
-                "Wire to: litellm.completion(model=provider_cfg.litellm_model, "
-                "api_key=provider_cfg.api_key, messages=[...]). "
-                "Install with: pip install 'magi-agent[providers]'"
-            ) from exc
+        import litellm  # noqa: PLC0415
+
         response = litellm.completion(
             model=provider_cfg.litellm_model,
             api_key=provider_cfg.api_key,
