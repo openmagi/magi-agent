@@ -118,14 +118,11 @@ from magi_agent.cli.tui.widgets.whichkey import WhichKeyOverlay, chord_continuat
 __all__ = ["MagiTuiApp", "TextualSink", "ToolUseConfirm"]
 
 
-def _token_text(payload: dict) -> str:
-    """Extract assistant text from a ``token`` payload (mirror headless)."""
-
-    for key in ("delta", "text"):
-        value = payload.get(key)
-        if isinstance(value, str):
-            return value
-    return ""
+# G-2: ``_token_text`` is the single ``token_text`` helper from
+# ``cli.event_projection`` — the TUI used to keep a byte-identical copy of
+# the headless implementation with a "mirror headless" docstring. Routed
+# through the shared module so a new payload key lands in exactly one place.
+from magi_agent.cli.event_projection import token_text as _token_text  # noqa: E402
 
 
 def _usage_tokens(usage: object) -> int:
