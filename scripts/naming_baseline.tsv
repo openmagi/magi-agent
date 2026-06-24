@@ -37,7 +37,7 @@ openclaw	magi_agent/transport/streaming_chat_route.py	3
 openmagi	magi_agent/adk_bridge/artifact_service.py	1
 openmagi	magi_agent/adk_bridge/callback_adapter.py	4
 openmagi	magi_agent/adk_bridge/context_compaction.py	1
-openmagi	magi_agent/adk_bridge/event_adapter.py	1
+openmagi	magi_agent/adk_bridge/event_adapter.py	9
 openmagi	magi_agent/adk_bridge/local_runner.py	2
 openmagi	magi_agent/adk_bridge/local_toolhost.py	1
 openmagi	magi_agent/adk_bridge/memory_service.py	1

@@ -285,127 +285,15 @@ class OpenMagiEventBridge:
         # ``live_tool_started_at_by_id``.  Never referenced in the CLI/None path.
         self._hosted_tool_started_at: dict[str, float] = {}
 
-    def project_runner_start_event(
-        self,
-        *,
-        turn_id: str,
-        declared_route: str = "direct",
-    ) -> EventProjection:
-        return project_runner_start_event(
-            turn_id=turn_id,
-            declared_route=declared_route,
-        )
-
-    def project_runner_phase_event(
-        self,
-        *,
-        turn_id: str,
-        phase: str,
-        status: str | None = None,
-        label: str | None = None,
-        message: str | None = None,
-        detail: str | None = None,
-        sequence: int | float | None = None,
-        created_at: int | float | None = None,
-    ) -> EventProjection:
-        return project_runner_phase_event(
-            turn_id=turn_id,
-            phase=phase,
-            status=status,
-            label=label,
-            message=message,
-            detail=detail,
-            sequence=sequence,
-            created_at=created_at,
-        )
-
-    def project_runner_heartbeat_event(
-        self,
-        *,
-        turn_id: str,
-        iter: int | float | None = None,
-        elapsed_ms: int | float | None = None,
-        last_event_at: int | float | None = None,
-    ) -> EventProjection:
-        return project_runner_heartbeat_event(
-            turn_id=turn_id,
-            iter=iter,
-            elapsed_ms=elapsed_ms,
-            last_event_at=last_event_at,
-        )
-
-    def project_runner_model_fallback_event(
-        self,
-        *,
-        turn_id: str,
-        from_model: str,
-        to_model: str,
-        reason: str,
-        attempt: int | float | None = None,
-    ) -> EventProjection:
-        return project_runner_model_fallback_event(
-            turn_id=turn_id,
-            from_model=from_model,
-            to_model=to_model,
-            reason=reason,
-            attempt=attempt,
-        )
-
-    def project_runner_retry_event(
-        self,
-        *,
-        turn_id: str,
-        reason: str,
-        retry_no: int | float | None = None,
-        tool_use_id: str | None = None,
-        tool_name: str | None = None,
-    ) -> EventProjection:
-        return project_runner_retry_event(
-            turn_id=turn_id,
-            reason=reason,
-            retry_no=retry_no,
-            tool_use_id=tool_use_id,
-            tool_name=tool_name,
-        )
-
-    def project_runner_llm_progress_event(
-        self,
-        *,
-        turn_id: str,
-        stage: str = "waiting",
-        label: str | None = None,
-        detail: str | None = None,
-        iter: int | float | None = None,
-        elapsed_ms: int | float | None = None,
-    ) -> EventProjection:
-        return project_runner_llm_progress_event(
-            turn_id=turn_id,
-            stage=stage,
-            label=label,
-            detail=detail,
-            iter=iter,
-            elapsed_ms=elapsed_ms,
-        )
-
-    def project_runner_end_event(
-        self,
-        *,
-        turn_id: str,
-        status: str = "committed",
-        stop_reason: str | None = None,
-        reason: str | None = None,
-        usage: dict[str, object] | None = None,
-        receipt_ref: str | None = None,
-    ) -> EventProjection:
-        return project_runner_end_event(
-            turn_id=turn_id,
-            status=status,
-            stop_reason=stop_reason,
-            reason=reason,
-            usage=usage,
-            receipt_ref=receipt_ref,
-        )
-
+    # D-10: seven pure pass-throughs (``project_runner_{start,phase,
+    # heartbeat,model_fallback,retry,llm_progress,end}_event``) used to
+    # re-declare full kwarg signatures and ``return module_func(**kwargs)``.
+    # They are now aliased to the module functions as ``staticmethod`` at
+    # the bottom of this module (after the module functions are defined)
+    # so call-sites like ``bridge.project_runner_start_event(...)`` keep
+    # working but the kwarg signatures only live once. The single real
+    # method ``project_adk_event`` stays because it touches the per-turn
+    # ``_streamed_partial_text`` state.
     def project_adk_event(self, event: Event, *, turn_id: str) -> EventProjection:
         if (event.error_code or event.error_message) and not _all_error_fields_benign(
             event.error_code, event.error_message
@@ -1750,3 +1638,32 @@ def _is_error_response(response: object) -> bool:
         or response.get("isError")
         or response.get("is_error")
     )
+
+
+# D-10 — attach the seven pure pass-through module functions as
+# ``staticmethod``s on :class:`OpenMagiEventBridge`. The class body used to
+# carry seven methods whose body was ``return module_func(**kwargs)`` with a
+# re-declared signature; the bridge holds real per-turn state only for
+# ``project_adk_event``, which stays a real method above. Existing call
+# sites (``bridge.project_runner_start_event(...)``, etc.) keep working.
+OpenMagiEventBridge.project_runner_start_event = staticmethod(  # type: ignore[method-assign]
+    project_runner_start_event
+)
+OpenMagiEventBridge.project_runner_phase_event = staticmethod(  # type: ignore[method-assign]
+    project_runner_phase_event
+)
+OpenMagiEventBridge.project_runner_heartbeat_event = staticmethod(  # type: ignore[method-assign]
+    project_runner_heartbeat_event
+)
+OpenMagiEventBridge.project_runner_model_fallback_event = staticmethod(  # type: ignore[method-assign]
+    project_runner_model_fallback_event
+)
+OpenMagiEventBridge.project_runner_retry_event = staticmethod(  # type: ignore[method-assign]
+    project_runner_retry_event
+)
+OpenMagiEventBridge.project_runner_llm_progress_event = staticmethod(  # type: ignore[method-assign]
+    project_runner_llm_progress_event
+)
+OpenMagiEventBridge.project_runner_end_event = staticmethod(  # type: ignore[method-assign]
+    project_runner_end_event
+)
