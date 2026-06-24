@@ -161,4 +161,30 @@ describe("describeDraft — plain-English live preview of the add-form draft", (
     expect(line).toContain("fs_write");
     expect(line).toContain("safe_write");
   });
+
+  // -------------------------------------------------------------------------
+  // F6.5 — llm_criterion sentence is pre_final-only here (verification-rule
+  // -modal scopes d.kind="llm_criterion" to pre_final; the after-tool form
+  // routes through d.kind="after_tool" below, where contentMatch is
+  // honored). Backend rejects contentMatch on pre_final via
+  // _validate_content_match, so the llm_criterion sentence never
+  // surfaces a pre-filter clause from this branch.
+  // -------------------------------------------------------------------------
+
+  it("llm_criterion preview ignores contentPattern (pre_final has no tool output)", () => {
+    // Even if a draft carries contentPattern, this branch must NOT
+    // render a "Critic invoked only when output..." clause — the
+    // backend would reject the persisted rule.
+    const line = describeDraft({
+      ...base(),
+      kind: "llm_criterion",
+      criterion: "the answer cites at least one source",
+      contentPattern: "AKIA",
+      contentIsRegex: false,
+      contentNegate: false,
+    });
+    expect(line).toContain("LLM critic");
+    expect(line).toContain('"the answer cites at least one source"');
+    expect(line).not.toContain("Critic invoked only when output");
+  });
 });

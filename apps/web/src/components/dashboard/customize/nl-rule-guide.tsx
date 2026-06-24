@@ -73,6 +73,16 @@ const EXAMPLES: ReadonlyArray<ExampleChip> = [
     label: "Audit weak citations",
     text: "On research turns, audit when an LLM critic judges that the answer cites at least one source is false.",
   },
+  // F6.5 — after-tool llm_criterion + contentMatch combo. The regex
+  // pre-filter is the deterministic input-definition slot; the critic is
+  // the advisory verdict. Compiler should route this to a
+  // llm_criterion CustomRule with firesAt=after_tool_use plus a
+  // contentMatch payload (pattern + isRegex).
+  {
+    archetype: "audit",
+    label: "Audit AWS keys with LLM verdict",
+    text: "After fetch_url returns, when the result contains AKIA[0-9A-Z]{16}, audit when an LLM critic judges that the key is real.",
+  },
   {
     archetype: "strip",
     label: "Strip secrets from tool output",
