@@ -107,7 +107,32 @@ export interface CustomizeCatalog {
     recipes: RecipeItem[];
     harnessPresets: HarnessPresetItem[];
     hooks: HookItem[];
+    /**
+     * Producer-backed deterministic checks the custom-rule builder may
+     * require. Union of {@link evidenceMenu} + {@link judgmentMenu}.
+     *
+     * @deprecated PR-F-UX5 — prefer ``evidenceMenu`` / ``judgmentMenu`` so
+     * the raw-evidence vs verdict-primitive distinction is visible in the UI.
+     * Retained as the back-compat union so existing consumers (NL compiler
+     * tests, third-party authoring surfaces) keep working.
+     */
     customRuleMenu: CustomRuleMenuItem[];
+    /**
+     * PR-F-UX5 — raw-evidence ref descriptors (``evidence:*``). These are the
+     * producer records a deterministic rule operates against (the inputs,
+     * not the verdicts). Source for the wizard's "Check evidence record
+     * present" picker AND the field-constraint type picker (verifiers have
+     * no traversable fields).
+     */
+    evidenceMenu: CustomRuleMenuItem[];
+    /**
+     * PR-F-UX5 — verdict-primitive ref descriptors. Built-in verifier outputs
+     * (``verifier:*`` refs and unprefixed named judgments such as
+     * ``fact_grounding``). Source for the wizard's "Check verifier /
+     * condition passed" picker; the Conditions tab merges these with
+     * user-authored named conditions under an origin badge.
+     */
+    judgmentMenu: CustomRuleMenuItem[];
   };
   tools: ToolItem[];
   controlPlane: ControlPlaneBehaviorItem[];

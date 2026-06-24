@@ -316,6 +316,24 @@ export function ReusableEvidenceTab({
 
   return (
     <div className="space-y-5">
+      {/* PR-F-UX5 — orientation note: "evidence" here means the RAW producer
+          records the runtime captures from tools/skills/spawns (the inputs
+          a deterministic rule operates against). Verdict primitives
+          (verifiers / named conditions) live in the Conditions tab — they
+          are judgments over evidence, not evidence itself. The split keeps
+          the two pickers in the wizard distinct and prevents the operator
+          from mistaking a verdict for a raw record. */}
+      <section className="rounded-xl border border-black/[0.06] bg-blue-500/[0.04] px-4 py-3">
+        <p className="text-xs leading-relaxed text-secondary">
+          <strong className="font-semibold text-foreground">
+            Evidence = raw producer records.
+          </strong>{" "}
+          The runtime captures these from tools, skills, and spawns; rules
+          operate over them. Verdict primitives (verifiers / named conditions)
+          live in the <strong className="text-foreground">Conditions</strong>{" "}
+          tab and are judgments OVER evidence, not evidence itself.
+        </p>
+      </section>
       <section className="space-y-2">
         <header>
           <h3 className="text-sm font-semibold text-foreground">

@@ -97,11 +97,13 @@ describe("AuthorWizard — variable-length policy authoring (F1.5)", () => {
     expect(src).toMatch(/return \["none", "regex", "llm_criterion"\]/);
   });
 
-  it("pre_final ignores target and returns evidence_ref / shacl / llm_criterion (+ field_constraint per F3)", () => {
-    // F3 appends `field_constraint` as the preferred deterministic SHACL
-    // option for pre_final; existing kinds preserved.
+  it("pre_final ignores target and returns evidence_ref / verifier_passed / shacl / llm_criterion / field_constraint (PR-F-UX5)", () => {
+    // F-UX5 inserts ``verifier_passed`` next to ``evidence_ref`` so the
+    // operator picks raw-evidence vs verdict-primitive distinctly. Both
+    // compile to ``deterministic_ref`` on the backend (storage unchanged).
+    // F3's ``field_constraint`` and the raw ``shacl`` escape hatch remain.
     expect(src).toMatch(
-      /pre_final[\s\S]*?return \["evidence_ref", "shacl", "llm_criterion", "field_constraint"\]/,
+      /pre_final[\s\S]*?return \["evidence_ref", "verifier_passed", "shacl", "llm_criterion", "field_constraint"\]/,
     );
   });
 
@@ -662,5 +664,109 @@ describe("AuthorWizard — F6.5 BLOCKER fix: toolMatch on after-tool llm_criteri
     // exact-membership check.
     expect(src).toContain("splitToolMatchList(draft.llmToolMatch)");
     expect(src).toContain("for tool ");
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// PR-F-UX5 — evidence vs verifier_passed split (raw evidence record vs
+// verdict primitive). Both compile to the same backend deterministic_ref
+// payload; the split lives entirely at the UX layer.
+// ---------------------------------------------------------------------------
+
+
+describe("AuthorWizard — PR-F-UX5 evidence_ref vs verifier_passed split", () => {
+  it("ConditionKind union gains 'verifier_passed' alongside 'evidence_ref'", () => {
+    // Two visibly distinct picker intents; same backend payload.
+    expect(src).toMatch(/type ConditionKind[\s\S]*?\| "evidence_ref"/);
+    expect(src).toMatch(/type ConditionKind[\s\S]*?\| "verifier_passed"/);
+  });
+
+  it("CONDITION_META labels evidence_ref as 'Check evidence record present'", () => {
+    // Raw evidence framing: the picker operates over producer-emitted
+    // records (evidence:*). The label MUST NOT use 'reference' (the old
+    // wording) so the operator sees the input-shape vs verdict-primitive
+    // distinction in the picker.
+    expect(src).toMatch(
+      /evidence_ref:\s*\{[\s\S]*?label:\s*"Check evidence record present"/,
+    );
+    expect(src).toMatch(/evidence_ref:[\s\S]*?Raw evidence/);
+  });
+
+  it("CONDITION_META labels verifier_passed as 'Check verifier / condition passed'", () => {
+    // Verdict primitive framing: the picker operates over judgments
+    // (verifier:* + bare named conditions). Same backend payload as
+    // evidence_ref but a different intent — must be visibly distinct.
+    expect(src).toMatch(
+      /verifier_passed:\s*\{[\s\S]*?label:\s*"Check verifier \/ condition passed"/,
+    );
+    expect(src).toMatch(/verifier_passed:[\s\S]*?Verdict primitive/);
+  });
+
+  it("evidence_ref picker source narrows to catalog.evidenceMenu only", () => {
+    // F-UX5 spec: evidence picker reads ONLY raw-evidence refs. The hub
+    // builds evidenceRefOptions from catalog.verification.evidenceMenu and
+    // passes it as a separate prop so verifier refs cannot leak into this
+    // picker.
+    expect(src).toContain("catalog.verification.evidenceMenu");
+    expect(src).toContain("evidenceRefOptions");
+  });
+
+  it("verifier_passed picker source narrows to catalog.judgmentMenu only", () => {
+    // Same split on the verdict-primitive side: picker reads only
+    // judgmentMenu (verifier:* + bare named judgments). User-authored
+    // refs are NOT mixed in because verifier authoring is a runtime-code
+    // surface, not a dashboard surface (F-UX5 principle 1).
+    expect(src).toContain("catalog.verification.judgmentMenu");
+    expect(src).toContain("judgmentRefOptions");
+  });
+
+  it("field_constraint picker keeps reading liveCatalogTypes (evidence-only by construction)", () => {
+    // F-UX5 spec: field_constraint picker must show evidence-shape types
+    // ONLY (verifiers have no traversable fields). liveCatalogTypes is
+    // already evidence-shape-only (filtered by registeredFields presence
+    // in FieldConstraintPicker), so the wizard does NOT feed it
+    // judgmentRefOptions.
+    expect(src).toMatch(/FieldConstraintPicker[\s\S]*?liveCatalogTypes/);
+    // Specifically: the field_constraint branch must NOT thread the
+    // judgment refs through (would invite a verifier-typed pick → silent
+    // dead end at compile time).
+    expect(src).not.toMatch(
+      /draft\.conditionKind === "field_constraint"[\s\S]*?judgmentRefOptions/,
+    );
+  });
+
+  it("evidence_ref + verifier_passed BOTH compile to backend kind 'deterministic_ref'", () => {
+    // Storage shape is identical for both UX kinds; the split is UX-only.
+    // No backend migration needed for existing rules (acceptance #5).
+    expect(src).toMatch(
+      /conditionKind === "evidence_ref"[\s\S]*?"deterministic_ref"/,
+    );
+    expect(src).toMatch(
+      /conditionKind === "verifier_passed"[\s\S]*?"deterministic_ref"/,
+    );
+  });
+
+  it("evidence_ref + verifier_passed share the same {ref} payload (backend stays unchanged)", () => {
+    // customRulePayload must collapse both cases onto the same {ref}
+    // emission so persisted rules are indistinguishable. Either a shared
+    // case fallthrough or two identical case bodies — assert structurally
+    // that both kinds reach the {ref} emit.
+    expect(src).toMatch(/case "evidence_ref":\s*\n\s*case "verifier_passed":/);
+  });
+
+  it("stepIsComplete accepts a non-empty evidenceRef for either kind", () => {
+    // The draft slot ``evidenceRef`` is reused by both pickers (storage is
+    // shared). The completion gate must not require a separate slot for
+    // verifier_passed.
+    expect(src).toMatch(/case "evidence_ref":\s*\n\s*case "verifier_passed":/);
+  });
+
+  it("verifier_passed picker badges built-in entries 'built-in' (and user entries 'user')", () => {
+    // The Conditions tab uses the same badge vocabulary; the picker
+    // mirrors it so the inventory looks consistent across surfaces.
+    expect(src).toMatch(
+      /conditionKind === "verifier_passed"[\s\S]*?badge=\{[\s\S]*?"built-in"/,
+    );
   });
 });
