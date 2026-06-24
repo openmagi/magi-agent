@@ -94,6 +94,8 @@ openmagi	magi_agent/connectors/credential_lease.py	6
 openmagi	magi_agent/connectors/marketplace.py	6
 openmagi	magi_agent/connectors/registry.py	6
 openmagi	magi_agent/customize/catalog.py	9
+openmagi	magi_agent/customize/field_constraint_compiler.py	1
+openmagi	magi_agent/customize/rule_compiler.py	2
 openmagi	magi_agent/customize/shacl_compiler.py	1
 openmagi	magi_agent/evidence/__init__.py	2
 openmagi	magi_agent/evidence/child_runtime_envelope.py	4

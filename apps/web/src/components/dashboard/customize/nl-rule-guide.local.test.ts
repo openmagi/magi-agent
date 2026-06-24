@@ -57,3 +57,17 @@ describe("NlRuleGuide — same mental model as AuthorWizard", () => {
     expect(src).toContain("useState(true)");
   });
 });
+
+describe("NlRuleGuide — F3 field_constraint example phrasings", () => {
+  it("ships at least three field_constraint examples covering eq/forEachExistsCovering/comparator phrasings", () => {
+    expect(src).toContain(
+      "On coding turns, block the final answer when TestRun.exitCode is not 0",
+    );
+    expect(src).toContain(
+      "On coding turns, require that for each entry in GitDiff.changedFiles there exists a TestRun whose command contains that path",
+    );
+    expect(src).toContain(
+      "On research turns, audit when SourceInspection.statusCode is greater than 399",
+    );
+  });
+});

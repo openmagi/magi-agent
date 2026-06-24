@@ -216,3 +216,73 @@ def test_route_fails_open_when_no_model_configured(tmp_path, monkeypatch) -> Non
     body = resp.json()
     assert body["ok"] is False
     assert body.get("error")
+
+
+# ---------------------------------------------------------------------------
+# F3 honest-degrade — missingFields / suggestion / explanation propagate
+# ---------------------------------------------------------------------------
+
+
+# A field that is verifiably NOT in the catalog hints anywhere
+# (audited 2026-06-23 in `_BUILTIN_FIELD_HINTS`).
+_UNKNOWN_FIELD = "magicTotallyImaginaryField"
+
+
+_UNKNOWN_FIELD_CONSTRAINT_JSON = json.dumps(
+    {
+        "routedKind": "field_constraint",
+        "draft": {
+            "scope": "coding",
+            "enabled": True,
+            "firesAt": "pre_final",
+            "action": "block",
+            "what": {
+                "kind": "field_constraint",
+                "payload": {
+                    "evidenceType": "TestRun",
+                    "field": _UNKNOWN_FIELD,
+                    "operator": "eq",
+                    "value": 0,
+                },
+            },
+        },
+        "explanation": "structured field constraint",
+    }
+)
+_UNKNOWN_FIELD_RESPONSE = f"```json\n{_UNKNOWN_FIELD_CONSTRAINT_JSON}\n```"
+
+
+def test_route_forwards_honest_degrade_keys(tmp_path, monkeypatch) -> None:
+    """When the compiler returns ``error == 'field_not_in_catalog'`` the
+    HTTP route MUST forward ``missingFields``, ``suggestion``, and
+    ``explanation`` verbatim so the frontend banner can render the
+    per-(evidenceType, field) list and the redirect copy."""
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
+    _enable(monkeypatch)
+
+    factory = _factory_seq(_UNKNOWN_FIELD_RESPONSE, _VALID_REVIEW_RESPONSE)
+    import magi_agent.transport.customize as customize_transport
+
+    monkeypatch.setattr(
+        customize_transport,
+        "_resolve_nl_rule_compile_factory",
+        lambda body: factory,
+    )
+
+    resp = _client().post(
+        "/v1/app/customize/rules/compile",
+        json={"nlText": "TestRun must have magicTotallyImaginaryField"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is False
+    assert body["error"] == "field_not_in_catalog"
+    missing = body.get("missingFields")
+    assert isinstance(missing, list) and missing
+    assert any(
+        m.get("field") == _UNKNOWN_FIELD for m in missing
+    ), f"missingFields must include the unknown field; got {missing!r}"
+    assert isinstance(body.get("suggestion"), str)
+    assert isinstance(body.get("explanation"), str)
+    # routedKind is informational but should round-trip when populated.
+    assert body.get("routedKind") in {"field_constraint", "shacl_constraint"}

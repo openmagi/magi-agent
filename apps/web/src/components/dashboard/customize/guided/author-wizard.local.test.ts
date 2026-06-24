@@ -95,9 +95,11 @@ describe("AuthorWizard — variable-length policy authoring (F1.5)", () => {
     expect(src).toMatch(/return \["none", "regex", "llm_criterion"\]/);
   });
 
-  it("pre_final ignores target and returns evidence_ref / shacl / llm_criterion", () => {
+  it("pre_final ignores target and returns evidence_ref / shacl / llm_criterion (+ field_constraint per F3)", () => {
+    // F3 appends `field_constraint` as the preferred deterministic SHACL
+    // option for pre_final; existing kinds preserved.
     expect(src).toMatch(
-      /pre_final[\s\S]*?return \["evidence_ref", "shacl", "llm_criterion"\]/,
+      /pre_final[\s\S]*?return \["evidence_ref", "shacl", "llm_criterion", "field_constraint"\]/,
     );
   });
 
@@ -158,5 +160,134 @@ describe("AuthorWizard — variable-length policy authoring (F1.5)", () => {
   it("Save button (last step) calls handleSave", () => {
     expect(src).toContain("handleSave");
     expect(src).toContain("onSave={handleSave}");
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// PR-F3 — field_constraint condition kind (deterministic SHACL-via-picker)
+// ---------------------------------------------------------------------------
+
+
+describe("AuthorWizard — F3 field_constraint condition kind", () => {
+  it("declares field_constraint as a ConditionKind union member", () => {
+    // Additive: field_constraint joins the existing kinds. Persists as
+    // shacl_constraint on the backend with an authoredAs IR for round-trip.
+    expect(src).toMatch(
+      /type ConditionKind[\s\S]*?\| "field_constraint"/,
+    );
+  });
+
+  it("pre_final exposes field_constraint as a preferred deterministic option", () => {
+    // pre_final is the canonical home for evidence-shape constraints; the
+    // deterministic SHACL compile path lives here so users can author
+    // field rules without ever seeing TTL.
+    expect(src).toMatch(
+      /pre_final[\s\S]*?return \[[^\]]*?"field_constraint"[^\]]*?\]/,
+    );
+  });
+
+  it("registers a CONDITION_META entry for field_constraint", () => {
+    expect(src).toMatch(
+      /field_constraint:\s*\{[\s\S]*?label:\s*"Field constraint"/,
+    );
+    expect(src).toMatch(
+      /field_constraint:\s*\{[\s\S]*?Deterministic SHACL compile, no LLM/,
+    );
+  });
+
+  it("adds structured draft fields for field_constraint authoring", () => {
+    // Five-tuple drives the deterministic SHACL synthesis on the backend:
+    // evidence type → field → operator → value, plus the cross-record
+    // sub-flow for forEachExistsCovering (source/target type+field).
+    expect(src).toContain("fcEvidenceType: string");
+    expect(src).toContain("fcField: string");
+    expect(src).toContain("fcOperator:");
+    expect(src).toContain("fcValue: string");
+    expect(src).toContain("fcCrossSourceType: string");
+    expect(src).toContain("fcCrossSourceField: string");
+    expect(src).toContain("fcCrossTargetType: string");
+    expect(src).toContain("fcCrossTargetField: string");
+  });
+
+  it("SpecificsStep renders a dedicated branch for field_constraint", () => {
+    expect(src).toMatch(
+      /draft\.conditionKind === "field_constraint"/,
+    );
+  });
+
+  it("SpecificsStep loads the F2 evidence live-catalog for type/field pickers", () => {
+    // PR-F3 wires the deterministic picker against the live catalog so the
+    // user only ever picks from types that actually have a registered
+    // field vocabulary (inert-producer hide invariant).
+    expect(src).toContain("getEvidenceLiveCatalog");
+    expect(src).toContain("EvidenceLiveCatalogTypeEntry");
+  });
+
+  it("field picker filters out inert-producer types (empty registeredFields)", () => {
+    // Spec §5 PR-F3: "only types with non-empty registeredFields are
+    // shown; show 'no fields available — producer extension needed' if
+    // empty." Hides silent-non-firing shape risk.
+    expect(src).toContain("registeredFields");
+    expect(src).toMatch(/registeredFields\.length\s*>\s*0/);
+  });
+
+  it("offers the full 8 single-record operators plus forEachExistsCovering", () => {
+    // Deterministic operators map 1:1 to SHACL constraints on a single
+    // evidence record; forEachExistsCovering is the cross-record cardinality
+    // form for "for each entry in <source.field>, there exists a <target>"
+    // patterns (intent 2 endgame).
+    expect(src).toContain('"eq"');
+    expect(src).toContain('"neq"');
+    expect(src).toContain('"gt"');
+    expect(src).toContain('"lt"');
+    expect(src).toContain('"ge"');
+    expect(src).toContain('"le"');
+    expect(src).toContain('"exists"');
+    expect(src).toContain('"notExists"');
+    expect(src).toContain('"forEachExistsCovering"');
+  });
+
+  it("hides the value input for exists/notExists operators", () => {
+    // exists/notExists are purely structural — no value is needed and
+    // surfacing an input would mislead. The wizard branches on operator
+    // shape so the value field disappears for cardinality-only operators.
+    expect(src).toMatch(
+      /fcOperator === "exists" \|\| .*fcOperator === "notExists"/,
+    );
+  });
+
+  it("forEachExistsCovering surfaces the cross-record sub-form", () => {
+    // Cross-record operator needs source.field + target.evidenceType +
+    // target.field; the sub-form replaces the single-record value input
+    // when this operator is picked.
+    expect(src).toMatch(/fcOperator === "forEachExistsCovering"/);
+  });
+
+  it("stepIsComplete validates field_constraint inputs (type + field + operator + value-when-needed)", () => {
+    expect(src).toMatch(
+      /case "field_constraint":/,
+    );
+  });
+
+  it("customRulePayload(field_constraint) emits an authoredAs IR for round-trip", () => {
+    // Spec §5 schema impact: store as shacl_constraint with authoredAs
+    // preserving the structured form so re-editing surfaces chips, not TTL.
+    expect(src).toMatch(/case "field_constraint":[\s\S]*?authoredAs:/);
+    expect(src).toMatch(/authoredAs:\s*\{[\s\S]*?kind:\s*"field_constraint"/);
+  });
+
+  it("customRuleKind maps field_constraint to shacl_constraint storage", () => {
+    // Backend storage is shacl_constraint; authoredAs is the round-trip
+    // hint. No new backend kind required (additive).
+    expect(src).toMatch(
+      /conditionKind === "field_constraint"[\s\S]*?"shacl_constraint"/,
+    );
+  });
+
+  it("describes field_constraint in plain English in the Review step", () => {
+    // The reviewer summary must reflect the field-shaped rule rather than
+    // dumping raw TTL or the generic "shacl shape" phrase.
+    expect(src).toMatch(/case "field_constraint":/);
   });
 });

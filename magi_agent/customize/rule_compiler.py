@@ -1,5 +1,5 @@
 """Unified NL → Rule compiler — single LLM call that routes a natural-
-language policy to one of the six backing rule primitives:
+language policy to one of the seven backing rule primitives:
 
     1. ``deterministic_ref``  → CustomRule (pre_final, evidence-ref check)
     2. ``tool_perm``          → CustomRule (before_tool_use, deny/ask)
@@ -7,6 +7,9 @@ language policy to one of the six backing rule primitives:
     4. ``shacl_constraint``   → CustomRule (pre_final, SHACL shape)
     5. ``seam_spec``          → SeamSpec doc (rewires built-in PresetSeam)
     6. ``custom_check``       → DashboardCheck (after_tool regex)
+    7. ``field_constraint``   → structured CustomRule (pre_final, IR compiles
+       deterministically to SHACL; preferred over raw ``shacl_constraint``
+       for single-field / cross-record-cardinality intents — PR-F3 2026-06-23)
 
 Earlier work only had NL compilers for ``shacl_constraint`` (PR-A) and
 ``seam_spec`` (PR-C). Kevin's 2026-06-22 follow-up flagged this as a
@@ -60,9 +63,11 @@ from magi_agent.customize.shacl_compiler import (
 # ---------------------------------------------------------------------------
 
 
-#: The 6 kinds the unified compiler can route to. Keep this list aligned
-#: with the prompt menu + the validator dispatch below; adding a new kind
-#: requires updating all three sites.
+#: The kinds the unified compiler can route to. Keep this list aligned with
+#: the prompt menu + the validator dispatch below; adding a new kind requires
+#: updating all three sites. ``field_constraint`` (PR-F3 2026-06-23) is the
+#: preferred structured form for single-field / cross-record-cardinality
+#: intents; raw ``shacl_constraint`` remains the power-user escape hatch.
 ROUTED_KINDS: Final[frozenset[str]] = frozenset(
     {
         "deterministic_ref",
@@ -71,6 +76,7 @@ ROUTED_KINDS: Final[frozenset[str]] = frozenset(
         "shacl_constraint",
         "seam_spec",
         "custom_check",
+        "field_constraint",
     }
 )
 
@@ -80,6 +86,13 @@ def schema_issues_for(routed_kind: str, draft: Any) -> list[str]:
 
     Dispatches to the right validator for ``routed_kind`` (existing helpers
     — no validation logic re-implemented here). Returns ``[]`` when clean.
+
+    PR-F3 (2026-06-23): adds a ``field_constraint`` branch — the structured
+    IR is validated via :func:`field_constraint_compiler.compile_to_shacl_ttl`
+    which already raises ``ValueError`` on unknown evidence types / unknown
+    fields / missing operator value; the resulting TTL is then re-validated
+    against the same backend gate ``shacl_constraint`` uses so a single proof
+    covers both authoring forms.
     """
     if routed_kind == "seam_spec":
         from magi_agent.customize.seam_spec import parse_spec, validate_spec  # noqa: PLC0415
@@ -95,10 +108,118 @@ def schema_issues_for(routed_kind: str, draft: Any) -> list[str]:
         )
 
         return validate_dashboard_check(draft)
+    if routed_kind == "field_constraint":
+        return _schema_issues_for_field_constraint(draft)
     # Remaining 4 kinds all route through validate_custom_rule.
     from magi_agent.customize.custom_rules import validate_custom_rule  # noqa: PLC0415
 
     return validate_custom_rule(draft)
+
+
+# Outer-shell guards lifted from ``validate_custom_rule`` so the
+# ``field_constraint`` branch can apply the same wrapper checks (scope,
+# firesAt, action, projection) without re-importing the shacl-only kinds set.
+def _validate_field_constraint_outer(rule: Any) -> tuple[list[str], dict | None]:
+    """Validate the CustomRule envelope around a ``field_constraint`` draft.
+
+    Returns ``(errors, payload_or_None)`` — the payload dict (or ``None`` if
+    the structural envelope already failed). Mirrors the prefix of
+    :func:`magi_agent.customize.custom_rules.validate_custom_rule`.
+    """
+    from magi_agent.customize.custom_rules import (  # noqa: PLC0415
+        ACTIONS,
+        FIRES_AT,
+        SCOPES,
+        _projection_slice_ok,
+    )
+
+    errors: list[str] = []
+    if not isinstance(rule, dict):
+        return ["rule must be an object"], None
+
+    scope = rule.get("scope")
+    if scope not in SCOPES:
+        errors.append(f"scope must be one of {sorted(SCOPES)}")
+
+    what = rule.get("what")
+    if not isinstance(what, dict):
+        errors.append("what must be an object with kind+payload")
+        return errors, None
+    if what.get("kind") != "field_constraint":
+        errors.append("what.kind must be 'field_constraint' for this draft")
+
+    payload = what.get("payload")
+    if not isinstance(payload, dict):
+        errors.append("what.payload must be an object")
+        payload = None
+
+    fires_at = rule.get("firesAt")
+    action = rule.get("action")
+    # field_constraint persists as a shacl_constraint at the backend gate;
+    # the firesAt/action contract therefore matches shacl_constraint:
+    # pre_final / block only.
+    if fires_at != "pre_final":
+        errors.append("field_constraint firesAt must be 'pre_final'")
+    elif fires_at not in FIRES_AT:  # pragma: no cover — pre_final is in the set
+        errors.append(f"firesAt must be one of {sorted(FIRES_AT)}")
+    if action != "block":
+        if action not in ACTIONS:
+            errors.append(f"action must be one of {sorted(ACTIONS)}")
+        else:
+            errors.append("field_constraint action must be 'block'")
+
+    projection = rule.get("projection")
+    if projection is not None:
+        if not isinstance(projection, list):
+            errors.append("projection must be a list")
+        else:
+            bad = [
+                s for s in projection
+                if not (isinstance(s, str) and _projection_slice_ok(s))
+            ]
+            if bad:
+                errors.append(
+                    f"projection slices {bad} not allowed "
+                    "(conversation/full history forbidden)"
+                )
+
+    return errors, payload
+
+
+def _schema_issues_for_field_constraint(draft: Any) -> list[str]:
+    """Deterministic schema check for the ``field_constraint`` draft.
+
+    Two layers:
+      1. Envelope (scope/firesAt/action/projection) via the local mirror of
+         ``validate_custom_rule``.
+      2. Payload — attempt ``compile_to_shacl_ttl(payload)``. The compiler
+         enforces the catalog cross-check (unknown evidence type or unknown
+         field raises ``ValueError`` BEFORE TTL is produced), so we surface
+         the raised reason verbatim. The synthesised TTL is then
+         re-validated against ``shacl_verifier.validate_shape_ttl`` so any
+         residual structural issue surfaces through the same backend gate
+         ``shacl_constraint`` rules go through.
+    """
+    errors, payload = _validate_field_constraint_outer(draft)
+    if payload is None:
+        return errors
+
+    from magi_agent.customize.field_constraint_compiler import (  # noqa: PLC0415
+        compile_to_shacl_ttl,
+    )
+    from magi_agent.evidence.shacl_verifier import (  # noqa: PLC0415
+        validate_shape_ttl,
+    )
+
+    try:
+        shape_ttl = compile_to_shacl_ttl(payload)
+    except ValueError as exc:
+        # Honest-degrade: bubble the catalog / operator / value reason.
+        errors.append(str(exc))
+        return errors
+
+    errors.extend(validate_shape_ttl(shape_ttl))
+    return errors
 
 
 # ---------------------------------------------------------------------------
@@ -133,9 +254,22 @@ matches its draft-shape contract.
     what:{kind:"llm_criterion", payload:{criterion:"<sentence>"} or
     {toolMatch:[...], contentMatch:{pattern, isRegex, negate}}}.
 
-  shacl_constraint — Deterministic SHACL shape against evidence records.
-    Use this only when the policy is naturally a structural constraint
-    on evidence fields (e.g. numeric ranges, enumerations). Draft shape:
+  field_constraint — PREFERRED for any single-field or per-record
+    cardinality intent. Structured IR; the compiler turns it into SHACL
+    deterministically (the user never sees TTL). Use this whenever the
+    policy reads as "field <op> value on <EvidenceType>" or "for each X
+    in source there exists a Y covering". Draft shape: CustomRule with
+    firesAt:"pre_final", action:"block", and
+    what:{kind:"field_constraint", payload:<IR>}, where the IR is EITHER
+      {evidenceType, field, operator:"eq"|"neq"|"gt"|"lt"|"ge"|"le"|
+       "exists"|"notExists", value?:<scalar>}
+    OR (cross-record cardinality)
+      {operator:"forEachExistsCovering",
+       source:{evidenceType, field}, target:{evidenceType, field}}.
+
+  shacl_constraint — POWER-USER ESCAPE HATCH ONLY. Use this only when the
+    policy cannot be expressed by field_constraint (multi-shape SHACL,
+    advanced sh:* constructs, custom node shapes). Draft shape:
     CustomRule with what:{kind:"shacl_constraint",
     payload:{shapeTtl:"<Turtle text>"}}.
 
@@ -162,10 +296,15 @@ _COMPILE_SYSTEM_INSTRUCTION_TMPL = (
     "explanation outside the JSON.\n\n"
     "The JSON object MUST have shape: "
     '{{"routedKind": "<one of: deterministic_ref, tool_perm, '
-    "llm_criterion, shacl_constraint, seam_spec, custom_check>\", "
+    "llm_criterion, shacl_constraint, seam_spec, custom_check, "
+    "field_constraint>\", "
     '"draft": <kind-specific draft object>, '
     '"explanation": "<one-sentence plain-English summary of what this '
     "will do at runtime>\"}}\n\n"
+    "PREFER field_constraint over shacl_constraint whenever the policy can "
+    "be expressed as a single-field predicate or a cross-record cardinality "
+    "claim. Only fall back to shacl_constraint for multi-shape / advanced "
+    "SHACL the structured IR cannot express.\n\n"
     "If the policy is ambiguous (multiple kinds would plausibly fit, "
     "the target preset is unclear, or the scope is missing), instead "
     'return {{"questions": ["...", "..."]}} with AT MOST 2 focused '
@@ -490,6 +629,236 @@ async def review_rule_compilation(
 # ---------------------------------------------------------------------------
 
 
+_SUGGESTION_BROWSE_FIELDS = (
+    "Browse available fields at Customize > Reusable evidence."
+)
+
+
+def _extract_referenced_fields(routed_kind: str, draft: Any) -> list[dict[str, str]]:
+    """Return ``[{evidenceType, field}, ...]`` referenced by the draft.
+
+    For ``field_constraint`` the IR is parsed directly. For
+    ``shacl_constraint`` the SHACL Turtle is parsed and ``sh:targetClass`` +
+    ``sh:path magi:field_<key>`` pairs are extracted. Anything that fails to
+    parse, or any path that does not match the ``magi:field_<key>`` scheme,
+    is skipped — the deterministic ``shaclIssues`` channel surfaces it
+    instead.
+    """
+    if not isinstance(draft, dict):
+        return []
+    payload = (
+        draft.get("what", {}).get("payload")
+        if isinstance(draft.get("what"), dict)
+        else None
+    )
+    if not isinstance(payload, dict):
+        return []
+
+    if routed_kind == "field_constraint":
+        return _references_from_field_constraint_payload(payload)
+    if routed_kind == "shacl_constraint":
+        shape_ttl = payload.get("shapeTtl")
+        if not isinstance(shape_ttl, str) or not shape_ttl.strip():
+            return []
+        return _references_from_shacl_ttl(shape_ttl)
+    return []
+
+
+def _references_from_field_constraint_payload(payload: dict) -> list[dict[str, str]]:
+    operator = payload.get("operator")
+    if operator == "forEachExistsCovering":
+        refs: list[dict[str, str]] = []
+        for side_label in ("source", "target"):
+            side = payload.get(side_label)
+            if (
+                isinstance(side, dict)
+                and isinstance(side.get("evidenceType"), str)
+                and isinstance(side.get("field"), str)
+            ):
+                refs.append(
+                    {
+                        "evidenceType": side["evidenceType"],
+                        "field": side["field"],
+                    }
+                )
+        return refs
+    ev = payload.get("evidenceType")
+    fname = payload.get("field")
+    if isinstance(ev, str) and isinstance(fname, str):
+        return [{"evidenceType": ev, "field": fname}]
+    return []
+
+
+def _references_from_shacl_ttl(shape_ttl: str) -> list[dict[str, str]]:
+    """Best-effort scan: extract field-typed paths from a SHACL shape.
+
+    The honest-degrade self-check needs the (evidenceType, field) pairs the
+    shape references. SHACL/Turtle parsing is delegated to rdflib so optional
+    dep absence (CI in lean mode) silently disables this check — the
+    deterministic ``shaclIssues`` channel still rejects malformed shapes.
+    """
+    try:
+        import rdflib  # noqa: PLC0415 — optional dep
+    except ImportError:
+        return []
+    try:
+        graph = rdflib.Graph().parse(data=shape_ttl, format="turtle")
+    except Exception:  # noqa: BLE001 — parse failure surfaces via shaclIssues
+        return []
+
+    SH = "http://www.w3.org/ns/shacl#"
+    MAGI_PREFIX = "https://openmagi.ai/ns/evidence#field_"
+
+    refs: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    try:
+        # For each NodeShape, collect (sh:targetClass strings, set of paths)
+        # and (sh:property [sh:path magi:type; sh:hasValue "<Type>"]) filters.
+        query = (
+            f"PREFIX sh: <{SH}> "
+            "SELECT ?shape ?path ?typeFilter WHERE { "
+            "?shape sh:property ?p . "
+            "OPTIONAL { ?p sh:path ?path } . "
+            "OPTIONAL { "
+            "  ?shape sh:property ?tp . "
+            "  ?tp sh:path <https://openmagi.ai/ns/evidence#type> . "
+            "  ?tp sh:hasValue ?typeFilter . "
+            "} "
+            "}"
+        )
+        rows = list(graph.query(query))
+    except Exception:  # noqa: BLE001 — degrade silently
+        return []
+
+    by_shape: dict[Any, dict[str, set[str]]] = {}
+    for row in rows:
+        shape, path, type_filter = row[0], row[1], row[2]
+        bucket = by_shape.setdefault(shape, {"paths": set(), "types": set()})
+        if path is not None:
+            path_str = str(path)
+            if path_str.startswith(MAGI_PREFIX):
+                field = path_str[len(MAGI_PREFIX) :]
+                if field:
+                    bucket["paths"].add(field)
+        if type_filter is not None:
+            bucket["types"].add(str(type_filter))
+
+    for bucket in by_shape.values():
+        type_values = bucket["types"] or {""}  # blank = unscoped
+        for field in sorted(bucket["paths"]):
+            for ev_type in sorted(type_values):
+                key = (ev_type, field)
+                if key in seen:
+                    continue
+                seen.add(key)
+                refs.append({"evidenceType": ev_type, "field": field})
+    return refs
+
+
+def _missing_field_references(
+    refs: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    """Return refs whose ``(evidenceType, field)`` is NOT in the catalog.
+
+    A ref with empty ``evidenceType`` (unscoped SHACL shape) is checked
+    against the union of all field hints — only refs whose field appears
+    nowhere in the catalog count as missing in that case.
+    """
+    from magi_agent.customize.shacl_compiler import (  # noqa: PLC0415
+        available_fields,
+    )
+
+    catalog = available_fields()
+    by_type = {item["evidenceType"]: set(item["fields"]) for item in catalog}
+    union_fields = {f for fields in by_type.values() for f in fields}
+
+    missing: list[dict[str, str]] = []
+    for ref in refs:
+        ev = ref.get("evidenceType", "")
+        field = ref.get("field", "")
+        if not field:
+            continue
+        if ev:
+            known = by_type.get(ev)
+            if known is None or field not in known:
+                missing.append({"evidenceType": ev, "field": field})
+        else:
+            if field not in union_fields:
+                missing.append({"evidenceType": "", "field": field})
+    return missing
+
+
+def _empty_catalog_clarifying(
+    routed_kind: str, draft: Any
+) -> tuple[str, ...] | None:
+    """NL-side check: if the LLM routed to ``field_constraint`` on an evidence
+    type whose verified field vocabulary is empty, return clarifying questions
+    instead of letting the compile go on to emit a vacuous shape.
+
+    Returns ``None`` when the check does not apply.
+    """
+    if routed_kind != "field_constraint":
+        return None
+    if not isinstance(draft, dict):
+        return None
+    what = draft.get("what")
+    if not isinstance(what, dict):
+        return None
+    payload = what.get("payload")
+    if not isinstance(payload, dict):
+        return None
+
+    from magi_agent.customize.shacl_compiler import (  # noqa: PLC0415
+        available_fields,
+    )
+
+    catalog = {
+        item["evidenceType"]: list(item["fields"])
+        for item in available_fields()
+    }
+
+    # Inspect each side the IR references.
+    sides: list[tuple[str, str | None]] = []
+    if payload.get("operator") == "forEachExistsCovering":
+        for label in ("source", "target"):
+            side = payload.get(label)
+            if isinstance(side, dict):
+                ev = side.get("evidenceType")
+                if isinstance(ev, str):
+                    sides.append((ev, side.get("field") if isinstance(side.get("field"), str) else None))
+    else:
+        ev = payload.get("evidenceType")
+        if isinstance(ev, str):
+            sides.append(
+                (ev, payload.get("field") if isinstance(payload.get("field"), str) else None)
+            )
+
+    empty_types: list[str] = []
+    for ev_type, _field in sides:
+        if not catalog.get(ev_type):
+            empty_types.append(ev_type)
+    if not empty_types:
+        return None
+
+    # Up to 2 focused questions (matches the existing clarifying-questions
+    # contract: tuple[str, ...] of length 1-2).
+    first = empty_types[0]
+    questions: list[str] = [
+        (
+            f"The evidence type {first!r} has no verified field vocabulary yet "
+            "(producer fields unverified). Which evidence type with a known "
+            "field schema should this rule target?"
+        )
+    ]
+    if len(empty_types) > 1:
+        questions.append(
+            f"The companion evidence type {empty_types[1]!r} also has no "
+            "verified fields. Pick a different one or restate the policy?"
+        )
+    return tuple(questions[:2])
+
+
 async def compile_with_review(
     nl_text: str,
     *,
@@ -514,6 +883,17 @@ async def compile_with_review(
     Item 3 hardening (PR-A): :func:`_precheck_aggregate` runs before any
     LLM call so a pathological NL/history payload fails fast and
     deterministically.
+
+    PR-F3 honest-degrade (2026-06-23): when a ``shacl_constraint`` or
+    ``field_constraint`` draft references a ``(evidenceType, field)`` pair
+    that is not in :func:`available_fields`, the compile RESULT short-circuits
+    to ``{ok: False, error: "field_not_in_catalog", missingFields: [...],
+    explanation, suggestion}`` BEFORE the reviewer is called — the gate would
+    silently never fire on a missing-field path, so the only honest answer is
+    to refuse and point the user at the live catalog. Plus a NL-side check:
+    if the compiler routes to ``field_constraint`` on an evidence type whose
+    ``available_fields`` entry is empty (producer unverified), return
+    ``clarifyingQuestions`` instead of letting the compile proceed.
     """
     if (
         compiler_model_factory is not None
@@ -541,6 +921,47 @@ async def compile_with_review(
 
     routed_kind: str = compile_result["routedKind"]
     draft = compile_result["draft"]
+
+    # NL-side empty-catalog check — clarifying-questions short-circuit so the
+    # user picks a verified evidence type rather than authoring against an
+    # inert producer.
+    empty_questions = _empty_catalog_clarifying(routed_kind, draft)
+    if empty_questions is not None:
+        return {
+            "ok": False,
+            "draft": None,
+            "clarifyingQuestions": empty_questions,
+            "confidenceLow": True,
+            "review": {"verdict": "unknown", "issues": [], "confidence": 0.0},
+            "schemaIssues": [],
+        }
+
+    # Honest-degrade self-check — refuse to compile silently against fields
+    # that are not in available_fields() (vacuous-shape trap).
+    refs = _extract_referenced_fields(routed_kind, draft)
+    missing = _missing_field_references(refs) if refs else []
+    if missing:
+        first = missing[0]
+        ev_phrase = (
+            f"on {first['evidenceType']}" if first.get("evidenceType") else ""
+        )
+        explanation = (
+            f"The fact you described references {first['field']!r} "
+            f"{ev_phrase}, but the producer does not emit that field. This "
+            "may need a producer extension (FDE-tier)."
+        ).strip()
+        return {
+            "ok": False,
+            "draft": None,
+            "routedKind": routed_kind,
+            "error": "field_not_in_catalog",
+            "missingFields": missing,
+            "explanation": explanation,
+            "suggestion": _SUGGESTION_BROWSE_FIELDS,
+            "review": {"verdict": "unknown", "issues": [], "confidence": 0.0},
+            "schemaIssues": [],
+        }
+
     review = await review_rule_compilation(
         nl_text, routed_kind, draft, model_factory=reviewer_model_factory
     )

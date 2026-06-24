@@ -114,6 +114,86 @@ def _resolve_nl_rule_compile_factory(body: dict) -> Any:
     return _production_shacl_compiler_model_factory()
 
 
+def _lift_field_constraint_for_save(body: dict) -> dict:
+    """Compile a ``field_constraint`` save payload into a ``shacl_constraint``.
+
+    PR-F3 (2026-06-23): both the NL surface and the guided wizard surface
+    author rules with a ``field_constraint`` IR — the design doc says
+    "field_constraint validated as a shacl_constraint (same backend gate);
+    no new runtime path needed". This helper performs that lift before
+    validation so :func:`validate_custom_rule` (which only knows the four
+    legacy kinds) sees the synthesised SHACL TTL.
+
+    Two input shapes are lifted:
+
+    (a) NL surface (kind == "field_constraint"):
+        ``what.payload`` IS the IR. Compile it to TTL, wrap as
+        ``shacl_constraint`` with the IR carried in ``payload.authoredAs``
+        so the wizard can re-open the rule with chips.
+
+    (b) Wizard surface (kind == "shacl_constraint" + payload.shapeTtl == ""
+        + payload.authoredAs.kind == "field_constraint"): compile the
+        nested IR into TTL and slot it into ``payload.shapeTtl``.
+
+    Other shapes pass through untouched. Raises :class:`ValueError` if the
+    IR is structurally invalid (unknown evidence type / unknown field /
+    unknown operator) so the route can surface the reason as a 400.
+    """
+    if not isinstance(body, dict):
+        return body
+    what = body.get("what")
+    if not isinstance(what, dict):
+        return body
+    kind = what.get("kind")
+    payload = what.get("payload")
+    if not isinstance(payload, dict):
+        return body
+
+    from magi_agent.customize.field_constraint_compiler import (  # noqa: PLC0415
+        compile_to_shacl_ttl,
+    )
+
+    # Branch (a): NL kind == "field_constraint" — the payload IS the IR.
+    if kind == "field_constraint":
+        # Strip a nested ``authoredAs`` (if the NL caller pre-wrapped one)
+        # so the compiler sees just the IR keys; we re-add a clean
+        # authoredAs below.
+        ir = {k: v for k, v in payload.items() if k != "authoredAs"}
+        shape_ttl = compile_to_shacl_ttl(ir)
+        lifted = dict(body)
+        lifted["what"] = {
+            "kind": "shacl_constraint",
+            "payload": {
+                "shapeTtl": shape_ttl,
+                "authoredAs": {"kind": "field_constraint", **ir},
+            },
+        }
+        return lifted
+
+    # Branch (b): Wizard kind == "shacl_constraint" with empty shapeTtl and
+    # an authoredAs IR carrying kind == "field_constraint".
+    if kind == "shacl_constraint":
+        shape_ttl = payload.get("shapeTtl")
+        authored_as = payload.get("authoredAs")
+        if (
+            isinstance(authored_as, dict)
+            and authored_as.get("kind") == "field_constraint"
+            and (not isinstance(shape_ttl, str) or not shape_ttl.strip())
+        ):
+            ir = {k: v for k, v in authored_as.items() if k != "kind"}
+            synthesised = compile_to_shacl_ttl(ir)
+            lifted = dict(body)
+            lifted_payload = {**payload, "shapeTtl": synthesised}
+            # Keep authoredAs verbatim for round-trip.
+            lifted["what"] = {
+                "kind": "shacl_constraint",
+                "payload": lifted_payload,
+            }
+            return lifted
+
+    return body
+
+
 def _make_json_safe(obj: Any) -> Any:
     """Recursively convert non-JSON-serializable objects to plain Python primitives.
 
@@ -278,6 +358,29 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             return JSONResponse(status_code=400, content={"error": "invalid_json"})
         if not isinstance(body, dict):
             return JSONResponse(status_code=400, content={"error": "object_required"})
+
+        # PR-F3 lift: validate_custom_rule only knows {deterministic_ref,
+        # tool_perm, llm_criterion, shacl_constraint}. The two NL/wizard
+        # authoring surfaces for field_constraint deliver:
+        #   (a) NL  : what.kind == "field_constraint"
+        #   (b) Wiz : what.kind == "shacl_constraint" + payload.authoredAs.kind
+        #             == "field_constraint" + payload.shapeTtl == ""
+        # In both cases compile the structured IR deterministically to a
+        # SHACL shape *before* validation so the same backend gate (the
+        # shacl_constraint validator) does the structural check. Persist as
+        # shacl_constraint so the runtime gate fires unchanged; preserve the
+        # authored IR in payload.authoredAs for round-trip.
+        try:
+            body = _lift_field_constraint_for_save(body)
+        except ValueError as exc:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "invalid_custom_rule",
+                    "details": [str(exc)],
+                },
+            )
+
         errors = validate_custom_rule(body)
         if errors:
             return JSONResponse(
@@ -987,11 +1090,22 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             )
 
         if not result.get("ok"):
+            # PR-F3 honest-degrade (2026-06-23): forward optional structured
+            # keys the compiler populates for error == "field_not_in_catalog"
+            # (and other honest-degrade branches) so the frontend banner can
+            # render the per-(evidenceType, field) list + the redirect copy.
+            # Strip None values so the response stays compact for the legacy
+            # branches that do not populate them.
+            error_payload: dict[str, Any] = {
+                "ok": False,
+                "error": result.get("error", "compilation failed"),
+                "routedKind": result.get("routedKind"),
+                "missingFields": result.get("missingFields"),
+                "suggestion": result.get("suggestion"),
+                "explanation": result.get("explanation"),
+            }
             return JSONResponse(
-                content={
-                    "ok": False,
-                    "error": result.get("error", "compilation failed"),
-                }
+                content={k: v for k, v in error_payload.items() if v is not None}
             )
 
         return JSONResponse(

@@ -58,3 +58,42 @@ describe("NlRuleCompose — Unified NL → rule compose surface (PR-D2)", () => 
     expect(src).toContain("onPickExample={(text) => setNlText(text)}");
   });
 });
+
+describe("NlRuleCompose — F3 field_constraint chip renderer + honest-degrade", () => {
+  it("labels the new field_constraint routedKind so it does not render as a blank string", () => {
+    expect(src).toContain("field_constraint:");
+  });
+
+  it("renders the structured field_constraint draft as editable chips (evidence type | field | operator | value)", () => {
+    expect(src).toContain("FieldConstraintChips");
+    expect(src).toContain('routedKind === "field_constraint"');
+    expect(src).toContain("Evidence type");
+    expect(src).toContain("Field");
+    expect(src).toContain("Operator");
+    expect(src).toContain("Value");
+  });
+
+  it("renders a cross-record sub-display when operator is forEachExistsCovering", () => {
+    expect(src).toContain("forEachExistsCovering");
+    expect(src).toContain("Source");
+    expect(src).toContain("Target");
+  });
+
+  it("renders the honest-degrade red banner when error === 'field_not_in_catalog'", () => {
+    expect(src).toContain('"field_not_in_catalog"');
+    expect(src).toContain(
+      "This rule references a field that isn't emitted as structured evidence yet",
+    );
+    expect(src).toContain("missingFields");
+  });
+
+  it("offers a 'Browse available fields' button and an 'Author as advisory llm_criterion instead?' link", () => {
+    expect(src).toContain("Browse available fields");
+    expect(src).toContain("Author as advisory llm_criterion instead?");
+  });
+
+  it("re-compiles with an advisory llm_criterion hint when the secondary action fires", () => {
+    expect(src).toContain("handleDegradeToAdvisory");
+    expect(src).toContain("Advisory");
+  });
+});

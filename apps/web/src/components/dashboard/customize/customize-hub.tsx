@@ -628,6 +628,7 @@ function RulesSectionMount({
               reloadDashboardChecks();
               setAddState({ phase: "idle" });
             }}
+            onBrowseEvidence={() => setSubTab("evidence")}
           />
         </section>
       ) : null}

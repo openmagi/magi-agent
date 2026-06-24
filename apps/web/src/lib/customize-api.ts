@@ -591,14 +591,28 @@ export async function getEvidenceLiveCatalog(
 // PR-D1/D2 — Unified NL → rule compiler API client
 // ---------------------------------------------------------------------------
 
-/** The six backing primitives the unified NL compiler can route to. */
+/** The seven backing primitives the unified NL compiler can route to.
+ *  `field_constraint` (F3) is the structured-picker form of a SHACL shape:
+ *  the compiler emits a `{evidenceType, field, operator, value}` IR (with a
+ *  cross-record `forEachExistsCovering` variant carrying `source` + `target`)
+ *  and the frontend renders it as editable chips. The IR persists as a
+ *  `shacl_constraint` on disk (deterministic synth at save), so no new
+ *  storage path is introduced. */
 export type RoutedKind =
   | "deterministic_ref"
   | "tool_perm"
   | "llm_criterion"
   | "shacl_constraint"
+  | "field_constraint"
   | "seam_spec"
   | "custom_check";
+
+/** Honest-degrade payload returned by the NL compiler when the rule
+ *  references an evidence field that no producer is known to emit. */
+export interface MissingFieldEntry {
+  evidenceType: string;
+  field: string;
+}
 
 /** Same verdict shape as SHACL / SeamSpec reviewers. */
 export interface RuleReview {
@@ -626,6 +640,16 @@ export interface RuleCompileResponse {
   schemaIssues?: string[];
   clarifyingQuestions?: string[];
   error?: string | null;
+  /** F3 honest-degrade: populated when `error === "field_not_in_catalog"`,
+   *  listing the (evidenceType, field) tuples the producer does not emit.
+   *  Used by the NL compose UI to render a red banner with a "Browse
+   *  available fields" link and an "Author as advisory llm_criterion
+   *  instead?" recovery action. */
+  missingFields?: MissingFieldEntry[];
+  /** Optional human-readable suggestion the backend pairs with
+   *  `field_not_in_catalog` (e.g. "Browse available fields at Customize >
+   *  Reusable evidence."). */
+  suggestion?: string;
 }
 
 /**

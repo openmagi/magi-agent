@@ -65,6 +65,25 @@ const EXAMPLES: ReadonlyArray<ExampleChip> = [
     label: "Strip secrets from tool output",
     text: "After any tool returns, strip the result when it contains the literal string AWS_SECRET.",
   },
+  // F3 — field_constraint structured-picker phrasings. These should
+  // route through the deterministic field_constraint compiler rather
+  // than the opaque shacl_constraint path, and the result view will
+  // render them as editable chips.
+  {
+    archetype: "block",
+    label: "Block answer when tests fail (field eq)",
+    text: "On coding turns, block the final answer when TestRun.exitCode is not 0",
+  },
+  {
+    archetype: "block",
+    label: "Each changed file covered by a test (cross-record)",
+    text: "On coding turns, require that for each entry in GitDiff.changedFiles there exists a TestRun whose command contains that path",
+  },
+  {
+    archetype: "audit",
+    label: "Audit broken fetches (field comparator)",
+    text: "On research turns, audit when SourceInspection.statusCode is greater than 399",
+  },
 ];
 
 
