@@ -197,6 +197,13 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     # Both fan-outs are no-ops without authored rules; lab opts in so dogfood
     # turns can exercise the wizard's new lifecycle options end-to-end.
     "MAGI_CUSTOMIZE_LIFECYCLE_EXPANSION_ENABLED",
+    # PR-F-MUT1 prompt_injection mutator: append to a tool's arguments before
+    # dispatch OR append a new section to the assembled system prompt. Both
+    # wires are no-ops without authored rules; lab opts in so dogfood turns
+    # can exercise the wizard's new mutator kind end-to-end. Strict
+    # default-OFF in the registry so a fresh install / hosted serve stays
+    # byte-identical.
+    "MAGI_CUSTOMIZE_PROMPT_INJECTION_ENABLED",
     # PR-F-UX2 (F8 core) runtime-fields endpoint: backs the wizard's chip
     # picker shown above regex / contentMatch / llm_criterion / SHACL inputs.
     # Pure derivation (no I/O, no LLM), registration-time only, fail-open on

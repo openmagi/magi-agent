@@ -116,7 +116,13 @@ type ConditionKind =
   | "shacl"
   | "llm_criterion"
   | "regex"
-  | "field_constraint";
+  | "field_constraint"
+  // PR-F-MUT1 — first mutator kind. UX is shared across two lifecycle slots
+  // (before_tool_use → append to a tool's arg key; on_user_prompt_submit →
+  // append a new system-prompt section). SpecificsStep branches on lifecycle
+  // to render the right picker; both surfaces compile to the new backend
+  // ``prompt_injection`` kind.
+  | "prompt_injection";
 
 
 // PR-F3: deterministic operators for field_constraint. The eight
@@ -187,6 +193,14 @@ interface Draft {
   fcCrossSourceField: string;
   fcCrossTargetType: string;
   fcCrossTargetField: string;
+  // PR-F-MUT1 — prompt_injection draft fields. Both lifecycle slots share the
+  // same shape; the wizard picks which to surface based on draft.lifecycle:
+  // * before_tool_use → piTargetArgKey + piValue (+ optional condition_regex)
+  // * on_user_prompt_submit → piValue (target hard-coded to "system_prompt")
+  piTargetArgKey: string;
+  piValue: string;
+  piConditionEnabled: boolean;
+  piConditionPattern: string;
   // common
   ruleId: string;
   description: string;
@@ -222,6 +236,10 @@ const EMPTY: Draft = {
   fcCrossSourceField: "",
   fcCrossTargetType: "",
   fcCrossTargetField: "",
+  piTargetArgKey: "",
+  piValue: "",
+  piConditionEnabled: false,
+  piConditionPattern: "",
   ruleId: "",
   description: "",
 };
@@ -725,12 +743,15 @@ function availableConditionKinds(
   lifecycle: Lifecycle,
   toolTarget: ToolTarget,
 ): ConditionKind[] {
-  // PR-F-UX1 Tier 2 — both new slots accept ``llm_criterion`` ONLY (backend
-  // ``_LEGAL`` matrix restricts these slots to llm_criterion + audit). No
-  // deterministic kinds today: deterministic_ref needs an evidence ledger
-  // (pre_final), tool_perm needs a tool (before_tool_use), and shacl shapes
-  // need pre-final evidence records.
-  if (lifecycle === "on_user_prompt_submit" || lifecycle === "on_subagent_stop") {
+  // PR-F-UX1 Tier 2 — both audit slots accept ``llm_criterion``. PR-F-MUT1
+  // additionally exposes ``prompt_injection`` on on_user_prompt_submit (the
+  // operator picks "append a section to the system prompt") while
+  // on_subagent_stop stays llm_criterion-only because the turn has already
+  // emitted (mutation has no honest target).
+  if (lifecycle === "on_user_prompt_submit") {
+    return ["llm_criterion", "prompt_injection"];
+  }
+  if (lifecycle === "on_subagent_stop") {
     return ["llm_criterion"];
   }
   // pre_final has no tool layer; target is ignored.
@@ -753,14 +774,20 @@ function availableConditionKinds(
       // backend cannot save. The Specifics hint surfaces the same fact so
       // operators aren't left guessing where domain/path matchers went —
       // use target=any to author those.
-      return ["none"];
+      // PR-F-MUT1 — prompt_injection sits beside ``none`` for the per-tool
+      // case: it appends a value to a chosen arg key on every call of the
+      // chosen tool. condition.tool is auto-derived from draft.toolName.
+      return ["none", "prompt_injection"];
     }
     // target=any: tool_perm has no wildcard matcher, so "no condition"
     // is omitted (no honest backend mapping). F6 adds path / path_allowlist
     // alongside domain / domain_allowlist — the backend tool_perm matcher
     // already supports both via match.path / match.pathAllowlist, firing
     // only for tools that surface a file/path argument.
-    return ["domain", "domain_allowlist", "path", "path_allowlist"];
+    // PR-F-MUT1 — prompt_injection appears here too so an operator can
+    // author "append X to <key> for any tool that surfaces <key>" without
+    // pinning a single tool.
+    return ["domain", "domain_allowlist", "path", "path_allowlist", "prompt_injection"];
   }
   // after_tool_use
   // PR-F-UX4 — liberalization: llm_criterion is now available under BOTH
@@ -835,6 +862,15 @@ const CONDITION_META: Record<ConditionKind, { label: string; description: string
     label: "Field constraint",
     description:
       "Pick an evidence type, field, operator, and value. Deterministic SHACL compile, no LLM.",
+  },
+  prompt_injection: {
+    // PR-F-MUT1 — single meta entry; SpecificsStep branches on lifecycle to
+    // render the right picker (tool-arg append vs system-prompt section
+    // append). The Mutator trust badge (F-MUT3) makes it explicit that this
+    // policy rewrites traffic.
+    label: "Append context (mutator)",
+    description:
+      "Mutator: appends a value to a tool's argument (before tool use) or to the assembled system prompt (on user prompt submit). v1 is append-only.",
   },
 };
 
@@ -1255,6 +1291,128 @@ function SpecificsStep({
           liveCatalogTypes={liveCatalogTypes}
         />
       ) : null}
+      {/* PR-F-MUT1 — prompt_injection picker. Two surfaces share the kind;
+          SpecificsStep picks the right one based on the lifecycle the
+          operator already selected upstream. */}
+      {draft.conditionKind === "prompt_injection" ? (
+        draft.lifecycle === "on_user_prompt_submit" ? (
+          <PromptInjectionSystemPromptPicker draft={draft} update={update} />
+        ) : (
+          <PromptInjectionToolArgPicker draft={draft} update={update} />
+        )
+      ) : null}
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// PR-F-MUT1 — prompt_injection pickers
+// ---------------------------------------------------------------------------
+
+
+function PromptInjectionToolArgPicker({
+  draft,
+  update,
+}: {
+  draft: Draft;
+  update: (patch: Partial<Draft>) => void;
+}): React.ReactElement {
+  return (
+    <div className="space-y-3">
+      <TextField
+        value={draft.piTargetArgKey}
+        onChange={(v) => update({ piTargetArgKey: v })}
+        label="Tool argument key to append into"
+        placeholder="command"
+        mono
+      />
+      <label className="block">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+          Value to append (raw text)
+        </span>
+        <textarea
+          value={draft.piValue}
+          onChange={(e) => update({ piValue: e.target.value })}
+          rows={3}
+          placeholder=" --dry-run"
+          aria-label="Value to append"
+          className="mt-1 w-full resize-y rounded-lg border border-primary/30 bg-white px-3 py-2 text-xs font-mono text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+        />
+      </label>
+      <div className="rounded-xl border border-black/[0.08] bg-gray-50/60 px-3 py-2.5 text-xs">
+        <label className="flex items-start gap-2 text-foreground">
+          <input
+            type="checkbox"
+            checked={draft.piConditionEnabled}
+            onChange={(e) => update({ piConditionEnabled: e.target.checked })}
+            className="mt-0.5 rounded border-black/[0.20] text-primary focus:ring-primary/30"
+          />
+          <span>
+            <span className="font-semibold">
+              Only fire when the existing argument matches a pattern
+            </span>
+            <span className="mt-0.5 block text-[11px] leading-relaxed text-secondary">
+              Optional deterministic regex pre-filter on the inbound argument
+              value. Leave off to fire on every matching tool call.
+            </span>
+          </span>
+        </label>
+        {draft.piConditionEnabled ? (
+          <div className="mt-3 space-y-2 border-t border-black/[0.06] pt-3">
+            <TextField
+              value={draft.piConditionPattern}
+              onChange={(v) => update({ piConditionPattern: v })}
+              label="Pre-filter regex"
+              placeholder="^rm"
+              mono
+            />
+          </div>
+        ) : null}
+      </div>
+      <p className="text-[11px] leading-relaxed text-secondary">
+        v1 is append-only (the value is concatenated to the existing argument
+        string). Replace mode is deferred to v2.
+      </p>
+    </div>
+  );
+}
+
+
+function PromptInjectionSystemPromptPicker({
+  draft,
+  update,
+}: {
+  draft: Draft;
+  update: (patch: Partial<Draft>) => void;
+}): React.ReactElement {
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+          Target (auto)
+        </span>
+        <div className="mt-1 inline-flex items-center gap-2 rounded-lg border border-black/[0.10] bg-gray-50/80 px-3 py-1.5 text-xs font-mono text-foreground">
+          system_prompt
+        </div>
+        <p className="text-[11px] leading-relaxed text-secondary">
+          v1 only supports appending a section to the assembled system
+          prompt. Replace mode is deferred to v2.
+        </p>
+      </div>
+      <label className="block">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+          Section to append
+        </span>
+        <textarea
+          value={draft.piValue}
+          onChange={(e) => update({ piValue: e.target.value })}
+          rows={5}
+          placeholder="Always cite sources. Prefer concise, testable code."
+          aria-label="Section to append"
+          className="mt-1 w-full resize-y rounded-lg border border-primary/30 bg-white px-3 py-2 text-xs text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+        />
+      </label>
     </div>
   );
 }
@@ -1665,6 +1823,14 @@ function triggerEventPhrase(draft: Draft, refOptions: RefOption[]): string {
       return "When the SHACL shape does NOT conform on any evidence record";
     case "field_constraint":
       return fieldConstraintTriggerPhrase(draft);
+    case "prompt_injection":
+      // PR-F-MUT1 — mutator action ("append") is unconditional within its
+      // matched scope (per-tool or per-prompt-submit). Phrase as the trigger
+      // surface so the Action-step header still reads naturally.
+      if (draft.lifecycle === "on_user_prompt_submit") {
+        return "On every user prompt submission";
+      }
+      return `When ${lowerHead(targetPhrase)} is invoked`;
   }
 }
 
@@ -1977,6 +2143,26 @@ function conditionClause(draft: Draft, refOptions: RefOption[]): string {
       return `the result ${draft.regexIsRegex ? "matches regex" : "contains"} "${draft.regexPattern}"`;
     case "field_constraint":
       return fieldConstraintClause(draft);
+    case "prompt_injection":
+      // PR-F-MUT1 — review-summary phrasing. Two surfaces, one kind: pick the
+      // tool-arg vs system-prompt form based on the lifecycle the operator
+      // selected upstream.
+      if (draft.lifecycle === "on_user_prompt_submit") {
+        return `append "${draft.piValue}" as a new system-prompt section`;
+      }
+      {
+        const target = draft.piTargetArgKey || "(unset)";
+        const tool =
+          draft.toolTarget === "specific" && draft.toolName.trim().length > 0
+            ? ` on "${draft.toolName.trim()}"`
+            : "";
+        const cond =
+          draft.piConditionEnabled
+          && draft.piConditionPattern.trim().length > 0
+            ? ` (only when arg matches /${draft.piConditionPattern.trim()}/)`
+            : "";
+        return `append "${draft.piValue}" to tool arg "${target}"${tool}${cond}`;
+      }
   }
 }
 
@@ -2135,6 +2321,11 @@ function buildPolicy(draft: Draft): Built {
 
 
 function customRuleKind(draft: Draft): string {
+  // PR-F-MUT1 — prompt_injection routes to its own backend kind regardless of
+  // lifecycle. Must come BEFORE the before_tool_use → tool_perm fallback so
+  // an operator authoring an inject-on-shell_exec rule doesn't silently
+  // downcast to a tool_perm deny.
+  if (draft.conditionKind === "prompt_injection") return "prompt_injection";
   if (draft.lifecycle === "before_tool_use") {
     // before_tool authoring always routes to tool_perm: target=specific
     // sets match.tool; target=any with domain* sets the url-shape matcher.
@@ -2179,6 +2370,12 @@ function fieldConstraintIsComplete(draft: Draft): boolean {
 
 
 function customRuleAction(draft: Draft): string {
+  // PR-F-MUT1 — prompt_injection is a mutator: the backend ``_LEGAL`` matrix
+  // restricts it to action=audit at both lifecycle slots (block has no
+  // honest semantics — the mutation already happened by the time the audit
+  // record is written). Force audit here so an operator who picked any
+  // archetype upstream still produces a valid rule.
+  if (draft.conditionKind === "prompt_injection") return "audit";
   switch (draft.archetype) {
     case "block":
       return "block";
@@ -2207,6 +2404,46 @@ function splitToolMatchList(raw: string): string[] {
 
 
 function customRulePayload(draft: Draft): Record<string, unknown> {
+  // PR-F-MUT1 — prompt_injection payload. Branches on lifecycle because the
+  // two slots have different required-field shapes (see backend
+  // validate_prompt_injection_payload):
+  //   before_tool_use      → {mode, target_arg_key, value, condition?}
+  //   on_user_prompt_submit → {mode, target=system_prompt, value, condition?}
+  if (draft.conditionKind === "prompt_injection") {
+    const value = draft.piValue;
+    if (draft.lifecycle === "on_user_prompt_submit") {
+      return {
+        mode: "append",
+        target: "system_prompt",
+        value,
+      };
+    }
+    // before_tool_use shape. Auto-derive condition.tool from draft.toolName
+    // when target=specific so the operator does not have to retype it.
+    const payload: Record<string, unknown> = {
+      mode: "append",
+      target_arg_key: draft.piTargetArgKey.trim(),
+      value,
+    };
+    const condition: Record<string, unknown> = {};
+    if (
+      draft.toolTarget === "specific"
+      && draft.toolName.trim().length > 0
+    ) {
+      condition.tool = draft.toolName.trim();
+    }
+    if (
+      draft.piConditionEnabled
+      && draft.piConditionPattern.trim().length > 0
+    ) {
+      condition.regex = draft.piConditionPattern.trim();
+    }
+    if (Object.keys(condition).length > 0) {
+      payload.condition = condition;
+    }
+    return payload;
+  }
+
   // before_tool tool_perm: pick the matcher shape from target + condition.
   if (draft.lifecycle === "before_tool_use") {
     const decision = draft.archetype === "ask" ? "ask" : "deny";

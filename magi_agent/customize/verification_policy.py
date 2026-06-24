@@ -254,6 +254,41 @@ class CustomizeVerificationPolicy:
             return candidates
         return [rule for rule in candidates if _rule_scope_matches(rule, current_scope)]
 
+    def enabled_prompt_injection_rules(
+        self, *, fires_at: str, current_scope: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Enabled ``prompt_injection`` custom rules for a fire-at point (F-MUT1).
+
+        Mirrors :meth:`enabled_llm_criterion_rules` exactly: filter on
+        ``enabled`` + ``firesAt == fires_at`` + ``what.kind ==
+        "prompt_injection"``. When ``current_scope`` is supplied the result
+        is additionally narrowed by :func:`_rule_scope_matches`; otherwise
+        the scope-blind list is returned. Consumed by:
+
+        * :mod:`magi_agent.facades` — ``fires_at="before_tool_use"`` to
+          gather tool-arg mutators.
+        * :mod:`magi_agent.runtime.governed_turn` — ``fires_at=
+          "on_user_prompt_submit"`` to gather system-prompt section
+          mutators.
+
+        The runtime apply helpers
+        (:func:`magi_agent.customize.prompt_injection.apply_prompt_injection_to_tool_args`
+        + :func:`...apply_prompt_injection_to_prompt_sections`) accept the
+        raw rule dicts returned here and fail-safe-drop any individual rule
+        that is malformed.
+        """
+        candidates = [
+            rule
+            for rule in self.custom_rules
+            if rule.get("enabled", False)
+            and rule.get("firesAt") == fires_at
+            and isinstance(rule.get("what"), dict)
+            and rule["what"].get("kind") == "prompt_injection"
+        ]
+        if current_scope is None:
+            return candidates
+        return [rule for rule in candidates if _rule_scope_matches(rule, current_scope)]
+
     def explicit_preset(self, preset_id: str) -> bool | None:
         """Explicit per-preset enable state, or None if the user never set it."""
         return self.preset_overrides.get(preset_id)

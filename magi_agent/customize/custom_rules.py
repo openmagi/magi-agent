@@ -27,6 +27,13 @@ KINDS = frozenset(
         "llm_criterion",
         "shacl_constraint",
         "capability_scope",
+        # F-MUT1: prompt_injection — mutator that either rewrites a tool call's
+        # arguments before dispatch (firesAt=before_tool_use) or appends a
+        # section to the assembled system prompt (firesAt=on_user_prompt_submit).
+        # v1 is append-only; replace mode is deferred to v2 with an admin-tier
+        # flag. See magi_agent/customize/prompt_injection.py for the validator
+        # + apply helpers.
+        "prompt_injection",
     }
 )
 ACTIONS = frozenset({"block", "retry", "ask_approval", "audit", "override"})
@@ -112,6 +119,16 @@ _LEGAL: dict[str, dict[str, frozenset[str]]] = {
     # only semantically meaningful action — the rule subtracts denied tools and
     # caps the permission class; audit/retry have no spawn-time analogue.
     "capability_scope": {"spawn": frozenset({"block"})},
+    # F-MUT1: prompt_injection is a mutator (rewrites/augments inbound data).
+    # The persisted action is ``audit`` at both slots — the runtime applier
+    # records the mutation as an audit event (no separate block/retry verdict
+    # because the mutation already happened). Distinct from llm_criterion's
+    # audit-at-Tier-2 slots: there the action labels a verdict; here it labels
+    # the mutator's "wrote the mutation event to the audit ledger".
+    "prompt_injection": {
+        "before_tool_use": frozenset({"audit"}),
+        "on_user_prompt_submit": frozenset({"audit"}),
+    },
 }
 
 
@@ -253,6 +270,15 @@ def validate_custom_rule(rule: Any) -> list[str]:
         )
 
         errors.extend(validate_capability_scope_payload(payload))
+    elif kind == "prompt_injection":
+        # F-MUT1: operator-authored mutator (append to tool args or system
+        # prompt). The shape varies by firesAt slot, so the validator takes
+        # the resolved fires_at as input.
+        from magi_agent.customize.prompt_injection import (  # noqa: PLC0415
+            validate_prompt_injection_payload,
+        )
+
+        errors.extend(validate_prompt_injection_payload(payload, fires_at))
 
     # (f) projection ⊆ whitelist (conversation rejected)
     projection = rule.get("projection")

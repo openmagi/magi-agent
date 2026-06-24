@@ -64,6 +64,12 @@ const PALETTE: Record<TrustClass, string> = {
   advisory: "bg-amber-500/10 text-amber-700",
   hybrid: "bg-violet-500/10 text-violet-700",
   preview: "bg-blue-500/10 text-blue-700",
+  // F-MUT1 — first mutator entry. F-MUT3 will tune the exact amber-yellow
+  // ramp + add an explicit "modifies traffic" tooltip; until then this
+  // distinct yellow-orange tone keeps the badge visibly different from the
+  // advisory amber and the deterministic emerald so an operator never
+  // confuses a mutator policy for a gate.
+  mutator: "bg-yellow-500/10 text-yellow-800",
 };
 
 const DEFAULT_LABEL: Record<TrustClass, string> = {
@@ -71,6 +77,7 @@ const DEFAULT_LABEL: Record<TrustClass, string> = {
   advisory: "Advisory",
   hybrid: "Hybrid",
   preview: "Preview",
+  mutator: "Mutator",
 };
 
 export function TrustBadge({

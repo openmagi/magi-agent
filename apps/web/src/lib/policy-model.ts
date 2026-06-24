@@ -64,6 +64,11 @@ export type PolicyConditionKind =
   | "regex"             // regex match on a tool result or output
   | "tool_perm"         // tool name / domain match before invocation
   | "capability_scope"  // narrows the spawned-child toolset (F4)
+  // F-MUT1 — first mutator kind. Rewrites inbound data (tool args before
+  // dispatch, or system-prompt sections at on_user_prompt_submit). Maps to
+  // the Mutator trust class via :func:`trustClassForPolicy` (amber-yellow
+  // badge styled by F-MUT3 in trust-badge.tsx).
+  | "prompt_injection"
   | "seam_action"       // built-in preset seam rewire (compound)
   | "none";             // built-in preview / always-on, condition is implicit
 
@@ -202,6 +207,30 @@ function customRuleCondition(
     else if (Array.isArray(m.domainAllowlist))
       target = `outside [${(m.domainAllowlist as string[]).join(", ")}]`;
     return { kind, summary: `${verb} ${target}`, payload: { match: m, decision: payload.decision } };
+  }
+  if (kind === "prompt_injection") {
+    // F-MUT1 — round-trip a persisted prompt_injection rule into a Policy
+    // condition. Branches on payload shape (target_arg_key → before-tool;
+    // target → on-user-prompt-submit) so the dashboard surfaces the right
+    // sentence without re-loading the rule's lifecycle slot.
+    const mode = typeof payload.mode === "string" ? payload.mode : "append";
+    const value = typeof payload.value === "string" ? payload.value : "";
+    const valuePreview = value.length > 60 ? `${value.slice(0, 60)}…` : value;
+    if (typeof payload.target_arg_key === "string") {
+      const argKey = payload.target_arg_key;
+      return {
+        kind,
+        summary: `${mode} "${valuePreview}" to tool arg "${argKey}"`,
+        payload: { mode, target_arg_key: argKey, value, condition: payload.condition },
+      };
+    }
+    const target =
+      typeof payload.target === "string" ? payload.target : "system_prompt";
+    return {
+      kind,
+      summary: `${mode} "${valuePreview}" to ${target}`,
+      payload: { mode, target, value, condition: payload.condition },
+    };
   }
   if (kind === "capability_scope") {
     // F4 — narrows the spawned-child toolset. Payload v1 (mirrors
@@ -384,7 +413,7 @@ export interface NamedConditionEntry {
  *    adding such an action later lights the badge automatically.
  *  * ``preview`` — visible but not wired (preset enforcement = ``preview``).
  */
-export type TrustClass = "deterministic" | "advisory" | "hybrid" | "preview";
+export type TrustClass = "deterministic" | "advisory" | "hybrid" | "preview" | "mutator";
 
 
 /**
@@ -481,6 +510,13 @@ export function trustClassForPolicy(policy: PolicyTrustInput): TrustClass {
       // a future "override" / strip action would mutate tool output and
       // therefore reads as Hybrid.
       return policy.action === "override" ? "hybrid" : "deterministic";
+    case "prompt_injection":
+      // F-MUT1 — first explicit mutator kind. Rewrites/augments inbound
+      // data, so the operator must see "this policy modifies traffic"
+      // before activating. F-MUT3 lights the amber-yellow palette in
+      // trust-badge.tsx; until then the badge falls through to its
+      // default rendering for this literal.
+      return "mutator";
     case "none":
       // Built-in preset_seam: fall through to the preset's enforcement
       // metadata. Preview presets are inert; everything else is enforced
