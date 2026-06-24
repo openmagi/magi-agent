@@ -11,10 +11,14 @@ chosen profile already on.
 
 INSTALL-DEFAULT, CODE-DEFAULT-OFF
 ---------------------------------
-This is a *file-driven* overlay, mirroring :mod:`cli.memory_bootstrap`. With NO
-profile file present it is a no-op, so the repo's code-level gate defaults (and
-a plain ``pip install`` with no seeded file) are unchanged. The packaging layer
-that wants install-default-on writes the file; the runtime code stays honest.
+This is primarily a *file-driven* overlay, mirroring :mod:`cli.memory_bootstrap`.
+A small list of "install-default" gates (see ``EMBEDDED_DEFAULT_PROFILE``) also
+ships as an *embedded* fallback so a fresh ``pip install`` boots with live
+subagents on out of the box — without that, ``magi serve`` looks broken because
+the dashboard Work pane shows no subagents. The runtime-code gate defaults
+remain OFF; this loader is what flips them on at CLI startup. Operators that
+want a gate truly off can either ``export MAGI_*=0`` before launching or write
+a ``profile.env`` line that overrides the embedded value.
 
 PRECEDENCE + SAFETY
 -------------------
@@ -45,6 +49,20 @@ DEFAULT_PROFILE_PATH = Path.home() / ".magi" / "profile.env"
 #: process env such as ``PATH``/``HOME``).
 _ALLOWED_PREFIXES = ("MAGI_",)
 
+#: Embedded fallback profile applied when ``~/.magi/profile.env`` does NOT
+#: provide the key. Mirrors the install profile the Homebrew tap seeds for a
+#: working out-of-the-box ``magi serve`` (live subagents → Work-pane visibility
+#: in the local dashboard). Every key still respects user precedence:
+#:
+#:    explicit env > profile.env file entry > embedded default
+#:
+#: To OPT OUT, either set the env var explicitly to ``0``/``false``, or write
+#: a ``profile.env`` line that overrides the value.
+EMBEDDED_DEFAULT_PROFILE: dict[str, str] = {
+    "MAGI_CHILD_RUNNER_LIVE_ENABLED": "1",
+    "MAGI_GATE5B_LIVE_SUBAGENTS_ENABLED": "1",
+}
+
 
 def apply_install_profile_bootstrap(
     environ: MutableMapping[str, str],
@@ -53,32 +71,43 @@ def apply_install_profile_bootstrap(
 ) -> None:
     """Overlay ``profile.env`` flags into ``environ`` via ``setdefault``.
 
+    Precedence (highest wins): explicit env → profile.env file → embedded
+    default. The embedded default lets a plain ``pip install`` (no Homebrew
+    seed) still boot with the install-default flags on, so a fresh install
+    works out of the box without manual ``export`` lines.
+
     Args:
         environ: The process env to mutate (normally ``os.environ``).
         profile_path: Path to the profile file; defaults to
             ``~/.magi/profile.env``. Injectable for tests.
     """
     path = Path(profile_path) if profile_path is not None else DEFAULT_PROFILE_PATH
+
+    # File overlay — fail-soft. If the file is absent/unreadable/malformed we
+    # still fall through to the embedded defaults below.
     try:
-        if not path.is_file():
-            return
-        text = path.read_text(encoding="utf-8")
+        if path.is_file():
+            text = path.read_text(encoding="utf-8")
+            for raw_line in text.splitlines():
+                try:
+                    parsed = _parse_line(raw_line)
+                    if parsed is None:
+                        continue
+                    key, value = parsed
+                    environ.setdefault(key, value)
+                except Exception:  # pragma: no cover - per-line tolerance
+                    logger.debug(
+                        "install profile: skipping malformed line", exc_info=True,
+                    )
     except OSError:
         logger.debug("install profile: cannot read %s; skipping", path, exc_info=True)
-        return
     except Exception:  # pragma: no cover - defensive; keep startup alive
         logger.debug("install profile: unexpected load failure; skipping", exc_info=True)
-        return
 
-    for raw_line in text.splitlines():
-        try:
-            parsed = _parse_line(raw_line)
-            if parsed is None:
-                continue
-            key, value = parsed
-            environ.setdefault(key, value)
-        except Exception:  # pragma: no cover - defensive; per-line tolerance
-            logger.debug("install profile: skipping malformed line", exc_info=True)
+    # Embedded defaults — applied via ``setdefault`` so explicit env and any
+    # profile.env entry still win over them.
+    for key, value in EMBEDDED_DEFAULT_PROFILE.items():
+        environ.setdefault(key, value)
 
 
 def _parse_line(raw_line: str) -> tuple[str, str] | None:
@@ -103,4 +132,8 @@ def _unquote(value: str) -> str:
     return value
 
 
-__all__ = ["apply_install_profile_bootstrap", "DEFAULT_PROFILE_PATH"]
+__all__ = [
+    "apply_install_profile_bootstrap",
+    "DEFAULT_PROFILE_PATH",
+    "EMBEDDED_DEFAULT_PROFILE",
+]
