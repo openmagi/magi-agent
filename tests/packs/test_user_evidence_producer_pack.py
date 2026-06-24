@@ -17,7 +17,9 @@ _IMPL_BODY = (
     "        evidence_type='custom:snap', public_ref='evidence:customSnap@1',\n"
     "        producer_surfaces=('tool_host',)))\n"
     "def provide_gitdiff_override(ctx):\n"
-    "    ctx.register('evidence:gitdiff@1', ProducerSpec(\n"
+    # F-4: first-party pack now registers ``evidence:git-diff@1`` —
+    # override targets the canonical ref.
+    "    ctx.register('evidence:git-diff@1', ProducerSpec(\n"
     "        evidence_type='GitDiff', public_ref='evidence:gitDiffV2@1',\n"
     "        producer_surfaces=('tool_host','verifier')))\n"
     "def provide_removable(ctx):\n"
@@ -43,7 +45,8 @@ def test_user_evidence_producer_add_override_remove(tmp_path: Path, monkeypatch)
         user_root, "user_ev", "user.ev",
         "[[provides]]\ntype = \"evidence_producer\"\nref = \"evidence:custom-snap@1\"\n"
         "impl = \"user_ev.impl:provide_custom\"\n\n"
-        "[[provides]]\ntype = \"evidence_producer\"\nref = \"evidence:gitdiff@1\"\n"
+        # F-4: canonical ref ``evidence:git-diff@1``.
+        "[[provides]]\ntype = \"evidence_producer\"\nref = \"evidence:git-diff@1\"\n"
         "impl = \"user_ev.impl:provide_gitdiff_override\"\n",
     )
     _write_pack(
@@ -60,7 +63,7 @@ def test_user_evidence_producer_add_override_remove(tmp_path: Path, monkeypatch)
 
     assert registries.evidence_producers.resolve("evidence:custom-snap@1") is not None  # ADD
     assert (
-        registries.evidence_producers.resolve("evidence:gitdiff@1").public_ref
+        registries.evidence_producers.resolve("evidence:git-diff@1").public_ref
         == "evidence:gitDiffV2@1"
-    )  # OVERRIDE
+    )  # OVERRIDE (F-4: canonical ref ``evidence:git-diff@1``)
     assert registries.evidence_producers.resolve("evidence:gitdiff-removable@1") is None  # REMOVE

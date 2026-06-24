@@ -13,7 +13,10 @@ import magi_agent
 from magi_agent.packs.registries import load_into_registries
 
 _FIRST_PARTY_ROOT = Path(magi_agent.__file__).parent / "firstparty" / "packs"
-_REF = "evidence:gitdiff@1"
+# F-4: canonical ref + public_ref both ``evidence:git-diff@1`` (was a
+# 3-way drift pre-F-4: ``gitdiff@1`` registration ref / ``gitDiff@1``
+# public_ref / ``git-diff`` consumer key).
+_REF = "evidence:git-diff@1"
 
 
 def test_evidence_gitdiff_pack_registers_producer() -> None:
@@ -23,4 +26,4 @@ def test_evidence_gitdiff_pack_registers_producer() -> None:
     assert spec is not None
     assert spec.evidence_type == "GitDiff"
     assert "tool_host" in spec.producer_surfaces
-    assert spec.public_ref == "evidence:gitDiff@1"
+    assert spec.public_ref == "evidence:git-diff@1"

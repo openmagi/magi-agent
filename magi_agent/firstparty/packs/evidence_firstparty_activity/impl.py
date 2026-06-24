@@ -10,8 +10,9 @@ emits the records (``ToolDispatcher.dispatch``).
 here: the first-party gate reads ``entry.ref`` from the manifest while emitted
 activity records carry ``public_ref``; keeping them equal ensures gate resolution
 and the verifier-bus ``evidence:`` prefix check align without a translation step.
-This differs from the ``evidence_gitdiff`` pack, which intentionally splits
-``ref="evidence:gitdiff@1"`` vs ``public_ref="evidence:gitDiff@1"``."""
+The ``evidence_gitdiff`` pack used to split ``ref="evidence:gitdiff@1"`` vs
+``public_ref="evidence:gitDiff@1"`` — F-4 unified both to ``evidence:git-diff@1``
+so the producer's contributed ref matches every consumer."""
 
 from __future__ import annotations
 

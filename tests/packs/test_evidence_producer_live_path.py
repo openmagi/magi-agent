@@ -14,7 +14,8 @@ _FIRST_PARTY_ROOT = Path(magi_agent.__file__).parent / "firstparty" / "packs"
 
 def test_pack_producer_ref_satisfies_required_evidence_gate() -> None:
     registries, _ = load_into_registries([_FIRST_PARTY_ROOT / "evidence_gitdiff"])
-    spec = registries.evidence_producers.resolve("evidence:gitdiff@1")
+    # F-4: canonical ref ``evidence:git-diff@1`` (was ``gitdiff@1``).
+    spec = registries.evidence_producers.resolve("evidence:git-diff@1")
     required = (spec.public_ref,)
 
     # Gate with the producer's contributed ref present -> pass.
