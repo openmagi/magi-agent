@@ -1149,6 +1149,100 @@ describe("AuthorWizard — PR-F-LIFE2 per-LLM-call lifecycle expansion", () => {
 
 
 // ---------------------------------------------------------------------------
+// PR-F-LIFE3 — four NEW emitter slots: before_compaction / after_compaction /
+// on_task_checkpoint / on_artifact_created. Backend matrix in
+// magi_agent/customize/custom_rules.py adds the four new firesAt slots
+// under (llm_criterion + audit) ONLY. The runtime sites
+// (context_compaction plugin / work-queue driver / file-delivery boundary)
+// are all gated by MAGI_CUSTOMIZE_LIFECYCLE_EXTRA_EMITTERS_ENABLED. The
+// wizard mirrors the restriction so an operator cannot assemble a draft
+// the backend rejects.
+// ---------------------------------------------------------------------------
+
+
+describe("AuthorWizard — PR-F-LIFE3 four new emitter slots", () => {
+  it("Lifecycle union gains all four new emitter slots", () => {
+    expect(src).toMatch(/type Lifecycle[\s\S]*?\| "before_compaction"/);
+    expect(src).toMatch(/type Lifecycle[\s\S]*?\| "after_compaction"/);
+    expect(src).toMatch(/type Lifecycle[\s\S]*?\| "on_task_checkpoint"/);
+    expect(src).toMatch(/type Lifecycle[\s\S]*?\| "on_artifact_created"/);
+  });
+
+  it("LIFECYCLE_OPTIONS lists all four new slots as Tier 2", () => {
+    // All four ride on top of existing runtime chokepoints behind the
+    // F-LIFE3 master flag — active wires, not Tier 3 file-hook-only.
+    expect(src).toMatch(/id: "before_compaction"[\s\S]*?tier: "tier2"/);
+    expect(src).toMatch(/id: "after_compaction"[\s\S]*?tier: "tier2"/);
+    expect(src).toMatch(/id: "on_task_checkpoint"[\s\S]*?tier: "tier2"/);
+    expect(src).toMatch(/id: "on_artifact_created"[\s\S]*?tier: "tier2"/);
+  });
+
+  it("LIFECYCLE_OPTIONS describes the four new slots as audit-only", () => {
+    // Backend ``_LEGAL`` matrix entries restrict all four slots to audit;
+    // friendly label must telegraph that contract so the operator sees
+    // up-front that block isn't an option here.
+    expect(src).toMatch(/id: "before_compaction"[\s\S]*?\(audit-only\)/);
+    expect(src).toMatch(/id: "after_compaction"[\s\S]*?\(audit-only\)/);
+    expect(src).toMatch(/id: "on_task_checkpoint"[\s\S]*?\(audit-only\)/);
+    expect(src).toMatch(/id: "on_artifact_created"[\s\S]*?\(audit-only\)/);
+  });
+
+  it("stepPlan(F-LIFE3 slots) drops the target step (6-step plan)", () => {
+    // All four F-LIFE3 slots fire OUTSIDE the tool boundary — same step
+    // shape as pre_final / turn-boundary / per-LLM-call.
+    expect(src).toMatch(
+      /lifecycle === "before_compaction"[\s\S]*?lifecycle === "after_compaction"[\s\S]*?lifecycle === "on_task_checkpoint"[\s\S]*?lifecycle === "on_artifact_created"[\s\S]*?\["trigger", "condition", "specifics", "action", "name", "review"\]/,
+    );
+  });
+
+  it("availableConditionKinds(F-LIFE3 slots) returns ONLY llm_criterion", () => {
+    // Backend ``_LEGAL`` has fan-out only for llm_criterion at the four
+    // new emitter slots. deterministic_ref / tool_perm / mutator kinds are
+    // honest-degrade omitted (no runtime consumer).
+    expect(src).toMatch(
+      /lifecycle === "before_compaction"[\s\S]*?lifecycle === "after_compaction"[\s\S]*?lifecycle === "on_task_checkpoint"[\s\S]*?lifecycle === "on_artifact_created"[\s\S]*?return \["llm_criterion"\]/,
+    );
+  });
+
+  it("availableArchetypes(F-LIFE3 slots) returns ONLY audit", () => {
+    // Mirrors the backend matrix entries — block/ask/retry have no honest
+    // semantics at the compaction / task-checkpoint / artifact-created
+    // chokepoints (the underlying runtime decision has already been made
+    // by the time the audit fires). The if-block must close on
+    // on_artifact_created and short-circuit to return ["audit"].
+    expect(src).toMatch(
+      /lifecycle === "on_artifact_created"\s*\)\s*\{\s*return \["audit"\];?\s*\}/,
+    );
+  });
+
+  it("reseedDownstream forces toolTarget=any for all four F-LIFE3 lifecycles", () => {
+    // F-LIFE3 slots have no tool layer; a stale "specific" pick must not
+    // bleed into payloads / Review summaries.
+    expect(src).toMatch(
+      /merged\.lifecycle === "before_compaction"[\s\S]*?merged\.lifecycle === "after_compaction"[\s\S]*?merged\.lifecycle === "on_task_checkpoint"[\s\S]*?merged\.lifecycle === "on_artifact_created"[\s\S]*?merged\.toolTarget = "any"/,
+    );
+  });
+
+  it("targetEventPhrase + whenForLifecycle describe all four F-LIFE3 slots in plain English", () => {
+    // The Review step's sentence and the ArchetypeStep header must stay
+    // honest when the operator picks an F-LIFE3 slot.
+    expect(src).toContain('"Before context compaction"');
+    expect(src).toContain('"After context compaction"');
+    expect(src).toContain('"On a work-queue task checkpoint"');
+    expect(src).toContain('"On a newly-created artifact"');
+  });
+
+  it("ReviewStep target row is skipped for all four F-LIFE3 lifecycles", () => {
+    // The Review summary must not show a Target row for the new emitter
+    // slots — they have no tool axis.
+    expect(src).toMatch(
+      /draft\.lifecycle !== "before_compaction"[\s\S]*?draft\.lifecycle !== "after_compaction"[\s\S]*?draft\.lifecycle !== "on_task_checkpoint"[\s\S]*?draft\.lifecycle !== "on_artifact_created"/,
+    );
+  });
+});
+
+
+// ---------------------------------------------------------------------------
 // PR-F-UX2 (F8 core) — RuntimeFieldChips wiring in SpecificsStep.
 //
 // The chip picker is rendered above every wizard text input that accepts a
