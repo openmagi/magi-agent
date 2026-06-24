@@ -1205,6 +1205,28 @@ FLAGS: tuple[FlagSpec, ...] = (
         stage="stage2",
     ),
     _b(
+        "MAGI_CUSTOMIZE_NL_INTERVIEW_MODE_ENABLED",
+        summary=(
+            "PR-F-UX6: turn the NL compose surface from a one-shot parser into "
+            "an interview-driven policy architect. When ON AND the input is "
+            "underspecified, the compiler runs ``discover_intent`` to build a "
+            "structured intent map and asks 1-3 focused questions (each with "
+            "an 'expects' tag — evidence_ref / verifier_ref / field / "
+            "tool_name / lifecycle / scope / value / freeform — and an "
+            "optional inventory the frontend renders as chip pickers). Once "
+            "the intent is resolved the compiler runs "
+            "``propose_primitive_or_hybrid`` and may return a HYBRID "
+            "composition (multiple primitives sharing a logical groupId) — "
+            "e.g. regex pre-filter + LLM critic for AWS-key audits. With the "
+            "flag OFF or when the NL is already well-formed, the legacy "
+            "one-shot compile path is preserved byte-identically. "
+            "Registration-time only; fail-open when no model is available. "
+            "Strict default-OFF; lab opts in via LAB_EXPERIMENTAL_FLAGS."
+        ),
+        scope="public",
+        stage="stage2",
+    ),
+    _b(
         "MAGI_DASHBOARD_PACK_AUTHORING_ENABLED",
         summary=(
             "Self-host-only dashboard pack-builder UI/REST plus the after-tool "
