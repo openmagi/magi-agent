@@ -75,7 +75,7 @@ function LiveCatalogRow({
   const authorable = isAuthorableNow(entry);
 
   return (
-    <li className="rounded-xl border border-black/[0.06] bg-white">
+    <li className="rounded-xl border border-black/[0.06] bg-[var(--glass-regular-bg)] backdrop-blur-xl">
       <button
         type="button"
         onClick={onToggle}
@@ -237,7 +237,7 @@ function PolicyDerivedRefs({
           {entries.map((entry) => (
             <li
               key={entry.ref}
-              className="rounded-xl border border-black/[0.06] bg-white px-4 py-3"
+              className="rounded-xl border border-black/[0.06] bg-[var(--glass-regular-bg)] backdrop-blur-xl px-4 py-3"
             >
               <div className="flex items-start gap-3">
                 <div className="min-w-0 flex-1">

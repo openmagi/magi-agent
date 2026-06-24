@@ -57,7 +57,7 @@ function MetricTile({
   icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
 }) {
   return (
-    <div className="rounded-lg border border-black/[0.05] bg-white px-3 py-2.5">
+    <div className="rounded-lg border border-black/[0.05] bg-[var(--glass-regular-bg)] backdrop-blur-xl px-3 py-2.5">
       <div className="flex items-center gap-1.5 text-secondary/70">
         <Icon className="h-3 w-3" strokeWidth={2} />
         <div className="text-[10.5px] font-semibold uppercase tracking-[0.12em]">{label}</div>
@@ -81,7 +81,7 @@ function ActionCard({
   return (
     <Link
       href={href}
-      className="group flex items-center gap-3 rounded-lg border border-black/[0.06] bg-white px-3 py-2.5 transition-colors hover:border-primary/30 hover:bg-gray-50"
+      className="group flex items-center gap-3 rounded-lg border border-black/[0.06] bg-[var(--glass-regular-bg)] backdrop-blur-xl px-3 py-2.5 transition-colors hover:border-primary/30 hover:bg-gray-50"
     >
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-primary/10 bg-primary/10 text-primary-light">
         <Icon className="h-3.5 w-3.5" strokeWidth={2} />

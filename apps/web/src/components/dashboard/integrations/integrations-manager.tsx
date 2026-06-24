@@ -172,7 +172,7 @@ function SectionCard({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-gray-200 bg-white p-5 space-y-4">
+    <section className="rounded-xl border border-gray-200 bg-[var(--glass-regular-bg)] backdrop-blur-xl p-5 space-y-4">
       <div className="flex items-center gap-3">
         <div className="w-8 h-8 rounded-lg bg-black/5 flex items-center justify-center shrink-0">
           {icon}

@@ -49,7 +49,13 @@ export function Modal({ open, onClose, children, className = "" }: ModalProps) {
         ref={contentRef}
         role="dialog"
         aria-modal="true"
-        className={`rounded-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto bg-[var(--color-surface-raised)] border border-[var(--color-border-strong)] shadow-2xl ${className}`}
+        style={{
+          backdropFilter: "blur(var(--glass-blur)) saturate(var(--glass-saturate))",
+          WebkitBackdropFilter: "blur(var(--glass-blur)) saturate(var(--glass-saturate))",
+          boxShadow: "var(--glass-rim), 0 24px 64px -16px rgba(15,23,42,0.45)",
+          background: "var(--glass-thick-bg)",
+        }}
+        className={`rounded-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto border border-white/40 ${className}`}
       >
         {children}
       </div>

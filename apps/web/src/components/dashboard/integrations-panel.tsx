@@ -821,7 +821,7 @@ export function IntegrationsPanel({ botId }: IntegrationsPanelProps) {
                     {notionHasWrite ? t.settingsPage.notionReadWrite : t.settingsPage.notionReadOnly}
                   </span>
                 </div>
-                <div className="p-2 rounded-lg bg-white border border-gray-200">
+                <div className="p-2 rounded-lg bg-[var(--glass-regular-bg)] backdrop-blur-xl border border-gray-200">
                   <p className="text-[10px] text-secondary/50 mb-1">{t.settingsPage.notionSuggestedCommands}</p>
                   <div className="flex flex-wrap gap-1.5">
                     {[
@@ -1139,7 +1139,7 @@ export function IntegrationsPanel({ botId }: IntegrationsPanelProps) {
           </div>
 
           {/* Future integrations placeholder */}
-          <div className="p-3 rounded-xl border border-gray-100 bg-white opacity-50">
+          <div className="p-3 rounded-xl border border-gray-100 bg-[var(--glass-regular-bg)] backdrop-blur-xl opacity-50">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-lg bg-black/5 flex items-center justify-center shrink-0">

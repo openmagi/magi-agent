@@ -142,7 +142,7 @@ export default function ToolsSettingsPage() {
           {filtered.map((tool) => (
             <div
               key={tool.name}
-              className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 overflow-hidden"
+              className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-[var(--glass-regular-bg)] backdrop-blur-xl dark:bg-zinc-900 overflow-hidden"
             >
               <div
                 className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"

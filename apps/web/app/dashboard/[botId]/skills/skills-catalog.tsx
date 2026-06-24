@@ -369,7 +369,7 @@ export default function SkillsCatalog(_props: SkillsCatalogProps): React.JSX.Ele
             {filteredSkills.map((skill) => (
               <article
                 key={`${skill.name}-${skill.path}`}
-                className="flex min-h-[190px] flex-col rounded-2xl border border-black/[0.06] bg-white px-4 py-4 transition-all duration-200 hover:border-primary/20 hover:bg-primary/[0.025]"
+                className="flex min-h-[190px] flex-col rounded-2xl border border-black/[0.06] bg-[var(--glass-regular-bg)] backdrop-blur-xl px-4 py-4 transition-all duration-200 hover:border-primary/20 hover:bg-primary/[0.025]"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">

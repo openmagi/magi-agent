@@ -182,7 +182,7 @@ export function CredentialsPanel({ botId }: CredentialsPanelProps): React.JSX.El
 
       <form
         onSubmit={handleRegister}
-        className="rounded-2xl border border-black/[0.06] bg-white p-5 space-y-4"
+        className="rounded-2xl border border-black/[0.06] bg-[var(--glass-regular-bg)] backdrop-blur-xl p-5 space-y-4"
       >
         <div className="flex items-center gap-2">
           <KeyRound className="h-4 w-4 text-primary" />
@@ -299,7 +299,7 @@ export function CredentialsPanel({ botId }: CredentialsPanelProps): React.JSX.El
             {data?.credentials.map((credential) => (
               <li
                 key={credential.id}
-                className="flex items-center justify-between gap-4 rounded-2xl border border-black/[0.06] bg-white px-5 py-4"
+                className="flex items-center justify-between gap-4 rounded-2xl border border-black/[0.06] bg-[var(--glass-regular-bg)] backdrop-blur-xl px-5 py-4"
               >
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">

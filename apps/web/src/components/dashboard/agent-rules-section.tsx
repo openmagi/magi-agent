@@ -707,7 +707,7 @@ export function AgentRulesSection({
             return (
               <div
                 key={item.id}
-                className="rounded-lg border border-black/[0.06] bg-white px-3 py-2"
+                className="rounded-lg border border-black/[0.06] bg-[var(--glass-regular-bg)] backdrop-blur-xl px-3 py-2"
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-xs font-medium text-foreground">
@@ -877,7 +877,7 @@ export function AgentRulesSection({
 
         {activeSafeguardsPanel}
 
-        <details className="rounded-xl border border-black/10 bg-white px-4 py-3">
+        <details className="rounded-xl border border-black/10 bg-[var(--glass-regular-bg)] backdrop-blur-xl px-4 py-3">
           <summary className="cursor-pointer text-xs font-semibold text-foreground">
             {directEditTitle}
           </summary>

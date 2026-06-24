@@ -25,7 +25,7 @@ function LocalRuntimeHeader() {
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(124,58,237,0.08),transparent_32rem),linear-gradient(180deg,#ffffff_0%,#f8fafc_42%,#fafafa_100%)]">
+    <div className="min-h-screen">
       <MobileSidebar />
       <div className="flex">
         <SidebarNav className="hidden md:flex" />

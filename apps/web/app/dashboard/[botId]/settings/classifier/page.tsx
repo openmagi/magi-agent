@@ -55,7 +55,7 @@ export default function ClassifierSettingsPage() {
         </p>
       </div>
 
-      <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5 space-y-4">
+      <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-[var(--glass-regular-bg)] backdrop-blur-xl dark:bg-zinc-900 p-5 space-y-4">
         <h3 className="text-base font-medium">새 분류 항목 추가</h3>
         <p className="text-sm text-zinc-500 dark:text-zinc-400">
           봇이 추가로 판단해야 할 내용을 자연어로 설명하세요
@@ -90,7 +90,7 @@ export default function ClassifierSettingsPage() {
             {dimensions.map((dim) => (
               <div
                 key={dim.name}
-                className="flex items-center gap-3 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-4 py-3"
+                className="flex items-center gap-3 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-[var(--glass-regular-bg)] backdrop-blur-xl dark:bg-zinc-900 px-4 py-3"
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">

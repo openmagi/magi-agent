@@ -2,6 +2,7 @@
    Source: magi-agent/design-system. Regenerate via scripts/sync-design-system.sh. */
 import type { HTMLAttributes } from "react"
 import { cn } from "./cn"
+import { GlassSurface } from "./GlassSurface"
 
 export interface CardProps extends HTMLAttributes<HTMLDivElement> {
   /** `interactive` adds hover lift + cursor-pointer; use when the whole card is a link. */
@@ -12,29 +13,42 @@ export interface CardProps extends HTMLAttributes<HTMLDivElement> {
   noPadding?: boolean
 }
 
+// Semantic alert/status cards stay solid + colored — legibility of an error
+// banner matters more than the glass effect.
 const TONES = {
-  default: "border-[var(--color-border-subtle)]",
-  alert:   "border-[var(--color-deny-fg)] bg-[var(--color-deny-bg)]/30",
-  status:  "border-[var(--color-pass-fg)] bg-[var(--color-pass-bg)]/30",
+  alert:  "border-[var(--color-deny-fg)] bg-[var(--color-deny-bg)]/30",
+  status: "border-[var(--color-pass-fg)] bg-[var(--color-pass-bg)]/30",
 } as const
 
 export function Card({
   interactive, tone = "default", noPadding, className, children, ...rest
 }: CardProps) {
+  if (tone !== "default") {
+    return (
+      <div
+        className={cn(
+          "rounded-lg border",
+          noPadding ? "" : "p-4",
+          TONES[tone],
+          interactive && "cursor-pointer transition-[filter] duration-150 hover:brightness-105",
+          className,
+        )}
+        {...rest}
+      >
+        {children}
+      </div>
+    )
+  }
+  // default cards are liquid glass (regular tier)
   return (
-    <div
-      className={cn(
-        "bg-[var(--color-surface-raised)] rounded-lg border",
-        noPadding ? "" : "p-4",
-        TONES[tone],
-        interactive &&
-          "cursor-pointer transition-colors duration-150 hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-overlay)]",
-        className,
-      )}
+    <GlassSurface
+      tier="regular"
+      interactive={interactive}
+      className={cn(noPadding ? "" : "p-4", className)}
       {...rest}
     >
       {children}
-    </div>
+    </GlassSurface>
   )
 }
 
