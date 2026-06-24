@@ -25,7 +25,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ShieldCheck, Wrench, Layers, Webhook, Wand2, Plus, SlidersHorizontal } from "lucide-react";
+import { ShieldCheck, Wrench, Layers, Webhook, Wand2, Plus, SlidersHorizontal, Gauge } from "lucide-react";
 import {
   useCustomize,
   patchToolOverride,
@@ -35,11 +35,15 @@ import {
   putCustomRule,
   deleteCustomRule,
   compileCustomRule,
+  getBudgets,
+  putBudgets,
 } from "@/lib/customize-api";
 import type {
+  BudgetsResponse,
   ConversationTurn,
   CustomRule,
   ShaclCompileResponse,
+  VerificationBudgets,
 } from "@/lib/customize-api";
 import { useAgentFetch } from "@/lib/local-api";
 import { AddRulePicker, type AddRuleChoice } from "./add-rule-modal";
@@ -52,6 +56,7 @@ import {
 import { CustomChecksSection } from "./custom-checks-section";
 import { CustomToolPanel } from "./custom-tool-modal";
 import { BehaviorsPanel } from "./behaviors-panel";
+import { BudgetsTab } from "./budgets-tab";
 import { GuidancePanel } from "./guidance-panel";
 import { PageHint } from "./page-hint";
 import { PoliciesTable } from "./policies-table";
@@ -78,6 +83,7 @@ export type CustomizeSection =
   | "guidance"
   | "tools"
   | "behaviors"
+  | "budgets"
   | "recipes"
   | "hooks";
 
@@ -113,6 +119,13 @@ const SECTIONS: ReadonlyArray<{
     icon: <SlidersHorizontal className="h-4 w-4" />,
     description:
       "In-context runtime behaviors (periodic facts survey, goal nudge, tool-synthesis nudge, empty-response recovery). These are seeded ON by the lab/dogfood profile; a toggle here overrides that.",
+  },
+  {
+    id: "budgets",
+    label: "Budgets",
+    icon: <Gauge className="h-4 w-4" />,
+    description:
+      "Per-bot cost ceilings (max tool calls per turn, max-steps brake, loop-guard hard threshold). Saved values are projected onto the matching MAGI_* env at turn entry; an explicit operator env always wins.",
   },
   {
     id: "recipes",
@@ -328,6 +341,47 @@ export function CustomizeHub({
     [agentFetch],
   );
 
+  // --- Budgets (PR-F7) ------------------------------------------------------
+  // Independent fetch from /v1/app/customize/budgets so the UI carries the
+  // `effectiveEnv` snapshot the dashboard /v1/app/customize GET does not emit.
+  const [budgetsData, setBudgetsData] = useState<BudgetsResponse | null>(null);
+  const [budgetsLoading, setBudgetsLoading] = useState(false);
+  const [budgetsSaving, setBudgetsSaving] = useState(false);
+  const [budgetsError, setBudgetsError] = useState<string | null>(null);
+
+  const loadBudgets = useCallback(() => {
+    setBudgetsLoading(true);
+    setBudgetsError(null);
+    getBudgets(agentFetch)
+      .then((next) => setBudgetsData(next))
+      .catch((err: unknown) =>
+        setBudgetsError(err instanceof Error ? err.message : "Failed to load budgets"),
+      )
+      .finally(() => setBudgetsLoading(false));
+  }, [agentFetch]);
+
+  // Lazy-load: only fetch once the user navigates to the Budgets sub-tab so
+  // the rest of the hub stays a single round-trip on first paint.
+  useEffect(() => {
+    if (section === "budgets" && budgetsData === null && !budgetsLoading) {
+      loadBudgets();
+    }
+  }, [section, budgetsData, budgetsLoading, loadBudgets]);
+
+  const handleSaveBudgets = useCallback(
+    (next: VerificationBudgets) => {
+      setBudgetsSaving(true);
+      setBudgetsError(null);
+      putBudgets(agentFetch, next)
+        .then((res) => setBudgetsData(res))
+        .catch((err: unknown) =>
+          setBudgetsError(err instanceof Error ? err.message : "Failed to save budgets"),
+        )
+        .finally(() => setBudgetsSaving(false));
+    },
+    [agentFetch],
+  );
+
   const recipes = useMemo(() => data?.catalog.verification.recipes ?? [], [data]);
 
   if (loading) {
@@ -435,6 +489,19 @@ export function CustomizeHub({
             onToggle={handleToggleBehavior}
             pendingIds={behaviorPending}
             error={behaviorError}
+          />
+        ) : null}
+
+        {section === "budgets" ? (
+          <BudgetsTab
+            budgets={budgetsData?.budgets ?? {}}
+            effectiveEnv={budgetsData?.effectiveEnv ?? {}}
+            envMap={budgetsData?.envMap ?? {}}
+            loading={budgetsLoading}
+            saving={budgetsSaving}
+            error={budgetsError}
+            onSave={handleSaveBudgets}
+            onReload={loadBudgets}
           />
         ) : null}
 

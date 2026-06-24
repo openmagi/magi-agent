@@ -186,6 +186,12 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     # Strict default-OFF in the registry so a fresh install / hosted serve stays
     # byte-identical; lab opts in so dogfood spawns honor operator-authored caps.
     "MAGI_CUSTOMIZE_CAPABILITY_SCOPE_ENABLED",
+    # F7 cost-vocabulary applier: project Customize budgets onto the live
+    # MAGI_* env (tool calls per turn / max-steps brake / loop-guard hard) via
+    # ``setdefault`` (operator env always wins). Strict default-OFF in the
+    # registry so a fresh install / hosted serve stays byte-identical; lab opts
+    # in so dogfood turns honor operator-authored budgets out-of-the-box.
+    "MAGI_CUSTOMIZE_BUDGETS_ENABLED",
     # NOTE: MAGI_CUSTOMIZE_VERIFICATION_ENABLED / MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED
     # are NOT here: they are profile-aware default-ON (``_pb``), so they resolve ON
     # in every non-safe profile (full AND lab) on their own. The lab seed only

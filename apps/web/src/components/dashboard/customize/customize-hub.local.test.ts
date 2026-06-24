@@ -68,4 +68,19 @@ describe("CustomizeHub — Policy unification (PR-E1)", () => {
   it("hides the unified list while authoring so the page is focused", () => {
     expect(src).toContain("List hidden while adding a policy");
   });
+
+  it("registers the PR-F7 Budgets sub-tab (id, label, icon, panel mount)", () => {
+    // Section vocabulary
+    expect(src).toContain('"budgets"');
+    expect(src).toContain('label: "Budgets"');
+    // Hub imports + handlers
+    expect(src).toContain("BudgetsTab");
+    expect(src).toContain("getBudgets");
+    expect(src).toContain("putBudgets");
+    expect(src).toContain("handleSaveBudgets");
+    // Render branch
+    expect(src).toContain('section === "budgets"');
+    // The hub lazy-loads budgets only when the operator opens the tab
+    expect(src).toContain("loadBudgets");
+  });
 });

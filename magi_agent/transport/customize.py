@@ -29,6 +29,7 @@ from magi_agent.customize.store import (
     set_custom_rule,
     set_tool_override,
     set_user_rules,
+    set_verification_budgets,
     set_verification_override,
 )
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
@@ -401,6 +402,112 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         overrides = delete_custom_rule(rule_id)
         apply_verification_overrides(runtime, overrides)
         return JSONResponse(content={"overrides": overrides})
+
+    # ------------------------------------------------------------------
+    # PR-F7 — Customize budgets routes. Surface the per-bot cost vocabulary
+    # (max tool calls per turn / max-steps brake / loop-guard hard) so the
+    # dashboard can author MAGI_* overrides as Customize state. The applier
+    # (governed_turn._maybe_apply_customize_budgets) projects the persisted
+    # values onto the live env at turn entry via ``setdefault`` so an explicit
+    # operator env always wins; the GET surface includes the resolved env
+    # snapshot so the UI can flag "your dashboard save is dormant because
+    # this env is pinned elsewhere".
+    # ------------------------------------------------------------------
+
+    @app.get("/v1/app/customize/budgets")
+    async def get_customize_budgets(request: Request) -> JSONResponse:
+        """Return the persisted budgets + effective env snapshot (PR-F7).
+
+        Response shape: ``{"budgets": {...}, "effectiveEnv": {...}}``. The
+        ``effectiveEnv`` value reflects what the runtime reads at turn entry
+        for each budget's underlying MAGI_* env; ``null`` means the env is
+        unset (so the dashboard save will take effect at the next turn).
+        """
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        from magi_agent.customize.budgets_apply import (  # noqa: PLC0415
+            BUDGET_ENV_MAP,
+            effective_budget_envs,
+        )
+
+        overrides = load_overrides()
+        budgets = (
+            overrides.get("verification", {}).get("budgets", {})
+            if isinstance(overrides, dict)
+            else {}
+        )
+        return JSONResponse(
+            content={
+                "budgets": budgets,
+                "effectiveEnv": effective_budget_envs(os.environ),
+                "envMap": dict(BUDGET_ENV_MAP),
+            }
+        )
+
+    @app.put("/v1/app/customize/budgets")
+    async def put_customize_budgets(request: Request) -> JSONResponse:
+        """Replace the persisted ``verification.budgets`` dict (PR-F7).
+
+        Body: ``{"budgets": {budgetName: positiveInt, ...}}``. Unknown budget
+        names are rejected so a typo cannot silently land in customize.json;
+        non-positive / non-int / boolean values are rejected. On success the
+        new overrides are persisted, applied to the live runtime policy via
+        :func:`apply_verification_overrides`, and the response mirrors GET so
+        the dashboard can refresh its read-only ``effectiveEnv`` snapshot.
+        """
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        if not isinstance(body, dict):
+            return JSONResponse(
+                status_code=400, content={"error": "object_required"}
+            )
+        budgets_raw = body.get("budgets")
+        if not isinstance(budgets_raw, dict):
+            return JSONResponse(
+                status_code=400,
+                content={"error": "budgets_object_required"},
+            )
+
+        from magi_agent.customize.budgets_apply import (  # noqa: PLC0415
+            BUDGET_ENV_MAP,
+            effective_budget_envs,
+        )
+
+        sanitized: dict[str, int] = {}
+        errors: list[str] = []
+        for key, value in budgets_raw.items():
+            if not isinstance(key, str) or key not in BUDGET_ENV_MAP:
+                errors.append(f"unknown budget: {key!r}")
+                continue
+            if isinstance(value, bool) or not isinstance(value, int):
+                errors.append(f"{key}: must be a positive integer")
+                continue
+            if value <= 0:
+                errors.append(f"{key}: must be > 0 (got {value})")
+                continue
+            sanitized[key] = value
+        if errors:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "invalid_budgets", "details": errors},
+            )
+
+        overrides = set_verification_budgets(sanitized)
+        apply_verification_overrides(runtime, overrides)
+        return JSONResponse(
+            content={
+                "overrides": overrides,
+                "budgets": overrides["verification"]["budgets"],
+                "effectiveEnv": effective_budget_envs(os.environ),
+                "envMap": dict(BUDGET_ENV_MAP),
+            }
+        )
 
     @app.post("/v1/app/customize/custom-rules/compile")
     async def compile_custom_rule(request: Request) -> JSONResponse:
