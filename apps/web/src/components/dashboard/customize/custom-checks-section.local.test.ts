@@ -37,3 +37,24 @@ describe("verification-rule-modal mounts CustomChecksSection", () => {
     expect(modalSrc).toContain("CustomChecksSection");
   });
 });
+
+describe("custom-checks-section — F5 TrustBadge per row", () => {
+  it("imports the shared TrustBadge component", () => {
+    expect(src).toContain("TrustBadge");
+    expect(src).toMatch(/from\s+["'][^"']*trust-badge["']/);
+  });
+
+  it("renders a <TrustBadge> for each check row", () => {
+    // The check-row map renders the badge with trustClass derived from action.
+    expect(src).toMatch(/<TrustBadge\s+trustClass=\{[^}]+\}/);
+  });
+
+  it("maps action='override' to hybrid; all other actions to deterministic", () => {
+    // The action-distinguisher uses the spec's "override" hybrid carve-out.
+    // Today the type is block | audit only, but the badge logic must be
+    // forward-compatible so a future "override" / strip action lights up hybrid.
+    expect(src).toContain('"override"');
+    expect(src).toContain('"hybrid"');
+    expect(src).toContain('"deterministic"');
+  });
+});

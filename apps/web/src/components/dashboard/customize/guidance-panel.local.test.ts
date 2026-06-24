@@ -26,9 +26,27 @@ describe("GuidancePanel — UX restructure B soft-instructions surface", () => {
     expect(src).toContain("useEffect(() => setDraft(userRules)");
   });
 
-  it("renders a prominent Advisory trust-class badge (PR-F1)", () => {
-    expect(src).toContain("Trust class: Advisory");
-    expect(src).toMatch(/>\s*Advisory\s*</);
+  it("renders a prominent Advisory trust-class badge (PR-F1, via shared TrustBadge after F5)", () => {
+    // Post-F5 the visible Advisory pill is rendered by the shared TrustBadge
+    // (advisory variant), which encapsulates the "Trust class: Advisory"
+    // aria-label and the visible "Advisory" text. Verifying the component
+    // usage here preserves the F1 contract without re-asserting the inlined
+    // markup that the F5 refactor intentionally removed.
+    expect(src).toContain('<TrustBadge trustClass="advisory"');
+  });
+
+  it("reuses the shared TrustBadge component instead of the inline pill (PR-F5)", () => {
+    expect(src).toContain("TrustBadge");
+    expect(src).toMatch(/from\s+["'][^"']*trust-badge["']/);
+    expect(src).toContain('<TrustBadge trustClass="advisory"');
+  });
+
+  it("removes the legacy inline Advisory <span> pill markup (PR-F5)", () => {
+    // The old hand-rolled span used bg-amber-500/10 + uppercase tracking-wide.
+    // It must be replaced by the shared component (still amber-styled) so a
+    // single primitive owns the trust-class visual contract.
+    expect(src).not.toMatch(/<span[^>]*aria-label="Trust class: Advisory"/);
+    expect(src).not.toContain("bg-amber-500/10 px-2 py-0.5 text-[10px]");
   });
 
   it("ships honest advisory helper copy that points at deterministic surfaces", () => {

@@ -40,6 +40,7 @@ import {
 } from "@/lib/packs-dashboard-api";
 import { useAgentFetch } from "@/lib/local-api";
 import { NlRuleGuide } from "./nl-rule-guide";
+import { TrustBadge, type TrustClass } from "./trust-badge";
 
 
 export interface NlRuleComposeProps {
@@ -309,9 +310,12 @@ function CompileResultView({
         <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
           Routed to
         </p>
-        <p className="mt-0.5 text-sm font-bold text-foreground">
-          {ROUTED_LABEL[routedKind]}
-        </p>
+        <div className="mt-0.5 flex items-center gap-2">
+          <p className="text-sm font-bold text-foreground">
+            {ROUTED_LABEL[routedKind]}
+          </p>
+          <TrustBadge trustClass={trustClassForRoutedKind(routedKind)} />
+        </div>
       </div>
 
       {result.explanation ? (
@@ -452,6 +456,22 @@ function extractFieldConstraintIR(draft: unknown): FieldConstraintIR | null {
   }
   return null;
 }
+
+/**
+ * F5 — derive the honesty trust class for a routedKind label.
+ *
+ * Keyed on the backend routedKind names. The only Advisory routing today
+ * is `llm_criterion` (LLM critic — guidance the model may ignore); every
+ * other routedKind compiles to a deterministic runtime gate
+ * (deterministic_ref / tool_perm / shacl_constraint / field_constraint /
+ * seam_spec / custom_check). Future Advisory routings extend this
+ * switch — the call site stays single-line.
+ */
+function trustClassForRoutedKind(routedKind: RoutedKind): TrustClass {
+  if (routedKind === "llm_criterion") return "advisory";
+  return "deterministic";
+}
+
 
 function isAdvisoryDraft(draft: unknown): boolean {
   if (!draft || typeof draft !== "object") return false;

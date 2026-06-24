@@ -38,6 +38,8 @@ import type {
   SeamSpecDoc,
 } from "@/lib/customize-api";
 
+import { TrustBadge, trustClassForPolicy, type TrustClass } from "./trust-badge";
+
 
 // ---------------------------------------------------------------------------
 // Origin + tone constants
@@ -88,6 +90,11 @@ interface RuleRow {
   scope: string;
   mode: string;
   state: "always-on" | "enabled" | "disabled" | "preview";
+  /** Honesty taxonomy bucket — drives the per-row TrustBadge in the
+   *  Trust column. Derived by ``trustClassForPolicy()`` from the source
+   *  shape in each adapter, so the table never invents trust class out
+   *  of band. */
+  trustClass: TrustClass;
   /** Toggle handler. ``null`` means the row is not togglable (always-on, preview). */
   onToggle: ((next: boolean) => void) | null;
   /** Delete handler. ``null`` means the row is built-in / cannot be deleted. */
@@ -127,6 +134,15 @@ function builtinToRow(
     scope: preset.domain,
     mode: preset.tier ?? "—",
     state,
+    // Built-in PresetSeams have implicit conditions (the runtime wires
+    // controls_refs deterministically); preview presets surface as
+    // preview regardless of condition kind. Pass state through so the
+    // helper picks the right bucket.
+    trustClass: trustClassForPolicy({
+      source: "preset_seam",
+      state,
+      condition: { kind: "none" },
+    }),
     onToggle: togglable && !pending ? (next) => onToggle(preset.id, next) : null,
     onDelete: null,
     hint: preset.description,
@@ -149,6 +165,14 @@ function customRuleToRow(
     scope: rule.scope ?? "always",
     mode: ruleKind,
     state: rule.enabled ? "enabled" : "disabled",
+    // CustomRule's what.kind drives trust class: llm_criterion → advisory,
+    // everything else (evidence_ref/shacl_constraint/tool_perm/...) →
+    // deterministic. See trust-badge.ts for the full mapping.
+    trustClass: trustClassForPolicy({
+      source: "custom_rule",
+      state: rule.enabled ? "enabled" : "disabled",
+      condition: { kind: ruleKind },
+    }),
     onToggle: busy ? null : (next) => onToggle(rule, next),
     onDelete: busy || !rule.id ? null : () => onDelete(rule.id!),
     hint: `${rule.firesAt} · ${rule.action}`,
@@ -169,6 +193,14 @@ function seamSpecToRows(spec: SeamSpecDoc): RuleRow[] {
       scope: "—",
       mode: action.controls_kind ?? "validator",
       state: "enabled",
+      // SeamSpec rewires the preset wiring at registration time — it is
+      // a deterministic gate by construction (no LLM judgment), so the
+      // helper always returns "deterministic" for seam_action.
+      trustClass: trustClassForPolicy({
+        source: "seam_spec",
+        state: "enabled",
+        condition: { kind: "seam_action" },
+      }),
       // SeamSpec rows are managed atomically per-doc — no per-action
       // toggle/delete. The whole doc is removed from the Advanced page.
       onToggle: null,
@@ -399,6 +431,10 @@ function RuleRowView({ row }: { row: RuleRow }): React.ReactElement {
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-3">
+        <TrustBadge
+          trustClass={row.trustClass}
+          ariaLabel="Trust class for this policy"
+        />
         <StatePill state={row.state} />
         {row.onToggle ? (
           <ToggleSwitch

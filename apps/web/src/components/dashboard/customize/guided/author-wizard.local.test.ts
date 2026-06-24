@@ -291,3 +291,36 @@ describe("AuthorWizard — F3 field_constraint condition kind", () => {
     expect(src).toMatch(/case "field_constraint":/);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// PR-F5 — TrustBadge in the Review step
+// ---------------------------------------------------------------------------
+
+
+describe("AuthorWizard — F5 TrustBadge in Review step", () => {
+  it("imports the shared TrustBadge component", () => {
+    // The badge is shared across customize surfaces (GuidancePanel,
+    // custom-checks-section, rules-table) so the review screen reaches for
+    // the same primitive rather than re-rolling an inline pill.
+    expect(src).toContain("TrustBadge");
+    expect(src).toMatch(/from\s+["'][^"']*trust-badge["']/);
+  });
+
+  it("renders a <TrustBadge trustClass={...}> inside ReviewStep", () => {
+    // Honesty signal next to the policy summary so the operator sees the
+    // trust class (deterministic vs advisory) before clicking Save.
+    expect(src).toMatch(/<TrustBadge\s+trustClass=\{[^}]+\}/);
+  });
+
+  it("derives the trust class from the draft's conditionKind", () => {
+    // llm_criterion is the only Advisory authoring path the wizard offers
+    // today; every other conditionKind maps to Deterministic. The
+    // derivation must read draft.conditionKind so future kinds re-classify
+    // here, not at the call site.
+    expect(src).toContain("trustClassForDraft");
+    expect(src).toContain('"llm_criterion"');
+    expect(src).toContain('"advisory"');
+    expect(src).toContain('"deterministic"');
+  });
+});

@@ -97,3 +97,33 @@ describe("NlRuleCompose — F3 field_constraint chip renderer + honest-degrade",
     expect(src).toContain("Advisory");
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// PR-F5 — TrustBadge next to the routed-kind label
+// ---------------------------------------------------------------------------
+
+
+describe("NlRuleCompose — F5 TrustBadge next to Routed-to label", () => {
+  it("imports the shared TrustBadge component", () => {
+    expect(src).toContain("TrustBadge");
+    expect(src).toMatch(/from\s+["'][^"']*trust-badge["']/);
+  });
+
+  it("renders <TrustBadge trustClass={...}> inside CompileResultView", () => {
+    // The badge replaces the F3 hand-rolled inline Advisory pill so every
+    // routedKind (not only llm_criterion) gets an explicit trust signal.
+    expect(src).toMatch(/<TrustBadge\s+trustClass=\{[^}]+\}/);
+  });
+
+  it("derives the trust class from routedKind via a dedicated helper", () => {
+    // The helper keys on the backend routedKind names — llm_criterion is
+    // the only Advisory routing today; every other routedKind is
+    // Deterministic (deterministic_ref / tool_perm / shacl_constraint /
+    // field_constraint / seam_spec / custom_check).
+    expect(src).toContain("trustClassForRoutedKind");
+    expect(src).toContain('"llm_criterion"');
+    expect(src).toContain('"advisory"');
+    expect(src).toContain('"deterministic"');
+  });
+});
