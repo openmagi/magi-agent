@@ -233,6 +233,18 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_CHILD_RUNNER_EMPTY_DEBUG",
+        summary=(
+            "Default-OFF operator-opt-in diagnostic. When truthy, the child "
+            "runner's legacy + governed collectors log one warning per turn "
+            "naming the collected text_chunks count / summary length and the "
+            "evidence_refs count + first ref. Lets the operator see whether "
+            "the empty-response guard about to be checked will fire AND, if "
+            "not, exactly why (zero text vs non-empty whitespace vs "
+            "unexpected ref leakage) without redeploying a debug wheel."
+        ),
+    ),
+    _b(
         "MAGI_GOAL_NUDGE_ENABLED",
         summary=(
             "Enable the production goal-nudge: a bounded continuation that "

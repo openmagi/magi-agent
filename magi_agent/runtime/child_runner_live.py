@@ -46,10 +46,92 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import inspect
+import logging
 import os
 import re
 from collections.abc import Callable, Mapping
 from typing import Any
+
+_logger = logging.getLogger(__name__)
+
+#: Operator opt-in env for verbose child-runner empty-stream diagnostics.
+#: Default-OFF — when set to a truthy value, the legacy and governed
+#: collectors emit one ``logger.warning`` per turn naming the collected
+#: ``text_chunks`` count / ``summary`` length and the ``evidence_refs``
+#: count. Lets the operator see whether the empty-response guard fired
+#: AND why (zero text vs non-empty whitespace vs unexpected ref leakage)
+#: without having to add print statements to a production wheel.
+CHILD_RUNNER_EMPTY_DEBUG_ENV = "MAGI_CHILD_RUNNER_EMPTY_DEBUG"
+
+
+def _empty_debug_enabled(env: Mapping[str, str]) -> bool:
+    raw = env.get(CHILD_RUNNER_EMPTY_DEBUG_ENV, "")
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _maybe_log_governed_collect_result(
+    env: Mapping[str, str],
+    *,
+    provider: object,
+    model: object,
+    summary: str,
+    evidence_refs: tuple[str, ...],
+    status: str,
+) -> None:
+    """Surface the governed-branch collector's actual output to the serve log
+    so the operator can see whether the empty-response guard about to be
+    checked will fire AND, if not, exactly why. Default-OFF; opts in via
+    ``MAGI_CHILD_RUNNER_EMPTY_DEBUG``."""
+    if not _empty_debug_enabled(env):
+        return
+    try:
+        first_ref = evidence_refs[0] if evidence_refs else None
+        _logger.warning(
+            "[child_runner.empty_debug] governed_branch "
+            "provider=%s model=%s summary_len=%d "
+            "summary_stripped_len=%d evidence_refs_count=%d "
+            "first_ref=%r status=%s",
+            provider,
+            model,
+            len(summary),
+            len(summary.strip()),
+            len(evidence_refs),
+            first_ref,
+            status,
+        )
+    except Exception:  # noqa: BLE001 — logging must never break a turn.
+        return
+
+
+def _maybe_log_legacy_collect_result(
+    env: Mapping[str, str],
+    *,
+    provider: object,
+    model: object,
+    text_chunks: int,
+    text_total_len: int,
+    evidence_refs: tuple[str, ...],
+) -> None:
+    """Same as :func:`_maybe_log_governed_collect_result` for the legacy
+    bare-run path. Logs per-chunk count + total length (which can be 0 even
+    when chunks were yielded with empty text)."""
+    if not _empty_debug_enabled(env):
+        return
+    try:
+        first_ref = evidence_refs[0] if evidence_refs else None
+        _logger.warning(
+            "[child_runner.empty_debug] legacy_branch "
+            "provider=%s model=%s text_chunks=%d text_total_len=%d "
+            "evidence_refs_count=%d first_ref=%r",
+            provider,
+            model,
+            text_chunks,
+            text_total_len,
+            len(evidence_refs),
+            first_ref,
+        )
+    except Exception:  # noqa: BLE001
+        return
 
 
 # ---------------------------------------------------------------------------
@@ -551,6 +633,21 @@ class RealLocalChildRunner:
         summary, evidence_refs, _status = await collect_governed_child_turn(
             run_governed_turn(ctx, runtime=rt, cancel=cancel)
         )
+        # Debug observability (default-OFF). Kevin's 0.1.77 repro showed
+        # status=ok with empty content even though the guard below should
+        # have raised — meaning ONE of {summary, evidence_refs} was non-empty
+        # in a way we can't see from the dashboard. With
+        # ``MAGI_CHILD_RUNNER_EMPTY_DEBUG=1`` the very next repro logs the
+        # actual lengths + the first ref so the silent path is visible. No
+        # behavior change when the flag is off.
+        _maybe_log_governed_collect_result(
+            self._env,
+            provider=getattr(self._provider_config, "provider", None),
+            model=getattr(self._provider_config, "model", None),
+            summary=summary,
+            evidence_refs=evidence_refs,
+            status=_status,
+        )
         # Silent-no-op detection (governed-path parity with PR #854's legacy
         # guard). The governed collector returned ``("", (), "completed")``
         # which is the same shape as the anthropic/google 100ms repro Kevin
@@ -649,6 +746,19 @@ class RealLocalChildRunner:
                     }
                 )
         evidence_refs = self._collect_evidence_refs(evidence_collector, session_id)
+        # Debug observability (default-OFF) — see _maybe_log_governed_collect_result
+        # at the governed branch for the same diagnostic on the other path. The
+        # legacy branch logs ``texts`` count + total length instead of joined
+        # summary (which can be 0-length but the count tells us how many
+        # chunks contributed).
+        _maybe_log_legacy_collect_result(
+            self._env,
+            provider=getattr(self._provider_config, "provider", None),
+            model=getattr(self._provider_config, "model", None),
+            text_chunks=len(texts),
+            text_total_len=sum(len(t) for t in texts),
+            evidence_refs=evidence_refs,
+        )
         # Silent-no-op detection. The ADK stream completed with ZERO collected
         # text AND no tool-call evidence — either the runner yielded no events
         # at all (the anthropic/gemini 100ms repro Kevin chased for days), or
