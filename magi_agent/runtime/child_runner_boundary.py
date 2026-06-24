@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 import hashlib
 import inspect
+import logging
+import os
 import re
 from typing import Any, Literal, Self
 
@@ -49,6 +51,7 @@ def clamp_total_agents_per_run(requested: int) -> int:
         return MAX_TOTAL_AGENTS_PER_RUN
     return max(1, min(requested, MAX_TOTAL_AGENTS_PER_RUN))
 
+
 _MODEL_CONFIG = ConfigDict(
     frozen=True,
     populate_by_name=True,
@@ -81,9 +84,7 @@ _RAW_PRIVATE_LINE_RE = re.compile(
 _PUBLIC_REF_RE = re.compile(
     r"^(?:child|evidence|artifact|audit|policy|workspace|prompt):[A-Za-z0-9._:-]+$"
 )
-_RUNTIME_OUTPUT_REF_RE = re.compile(
-    r"^(?P<namespace>child|evidence|artifact|audit):[a-f0-9]{16}$"
-)
+_RUNTIME_OUTPUT_REF_RE = re.compile(r"^(?P<namespace>child|evidence|artifact|audit):[a-f0-9]{16}$")
 _CHILD_OUTPUT_REF_RE = re.compile(
     r"^(?P<namespace>child|evidence|artifact|audit):[A-Za-z0-9._:-]+$"
 )
@@ -296,16 +297,12 @@ def _child_turn_context_refs(
     def _ref_tuple(value: object) -> tuple[str, ...]:
         if not isinstance(value, (list, tuple)):
             return ()
-        return tuple(
-            item.strip() for item in value if isinstance(item, str) and item.strip()
-        )
+        return tuple(item.strip() for item in value if isinstance(item, str) and item.strip())
 
     metadata = request.metadata or {}
     digest_raw = metadata.get("contextPlanDigest")
     context_digest = (
-        digest_raw.strip()
-        if isinstance(digest_raw, str) and digest_raw.strip()
-        else None
+        digest_raw.strip() if isinstance(digest_raw, str) and digest_raw.strip() else None
     )
     return (
         _ref_tuple(metadata.get("inputRefs")),
@@ -573,8 +570,7 @@ class LocalChildRunnerBoundary:
         except Exception as exc:
             diagnostics["localFakeChildRunnerCalled"] = True
             diagnostics["providerError"] = (
-                _sanitize_public_text(str(exc), max_chars=240)
-                or "[redacted-provider-error]"
+                _sanitize_public_text(str(exc), max_chars=240) or "[redacted-provider-error]"
             )
             return _result(
                 request,
@@ -675,8 +671,7 @@ class LocalChildRunnerBoundary:
         except Exception as exc:
             diagnostics["realChildRunnerExecuted"] = False
             diagnostics["providerError"] = (
-                _sanitize_public_text(str(exc), max_chars=240)
-                or "[redacted-provider-error]"
+                _sanitize_public_text(str(exc), max_chars=240) or "[redacted-provider-error]"
             )
             return _result(
                 request,
@@ -701,8 +696,12 @@ class LocalChildRunnerBoundary:
                 diagnostics=diagnostics,
             )
 
-        child_execution_id = f"child-exec-{_digest(f'{request.parent_execution_id}:{request.task_id}')}"
-        receipt_ref = f"receipt:{_digest(f'{request.parent_execution_id}:{request.task_id}:receipt')}"
+        child_execution_id = (
+            f"child-exec-{_digest(f'{request.parent_execution_id}:{request.task_id}')}"
+        )
+        receipt_ref = (
+            f"receipt:{_digest(f'{request.parent_execution_id}:{request.task_id}:receipt')}"
+        )
         audit_ref = f"audit:{_digest(f'{request.parent_execution_id}:{request.task_id}:adk-turn')}"
         envelope = _runtime_child_acceptance_envelope(
             request,
@@ -733,9 +732,7 @@ class LocalChildRunnerBoundary:
                 diagnostics=diagnostics,
             )
 
-        diagnostics["childAcceptanceAcceptedEvidenceCount"] = len(
-            verdict.accepted_evidence_refs
-        )
+        diagnostics["childAcceptanceAcceptedEvidenceCount"] = len(verdict.accepted_evidence_refs)
 
         # Build the sanitised parent-visible envelope from accepted REAL turn
         # evidence.  No raw transcript/events are read; the parent sees only
@@ -807,8 +804,7 @@ class LocalChildRunnerBoundary:
         except Exception as exc:
             diagnostics["liveChildRunnerCalled"] = True
             diagnostics["providerError"] = (
-                _sanitize_public_text(str(exc), max_chars=240)
-                or "[redacted-provider-error]"
+                _sanitize_public_text(str(exc), max_chars=240) or "[redacted-provider-error]"
             )
             return _result(
                 request,
@@ -818,6 +814,13 @@ class LocalChildRunnerBoundary:
                 diagnostics=diagnostics,
             )
         diagnostics["liveChildRunnerCalled"] = True
+        # Operator-opt-in trace (MAGI_CHILD_RUNNER_EMPTY_DEBUG=1). Surfaces
+        # the RAW output the live child runner returned BEFORE the envelope
+        # coercion below, so the operator can tell whether the dispatch
+        # actually completed with ``status="completed"`` + empty summary
+        # (real empty answer) vs returned something the coercion is about
+        # to silently rewrite to ``"completed"``.
+        _maybe_log_trace_boundary_output(os.environ, output=output)
 
         # Runtime-issued acceptance GATE: prove the runtime boundary (not the
         # child) authored the acceptance before the result crosses back. Same
@@ -862,17 +865,13 @@ class LocalChildRunnerBoundary:
                 error_code="live_child_acceptance_rejected",
                 diagnostics=diagnostics,
             )
-        diagnostics["childAcceptanceAcceptedEvidenceCount"] = len(
-            verdict.accepted_evidence_refs
-        )
+        diagnostics["childAcceptanceAcceptedEvidenceCount"] = len(verdict.accepted_evidence_refs)
 
         return ChildRunnerResult(
             status="ok",
             taskId=request.task_id,
             promptRef=prompt_ref,
-            envelope=_envelope_from_output(
-                request, output, max_refs=self.config.max_output_refs
-            ),
+            envelope=_envelope_from_output(request, output, max_refs=self.config.max_output_refs),
             diagnosticMetadata=diagnostics,
             authorityFlags=ChildRunnerAuthorityFlags(),
         )
@@ -1111,9 +1110,19 @@ def _envelope_from_output(
     child_execution_id = _safe_public_identifier(
         str(data.get("childExecutionId") or f"child:{request.task_id}")
     )
-    status = data.get("status")
-    if status not in {"completed", "blocked", "failed"}:
-        status = "completed"
+    input_status = data.get("status")
+    status = input_status if input_status in {"completed", "blocked", "failed"} else "completed"
+    # Operator-opt-in trace (MAGI_CHILD_RUNNER_EMPTY_DEBUG=1). The status
+    # coercion above SILENTLY rewrites any unexpected/absent ``status`` to
+    # ``"completed"`` (a known way to land on the dangerous status=ok +
+    # empty-summary envelope shape the parent agent then treats as a real
+    # child answer. This log surfaces the coercion when it happens.
+    _maybe_log_trace_envelope_coercion(
+        os.environ,
+        input_status=input_status,
+        coerced_status=status,
+        summary_len=len(str(data.get("summary") or "")),
+    )
     return ChildRunnerEnvelopeRef(
         childRef=f"child:{_digest(f'{request.parent_execution_id}:{child_execution_id}')}",
         taskId=request.task_id,
@@ -1157,7 +1166,9 @@ def _parent_refs(envelope: ChildRunnerEnvelopeRef | None) -> list[str]:
     return list(dict.fromkeys(refs))
 
 
-def _safe_envelope_projection(envelope: ChildRunnerEnvelopeRef | None) -> ChildRunnerEnvelopeRef | None:
+def _safe_envelope_projection(
+    envelope: ChildRunnerEnvelopeRef | None,
+) -> ChildRunnerEnvelopeRef | None:
     if envelope is None:
         return None
     reissued = _reissue_parent_visible_envelope_refs(envelope)
@@ -1199,9 +1210,7 @@ def _runtime_issued_refs(
 def _reissue_parent_visible_envelope_refs(
     envelope: ChildRunnerEnvelopeRef,
 ) -> dict[str, str | tuple[str, ...]]:
-    seed_prefix = (
-        f"{envelope.parent_execution_id}:{envelope.task_id}:{envelope.child_execution_id}"
-    )
+    seed_prefix = f"{envelope.parent_execution_id}:{envelope.task_id}:{envelope.child_execution_id}"
     return {
         "child": f"child:{_digest(f'{seed_prefix}:child:{envelope.child_ref}')}",
         "evidence": _reissue_stored_refs(seed_prefix, envelope.evidence_refs, "evidence"),
@@ -1332,7 +1341,75 @@ def _digest(value: str) -> str:
     return hashlib.sha1(value.encode("utf-8")).hexdigest()[:16]
 
 
+# ---------------------------------------------------------------------------
+# Operator-opt-in trace helpers (gated on MAGI_CHILD_RUNNER_EMPTY_DEBUG).
+# Paired with child_runner_live's trace helpers (together they cover the
+# entire dispatch path so the operator can see exactly which step produced
+# the silent-empty envelope. Default-OFF; every helper swallows internal
+# exceptions so logging can never break a turn).
+# ---------------------------------------------------------------------------
+
+_TRACE_LOGGER = logging.getLogger(__name__)
+CHILD_RUNNER_EMPTY_DEBUG_ENV = "MAGI_CHILD_RUNNER_EMPTY_DEBUG"
+
+
+def _trace_enabled(env: Mapping[str, str]) -> bool:
+    raw = env.get(CHILD_RUNNER_EMPTY_DEBUG_ENV, "")
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _maybe_log_trace_boundary_output(
+    env: Mapping[str, str],
+    *,
+    output: object,
+) -> None:
+    """Log the RAW child-runner output BEFORE envelope coercion strips it.
+
+    ``status`` is logged verbatim (so missing/None/exotic values are visible);
+    ``summary_len`` reflects the actual character count the next step is
+    about to push through ``_envelope_from_output``."""
+    if not _trace_enabled(env):
+        return
+    try:
+        data = output if isinstance(output, Mapping) else {}
+        _TRACE_LOGGER.warning(
+            "[boundary.trace] boundary_output status=%r summary_len=%d evidence_refs=%d",
+            data.get("status"),
+            len(str(data.get("summary") or "")),
+            len(data.get("evidenceRefs") or ()),
+        )
+    except Exception:  # noqa: BLE001 (logging must never break a turn).
+        return
+
+
+def _maybe_log_trace_envelope_coercion(
+    env: Mapping[str, str],
+    *,
+    input_status: object,
+    coerced_status: object,
+    summary_len: int,
+) -> None:
+    """Log the (input_status, coerced_status) pair INSIDE _envelope_from_output.
+
+    When ``input_status != coerced_status`` a silent rewrite happened. The
+    operator can immediately tell from a single line whether the dispatched
+    child shipped an unexpected status (None / "ok" / "" / "running" / ...)
+    that the boundary just rewrote to ``"completed"``."""
+    if not _trace_enabled(env):
+        return
+    try:
+        _TRACE_LOGGER.warning(
+            "[boundary.trace] envelope_coercion input_status=%r coerced_status=%r summary_len=%d",
+            input_status,
+            coerced_status,
+            summary_len,
+        )
+    except Exception:  # noqa: BLE001
+        return
+
+
 __all__ = [
+    "CHILD_RUNNER_EMPTY_DEBUG_ENV",
     "FUTURE_ADK_CHILD_RUNNER_SURFACE",
     "MAX_TOTAL_AGENTS_PER_RUN",
     "REAL_ADK_CHILD_RUNNER_SURFACE",
