@@ -49,7 +49,10 @@ def _scheduler_executor_enabled() -> bool:
 
 
 def _scheduler_readiness_mode_from_env() -> str | None:
-    raw = os.environ.get("MAGI_SCHEDULER_READINESS_EXECUTION_MODE", "")
+    # I-4: routed through the typed flag registry.
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    raw = flag_str("MAGI_SCHEDULER_READINESS_EXECUTION_MODE") or ""
     clean = raw.strip().lower()
     if clean in {"disabled", "shadow", "live"}:
         return clean
@@ -57,22 +60,31 @@ def _scheduler_readiness_mode_from_env() -> str | None:
 
 
 def _scheduler_db_path_from_env() -> Path:
-    raw = os.environ.get("MAGI_SCHEDULER_DB_PATH", "")
+    # I-4: routed through the typed flag registry.
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    raw = flag_str("MAGI_SCHEDULER_DB_PATH") or ""
     if raw.strip():
         return Path(raw).expanduser()
-    state_dir = Path(os.environ.get("MAGI_STATE_DIR", "~/.magi")).expanduser()
+    state_dir = Path(flag_str("MAGI_STATE_DIR") or "~/.magi").expanduser()
     return state_dir / "scheduler" / "jobs.db"
 
 
 def _scheduler_lock_dir_from_env() -> Path | None:
-    raw = os.environ.get("MAGI_SCHEDULER_LOCK_DIR", "")
+    # I-4: routed through the typed flag registry.
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    raw = flag_str("MAGI_SCHEDULER_LOCK_DIR") or ""
     if raw.strip():
         return Path(raw).expanduser()
     return None
 
 
 def _scheduler_owner_digest_from_env() -> str:
-    raw = os.environ.get("MAGI_SCHEDULER_OWNER_DIGEST", "")
+    # I-4: routed through the typed flag registry.
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    raw = flag_str("MAGI_SCHEDULER_OWNER_DIGEST") or ""
     return raw.strip() or "owner:local-gateway"
 
 
@@ -162,7 +174,10 @@ from magi_agent.missions.work_queue.store import work_queue_db_path_from_env as 
 
 
 def _work_queue_claimer_from_env() -> str:
-    raw = os.environ.get("MAGI_WORK_QUEUE_CLAIMER", "")
+    # I-4: routed through the typed flag registry.
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    raw = flag_str("MAGI_WORK_QUEUE_CLAIMER") or ""
     if raw.strip():
         return raw.strip()
     # Stable host-based identity so multiple gateway processes on different

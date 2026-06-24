@@ -2146,6 +2146,52 @@ FLAGS: tuple[FlagSpec, ...] = (
             "the operator trusts the configured hook URLs."
         ),
     ),
+    # --- Gateway / watchers config (I-4 batch 13) ---------------------------
+    FlagSpec(
+        name="MAGI_SCHEDULER_READINESS_EXECUTION_MODE",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Execution mode for the scheduler readiness gate "
+            "(consumed by ``gateway/watchers``). Empty defers to the "
+            "watcher's resolved default."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_SCHEDULER_DB_PATH",
+        default="",
+        scope="public",
+        stage="stage2",
+        summary=(
+            "Explicit path to the scheduler persistence DB. Empty uses "
+            "``<MAGI_STATE_DIR>/scheduler/jobs.db``."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_SCHEDULER_OWNER_DIGEST",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Owner-identity digest to embed on scheduler claims. Empty "
+            "uses the runtime-resolved default."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_WORK_QUEUE_CLAIMER",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Claimer id used on work-queue lease acquisitions. Empty "
+            "uses the runtime-resolved default."
+        ),
+        kind="str",
+    ),
 )
 
 
