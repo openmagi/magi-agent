@@ -138,7 +138,12 @@ export interface CustomizeCatalog {
   controlPlane: ControlPlaneBehaviorItem[];
 }
 
-/** A structured custom verification rule (spec §9.1). P1 builds deterministic_ref. */
+/** A structured custom verification rule (spec §9.1). P1 builds deterministic_ref.
+ *
+ *  PR-F-UX6: optional `groupId` — rules sharing a non-empty groupId are
+ *  surfaced in the dashboard as one logical hybrid policy (the operator
+ *  sees one row + can drill into the composing primitives). Backend gates
+ *  still evaluate each rule independently. */
 export interface CustomRule {
   id?: string;
   scope: string;
@@ -147,6 +152,7 @@ export interface CustomRule {
   firesAt: string;
   action: string;
   projection?: string[];
+  groupId?: string;
 }
 
 export interface CustomizeOverrides {
@@ -733,7 +739,11 @@ export type RoutedKind =
   | "shacl_constraint"
   | "field_constraint"
   | "seam_spec"
-  | "custom_check";
+  | "custom_check"
+  // PR-F4: spawn-time toolset cap. PR-F-UX6 architect may surface this
+  // as a primitive in a hybrid composition (e.g. cap subagents + advisory
+  // critic on the parent answer).
+  | "capability_scope";
 
 /** Honest-degrade payload returned by the NL compiler when the rule
  *  references an evidence field that no producer is known to emit. */
@@ -758,6 +768,16 @@ export interface RuleReview {
  * `routedKind` / `draft` are null, `error` is explicitly null.
  * On compile failure: `ok: false`, `error` carries the reason.
  * Flag-OFF: `ok: false`, `error: "nl-rule compiler disabled"`.
+ *
+ * PR-F-UX6 interview-mode additions (sent only when
+ * MAGI_CUSTOMIZE_NL_INTERVIEW_MODE_ENABLED is ON):
+ *   - `mode: "interview"` + `questions: InterviewQuestion[]` — the compiler
+ *     needs more input; render each question with a chip picker per
+ *     `expects` tag.
+ *   - `mode: "proposal"` + `proposal: ArchitectProposal` — the compiler
+ *     proposes a single primitive OR a hybrid composition of N primitives
+ *     sharing a logical groupId; render the ProposalCard.
+ *   - Legacy callers without these fields keep working — `mode` is absent.
  */
 export interface RuleCompileResponse {
   ok: boolean;
@@ -778,22 +798,101 @@ export interface RuleCompileResponse {
    *  `field_not_in_catalog` (e.g. "Browse available fields at Customize >
    *  Reusable evidence."). */
   suggestion?: string;
+  /** PR-F-UX6: interview-mode response branch. Absent on legacy compile
+   *  success / clarifying-questions / error responses. */
+  mode?: "interview" | "proposal";
+  /** PR-F-UX6: present when `mode === "interview"`. */
+  questions?: InterviewQuestion[];
+  /** PR-F-UX6: present when `mode === "interview"` or `mode === "proposal"` —
+   *  the architect's structured intent map so the frontend can drop into
+   *  the wizard with pre-filled state. */
+  intent?: ArchitectIntent;
+  /** PR-F-UX6: present when `mode === "proposal"`. */
+  proposal?: ArchitectProposal;
+}
+
+/** PR-F-UX6 — the vocabulary of `expects` tags the architect may emit on
+ *  each open question. Drives the per-question chip-picker component in
+ *  the NL compose UI. */
+export type ArchitectExpects =
+  | "evidence_ref"
+  | "verifier_ref"
+  | "field"
+  | "tool_name"
+  | "lifecycle"
+  | "scope"
+  | "value"
+  | "freeform";
+
+/** PR-F-UX6 — one open question the architect needs answered before it can
+ *  propose a primitive. */
+export interface InterviewQuestion {
+  question: string;
+  expects: ArchitectExpects;
+  /** Optional closed-set inventory the operator may pick from (e.g. the
+   *  runtime tool names). Absent → freeform text input. */
+  inventory?: string[];
+}
+
+/** PR-F-UX6 — structured intent map the architect produces in `discover_intent`. */
+export interface ArchitectIntent {
+  whatToCheck: string;
+  whereInLifecycle: string;
+  whatToDoOnFail: string;
+  openQuestions: InterviewQuestion[];
+  confidence: number;
+}
+
+/** PR-F-UX6 — trust-class taxonomy the architect declares per primitive in
+ *  a proposal. Mirrors the frontend TrustBadge bucket names. */
+export type ArchitectTrustClass = "deterministic" | "advisory";
+
+/** PR-F-UX6 — one primitive within an architect proposal. `payload` is the
+ *  same shape the legacy one-shot compiler emits for `kind` (so the same
+ *  PUT routes accept it on activate). */
+export interface ArchitectPrimitive {
+  kind: RoutedKind;
+  payload: unknown;
+  trustClass: ArchitectTrustClass;
+  rationale: string;
+}
+
+/** PR-F-UX6 — full architect proposal. `mode: "single"` → one primitive;
+ *  `mode: "hybrid"` → N primitives composed and persisted under one
+ *  logical groupId. */
+export interface ArchitectProposal {
+  mode: "single" | "hybrid";
+  primitives: ArchitectPrimitive[];
+  summary: string;
+  explanation: string;
 }
 
 /**
  * Compiles a natural-language policy via `POST /v1/app/customize/rules/
  * compile`. Same error contract as `compileSeamSpec` / `compileCustomRule`:
  * never throws on a 4xx/5xx or network error.
+ *
+ * PR-F-UX6: `mode === "interview"` forces the architect interview path
+ * even on well-formed inputs (the UI's "Refine" affordance). Omit the
+ * arg to let the backend pick (legacy heuristic + flag-gated).
  */
 export async function compileRule(
   fetch: (path: string, init?: RequestInit) => Promise<Response>,
   nlText: string,
   priorTurns?: ConversationTurn[],
+  mode?: "interview",
 ): Promise<RuleCompileResponse> {
   try {
-    const bodyPayload: { nlText: string; priorTurns?: ConversationTurn[] } = { nlText };
+    const bodyPayload: {
+      nlText: string;
+      priorTurns?: ConversationTurn[];
+      mode?: "interview";
+    } = { nlText };
     if (priorTurns !== undefined && priorTurns.length > 0) {
       bodyPayload.priorTurns = priorTurns;
+    }
+    if (mode !== undefined) {
+      bodyPayload.mode = mode;
     }
     const res = await fetch(`/v1/app/customize/rules/compile`, {
       method: "POST",

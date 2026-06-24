@@ -125,6 +125,16 @@ def validate_custom_rule(rule: Any) -> list[str]:
     if scope not in SCOPES:
         errors.append(f"scope must be one of {sorted(SCOPES)}")
 
+    # PR-F-UX6: optional ``groupId`` (non-empty string when present). Rules
+    # sharing a groupId are surfaced in the dashboard as one logical policy
+    # (hybrid composition: e.g. regex pre-filter + LLM critic). Backend gates
+    # still evaluate each rule independently — no new runtime gate. groupId is
+    # orthogonal to scope/firesAt/kind/action and does not enter the ``_LEGAL``
+    # matrix. Absent groupId is valid (ungrouped rule).
+    gid = rule.get("groupId")
+    if gid is not None and (not isinstance(gid, str) or not gid.strip()):
+        errors.append("groupId must be a non-empty string if provided")
+
     what = rule.get("what")
     if not isinstance(what, dict):
         return [*errors, "what must be an object with kind+payload"]

@@ -101,6 +101,11 @@ interface RuleRow {
   onDelete: (() => void) | null;
   /** Optional one-line description shown beneath the title. */
   hint?: string;
+  /** PR-F-UX6: composing primitives for a hybrid (groupId-shared) row.
+   *  When present the RuleRowView renders a chevron + nested sub-rows.
+   *  Each child is a normal per-rule row so the per-primitive toggle /
+   *  delete affordances stay intact. */
+  children?: RuleRow[];
 }
 
 
@@ -176,6 +181,49 @@ function customRuleToRow(
     onToggle: busy ? null : (next) => onToggle(rule, next),
     onDelete: busy || !rule.id ? null : () => onDelete(rule.id!),
     hint: `${rule.firesAt} · ${rule.action}`,
+  };
+}
+
+
+/**
+ * PR-F-UX6 — render N custom rules sharing a `groupId` as one expandable
+ * hybrid row. The summary row reports the kinds composed and exposes a
+ * "Trust: hybrid" badge; the expanded view shows each composing primitive
+ * as its own per-rule sub-row with the normal toggle/delete affordances.
+ */
+function customRuleGroupToRow(
+  groupId: string,
+  rules: CustomRule[],
+  busy: boolean,
+  onToggle: (rule: CustomRule, next: boolean) => void,
+  onDelete: (id: string) => void,
+): RuleRow {
+  const kinds = Array.from(
+    new Set(rules.map((r) => r.what?.kind ?? "rule")),
+  );
+  const allEnabled = rules.every((r) => r.enabled);
+  const anyEnabled = rules.some((r) => r.enabled);
+  const state: RuleRow["state"] = allEnabled
+    ? "enabled"
+    : anyEnabled
+      ? "enabled"  // mixed → surface as enabled at the group level; per-primitive toggles surface state truthfully
+      : "disabled";
+  const scope = rules[0]?.scope ?? "always";
+  const firesAt = rules[0]?.firesAt ?? "—";
+  return {
+    rowKey: `custom-group:${groupId}`,
+    origin: "custom",
+    title: `${groupId} (hybrid: ${kinds.join(" + ")})`,
+    scope,
+    mode: kinds.join(" + "),
+    state,
+    trustClass: "hybrid",
+    onToggle: null,
+    onDelete: null,
+    hint: `${firesAt} · ${rules.length} composing primitives`,
+    children: rules.map((rule) =>
+      customRuleToRow(rule, busy, onToggle, onDelete),
+    ),
   };
 }
 
@@ -256,10 +304,38 @@ export function RulesTable(props: RulesTableProps): React.ReactElement {
         builtinToRow(preset, presetOverrides, pendingPresets, onTogglePreset),
       );
     }
+    // PR-F-UX6: bucket custom rules by groupId. Ungrouped rules render as
+    // normal per-rule rows; grouped rules collapse into one expandable
+    // hybrid row. Stored order is preserved within each group.
+    const groupedBuckets: Map<string, CustomRule[]> = new Map();
+    const ungrouped: CustomRule[] = [];
     for (const rule of customRules) {
+      const gid = typeof rule.groupId === "string" && rule.groupId.trim()
+        ? rule.groupId
+        : null;
+      if (gid !== null) {
+        const bucket = groupedBuckets.get(gid) ?? [];
+        bucket.push(rule);
+        groupedBuckets.set(gid, bucket);
+      } else {
+        ungrouped.push(rule);
+      }
+    }
+    for (const rule of ungrouped) {
       out.custom.push(
         customRuleToRow(
           rule,
+          customRuleBusy,
+          onToggleCustomRule,
+          onDeleteCustomRule,
+        ),
+      );
+    }
+    for (const [gid, rules] of groupedBuckets) {
+      out.custom.push(
+        customRuleGroupToRow(
+          gid,
+          rules,
           customRuleBusy,
           onToggleCustomRule,
           onDeleteCustomRule,
@@ -417,43 +493,72 @@ function OriginGroup({
 
 
 function RuleRowView({ row }: { row: RuleRow }): React.ReactElement {
+  const hasChildren = (row.children?.length ?? 0) > 0;
+  const [expanded, setExpanded] = useState(false);
   return (
-    <div className="flex items-start gap-3 px-4 py-3">
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-foreground">{row.title}</p>
-        {row.hint ? (
-          <p className="mt-0.5 truncate text-[11px] text-secondary/80">{row.hint}</p>
-        ) : null}
-        <p className="mt-1 flex gap-2 text-[10px] uppercase tracking-wider text-secondary/60">
-          <span>scope: {row.scope}</span>
-          <span>·</span>
-          <span>mode: {row.mode}</span>
-        </p>
-      </div>
-      <div className="flex shrink-0 items-center gap-3">
-        <TrustBadge
-          trustClass={row.trustClass}
-          ariaLabel="Trust class for this policy"
-        />
-        <StatePill state={row.state} />
-        {row.onToggle ? (
-          <ToggleSwitch
-            checked={row.state === "enabled"}
-            onChange={row.onToggle}
-            label={`Toggle ${row.title}`}
-          />
-        ) : null}
-        {row.onDelete ? (
+    <div className="flex flex-col">
+      <div className="flex items-start gap-3 px-4 py-3">
+        {hasChildren ? (
           <button
             type="button"
-            onClick={row.onDelete}
-            aria-label={`Delete ${row.title}`}
-            className="text-secondary transition-colors hover:text-red-600"
+            onClick={() => setExpanded((p) => !p)}
+            aria-label={`${expanded ? "Collapse" : "Expand"} composing primitives`}
+            aria-expanded={expanded}
+            className="mt-1 shrink-0 text-secondary"
           >
-            <Trash2 className="h-4 w-4" />
+            <ChevronRight
+              aria-hidden="true"
+              className={`h-4 w-4 transition-transform ${
+                expanded ? "rotate-90" : ""
+              }`}
+            />
           </button>
         ) : null}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-foreground">
+            {row.title}
+          </p>
+          {row.hint ? (
+            <p className="mt-0.5 truncate text-[11px] text-secondary/80">{row.hint}</p>
+          ) : null}
+          <p className="mt-1 flex gap-2 text-[10px] uppercase tracking-wider text-secondary/60">
+            <span>scope: {row.scope}</span>
+            <span>·</span>
+            <span>mode: {row.mode}</span>
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-3">
+          <TrustBadge
+            trustClass={row.trustClass}
+            ariaLabel="Trust class for this policy"
+          />
+          <StatePill state={row.state} />
+          {row.onToggle ? (
+            <ToggleSwitch
+              checked={row.state === "enabled"}
+              onChange={row.onToggle}
+              label={`Toggle ${row.title}`}
+            />
+          ) : null}
+          {row.onDelete ? (
+            <button
+              type="button"
+              onClick={row.onDelete}
+              aria-label={`Delete ${row.title}`}
+              className="text-secondary transition-colors hover:text-red-600"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          ) : null}
+        </div>
       </div>
+      {hasChildren && expanded ? (
+        <div className="ml-7 divide-y divide-black/[0.04] border-t border-black/[0.04]">
+          {row.children!.map((child) => (
+            <RuleRowView key={child.rowKey} row={child} />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

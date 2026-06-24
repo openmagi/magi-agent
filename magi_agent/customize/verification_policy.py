@@ -179,6 +179,33 @@ class CustomizeVerificationPolicy:
             results.append({"ruleId": rule_id, "shapeTtl": shape_ttl})
         return results
 
+    def enabled_custom_rules_grouped(
+        self,
+    ) -> dict[str | None, list[dict[str, Any]]]:
+        """PR-F-UX6: bucket ENABLED custom rules by ``groupId``.
+
+        Rules sharing a non-empty ``groupId`` string are surfaced in the
+        dashboard as one logical policy (hybrid composition: e.g. regex
+        pre-filter + LLM critic). The ``None`` key holds ungrouped rules.
+
+        Defensive: a malformed ``groupId`` (non-str / empty / whitespace-only)
+        is bucketed as ungrouped — matches the precedent set by
+        :func:`_rule_scope_matches` (corrupt persisted values never raise,
+        they degrade to the safe fallback). Preserves stored order within each
+        group.
+        """
+        grouped: dict[str | None, list[dict[str, Any]]] = {}
+        for rule in self.custom_rules:
+            if not rule.get("enabled", False):
+                continue
+            raw = rule.get("groupId")
+            if isinstance(raw, str) and raw.strip():
+                key: str | None = raw
+            else:
+                key = None
+            grouped.setdefault(key, []).append(rule)
+        return grouped
+
     def enabled_capability_scope_rules(self) -> list[dict[str, Any]]:
         """Enabled ``capability_scope`` custom rules (F4 spawn-time toolset cap).
 

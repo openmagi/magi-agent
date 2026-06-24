@@ -96,6 +96,24 @@ def _is_nl_rule_compiler_enabled() -> bool:
         return False
 
 
+def _is_nl_interview_mode_enabled() -> bool:
+    """Read ``MAGI_CUSTOMIZE_NL_INTERVIEW_MODE_ENABLED`` defensively (PR-F-UX6).
+
+    Default-OFF gate: when this is OFF the route preserves the legacy
+    one-shot ``compile_with_review`` path byte-identically. When ON the
+    route may route through ``compile_interview_step`` which emits two new
+    response shapes (``mode: "interview"`` and ``mode: "proposal"``);
+    legacy callers continue to see the success / clarifyingQuestions /
+    error shapes for well-formed inputs.
+    """
+    try:
+        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+        return flag_bool("MAGI_CUSTOMIZE_NL_INTERVIEW_MODE_ENABLED")
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _is_runtime_fields_endpoint_enabled() -> bool:
     """Read ``MAGI_CUSTOMIZE_RUNTIME_FIELDS_ENDPOINT_ENABLED`` (PR-F-UX2)."""
     try:
@@ -1229,6 +1247,7 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         from magi_agent.customize.rule_compiler import (  # noqa: PLC0415
             MAX_AGGREGATE_TEXT,
             PrecheckError,
+            compile_interview_step,
             compile_with_review,
         )
         from magi_agent.customize.shacl_compiler import (  # noqa: PLC0415
@@ -1252,20 +1271,80 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         compiler_factory = (lambda: resolved()) if callable(resolved) else None
         reviewer_factory = (lambda: resolved()) if callable(resolved) else None
 
-        try:
-            result = await asyncio.wait_for(
-                compile_with_review(
-                    nl_text,
-                    compiler_model_factory=compiler_factory,
-                    reviewer_model_factory=reviewer_factory,
-                    prior_turns=tuple(validated_prior_turns),
-                ),
-                timeout=_LLM_CALL_TIMEOUT_S,
-            )
-        except Exception as exc:  # noqa: BLE001 — never raise from compile route
-            return JSONResponse(
-                content={"ok": False, "error": f"compile error: {exc}"}
-            )
+        # PR-F-UX6 interview-mode routing: when the flag is ON, route through
+        # ``compile_interview_step`` which decides per-call between (a) the
+        # legacy one-shot compile path (well-formed inputs, byte-identical
+        # response shape), (b) an interview turn (underspecified inputs →
+        # questions[]), and (c) a proposal turn (resolved intent → composed
+        # primitives). The body can also force interview mode via
+        # ``mode="interview"`` so the UI's "Refine" button works even on
+        # well-formed inputs.
+        interview_mode_enabled = _is_nl_interview_mode_enabled()
+        body_mode = body.get("mode") if isinstance(body.get("mode"), str) else None
+        force_interview = body_mode == "interview"
+
+        if interview_mode_enabled or force_interview:
+            try:
+                step_result = await asyncio.wait_for(
+                    compile_interview_step(
+                        nl_text,
+                        compiler_model_factory=compiler_factory,
+                        reviewer_model_factory=reviewer_factory,
+                        prior_turns=tuple(validated_prior_turns),
+                        force_interview=force_interview,
+                    ),
+                    timeout=_LLM_CALL_TIMEOUT_S,
+                )
+            except Exception as exc:  # noqa: BLE001 — never raise from compile route
+                return JSONResponse(
+                    content={"ok": False, "error": f"compile error: {exc}"}
+                )
+
+            step_mode = step_result.get("mode")
+            if step_mode == "interview":
+                # Interview turn — questions[] for the frontend to render
+                # with chip pickers per ``expects`` tag.
+                return JSONResponse(
+                    content={
+                        "ok": bool(step_result.get("ok", True)),
+                        "mode": "interview",
+                        "questions": _make_json_safe(
+                            step_result.get("questions", [])
+                        ),
+                        "intent": _make_json_safe(
+                            step_result.get("intent", {})
+                        ),
+                        "error": step_result.get("error"),
+                    }
+                )
+            if step_mode == "proposal":
+                # Proposal turn — single primitive OR hybrid composition.
+                return JSONResponse(
+                    content={
+                        "ok": True,
+                        "mode": "proposal",
+                        "proposal": _make_json_safe(step_result.get("proposal", {})),
+                        "intent": _make_json_safe(step_result.get("intent", {})),
+                    }
+                )
+            # step_mode == "compile" — fell through to the legacy path. Fall
+            # through to the legacy response-formatting branches below.
+            result = step_result
+        else:
+            try:
+                result = await asyncio.wait_for(
+                    compile_with_review(
+                        nl_text,
+                        compiler_model_factory=compiler_factory,
+                        reviewer_model_factory=reviewer_factory,
+                        prior_turns=tuple(validated_prior_turns),
+                    ),
+                    timeout=_LLM_CALL_TIMEOUT_S,
+                )
+            except Exception as exc:  # noqa: BLE001 — never raise from compile route
+                return JSONResponse(
+                    content={"ok": False, "error": f"compile error: {exc}"}
+                )
 
         if result.get("clarifyingQuestions"):
             return JSONResponse(
