@@ -133,16 +133,20 @@ describe("AuthorWizard — variable-length policy authoring (F1.5 + F-UX3)", () 
     // constraint. F-UX4 liberalizes by auto-deriving `toolMatch=[draft.toolName]`
     // in customRulePayload when target=specific + llm_criterion + after_tool_use,
     // so both axes expose llm_criterion identically at the picker level.
+    // PR-F-MUT2 appends ``output_rewrite`` to the same list as a Mutator
+    // entry; the picker still surfaces llm_criterion in both target modes.
     expect(src).toMatch(
       /PR-F-UX4 — liberalization: llm_criterion is now available under BOTH/,
     );
     expect(src).toMatch(
-      /toolTarget === "specific"\) \{[\s\S]*?return \["none", "regex", "llm_criterion"\]/,
+      /toolTarget === "specific"\) \{[\s\S]*?return \["none", "regex", "llm_criterion", "output_rewrite"\]/,
     );
   });
 
-  it("after_tool_use + target=any offers none / regex / llm_criterion", () => {
-    expect(src).toMatch(/return \["none", "regex", "llm_criterion"\]/);
+  it("after_tool_use + target=any offers none / regex / llm_criterion / output_rewrite", () => {
+    // PR-F-MUT2 — same list as target=specific; the toolMatch.include
+    // filter rides on the payload, not the wizard's top-level Target step.
+    expect(src).toMatch(/return \["none", "regex", "llm_criterion", "output_rewrite"\]/);
   });
 
   it("pre_final ignores target and returns evidence_ref / verifier_passed / shacl / llm_criterion / field_constraint (PR-F-UX5)", () => {
@@ -686,12 +690,17 @@ describe("AuthorWizard — F6.5 BLOCKER fix: toolMatch on after-tool llm_criteri
     // pre_final has no tool to match against.
     // Verified structurally: the toolMatch emit sits inside the
     // `if (draft.lifecycle === "after_tool_use")` block — the only branch
-    // assigning payload.toolMatch.
+    // assigning payload.toolMatch IN THE llm_criterion case.
     // PR-F-UX4 ternary spans lines, so the assignment is `payload.toolMatch =\n  ...`.
     // The regex tolerates the trailing space-or-newline so it counts the
-    // assignment regardless of formatter line wrapping.
+    // assignment regardless of formatter line wrapping. PR-F-MUT2 adds a
+    // SECOND payload.toolMatch assignment (the output_rewrite branch's
+    // include-list filter); that one is also gated on the wizard's
+    // target=specific axis, NOT on the inbound lifecycle (output_rewrite
+    // only fires at after_tool_use to begin with), so it does not violate
+    // the "no toolMatch on pre_final" invariant either.
     const matches = src.match(/payload\.toolMatch =[\s\S]/g) ?? [];
-    expect(matches.length).toBe(1);
+    expect(matches.length).toBe(2);
   });
 
   it("stepIsComplete blocks Next when after-tool llm_criterion toolMatch is empty", () => {
@@ -1057,17 +1066,19 @@ describe("AuthorWizard — PR-F-UX4 condition matrix loosening + auto-derive", (
   it("after_tool_use + target=specific now exposes llm_criterion (was hidden in F6.5)", () => {
     // Liberalization: the picker matrix matches the backend matrix. The
     // wizard auto-derives toolMatch from the Trigger step's tool pick so
-    // the operator does not have to retype the tool name.
+    // the operator does not have to retype the tool name. PR-F-MUT2
+    // appends ``output_rewrite`` to the same list as a Mutator entry.
     expect(src).toMatch(
-      /toolTarget === "specific"\) \{[\s\S]*?return \["none", "regex", "llm_criterion"\]/,
+      /toolTarget === "specific"\) \{[\s\S]*?return \["none", "regex", "llm_criterion", "output_rewrite"\]/,
     );
   });
 
-  it("after_tool_use + target=any keeps offering none / regex / llm_criterion", () => {
+  it("after_tool_use + target=any keeps offering none / regex / llm_criterion / output_rewrite", () => {
     // Symmetric matrix: both target axes expose the same condition list
     // for after_tool_use. The only difference is where the toolMatch list
-    // comes from (auto-derived vs typed).
-    expect(src).toMatch(/return \["none", "regex", "llm_criterion"\]/);
+    // comes from (auto-derived vs typed). PR-F-MUT2 appends
+    // ``output_rewrite`` to the same list as a Mutator entry.
+    expect(src).toMatch(/return \["none", "regex", "llm_criterion", "output_rewrite"\]/);
   });
 
   it("customRulePayload auto-derives toolMatch=[draft.toolName] when target=specific", () => {
@@ -1335,6 +1346,89 @@ describe("AuthorWizard — F-MUT1 prompt_injection kind", () => {
     );
     expect(src).toMatch(
       /case "prompt_injection":[\s\S]*?append "\$\{draft\.piValue\}" to tool arg/,
+    );
+  });
+});
+
+
+describe("AuthorWizard — F-MUT2 output_rewrite kind", () => {
+  it("adds output_rewrite to the ConditionKind union", () => {
+    expect(src).toMatch(/type ConditionKind[\s\S]*?\| "output_rewrite"/);
+  });
+
+  it("availableConditionKinds surfaces output_rewrite on after_tool_use (both target modes)", () => {
+    // target=specific: ["none", "regex", "llm_criterion", "output_rewrite"]
+    expect(src).toMatch(
+      /toolTarget === "specific"\) \{[\s\S]*?return \["none", "regex", "llm_criterion", "output_rewrite"\]/,
+    );
+    // target=any: same list (the toolMatch.include filter rides on the
+    // payload, not the wizard's top-level Target step).
+    expect(src).toMatch(
+      /return \["none", "regex", "llm_criterion", "output_rewrite"\]/,
+    );
+  });
+
+  it("CONDITION_META exposes an output_rewrite entry labelled as a mutator", () => {
+    expect(src).toMatch(
+      /output_rewrite: \{[\s\S]*?label: "Rewrite tool output \(mutator\)"/,
+    );
+    expect(src).toMatch(/output_rewrite: \{[\s\S]*?redact/);
+  });
+
+  it("SpecificsStep renders a dedicated branch for output_rewrite", () => {
+    expect(src).toMatch(
+      /draft\.conditionKind === "output_rewrite"[\s\S]*?OutputRewriteRedactPicker/,
+    );
+  });
+
+  it("ships the output_rewrite picker as a named component", () => {
+    expect(src).toContain("function OutputRewriteRedactPicker");
+  });
+
+  it("Draft + EMPTY carry the new or* fields with safe defaults", () => {
+    expect(src).toMatch(/orPattern:\s*string/);
+    expect(src).toMatch(/orReplacement:\s*string/);
+    expect(src).toMatch(/orScope:\s*"match_only"\s*\|\s*"full_output"/);
+    expect(src).toMatch(/orIsRegex:\s*boolean/);
+    expect(src).toMatch(/orPattern:\s*""/);
+    expect(src).toMatch(/orReplacement:\s*""/);
+    expect(src).toMatch(/orScope:\s*"match_only"/);
+    expect(src).toMatch(/orIsRegex:\s*true/);
+  });
+
+  it("customRuleKind routes output_rewrite to its own backend kind", () => {
+    expect(src).toMatch(
+      /draft\.conditionKind === "output_rewrite"\)\s*return "output_rewrite"/,
+    );
+  });
+
+  it("customRuleAction forces audit for output_rewrite (backend _LEGAL matrix)", () => {
+    expect(src).toMatch(
+      /draft\.conditionKind === "output_rewrite"\)\s*return "audit"/,
+    );
+  });
+
+  it("customRulePayload emits the v1 redact shape with mode locked to 'redact'", () => {
+    expect(src).toMatch(
+      /draft\.conditionKind === "output_rewrite"[\s\S]*?mode: "redact"[\s\S]*?pattern: draft\.orPattern\.trim\(\)[\s\S]*?replacement: draft\.orReplacement/,
+    );
+  });
+
+  it("customRulePayload auto-derives toolMatch.include from draft.toolName when target=specific", () => {
+    expect(src).toMatch(
+      /draft\.conditionKind === "output_rewrite"[\s\S]*?toolMatch = \{ include: \[draft\.toolName\.trim\(\)\] \}/,
+    );
+  });
+
+  it("stepIsComplete gates the Specifics step on pattern + replacement", () => {
+    expect(src).toMatch(
+      /case "output_rewrite":[\s\S]*?draft\.orPattern\.trim\(\)\.length > 0[\s\S]*?draft\.orReplacement\.length > 0/,
+    );
+  });
+
+  it("conditionClause Review summary covers the output_rewrite redact surface", () => {
+    expect(src).toMatch(
+      /case "output_rewrite":[\s\S]*?redact \$\{verb\}.*?in tool output/,
     );
   });
 });
