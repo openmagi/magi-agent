@@ -6,47 +6,84 @@ const src = readFileSync(
   "utf8",
 );
 
-describe("AuthorWizard — variable-length policy authoring (F1.5)", () => {
-  it("declares step plan as a function of lifecycle (pre_final=6, tool-bearing=7)", () => {
-    // F1.5 separates tool targeting from per-call condition. pre_final has
-    // no tool layer so it stays 6 steps; tool-bearing lifecycles gain a
-    // dedicated "Target" step (Any tool / Specific tool) for a total of 7.
+describe("AuthorWizard — variable-length policy authoring (F1.5 + F-UX3)", () => {
+  it("declares step plan as a constant 6 steps for all lifecycles (F-UX3 collapse)", () => {
+    // PR-F-UX3 — F1.5's standalone Target step was collapsed back into the
+    // Trigger step as a sub-fieldset. The step plan no longer branches on
+    // lifecycle: every lifecycle returns the same 6-step list. The tool-
+    // target axis still exists, it just renders inside TriggerStep.
     expect(src).toContain("function stepPlan(lifecycle: Lifecycle): StepKey[]");
     expect(src).toMatch(
       /pre_final[\s\S]*?\["trigger", "condition", "specifics", "action", "name", "review"\]/,
     );
-    expect(src).toContain(
+    // The tool-bearing branch must ALSO return the 6-step plan, not the
+    // 7-step F1.5 plan that included "target". The asserted comment makes
+    // the intent explicit so a future regression renaming the branch
+    // doesn't accidentally re-introduce the 7-step plan.
+    expect(src).toMatch(
+      /Tool-bearing lifecycles[\s\S]*?return \["trigger", "condition", "specifics", "action", "name", "review"\]/,
+    );
+    // The 7-step plan from F1.5 must be gone.
+    expect(src).not.toContain(
       '["trigger", "target", "condition", "specifics", "action", "name", "review"]',
     );
+    // The standalone "target" key must be dropped from the StepKey union.
+    expect(src).not.toMatch(/type StepKey = [^;]*?"target"/);
   });
 
-  it("ships one step body per axis: trigger / target / condition / specifics / archetype / name / review", () => {
+  it("ships one step body per axis: trigger / condition / specifics / archetype / name / review (no TargetStep)", () => {
     expect(src).toContain("TriggerStep");
-    expect(src).toContain("TargetStep");
     expect(src).toContain("ConditionKindStep");
     expect(src).toContain("SpecificsStep");
     expect(src).toContain("ArchetypeStep");
     expect(src).toContain("NameStep");
     expect(src).toContain("ReviewStep");
+    // PR-F-UX3 — TargetStep deleted; its fields moved into TriggerStep.
+    expect(src).not.toContain("function TargetStep(");
+    expect(src).not.toMatch(/currentKey === "target"/);
   });
 
-  it("TargetStep is keyed off the dynamic step plan (currentKey === 'target')", () => {
-    // Target step is rendered conditionally on the StepKey enum, not a
-    // hardcoded index, so pre_final can skip it.
-    expect(src).toMatch(/currentKey === "target"[\s\S]*?TargetStep/);
-  });
-
-  it("Target step surfaces Any tool / Specific tool radio + tool-name input", () => {
+  it("TriggerStep surfaces Any tool / Specific tool radio + tool-name dropdown (folded-in target)", () => {
+    // PR-F-UX3 — the Tool target sub-fieldset lives inside TriggerStep,
+    // gated on lifecycleHasToolTarget(draft.lifecycle).
+    expect(src).toContain("Tool target");
     expect(src).toContain("Which tool(s) does this policy apply to?");
     expect(src).toContain("Any tool");
     expect(src).toContain("Specific tool");
     expect(src).toContain('toolTarget === "specific"');
+    // Replaces F1.5's freeform TextField with a real catalog dropdown.
+    expect(src).toContain("ToolNameSelect");
+    expect(src).toMatch(/<select[\s\S]*?value=\{value\}/);
   });
 
-  it("TriggerStep renders TWO radio fieldsets (lifecycle + scope)", () => {
-    expect(src.match(/<fieldset/g)?.length).toBe(2);
+  it("TriggerStep gates the Tool target sub-fieldset on tool-bearing lifecycles only", () => {
+    // pre_final / Tier 2 audit slots have no tool layer — the sub-fieldset
+    // must be hidden so the operator can't author a draft that drags a
+    // stale toolName into a non-tool lifecycle payload.
+    expect(src).toContain("lifecycleHasToolTarget");
+    expect(src).toMatch(
+      /function lifecycleHasToolTarget[\s\S]*?"before_tool_use"[\s\S]*?"after_tool_use"/,
+    );
+    expect(src).toContain("showToolTarget");
+  });
+
+  it("ToolNameSelect sources options from the catalog.tools prop (no freeform typing)", () => {
+    // PR-F-UX3 — typo risk eliminated: the dropdown enumerates real
+    // runtime tools so an operator cannot save a rule against a tool that
+    // doesn't exist. The catalog is threaded through TriggerStep via
+    // ``tools={catalog.tools}`` from the wizard hub.
+    expect(src).toContain("tools: ToolItem[]");
+    expect(src).toMatch(/<TriggerStep[\s\S]*?tools=\{catalog\.tools\}/);
+    expect(src).toMatch(/sorted\.map\(\(t\) => \{[\s\S]*?<option key=\{t\.name\}/);
+  });
+
+  it("TriggerStep renders THREE fieldsets when the lifecycle is tool-bearing (lifecycle + scope + tool target)", () => {
+    // F-UX3 adds the Tool target sub-fieldset to the existing
+    // lifecycle + scope pair. The fieldset count is 3 in the source.
+    expect(src.match(/<fieldset/g)?.length).toBe(3);
     expect(src).toContain("Lifecycle event");
     expect(src).toContain("Turn scope");
+    expect(src).toContain("Tool target");
   });
 
   it("drops the disabled 'emit' archetype (audit+(no condition) covers the same outcome)", () => {
@@ -962,5 +999,138 @@ describe("AuthorWizard — PR-F-UX2 runtime-field chip picker wiring", () => {
     // Trigger step refetches the right chip menu for the chosen slot.
     const occurrences = src.match(/<RuntimeFieldChips[\s\S]*?lifecycle=\{draft\.lifecycle\}/g) ?? [];
     expect(occurrences.length).toBeGreaterThanOrEqual(4);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// PR-F-UX3 — Target merged into Trigger + tool catalog dropdown.
+//
+// F1.5 split tool targeting out of the Condition list into its own Target
+// step. F-UX3 folds it back into the Trigger step as a third sub-fieldset
+// and swaps the freeform <input> for a real catalog-driven <select> so a
+// typo can no longer silently produce a no-match rule.
+// ---------------------------------------------------------------------------
+
+
+describe("AuthorWizard — PR-F-UX3 target merge into trigger + catalog dropdown", () => {
+  it("StepKey union drops 'target'", () => {
+    // The standalone Target step is gone; the field union must not
+    // re-introduce the literal or downstream switch arms would silently
+    // become unreachable code.
+    expect(src).not.toMatch(/type StepKey = [^;]*?"target"/);
+    expect(src).toMatch(
+      /type StepKey =\s*"trigger" \| "condition" \| "specifics" \| "action" \| "name" \| "review"/,
+    );
+  });
+
+  it("stepPlan returns the same 6-step list for EVERY lifecycle (no 7-step branch)", () => {
+    // pre_final branch + Tier 2 branch + tool-bearing branch all return the
+    // same 6 keys; the lifecycle branching only survives so the function
+    // body stays explicit about each shape.
+    const sixSteps = '["trigger", "condition", "specifics", "action", "name", "review"]';
+    const occurrences = (src.match(new RegExp(sixSteps.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) ?? []).length;
+    expect(occurrences).toBeGreaterThanOrEqual(3);
+    // The F1.5 7-step list must NOT appear anywhere.
+    expect(src).not.toContain(
+      '["trigger", "target", "condition", "specifics", "action", "name", "review"]',
+    );
+  });
+
+  it("the standalone TargetStep component is deleted", () => {
+    expect(src).not.toContain("function TargetStep(");
+    expect(src).not.toMatch(/<TargetStep\b/);
+  });
+
+  it("the render dispatch no longer keys off currentKey === 'target'", () => {
+    expect(src).not.toMatch(/currentKey === "target"/);
+  });
+
+  it("lifecycleHasToolTarget is the single predicate gating the sub-fieldset", () => {
+    // Single source of truth: TriggerStep AND stepIsComplete("trigger")
+    // both consult lifecycleHasToolTarget so the tool-target axis can't
+    // drift between the two surfaces.
+    expect(src).toContain(
+      'function lifecycleHasToolTarget(lifecycle: Lifecycle): boolean',
+    );
+    expect(src).toMatch(
+      /lifecycleHasToolTarget[\s\S]*?return lifecycle === "before_tool_use" \|\| lifecycle === "after_tool_use"/,
+    );
+  });
+
+  it("TriggerStep accepts a tools prop typed ToolItem[] (catalog-driven dropdown)", () => {
+    expect(src).toContain("tools: ToolItem[]");
+    expect(src).toMatch(/import\s*\{[\s\S]*?type ToolItem[\s\S]*?\}\s*from\s*"@\/lib\/customize-api"/);
+  });
+
+  it("AuthorWizard threads catalog.tools through to TriggerStep", () => {
+    expect(src).toMatch(/<TriggerStep[\s\S]*?tools=\{catalog\.tools\}/);
+  });
+
+  it("Tool target sub-fieldset renders ONLY when lifecycleHasToolTarget(draft.lifecycle)", () => {
+    expect(src).toContain("showToolTarget");
+    expect(src).toMatch(
+      /const showToolTarget = lifecycleHasToolTarget\(draft\.lifecycle\)/,
+    );
+    expect(src).toMatch(/showToolTarget \? \(\s*\n?\s*<fieldset/);
+  });
+
+  it("Tool target sub-fieldset surfaces Any tool + Specific tool radios", () => {
+    expect(src).toContain("Tool target");
+    expect(src).toContain("Any tool");
+    expect(src).toContain("Specific tool");
+  });
+
+  it("ToolNameSelect is a <select> sourced from the tools prop (no freeform <input>)", () => {
+    // The dropdown enumerates the live catalog; the wizard no longer
+    // accepts freeform tool-name text input on the trigger step.
+    expect(src).toContain("function ToolNameSelect(");
+    expect(src).toMatch(/<select[\s\S]*?value=\{value\}[\s\S]*?onChange=\{[\s\S]*?\}/);
+    expect(src).toMatch(/sorted\.map\(\(t\) => \{[\s\S]*?<option key=\{t\.name\}/);
+    // The Trigger step renders the dropdown when target=specific, not the
+    // F1.5 TextField. The TextField call shape used by F1.5 is gone.
+    expect(src).not.toMatch(
+      /<TextField\s+value=\{draft\.toolName\}[\s\S]*?placeholder="shell_exec"/,
+    );
+  });
+
+  it("ToolNameSelect tolerates a stale toolName that is no longer in the catalog", () => {
+    // Round-trip safety: if a saved rule references a renamed/removed
+    // tool, the dropdown surfaces it disambiguated rather than silently
+    // snapping back to the placeholder option.
+    expect(src).toContain("valueInCatalog");
+    expect(src).toMatch(/not in catalog/);
+  });
+
+  it("stepIsComplete('trigger') gates on lifecycle + scope + (target axis when tool-bearing)", () => {
+    // Merged completion gate: non-tool-bearing lifecycles need only
+    // lifecycle + scope; tool-bearing lifecycles add the
+    // any-or-(specific-with-non-empty-name) check.
+    expect(src).toContain('case "trigger":');
+    expect(src).toContain("!draft.lifecycle || !draft.scope");
+    expect(src).toContain("lifecycleHasToolTarget(draft.lifecycle)");
+    expect(src).toMatch(
+      /draft\.toolTarget === "any"\s*\n?\s*\|\| \(draft\.toolTarget === "specific" && draft\.toolName\.trim\(\)\.length > 0\)/,
+    );
+    // The old standalone case is gone.
+    expect(src).not.toMatch(/case "target":/);
+  });
+
+  it("reseedDownstream resets toolTarget+toolName when lifecycle moves to a non-tool lifecycle", () => {
+    // Switching from before_tool_use to pre_final must drop any
+    // toolTarget="specific" pick — otherwise the Review row + payload
+    // emit would lie about a tool-name filter that the backend ignores at
+    // pre_final.
+    expect(src).toContain("reseedDownstream");
+    expect(src).toMatch(
+      /merged\.lifecycle === "pre_final"[\s\S]*?merged\.lifecycle === "on_user_prompt_submit"[\s\S]*?merged\.lifecycle === "on_subagent_stop"[\s\S]*?merged\.toolTarget = "any"[\s\S]*?merged\.toolName = ""/,
+    );
+  });
+
+  it("TriggerStep counts three <fieldset>s (lifecycle + scope + tool target)", () => {
+    // Sanity: the third sub-fieldset is present in the wizard source so
+    // the F-UX3 collapse actually happened. The Trigger step is the only
+    // step rendering <fieldset>s, so the file-wide count is 3.
+    expect(src.match(/<fieldset/g)?.length).toBe(3);
   });
 });
