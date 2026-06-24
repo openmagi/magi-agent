@@ -297,19 +297,11 @@ def _is_error(terminal: Terminal, error: str | None) -> bool:
     }
 
 
-def _token_text(payload: dict) -> str:
-    """Extract assistant text from a ``token`` RuntimeEvent payload.
-
-    The real ADK engine emits ``text_delta`` events whose text lives under the
-    ``delta`` key, while the A1 stub uses ``text``. Read both so the headless
-    projection works for every driver.
-    """
-
-    for key in ("delta", "text"):
-        value = payload.get(key)
-        if isinstance(value, str):
-            return value
-    return ""
+# G-2: ``_token_text`` is the single ``token_text`` helper from
+# ``cli.event_projection``. The local alias preserves call-site names
+# (``_token_text(event.payload)`` inside this module) without re-declaring
+# the body that used to byte-match ``cli/tui/app.py``.
+from magi_agent.cli.event_projection import token_text as _token_text  # noqa: E402
 
 
 def _accumulate_text(events: list[RuntimeEvent]) -> str:

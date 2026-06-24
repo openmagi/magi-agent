@@ -492,17 +492,18 @@ def _build_nudge_message(nudge: "GoalNudge") -> str:
 
     return build_nudge_message(nudge)
 
-# Map a projected public-event dict's "type" -> RuntimeEvent EventKind. Anything
-# not listed defaults to "status".
-_TOKEN_EVENT_TYPES = frozenset({"text_delta"})
-_TOOL_EVENT_TYPES = frozenset({"tool_start", "tool_progress", "tool_end"})
-_CONTROL_EVENT_TYPES = frozenset(
-    {"control_event", "control_request", "control_replay_complete"}
+# G-2: the event-type sets and the "type -> EventKind" mapper live in
+# cli.event_projection so this engine, cli/headless.py, and cli/tui/app.py
+# all consult the same source. Aliased to the historical underscore-private
+# names so the body of this module keeps reading exactly as it did.
+from magi_agent.cli.event_projection import (
+    ARTIFACT_EVENT_TYPES as _ARTIFACT_EVENT_TYPES,
+    CONTROL_EVENT_TYPES as _CONTROL_EVENT_TYPES,
+    ERROR_EVENT_TYPES as _ERROR_EVENT_TYPES,
+    TOKEN_EVENT_TYPES as _TOKEN_EVENT_TYPES,
+    TOOL_EVENT_TYPES as _TOOL_EVENT_TYPES,
+    classify_event as _classify_event,
 )
-_ARTIFACT_EVENT_TYPES = frozenset(
-    {"source_inspected", "document_draft", "research_artifact_delta", "patch_preview"}
-)
-_ERROR_EVENT_TYPES = frozenset({"error"})
 
 # ---------------------------------------------------------------------------
 # P3 — zero-edit guard (eval mode): track file-mutating tool calls per turn
@@ -613,17 +614,11 @@ def _projected_events_with_transcript_text_fallback(
 
 
 def _map_event_kind(event_type: object) -> str:
-    if event_type in _TOKEN_EVENT_TYPES:
-        return "token"
-    if event_type in _TOOL_EVENT_TYPES:
-        return "tool"
-    if event_type in _CONTROL_EVENT_TYPES:
-        return "control"
-    if event_type in _ARTIFACT_EVENT_TYPES:
-        return "artifact"
-    if event_type in _ERROR_EVENT_TYPES:
-        return "error"
-    return "status"
+    # G-2: route through ``cli.event_projection.classify_event``. The
+    # underscore-private name is retained as a back-compat alias because the
+    # engine's own call sites refer to ``_map_event_kind``; classification
+    # logic is centralised so a new event-type lands in exactly one module.
+    return _classify_event(event_type)
 
 
 _CODING_TASK_TYPES = frozenset(
