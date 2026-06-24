@@ -115,6 +115,20 @@ _ALLOWED_RUNNER_KWARGS = (
 _ALLOWED_RUN_ASYNC_KWARGS = ("new_message", "run_config", "session_id", "user_id")
 _MAX_MANUAL_TOOL_CONTINUATIONS = 4
 _MANUAL_TOOL_EVENT_LIMIT = 64
+
+
+def _stream_thinking_enabled() -> bool:
+    """I-1: typed-registry read for the public thinking-delta passthrough gate.
+
+    Two sites in this module guard ``thinking_delta`` emission on
+    ``MAGI_STREAM_THINKING``; route both through the same one-liner so the
+    flag has a single discoverable read path. ``flag_bool`` mirrors the prior
+    ``_truthy_env`` semantics (missing/empty → False) when the spec is
+    registered default-OFF.
+    """
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_STREAM_THINKING")
 _DEFAULT_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT = 2048
 _MAX_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT = 8192
 _MAX_MANUAL_TOOL_RESULTS_BYTES = 8192
@@ -819,7 +833,7 @@ class Gate5B4C3LiveRunnerBoundary:
                         if (
                             thinking_chunk
                             and _event_is_partial(event)
-                            and _truthy_env("MAGI_STREAM_THINKING")
+                            and _stream_thinking_enabled()
                         ):
                             # Stream model reasoning on the thinking channel,
                             # gated at the producer behind MAGI_STREAM_THINKING
@@ -2782,7 +2796,7 @@ async def _run_no_tool_finalizer(
                 thinking_chunk
                 and _event_is_partial(event)
                 and public_event_sink is not None
-                and _truthy_env("MAGI_STREAM_THINKING")
+                and _stream_thinking_enabled()
             ):
                 public_event_sink(
                     {

@@ -514,7 +514,10 @@ def _sanitize_agent_event(event: dict[str, object]) -> dict[str, object] | None:
         event = {**event, "type": aliased_event_type}
         event_type = aliased_event_type
     if event_type == "thinking_delta":
-        if not _truthy_env("MAGI_STREAM_THINKING"):
+        # I-1: routed through the typed flag registry.
+        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+        if not flag_bool("MAGI_STREAM_THINKING"):
             return None
         value = _get_public_string_value(event, "delta")
         if value is None:

@@ -198,7 +198,9 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_SPAWN_RECIPE_CAP_ENABLED` (default off) — Apply the orchestrator's spawn_cap as the innermost tool-name ceiling in _resolve_turn_toolset, after profile and parent-cap filtering. Default OFF / None spawn_cap is a no-op (byte-identical).
 - `MAGI_STATE_DIR` (default `~/.magi`) — Root directory for per-user runtime state (work-queue db, session caches, etc). ``~`` is expanded.
 - `MAGI_STEP_DECOMPOSITION_ENABLED` (default off) — Inject a light first-pass guidance asking the agent to enumerate dependent sub-steps up front and confirm each before proceeding (prompt-only nudge; reuses existing planning seams).
+- `MAGI_STREAMING_CHAT` (default off) — Hosted ``/v1/chat/stream`` SSE route activation. Default-OFF; the legacy completions endpoint stays the only chat surface when OFF.
 - `MAGI_STREAM_FALLBACK_MODEL` (default `claude-haiku-4-5-20251001`) — Model id used by ``runtime/stream_fallback`` when a primary stream is reclassified as unrecoverable. Snapshotted at import time.
+- `MAGI_STREAM_THINKING` (default off) — Pass-through thinking-delta events to the public SSE surface (``transport/sse``, ``shadow/gate5b4c3_live_runner_boundary``, ``adk_bridge/event_adapter``). Default-OFF clips thinking text before it reaches any external consumer.
 - `MAGI_STREAM_WITHHOLDING_ENABLED` (default off) — Enable the runtime stream-withholding buffer. When ON the streaming chat path holds tokens in a per-turn buffer so a tool-call retry can suppress + replay them; OFF emits directly.
 - `MAGI_STREAM_WITHHOLDING_MAX_RETRIES` (default `2`) — Maximum suppress-and-retry attempts for the withholding buffer (default 2).
 - `MAGI_SUBAGENT_GOVERNED_TURN_ENABLED` (default off) — Route spawned subagents through run_governed_turn (governed turn-loop) instead of the bare run_async child loop. Default OFF keeps the legacy child path byte-identical.
