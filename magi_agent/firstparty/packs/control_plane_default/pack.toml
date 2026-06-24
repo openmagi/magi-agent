@@ -51,6 +51,25 @@ priority = 20
 phase = "loop"
 gatePosition = "after"
 
+# PR-F-LIFE2 per-LLM-call audit fan-out: MAGI_CUSTOMIZE_LLM_CALL_HOOKS_ENABLED,
+# strict default-OFF. Registers LifecycleLlmCallAuditControl which wires the
+# customize before_llm_call / after_llm_call rule fan-outs to the ADK
+# on_before_model / on_after_model boundary with a per-turn critic budget
+# (MAGI_CUSTOMIZE_LLM_CALL_AUDIT_BUDGET, default 3). This is the production
+# wire: build_default_plugin → build_control_plane_from_packs loads it, so
+# every operator-facing serve/REPL/child path through the pack loader picks
+# it up. Without this entry the legacy build_default_plane composes it but
+# the live runner never sees it (cli/real_runner.py + transport/gate5b_*
+# call build_default_plugin). Priority sits between facts-replan and the
+# nudge so audit-only controls register before the priority-LAST nudge.
+[[provides]]
+type = "control_plane"
+ref = "control_plane:lifecycle-llm-call-audit@1"
+impl = "magi_agent.firstparty.packs.control_plane_default.impl:provide_lifecycle_llm_call_audit_controls"
+priority = 25
+phase = "loop"
+gatePosition = "after"
+
 # Tool-synthesis reflection nudge (#512): MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED +
 # frontier-tier model label, default-OFF. Highest priority = registered LAST.
 [[provides]]

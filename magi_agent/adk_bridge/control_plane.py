@@ -1705,6 +1705,30 @@ def build_facts_replan_controls(
     return [] if control is None else [control]
 
 
+def build_lifecycle_llm_call_audit_controls(
+    os_environ: dict[str, str] | None = None,
+) -> "list[LoopControl]":
+    """PR-F-LIFE2 per-LLM-call audit control,
+    ``MAGI_CUSTOMIZE_LLM_CALL_HOOKS_ENABLED``, strict default-OFF. Registers
+    a single ``LifecycleLlmCallAuditControl`` that wires
+    :func:`magi_agent.customize.lifecycle_audit.run_before_llm_call_audit` /
+    :func:`magi_agent.customize.lifecycle_audit.run_after_llm_call_audit`
+    fan-outs to the ADK ``on_before_model`` / ``on_after_model`` boundary
+    and enforces a per-turn critic budget (env
+    ``MAGI_CUSTOMIZE_LLM_CALL_AUDIT_BUDGET``, default 3) so a misbehaving
+    rule cannot multiply critic cost without bound.
+    """
+    env = os_environ if os_environ is not None else dict(os.environ)
+    # Lazy import to avoid pulling in the lifecycle_audit / customize
+    # surface for OFF callers (the file imports from this module).
+    from magi_agent.adk_bridge.lifecycle_llm_call_control import (  # noqa: PLC0415
+        build_lifecycle_llm_call_control,
+    )
+
+    control = build_lifecycle_llm_call_control(env)
+    return [] if control is None else [control]
+
+
 def build_tool_synthesis_nudge_controls(
     os_environ: dict[str, str] | None = None,
     *,
@@ -1806,6 +1830,14 @@ def build_default_plane(
         plane.register(control)
     for control in build_facts_replan_controls(env):
         plane.register(control)
+    # PR-F-LIFE2 per-LLM-call audit fan-out — registers when the master
+    # flag MAGI_CUSTOMIZE_LLM_CALL_HOOKS_ENABLED is ON; returns [] (no
+    # registration) when OFF so the plane is byte-identical for default
+    # callers. The control's on_before_model/on_after_model still re-
+    # checks the flag inside the hot path so a runtime flip after
+    # registration also short-circuits cleanly.
+    for control in build_lifecycle_llm_call_audit_controls(env):
+        plane.register(control)
     for control in build_tool_synthesis_nudge_controls(
         env, tool_synthesis_model_label=tool_synthesis_model_label
     ):
@@ -1888,6 +1920,7 @@ __all__ = [
     "build_default_plane",
     "build_default_plugin",
     "build_facts_replan_controls",
+    "build_lifecycle_llm_call_audit_controls",
     "build_loop_resilience_controls",
     "build_tool_synthesis_nudge_controls",
 ]
