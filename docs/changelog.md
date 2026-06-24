@@ -15,6 +15,26 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.78
+
+### Added
+- **Composio integration — `credentialSource` exposed in aggregate status (#907).** Hosted dashboard can now distinguish between platform-master-key brokering and user-issued keys. Unlocks the hosted no-key Composio OAuth flow.
+- **ListCredentials read-only tool (#906).** First-party tool in the gate5b full toolhost so weaker models stop fishing through files / memory / curl for credential values that the broker never reveals.
+- **Customize control-plane toggles (#908).** User-facing toggles for in-context control-plane behaviours; default-OFF / back-compat (control_plane section empty → byte-identical).
+- **Canonical Open Magi design system (#914).** `design-system/` tokens + 15 primitives shared across web surfaces; sync/drift scripts + apps/web adapter + hex + web_dashboard snapshot.
+
+### Changed
+- **I-4 cluster — flag-registry consolidation (batches 8–12).** 18 more raw `os.environ.get` reads consolidated to the typed flag registry. Flag-reads budget tightened **40 → 24** (cumulative since 0.1.75: **70 → 24**).
+  - Batch 8 — observability (6 knobs registered, _int_env delegate): #904.
+  - Batch 9 — skill-curator cadence (3): #905.
+  - Batch 10 — adk_bridge runtime (4): #909.
+  - Batch 11 — external-hook framework (5): #910.
+  - Batch 12 — scheduler / prompt-cache (5): #912.
+
+### Fixed
+- **Customize author wizard reorder + emit drop (#903).** Flow now When → Condition → Specifics → Action → Name → Review (Condition before Action matches the user's mental model). "Emit a signal unconditionally" archetype dropped (reachable through the regular wizard). Fetch-only entries are labelled honestly. NL compiler endpoint enabled in lab.
+- **Dockerfile pip resolution unblock (#915).** 0.1.77 promoted `mitmproxy>=10` from `[vault]` extra → core deps, pushing the modern pip resolver into `resolution-too-deep` when combined with composio + openai + playwright. Single core install line now uses `--use-deprecated=legacy-resolver`; converges in ~2 minutes. Follow-up: tighten constraints and drop the legacy flag.
+
 ## 0.1.77
 
 ### Added
