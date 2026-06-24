@@ -71,6 +71,19 @@ describe("ReusableEvidenceTab — live input space browser (PR-F2)", () => {
     // entries prop must remain so the customize-hub call-site does not break.
     expect(src).toContain("entries");
   });
+
+  // PR-F-UX5 — header note clarifying what "evidence" means here vs the
+  // Conditions tab, so the operator does not mistake a verdict primitive
+  // (which lives under Conditions) for a raw producer record (which lives
+  // here).
+  it("renders an orientation note framing evidence as raw producer records (PR-F-UX5)", () => {
+    expect(src).toMatch(/raw producer records/i);
+    expect(src).toMatch(/tools, skills, and spawns|tools.*skills.*spawns/i);
+    // The note must contrast against the Conditions tab so the operator
+    // sees the model distinction.
+    expect(src).toMatch(/verifier|verdict primitive/i);
+    expect(src).toContain("Conditions");
+  });
 });
 
 describe("customize-api.ts — getEvidenceLiveCatalog (PR-F2)", () => {

@@ -549,6 +549,39 @@ export function extractEvidenceTypes(policies: Policy[]): EvidenceTypeEntry[] {
 
 
 /**
+ * PR-F-UX5 — derive a :class:`NamedConditionEntry` per built-in verdict
+ * primitive (``catalog.verification.judgmentMenu``) so the Conditions tab can
+ * surface built-in verifiers and user-authored named conditions in a single
+ * list with origin badges.
+ *
+ * The synthesised ``ownerPolicyId`` / ``ownerPolicyName`` point to a virtual
+ * ``builtin:<ref>`` owner so the Conditions tab's "from policy" copy can show
+ * "built-in" without claiming a real :class:`Policy` exists. Built-in rows
+ * are read-only; editing a verifier requires runtime code changes (the F-UX5
+ * design treats producers/verifiers as code, not authoring surface).
+ *
+ * Each entry's ``kind`` is ``evidence_ref`` (matches how the wizard's
+ * ``verifier_passed`` UX kind compiles to the same backend
+ * ``deterministic_ref`` payload) so the Conditions tab labelling reads the
+ * same as a user-authored deterministic_ref rule referencing the same ref.
+ */
+export function extractBuiltinJudgmentRefs(
+  catalog: CustomizeCatalog,
+): NamedConditionEntry[] {
+  const items = catalog.verification.judgmentMenu ?? [];
+  return items.map((item) => ({
+    key: `builtin:${item.ref}`,
+    kind: "evidence_ref" as const,
+    summary: item.label,
+    ownerPolicyId: `builtin:${item.ref}`,
+    ownerPolicyName: item.ref,
+    origin: "builtin" as const,
+    payload: { ref: item.ref },
+  }));
+}
+
+
+/**
  * Extract every NL-bound condition the user has authored so other policies
  * can reuse them via the wizard / NL compiler.
  *

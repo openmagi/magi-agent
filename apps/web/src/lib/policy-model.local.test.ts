@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  extractBuiltinJudgmentRefs,
   extractEvidenceTypes,
   extractNamedConditions,
   trustClassForPolicy,
@@ -44,8 +45,13 @@ function buildCatalog(): Parameters<typeof unifyPolicies>[0]["catalog"] {
       ],
       hooks: [],
       customRuleMenu: [],
+      // PR-F-UX5 — evidence vs verdict split surfaced as two catalog fields;
+      // legacy customRuleMenu retained as the union for back-compat.
+      evidenceMenu: [],
+      judgmentMenu: [],
     },
     tools: [],
+    controlPlane: [],
   };
 }
 
@@ -325,6 +331,88 @@ function buildPolicy(args: {
     } },
   };
 }
+
+
+// ---------------------------------------------------------------------------
+// PR-F-UX5 — extractBuiltinJudgmentRefs derives Conditions-tab rows from
+// the catalog's judgmentMenu so built-in verifier primitives appear alongside
+// user-authored named conditions under an origin badge.
+// ---------------------------------------------------------------------------
+
+
+describe("extractBuiltinJudgmentRefs — derives built-in entries from catalog.judgmentMenu", () => {
+  function buildCatalogWithJudgmentMenu(
+    items: Array<{
+      ref: string;
+      label: string;
+      evidenceType: string;
+      tier: string;
+      firesAt: string;
+      allowedActions: string[];
+    }>,
+  ): Parameters<typeof extractBuiltinJudgmentRefs>[0] {
+    const cat = buildCatalog();
+    cat.verification.judgmentMenu = items;
+    return cat;
+  }
+
+  it("returns an entry per judgmentMenu item with origin=builtin", () => {
+    const cat = buildCatalogWithJudgmentMenu([
+      {
+        ref: "verifier:dev-coding:test-evidence",
+        label: "Tests pass after a code change",
+        evidenceType: "TestRun",
+        tier: "deterministic",
+        firesAt: "pre_final",
+        allowedActions: ["block", "retry", "audit"],
+      },
+      {
+        ref: "fact_grounding",
+        label: "Factual values are grounded",
+        evidenceType: "FactGrounding",
+        tier: "deterministic",
+        firesAt: "pre_final",
+        allowedActions: ["block", "retry", "audit"],
+      },
+    ]);
+    const out = extractBuiltinJudgmentRefs(cat);
+    expect(out).toHaveLength(2);
+    for (const entry of out) {
+      expect(entry.origin).toBe("builtin");
+      // Conditions tab uses ownerPolicyName as the inline reference; for a
+      // built-in row it should be the bare ref so the operator can copy it.
+      expect(entry.ownerPolicyName).toBe(entry.payload?.ref);
+    }
+    expect(out.map((e) => e.payload?.ref)).toEqual([
+      "verifier:dev-coding:test-evidence",
+      "fact_grounding",
+    ]);
+  });
+
+  it("returns an empty list when the judgmentMenu is empty", () => {
+    const cat = buildCatalogWithJudgmentMenu([]);
+    expect(extractBuiltinJudgmentRefs(cat)).toEqual([]);
+  });
+
+  it("each entry carries kind=evidence_ref (storage shape parity with deterministic_ref)", () => {
+    // Backend persists both wizard kinds (evidence_ref + verifier_passed) as
+    // ``deterministic_ref``; the frontend renames it ``evidence_ref`` at the
+    // adapter boundary. Built-in judgment rows mirror that to keep the
+    // Conditions tab labelling consistent.
+    const cat = buildCatalogWithJudgmentMenu([
+      {
+        ref: "verifier:research-source-evidence",
+        label: "At least one source was actually inspected",
+        evidenceType: "SourceLedger",
+        tier: "deterministic",
+        firesAt: "pre_final",
+        allowedActions: ["block", "retry", "audit"],
+      },
+    ]);
+    const [entry] = extractBuiltinJudgmentRefs(cat);
+    expect(entry.kind).toBe("evidence_ref");
+  });
+});
 
 
 describe("trustClassForPolicy — verified mapping table (PR-F5)", () => {

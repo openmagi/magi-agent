@@ -64,6 +64,7 @@ import { ReusableEvidenceTab } from "./reusable-evidence-tab";
 import { ReusableConditionsTab } from "./reusable-conditions-tab";
 import { SeamBuilderPanel } from "./seam-builder-panel";
 import {
+  extractBuiltinJudgmentRefs,
   extractEvidenceTypes,
   extractNamedConditions,
   unifyPolicies,
@@ -625,6 +626,13 @@ function RulesSectionMount({
   );
   const evidenceTypes = useMemo(() => extractEvidenceTypes(policies), [policies]);
   const conditions = useMemo(() => extractNamedConditions(policies), [policies]);
+  // PR-F-UX5 — built-in verdict primitives sourced from catalog.judgmentMenu.
+  // The Conditions tab merges this with user-authored conditions; the
+  // counter sums both halves so it matches what the tab body renders.
+  const builtinJudgments = useMemo(
+    () => extractBuiltinJudgmentRefs(data.catalog),
+    [data.catalog],
+  );
   const seamSpecs = data.overrides.verification.seam_specs ?? [];
 
   const handleModePick = (mode: AddPolicyMode) => {
@@ -644,8 +652,28 @@ function RulesSectionMount({
           {(
             [
               { id: "policies", label: `Policies (${policies.length})` },
-              { id: "evidence", label: `Evidence (${evidenceTypes.length})` },
-              { id: "conditions", label: `Conditions (${conditions.length})` },
+              // PR-F-UX5 — Evidence counter = built-in evidence menu (raw
+              // producer records the runtime knows about) + the user-consumed
+              // refs the policies-derived index has surfaced. Both halves
+              // appear in the Evidence tab body, so the counter mirrors the
+              // visible row count.
+              {
+                id: "evidence",
+                label: `Evidence (${
+                  data.catalog.verification.evidenceMenu.length
+                  + evidenceTypes.length
+                })`,
+              },
+              // PR-F-UX5 — Conditions counter = built-in verdict primitives
+              // (judgmentMenu) + user-authored named conditions. The tab body
+              // merges them under origin badges so the counter equals the row
+              // count there too.
+              {
+                id: "conditions",
+                label: `Conditions (${
+                  builtinJudgments.length + conditions.length
+                })`,
+              },
             ] as ReadonlyArray<{ id: SubTab; label: string }>
           ).map((t) => (
             <button
@@ -786,7 +814,10 @@ function RulesSectionMount({
             <ReusableEvidenceTab entries={evidenceTypes} />
           ) : null}
           {subTab === "conditions" ? (
-            <ReusableConditionsTab entries={conditions} />
+            <ReusableConditionsTab
+              entries={conditions}
+              builtinEntries={builtinJudgments}
+            />
           ) : null}
         </>
       ) : (

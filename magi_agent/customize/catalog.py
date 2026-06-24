@@ -15,7 +15,7 @@ from magi_agent.customize.preset_map import (
     supported_modes_for,
     tier_for,
 )
-from magi_agent.customize.what_menu import what_menu
+from magi_agent.customize.what_menu import evidence_menu, judgment_menu, what_menu
 from magi_agent.customize.preset_map import scope_for_preset
 from magi_agent.harness.presets import builtin_preset_catalog
 from magi_agent.transport.app_api import _RUNTIME_HOOK_POINTS as _HOOK_POINTS
@@ -188,7 +188,22 @@ def build_catalog(runtime: Any) -> dict[str, Any]:
             "hooks": _hook_entries(runtime),
             # Producer-backed deterministic checks the custom-rule builder may
             # require (spec §9.1 / §12). Empty-safe.
+            #
+            # DEPRECATED (PR-F-UX5): kept as the union of evidenceMenu +
+            # judgmentMenu for back-compat with pre-PR-F-UX5 consumers
+            # (existing NL compiler tests, third-party authoring surfaces).
+            # New UI code should read ``evidenceMenu`` / ``judgmentMenu`` so
+            # the raw-evidence vs verdict-primitive distinction is visible.
             "customRuleMenu": what_menu(),
+            # PR-F-UX5 — raw-evidence ref descriptors (``evidence:*``). The
+            # wizard's "Check evidence record present" picker AND the
+            # field-constraint type picker read from this list.
+            "evidenceMenu": evidence_menu(),
+            # PR-F-UX5 — verdict-primitive ref descriptors (``verifier:*`` and
+            # bare named judgments). The wizard's "Check verifier / condition
+            # passed" picker and the Conditions tab (merged with user-authored
+            # named conditions) read from this list.
+            "judgmentMenu": judgment_menu(),
         },
         "tools": _tool_entries(runtime),
         # In-context control-plane behavior toggles (facts-survey replan, goal

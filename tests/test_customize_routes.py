@@ -248,7 +248,11 @@ def test_customize_returns_catalog_and_overrides(tmp_path, monkeypatch) -> None:
         "recipes",
         "harnessPresets",
         "hooks",
+        # PR-F-UX5 evidence vs verifier split; ``customRuleMenu`` kept as the
+        # back-compat union of evidenceMenu + judgmentMenu.
         "customRuleMenu",
+        "evidenceMenu",
+        "judgmentMenu",
     }
     # Control-plane behavior catalog includes the facts-survey toggle.
     assert any(e["id"] == "facts-replan" for e in body["catalog"]["controlPlane"])
