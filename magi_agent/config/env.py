@@ -415,7 +415,10 @@ class EmptyResponseRecoveryEnv:
 def parse_empty_response_recovery_env(
     env: Mapping[str, str],
 ) -> EmptyResponseRecoveryEnv:
-    enabled = _is_true(env.get(EMPTY_RESPONSE_RECOVERY_ENABLED_ENV))
+    # I-1: route the enabled bool through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    enabled = flag_bool(EMPTY_RESPONSE_RECOVERY_ENABLED_ENV, env=env)
     max_recoveries = _int_env(env, EMPTY_RESPONSE_MAX_RECOVERIES_ENV, 1)
     if max_recoveries < 1:
         raise RuntimeEnvError(f"{EMPTY_RESPONSE_MAX_RECOVERIES_ENV} must be >= 1")
@@ -517,7 +520,10 @@ def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv
     if tail_events < 1:
         raise RuntimeEnvError(f"{COMPACTION_TAIL_EVENTS_ENV} must be >= 1")
     # G2: strict default-OFF real-token accounting (NOT profile-aware).
-    real_tokens_enabled = _is_true(env.get(COMPACTION_REAL_TOKENS_ENABLED_ENV))
+    # I-1: route through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    real_tokens_enabled = flag_bool(COMPACTION_REAL_TOKENS_ENABLED_ENV, env=env)
     real_tokens_pct = _float_env(
         env,
         COMPACTION_REAL_TOKENS_PCT_ENV,
@@ -536,7 +542,8 @@ def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv
         raise RuntimeEnvError(f"{COMPACTION_OUTPUT_RESERVE_ENV} must be >= 0")
     # G4: strict default-OFF tool-output prune pre-tier (NOT profile-aware,
     # matching the real-tokens master switch convention above).
-    tool_prune_enabled = _is_true(env.get(COMPACTION_TOOL_PRUNE_ENABLED_ENV))
+    # I-1: route through the typed flag registry (imported above).
+    tool_prune_enabled = flag_bool(COMPACTION_TOOL_PRUNE_ENABLED_ENV, env=env)
     prune_protect = _int_env(
         env,
         COMPACTION_PRUNE_PROTECT_ENV,
@@ -553,7 +560,8 @@ def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv
         raise RuntimeEnvError(f"{COMPACTION_PRUNE_MINIMUM_ENV} must be >= 1")
     # G1: strict default-OFF summary injection (NOT profile-aware, matching the
     # real-tokens / tool-prune master switches above).
-    summarize_enabled = _is_true(env.get(COMPACTION_SUMMARIZE_ENABLED_ENV))
+    # I-1: route through the typed flag registry (imported above).
+    summarize_enabled = flag_bool(COMPACTION_SUMMARIZE_ENABLED_ENV, env=env)
     summary_model = _trimmed(env.get(COMPACTION_SUMMARY_MODEL_ENV)) or ""
     summary_timeout = _float_env(
         env,
@@ -564,8 +572,9 @@ def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv
         raise RuntimeEnvError(f"{COMPACTION_SUMMARY_TIMEOUT_ENV} must be > 0")
     # G5/G6: strict default-OFF anchored summary + configurable failure breaker
     # (NOT profile-aware, matching the summarize master switch above).
-    anchored_summary_enabled = _is_true(
-        env.get(COMPACTION_ANCHORED_SUMMARY_ENABLED_ENV)
+    # I-1: route through the typed flag registry (imported above).
+    anchored_summary_enabled = flag_bool(
+        COMPACTION_ANCHORED_SUMMARY_ENABLED_ENV, env=env
     )
     summary_max_failures = _int_env(
         env,
@@ -578,7 +587,8 @@ def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv
         )
     # G7: strict default-OFF manual /compact force-compaction (NOT profile-aware,
     # matching the summarize / real-tokens / tool-prune master switches above).
-    manual_enabled = _is_true(env.get(COMPACTION_MANUAL_ENABLED_ENV))
+    # I-1: route through the typed flag registry (imported above).
+    manual_enabled = flag_bool(COMPACTION_MANUAL_ENABLED_ENV, env=env)
     return ContextCompactionEnv(
         enabled=enabled,
         token_threshold=token_threshold,
