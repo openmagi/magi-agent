@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
+from math import isfinite
 from typing import Literal
 
 from magi_agent.config._truthy import env_bool
+from magi_agent.ops.safety import reject_private_text, require_safe_key
 
 
 def _truthy_env(name: str) -> bool:
@@ -16,6 +19,66 @@ def _truthy_env(name: str) -> bool:
     truthy set lives in one place; behaviour is byte-identical.
     """
     return env_bool(os.environ, name, default=False)
+
+
+def _safe_health_value(value: object) -> tuple[bool, object]:
+    """A-11 lenient health-surface value scrub.
+
+    Returns ``(ok, scrubbed_value)``. ``ok=False`` means the caller should
+    drop the key. Bools, finite numerics, secret-clean strings, and
+    tuples/lists composed of safe primitives pass through verbatim. Anything
+    that hits the C-1 secret denylist or falls outside the recognized
+    primitive set is rejected. Fail-OPEN against the ``safe_ref``/``safe_key``
+    *format* check (the health surface is not a typed governance artifact)
+    and fail-CLOSED against the secret denylist (the surface MUST NOT leak).
+
+    Once C-2 lands the canonical lenient ``safe_dimensions``-style helper
+    this thin wrapper can be replaced by it.
+    """
+    if isinstance(value, bool):
+        return True, value
+    if isinstance(value, int):  # bool is a bool subclass — handled above first.
+        return True, value
+    if isinstance(value, float):
+        if not isfinite(value):
+            return False, None
+        return True, value
+    if isinstance(value, str):
+        try:
+            reject_private_text(value, field_name="tickSummary")
+        except ValueError:
+            return False, None
+        return True, value
+    if isinstance(value, tuple | list):
+        scrubbed: list[object] = []
+        for item in value:
+            ok, item_scrubbed = _safe_health_value(item)
+            if not ok:
+                return False, None
+            scrubbed.append(item_scrubbed)
+        return True, tuple(scrubbed)
+    return False, None
+
+
+def _safe_tick_summary(tick: Mapping[str, object]) -> dict[str, object]:
+    """A-11 lenient health-surface tick-summary scrub.
+
+    Drops keys that violate ``require_safe_key``; drops values that fail the
+    lenient value scrub. Never raises — a noisy tick must not crash the
+    publicly-projected health surface.
+    """
+    safe: dict[str, object] = {}
+    for key, value in tick.items():
+        if not isinstance(key, str):
+            continue
+        try:
+            safe_key = require_safe_key(key, field_name="tickSummary")
+        except ValueError:
+            continue
+        ok, scrubbed = _safe_health_value(value)
+        if ok:
+            safe[safe_key] = scrubbed
+    return safe
 
 
 def default_runtime_ops_health_metadata() -> dict[str, object]:
@@ -88,8 +151,11 @@ def scheduler_executor_health_projection(
     }
 
     if tick_summary is not None:
-        # Merge caller-supplied tick summary (do not overwrite core fields).
-        for key, value in tick_summary.items():
+        # A-11: route tick rows through the lenient health-surface scrub so
+        # a noisy caller cannot leak credential-shaped values into the
+        # publicly-projected health dict. Core keys still win on collision.
+        safe_tick = _safe_tick_summary(tick_summary)
+        for key, value in safe_tick.items():
             if key not in projection:
                 projection[key] = value
 
