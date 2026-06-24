@@ -119,6 +119,12 @@
       "group": "Core Concepts"
     },
     {
+      "slug": "hookbus-replace-contract-audit-2026-06-24",
+      "title": "HookBus replace-contract audit (2026-06-24)",
+      "path": "docs/architecture/hookbus-replace-contract-audit-2026-06-24.md",
+      "group": "Core Concepts"
+    },
+    {
       "slug": "why-the-harness",
       "title": "Why the Harness, Not Just Hooks",
       "path": "docs/why-the-harness.md",
