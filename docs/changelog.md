@@ -1,3 +1,18 @@
+# 0.1.82 (2026-06-24)
+
+## Customize (F-UX series wrap)
+- F-UX1: lifecycle audit + Tier 2 hook expansion in author wizard (#962).
+- F-UX2: runtime-fields endpoint + variable chip picker (F8 core) (#963).
+- F-UX3+F-UX4: trigger collapse + condition matrix loosening + round-trip guard (#971).
+- F-UX6: interview-driven NL authoring + hybrid primitive proposals (#967).
+
+## Refactors / cleanup
+- D-10: collapse 7 pure passthrough methods on event bridge (#965).
+- D-13: unify transcript rendering into context/transcript_render (#968).
+
+## Tests
+- J-2 step 1: meta-test locking wiring docstring honesty for model plumbing (#970).
+
 # 0.1.81 (2026-06-24)
 
 ## Customize
