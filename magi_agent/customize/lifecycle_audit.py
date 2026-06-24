@@ -97,6 +97,35 @@ def lifecycle_turn_hooks_enabled(env: dict[str, str] | None = None) -> bool:
         return False
 
 
+def llm_call_hooks_enabled(env: dict[str, str] | None = None) -> bool:
+    """PR-F-LIFE2 triple-gate check for the per-LLM-call audit fan-outs.
+
+    Mirrors :func:`lifecycle_turn_hooks_enabled` but keys on the F-LIFE2
+    master switch ``MAGI_CUSTOMIZE_LLM_CALL_HOOKS_ENABLED`` so the per-call
+    slot family (before_llm_call + after_llm_call) can be staged
+    independently. These slots fire on EVERY LLM call inside a turn so the
+    OFF path must be byte-identical with zero per-call overhead — every wire
+    site is required to check this helper FIRST and bail before any further
+    work (the helper itself is cheap, but a single env miss avoids any policy
+    load / criterion judge work on the per-call hot path).
+
+    Fail-open: any import error returns ``False`` so the call site stays a
+    no-op when the flag layer cannot be read.
+    """
+    try:
+        from magi_agent.config.flags import flag_bool, flag_profile_bool  # noqa: PLC0415
+    except Exception:
+        return False
+    try:
+        return (
+            flag_bool("MAGI_CUSTOMIZE_LLM_CALL_HOOKS_ENABLED", env=env)
+            and flag_profile_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", env=env)
+            and flag_profile_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", env=env)
+        )
+    except Exception:
+        return False
+
+
 def _default_policy_loader() -> Any:
     from magi_agent.customize.store import load_overrides  # noqa: PLC0415
     from magi_agent.customize.verification_policy import (  # noqa: PLC0415
@@ -335,12 +364,129 @@ async def run_after_turn_end_audit(
     return audits
 
 
+async def run_before_llm_call_audit(
+    *,
+    prompt_text: str,
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+    critic_budget_remaining: int,
+) -> list[AuditRecord]:
+    """PR-F-LIFE2 audit fan-out for ``firesAt == "before_llm_call"``.
+
+    Wired adjacent to the ADK ``before_model_callback`` boundary inside the
+    runner stream. Fires on every LLM call within a turn but is hard-capped
+    by ``critic_budget_remaining`` so a misbehaving rule cannot multiply
+    critic cost without bound. The caller (the ADK plugin in
+    :mod:`magi_agent.adk_bridge.lifecycle_llm_call_control`) maintains a
+    per-(session, turn) counter initialised from
+    ``MAGI_CUSTOMIZE_LLM_CALL_AUDIT_BUDGET`` (default ``3``) and threads the
+    remaining budget in.
+
+    Each successful audit invocation costs ONE budget unit. When the budget
+    is exhausted (``critic_budget_remaining <= 0``) the fan-out short-circuits
+    to a single ``budget_exhausted`` skip record so the ledger captures the
+    reason without invoking the critic. Triple-gated + fail-open via
+    :func:`llm_call_hooks_enabled`.
+    """
+    if not llm_call_hooks_enabled(env=env):
+        return []
+    try:
+        loader = policy_loader or _default_policy_loader
+        policy = loader()
+        rules = policy.enabled_llm_criterion_rules(fires_at="before_llm_call")
+    except Exception:
+        return []
+    if not rules:
+        return []
+    if critic_budget_remaining <= 0:
+        # Budget exhausted: record ONE skip event so the audit ledger reflects
+        # the cost-ceiling decision without invoking the critic. The caller
+        # records this per-call; downstream the ledger sees a single
+        # status="skipped" / reason="budget_exhausted" record.
+        return [
+            {
+                "rule_id": None,
+                "passed": True,
+                "reason": "per-turn critic budget exhausted",
+                "status": "budget_exhausted",
+            }
+        ]
+    audits: list[AuditRecord] = []
+    for rule in rules:
+        audit = await _audit_one_rule(
+            rule,
+            draft_text=prompt_text,
+            model_factory=model_factory,
+            invoke=invoke,
+        )
+        audits.append(audit)
+    return audits
+
+
+async def run_after_llm_call_audit(
+    *,
+    draft_text: str,
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+    critic_budget_remaining: int,
+) -> list[AuditRecord]:
+    """PR-F-LIFE2 audit fan-out for ``firesAt == "after_llm_call"``.
+
+    Wired adjacent to the ADK ``after_model_callback`` boundary inside the
+    runner stream. ``draft_text`` is the model's just-emitted text output
+    (extracted by the caller from the ADK ``LlmResponse``). Subject to the
+    same per-turn critic budget as :func:`run_before_llm_call_audit`; the
+    caller decrements the shared counter so before/after combined never
+    exceed the per-turn cap.
+
+    Triple-gated + fail-open via :func:`llm_call_hooks_enabled`; returns a
+    single ``budget_exhausted`` skip record when the caller's budget is
+    depleted so the cost-ceiling decision is visible in the audit ledger.
+    """
+    if not llm_call_hooks_enabled(env=env):
+        return []
+    try:
+        loader = policy_loader or _default_policy_loader
+        policy = loader()
+        rules = policy.enabled_llm_criterion_rules(fires_at="after_llm_call")
+    except Exception:
+        return []
+    if not rules:
+        return []
+    if critic_budget_remaining <= 0:
+        return [
+            {
+                "rule_id": None,
+                "passed": True,
+                "reason": "per-turn critic budget exhausted",
+                "status": "budget_exhausted",
+            }
+        ]
+    audits: list[AuditRecord] = []
+    for rule in rules:
+        audit = await _audit_one_rule(
+            rule,
+            draft_text=draft_text,
+            model_factory=model_factory,
+            invoke=invoke,
+        )
+        audits.append(audit)
+    return audits
+
+
 __all__ = [
     "AuditRecord",
     "lifecycle_expansion_enabled",
     "lifecycle_turn_hooks_enabled",
+    "llm_call_hooks_enabled",
     "run_user_prompt_submit_audit",
     "run_subagent_stop_audit",
     "run_before_turn_start_audit",
     "run_after_turn_end_audit",
+    "run_before_llm_call_audit",
+    "run_after_llm_call_audit",
 ]
