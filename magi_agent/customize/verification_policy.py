@@ -289,6 +289,38 @@ class CustomizeVerificationPolicy:
             return candidates
         return [rule for rule in candidates if _rule_scope_matches(rule, current_scope)]
 
+    def enabled_output_rewrite_rules(
+        self, *, fires_at: str, current_scope: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Enabled ``output_rewrite`` custom rules for a fire-at point (F-MUT2).
+
+        Mirrors :meth:`enabled_prompt_injection_rules` exactly: filter on
+        ``enabled`` + ``firesAt == fires_at`` + ``what.kind ==
+        "output_rewrite"``. When ``current_scope`` is supplied the result
+        is additionally narrowed by :func:`_rule_scope_matches`; otherwise
+        the scope-blind list is returned. Consumed by:
+
+        * :mod:`magi_agent.facades` — ``fires_at="after_tool_use"`` to
+          gather tool-output mutators applied after the AFTER_TOOL_USE
+          hook's ``replace`` consumer.
+
+        The runtime apply helper
+        (:func:`magi_agent.customize.output_rewrite.apply_output_rewrite_to_tool_result`)
+        accepts the raw rule dicts returned here and fail-safe-drops any
+        individual rule that is malformed.
+        """
+        candidates = [
+            rule
+            for rule in self.custom_rules
+            if rule.get("enabled", False)
+            and rule.get("firesAt") == fires_at
+            and isinstance(rule.get("what"), dict)
+            and rule["what"].get("kind") == "output_rewrite"
+        ]
+        if current_scope is None:
+            return candidates
+        return [rule for rule in candidates if _rule_scope_matches(rule, current_scope)]
+
     def explicit_preset(self, preset_id: str) -> bool | None:
         """Explicit per-preset enable state, or None if the user never set it."""
         return self.preset_overrides.get(preset_id)
