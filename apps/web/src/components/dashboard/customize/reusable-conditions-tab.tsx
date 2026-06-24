@@ -49,6 +49,10 @@ const KIND_LABEL: Record<NamedConditionEntry["kind"], string> = {
   tool_perm: "Tool / domain match",
   evidence_ref: "Evidence ref",
   capability_scope: "Subagent capability scope",
+  // PR-F-MUT1 — mutator surface; the row label distinguishes it from gate
+  // kinds so an operator scanning the table sees "this rewrites traffic"
+  // before opening the row.
+  prompt_injection: "Prompt injection (mutator)",
   seam_action: "Seam action",
   none: "Built-in",
 };

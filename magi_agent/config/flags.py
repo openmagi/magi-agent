@@ -918,6 +918,28 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_CUSTOMIZE_PROMPT_INJECTION_ENABLED",
+        stage="stage2",
+        summary=(
+            "PR-F-MUT1: activate the ``prompt_injection`` custom_rule kind. "
+            "When ON the runtime applies enabled prompt_injection rules at "
+            "two lifecycle slots: ``before_tool_use`` (append a value to a "
+            "chosen tool argument key — e.g. always append '--dry-run' to "
+            "shell_exec) wired in magi_agent/facades.py:execute_tool_with_hooks "
+            "after the BEFORE_TOOL_USE hook block branch; and "
+            "``on_user_prompt_submit`` (append a value as a new system-prompt "
+            "section) wired alongside the F-UX1 audit fan-out in "
+            "magi_agent/runtime/governed_turn.run_governed_turn. v1 is "
+            "append-only (mode=replace is deferred to v2 with an admin-tier "
+            "flag) and caps value at 4000 chars. Triple-gated with "
+            "MAGI_CUSTOMIZE_VERIFICATION_ENABLED + "
+            "MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED; fail-open on any "
+            "customize-store fault so a broken overrides file never breaks a "
+            "turn. With no prompt_injection rules authored, runtime stays "
+            "byte-identical (the new wires are a no-op). Strict default-OFF."
+        ),
+    ),
+    _b(
         "MAGI_CUSTOMIZE_RUNTIME_FIELDS_ENDPOINT_ENABLED",
         stage="stage2",
         summary=(

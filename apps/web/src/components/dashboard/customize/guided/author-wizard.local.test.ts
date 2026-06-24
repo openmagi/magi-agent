@@ -105,12 +105,14 @@ describe("AuthorWizard — variable-length policy authoring (F1.5 + F-UX3)", () 
     );
   });
 
-  it("before_tool_use + target=specific exposes ONLY 'none' (per-tool unconditional)", () => {
+  it("before_tool_use + target=specific exposes 'none' plus PR-F-MUT1 prompt_injection", () => {
     // Backend tool_perm has no AND between tool name and url-shape matchers,
-    // so per-tool rules can only fire unconditionally per call. The wizard
-    // shrinks the option list to match.
+    // so per-tool rules can only fire unconditionally per call. PR-F-MUT1
+    // adds ``prompt_injection`` here as a mutator (not a deny gate) — it
+    // doesn't introduce an AND, the rule fires on every call to the
+    // chosen tool.
     expect(src).toMatch(
-      /toolTarget === "specific"[\s\S]*?return \["none"\]/,
+      /toolTarget === "specific"[\s\S]*?return \["none", "prompt_injection"\]/,
     );
   });
 
@@ -118,9 +120,10 @@ describe("AuthorWizard — variable-length policy authoring (F1.5 + F-UX3)", () 
     // tool_perm has no wildcard, so 'no condition' with target=any has no
     // honest backend mapping. The option is omitted instead of synthesised.
     // F6 expanded the matcher list to include path + path_allowlist (the
-    // backend tool_perm matcher already supports both).
+    // backend tool_perm matcher already supports both). PR-F-MUT1 appends
+    // ``prompt_injection`` — a mutator, not a deny gate.
     expect(src).toMatch(
-      /target=any: tool_perm has no wildcard[\s\S]*?return \["domain", "domain_allowlist", "path", "path_allowlist"\]/,
+      /target=any: tool_perm has no wildcard[\s\S]*?return \["domain", "domain_allowlist", "path", "path_allowlist", "prompt_injection"\]/,
     );
   });
 
@@ -364,9 +367,11 @@ describe("AuthorWizard — F6 path / path_allowlist condition kinds", () => {
   it("before_tool_use + target=any offers path + path_allowlist alongside domain / domain_allowlist", () => {
     // The before-tool + any-tool branch is the only path tool_perm rules
     // can be authored under — per-tool match has no AND with path matchers
-    // in the backend.
+    // in the backend. PR-F-MUT1 appends ``prompt_injection`` to the same
+    // branch (mutator surface, not a deny gate); the domain/path matchers
+    // remain unchanged.
     expect(src).toMatch(
-      /return \["domain", "domain_allowlist", "path", "path_allowlist"\]/,
+      /return \["domain", "domain_allowlist", "path", "path_allowlist", "prompt_injection"\]/,
     );
   });
 
@@ -1107,9 +1112,11 @@ describe("AuthorWizard — PR-F-UX4 condition matrix loosening + auto-derive", (
     // F-UX4 only loosens combos the backend can actually save. The
     // before_tool_use + target=specific + (domain|path) AND combo is still
     // refused because backend tool_perm.py honors a single matcher key per
-    // rule — no honest mapping today.
+    // rule — no honest mapping today. PR-F-MUT1 adds ``prompt_injection``
+    // alongside ``none`` (it's a mutator, not a deny gate), but the
+    // domain/path AND combo stays excluded.
     expect(src).toMatch(
-      /toolTarget === "specific"\) \{[\s\S]*?return \["none"\]/,
+      /toolTarget === "specific"\) \{[\s\S]*?return \["none", "prompt_injection"\]/,
     );
   });
 });
@@ -1234,5 +1241,100 @@ describe("AuthorWizard — PR-F-UX3 target merge into trigger + catalog dropdown
     // the F-UX3 collapse actually happened. The Trigger step is the only
     // step rendering <fieldset>s, so the file-wide count is 3.
     expect(src.match(/<fieldset/g)?.length).toBe(3);
+  });
+});
+
+
+describe("AuthorWizard — F-MUT1 prompt_injection kind", () => {
+  it("adds prompt_injection to the ConditionKind union", () => {
+    expect(src).toMatch(/type ConditionKind[\s\S]*?\| "prompt_injection"/);
+  });
+
+  it("availableConditionKinds surfaces prompt_injection at on_user_prompt_submit", () => {
+    // The on_user_prompt_submit branch now returns BOTH llm_criterion AND
+    // prompt_injection so the operator can pick "append a section to the
+    // system prompt" without losing the audit-critic option.
+    expect(src).toMatch(
+      /on_user_prompt_submit"\)[\s\S]*?return \["llm_criterion", "prompt_injection"\]/,
+    );
+  });
+
+  it("availableConditionKinds keeps on_subagent_stop llm_criterion-only", () => {
+    // Mutation on a turn that already emitted has no honest target — the
+    // backend _LEGAL matrix leaves on_subagent_stop as llm_criterion-only.
+    expect(src).toMatch(
+      /on_subagent_stop"\)[\s\S]*?return \["llm_criterion"\]/,
+    );
+  });
+
+  it("availableConditionKinds surfaces prompt_injection on before_tool_use (both target modes)", () => {
+    // target=specific: ["none", "prompt_injection"]
+    expect(src).toMatch(
+      /toolTarget === "specific"\)[\s\S]*?return \["none", "prompt_injection"\]/,
+    );
+    // target=any: domain/path matchers + prompt_injection at the tail.
+    expect(src).toMatch(
+      /return \["domain", "domain_allowlist", "path", "path_allowlist", "prompt_injection"\]/,
+    );
+  });
+
+  it("CONDITION_META exposes a prompt_injection entry labelled as a mutator", () => {
+    expect(src).toMatch(/prompt_injection: \{[\s\S]*?label: "Append context \(mutator\)"/);
+    expect(src).toMatch(/prompt_injection: \{[\s\S]*?Mutator/);
+  });
+
+  it("SpecificsStep branches on lifecycle to render the right picker", () => {
+    expect(src).toMatch(
+      /draft\.conditionKind === "prompt_injection"[\s\S]*?lifecycle === "on_user_prompt_submit"[\s\S]*?PromptInjectionSystemPromptPicker[\s\S]*?PromptInjectionToolArgPicker/,
+    );
+  });
+
+  it("ships both prompt_injection pickers as named components", () => {
+    expect(src).toContain("function PromptInjectionToolArgPicker");
+    expect(src).toContain("function PromptInjectionSystemPromptPicker");
+  });
+
+  it("Draft + EMPTY carry the new pi* fields", () => {
+    expect(src).toMatch(/piTargetArgKey:\s*string/);
+    expect(src).toMatch(/piValue:\s*string/);
+    expect(src).toMatch(/piConditionEnabled:\s*boolean/);
+    expect(src).toMatch(/piConditionPattern:\s*string/);
+    expect(src).toMatch(/piTargetArgKey:\s*""/);
+    expect(src).toMatch(/piValue:\s*""/);
+    expect(src).toMatch(/piConditionEnabled:\s*false/);
+    expect(src).toMatch(/piConditionPattern:\s*""/);
+  });
+
+  it("customRuleKind routes prompt_injection to its own backend kind", () => {
+    expect(src).toMatch(
+      /draft\.conditionKind === "prompt_injection"\)\s*return "prompt_injection"/,
+    );
+  });
+
+  it("customRuleAction forces audit for prompt_injection (backend _LEGAL matrix)", () => {
+    expect(src).toMatch(
+      /draft\.conditionKind === "prompt_injection"\)\s*return "audit"/,
+    );
+  });
+
+  it("customRulePayload emits the on_user_prompt_submit shape (target=system_prompt)", () => {
+    expect(src).toMatch(
+      /draft\.lifecycle === "on_user_prompt_submit"[\s\S]*?mode: "append"[\s\S]*?target: "system_prompt"/,
+    );
+  });
+
+  it("customRulePayload emits the before_tool_use shape (target_arg_key + optional condition)", () => {
+    expect(src).toMatch(/target_arg_key: draft\.piTargetArgKey\.trim\(\)/);
+    expect(src).toMatch(/condition\.tool = draft\.toolName\.trim\(\)/);
+    expect(src).toMatch(/condition\.regex = draft\.piConditionPattern\.trim\(\)/);
+  });
+
+  it("conditionClause Review summary covers both prompt_injection surfaces", () => {
+    expect(src).toMatch(
+      /case "prompt_injection":[\s\S]*?on_user_prompt_submit"[\s\S]*?new system-prompt section/,
+    );
+    expect(src).toMatch(
+      /case "prompt_injection":[\s\S]*?append "\$\{draft\.piValue\}" to tool arg/,
+    );
   });
 });

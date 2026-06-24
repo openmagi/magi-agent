@@ -407,6 +407,72 @@ def _prompt_transform_hooks_enabled() -> bool:
     return flag_bool("MAGI_PROMPT_TRANSFORM_HOOKS_ENABLED")
 
 
+def _prompt_injection_enabled() -> bool:
+    """F-MUT1 triple-gate check for the on_user_prompt_submit section appender.
+
+    Returns ``True`` only when ``MAGI_CUSTOMIZE_PROMPT_INJECTION_ENABLED`` is
+    strict-truthy ON AND the two customize prerequisites
+    (``MAGI_CUSTOMIZE_VERIFICATION_ENABLED`` + ``MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED``)
+    resolve ON via the profile-aware reader. Fail-open: any import / read
+    error returns ``False`` so the OFF path stays byte-identical.
+    """
+    try:
+        from magi_agent.config.flags import (  # noqa: PLC0415
+            flag_bool,
+            flag_profile_bool,
+        )
+    except Exception:
+        return False
+    try:
+        return (
+            flag_bool("MAGI_CUSTOMIZE_PROMPT_INJECTION_ENABLED")
+            and flag_profile_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED")
+            and flag_profile_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED")
+        )
+    except Exception:
+        return False
+
+
+def _maybe_apply_prompt_injection_sections(sections: list[str]) -> list[str]:
+    """F-MUT1: append ``prompt_injection`` rule sections to *sections*.
+
+    Loads the persisted Customize overrides, builds a resolved
+    :class:`CustomizeVerificationPolicy`, and appends one section per enabled
+    ``prompt_injection`` rule with ``firesAt == "on_user_prompt_submit"`` and
+    ``target == "system_prompt"`` (mode=append, v1). Returns the input
+    unchanged when:
+
+    * the F-MUT1 master flag resolves OFF,
+    * no matching rules are authored,
+    * any error walks the customize-store / import chain (fail-open).
+
+    Pure / read-only / fail-open — a malformed rule never breaks prompt
+    assembly. The append happens AFTER the BEFORE_SYSTEM_PROMPT hook replace
+    branch so a hook-authored full replacement composes deterministically
+    with the rule-driven appends.
+    """
+    try:
+        if not _prompt_injection_enabled():
+            return sections
+        from magi_agent.customize.prompt_injection import (  # noqa: PLC0415
+            apply_prompt_injection_to_prompt_sections,
+        )
+        from magi_agent.customize.store import load_overrides  # noqa: PLC0415
+        from magi_agent.customize.verification_policy import (  # noqa: PLC0415
+            CustomizeVerificationPolicy,
+        )
+
+        policy = CustomizeVerificationPolicy.from_overrides(load_overrides())
+        rules = policy.enabled_prompt_injection_rules(
+            fires_at="on_user_prompt_submit"
+        )
+        if not rules:
+            return sections
+        return apply_prompt_injection_to_prompt_sections(sections, rules)
+    except Exception:  # noqa: BLE001 — fail-open
+        return sections
+
+
 def _available_subagent_models_block() -> str:
     """System-prompt block listing the routes a child spawn may target.
 
@@ -727,9 +793,17 @@ def _apply_prompt_transform(
     and a hook actually replaces sections, that prefix is mutated, which LOWERS
     the prompt-cache hit rate. When the flag is OFF this short-circuits and the
     prefix is byte-identical, so there is no cache regression.
+
+    F-MUT1: the ``prompt_injection`` mutator kind runs INDEPENDENTLY of the
+    BEFORE_SYSTEM_PROMPT HookBus, so even the OFF-hook / OFF-bus short-circuit
+    must consult F-MUT1 appended sections. See
+    :func:`_maybe_apply_prompt_injection_sections` — when the F-MUT1 flag is
+    OFF the helper returns its input unchanged (byte-identical) so the legacy
+    short-circuit path stays zero-cost. When F-MUT1 is ON the helper composes
+    appended sections regardless of the BEFORE_SYSTEM_PROMPT hook flag.
     """
     if not _prompt_transform_hooks_enabled() or hook_bus is None:
-        return sections
+        return _maybe_apply_prompt_injection_sections(list(sections))
 
     from magi_agent.harness.resolved import (
         build_default_resolved_harness_state,
@@ -792,6 +866,13 @@ def _apply_prompt_transform(
                     "promptTransform hook returned non-list[str] value; "
                     "failing safe to original sections"
                 )
+
+    # F-MUT1: append ``prompt_injection`` rule sections AFTER the HookBus
+    # replace branch so a hook-authored full replacement composes
+    # deterministically with rule-driven appends. The helper is a no-op when
+    # the F-MUT1 master flag is OFF, preserving the byte-identical OFF
+    # behavior.
+    transformed = _maybe_apply_prompt_injection_sections(transformed)
 
     final_sections = _reassert_protected_sections(transformed)
 
