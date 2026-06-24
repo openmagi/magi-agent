@@ -71,6 +71,15 @@ FIRES_AT = frozenset(
         # PR-F-UX1 Tier 2 — bus-emitted gates with new custom_rule paths.
         "on_user_prompt_submit",
         "on_subagent_stop",
+        # PR-F-LIFE1 Tier 2 — top-level turn-boundary gates. Wired in
+        # ``runtime/governed_turn.run_governed_turn`` (TOP for
+        # before_turn_start; ``finally`` block for after_turn_end). Both are
+        # audit-only by default for llm_criterion / deterministic_ref; the
+        # ``on_subagent_stop`` slot additionally accepts block / ask actions
+        # so an operator can author a "subagent must produce a summary"-style
+        # rule whose verdict the parent caller can act on.
+        "before_turn_start",
+        "after_turn_end",
     }
 )
 
@@ -106,7 +115,15 @@ def _validate_content_match(content_match: Any, fires_at: Any) -> list[str]:
 
 # Legal (kind -> firesAt -> allowed actions) matrix (spec §9.1 table).
 _LEGAL: dict[str, dict[str, frozenset[str]]] = {
-    "deterministic_ref": {"pre_final": frozenset({"block", "retry", "audit"})},
+    "deterministic_ref": {
+        "pre_final": frozenset({"block", "retry", "audit"}),
+        # PR-F-LIFE1 NOTE: before_turn_start / after_turn_end have a fan-out
+        # only for `llm_criterion` (see lifecycle_audit.run_before_turn_start_audit
+        # and run_after_turn_end_audit). Authoring `deterministic_ref` at those
+        # slots would be inert — the validator would accept the rule but the
+        # runtime has no consumer. Honest-degrade: omit until a runtime
+        # fan-out lands.
+    },
     "tool_perm": {"before_tool_use": frozenset({"block", "ask_approval"})},
     "llm_criterion": {
         "pre_final": frozenset({"block", "retry", "audit"}),
@@ -118,7 +135,21 @@ _LEGAL: dict[str, dict[str, frozenset[str]]] = {
         # audit-only: the criterion judge is invoked and the verdict recorded,
         # the surrounding runtime contract is unchanged.
         "on_user_prompt_submit": frozenset({"audit"}),
-        "on_subagent_stop": frozenset({"audit"}),
+        # PR-F-LIFE1 — ``on_subagent_stop`` validator accepts
+        # ``block`` / ``ask_approval`` IN ADDITION to ``audit`` so an operator
+        # can author a "subagent must produce a summary"-style rule. The audit
+        # fan-out still runs and the verdict is recorded.
+        # TODO(F-LIFE1 follow-up): the parent-surfacing wire (turn the verdict
+        # into a directive consumed by the SpawnAgent parent caller) is NOT
+        # built in this PR. Today the verdict is captured by the audit ledger
+        # but the parent does not act on a block/ask_approval action. This is
+        # authorability-lift-only; runtime surfacing arrives in a follow-up.
+        # ``audit`` stays the conservative honest action.
+        "on_subagent_stop": frozenset({"audit", "block", "ask_approval"}),
+        # PR-F-LIFE1 — audit-only at the new turn-boundary slots. See the
+        # deterministic_ref note above; the rationale matches.
+        "before_turn_start": frozenset({"audit"}),
+        "after_turn_end": frozenset({"audit"}),
     },
     # audit/retry deferred: runtime always blocks on a failed shacl record regardless
     # of the stored action, so promising audit/retry here is a false contract.

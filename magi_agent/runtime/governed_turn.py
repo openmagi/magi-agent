@@ -47,6 +47,13 @@ async def run_governed_turn(
     # map can never break a turn — see budgets_apply.apply_budgets_if_enabled.
     _maybe_apply_customize_budgets()
 
+    # PR-F-LIFE1: Tier 2 ``before_turn_start`` audit-only fan-out. Wired at
+    # the TOP of the canonical funnel, BEFORE the sibling F-UX1 fan-out so
+    # the two slot families fire in lifecycle order (turn-start → prompt-
+    # submit). Triple-gated + fail-open by lifecycle_audit; OFF path is
+    # byte-identical.
+    await _maybe_run_before_turn_start_audit(ctx)
+
     # PR-F-UX1: Tier 2 ``on_user_prompt_submit`` audit-only fan-out. Wired at
     # the TOP of the canonical CLI/serve/child funnel (BEFORE the engine
     # stream starts) so it runs on every real governed turn. Triple-gated +
@@ -72,18 +79,28 @@ async def run_governed_turn(
     # the parent / top-level turn path stays byte-identical and zero-cost.
     subagent_collector = _SubagentStopCollector.maybe_create(ctx)
 
+    # PR-F-LIFE1: Tier 2 ``after_turn_end`` final-text collector. Distinct
+    # from _SubagentStopCollector — this one ONLY fires for TOP-LEVEL turns
+    # (``ctx.depth == 0``), so the two collectors do not overlap. Both share
+    # the same response_clear / text_delta aggregation pattern.
+    turn_end_collector = _AfterTurnEndCollector.maybe_create(ctx)
+
     try:
         async for item in stream:
             if bookend is not None:
                 bookend.observe(item)
             if subagent_collector is not None:
                 subagent_collector.observe(item)
+            if turn_end_collector is not None:
+                turn_end_collector.observe(item)
             yield item
     finally:
         if bookend is not None:
             bookend.persist()
         if subagent_collector is not None:
             await subagent_collector.run_audit()
+        if turn_end_collector is not None:
+            await turn_end_collector.run_audit()
 
 
 class _BookendCollector:
@@ -310,6 +327,100 @@ class _SubagentStopCollector:
             )
 
             await run_subagent_stop_audit(
+                final_text=self._result_text,
+                model_factory=_build_lifecycle_critic_factory(),
+            )
+        except Exception:
+            return
+
+
+async def _maybe_run_before_turn_start_audit(ctx: TurnContext) -> None:
+    """PR-F-LIFE1 Tier 2 ``before_turn_start`` audit-only fan-out.
+
+    Invoked at the TOP of :func:`run_governed_turn`, BEFORE the sibling
+    ``on_user_prompt_submit`` fan-out so the two slot families fire in
+    lifecycle order. Triple-gated + fail-open via
+    :func:`lifecycle_turn_hooks_enabled`: bails silently when the F-LIFE1
+    master flag resolves OFF, when no matching rules are authored, or on any
+    exception. Never mutates ``ctx`` and never blocks turn execution — the
+    audit verdicts are recorded by the lifecycle_audit module and discarded
+    by this wire (a later PR will route them to a durable evidence sink).
+    """
+    try:
+        from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+            lifecycle_turn_hooks_enabled,
+            run_before_turn_start_audit,
+        )
+
+        if not lifecycle_turn_hooks_enabled():
+            return
+        await run_before_turn_start_audit(
+            prompt_text=ctx.prompt or "",
+            model_factory=_build_lifecycle_critic_factory(),
+        )
+    except Exception:
+        return
+
+
+class _AfterTurnEndCollector:
+    """PR-F-LIFE1 — accumulates the TOP-LEVEL turn's final assistant text off
+    the event stream and runs the ``after_turn_end`` audit fan-out at turn
+    end.
+
+    Mirrors :class:`_SubagentStopCollector` exactly, only inverted on the
+    ``ctx.depth`` axis: this collector is created ONLY for top-level turns
+    (``ctx.depth == 0``) when the F-LIFE1 master flag resolves ON, so the
+    sibling on_subagent_stop / after_turn_end fan-outs never overlap.
+    Fully fail-open: any observation or audit error is swallowed so a
+    governed turn never breaks because of audit bookkeeping.
+    """
+
+    __slots__ = ("_ctx", "_result_text")
+
+    def __init__(self, ctx: TurnContext) -> None:
+        self._ctx = ctx
+        self._result_text = ""
+
+    @classmethod
+    def maybe_create(cls, ctx: TurnContext) -> "_AfterTurnEndCollector | None":
+        # Only the TOP-LEVEL turn (depth == 0) emits after_turn_end. Child
+        # turns are covered by _SubagentStopCollector so the two slots stay
+        # disjoint.
+        if getattr(ctx, "depth", 0) > 0:
+            return None
+        try:
+            from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+                lifecycle_turn_hooks_enabled,
+            )
+
+            if not lifecycle_turn_hooks_enabled():
+                return None
+            return cls(ctx)
+        except Exception:
+            return None
+
+    def observe(self, item: object) -> None:
+        try:
+            payload = getattr(item, "payload", None)
+            if not isinstance(payload, dict):
+                return
+            kind = payload.get("type")
+            if kind == "response_clear":
+                self._result_text = ""
+            elif kind == "text_delta":
+                delta = payload.get("delta")
+                if isinstance(delta, str):
+                    self._result_text += delta
+        except Exception:
+            return
+
+    async def run_audit(self) -> None:
+        try:
+            from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+                run_after_turn_end_audit,
+            )
+
+            await run_after_turn_end_audit(
                 final_text=self._result_text,
                 model_factory=_build_lifecycle_critic_factory(),
             )
