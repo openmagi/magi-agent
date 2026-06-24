@@ -82,6 +82,8 @@ def test_partial_file_is_shape_normalized(tmp_path: Path) -> None:
         "modes": {},
         "custom_rules": [],
         "seam_specs": [],
+        # PR-F7 (2026-06-23): additive — operator-authored cost budgets.
+        "budgets": {},
     }
 
 

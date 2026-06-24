@@ -135,6 +135,8 @@ export interface CustomizeOverrides {
     custom_rules: CustomRule[];
     /** PR-C2 approved SeamSpec docs. Empty when the seam-spec flag is OFF or no spec has been saved yet. */
     seam_specs?: SeamSpecDoc[];
+    /** PR-F7 cost budgets. Keys: maxToolCallsPerTurn / maxStepsBrakeHard / loopGuardHardThreshold; values are positive integers. */
+    budgets?: VerificationBudgets;
   };
   tools: Record<string, boolean>;
   /** Free-text USER-RULES.md body injected into the system prompt. */
@@ -145,6 +147,37 @@ export interface CustomizeOverrides {
    * value wins over the lab/dogfood env seed.
    */
   control_plane: Record<string, boolean>;
+}
+
+/**
+ * PR-F7 — operator-authored per-bot cost budgets.
+ *
+ * Each value is a positive integer. The backend applier projects the dashboard
+ * save onto the live MAGI_* env at turn entry via ``setdefault``, so an
+ * explicit operator env (k8s / shell export / dogfood profile) always wins.
+ * The GET endpoint returns ``effectiveEnv`` so the dashboard can flag "your
+ * save is dormant because this env is pinned elsewhere".
+ */
+export interface VerificationBudgets {
+  /** -> MAGI_TOOL_MAX_CALLS_PER_TURN (default 64; range 1..4096) */
+  maxToolCallsPerTurn?: number;
+  /** -> MAGI_MAX_STEPS_BRAKE_HARD (sentinel; no numeric flag registered today) */
+  maxStepsBrakeHard?: number;
+  /** -> MAGI_LOOP_GUARD_HARD_THRESHOLD (default 5) */
+  loopGuardHardThreshold?: number;
+}
+
+/**
+ * Response shape from `GET /v1/app/customize/budgets`. The `effectiveEnv`
+ * mirror is keyed by the same logical budget names so the UI can show the
+ * resolved env value (or null when unset) right next to the input.
+ */
+export interface BudgetsResponse {
+  budgets: VerificationBudgets;
+  /** The currently-set MAGI_* env value for each budget (null when unset). */
+  effectiveEnv: { [K in keyof VerificationBudgets]?: string | null };
+  /** Static budget-name -> MAGI_* env-name vocabulary (so the UI does not hardcode it). */
+  envMap: Record<string, string>;
 }
 
 export interface CustomizeResponse {
@@ -740,4 +773,52 @@ export function useCustomize(): UseCustomizeResult {
   }, [agentFetch, reloadKey]);
 
   return { data, loading, error, reload };
+}
+
+
+// ---------------------------------------------------------------------------
+// PR-F7 — Customize budgets (cost vocabulary) API client
+// ---------------------------------------------------------------------------
+
+/**
+ * Loads the persisted budgets + the resolved env snapshot via
+ * `GET /v1/app/customize/budgets`. Throws on non-2xx so the budgets tab can
+ * surface a "could not load" error and the user retries; not fail-open
+ * because this is a settings-screen read where silent emptiness would
+ * obscure a misconfigured runtime.
+ */
+export async function getBudgets(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+): Promise<BudgetsResponse> {
+  const res = await fetch(`/v1/app/customize/budgets`);
+  if (!res.ok) throw new Error(`Failed to load budgets (${res.status})`);
+  return (await res.json()) as BudgetsResponse;
+}
+
+/**
+ * Persists a new budgets dict via `PUT /v1/app/customize/budgets`. Unknown
+ * keys / non-positive-int / boolean values are rejected by the server with
+ * 400; the thrown Error includes the joined details so the UI can surface
+ * "loopGuardHardThreshold: must be > 0 (got -1)" verbatim.
+ *
+ * Returns the post-save response (including the refreshed `effectiveEnv`) so
+ * the budgets tab can reflect the operator-env precedence immediately.
+ */
+export async function putBudgets(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  budgets: VerificationBudgets,
+): Promise<BudgetsResponse> {
+  const res = await fetch(`/v1/app/customize/budgets`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ budgets }),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    const msg = Array.isArray(detail?.details)
+      ? detail.details.join("; ")
+      : `(${res.status})`;
+    throw new Error(`Failed to save budgets ${msg}`);
+  }
+  return (await res.json()) as BudgetsResponse;
 }

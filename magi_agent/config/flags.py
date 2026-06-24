@@ -1182,6 +1182,23 @@ FLAGS: tuple[FlagSpec, ...] = (
         scope="public",
         stage="stage2",
     ),
+    _b(
+        "MAGI_CUSTOMIZE_BUDGETS_ENABLED",
+        summary=(
+            "PR-F7 cost-vocabulary applier: project operator-authored Customize "
+            "``verification.budgets`` (maxToolCallsPerTurn / maxStepsBrakeHard / "
+            "loopGuardHardThreshold) onto the live MAGI_* env at turn entry via "
+            "``setdefault`` so an explicit operator env (k8s / shell export / "
+            "dogfood profile) always wins. Triple-gated with "
+            "MAGI_CUSTOMIZE_VERIFICATION_ENABLED + "
+            "MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED. With no budgets authored the "
+            "runtime is byte-identical (the applier is a no-op). Strict "
+            "default-OFF; the proper ``budget_constraint`` primitive (scope/"
+            "turn-type aware) will subsume this in a future series."
+        ),
+        scope="public",
+        stage="stage2",
+    ),
     # --- Resilience controls ------------------------------------------------
     # Profile-aware default-ON (env._runtime_feature_enabled): ON in the full
     # runtime profile, OFF under MAGI_RUNTIME_PROFILE=safe|eval.
