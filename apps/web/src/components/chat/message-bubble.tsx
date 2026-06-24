@@ -19,7 +19,6 @@ import {
   stripAssistantMetadataPreamble,
   stripStreamingAssistantMetadataPreamble,
 } from "@/chat-core";
-import { collapseLiveSoftWraps } from "@/chat-core";
 import type {
   InspectedSource,
   ReplyTo,
@@ -608,25 +607,18 @@ function InlineLiveTranscript({
       {displayItems.map((item, index) => {
         const displayContent = item.displayContent ?? item.content;
         if (!displayContent) return null;
-        const renderPlainLiveText = isStreaming;
         return (
           <div
             key={item.id}
-            className={renderPlainLiveText
-              ? "whitespace-pre-wrap text-sm leading-relaxed [overflow-wrap:break-word] [word-break:keep-all]"
-              : "prose-chat"}
+            className="prose-chat"
             data-chat-live-transcript-item="text"
           >
-            {renderPlainLiveText ? (
-              collapseLiveSoftWraps(displayContent)
-            ) : (
-              <ReactMarkdown
-                remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath]}
-                rehypePlugins={[rehypeKatex]}
-              >
-                {displayContent}
-              </ReactMarkdown>
-            )}
+            <ReactMarkdown
+              remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath]}
+              rehypePlugins={[rehypeKatex]}
+            >
+              {displayContent}
+            </ReactMarkdown>
             {isStreaming && index === lastTextIndex && (
               <span className="ml-0.5 inline-block h-3.5 w-[3px] animate-pulse rounded-full bg-foreground/40 align-middle" />
             )}
@@ -893,10 +885,6 @@ export function MessageBubble({ role, content, timestamp, isStreaming, inlineBef
             </p>
           ) : !isUser && hasLiveTranscriptItems ? (
             <InlineLiveTranscript items={liveTranscriptItems} isStreaming={isStreaming} />
-          ) : !isUser && isStreaming && hasDisplayContent ? (
-            <p className="whitespace-pre-wrap text-sm leading-relaxed [overflow-wrap:break-word] [word-break:keep-all]">
-              {collapseLiveSoftWraps(displayContent)}
-            </p>
           ) : !isUser && hasDisplayContent ? (
             <div className="prose-chat">
               <ReactMarkdown
@@ -945,8 +933,11 @@ export function MessageBubble({ role, content, timestamp, isStreaming, inlineBef
                   } : {}),
                 }}
               >
-                {displayContent}
+                {isStreaming ? displayContentWithoutCursor : displayContent}
               </ReactMarkdown>
+              {isStreaming && (
+                <span className="ml-0.5 inline-block h-3.5 w-[3px] animate-pulse rounded-full bg-foreground/40 align-middle" />
+              )}
             </div>
           ) : null}
           {!isUser && inlineAfterContent}
