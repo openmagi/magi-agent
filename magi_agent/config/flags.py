@@ -918,30 +918,6 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
-        "MAGI_CUSTOMIZE_LIFECYCLE_TURN_HOOKS_ENABLED",
-        stage="stage2",
-        summary=(
-            "PR-F-LIFE1 Tier 2 lifecycle expansion (turn boundaries): "
-            "activate the two new audit-only custom_rule gate sites — "
-            "before_turn_start (wired at the TOP of "
-            "runtime/governed_turn.run_governed_turn, BEFORE the engine "
-            "stream is started) and after_turn_end (wired in the same "
-            "function's ``finally`` block alongside the existing "
-            "on_subagent_stop collector). Both fan-outs invoke the "
-            "existing llm_criterion judge per matching rule and record "
-            "audit verdicts only by default; the backend ``_LEGAL`` "
-            "matrix additionally exposes "
-            "(llm_criterion, on_subagent_stop, block|ask) so an operator "
-            "can author 'subagent must produce a summary'-style rules "
-            "whose verdict the parent caller can act on. Triple-gated "
-            "with MAGI_CUSTOMIZE_VERIFICATION_ENABLED + "
-            "MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED; fail-open on any "
-            "customize-store fault. With no before_turn_start / "
-            "after_turn_end rules authored, runtime stays byte-identical "
-            "(the new fan-outs are no-ops). Strict default-OFF."
-        ),
-    ),
-    _b(
         "MAGI_CUSTOMIZE_PROMPT_INJECTION_ENABLED",
         stage="stage2",
         summary=(
@@ -960,27 +936,6 @@ FLAGS: tuple[FlagSpec, ...] = (
             "MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED; fail-open on any "
             "customize-store fault so a broken overrides file never breaks a "
             "turn. With no prompt_injection rules authored, runtime stays "
-            "byte-identical (the new wires are a no-op). Strict default-OFF."
-        ),
-    ),
-    _b(
-        "MAGI_CUSTOMIZE_OUTPUT_REWRITE_ENABLED",
-        stage="stage2",
-        summary=(
-            "PR-F-MUT2: activate the ``output_rewrite`` custom_rule kind. "
-            "When ON the runtime applies enabled output_rewrite rules at the "
-            "``after_tool_use`` lifecycle slot, rewriting the dispatched "
-            "ToolResult's output text BEFORE the model reads it. v1 ships a "
-            "single ``redact`` mode (re.sub(pattern, replacement, text)) with "
-            "optional toolMatch include/exclude filters; ``summarize`` and "
-            "``replace`` modes are deferred to v2 with an admin-tier flag. "
-            "Wired in magi_agent/facades.py:execute_tool_with_hooks after the "
-            "AFTER_TOOL_USE hook's typed replace consumer (parallel to the "
-            "F-MUT1 BEFORE_TOOL_USE consumer). Triple-gated with "
-            "MAGI_CUSTOMIZE_VERIFICATION_ENABLED + "
-            "MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED; fail-open on any "
-            "customize-store fault so a broken overrides file never breaks a "
-            "turn. With no output_rewrite rules authored, runtime stays "
             "byte-identical (the new wires are a no-op). Strict default-OFF."
         ),
     ),
