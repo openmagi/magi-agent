@@ -36,10 +36,13 @@ DEFAULT_DATA: dict[str, Any] = {"credentials": []}
 
 def credentials_path() -> Path:
     """Locate credentials.json beside the runtime config (env-overridable)."""
-    override = os.environ.get("MAGI_CREDENTIALS")
+    # I-4: routed through the typed flag registry.
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    override = flag_str("MAGI_CREDENTIALS") or None
     if override:
         return Path(override)
-    config = os.environ.get("MAGI_CONFIG")
+    config = flag_str("MAGI_CONFIG") or None
     if config:
         return Path(config).parent / "credentials.json"
     return Path.home() / ".magi" / "credentials.json"

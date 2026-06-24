@@ -2192,6 +2192,32 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
+    # --- Credentials store paths (I-4 batch 14) -----------------------------
+    FlagSpec(
+        name="MAGI_CREDENTIALS",
+        default="",
+        scope="public",
+        stage="stage2",
+        summary=(
+            "Explicit path to the credentials.json store. Empty falls "
+            "back to ``<MAGI_CONFIG>'s dir>/credentials.json`` or "
+            "``~/.magi/credentials.json``."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_CREDENTIAL_APPROVALS",
+        default="",
+        scope="public",
+        stage="stage2",
+        summary=(
+            "Explicit path to the credential approvals.json store. "
+            "Empty falls back to ``<MAGI_CONFIG>'s "
+            "dir>/credential_approvals.json`` or "
+            "``~/.magi/credential_approvals.json``."
+        ),
+        kind="str",
+    ),
 )
 
 
