@@ -307,9 +307,30 @@ def test_llm_criterion_block_at_on_user_prompt_submit_rejected():
     assert any("on_user_prompt_submit" in e and "audit" in e for e in errs), errs
 
 
-def test_llm_criterion_block_at_on_subagent_stop_rejected():
-    """Block at Tier 2 slot is rejected: audit-only matrix entry."""
+def test_llm_criterion_block_at_on_subagent_stop_accepted():
+    """PR-F-LIFE1 — ``on_subagent_stop`` is lifted past audit-only: the
+    backend ``_LEGAL`` matrix now accepts (llm_criterion ×
+    on_subagent_stop × block) so an operator can author a "subagent must
+    produce a summary"-style rule whose failed verdict is a directive to
+    the PARENT caller. ``audit`` remains valid for the conservative case.
+    """
     rule = _llm(firesAt="on_subagent_stop", action="block")
+    assert validate_custom_rule(rule) == []
+
+
+def test_llm_criterion_ask_at_on_subagent_stop_accepted():
+    """PR-F-LIFE1 — ``ask_approval`` joins ``block`` + ``audit`` at the
+    ``on_subagent_stop`` slot for the same reason (the verb is a directive
+    to the parent caller, not a mutation of the already-emitted child
+    output)."""
+    rule = _llm(firesAt="on_subagent_stop", action="ask_approval")
+    assert validate_custom_rule(rule) == []
+
+
+def test_llm_criterion_retry_at_on_subagent_stop_still_rejected():
+    """PR-F-LIFE1 leaves ``retry`` out of the lift — retry has no honest
+    runtime mapping after the child output has already been emitted."""
+    rule = _llm(firesAt="on_subagent_stop", action="retry")
     errs = validate_custom_rule(rule)
     assert any("on_subagent_stop" in e and "audit" in e for e in errs), errs
 
@@ -333,3 +354,73 @@ def test_tier2_firesat_slots_listed_in_FIRES_AT():
 
     assert "on_user_prompt_submit" in FIRES_AT
     assert "on_subagent_stop" in FIRES_AT
+
+
+# ---------------------------------------------------------------------------
+# PR-F-LIFE1 — top-level turn-boundary slots. Validate that both
+# before_turn_start and after_turn_end accept (llm_criterion + audit) and
+# (deterministic_ref + audit), and reject non-audit actions / other kinds.
+# Wired in magi_agent/runtime/governed_turn.run_governed_turn via
+# magi_agent.customize.lifecycle_audit.{run_before_turn_start_audit,
+# run_after_turn_end_audit}.
+# ---------------------------------------------------------------------------
+
+
+def test_llm_criterion_audit_at_before_turn_start_accepted():
+    rule = _llm(firesAt="before_turn_start", action="audit")
+    assert validate_custom_rule(rule) == []
+
+
+def test_llm_criterion_audit_at_after_turn_end_accepted():
+    rule = _llm(firesAt="after_turn_end", action="audit")
+    assert validate_custom_rule(rule) == []
+
+
+def test_deterministic_ref_at_before_turn_start_rejected_no_runtime_fanout():
+    """deterministic_ref has no fan-out at the turn-boundary slots; the
+    validator must reject so operators do not persist inert rules.
+    (Review pass on PR-F-LIFE1 dropped this from _LEGAL — only
+    llm_criterion has a real lifecycle_audit fan-out at these slots.)"""
+    rule = _det(firesAt="before_turn_start", action="audit")
+    errs = validate_custom_rule(rule)
+    assert any("before_turn_start" in e for e in errs), errs
+
+
+def test_deterministic_ref_at_after_turn_end_rejected_no_runtime_fanout():
+    rule = _det(firesAt="after_turn_end", action="audit")
+    errs = validate_custom_rule(rule)
+    assert any("after_turn_end" in e for e in errs), errs
+
+
+def test_llm_criterion_block_at_before_turn_start_rejected():
+    """Block at top-level turn entry would require a runtime contract change
+    (engine stream has not started yet) — keep wire audit-only."""
+    rule = _llm(firesAt="before_turn_start", action="block")
+    errs = validate_custom_rule(rule)
+    assert any("before_turn_start" in e and "audit" in e for e in errs), errs
+
+
+def test_llm_criterion_block_at_after_turn_end_rejected():
+    """Block at top-level turn end has no honest target (emission already
+    completed) — keep wire audit-only."""
+    rule = _llm(firesAt="after_turn_end", action="block")
+    errs = validate_custom_rule(rule)
+    assert any("after_turn_end" in e and "audit" in e for e in errs), errs
+
+
+def test_tool_perm_at_before_turn_start_rejected():
+    """tool_perm has no honest mapping at a turn-boundary slot (no tool
+    invocation is in flight)."""
+    rule = _tool(firesAt="before_turn_start", action="block")
+    errs = validate_custom_rule(rule)
+    assert any("before_turn_start" in e for e in errs), errs
+
+
+def test_life1_firesat_slots_listed_in_FIRES_AT():
+    """Guard against drift — both turn-boundary slots must be members of
+    FIRES_AT so the validator's ``firesAt must be one of …`` check
+    accepts them."""
+    from magi_agent.customize.custom_rules import FIRES_AT
+
+    assert "before_turn_start" in FIRES_AT
+    assert "after_turn_end" in FIRES_AT

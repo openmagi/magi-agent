@@ -98,7 +98,17 @@ type Lifecycle =
   // PR-F-UX1 Tier 2 — bus-emitted gates with custom_rule paths wired in
   // magi_agent.customize.lifecycle_audit (audit-only, llm_criterion only).
   | "on_user_prompt_submit"
-  | "on_subagent_stop";
+  | "on_subagent_stop"
+  // PR-F-LIFE1 Tier 2 — top-level turn-boundary gates. Fan-outs live in
+  // magi_agent.customize.lifecycle_audit (run_before_turn_start_audit +
+  // run_after_turn_end_audit) and are wired into
+  // magi_agent.runtime.governed_turn so every top-level governed turn
+  // emits both. Default conservative path is audit-only; the backend
+  // ``_LEGAL`` matrix additionally exposes block/ask on on_subagent_stop
+  // so an operator can author a "subagent must produce a summary"-style
+  // rule whose verdict the parent caller can act on.
+  | "before_turn_start"
+  | "after_turn_end";
 type Scope = "always" | "coding" | "research" | "delivery" | "memory" | "task";
 // PR-F-MUT3 — "mutate" is a friendly grouping archetype that surfaces the
 // two mutator conditionKinds (prompt_injection + output_rewrite) as a
@@ -289,6 +299,12 @@ function stepPlan(lifecycle: Lifecycle): StepKey[] {
   if (lifecycle === "on_user_prompt_submit" || lifecycle === "on_subagent_stop") {
     return ["trigger", "condition", "specifics", "action", "name", "review"];
   }
+  // PR-F-LIFE1 Tier 2 — turn-boundary slots also fire OUTSIDE the tool
+  // boundary (before the engine stream starts / after it has completed), so
+  // they have no tool target axis. Same step shape as pre_final.
+  if (lifecycle === "before_turn_start" || lifecycle === "after_turn_end") {
+    return ["trigger", "condition", "specifics", "action", "name", "review"];
+  }
   // Tool-bearing lifecycles (before_tool_use / after_tool_use): tool target
   // sub-fieldset renders inside TriggerStep, not as a separate step.
   return ["trigger", "condition", "specifics", "action", "name", "review"];
@@ -334,6 +350,9 @@ export function AuthorWizard({
       merged.lifecycle === "pre_final"
       || merged.lifecycle === "on_user_prompt_submit"
       || merged.lifecycle === "on_subagent_stop"
+      // PR-F-LIFE1 — turn-boundary slots have no tool axis.
+      || merged.lifecycle === "before_turn_start"
+      || merged.lifecycle === "after_turn_end"
     ) {
       merged.toolTarget = "any";
       merged.toolName = "";
@@ -580,9 +599,24 @@ const LIFECYCLE_OPTIONS: ReadonlyArray<LifecycleOption> = [
   },
   {
     id: "on_subagent_stop",
-    label: "When a subagent finishes a turn (audit-only)",
+    label: "When a subagent finishes a turn",
     description:
-      "Fires at AFTER_TURN_END — adjacent to the child-runner's turn-end callback. Audit-only: the child output has already been emitted, so blocks aren't honest at this slot.",
+      "Fires after a spawned child agent's turn completes. Audit-only by default; block / ask actions are now accepted so an operator can require the child to produce a summary the parent caller can act on.",
+    tier: "tier2",
+  },
+  // --- Tier 2 — wired in PR-F-LIFE1, audit-only ----------------------------
+  {
+    id: "before_turn_start",
+    label: "When a top-level turn starts (audit-only)",
+    description:
+      "Fires once per top-level turn before the engine stream starts — use for session-level checks (rare). Audit-only: records the criterion verdict without mutating the inbound prompt or blocking the turn.",
+    tier: "tier2",
+  },
+  {
+    id: "after_turn_end",
+    label: "When a top-level turn ends (audit-only)",
+    description:
+      "Fires once per top-level turn after the engine stream completes — use for session-level checks (rare). Audit-only: the top-level emission has already completed, so blocks aren't honest at this slot.",
     tier: "tier2",
   },
   // --- Tier 3 — visible but disabled (file hook only) ----------------------
@@ -812,6 +846,17 @@ function availableConditionKinds(
     return ["llm_criterion", "prompt_injection"];
   }
   if (lifecycle === "on_subagent_stop") {
+    return ["llm_criterion"];
+  }
+  // PR-F-LIFE1 Tier 2 — turn-boundary slots accept ``llm_criterion`` only.
+  // evidence_ref / verifier_passed compile to ``deterministic_ref``, which
+  // has no runtime fan-out at the turn-boundary slots (see custom_rules.py
+  // _LEGAL). Exposing them in the wizard would let the operator persist a
+  // rule the runtime cannot honor. Mutator kinds (prompt_injection /
+  // output_rewrite) are NOT exposed at turn boundaries in v1 because there
+  // is no honest mutation target at top-level turn entry (engine has not
+  // started) or exit (the emission has already completed).
+  if (lifecycle === "before_turn_start" || lifecycle === "after_turn_end") {
     return ["llm_criterion"];
   }
   // pre_final has no tool layer; target is ignored.
@@ -1927,7 +1972,21 @@ function availableArchetypes(lifecycle: Lifecycle): Archetype[] {
   if (lifecycle === "on_user_prompt_submit") {
     return ["audit", "mutate"];
   }
+  // PR-F-LIFE1 — ``on_subagent_stop`` is lifted past audit-only: the
+  // backend ``_LEGAL`` matrix now accepts (llm_criterion × on_subagent_stop
+  // × {audit, block, ask}). Block / ask are directives to the PARENT
+  // caller (the child output has already been emitted, so the wizard reads
+  // the verb as "tell the parent the subagent failed the criterion"). The
+  // audit row is still recorded in either case.
   if (lifecycle === "on_subagent_stop") {
+    return ["block", "ask", "audit"];
+  }
+  // PR-F-LIFE1 — both turn-boundary slots stay audit-only at the wizard
+  // (matches the backend ``_LEGAL`` entries). Block at top-level turn entry
+  // would require a runtime contract change (the engine stream has not
+  // started yet) and at top-level turn end the emission has already
+  // completed, so the conservative wire is audit-only.
+  if (lifecycle === "before_turn_start" || lifecycle === "after_turn_end") {
     return ["audit"];
   }
   return ["block", "ask", "audit"];
@@ -2060,6 +2119,13 @@ function targetEventPhrase(draft: Draft): string {
   }
   if (draft.lifecycle === "on_subagent_stop") {
     return "When a subagent finishes a turn";
+  }
+  // PR-F-LIFE1 Tier 2 — turn-boundary lifecycle phrasing.
+  if (draft.lifecycle === "before_turn_start") {
+    return "When a top-level turn starts";
+  }
+  if (draft.lifecycle === "after_turn_end") {
+    return "When a top-level turn ends";
   }
   if (draft.lifecycle === "before_tool_use") {
     return draft.toolTarget === "specific"
@@ -2208,7 +2274,10 @@ function ReviewStep({
           <dd>{draft.scope} · {draft.lifecycle}</dd>
           {draft.lifecycle !== "pre_final"
             && draft.lifecycle !== "on_user_prompt_submit"
-            && draft.lifecycle !== "on_subagent_stop" ? (
+            && draft.lifecycle !== "on_subagent_stop"
+            // PR-F-LIFE1 — turn-boundary lifecycles have no tool layer.
+            && draft.lifecycle !== "before_turn_start"
+            && draft.lifecycle !== "after_turn_end" ? (
             <>
               <dt className="text-secondary">Target</dt>
               <dd>{draft.toolTarget === "any" ? "any tool" : draft.toolName || "(unnamed tool)"}</dd>
@@ -2253,6 +2322,13 @@ function whenForLifecycle(draft: Draft): string {
   }
   if (draft.lifecycle === "on_subagent_stop") {
     return "When a subagent finishes a turn";
+  }
+  // PR-F-LIFE1 Tier 2 — describe the two new turn-boundary lifecycle slots.
+  if (draft.lifecycle === "before_turn_start") {
+    return "When a top-level turn starts";
+  }
+  if (draft.lifecycle === "after_turn_end") {
+    return "When a top-level turn ends";
   }
   if (draft.lifecycle === "before_tool_use") {
     return draft.toolTarget === "specific"

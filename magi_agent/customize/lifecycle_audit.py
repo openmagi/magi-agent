@@ -74,6 +74,29 @@ def lifecycle_expansion_enabled(env: dict[str, str] | None = None) -> bool:
         return False
 
 
+def lifecycle_turn_hooks_enabled(env: dict[str, str] | None = None) -> bool:
+    """PR-F-LIFE1 triple-gate check for the turn-boundary fan-outs.
+
+    Mirrors :func:`lifecycle_expansion_enabled` but keys on the F-LIFE1 master
+    switch ``MAGI_CUSTOMIZE_LIFECYCLE_TURN_HOOKS_ENABLED`` so the two slot
+    families (Tier 2 prompt/subagent vs Tier 2 turn boundary) can be staged
+    independently. Fail-open: any import error returns ``False`` so the call
+    site stays a no-op when the flag layer cannot be read.
+    """
+    try:
+        from magi_agent.config.flags import flag_bool, flag_profile_bool  # noqa: PLC0415
+    except Exception:
+        return False
+    try:
+        return (
+            flag_bool("MAGI_CUSTOMIZE_LIFECYCLE_TURN_HOOKS_ENABLED", env=env)
+            and flag_profile_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", env=env)
+            and flag_profile_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", env=env)
+        )
+    except Exception:
+        return False
+
+
 def _default_policy_loader() -> Any:
     from magi_agent.customize.store import load_overrides  # noqa: PLC0415
     from magi_agent.customize.verification_policy import (  # noqa: PLC0415
@@ -229,9 +252,95 @@ async def run_subagent_stop_audit(
     return audits
 
 
+async def run_before_turn_start_audit(
+    *,
+    prompt_text: str,
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> list[AuditRecord]:
+    """PR-F-LIFE1 audit fan-out for ``firesAt == "before_turn_start"``.
+
+    Called at the TOP of :func:`magi_agent.runtime.governed_turn.run_governed_turn`
+    (the canonical CLI/serve/child funnel), BEFORE the engine stream starts
+    AND BEFORE the sibling ``run_user_prompt_submit_audit`` fan-out. The
+    inbound user prompt text is threaded in as ``prompt_text`` so the
+    criterion judge has a draft to evaluate at top-level turn entry.
+    Returns the per-rule audit list (empty when the flag is OFF, when no
+    rules are authored, or on any fail-open path). Never mutates
+    ``prompt_text`` and never blocks turn execution.
+    """
+    if not lifecycle_turn_hooks_enabled(env=env):
+        return []
+    try:
+        loader = policy_loader or _default_policy_loader
+        policy = loader()
+        rules = policy.enabled_llm_criterion_rules(fires_at="before_turn_start")
+    except Exception:
+        return []
+    if not rules:
+        return []
+    audits: list[AuditRecord] = []
+    for rule in rules:
+        audit = await _audit_one_rule(
+            rule,
+            draft_text=prompt_text,
+            model_factory=model_factory,
+            invoke=invoke,
+        )
+        audits.append(audit)
+    return audits
+
+
+async def run_after_turn_end_audit(
+    *,
+    final_text: str,
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> list[AuditRecord]:
+    """PR-F-LIFE1 audit fan-out for ``firesAt == "after_turn_end"``.
+
+    Called at the END of :func:`magi_agent.runtime.governed_turn.run_governed_turn`
+    (the canonical funnel) on the top-level turn boundary — distinct from
+    :func:`run_subagent_stop_audit`, which only fires for child turns
+    (``ctx.depth > 0``). The top-level turn's final assistant text is
+    collected off the event stream by the governed_turn wire and threaded in
+    as ``final_text``. Returns the per-rule audit list (empty when the flag
+    is OFF, when no rules are authored, when ``final_text`` is empty, or on
+    any fail-open path). Audit-only — the top-level emission has already
+    completed by the time this fan-out runs.
+    """
+    if not lifecycle_turn_hooks_enabled(env=env):
+        return []
+    try:
+        loader = policy_loader or _default_policy_loader
+        policy = loader()
+        rules = policy.enabled_llm_criterion_rules(fires_at="after_turn_end")
+    except Exception:
+        return []
+    if not rules:
+        return []
+    audits: list[AuditRecord] = []
+    for rule in rules:
+        audit = await _audit_one_rule(
+            rule,
+            draft_text=final_text,
+            model_factory=model_factory,
+            invoke=invoke,
+        )
+        audits.append(audit)
+    return audits
+
+
 __all__ = [
     "AuditRecord",
     "lifecycle_expansion_enabled",
+    "lifecycle_turn_hooks_enabled",
     "run_user_prompt_submit_audit",
     "run_subagent_stop_audit",
+    "run_before_turn_start_audit",
+    "run_after_turn_end_audit",
 ]

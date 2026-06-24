@@ -927,16 +927,15 @@ describe("AuthorWizard — PR-F-UX1 lifecycle audit + Tier 2 expansion", () => {
     );
   });
 
-  it("availableArchetypes(on_subagent_stop) returns ONLY audit", () => {
-    // Mirrors the backend matrix: block/retry would change the surrounding
-    // runtime contract (already-emitted child output cannot be mutated
-    // without violating the audit-only invariant) and is deferred to a
-    // later PR. PR-F-MUT3 splits the on_user_prompt_submit case out
-    // because the prompt_injection (system-prompt section append) mutator
-    // is wired there — the operator picks "mutate" via the Inject /
-    // Rewrite card.
+  it("availableArchetypes(on_subagent_stop) is lifted to [block, ask, audit] (PR-F-LIFE1)", () => {
+    // PR-F-LIFE1 lifts ``on_subagent_stop`` past audit-only — the backend
+    // ``_LEGAL`` matrix now accepts (llm_criterion × on_subagent_stop ×
+    // {audit, block, ask_approval}). The block / ask verbs are directives
+    // to the PARENT caller (the child output has already been emitted),
+    // not a mutation of the already-emitted output. The audit row is
+    // recorded in either case.
     expect(src).toMatch(
-      /lifecycle === "on_subagent_stop"\) \{[\s\S]*?return \["audit"\]/,
+      /lifecycle === "on_subagent_stop"\) \{[\s\S]*?return \["block", "ask", "audit"\]/,
     );
   });
 
@@ -963,9 +962,94 @@ describe("AuthorWizard — PR-F-UX1 lifecycle audit + Tier 2 expansion", () => {
   it("Review step skips the Target row for both new lifecycles", () => {
     // The Target row is tool-bearing-only; the two Tier 2 slots have no
     // tool axis so the row would render "(unnamed tool)" which is a lie.
+    // PR-F-LIFE1 adds the two turn-boundary slots to the same skip set.
     expect(src).toMatch(
-      /lifecycle !== "pre_final"[\s\S]*?lifecycle !== "on_user_prompt_submit"[\s\S]*?lifecycle !== "on_subagent_stop"[\s\S]*?Target/,
+      /lifecycle !== "pre_final"[\s\S]*?lifecycle !== "on_user_prompt_submit"[\s\S]*?lifecycle !== "on_subagent_stop"[\s\S]*?lifecycle !== "before_turn_start"[\s\S]*?lifecycle !== "after_turn_end"[\s\S]*?Target/,
     );
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// PR-F-LIFE1 — turn-boundary lifecycle expansion. Backend matrix in
+// magi_agent/customize/custom_rules.py restricts the two new firesAt slots
+// (before_turn_start + after_turn_end) to (llm_criterion + audit) and
+// (deterministic_ref + audit); the wizard mirrors that restriction so an
+// operator cannot assemble a draft the backend rejects. PR-F-LIFE1 also
+// lifts on_subagent_stop to additionally accept block + ask.
+// ---------------------------------------------------------------------------
+
+
+describe("AuthorWizard — PR-F-LIFE1 turn-boundary lifecycle expansion", () => {
+  it("Lifecycle union gains before_turn_start + after_turn_end", () => {
+    expect(src).toMatch(/type Lifecycle[\s\S]*?\| "before_turn_start"/);
+    expect(src).toMatch(/type Lifecycle[\s\S]*?\| "after_turn_end"/);
+  });
+
+  it("LIFECYCLE_OPTIONS lists the two new turn-boundary slots as Tier 2", () => {
+    // Both slots ride on top of the existing run_governed_turn funnel —
+    // active wire, not a Tier 3 file-hook-only entry.
+    expect(src).toMatch(/id: "before_turn_start"[\s\S]*?tier: "tier2"/);
+    expect(src).toMatch(/id: "after_turn_end"[\s\S]*?tier: "tier2"/);
+  });
+
+  it("LIFECYCLE_OPTIONS describes the turn-boundary slots as audit-only", () => {
+    // Backend ``_LEGAL`` matrix entries restrict both turn-boundary slots
+    // to audit; the friendly label must telegraph that contract so the
+    // operator sees up-front that block isn't an option here.
+    expect(src).toMatch(
+      /id: "before_turn_start"[\s\S]*?\(audit-only\)/,
+    );
+    expect(src).toMatch(
+      /id: "after_turn_end"[\s\S]*?\(audit-only\)/,
+    );
+  });
+
+  it("stepPlan(turn-boundary) drops the target step (6-step plan)", () => {
+    // Turn-boundary slots fire OUTSIDE the tool boundary so they have no
+    // tool target axis — same step shape as pre_final / the other Tier 2
+    // slots.
+    expect(src).toMatch(
+      /lifecycle === "before_turn_start" \|\| lifecycle === "after_turn_end"[\s\S]*?\["trigger", "condition", "specifics", "action", "name", "review"\]/,
+    );
+  });
+
+  it("availableConditionKinds(turn-boundary) returns the conservative set", () => {
+    // Backend ``_LEGAL`` has fan-out only for llm_criterion at the new
+    // turn-boundary slots. deterministic_ref (which evidence_ref /
+    // verifier_passed compile to) was dropped from _LEGAL during the
+    // F-LIFE1 review pass because there is no runtime consumer — exposing
+    // it would have let the operator persist an inert rule. Mutator kinds
+    // (prompt_injection / output_rewrite) are also NOT exposed — no honest
+    // mutation target at top-level turn entry / exit.
+    expect(src).toMatch(
+      /lifecycle === "before_turn_start" \|\| lifecycle === "after_turn_end"[\s\S]*?return \["llm_criterion"\]/,
+    );
+  });
+
+  it("availableArchetypes(turn-boundary) returns ONLY audit", () => {
+    // Mirrors the backend matrix entries
+    // (llm_criterion × before_turn_start × {audit}) /
+    // (llm_criterion × after_turn_end × {audit}). Block / ask are deferred
+    // (no honest runtime target at top-level boundaries).
+    expect(src).toMatch(
+      /lifecycle === "before_turn_start" \|\| lifecycle === "after_turn_end"\) \{[\s\S]*?return \["audit"\]/,
+    );
+  });
+
+  it("reseedDownstream forces toolTarget=any for the turn-boundary lifecycles", () => {
+    // Turn-boundary slots have no tool layer; a stale "specific" pick must
+    // not bleed into payloads / Review summaries.
+    expect(src).toMatch(
+      /merged\.lifecycle === "before_turn_start"[\s\S]*?merged\.lifecycle === "after_turn_end"[\s\S]*?merged\.toolTarget = "any"/,
+    );
+  });
+
+  it("targetEventPhrase + whenForLifecycle describe both turn-boundary slots in plain English", () => {
+    // The Review step's sentence and the ArchetypeStep header must stay
+    // honest when the operator picks a turn-boundary slot.
+    expect(src).toContain('"When a top-level turn starts"');
+    expect(src).toContain('"When a top-level turn ends"');
   });
 });
 
