@@ -121,7 +121,10 @@ def _build_live_child_runner_from_env() -> object | None:
             resolve_child_toolset_profile,
         )
 
-        workspace_root = os.environ.get("MAGI_AGENT_WORKSPACE") or None
+        # I-4: routed through the typed flag registry.
+        from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+        workspace_root = flag_str("MAGI_AGENT_WORKSPACE") or None
         return live_mod.RealLocalChildRunner(
             toolset_profile=resolve_child_toolset_profile(),
             workspace_root=workspace_root,

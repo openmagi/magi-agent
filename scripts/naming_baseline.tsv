@@ -89,6 +89,7 @@ openmagi	magi_agent/cli/tool_runtime.py	1
 openmagi	magi_agent/cli/wiring.py	2
 openmagi	magi_agent/composio/config.py	1
 openmagi	magi_agent/config/env.py	3
+openmagi	magi_agent/config/flags.py	1
 openmagi	magi_agent/config/models.py	1
 openmagi	magi_agent/connectors/credential_lease.py	6
 openmagi	magi_agent/connectors/marketplace.py	6

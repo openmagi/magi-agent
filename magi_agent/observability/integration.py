@@ -16,7 +16,10 @@ def resolve_observability_home() -> Path:
     """The observability home directory: ``MAGI_OBS_HOME`` when set, else the
     hidden home dir under the cwd. Shared so sibling features (e.g. the session
     transcript) write under the same parent without re-deriving the path."""
-    return Path(os.environ.get("MAGI_OBS_HOME") or (Path.cwd() / ".openmagi"))
+    # I-4: routed through the typed flag registry.
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    return Path(flag_str("MAGI_OBS_HOME") or (Path.cwd() / ".openmagi"))
 
 
 def register_observability(app: Any, runtime: Any) -> ObservabilityCore | None:
