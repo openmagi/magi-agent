@@ -788,7 +788,7 @@ graph LR
 | shacl_compiler.py | SHACL compiler module -- Tasks 3.1 + 3.2: pure helpers + NL-to-SHACL compiler. | builtin, providers, readonly_classifier, shacl_verifier, types | customize/rule_compiler.py, customize/seam_compiler.py, transport/customize.py |
 | store.py | — | — | (root)/main.py, cli/app.py, cli/engine.py, cli/real_runner.py, cli/tests/test_document_coverage_seam_wiring.py, customize/__init__.py, customize/after_tool_gate.py, customize/runtime_gate.py, customize/tool_perm.py, runtime/message_builder.py, runtime/openmagi_runtime.py, transport/customize.py |
 | tool_perm.py | Custom tool-permission rule matching (P2). | flags, store, verification_policy | tools/permission.py |
-| verification_policy.py | — | scope | cli/engine.py, cli/real_runner.py, customize/after_tool_gate.py, customize/apply.py, customize/runtime_gate.py, customize/tool_perm.py |
+| verification_policy.py | — | scope | cli/engine.py, cli/real_runner.py, customize/after_tool_gate.py, customize/apply.py, customize/runtime_gate.py, customize/tool_perm.py, runtime/message_builder.py |
 | what_menu.py | WHAT-menu for deterministic custom rules. | flags, runtime_gate | cli/real_runner.py, customize/catalog.py, customize/custom_rules.py |
 
 ### discovery/
@@ -1544,7 +1544,7 @@ graph LR
 | memory_snapshot_cache.py | Session-scoped frozen snapshot cache for memory prompt projection. | prompt_projection | cli/tool_runtime.py |
 | memory_turn_hook.py | Turn-end memory hook: transcript→daily flush + compaction trigger (PR-B). | compaction_tree, config, local_file_writable, summarizer_runtime | cli/headless.py, transport/chat_routes.py |
 | memory_write_wiring.py | Gate-aware factory for the MemoryWrite tool host (Task D, PR2). | local_file_writable, memory_write_readiness, memory_write_tool | cli/tool_runtime.py, runtime/openmagi_runtime.py |
-| message_builder.py | — | _token_window_table, bus, child_runner_live, context, env, flags, injection, manifest, model_tiers, provider_adapter, resolved, splitter, store | cli/clipboard_image.py, cli/tool_runtime.py, runtime/context_attachments.py, shadow/gate5b4c3_runner_input_adapter.py, transport/chat.py, transport/generation_request.py |
+| message_builder.py | — | _token_window_table, bus, child_runner_live, context, env, flags, injection, manifest, model_tiers, provider_adapter, resolved, splitter, store, verification_policy | cli/clipboard_image.py, cli/tool_runtime.py, runtime/context_attachments.py, shadow/gate5b4c3_runner_input_adapter.py, transport/chat.py, transport/generation_request.py |
 | model_factory.py | E-7 — single seam for per-turn model construction. | anthropic_cache_model, env | shadow/gate5b4c3_live_runner_boundary.py |
 | model_tiers.py | — | catalog, env, providers, safety | evidence/final_output_gate.py, gates/tool_usage_guidance.py, harness/long_context_eval.py, models/types.py, plugins/tool_projection.py, recipes/materializer.py, recipes/phase_routing_defaults.py, recipes/reliability_policy.py, runtime/adk_turn_runner.py, runtime/child_runner_boundary.py, runtime/child_runner_live.py, runtime/context_budget.py, runtime/message_builder.py, runtime/phase_routing.py, runtime/reliability_budget.py, runtime/request_shape.py, runtime/tool_synthesis.py, tools/image_tools.py |
 | no_agent_watchdog.py | — | safety | runtime/events.py |
