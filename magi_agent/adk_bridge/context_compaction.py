@@ -566,11 +566,45 @@ class MagiContextCompactionPlugin(BasePlugin):
         — the same class of cost as today's tail-drop (and the G4 prune). True
         cache-preserving (anchored / stable-prefix) summarization is deferred to
         G5.
+
+        PR-F-LIFE3: emits the ``before_compaction`` / ``after_compaction``
+        custom_rule audit fan-outs around the tail-drop. The emit is gated by
+        :func:`lifecycle_extra_emitters_enabled` so the OFF contract is
+        byte-identical (no policy load, no critic factory build). Each emit
+        is wrapped in its own try/except so an audit failure cannot break a
+        live compaction call.
         """
+        # PR-F-LIFE3: before_compaction emit — fires for BOTH the automatic
+        # threshold/real-token decision path AND the manual /compact force
+        # path (every caller into this method goes through this single
+        # entry). Bounded text summary keeps the critic frame small.
+        try:
+            await self._maybe_emit_compaction_audit(
+                slot="before_compaction",
+                contents=contents,
+                llm_request=llm_request,
+            )
+        except Exception:
+            # Audit failure must never break a live model turn.
+            pass
+
         keep = min(self.tail_events, len(contents))
         split_index = len(contents) - keep
         split_index = _adjust_split_to_avoid_orphan_response(contents, split_index)
         if split_index <= 0:
+            # No-op compaction (orphan widening kept everything). Emit a
+            # paired after_compaction with dropped_count=0 so audit ledgers
+            # show matched before/after pairs — orphan-only emit would
+            # mislead operators authoring rules at both slots.
+            try:
+                await self._maybe_emit_compaction_audit(
+                    slot="after_compaction",
+                    contents=contents,
+                    llm_request=llm_request,
+                    dropped_count=0,
+                )
+            except Exception:
+                pass
             return None
         kept = len(contents) - split_index
         if kept > 2 * self.tail_events:
@@ -585,16 +619,110 @@ class MagiContextCompactionPlugin(BasePlugin):
                 self.tail_events,
                 len(contents),
             )
+        dropped_count = split_index
         if self._summarize_enabled and split_index > 0:
             dropped = contents[:split_index]
             if dropped:
                 head = await self._build_summary_head(llm_request, dropped)
                 if head is not None:
                     llm_request.contents = head + contents[split_index:]
+                    # PR-F-LIFE3: after_compaction emit — fires on successful
+                    # summary-head injection path.
+                    try:
+                        await self._maybe_emit_compaction_audit(
+                            slot="after_compaction",
+                            contents=llm_request.contents,
+                            llm_request=llm_request,
+                            dropped_count=dropped_count,
+                        )
+                    except Exception:
+                        pass
                     return None
         # Fall through to the EXISTING pure tail-drop (byte-identical to today).
         llm_request.contents = contents[split_index:]
+        # PR-F-LIFE3: after_compaction emit — fires on the pure tail-drop path.
+        try:
+            await self._maybe_emit_compaction_audit(
+                slot="after_compaction",
+                contents=llm_request.contents,
+                llm_request=llm_request,
+                dropped_count=dropped_count,
+            )
+        except Exception:
+            pass
         return None
+
+    async def _maybe_emit_compaction_audit(
+        self,
+        *,
+        slot: str,
+        contents: list[Any],
+        llm_request: Any,
+        dropped_count: int | None = None,
+    ) -> None:
+        """PR-F-LIFE3 helper — fire the before/after compaction audit fan-out.
+
+        Fast OFF-path: triple-gate check FIRST so the OFF cost is one helper
+        call + one comparison; the policy load + critic factory build only
+        happen when the master flag resolves ON. The audit fan-out itself
+        is fail-open (see :mod:`magi_agent.customize.lifecycle_audit`), so a
+        misbehaving rule cannot wedge this call site.
+        """
+        from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+            lifecycle_extra_emitters_enabled,
+            run_after_compaction_audit,
+            run_before_compaction_audit,
+        )
+
+        if not lifecycle_extra_emitters_enabled():
+            return None
+        try:
+            model_id = _resolve_model_id(llm_request) or "(unknown)"
+        except Exception:
+            model_id = "(unknown)"
+        size = len(contents) if isinstance(contents, list) else 0
+        if slot == "before_compaction":
+            frame = (
+                f"pre_compaction: contents={size}, model={model_id[:64]}"
+            )
+            # Lazy critic factory build (mirrors lifecycle_llm_call_control).
+            factory = self._build_lifecycle_critic_factory()
+            await run_before_compaction_audit(
+                pre_compaction_text=frame,
+                model_factory=factory,
+            )
+        else:
+            dc = dropped_count if isinstance(dropped_count, int) else -1
+            frame = (
+                f"post_compaction: kept={size}, dropped={dc}, "
+                f"model={model_id[:64]}"
+            )
+            factory = self._build_lifecycle_critic_factory()
+            await run_after_compaction_audit(
+                summary_text=frame,
+                model_factory=factory,
+            )
+        return None
+
+    @staticmethod
+    def _build_lifecycle_critic_factory() -> Any | None:
+        """Build the Haiku-class critic factory used by the F-LIFE3 emits.
+
+        Mirrors
+        :func:`magi_agent.adk_bridge.lifecycle_llm_call_control._build_critic_factory`
+        so all lifecycle audit fan-outs share the same critic resolution
+        path. Returns ``None`` on any import / build failure; the audit
+        helper then records ``status="skipped"`` with reason ``no critic
+        model available`` rather than invoking against ``None``.
+        """
+        try:
+            from magi_agent.cli.wiring import (  # noqa: PLC0415
+                _build_criterion_model_factory,
+            )
+
+            return _build_criterion_model_factory()
+        except Exception:
+            return None
 
     async def _build_summary_head(
         self, llm_request: Any, dropped: list[Any]

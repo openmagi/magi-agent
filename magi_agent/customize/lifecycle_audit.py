@@ -126,6 +126,35 @@ def llm_call_hooks_enabled(env: dict[str, str] | None = None) -> bool:
         return False
 
 
+def lifecycle_extra_emitters_enabled(env: dict[str, str] | None = None) -> bool:
+    """PR-F-LIFE3 triple-gate check for the four new emitter slots.
+
+    Mirrors :func:`llm_call_hooks_enabled` but keys on the F-LIFE3 master
+    switch ``MAGI_CUSTOMIZE_LIFECYCLE_EXTRA_EMITTERS_ENABLED`` so the four
+    new slot families (before_compaction / after_compaction /
+    on_task_checkpoint / on_artifact_created) can be staged independently
+    of the F-LIFE1/2 lifecycle expansions. Each emit site (compaction
+    plugin / work-queue driver / file-delivery boundary) calls this helper
+    FIRST so the OFF path is byte-identical (no policy load, no critic
+    factory build).
+
+    Fail-open: any import error returns ``False`` so the call site stays a
+    no-op when the flag layer cannot be read.
+    """
+    try:
+        from magi_agent.config.flags import flag_bool, flag_profile_bool  # noqa: PLC0415
+    except Exception:
+        return False
+    try:
+        return (
+            flag_bool("MAGI_CUSTOMIZE_LIFECYCLE_EXTRA_EMITTERS_ENABLED", env=env)
+            and flag_profile_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", env=env)
+            and flag_profile_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", env=env)
+        )
+    except Exception:
+        return False
+
+
 def _default_policy_loader() -> Any:
     from magi_agent.customize.store import load_overrides  # noqa: PLC0415
     from magi_agent.customize.verification_policy import (  # noqa: PLC0415
@@ -478,15 +507,196 @@ async def run_after_llm_call_audit(
     return audits
 
 
+async def _run_extra_emitter_audit(
+    *,
+    fires_at: str,
+    draft_text: str,
+    model_factory: Callable[[], Any] | None,
+    invoke: InvokeFn | None,
+    policy_loader: Callable[[], Any] | None,
+    env: dict[str, str] | None,
+) -> list[AuditRecord]:
+    """Shared body for the four PR-F-LIFE3 audit fan-out helpers.
+
+    The four emitters (before_compaction / after_compaction /
+    on_task_checkpoint / on_artifact_created) all share the same shape
+    (gate → policy load → per-rule judge) so the body is factored here.
+    The caller picks the ``fires_at`` slot and threads in the relevant
+    ``draft_text`` (a bounded textual summary of the emitter's event —
+    e.g. a compaction count, a task-status sentence, an artifact ref).
+    Fail-open on every step: any failure returns an empty list so a
+    misbehaving rule cannot wedge the surrounding runtime chokepoint.
+    """
+    if not lifecycle_extra_emitters_enabled(env=env):
+        return []
+    try:
+        loader = policy_loader or _default_policy_loader
+        policy = loader()
+        rules = policy.enabled_llm_criterion_rules(fires_at=fires_at)
+    except Exception:
+        return []
+    if not rules:
+        return []
+    audits: list[AuditRecord] = []
+    for rule in rules:
+        audit = await _audit_one_rule(
+            rule,
+            draft_text=draft_text,
+            model_factory=model_factory,
+            invoke=invoke,
+        )
+        audits.append(audit)
+    return audits
+
+
+async def run_before_compaction_audit(
+    *,
+    pre_compaction_text: str,
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> list[AuditRecord]:
+    """PR-F-LIFE3 audit fan-out for ``firesAt == "before_compaction"``.
+
+    Wired immediately before
+    :meth:`magi_agent.adk_bridge.context_compaction.MagiContextCompactionPlugin._apply_tail_trim`
+    runs (covers both the automatic threshold-breach decision path and
+    the manual ``/compact`` force path). ``pre_compaction_text`` is a
+    bounded textual summary of the about-to-be-trimmed context (e.g.
+    "pre-compaction: 42 contents, model=gpt-5"). Audit-only — never
+    mutates ``llm_request`` and never blocks the compaction call (the
+    compaction plugin's own try/except envelope additionally fails open
+    if this fan-out raises).
+    """
+    return await _run_extra_emitter_audit(
+        fires_at="before_compaction",
+        draft_text=pre_compaction_text,
+        model_factory=model_factory,
+        invoke=invoke,
+        policy_loader=policy_loader,
+        env=env,
+    )
+
+
+async def run_after_compaction_audit(
+    *,
+    summary_text: str,
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> list[AuditRecord]:
+    """PR-F-LIFE3 audit fan-out for ``firesAt == "after_compaction"``.
+
+    Wired immediately after a successful tail-drop returns from
+    :meth:`magi_agent.adk_bridge.context_compaction.MagiContextCompactionPlugin._apply_tail_trim`.
+    ``summary_text`` is a bounded textual summary of the post-compaction
+    state (e.g. "post-compaction: dropped=30, kept=12, summary_ref=…").
+    Audit-only — the compaction has already taken effect on
+    ``llm_request.contents`` by the time this fan-out runs.
+    """
+    return await _run_extra_emitter_audit(
+        fires_at="after_compaction",
+        draft_text=summary_text,
+        model_factory=model_factory,
+        invoke=invoke,
+        policy_loader=policy_loader,
+        env=env,
+    )
+
+
+async def run_task_checkpoint_audit(
+    *,
+    task_id: str,
+    checkpoint_kind: str,
+    summary_text: str = "",
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> list[AuditRecord]:
+    """PR-F-LIFE3 audit fan-out for ``firesAt == "on_task_checkpoint"``.
+
+    Wired at each work-queue task status transition (claimed / completed
+    / failed) inside
+    :meth:`magi_agent.missions.work_queue.driver.WorkQueueDriver.run_once`.
+    ``checkpoint_kind`` is one of ``"claimed"`` / ``"completed"`` /
+    ``"failed"`` / ``"short_circuited"``; ``summary_text`` is the
+    task's result / error / title (bounded by the caller so a giant
+    result payload never reaches the critic). The fan-out composes a
+    short ``draft_text`` that includes the task id + checkpoint kind +
+    summary so the criterion judge has a deterministic frame.
+    Audit-only — never aborts the dispatcher tick (the work-queue
+    driver wraps the call in its own try/except so a fan-out raise
+    never breaks dispatch).
+    """
+    # Compose a bounded draft text frame. Cap each field so a runaway
+    # task body / result cannot blow past the critic's context window.
+    frame = (
+        f"task_id={task_id[:128]}\n"
+        f"checkpoint={checkpoint_kind[:32]}\n"
+        f"summary={(summary_text or '')[:1024]}"
+    )
+    return await _run_extra_emitter_audit(
+        fires_at="on_task_checkpoint",
+        draft_text=frame,
+        model_factory=model_factory,
+        invoke=invoke,
+        policy_loader=policy_loader,
+        env=env,
+    )
+
+
+async def run_artifact_created_audit(
+    *,
+    artifact_ref: str,
+    artifact_excerpt: str = "",
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> list[AuditRecord]:
+    """PR-F-LIFE3 audit fan-out for ``firesAt == "on_artifact_created"``.
+
+    Wired immediately after a successful ``artifact_provider.write_artifact``
+    returns ``status="ok"`` inside
+    :meth:`magi_agent.artifacts.file_delivery.FileDeliveryBoundary.execute`.
+    ``artifact_ref`` is the resolved artifact reference (e.g. the digest
+    ref returned by the provider); ``artifact_excerpt`` is an optional
+    bounded textual summary of the artifact payload (caller-bounded —
+    the boundary does not slurp the full artifact bytes into the
+    critic). Audit-only — the artifact has already been written by the
+    time this fan-out runs.
+    """
+    frame = (
+        f"artifact_ref={artifact_ref[:256]}\n"
+        f"excerpt={(artifact_excerpt or '')[:1024]}"
+    )
+    return await _run_extra_emitter_audit(
+        fires_at="on_artifact_created",
+        draft_text=frame,
+        model_factory=model_factory,
+        invoke=invoke,
+        policy_loader=policy_loader,
+        env=env,
+    )
+
+
 __all__ = [
     "AuditRecord",
     "lifecycle_expansion_enabled",
     "lifecycle_turn_hooks_enabled",
     "llm_call_hooks_enabled",
+    "lifecycle_extra_emitters_enabled",
     "run_user_prompt_submit_audit",
     "run_subagent_stop_audit",
     "run_before_turn_start_audit",
     "run_after_turn_end_audit",
     "run_before_llm_call_audit",
     "run_after_llm_call_audit",
+    "run_before_compaction_audit",
+    "run_after_compaction_audit",
+    "run_task_checkpoint_audit",
+    "run_artifact_created_audit",
 ]

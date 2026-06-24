@@ -982,6 +982,34 @@ FLAGS: tuple[FlagSpec, ...] = (
         kind="int",
     ),
     _b(
+        "MAGI_CUSTOMIZE_LIFECYCLE_EXTRA_EMITTERS_ENABLED",
+        stage="stage2",
+        summary=(
+            "PR-F-LIFE3 Tier 2 lifecycle expansion (four new emitter "
+            "slots): activate audit-only custom_rule gate sites at four "
+            "runtime chokepoints that previously had no custom_rule path "
+            "— before_compaction + after_compaction (wired around "
+            "MagiContextCompactionPlugin._apply_tail_trim, covering both "
+            "the automatic threshold/real-token decision path and the "
+            "manual /compact force path), on_task_checkpoint (wired at "
+            "each work-queue task status transition — claimed / "
+            "completed / failed — inside WorkQueueDriver.run_once), and "
+            "on_artifact_created (wired immediately after a successful "
+            "artifact_provider.write_artifact ok-status branch inside "
+            "FileDeliveryBoundary.execute). All four fan-outs invoke the "
+            "existing llm_criterion judge per matching rule and record "
+            "audit verdicts only; the surrounding runtime contract is "
+            "byte-identical (no mutation of compaction output, no "
+            "interference with task dispatch, no rewrite of the written "
+            "artifact). Triple-gated with MAGI_CUSTOMIZE_VERIFICATION_ENABLED "
+            "+ MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED; fail-open on any "
+            "customize-store fault. With no before_compaction / "
+            "after_compaction / on_task_checkpoint / on_artifact_created "
+            "rules authored, runtime stays byte-identical (the new fan-outs "
+            "are no-ops). Strict default-OFF."
+        ),
+    ),
+    _b(
         "MAGI_CUSTOMIZE_PROMPT_INJECTION_ENABLED",
         stage="stage2",
         summary=(

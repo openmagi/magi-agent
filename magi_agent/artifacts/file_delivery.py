@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping, Sequence
 import hashlib
 import inspect
@@ -16,6 +17,51 @@ from magi_agent.runtime.provider_receipts import (
     provider_digest,
     sanitize_provider_payload,
 )
+
+
+def _emit_artifact_created_sync(
+    *, artifact_ref: str, artifact_excerpt: str = ""
+) -> None:
+    """PR-F-LIFE3 sync helper: fire the ``on_artifact_created`` audit fan-out.
+
+    :meth:`FileDeliveryBoundary.execute` is synchronous so the async fan-out
+    is invoked via ``asyncio.run`` after the master flag triple-gate
+    short-circuit. Fail-open at every step (import error, busy outer event
+    loop, fan-out raise) so a misbehaving rule cannot wedge the artifact
+    write path.
+    """
+    try:
+        from magi_agent.customize.lifecycle_audit import (
+            lifecycle_extra_emitters_enabled,
+            run_artifact_created_audit,
+        )
+
+        if not lifecycle_extra_emitters_enabled():
+            return None
+        try:
+            from magi_agent.adk_bridge.lifecycle_llm_call_control import (
+                _build_critic_factory,
+            )
+
+            factory = _build_critic_factory()
+        except Exception:
+            factory = None
+        try:
+            asyncio.run(
+                run_artifact_created_audit(
+                    artifact_ref=artifact_ref,
+                    artifact_excerpt=artifact_excerpt,
+                    model_factory=factory,
+                )
+            )
+        except RuntimeError:
+            # Outer event loop already running on this sync path — drop
+            # the emit rather than raising into the artifact write.
+            return None
+    except Exception:
+        # Fail-open: never break artifact writes.
+        return None
+    return None
 
 
 FileDeliveryOperation = Literal["file.deliver", "file.send"]
@@ -381,6 +427,32 @@ class FileDeliveryBoundary:
                     reason_codes=("artifact_provider_blocked",),
                     diagnostics=diagnostics,
                 )
+
+            # PR-F-LIFE3: on_artifact_created emit — fires ONLY on the
+            # ok-status branch (the artifact was successfully written by the
+            # provider). Excerpt-only payload (no full bytes) — the audit
+            # critic gets the artifact ref + a bounded excerpt frame, not
+            # the raw artifact bytes. The helper triple-gate short-circuits
+            # when the master flag is OFF so the OFF path is byte-identical.
+            try:
+                ref_for_emit = (
+                    artifact_ref
+                    if isinstance(artifact_ref, str) and artifact_ref
+                    else (
+                        request.artifact_refs[0]
+                        if request.artifact_refs
+                        else ""
+                    )
+                )
+                op_label = str(request.operation)
+                _emit_artifact_created_sync(
+                    artifact_ref=ref_for_emit,
+                    artifact_excerpt=f"operation={op_label}",
+                )
+            except Exception:
+                # Fail-open at the emit boundary so an audit fan-out raise
+                # cannot abort the artifact write.
+                pass
 
         if artifact_receipt is None:
             return _decision(
