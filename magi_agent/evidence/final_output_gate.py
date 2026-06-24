@@ -103,7 +103,11 @@ class FinalOutputGate:
         self.config = config or FinalOutputGateConfig()
 
     def evaluate(self, request: FinalOutputGateRequest) -> FinalOutputGateDecision:
-        if not self.config.enabled or not self.config.local_evaluation_enabled:
+        # F-11: single activation predicate so both gate configs cannot
+        # drift on the ``enabled`` + ``local_evaluation_enabled`` pair.
+        from magi_agent.evidence.gate_activation import gate_is_live  # noqa: PLC0415
+
+        if not gate_is_live(self.config):
             return _decision("skipped", ("final_output_gate_disabled",), (), {})
 
         source_refs = _source_refs(request.evidence_records)
