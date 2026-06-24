@@ -54,13 +54,22 @@ network egress), distinct from the local read/write/execute/meta tools:
 
 | Tool | Purpose | Permission |
 |---|---|---|
-| `WebSearch` | Search the web via a live provider router. | net (egress; default: not configured → error) |
-| `WebFetch` | Fetch a URL via a live provider router. | net (egress; default: not configured → error) |
+| `WebSearch` | Search the web via a live provider router. | net (egress; engine results need a provider key, else falls back to the browser tool) |
+| `WebFetch` | Fetch a URL via a live provider router. | net (egress; keyless live by default on a local install) |
 
-They have **no fabricated fallback**: on a default install with
-no live web provider configured they return an honest
-`web_research_not_configured` error instead of simulated results. Local CLI
-search uses the direct web toolset when `BRAVE_API_KEY` and `FIRECRAWL_API_KEY`
+They have **no fabricated fallback**: when no live web provider is resolved they
+return an honest `web_research_not_configured` error instead of simulated
+results. On a default **local** install this rarely happens for `WebFetch`,
+because the full local runtime overlay seeds the keyless web path on
+(`CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED`,
+`CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED`,
+`CORE_AGENT_PYTHON_JINA_READER_ENABLED`,
+`CORE_AGENT_PYTHON_INSANE_FETCH_ENABLED`, see
+[What Works Today](/docs/what-works-today)): jina-reader is keyless and
+insane-fetch runs locally via `curl_cffi`, so URL fetch works with zero keys.
+`WebSearch` engine results still need a search provider. In a conservative
+profile (`safe`/`eval`) or when the overlay is off, both return the honest error.
+Local CLI search uses the direct web toolset when `BRAVE_API_KEY` and `FIRECRAWL_API_KEY`
 are set, or when `MAGI_WEB_SEARCH_PROVIDER=serpapi`, `SERPAPI_API_KEY`, and
 `FIRECRAWL_API_KEY` are set. To activate the native provider-router path, set
 `CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED=1` and
