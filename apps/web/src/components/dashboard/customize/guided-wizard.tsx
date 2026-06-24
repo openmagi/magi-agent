@@ -29,6 +29,10 @@ export interface GuidedWizardProps {
   onActivated: () => void;
   onPickDifferent: () => void;
   onCancel: () => void;
+  /** PR-F-HANDOFF — optional callback the hub wires to switch the
+   *  customize mode into NL with the serialized wizard primer pre-filled
+   *  into NlRuleCompose's textarea. Threaded through to AuthorWizard. */
+  onContinueInNl?: (primer: string) => void;
 }
 
 
@@ -38,6 +42,7 @@ export function GuidedWizard({
   onActivated,
   onPickDifferent,
   onCancel,
+  onContinueInNl,
 }: GuidedWizardProps): React.ReactElement {
   return (
     <AuthorWizard
@@ -48,6 +53,7 @@ export function GuidedWizard({
       // the same affordance — there is no longer an intermediate
       // kind-picker to step back to.
       onCancel={onPickDifferent}
+      onContinueInNl={onContinueInNl}
     />
   );
 }

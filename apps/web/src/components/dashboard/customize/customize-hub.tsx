@@ -558,10 +558,13 @@ function RulesSectionMount({
 }): React.ReactElement {
   // 5-phase Add state. picking_mode shows the NL/Guided/Raw cards; nl,
   // raw_picking, and raw_authoring are the actual authoring surfaces.
+  // PR-F-HANDOFF — the ``nl`` phase carries an optional ``nlPrefill`` seed
+  // sourced from the guided wizard's "Continue in NL" handoff. The NL
+  // surface reads it via NlRuleCompose's ``initialNlText`` prop.
   type AddState =
     | { phase: "idle" }
     | { phase: "picking_mode" }
-    | { phase: "nl" }
+    | { phase: "nl"; nlPrefill?: string }
     | { phase: "guided" }
     | { phase: "raw_picking" }
     | { phase: "raw_authoring"; choice: AddRuleChoice };
@@ -725,6 +728,7 @@ function RulesSectionMount({
             }}
             onBrowseEvidence={() => setSubTab("evidence")}
             onAuthorManually={() => setAddState({ phase: "guided" })}
+            initialNlText={addState.nlPrefill}
           />
         </section>
       ) : null}
@@ -740,6 +744,13 @@ function RulesSectionMount({
           }}
           onPickDifferent={() => setAddState({ phase: "picking_mode" })}
           onCancel={() => setAddState({ phase: "idle" })}
+          // PR-F-HANDOFF — operator clicked "Continue in NL" mid-wizard.
+          // Flip to the NL surface and seed the textarea with the
+          // serialized draft primer so the chat resumes where the
+          // wizard left off.
+          onContinueInNl={(primer) =>
+            setAddState({ phase: "nl", nlPrefill: primer })
+          }
         />
       ) : null}
 

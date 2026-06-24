@@ -63,6 +63,14 @@ export interface NlRuleComposeProps {
    *  wizard with the inferred intent pre-filled. When absent the
    *  "Author manually instead" link on the ProposalCard hides. */
   onAuthorManually?: () => void;
+  /** PR-F-HANDOFF: optional initial textarea value. The customize hub
+   *  passes the serialized wizard primer through this prop when the
+   *  operator clicks "Continue in NL" from inside the guided wizard so
+   *  the chat resumes exactly where the wizard left off. Treated as a
+   *  one-shot seed — once the operator edits the textarea (or another
+   *  surface mounts NlRuleCompose without a primer) the value stops
+   *  driving the local state. */
+  initialNlText?: string;
 }
 
 
@@ -183,10 +191,15 @@ export function NlRuleCompose({
   onActivated,
   onBrowseEvidence,
   onAuthorManually,
+  initialNlText,
 }: NlRuleComposeProps): React.ReactElement {
   const agentFetch = useAgentFetch();
 
-  const [nlText, setNlText] = useState("");
+  // PR-F-HANDOFF — seed local state with the wizard primer when the parent
+  // mounted NlRuleCompose with a non-empty initialNlText. The state is
+  // otherwise owned locally so the operator can freely edit / overwrite
+  // the primer once the surface is on screen.
+  const [nlText, setNlText] = useState<string>(initialNlText ?? "");
   const [compileBusy, setCompileBusy] = useState(false);
   const [result, setResult] = useState<RuleCompileResponse | null>(null);
   const [activateBusy, setActivateBusy] = useState(false);

@@ -12,6 +12,7 @@
  * keeps each sub-wizard small (~150 LOC) and decoupled from the others.
  */
 
+import { MessageSquare } from "lucide-react";
 import React from "react";
 
 
@@ -32,6 +33,13 @@ export interface WizardChromeProps {
   /** Wrap the section with an ARIA label so screen-readers announce
    *  "Guided policy wizard, step N / M". */
   ariaLabel?: string;
+  /** PR-F-HANDOFF — when provided, the chrome renders a persistent
+   *  "Continue in NL" button in the nav row that switches the operator
+   *  into the natural-language compose surface, seeding it with the
+   *  serialized wizard draft state. Hidden when undefined so the chrome
+   *  remains backward-compatible with callers that don't wire the
+   *  handoff. */
+  onContinueInNl?: () => void;
 }
 
 
@@ -48,6 +56,7 @@ export function WizardChrome({
   error,
   children,
   ariaLabel = "Guided policy wizard",
+  onContinueInNl,
 }: WizardChromeProps): React.ReactElement {
   const isFirst = step === 0;
   const isLast = step === total - 1;
@@ -70,7 +79,7 @@ export function WizardChrome({
         </p>
       ) : null}
 
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         {isFirst ? (
           <button
             type="button"
@@ -88,6 +97,20 @@ export function WizardChrome({
             ← Back
           </button>
         )}
+        {onContinueInNl ? (
+          <button
+            type="button"
+            onClick={onContinueInNl}
+            disabled={saving}
+            data-testid="continue-in-nl-button"
+            aria-label="Continue in NL"
+            title="Hand off your wizard progress to the natural-language compose surface"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-white px-3 py-1.5 text-xs font-medium text-primary shadow-sm hover:bg-primary/[0.04] focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />
+            Continue in NL
+          </button>
+        ) : null}
         {isLast ? (
           <button
             type="button"
