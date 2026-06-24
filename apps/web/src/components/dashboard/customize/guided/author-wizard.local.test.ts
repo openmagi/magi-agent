@@ -871,3 +871,96 @@ describe("AuthorWizard — PR-F-UX1 lifecycle audit + Tier 2 expansion", () => {
     );
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// PR-F-UX2 (F8 core) — RuntimeFieldChips wiring in SpecificsStep.
+//
+// The chip picker is rendered above every wizard text input that accepts a
+// runtime variable reference (regex pattern, contentMatch pattern,
+// llm_criterion criterion, SHACL TTL). Each input gets a ref so the
+// insertAtCaret helper can splice the chip token at the caret.
+// ---------------------------------------------------------------------------
+
+
+describe("AuthorWizard — PR-F-UX2 runtime-field chip picker wiring", () => {
+  it("imports RuntimeFieldChips from the colocated module", () => {
+    expect(src).toContain('import { RuntimeFieldChips }');
+    expect(src).toContain('from "./runtime-field-chips"');
+  });
+
+  it("ships the insertAtCaret helper for cursor-aware chip splicing", () => {
+    // Mirrors the chat-input acceptSlash / acceptKb pattern: read selection
+    // from the ref, splice the token, restore the caret via
+    // requestAnimationFrame.
+    expect(src).toContain("function insertAtCaret");
+    expect(src).toContain("selectionStart");
+    expect(src).toContain("selectionEnd");
+    expect(src).toContain("requestAnimationFrame");
+    expect(src).toContain("setSelectionRange");
+  });
+
+  it("TextField accepts an optional inputRef so SpecificsStep can read the caret", () => {
+    expect(src).toContain("inputRef?: React.Ref<HTMLInputElement>");
+    // The ref must be forwarded to the underlying <input>.
+    expect(src).toMatch(/<input[\s\S]*?ref=\{inputRef\}/);
+  });
+
+  it("SpecificsStep declares dedicated refs for each chip-bearing input", () => {
+    expect(src).toContain("regexInputRef");
+    expect(src).toContain("criterionInputRef");
+    expect(src).toContain("contentMatchInputRef");
+    expect(src).toContain("shaclTextareaRef");
+  });
+
+  it("SpecificsStep resolves chipTool from the wizard's Target step pick", () => {
+    // tool_input.* expansion needs the specific tool name; when target=any
+    // the chip endpoint surfaces the generic marker + alias hints instead.
+    expect(src).toContain("chipTool");
+    expect(src).toMatch(/toolTarget === "specific"[\s\S]*?draft\.toolName\.trim\(\)/);
+  });
+
+  it("RuntimeFieldChips renders above the regex pattern input", () => {
+    expect(src).toMatch(
+      /conditionKind === "regex"[\s\S]*?<RuntimeFieldChips[\s\S]*?condition="regex"/,
+    );
+  });
+
+  it("RuntimeFieldChips renders above the llm_criterion criterion input", () => {
+    expect(src).toMatch(
+      /<RuntimeFieldChips[\s\S]*?condition="llm_criterion"/,
+    );
+  });
+
+  it("RuntimeFieldChips renders above the llm_criterion contentMatch sub-form pattern", () => {
+    // contentMatch is the deterministic pre-filter pattern when the
+    // operator opts in; chip the same variable menu as the regex path.
+    expect(src).toMatch(
+      /<RuntimeFieldChips[\s\S]*?condition="contentMatch"/,
+    );
+  });
+
+  it("RuntimeFieldChips renders above the raw SHACL TTL textarea", () => {
+    expect(src).toMatch(
+      /conditionKind === "shacl"[\s\S]*?<RuntimeFieldChips[\s\S]*?condition="shacl"/,
+    );
+  });
+
+  it("every chip insertion routes through insertAtCaret + the corresponding ref", () => {
+    // The lifecycle + condition + tool tuple is repeated four times (regex,
+    // criterion, contentMatch, shacl). Each must hand a unique ref to
+    // insertAtCaret so caret restoration targets the right element.
+    // Pattern tolerates Prettier's per-arg line break (insertAtCaret(\n  refName)).
+    expect(src).toMatch(/insertAtCaret\(\s*regexInputRef/);
+    expect(src).toMatch(/insertAtCaret\(\s*criterionInputRef/);
+    expect(src).toMatch(/insertAtCaret\(\s*contentMatchInputRef/);
+    expect(src).toMatch(/insertAtCaret\(\s*shaclTextareaRef/);
+  });
+
+  it("SpecificsStep threads draft.lifecycle into each chip picker (not a hardcoded literal)", () => {
+    // The lifecycle prop must be dynamic so changing lifecycle on the
+    // Trigger step refetches the right chip menu for the chosen slot.
+    const occurrences = src.match(/<RuntimeFieldChips[\s\S]*?lifecycle=\{draft\.lifecycle\}/g) ?? [];
+    expect(occurrences.length).toBeGreaterThanOrEqual(4);
+  });
+});

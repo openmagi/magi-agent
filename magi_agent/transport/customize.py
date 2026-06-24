@@ -96,6 +96,16 @@ def _is_nl_rule_compiler_enabled() -> bool:
         return False
 
 
+def _is_runtime_fields_endpoint_enabled() -> bool:
+    """Read ``MAGI_CUSTOMIZE_RUNTIME_FIELDS_ENDPOINT_ENABLED`` (PR-F-UX2)."""
+    try:
+        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+        return flag_bool("MAGI_CUSTOMIZE_RUNTIME_FIELDS_ENDPOINT_ENABLED")
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _resolve_nl_rule_compile_factory(body: dict) -> Any:
     """Resolve the unified NL→Rule compiler model factory.
 
@@ -262,6 +272,78 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
                 "asOf": "",
             }
         return JSONResponse(content=_make_json_safe(view))
+
+    @app.get("/v1/app/customize/runtime-fields")
+    async def get_runtime_fields(request: Request) -> JSONResponse:
+        """PR-F-UX2 (F8 core): runtime variable chips for the wizard picker.
+
+        Returns the set of runtime variables the operator can reference in
+        a wizard text input (regex pattern, contentMatch, llm_criterion
+        criterion, SHACL TTL) for the given (lifecycle, condition, tool?)
+        tuple. The chip menu mirrors the runtime gate's actual signature so
+        the operator never authors against a field the runtime cannot honor.
+
+        Query params:
+          lifecycle   str (required)  one of the wizard's Lifecycle values
+                                      (before_tool_use, after_tool_use,
+                                      pre_final, on_user_prompt_submit,
+                                      on_subagent_stop, spawn).
+          condition   str (required)  the wizard's conditionKind value
+                                      (regex, contentMatch, path,
+                                      path_allowlist, domain, ...).
+          tool        str (optional)  tool name; when given, tool_input.*
+                                      expands the tool's manifest
+                                      input_schema properties.
+
+        Read-only, fail-open: an unknown (lifecycle, condition) tuple
+        returns ``{fields: [], context: ..., source: 'unknown'}`` rather
+        than 4xx/5xx so the chip list silently degrades to "no chips".
+
+        Gated by ``MAGI_CUSTOMIZE_RUNTIME_FIELDS_ENDPOINT_ENABLED`` so a
+        fresh install / hosted serve does not expose the surface until the
+        operator explicitly opts in. Lab profile enables it via
+        :data:`LAB_EXPERIMENTAL_FLAGS`.
+        """
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        if not _is_runtime_fields_endpoint_enabled():
+            return JSONResponse(
+                status_code=404,
+                content={"error": "runtime_fields_endpoint_disabled"},
+            )
+        lifecycle = request.query_params.get("lifecycle") or ""
+        condition = request.query_params.get("condition") or ""
+        tool = request.query_params.get("tool")
+        if not lifecycle or not condition:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "lifecycle_and_condition_required"},
+            )
+        try:
+            from magi_agent.customize.runtime_fields import (  # noqa: PLC0415
+                fields_for_context,
+            )
+
+            fields = fields_for_context(
+                lifecycle,
+                condition,
+                tool=tool,
+                tool_registry=runtime.tool_registry,
+            )
+        except Exception:  # noqa: BLE001 — fail-open per spec
+            fields = []
+        context = f"{lifecycle}/{condition}"
+        if tool:
+            context = f"{context}/{tool}"
+        source = "fields_for_context" if fields else "unknown"
+        return JSONResponse(
+            content={
+                "fields": fields,
+                "context": context,
+                "source": source,
+            }
+        )
 
     @app.patch("/v1/app/customize/tools/{name}")
     async def patch_tool(name: str, request: Request) -> JSONResponse:
