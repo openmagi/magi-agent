@@ -226,7 +226,10 @@ class ToolExceptionReflectionEnv:
 def parse_tool_exception_reflection_env(
     env: Mapping[str, str],
 ) -> ToolExceptionReflectionEnv:
-    enabled = _is_true(env.get(TOOL_EXCEPTION_REFLECTION_ENABLED_ENV))
+    # I-1: route the enabled bool through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    enabled = flag_bool(TOOL_EXCEPTION_REFLECTION_ENABLED_ENV, env=env)
     max_attempts = _int_env(
         env,
         TOOL_EXCEPTION_MAX_ATTEMPTS_ENV,
@@ -265,7 +268,10 @@ class ToolSchemaFeedbackEnv:
 def parse_tool_schema_feedback_env(
     env: Mapping[str, str],
 ) -> ToolSchemaFeedbackEnv:
-    enabled = _is_true(env.get(TOOL_SCHEMA_FEEDBACK_ENABLED_ENV))
+    # I-1: route the enabled bool through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    enabled = flag_bool(TOOL_SCHEMA_FEEDBACK_ENABLED_ENV, env=env)
     max_attempts = _int_env(
         env,
         TOOL_SCHEMA_FEEDBACK_MAX_ATTEMPTS_ENV,
