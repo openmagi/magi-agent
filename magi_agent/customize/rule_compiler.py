@@ -251,10 +251,15 @@ matches its draft-shape contract.
      what:{kind:"deterministic_ref", payload:{ref:"<evidence-ref>"}}}.
 
   tool_perm — Deny or require approval for a tool call by name, by
-    target domain, or by domain allowlist. Draft shape: CustomRule with
-    firesAt:"before_tool_use", action:"block" or "ask_approval", and
-    what:{kind:"tool_perm", payload:{match:{tool|domain|domainAllowlist:...},
-    decision:"deny"|"ask"}}.
+    target domain / domain allowlist, OR by file/path prefix (single
+    prefix or allowlist of prefixes). Path matchers fire only for tools
+    whose argument schema surfaces a `path` (or alias: file, filename,
+    filepath, filePath, pathRef) key — i.e. file-acting tools like
+    FileRead / FileEdit / FileWrite / PatchApply. Glob / Grep do NOT
+    match (their arg is `pattern`, not `path`). Draft shape: CustomRule
+    with firesAt:"before_tool_use", action:"block" or "ask_approval", and
+    what:{kind:"tool_perm", payload:{match:{tool|domain|domainAllowlist|
+    path|pathAllowlist:...}, decision:"deny"|"ask"}}.
 
   llm_criterion — Block the final answer (or override a tool result)
     when an LLM critic judges a free-text criterion. Draft shape:
