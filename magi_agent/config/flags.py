@@ -2638,6 +2638,79 @@ FLAGS: tuple[FlagSpec, ...] = (
             "before it reaches any external consumer."
         ),
     ),
+    # I-1: hosted gate-readiness ENABLED knobs. All strict default-OFF
+    # ``_b(...)`` (kind ``bool``) so the hosted operator must opt in
+    # explicitly per gate; matches the existing ``_is_true`` semantics
+    # (missing/empty → False) byte-identically. Hosted-only (excluded
+    # from the public env-reference via the ``hosted`` scope marker on
+    # the FlagSpec; default ``_b`` is ``public``, so these use explicit
+    # ``FlagSpec(scope="hosted", ...)`` rather than the ``_b`` helper).
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE2_READINESS_ENABLED",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted gate2 readiness ladder activation (sandbox harness + "
+            "ready-state probes). Default-OFF; hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE3_READINESS_ENABLED",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted gate3 readiness ladder activation (replay harness + "
+            "evidence-record probes). Default-OFF; hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE4_READINESS_ENABLED",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted gate4 readiness ladder activation (consumer + dry-run "
+            "boundary probes). Default-OFF; hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE5_READINESS_ENABLED",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted gate5 readiness ladder activation (live-shadow runner + "
+            "preflight probes). Default-OFF; hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE7_READINESS_ENABLED",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted gate7 readiness ladder activation (post-runner audit "
+            "probes). Default-OFF; hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE8_SELECTED_AUTHORITY_ENABLED",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted gate8 selected-authority routing activation (selected "
+            "bot/owner digests). Default-OFF; hosted-only."
+        ),
+        kind="bool",
+    ),
 )
 
 

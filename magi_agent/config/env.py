@@ -1458,7 +1458,10 @@ def _build_context_continuity_local_canary_config() -> PythonContextContinuityCo
 
 
 def parse_python_gate2_readiness_env(env: Mapping[str, str]) -> PythonGate2ReadinessConfig:
-    enabled = _is_true(env.get("CORE_AGENT_PYTHON_GATE2_READINESS_ENABLED"))
+    # I-1: route through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    enabled = flag_bool("CORE_AGENT_PYTHON_GATE2_READINESS_ENABLED", env=env)
     return PythonGate2ReadinessConfig(
         enabled=enabled,
         killSwitchEnabled=_env_bool_default_true(
@@ -1510,7 +1513,10 @@ def parse_python_gate2_readiness_env(env: Mapping[str, str]) -> PythonGate2Readi
 
 
 def parse_python_gate3_readiness_env(env: Mapping[str, str]) -> PythonGate3ReadinessConfig:
-    enabled = _is_true(env.get("CORE_AGENT_PYTHON_GATE3_READINESS_ENABLED"))
+    # I-1: route through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    enabled = flag_bool("CORE_AGENT_PYTHON_GATE3_READINESS_ENABLED", env=env)
     return PythonGate3ReadinessConfig(
         enabled=enabled,
         killSwitchEnabled=_env_bool_default_true(
@@ -1555,7 +1561,10 @@ def parse_python_gate3_readiness_env(env: Mapping[str, str]) -> PythonGate3Readi
 
 
 def parse_python_gate4_readiness_env(env: Mapping[str, str]) -> PythonGate4ReadinessConfig:
-    enabled = _is_true(env.get("CORE_AGENT_PYTHON_GATE4_READINESS_ENABLED"))
+    # I-1: route through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    enabled = flag_bool("CORE_AGENT_PYTHON_GATE4_READINESS_ENABLED", env=env)
     return PythonGate4ReadinessConfig(
         enabled=enabled,
         killSwitchEnabled=_env_bool_default_true(
@@ -1602,7 +1611,10 @@ def parse_python_gate4_readiness_env(env: Mapping[str, str]) -> PythonGate4Readi
 
 
 def parse_python_gate5_readiness_env(env: Mapping[str, str]) -> PythonGate5ReadinessConfig:
-    enabled = _is_true(env.get("CORE_AGENT_PYTHON_GATE5_READINESS_ENABLED"))
+    # I-1: route through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    enabled = flag_bool("CORE_AGENT_PYTHON_GATE5_READINESS_ENABLED", env=env)
     return PythonGate5ReadinessConfig(
         enabled=enabled,
         killSwitchEnabled=_env_bool_default_true(
@@ -1652,7 +1664,10 @@ def parse_python_gate5_readiness_env(env: Mapping[str, str]) -> PythonGate5Readi
 
 
 def parse_python_gate7_readiness_env(env: Mapping[str, str]) -> PythonGate7ReadinessConfig:
-    enabled = _is_true(env.get("CORE_AGENT_PYTHON_GATE7_READINESS_ENABLED"))
+    # I-1: route through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    enabled = flag_bool("CORE_AGENT_PYTHON_GATE7_READINESS_ENABLED", env=env)
     return PythonGate7ReadinessConfig(
         enabled=enabled,
         killSwitchEnabled=_env_bool_default_true(
@@ -1719,7 +1734,10 @@ def parse_python_gate7_readiness_env(env: Mapping[str, str]) -> PythonGate7Readi
 
 
 def parse_python_gate8_readiness_env(env: Mapping[str, str]) -> PythonGate8ReadinessConfig:
-    enabled = _is_true(env.get("CORE_AGENT_PYTHON_GATE8_SELECTED_AUTHORITY_ENABLED"))
+    # I-1: route through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    enabled = flag_bool("CORE_AGENT_PYTHON_GATE8_SELECTED_AUTHORITY_ENABLED", env=env)
     return PythonGate8ReadinessConfig(
         enabled=enabled,
         killSwitchEnabled=_env_bool_default_true(
