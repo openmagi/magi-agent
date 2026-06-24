@@ -37,6 +37,75 @@ import { getRuntimeFields, type RuntimeFieldChip } from "@/lib/customize-api";
 import { useAgentFetch } from "@/lib/local-api";
 
 
+/**
+ * F-UX-EXTRA #3 — friendly-label dictionary for the most common runtime
+ * variables surfaced by the backend ``fields_for_context`` endpoint. The
+ * raw chip name is still what's inserted into the host input (the runtime
+ * gate only honors the canonical name); the friendly label is shown on
+ * the chip face and the raw name moves to the hover tooltip.
+ *
+ * Missing entries degrade quietly: the chip falls back to rendering the
+ * raw name as both face label and tooltip mono token (status quo).
+ */
+const VARIABLE_FRIENDLY_LABELS: Record<
+  string,
+  { label: string; description: string }
+> = {
+  session_id: {
+    label: "Session ID",
+    description: "Stable identifier for the current session.",
+  },
+  turn_id: {
+    label: "Turn ID",
+    description: "Identifier for the current top-level turn.",
+  },
+  tool: {
+    label: "Tool name",
+    description: "Name of the tool being invoked or just returned.",
+  },
+  tool_name: {
+    label: "Tool name",
+    description: "Name of the tool being invoked or just returned.",
+  },
+  tool_input: {
+    label: "Tool input (object)",
+    description: "Full input object passed to the tool.",
+  },
+  "tool_input.url": {
+    label: "Tool URL argument",
+    description: "URL argument from the tool's input.",
+  },
+  "tool_input.path": {
+    label: "Tool path argument",
+    description: "File path argument from the tool's input.",
+  },
+  "tool_input.command": {
+    label: "Tool command argument",
+    description: "Shell command argument from the tool's input.",
+  },
+  tool_output: {
+    label: "Tool output (text)",
+    description: "Text of the tool's result.",
+  },
+  result: {
+    label: "Tool result (object)",
+    description: "Full result object the tool returned.",
+  },
+  prompt: {
+    label: "User prompt",
+    description: "Text the user submitted.",
+  },
+  evidence: {
+    label: "Evidence record",
+    description: "Producer-emitted evidence record on the turn.",
+  },
+  verifier: {
+    label: "Verifier verdict",
+    description: "Built-in verifier or named user condition verdict.",
+  },
+};
+
+
 export interface RuntimeFieldChipsProps {
   /** Wizard lifecycle (e.g. ``after_tool_use``). */
   lifecycle: string;
@@ -111,25 +180,38 @@ export function RuntimeFieldChips({
         {loading ? <span className="ml-1 text-secondary/50">(loading)</span> : null}
       </div>
       <div className="flex flex-wrap gap-1.5">
-        {chips.map((chip) => (
-          <button
-            key={chip.name}
-            type="button"
-            onClick={() => onInsert(chip.name)}
-            title={
-              chip.description
-                ? `${chip.type} — ${chip.description}`
-                : chip.type
-            }
-            aria-label={`Insert ${chip.name}`}
-            className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/[0.04] px-2 py-0.5 font-mono text-[11px] text-primary/90 hover:border-primary/60 hover:bg-primary/[0.10] focus:outline-none focus:ring-2 focus:ring-primary/30"
-          >
-            {chip.name}
-            <span className="text-[10px] uppercase tracking-wide text-secondary/60">
-              {chip.type}
-            </span>
-          </button>
-        ))}
+        {chips.map((chip) => {
+          // F-UX-EXTRA #3 — render the friendly label on the chip face when
+          // we know one; raw name + type + description move into the
+          // tooltip. Click STILL inserts the raw canonical name so the
+          // runtime gate honors it byte-for-byte.
+          const friendly = VARIABLE_FRIENDLY_LABELS[chip.name];
+          const face = friendly?.label ?? chip.name;
+          const tipDescription = friendly?.description ?? chip.description;
+          const tooltip = friendly
+            ? `${friendly.label}\n${chip.name} (${chip.type})${
+                tipDescription ? `\n${tipDescription}` : ""
+              }`
+            : tipDescription
+              ? `${chip.type} — ${tipDescription}`
+              : chip.type;
+          return (
+            <button
+              key={chip.name}
+              type="button"
+              onClick={() => onInsert(chip.name)}
+              title={tooltip}
+              aria-label={`Insert ${chip.name}`}
+              data-chip-name={chip.name}
+              className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/[0.04] px-2 py-0.5 text-[11px] text-primary/90 hover:border-primary/60 hover:bg-primary/[0.10] focus:outline-none focus:ring-2 focus:ring-primary/30"
+            >
+              <span className={friendly ? "" : "font-mono"}>{face}</span>
+              <span className="text-[10px] uppercase tracking-wide text-secondary/60">
+                {chip.type}
+              </span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );

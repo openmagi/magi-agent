@@ -1850,3 +1850,88 @@ describe("AuthorWizard — F-MUT3 'Inject / Rewrite' archetype card", () => {
     );
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// F-UX-EXTRA #1 — inline preview chips on Condition picker cards.
+// F-UX-EXTRA #2 — auto-fill Policy ID with manual-edit preservation.
+// ---------------------------------------------------------------------------
+
+
+describe("AuthorWizard — F-UX-EXTRA #1 condition preview chips", () => {
+  it("declares the CONDITION_PREVIEW_CHIPS lookup keyed by ConditionKind", () => {
+    expect(src).toContain(
+      "const CONDITION_PREVIEW_CHIPS: Record<ConditionKind, ReadonlyArray<string>>",
+    );
+  });
+
+  it("registers representative chips for the most common condition kinds", () => {
+    // Tokens match the canonical names RuntimeFieldChips inserts (no `$`
+    // sigil) — keeps the preview faithful to what the interactive picker
+    // writes into the pattern field at SpecificsStep.
+    // llm_criterion shows tool + result (after-tool critic ergonomics).
+    expect(src).toMatch(/llm_criterion:\s*\["tool", "result"\]/);
+    // prompt_injection shows tool_input.command (the typical mutator slot).
+    expect(src).toMatch(/prompt_injection:\s*\["tool_input\.command"\]/);
+    // path / path_allowlist share tool_input.path (the matcher source).
+    expect(src).toMatch(/path:\s*\["tool_input\.path"\]/);
+    // none condition has no chips (no per-call check to preview).
+    expect(src).toMatch(/none:\s*\[\]/);
+  });
+
+  it("ConditionKindStep threads the preview chips into each RadioCard", () => {
+    // The RadioCard receives previewChips={chips} so the inline preview
+    // renders beneath the description without an extra fetch.
+    expect(src).toContain("const chips = CONDITION_PREVIEW_CHIPS[kind]");
+    expect(src).toMatch(
+      /<RadioCard[\s\S]*?previewChips=\{chips\}[\s\S]*?\/>/,
+    );
+  });
+});
+
+
+describe("AuthorWizard — F-UX-EXTRA #2 auto-fill Policy ID", () => {
+  it("exposes a deriveRuleId helper that composes archetype + condition + lifecycle", () => {
+    expect(src).toContain("function deriveRuleId(draft: Draft): string");
+    // The three axes feed the slug; the joiner is "-" so the resulting
+    // ID is lower-kebab and matches the existing validator regex.
+    expect(src).toMatch(
+      /archetypeSlug\(draft\.archetype\)[\s\S]*?conditionSlug\(draft\.conditionKind\)[\s\S]*?lifecycleSlug\(draft\.lifecycle\)/,
+    );
+    // Trim to 50 chars so the ID is short enough to read in the policy
+    // list (the validator caps at 128 but visual scanning wants tighter).
+    expect(src).toContain(".slice(0, 50)");
+  });
+
+  it("conditionSlug folds the longer enum names into compact tokens", () => {
+    expect(src).toMatch(/"llm_criterion":\s*\n\s*return "critic"/);
+    expect(src).toMatch(/"prompt_injection":\s*\n\s*return "prompt-inject"/);
+    expect(src).toMatch(/"field_constraint":\s*\n\s*return "field"/);
+    expect(src).toMatch(/"none":\s*\n\s*return "always"/);
+  });
+
+  it("NameStep tracks userEdited and only auto-fills when untouched", () => {
+    // The hook initialises from the current draft.ruleId (non-empty means
+    // the operator already typed — preserve their edit on remount).
+    expect(src).toContain("useState<boolean>");
+    expect(src).toContain("draft.ruleId.length > 0");
+    // The effect only seeds the suggested value when the operator has
+    // NOT typed; manual edits flip userEdited true and stop the auto-fill.
+    expect(src).toMatch(/if \(userEdited\) return/);
+    expect(src).toContain("setUserEdited(true)");
+  });
+
+  it("NameStep ships a Reset to suggested affordance that clears userEdited", () => {
+    expect(src).toContain('data-testid="reset-policy-id"');
+    expect(src).toContain("setUserEdited(false)");
+    expect(src).toContain("Reset to suggested");
+  });
+
+  it("defaultIdHint mirrors the derived ID so placeholder matches auto-fill", () => {
+    // Placeholder and auto-fill must agree so the operator sees the same
+    // shape whether they look at the placeholder or wait for the seed.
+    expect(src).toMatch(
+      /function defaultIdHint[\s\S]*?const derived = deriveRuleId\(draft\)/,
+    );
+  });
+});

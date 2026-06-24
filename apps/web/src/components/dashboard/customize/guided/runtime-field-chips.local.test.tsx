@@ -182,3 +182,52 @@ describe("getRuntimeFields — runtime stub", () => {
     expect(seen[0]).not.toContain("tool=");
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// F-UX-EXTRA #3 — friendly chip labels + richer hover tooltips.
+//
+// The chip face shows a human-readable label when we know one; the raw
+// canonical variable name + type + description move into the tooltip. A
+// chip CLICK still inserts the raw chip.name so the runtime gate sees a
+// byte-identical token.
+// ---------------------------------------------------------------------------
+describe("RuntimeFieldChips — F-UX-EXTRA #3 friendly labels + tooltips", () => {
+  it("declares the VARIABLE_FRIENDLY_LABELS dictionary", () => {
+    expect(componentSrc).toContain("const VARIABLE_FRIENDLY_LABELS:");
+    // Both common shapes the runtime emits today must have an entry so the
+    // most-used chips never fall through to the raw-name fallback.
+    expect(componentSrc).toMatch(/tool_name:\s*\{[\s\S]*?label:\s*"Tool name"/);
+    expect(componentSrc).toMatch(
+      /"tool_input\.url":\s*\{[\s\S]*?label:\s*"Tool URL argument"/,
+    );
+    expect(componentSrc).toMatch(/session_id:\s*\{[\s\S]*?label:\s*"Session ID"/);
+  });
+
+  it("renders the friendly label as the chip face when one is known", () => {
+    // The face uses the dictionary entry's label; the raw chip.name only
+    // shows on the face when we don't have a friendly label (fallback).
+    expect(componentSrc).toContain("const friendly = VARIABLE_FRIENDLY_LABELS[chip.name]");
+    expect(componentSrc).toContain("const face = friendly?.label ?? chip.name");
+  });
+
+  it("tooltip composes friendly label + raw name + type + description", () => {
+    // The hover tooltip carries the full triple so a screen reader / hover
+    // user sees both the human label and the canonical token they're
+    // inserting. Degrades to the original `${type} — ${description}` form
+    // for chips that have no friendly entry.
+    expect(componentSrc).toMatch(
+      /const tooltip = friendly[\s\S]*?\$\{friendly\.label\}[\s\S]*?\$\{chip\.name\}/,
+    );
+  });
+
+  it("still inserts the RAW canonical chip name on click (no friendly label leakage)", () => {
+    // The runtime gate only honors the canonical name; insertion must be
+    // byte-identical regardless of what the chip face renders.
+    expect(componentSrc).toContain("onClick={() => onInsert(chip.name)}");
+  });
+
+  it("emits a data-chip-name attribute carrying the raw token for e2e/test hooks", () => {
+    expect(componentSrc).toContain("data-chip-name={chip.name}");
+  });
+});
