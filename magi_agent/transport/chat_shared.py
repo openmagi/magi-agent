@@ -279,7 +279,10 @@ def live_subagents_serve_enabled(env: Mapping[str, str]) -> bool:
     SpawnAgent surface on serve once the child runner is already permitted.
     """
 
-    return _is_true(env.get(LIVE_SUBAGENTS_SERVE_ENABLED_ENV)) and (
+    # I-1: route through the typed flag registry.
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool(LIVE_SUBAGENTS_SERVE_ENABLED_ENV, env=env) and (
         is_live_child_runner_enabled(env)
     )
 
