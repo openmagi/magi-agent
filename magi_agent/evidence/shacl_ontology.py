@@ -106,7 +106,18 @@ def evidence_records_to_graph(records: Iterable[EvidenceRecord]) -> rdflib.Graph
         collapsed.  Keys that collapse to the empty string are silently skipped.
         The sanitisation is deterministic.
 
-    Non-scalar field values (lists, dicts, …) are coerced via ``str()`` to an
+    List / tuple field values (F2, 2026-06-23):
+        A list or tuple value is FLATTENED into one triple per entry under
+        the same ``magi:field_<key>`` predicate.  This lets SHACL ``sh:path``
+        traversal iterate over each element (e.g. the GitDiff.changedFiles
+        list of relative paths) instead of seeing one opaque ``str(tuple)``
+        literal.  Each entry is typed via ``_to_typed_literal`` so a tuple
+        of strings produces multiple ``xsd:string`` literals.  Empty
+        list/tuple → zero triples (caller's ``sh:minCount 1`` then fires).
+        Nested non-scalar entries (dicts, list-of-lists) fall through to
+        ``str()`` coercion, preserving the prior YAGNI behaviour.
+
+    Other non-scalar field values (dicts, …) are coerced via ``str()`` to an
     ``xsd:string`` literal; no metadata annotation is added (YAGNI).
 
     Zero model/LLM calls — pure function.
@@ -132,6 +143,16 @@ def evidence_records_to_graph(records: Iterable[EvidenceRecord]) -> rdflib.Graph
             if safe_key is None:
                 continue  # skip un-representable keys deterministically
             predicate = MAGI[f"field_{safe_key}"]
+            # F2: flatten list/tuple values into one triple per entry so
+            # SHACL ``sh:path`` traversal can iterate (e.g. GitDiff.changedFiles).
+            # bytes/bytearray/memoryview are NOT iterables we want to expand
+            # here — they would already be rejected upstream by
+            # ``_freeze_metadata_value``; the isinstance check on list|tuple
+            # keeps the expansion to operator-meaningful sequences.
+            if isinstance(value, list | tuple):
+                for entry in value:
+                    g.add((node, predicate, _to_typed_literal(entry)))
+                continue
             g.add((node, predicate, _to_typed_literal(value)))
 
     return g

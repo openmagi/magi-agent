@@ -522,6 +522,72 @@ export async function deleteSeamSpec(
 
 
 // ---------------------------------------------------------------------------
+// PR-F2 — Evidence live-catalog (input-space browser) API client
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-type entry returned by `GET /v1/app/customize/evidence/live-catalog`.
+ *
+ * - `registeredFields`: the static `_BUILTIN_FIELD_HINTS` vocabulary for the
+ *   evidence type. Empty list = inert-producer (no field constraints
+ *   authorable until the producer is extended; the UI must flag this state
+ *   honestly rather than hide the type).
+ * - `fieldsPopulatedRecently`: the subset of registered fields actually
+ *   observed in `EvidenceRecord.fields` across the recent ledger sampling
+ *   window. Drives the "Authorable now" badge together with `refsUsing`.
+ * - `samplePopulationCount`: how many records (within the window) contributed
+ *   to the populated-field union. Surfaced as honest signal of sample depth.
+ * - `refsUsing`: named evidence refs (from `what_menu` etc.) that target this
+ *   type and are currently rule-ready (producer active).
+ * - `rulesReferencing`: count of user rules that name one of `refsUsing`.
+ */
+export interface EvidenceLiveCatalogTypeEntry {
+  type: string;
+  registeredFields: string[];
+  fieldsPopulatedRecently: string[];
+  samplePopulationCount: number;
+  refsUsing: string[];
+  rulesReferencing: number;
+}
+
+/**
+ * Response from `GET /v1/app/customize/evidence/live-catalog`.
+ *
+ * Spec §5 PR-F2: read-only, fail-open. The server returns an empty
+ * `evidenceTypes` list on ledger read error rather than 5xx. The client
+ * mirrors that contract: on any fetch failure we return an empty catalog
+ * so the UI degrades to the "no evidence types observed yet" empty state
+ * rather than crashing.
+ */
+export interface EvidenceLiveCatalog {
+  evidenceTypes: EvidenceLiveCatalogTypeEntry[];
+  /** Human description of the sampling window (e.g. "last 100 turns"). */
+  samplingWindow: string;
+  /** ISO-8601 timestamp of when the snapshot was assembled. */
+  asOf: string;
+}
+
+/**
+ * Loads the evidence live catalog. Fail-open contract: any network/HTTP
+ * error returns an empty catalog rather than throwing, so the consumer can
+ * render the empty state without a try/catch wrapper.
+ */
+export async function getEvidenceLiveCatalog(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+): Promise<EvidenceLiveCatalog> {
+  try {
+    const res = await fetch(`/v1/app/customize/evidence/live-catalog`);
+    if (!res.ok) {
+      return { evidenceTypes: [], samplingWindow: "", asOf: "" };
+    }
+    return (await res.json()) as EvidenceLiveCatalog;
+  } catch {
+    return { evidenceTypes: [], samplingWindow: "", asOf: "" };
+  }
+}
+
+
+// ---------------------------------------------------------------------------
 // PR-D1/D2 — Unified NL → rule compiler API client
 // ---------------------------------------------------------------------------
 

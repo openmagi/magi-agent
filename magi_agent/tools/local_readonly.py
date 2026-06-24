@@ -532,12 +532,37 @@ class LocalReadOnlyToolHost:
             }
             for index, resolved in enumerate(resolved_paths)
         ]
+        diff_digest = _digest(diff_text)
+        # F2 (2026-06-23): promote ``changedFiles`` to a first-class
+        # ``EvidenceRecord.fields`` value via ``ToolResult.metadata['evidence']``.
+        # The dispatch path ``evidence_from_tool_result`` lifts the declaration
+        # into a structured ``EvidenceRecord(type='GitDiff', fields={...})``
+        # so SHACL shapes and ``EvidenceRequirement`` matchers can reference
+        # ``changedFiles`` (today they declare ``exists=True`` against a key
+        # that no producer emits). The list shape (tuple of relative path
+        # strings) lets the SHACL ontology emit one triple per entry under
+        # ``magi:field_changedFiles``, enabling ``sh:path`` traversal.
+        changed_files = tuple(resolved.relative for resolved in resolved_paths)
         output = {
             "files": files,
             "preview": preview,
             "truncated": len(diff_text) > max_bytes,
             "subprocessFree": True,
-            "digest": _digest(diff_text),
+            "digest": diff_digest,
+        }
+        evidence_declaration = {
+            "type": "GitDiff",
+            "status": "ok",
+            "fields": {
+                "changedFiles": changed_files,
+                "fileCount": len(changed_files),
+                "digest": diff_digest,
+                "subprocessFree": True,
+            },
+            "source": {
+                "kind": "tool_trace",
+                "toolName": "GitDiff",
+            },
         }
         return self._ok_result(
             context,
@@ -547,6 +572,7 @@ class LocalReadOnlyToolHost:
             source_bundle=source_bundle,
             redacted=redacted,
             file_refs=source_bundle.source_refs,
+            evidence_declaration=evidence_declaration,
         )
 
     def _source_bundle(
@@ -639,6 +665,7 @@ class LocalReadOnlyToolHost:
         source_bundle: _SourceBundle,
         redacted: bool,
         file_refs: tuple[str, ...],
+        evidence_declaration: Mapping[str, object] | None = None,
     ) -> ToolResult:
         receipt = ToolExecutionReceipt(
             receiptId=f"receipt:{_short_digest({'tool': tool_name, 'output': output})}",
@@ -655,7 +682,7 @@ class LocalReadOnlyToolHost:
             redactionStatus="redacted" if redacted else "no_redaction_needed",
             sourceRef=source_bundle.source_refs[0] if source_bundle.source_refs else None,
         ).public_projection()
-        metadata = {
+        metadata: dict[str, object] = {
             **_base_metadata(tool_name, reason="tool_executed"),
             "localOnly": True,
             "sourceRefs": source_bundle.source_refs,
@@ -663,6 +690,12 @@ class LocalReadOnlyToolHost:
             "sourceEvidenceReceipts": source_bundle.receipts,
             "toolExecutionReceipt": receipt,
         }
+        if evidence_declaration is not None:
+            # F2: opt-in evidence declaration the dispatch path
+            # (``evidence_from_tool_result``) lifts into a structured
+            # ``EvidenceRecord`` so SHACL/contract matchers can see
+            # producer-emitted fields (e.g. GitDiff.changedFiles).
+            metadata["evidence"] = dict(evidence_declaration)
         return ToolResult(
             status="ok",
             output=output,
