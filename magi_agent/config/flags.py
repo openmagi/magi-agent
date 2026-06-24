@@ -2399,6 +2399,29 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
+    # I-1: tool-reflection / tool-schema-feedback enable knobs (hermes mech-1).
+    # Strict default-OFF; per their existing docstrings they intentionally do
+    # NOT follow ``_runtime_feature_enabled`` profile-default-ON semantics so
+    # benchmark/eval profiles can opt in explicitly.
+    _b(
+        "MAGI_TOOL_EXCEPTION_REFLECTION_ENABLED",
+        summary=(
+            "Convert a raising tool (except FileEdit/PatchApply, which keep "
+            "their specialized edit-retry handler) into a model-visible "
+            "corrective tool_result with retry guidance + per-invocation "
+            "attempt budget instead of killing the whole turn. Default-OFF."
+        ),
+    ),
+    _b(
+        "MAGI_TOOL_SCHEMA_FEEDBACK_ENABLED",
+        summary=(
+            "Enrich a dispatcher result with errorCode "
+            "``tool_input_schema_invalid`` with plain-text missing/unknown "
+            "argument NAMES (vocabulary the model already sees; argument "
+            "VALUES are never surfaced) plus hermes-style retry guidance, "
+            "under a per-invocation attempt budget. Default-OFF."
+        ),
+    ),
 )
 
 
