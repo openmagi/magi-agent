@@ -73,6 +73,13 @@ export function describeDraft(d: CustomRuleDraft): string | null {
   }
   if (d.kind === "llm_criterion") {
     if (!d.criterion.trim()) return null;
+    // describe-draft is consumed by verification-rule-modal whose
+    // llm_criterion form is pre_final-only (after-tool llm_criterion
+    // lives under d.kind="after_tool" below, where contentMatch is
+    // honored). pre_final has no tool output, so contentMatch is
+    // rejected by the backend (_validate_content_match). The F6.5
+    // contentMatch preview clause was previously rendered here and
+    // would have lied; removed.
     return `${whenClause}, block the final answer when an LLM critic judges that "${d.criterion.trim()}" is false.`;
   }
   if (d.kind === "tool_perm") {

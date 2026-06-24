@@ -83,3 +83,16 @@ describe("NlRuleGuide — F3 field_constraint example phrasings", () => {
     );
   });
 });
+
+
+describe("NlRuleGuide — F6.5 llm_criterion + contentMatch combo example", () => {
+  it("ships an after-tool example combining a regex pre-filter with an LLM critic verdict", () => {
+    // F6.5 surfaces the deterministic regex pre-filter as the explicit
+    // input-definition slot in front of an advisory critic. The example
+    // chip should route the NL compiler to a llm_criterion CustomRule
+    // (firesAt=after_tool_use) with a contentMatch payload.
+    expect(src).toContain(
+      "After fetch_url returns, when the result contains AKIA[0-9A-Z]{16}, audit when an LLM critic judges that the key is real.",
+    );
+  });
+});

@@ -87,9 +87,9 @@ describe("AuthorWizard — variable-length policy authoring (F1.5)", () => {
     );
   });
 
-  it("after_tool_use + target=specific omits 'llm_criterion' (no per-tool filter today)", () => {
+  it("after_tool_use + target=specific omits 'llm_criterion' (use target=any + llmToolMatch field instead)", () => {
     expect(src).toMatch(
-      /llm_criterion has no per-tool filter[\s\S]*?return \["none", "regex"\]/,
+      /SpecificsStep already exposes its own `llmToolMatch`[\s\S]*?return \["none", "regex"\]/,
     );
   });
 
@@ -473,5 +473,194 @@ describe("AuthorWizard — F5 TrustBadge in Review step", () => {
     expect(src).toContain('"llm_criterion"');
     expect(src).toContain('"advisory"');
     expect(src).toContain('"deterministic"');
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// PR-F6.5 — llm_criterion + contentMatch combo (after-tool deterministic
+// pre-filter in front of the advisory critic)
+// ---------------------------------------------------------------------------
+
+
+describe("AuthorWizard — F6.5 llm_criterion + contentMatch combo", () => {
+  it("adds the contentMatch draft fields (enabled flag + pattern + isRegex + negate)", () => {
+    // The combo lives entirely on the llm_criterion path; four fields keep
+    // the wizard form state separate from the after-tool regex
+    // dashboard_check path (which already had regexPattern / regexIsRegex).
+    expect(src).toContain("llmContentMatchEnabled: boolean");
+    expect(src).toContain("llmContentMatchPattern: string");
+    expect(src).toContain("llmContentMatchIsRegex: boolean");
+    expect(src).toContain("llmContentMatchNegate: boolean");
+  });
+
+  it("EMPTY draft seeds the contentMatch fields as off/empty/false/false", () => {
+    // Default-OFF: the sub-form must not appear (and the runtime gate must
+    // not see a contentMatch payload) until the operator explicitly opts in.
+    expect(src).toContain("llmContentMatchEnabled: false");
+    expect(src).toContain('llmContentMatchPattern: ""');
+    expect(src).toContain("llmContentMatchIsRegex: false");
+    expect(src).toContain("llmContentMatchNegate: false");
+  });
+
+  it("SpecificsStep gates the contentMatch sub-form on lifecycle === after_tool_use", () => {
+    // Pre-final rules have no tool result to pre-filter, and the backend
+    // `_validate_content_match` rejects contentMatch on pre_final. The
+    // sub-form is hidden outside the after-tool branch so the wizard never
+    // lets the user author a guaranteed-reject combo.
+    expect(src).toMatch(
+      /draft\.conditionKind === "llm_criterion"[\s\S]*?draft\.lifecycle === "after_tool_use"/,
+    );
+  });
+
+  it("SpecificsStep ships the enable-checkbox copy + helper text", () => {
+    // The operator-facing copy must explain WHAT the gate does (only invoke
+    // the critic when the tool output matches) so the deterministic vs
+    // advisory layering is visible at authoring time.
+    expect(src).toContain("Add a regex pre-filter");
+    // Prettier wraps the long JSX text onto two source lines, so match on
+    // the wrapped pair rather than the single-line literal.
+    expect(src).toMatch(
+      /only invoke the critic when the\s+tool output matches/,
+    );
+  });
+
+  it("SpecificsStep surfaces pattern + isRegex + negate inputs when enabled", () => {
+    // Progressive disclosure: the three knobs only render when the
+    // enabled flag is true, matching the EMPTY draft default-OFF and the
+    // backend payload's optional-nested shape.
+    expect(src).toContain("draft.llmContentMatchEnabled ?");
+    expect(src).toContain("Pre-filter pattern");
+    expect(src).toContain("Treat as regular expression");
+    expect(src).toContain("Negate");
+  });
+
+  it("customRulePayload(after_tool llm_criterion) emits contentMatch when enabled + non-empty pattern", () => {
+    // The runtime gate (`magi_agent/customize/after_tool_gate.py`) reads
+    // payload.contentMatch as a dict with {pattern, isRegex, negate}. The
+    // emit shape must round-trip through `validate_custom_rule`.
+    expect(src).toContain("draft.llmContentMatchEnabled");
+    expect(src).toContain("payload.contentMatch = {");
+    expect(src).toMatch(
+      /pattern: draft\.llmContentMatchPattern\.trim\(\)[\s\S]*?isRegex: draft\.llmContentMatchIsRegex[\s\S]*?negate: draft\.llmContentMatchNegate/,
+    );
+  });
+
+  it("customRulePayload omits contentMatch on pre_final llm_criterion (rejected upstream)", () => {
+    // The emit branch is gated on draft.lifecycle === "after_tool_use" so
+    // pre_final llm_criterion authoring stays byte-identical to before
+    // F6.5. The backend would reject any pre_final contentMatch anyway
+    // (`_validate_content_match` errors with 'only valid for after_tool_use').
+    expect(src).toMatch(
+      /draft\.lifecycle === "after_tool_use"[\s\S]*?draft\.llmContentMatchEnabled[\s\S]*?draft\.llmContentMatchPattern\.trim\(\)\.length > 0/,
+    );
+  });
+
+  it("stepIsComplete blocks Next when contentMatch is enabled but pattern is empty", () => {
+    // An enabled-but-empty pre-filter would compile to a no-match
+    // (pattern empty) and the backend `_validate_content_match` rejects
+    // it. The wizard refuses to advance before the operator either
+    // disables the toggle or fills the pattern.
+    expect(src).toContain("draft.llmContentMatchEnabled");
+    expect(src).toContain("draft.llmContentMatchPattern.trim().length > 0");
+  });
+
+  it("describePolicy reflects the pre-filter when set", () => {
+    // The review-step sentence must surface the deterministic gate so the
+    // operator sees the combo ("critic invoked only when output ...") and
+    // not just the LLM verdict half.
+    expect(src).toContain("with pre-filter:");
+    expect(src).toContain("critic invoked only when output");
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// PR-F6.5 BLOCKER fix — after-tool llm_criterion requires a non-empty
+// `toolMatch` list (backend validator
+// `magi_agent/customize/custom_rules.py:185`). Without this the wizard
+// could never persist the F6.5 combo: PUT /custom-rules returned HTTP 400.
+// These tests lock the wizard's tool-name input, payload emit, completion
+// gate, and end-to-end shape against the backend's required keys.
+// ---------------------------------------------------------------------------
+
+
+describe("AuthorWizard — F6.5 BLOCKER fix: toolMatch on after-tool llm_criterion", () => {
+  it("Draft carries an llmToolMatch comma-separated string", () => {
+    // Single string field (not string[]) keeps the form state simple and
+    // mirrors the existing domainAllowlist / pathAllowlist comma pattern.
+    expect(src).toContain("llmToolMatch: string");
+    expect(src).toContain('llmToolMatch: ""');
+  });
+
+  it("SpecificsStep renders the tool-name input on after-tool llm_criterion", () => {
+    // The input must live inside the `lifecycle === "after_tool_use"`
+    // branch so pre_final stays unchanged (it has no tool layer).
+    expect(src).toContain("Tool name(s) to match (comma-separated, exact match)");
+    expect(src).toContain("update({ llmToolMatch: v })");
+    expect(src).toContain("value={draft.llmToolMatch}");
+  });
+
+  it("splitToolMatchList helper trims and drops empties", () => {
+    // The helper is the single source of truth used by both
+    // customRulePayload (emit) and stepIsComplete (gate) so they cannot
+    // diverge. Same shape as the existing allowlist split helpers.
+    expect(src).toMatch(
+      /function splitToolMatchList\(raw: string\): string\[\][\s\S]*?\.split\(","\)[\s\S]*?\.map\(\(s\) => s\.trim\(\)\)[\s\S]*?\.filter\(Boolean\)/,
+    );
+  });
+
+  it("customRulePayload(after_tool llm_criterion) ALWAYS emits a toolMatch list", () => {
+    // The toolMatch emit MUST sit unconditionally inside the
+    // `lifecycle === "after_tool_use"` branch — gating it on a sub-flag
+    // would let the wizard emit a payload the backend validator rejects.
+    expect(src).toContain("payload.toolMatch = splitToolMatchList(draft.llmToolMatch)");
+    expect(src).toMatch(
+      /draft\.lifecycle === "after_tool_use"[\s\S]*?payload\.toolMatch = splitToolMatchList/,
+    );
+  });
+
+  it("customRulePayload OMITS toolMatch on pre_final (no tool layer)", () => {
+    // pre_final llm_criterion stays byte-identical to pre-fix: the backend
+    // validator does not require toolMatch outside after_tool_use, and
+    // pre_final has no tool to match against.
+    // Verified structurally: the toolMatch emit sits inside the
+    // `if (draft.lifecycle === "after_tool_use")` block — the only branch
+    // assigning payload.toolMatch.
+    const matches = src.match(/payload\.toolMatch = /g) ?? [];
+    expect(matches.length).toBe(1);
+  });
+
+  it("stepIsComplete blocks Next when after-tool llm_criterion toolMatch is empty", () => {
+    // splitToolMatchList(draft.llmToolMatch).length > 0 is the completion
+    // gate — without it the wizard would advance to Save and the backend
+    // would reject with HTTP 400.
+    expect(src).toContain('draft.lifecycle !== "after_tool_use"');
+    expect(src).toContain("splitToolMatchList(draft.llmToolMatch).length > 0");
+  });
+
+  it("emitted after-tool llm_criterion payload matches the backend's required keys (round-trip shape)", () => {
+    // Mirrors the validator contract at
+    // `magi_agent/customize/custom_rules.py:185-188`:
+    //   - toolMatch: list[str], non-empty
+    //   - criterion: str OR contentMatch dict (one of)
+    // The wizard's payload builder must emit `toolMatch` as a string[] and
+    // `criterion` as a string; contentMatch (optional) round-trips its own
+    // {pattern,isRegex,negate} dict. Asserting the emit shape here is the
+    // closest we can get without spinning up a Python interpreter in
+    // vitest — the firing test
+    // `tests/customize_firing/test_llm_criterion_content_match_firing.py`
+    // covers the runtime half with this exact payload shape.
+    expect(src).toContain("payload.toolMatch = splitToolMatchList(draft.llmToolMatch)");
+    expect(src).toContain("criterion: draft.criterion.trim()");
+    expect(src).toContain("payload.contentMatch = {");
+  });
+
+  it("describePolicy surfaces the tool-match list at review time", () => {
+    // Operator sanity: the review-step sentence must name the tool(s) the
+    // critic actually fires against, mirroring the runtime gate's
+    // exact-membership check.
+    expect(src).toContain("splitToolMatchList(draft.llmToolMatch)");
+    expect(src).toContain("for tool ");
   });
 });

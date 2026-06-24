@@ -135,6 +135,27 @@ interface Draft {
   criterion: string;
   regexPattern: string;
   regexIsRegex: boolean;
+  // PR-F6.5 (BLOCKER fix): comma-separated list of tool names the after-tool
+  // llm_criterion rule fires on. Backend validator
+  // (`magi_agent/customize/custom_rules.py:185`) REQUIRES a non-empty
+  // `toolMatch` list for every after_tool_use llm_criterion rule, and the
+  // runtime gate (`after_tool_gate.py:150`) matches by exact membership
+  // (`tool_name not in tool_match` → skip). The wizard collects the list
+  // here and the payload builder splits/trims into a string[]. target=any
+  // is retained (per-tool filtering lives on the rule, not on the wizard's
+  // top-level Target step) so the existing availableConditionKinds wiring
+  // ("after_tool_use + any + llm_criterion") stays intact.
+  llmToolMatch: string;
+  // PR-F6.5: optional deterministic regex pre-filter on an after-tool
+  // llm_criterion rule. When enabled, the runtime gate only invokes the
+  // (cost-bearing) LLM critic on tool results that match the pattern, so
+  // the combo composes a deterministic input-definition slot in front of
+  // an advisory verdict. See `magi_agent/customize/after_tool_gate.py`
+  // for the runtime check.
+  llmContentMatchEnabled: boolean;
+  llmContentMatchPattern: string;
+  llmContentMatchIsRegex: boolean;
+  llmContentMatchNegate: boolean;
   // PR-F3: field_constraint structured IR.
   // Single-record form: (fcEvidenceType, fcField, fcOperator, fcValue).
   // Cross-record form (operator = forEachExistsCovering): the source side
@@ -170,6 +191,11 @@ const EMPTY: Draft = {
   criterion: "",
   regexPattern: "",
   regexIsRegex: false,
+  llmToolMatch: "",
+  llmContentMatchEnabled: false,
+  llmContentMatchPattern: "",
+  llmContentMatchIsRegex: false,
+  llmContentMatchNegate: false,
   fcEvidenceType: "",
   fcField: "",
   fcOperator: "eq",
@@ -499,8 +525,15 @@ function availableConditionKinds(
   }
   // after_tool_use
   if (toolTarget === "specific") {
-    // llm_criterion has no per-tool filter today, so it's offered only
-    // for target=any.
+    // llm_criterion is offered only under target=any because the
+    // SpecificsStep already exposes its own `llmToolMatch` text field
+    // for the backend-required per-tool filter (custom_rules.py:185-188
+    // rejects any after_tool_use llm_criterion without a non-empty
+    // toolMatch). Surfacing llm_criterion under target=specific too
+    // would force the user to fill BOTH the top-level toolName and the
+    // SpecificsStep llmToolMatch — duplicated tool entry, no clearer
+    // semantic. stepIsComplete enforces a non-empty llmToolMatch for
+    // the target=any path.
     return ["none", "regex"];
   }
   return ["none", "regex", "llm_criterion"];
@@ -713,12 +746,105 @@ function SpecificsStep({
         </label>
       ) : null}
       {draft.conditionKind === "llm_criterion" ? (
-        <TextField
-          value={draft.criterion}
-          onChange={(v) => update({ criterion: v })}
-          label="LLM criterion (single sentence)"
-          placeholder="The answer cites at least one source."
-        />
+        <div className="space-y-3">
+          {/* PR-F6.5 BLOCKER fix — the backend validator
+              (`magi_agent/customize/custom_rules.py:185`) REQUIRES a
+              non-empty `toolMatch` list on every after_tool_use
+              llm_criterion rule and the runtime gate matches by exact
+              membership. Without this input the wizard always emitted a
+              payload that PUT /custom-rules rejected with HTTP 400. Hidden
+              on pre_final (no tool layer there). */}
+          {draft.lifecycle === "after_tool_use" ? (
+            <div className="space-y-1">
+              <TextField
+                value={draft.llmToolMatch}
+                onChange={(v) => update({ llmToolMatch: v })}
+                label="Tool name(s) to match (comma-separated, exact match)"
+                placeholder="fetch_url, web_search"
+                mono
+              />
+              <p className="text-[11px] leading-relaxed text-secondary">
+                The critic only fires for these tool names. Required by the
+                runtime gate — leave empty and the wizard refuses to save.
+                One name per rule is fine; commas split a multi-tool list.
+              </p>
+            </div>
+          ) : null}
+          <TextField
+            value={draft.criterion}
+            onChange={(v) => update({ criterion: v })}
+            label="LLM criterion (single sentence)"
+            placeholder="The answer cites at least one source."
+          />
+          {/* PR-F6.5 — deterministic contentMatch pre-filter on after-tool
+              llm_criterion rules. The runtime gate only invokes the LLM
+              critic when the tool output matches the pattern. Surface this
+              ONLY on the after-tool branch: pre_final rules do not see a
+              tool result text, so contentMatch is rejected upstream by
+              `_validate_content_match`. */}
+          {draft.lifecycle === "after_tool_use" ? (
+            <div className="rounded-xl border border-black/[0.08] bg-gray-50/60 px-3 py-2.5 text-xs">
+              <label className="flex items-start gap-2 text-foreground">
+                <input
+                  type="checkbox"
+                  checked={draft.llmContentMatchEnabled}
+                  onChange={(e) =>
+                    update({ llmContentMatchEnabled: e.target.checked })
+                  }
+                  className="mt-0.5 rounded border-black/[0.20] text-primary focus:ring-primary/30"
+                />
+                <span>
+                  <span className="font-semibold">
+                    Add a regex pre-filter (only invoke the critic when the
+                    tool output matches)
+                  </span>
+                  <span className="mt-0.5 block text-[11px] leading-relaxed text-secondary">
+                    Optional deterministic gate in front of the advisory
+                    LLM check. Keeps critic cost low and adds a byte-stable
+                    pre-condition before the model runs.
+                  </span>
+                </span>
+              </label>
+              {draft.llmContentMatchEnabled ? (
+                <div className="mt-3 space-y-2 border-t border-black/[0.06] pt-3">
+                  <TextField
+                    value={draft.llmContentMatchPattern}
+                    onChange={(v) => update({ llmContentMatchPattern: v })}
+                    label="Pre-filter pattern"
+                    placeholder={
+                      draft.llmContentMatchIsRegex
+                        ? "AKIA[0-9A-Z]{16}"
+                        : "AWS_SECRET"
+                    }
+                    mono
+                  />
+                  <label className="flex items-center gap-2 text-xs text-secondary">
+                    <input
+                      type="checkbox"
+                      checked={draft.llmContentMatchIsRegex}
+                      onChange={(e) =>
+                        update({ llmContentMatchIsRegex: e.target.checked })
+                      }
+                      className="rounded border-black/[0.20] text-primary focus:ring-primary/30"
+                    />
+                    Treat as regular expression
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-secondary">
+                    <input
+                      type="checkbox"
+                      checked={draft.llmContentMatchNegate}
+                      onChange={(e) =>
+                        update({ llmContentMatchNegate: e.target.checked })
+                      }
+                      className="rounded border-black/[0.20] text-primary focus:ring-primary/30"
+                    />
+                    Negate (invoke critic when the output does NOT match)
+                  </label>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
       ) : null}
       {draft.conditionKind === "regex" ? (
         <div className="space-y-2">
@@ -1352,8 +1478,40 @@ function conditionClause(draft: Draft, refOptions: RefOption[]): string {
     }
     case "shacl":
       return "the SHACL shape does NOT conform on any evidence record";
-    case "llm_criterion":
-      return `an LLM critic judges "${draft.criterion}" is false`;
+    case "llm_criterion": {
+      let base = `an LLM critic judges "${draft.criterion}" is false`;
+      // PR-F6.5 BLOCKER fix: prefix the per-rule tool filter on after-tool
+      // rules so the operator sees which tool(s) the critic actually runs
+      // against. Mirrors the runtime gate's exact-membership check.
+      if (draft.lifecycle === "after_tool_use") {
+        const tools = splitToolMatchList(draft.llmToolMatch);
+        if (tools.length > 0) {
+          base = `for tool ${tools.map((t) => `"${t}"`).join(" / ")}, ${base}`;
+        }
+      }
+      // PR-F6.5: surface the deterministic regex pre-filter so the operator
+      // sees the combo (regex gate → critic) at review time. Mirrors the
+      // runtime: critic only runs when the pre-filter matches.
+      if (
+        draft.lifecycle === "after_tool_use"
+        && draft.llmContentMatchEnabled
+        && draft.llmContentMatchPattern.trim().length > 0
+      ) {
+        // Imperative verb under negate ("does NOT match regex" / "does NOT
+        // contain") to keep the sentence grammatical.
+        const positive = draft.llmContentMatchIsRegex
+          ? "matches regex"
+          : "contains";
+        const baseVerb = draft.llmContentMatchIsRegex
+          ? "match regex"
+          : "contain";
+        const clause = draft.llmContentMatchNegate
+          ? ` does NOT ${baseVerb}`
+          : ` ${positive}`;
+        return `${base} (with pre-filter: critic invoked only when output${clause} "${draft.llmContentMatchPattern.trim()}")`;
+      }
+      return base;
+    }
     case "regex":
       return `the result ${draft.regexIsRegex ? "matches regex" : "contains"} "${draft.regexPattern}"`;
     case "field_constraint":
@@ -1415,7 +1573,24 @@ function stepIsComplete(currentKey: StepKey, draft: Draft): boolean {
         case "shacl":
           return draft.shapeTtl.trim().length > 0;
         case "llm_criterion":
-          return draft.criterion.trim().length > 0;
+          // PR-F6.5: when the after-tool contentMatch pre-filter is enabled,
+          // the pattern must be non-empty — backend `_validate_content_match`
+          // rejects an empty pattern. Criterion remains required for the
+          // wizard's authoring path (the spec exposes contentMatch as an
+          // optional add-on to the critic, not as a standalone gate).
+          //
+          // PR-F6.5 BLOCKER fix: after_tool_use also requires a non-empty
+          // `toolMatch` list — backend validator
+          // (`magi_agent/customize/custom_rules.py:185`) rejects any
+          // after_tool_use llm_criterion payload without one with HTTP 400.
+          // pre_final has no tool layer so the list is omitted.
+          return (
+            draft.criterion.trim().length > 0
+            && (draft.lifecycle !== "after_tool_use"
+              || splitToolMatchList(draft.llmToolMatch).length > 0)
+            && (!draft.llmContentMatchEnabled
+              || draft.llmContentMatchPattern.trim().length > 0)
+          );
         case "regex":
           return draft.regexPattern.trim().length > 0;
         case "field_constraint":
@@ -1528,6 +1703,20 @@ function customRuleAction(draft: Draft): string {
 }
 
 
+/**
+ * PR-F6.5 BLOCKER fix — split the wizard's comma-separated tool-name list
+ * into the `string[]` shape the backend validator expects (a non-empty list
+ * is REQUIRED for every after_tool_use llm_criterion rule). Trimmed,
+ * de-empty'd, no dedupe (backend treats duplicates as harmless membership).
+ */
+function splitToolMatchList(raw: string): string[] {
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+
 function customRulePayload(draft: Draft): Record<string, unknown> {
   // before_tool tool_perm: pick the matcher shape from target + condition.
   if (draft.lifecycle === "before_tool_use") {
@@ -1583,8 +1772,36 @@ function customRulePayload(draft: Draft): Record<string, unknown> {
       return {
         contentMatch: { pattern: draft.regexPattern.trim(), isRegex: draft.regexIsRegex },
       };
-    case "llm_criterion":
-      return { criterion: draft.criterion.trim() };
+    case "llm_criterion": {
+      // PR-F6.5: after-tool llm_criterion may carry an optional deterministic
+      // `contentMatch` regex pre-filter. The runtime gate uses it to skip the
+      // (costly) LLM critic call entirely when the tool output does not match
+      // — turning the combo into "deterministic pre-condition + advisory
+      // critic". Pre-final rules never see a tool output so contentMatch is
+      // omitted there (and would be rejected by `_validate_content_match`).
+      const payload: Record<string, unknown> = {
+        criterion: draft.criterion.trim(),
+      };
+      if (draft.lifecycle === "after_tool_use") {
+        // BLOCKER fix: `toolMatch` is REQUIRED by the backend validator on
+        // every after_tool_use llm_criterion rule. The runtime gate
+        // (`after_tool_gate.py:150`) skips the rule unless `tool_name in
+        // tool_match`, so the list is the per-rule tool filter the
+        // wizard's top-level Target step cannot express for this combo.
+        payload.toolMatch = splitToolMatchList(draft.llmToolMatch);
+        if (
+          draft.llmContentMatchEnabled
+          && draft.llmContentMatchPattern.trim().length > 0
+        ) {
+          payload.contentMatch = {
+            pattern: draft.llmContentMatchPattern.trim(),
+            isRegex: draft.llmContentMatchIsRegex,
+            negate: draft.llmContentMatchNegate,
+          };
+        }
+      }
+      return payload;
+    }
     case "field_constraint":
       // Storage kind is shacl_constraint (see customRuleKind). The
       // structured IR rides in `authoredAs` so re-opening the rule in the
