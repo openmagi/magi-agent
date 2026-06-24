@@ -37,8 +37,12 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # web-dashboard freshness gate diffs against origin/base
       - name: Naming-leak ratchet gate
         run: bash scripts/check_naming.sh
+      - name: Web-dashboard bundle freshness gate
+        run: bash scripts/check_web_dashboard_freshness.sh
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
