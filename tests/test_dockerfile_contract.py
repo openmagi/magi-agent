@@ -9,7 +9,10 @@ DOCKERFILE = ROOT / "Dockerfile"
 def test_runtime_image_installs_runtime_extras() -> None:
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
 
-    match = re.search(r'pip install --no-cache-dir "\.\[([^\]]+)\]"', dockerfile)
+    match = re.search(
+        r'pip install --no-cache-dir(?: [-A-Za-z=]+)* "\.\[([^\]]+)\]"',
+        dockerfile,
+    )
     assert match is not None, "runtime image must install magi-agent with extras"
 
     extras = {extra.strip() for extra in match.group(1).split(",")}
