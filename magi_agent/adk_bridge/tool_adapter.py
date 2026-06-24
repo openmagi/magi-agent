@@ -210,9 +210,11 @@ def active_provider_family() -> "ProviderFamily":
         if family is not ProviderFamily.DEFAULT:
             return family
 
-    provider_label = os.environ.get(
-        "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_LABEL",
-        "",
+    # I-4: routed through the typed flag registry.
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    provider_label = (
+        flag_str("CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_LABEL") or ""
     ).strip().lower()
     try:
         return ProviderFamily(provider_label)

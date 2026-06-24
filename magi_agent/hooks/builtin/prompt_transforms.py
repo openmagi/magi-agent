@@ -33,7 +33,6 @@ immutable tuple and never mutate it; they build a new list.
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from magi_agent.hooks.context import HookContext
@@ -133,9 +132,10 @@ def language_preference_transform_manifest() -> HookManifest:
 
 
 def _workspace_root() -> Path:
-    configured = os.environ.get(
-        "CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_WORKSPACE_ROOT"
-    )
+    # I-4: routed through the typed flag registry.
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    configured = flag_str("CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_WORKSPACE_ROOT")
     if configured:
         return Path(configured)
     return Path.cwd()

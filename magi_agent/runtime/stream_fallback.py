@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import os
 import time
 from dataclasses import dataclass, field
 from typing import Literal
 
+from magi_agent.config.flags import flag_str
 from magi_agent.runtime.error_taxonomy import ErrorCategory
 from magi_agent.runtime.stream_withholding import (
     StreamWithholdingEvidence,
@@ -13,9 +13,9 @@ from magi_agent.runtime.stream_withholding import (
 from magi_agent.transport.sse import InMemorySseWriter
 from magi_agent.transport.sse_buffer import SseEventBuffer
 
-
-STREAM_FALLBACK_MODEL = os.environ.get(
-    "MAGI_STREAM_FALLBACK_MODEL", "claude-haiku-4-5-20251001"
+# I-4: snapshot the fallback model from the typed flag registry.
+STREAM_FALLBACK_MODEL = (
+    flag_str("MAGI_STREAM_FALLBACK_MODEL") or "claude-haiku-4-5-20251001"
 )
 
 _FALLBACK_TRIGGERING_CATEGORIES: frozenset[ErrorCategory] = frozenset(
