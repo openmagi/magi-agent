@@ -344,6 +344,19 @@ const EMPTY: Draft = {
 // rendered conditionally on lifecycle, so the step plan no longer
 // branches on lifecycle. pre_final remains 6 steps and tool-bearing
 // lifecycles collapse from 7 → 6.
+//
+// PR-F-UX7 — kept at 6 steps. An earlier draft of the F-UX7 spec
+// (clawy docs/plans/2026-06-25-customize-fux7-flife4-trigger-and-
+// action-matrix-design.md) called for a 6 → 5 shrink, on the stale
+// assumption that a standalone "target" step still existed. F-UX3
+// (PR #971) already removed it, so the only step still nominally
+// foldable would be "specifics" or "review", and both are load-
+// bearing (per-condition form + final audit pass). F-UX7 therefore
+// changes only the Specific-tool widget inside TriggerStep — not the
+// plan. The defense-in-depth test in author-wizard.local.test.ts
+// pins both ["trigger","target",…] (7-step regression) and the
+// hypothetical ["trigger","condition","specifics","name","review"]
+// (5-step regression) as forbidden.
 type StepKey = "trigger" | "condition" | "specifics" | "action" | "name" | "review";
 
 function stepPlan(lifecycle: Lifecycle): StepKey[] {
@@ -930,12 +943,30 @@ function TriggerStep({
 }
 
 
-// PR-F-UX3 — dropdown source for the tool-target sub-fieldset. Replaces
-// the freeform TextField the F1.5 TargetStep used so a typo can no
-// longer silently produce a no-match rule. Sorted by display name with
-// the runtime's source/dangerous markers preserved as suffix hints; the
-// stored value is the bare tool name (matches the backend tool_perm
-// match.tool exact-string compare).
+// PR-F-UX7 — native combobox for the tool-target sub-fieldset. F-UX3
+// introduced a catalog-backed <select> to replace the F1.5 freeform
+// TextField (eliminating typo-induced no-match rules); F-UX7 evolves
+// that into a native HTML combobox (<input list="..."> + <datalist>) so
+// the operator can EITHER pick a known runtime tool from the suggestion
+// list OR type a free-text fallback (e.g. a dynamically-registered tool
+// that is not yet in the catalog snapshot). The stored value is still
+// the bare tool name (matches the backend tool_perm match.tool exact-
+// string compare). The previous F-UX3 "{value} (not in catalog)"
+// synthetic option is no longer needed: the input itself surfaces the
+// raw value, and the operator can edit it directly.
+//
+// Implementation notes:
+//   - <datalist> is browser-native, free a11y, and degrades gracefully
+//     (renders as a plain text input on browsers that ignore it). We
+//     deliberately avoid a custom Popover/Headless-UI combobox to keep
+//     parity with how the rest of this wizard uses unwrapped native
+//     form controls.
+//   - The validator on Next-step click (stepIsComplete("trigger"))
+//     already only requires draft.toolName.trim().length > 0 when
+//     toolTarget === "specific", so free-text is accepted as-is.
+//   - We keep the function name `ToolNameSelect` to minimise call-site
+//     churn (the F-UX3 callsite in TriggerStep still imports it by
+//     name); the rendered element is now a combobox-pattern <input>.
 function ToolNameSelect({
   value,
   onChange,
@@ -945,39 +976,84 @@ function ToolNameSelect({
   onChange: (v: string) => void;
   tools: ToolItem[];
 }): React.ReactElement {
-  // Sort by name so the dropdown is stable across renders; the catalog
-  // is already deduped by the customize-api fetcher.
+  // Sort by name so the suggestion list is stable across renders; the
+  // catalog is already deduped by the customize-api fetcher.
   const sorted = [...tools].sort((a, b) => a.name.localeCompare(b.name));
-  // If the current value is not in the catalog (e.g. wizard pre-filled
-  // from a saved rule that referenced a removed/renamed tool), surface
-  // it as a disambiguated option so the user can see it instead of the
-  // selector silently snapping back to the placeholder.
+  // Whether the current value matches a catalog entry. Used to surface
+  // an honest "(not in catalog)" hint beneath the input when the
+  // operator typed (or round-tripped) a name the runtime does not know
+  // about, so the F-UX3 round-trip safety property is preserved without
+  // the synthetic <option>.
   const valueInCatalog = sorted.some((t) => t.name === value);
+  // Whether the typed/selected name resolves to a dangerous catalog
+  // entry. Used to surface a visible warning chip — <option label=...>
+  // is unreliable as a dangerous-tool signal: Chrome/Edge ignore it
+  // entirely (suggestion list only shows `value`), Safari shows it
+  // inline, Firefox shows it as a secondary line. A sibling warning
+  // chip is the only browser-portable way to keep the F-UX3 dangerous
+  // visibility property.
+  const matchedDangerous = sorted.some(
+    (t) => t.name === value && t.dangerous,
+  );
+  // Stable id so the <datalist> can be referenced by `list="..."` —
+  // matches the spec PR-F-UX7 ("data-testid=tool-name-combobox").
+  const listId = "tool-name-options";
+  // Stable hint ids for `aria-describedby` so screen readers surface
+  // the "(not in catalog)" / "dangerous" warnings alongside the input
+  // label rather than dropping them on the floor.
+  const notInCatalogId = "tool-name-not-in-catalog";
+  const dangerousId = "tool-name-dangerous";
+  const describedBy = [
+    !valueInCatalog && value.trim().length > 0 ? notInCatalogId : null,
+    matchedDangerous ? dangerousId : null,
+  ]
+    .filter((s): s is string => s !== null)
+    .join(" ") || undefined;
   return (
     <label className="block">
       <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
         Tool name
       </span>
-      <select
+      <input
+        type="text"
+        list={listId}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         aria-label="Tool name"
+        aria-describedby={describedBy}
+        data-testid="tool-name-combobox"
+        placeholder="Pick from the list or type a tool name…"
+        autoComplete="off"
+        spellCheck={false}
         className="mt-1 w-full rounded-lg border border-primary/30 bg-white px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-      >
-        <option value="">Select a tool…</option>
-        {!valueInCatalog && value ? (
-          <option value={value}>{value} (not in catalog)</option>
-        ) : null}
-        {sorted.map((t) => {
-          const suffix = t.dangerous ? " · dangerous" : "";
-          return (
-            <option key={t.name} value={t.name}>
-              {t.name}
-              {suffix}
-            </option>
-          );
-        })}
-      </select>
+      />
+      <datalist id={listId}>
+        {sorted.map((t) => (
+          // The stored value stays a clean bare tool name so the
+          // backend tool_perm match.tool comparison does not see any
+          // suffix. <option label="dangerous"> is intentionally NOT
+          // used here (Chrome/Edge ignore it); the dangerous signal
+          // surfaces via the sibling warning chip below instead.
+          <option key={t.name} value={t.name} />
+        ))}
+      </datalist>
+      {!valueInCatalog && value.trim().length > 0 ? (
+        <span
+          id={notInCatalogId}
+          className="mt-1 block text-[11px] text-secondary/70"
+        >
+          {value} (not in catalog) — saved as a free-text tool name.
+        </span>
+      ) : null}
+      {matchedDangerous ? (
+        <span
+          id={dangerousId}
+          className="mt-1 inline-flex items-center gap-1 rounded-md bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive"
+          data-testid="tool-name-dangerous-warning"
+        >
+          ⚠ Dangerous tool
+        </span>
+      ) : null}
     </label>
   );
 }
