@@ -1,3 +1,23 @@
+# 0.1.84 (2026-06-24)
+
+## Customize (F-MUT mutator hook series)
+- F-MUT-AUDIT: HookBus replace contract verification + typed payload module (#973).
+- F-MUT1: prompt_injection kind + BEFORE_TOOL_USE replace consumer (#978).
+- F-MUT2: output_rewrite kind + AFTER_TOOL_USE replace consumer (#982).
+- F-MUT3: Mutator trust badge + wizard archetype + F-UX6 NL routing (#983).
+
+## Customize (F-LIFE lifecycle hooks)
+- F-LIFE1: BEFORE_TURN_START + AFTER_TURN_END + on_subagent_stop non-audit lift (#984).
+- F-LIFE2: BEFORE/AFTER_LLM_CALL audit + per-turn critic budget (default 3) (#985).
+- F-LIFE3: compaction / task-checkpoint / artifact-created emitters (#986).
+
+## Customize (UX polish)
+- F-UX-EXTRA: inline condition chips + Policy ID auto-fill + friendly variable tooltips (#987).
+- F-HANDOFF: wizard → NL bidirectional context handoff (Continue-in-NL button) (#988).
+
+## CLI bootstrap
+- Embed install-default profile so live subagents work out of the box (#989).
+
 # 0.1.83 (2026-06-24)
 
 ## Dashboard
