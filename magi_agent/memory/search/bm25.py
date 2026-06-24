@@ -97,12 +97,27 @@ class PyBM25Backend:
         self._docs: list[_Document] = []
         self._doc_freqs: Counter[str] = Counter()
         self._avg_doc_len: float = 0.0
+        # H-27: ``_index_signature`` keys the built index on
+        # ``(resolved_root, max(mtime), file_count)``. A subsequent reindex
+        # over an unchanged tree returns immediately without re-reading or
+        # re-tokenising — ``hipocampus_readonly._local_search_results`` calls
+        # ``reindex(...)`` before every search, so the cache turns N recall
+        # turns over an unchanged corpus into 1 tokenisation pass + N stat
+        # walks. The signature is None until the first successful reindex.
+        self._index_signature: tuple[Path, float, int] | None = None
 
     @property
     def capabilities(self) -> SearchCapabilities:
         return SearchCapabilities(name="pybm25", supports_vector=False)
 
     def reindex(self, root: Path) -> None:
+        signature = self._compute_signature(root)
+        if signature is not None and signature == self._index_signature:
+            # H-27 cache hit: tree unchanged since the last successful
+            # reindex; the prior ``_docs``/``_doc_freqs``/``_avg_doc_len``
+            # are still authoritative.
+            return
+
         docs: list[_Document] = []
         for path in self._iter_memory_files(root):
             try:
@@ -123,6 +138,31 @@ class PyBM25Backend:
         self._docs = docs
         self._doc_freqs = doc_freqs
         self._avg_doc_len = (total_len / len(docs)) if docs else 0.0
+        # Stamp the cache only after the build succeeds; if signature
+        # computation returned ``None`` (root unresolvable) the cache
+        # stays cleared so the next call retries.
+        self._index_signature = signature
+
+    def _compute_signature(self, root: Path) -> tuple[Path, float, int] | None:
+        """Cheap one-pass walk that returns the cache key for ``root`` or
+        ``None`` when the root cannot be resolved. Reuses the same
+        whitelist-aware traversal as :meth:`_iter_memory_files` so the
+        signature exactly tracks the set of files the build would index.
+        """
+        resolved_root = _resolve_existing(root)
+        if resolved_root is None or not resolved_root.is_dir():
+            return None
+        max_mtime = 0.0
+        count = 0
+        for path in self._iter_memory_files(root):
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            count += 1
+            if stat.st_mtime > max_mtime:
+                max_mtime = stat.st_mtime
+        return (resolved_root, max_mtime, count)
 
     def search(self, query: str, *, k: int) -> list[SearchHit]:
         if k <= 0 or not self._docs:
