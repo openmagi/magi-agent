@@ -724,6 +724,7 @@ function RulesSectionMount({
               setAddState({ phase: "idle" });
             }}
             onBrowseEvidence={() => setSubTab("evidence")}
+            onAuthorManually={() => setAddState({ phase: "guided" })}
           />
         </section>
       ) : null}

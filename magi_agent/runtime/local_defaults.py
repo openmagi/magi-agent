@@ -214,6 +214,14 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     # opt in for lab. Without this the dashboard "Compile" button returns
     # ``nl-rule compiler disabled`` even though the user already has the UI.
     "MAGI_CUSTOMIZE_NL_RULE_COMPILER_ENABLED",
+    # PR-F-UX6 interview-driven NL authoring + hybrid primitive proposals.
+    # Registration-time only (never on the hot path) and fail-open when no
+    # provider key is configured, so safe to dogfood in lab. Without this the
+    # compose surface still works in the legacy one-shot mode — interview-mode
+    # only activates when the flag is ON AND the input is underspecified.
+    # Registry default stays OFF so a fresh install / hosted serve preserve the
+    # legacy compile path until the operator explicitly opts in.
+    "MAGI_CUSTOMIZE_NL_INTERVIEW_MODE_ENABLED",
     # Customize seam-spec endpoint. Registration-time / dashboard-authoring path
     # only, never on the live turn hot path, and fail-open when prerequisites are
     # missing — safe to dogfood in lab. Registry default stays OFF so a fresh

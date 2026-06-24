@@ -28,7 +28,11 @@ import {
   compileRule,
   putCustomRule,
   putSeamSpec,
+  type ArchitectPrimitive,
+  type ArchitectProposal,
+  type ConversationTurn,
   type CustomRule,
+  type InterviewQuestion,
   type MissingFieldEntry,
   type RoutedKind,
   type RuleCompileResponse,
@@ -39,7 +43,9 @@ import {
   type DashboardCheck,
 } from "@/lib/packs-dashboard-api";
 import { useAgentFetch } from "@/lib/local-api";
+import { InterviewMessage } from "./interview-message";
 import { NlRuleGuide } from "./nl-rule-guide";
+import { ProposalCard } from "./proposal-card";
 import { TrustBadge, type TrustClass } from "./trust-badge";
 
 
@@ -53,6 +59,100 @@ export interface NlRuleComposeProps {
    *  Without this prop the button is hidden — the banner still offers
    *  the advisory degrade path so the operator is never dead-ended. */
   onBrowseEvidence?: () => void;
+  /** PR-F-UX6: optional callback to drop the operator into the guided
+   *  wizard with the inferred intent pre-filled. When absent the
+   *  "Author manually instead" link on the ProposalCard hides. */
+  onAuthorManually?: () => void;
+}
+
+
+// ---------------------------------------------------------------------------
+// PR-F-UX6 — chat-thread types
+// ---------------------------------------------------------------------------
+
+
+/**
+ * One turn in the operator-facing chat thread. The first user turn carries
+ * the initial NL intent; subsequent user turns are answers to architect
+ * interview questions. Assistant turns surface the architect's questions
+ * or the proposal preamble (the ProposalCard itself renders out-of-band
+ * below the thread).
+ */
+interface ChatTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+
+/**
+ * The current architect state. Mutually exclusive with the legacy
+ * compile-result view; the legacy view is preserved for backward-
+ * compatibility with the flag-OFF / one-shot success branch (and for any
+ * input the architect routes to legacy compile).
+ */
+type ArchitectState =
+  | { kind: "idle" }
+  | { kind: "interview"; questions: InterviewQuestion[]; proposalError?: string }
+  | { kind: "proposal"; proposal: ArchitectProposal };
+
+
+// ---------------------------------------------------------------------------
+// PR-F-UX6 — groupId generator for hybrid activation
+// ---------------------------------------------------------------------------
+
+
+function newGroupId(): string {
+  // crypto.randomUUID is available in evergreen browsers + Node 19+. Fall
+  // back to a Math.random base36 string for jsdom test environments that
+  // do not expose crypto.randomUUID.
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `grp_${crypto.randomUUID()}`;
+  }
+  return `grp_${Math.random().toString(36).slice(2, 12)}`;
+}
+
+
+/**
+ * Lift an architect primitive into the persistence-shape needed by the
+ * matching PUT route. Primitives whose backing storage is a CustomRule
+ * (deterministic_ref / tool_perm / llm_criterion / shacl_constraint /
+ * field_constraint / capability_scope) get the optional `groupId` stamped
+ * onto the rule envelope; seam_spec / custom_check primitives pass
+ * through untouched (those routes do not share the custom_rules table).
+ */
+function stampGroupId<T>(payload: T, groupId: string | null): T {
+  if (groupId === null) return payload;
+  if (!payload || typeof payload !== "object") return payload;
+  return { ...(payload as Record<string, unknown>), groupId } as T;
+}
+
+
+async function activatePrimitive(
+  agentFetch: (path: string, init?: RequestInit) => Promise<Response>,
+  primitive: ArchitectPrimitive,
+  groupId: string | null,
+): Promise<void> {
+  const kind = primitive.kind;
+  if (
+    kind === "deterministic_ref"
+      || kind === "tool_perm"
+      || kind === "llm_criterion"
+      || kind === "shacl_constraint"
+      || kind === "field_constraint"
+      || kind === "capability_scope"
+  ) {
+    const rule = stampGroupId(primitive.payload as CustomRule, groupId);
+    await putCustomRule(agentFetch, rule);
+    return;
+  }
+  if (kind === "seam_spec") {
+    await putSeamSpec(agentFetch, primitive.payload as SeamSpecDoc);
+    return;
+  }
+  if (kind === "custom_check") {
+    await putDashboardCheck(agentFetch, primitive.payload as DashboardCheck);
+    return;
+  }
 }
 
 
@@ -64,6 +164,7 @@ const ROUTED_LABEL: Record<RoutedKind, string> = {
   field_constraint: "Custom Rule (field constraint — picker authored)",
   seam_spec: "SeamSpec (rewires a built-in preset)",
   custom_check: "Dashboard Check (after-tool, self-host)",
+  capability_scope: "Custom Rule (spawn-time toolset cap)",
 };
 
 /**
@@ -81,6 +182,7 @@ const ADVISORY_HINT_PREFIX =
 export function NlRuleCompose({
   onActivated,
   onBrowseEvidence,
+  onAuthorManually,
 }: NlRuleComposeProps): React.ReactElement {
   const agentFetch = useAgentFetch();
 
@@ -89,6 +191,55 @@ export function NlRuleCompose({
   const [result, setResult] = useState<RuleCompileResponse | null>(null);
   const [activateBusy, setActivateBusy] = useState(false);
   const [activateError, setActivateError] = useState<string | null>(null);
+  // PR-F-UX6 chat-thread state — accumulates user / assistant turns across
+  // the interview loop. Empty when the surface is still in single-shot mode.
+  const [thread, setThread] = useState<ChatTurn[]>([]);
+  const [architectState, setArchitectState] = useState<ArchitectState>({
+    kind: "idle",
+  });
+
+  const resetSurface = useCallback(() => {
+    setResult(null);
+    setActivateError(null);
+    setThread([]);
+    setArchitectState({ kind: "idle" });
+  }, []);
+
+  const applyResponse = useCallback(
+    (out: RuleCompileResponse) => {
+      // PR-F-UX6: classify the response into one of three surfaces.
+      if (out.mode === "interview" && out.questions) {
+        setArchitectState({ kind: "interview", questions: out.questions });
+        // Mirror the architect's first question into the thread so the
+        // operator sees a transcript of what was asked.
+        if (out.questions.length > 0) {
+          const summary = out.questions.map((q) => `Q: ${q.question}`).join("\n");
+          setThread((prior) => [
+            ...prior,
+            { role: "assistant", content: summary },
+          ]);
+        }
+        setResult(null);
+        return;
+      }
+      if (out.mode === "proposal" && out.proposal) {
+        setArchitectState({ kind: "proposal", proposal: out.proposal });
+        setThread((prior) => [
+          ...prior,
+          {
+            role: "assistant",
+            content: `Proposal: ${out.proposal!.summary}`,
+          },
+        ]);
+        setResult(null);
+        return;
+      }
+      // Legacy single-shot success / clarifyingQuestions / error.
+      setArchitectState({ kind: "idle" });
+      setResult(out);
+    },
+    [],
+  );
 
   const handleCompile = useCallback(async () => {
     if (!nlText.trim()) {
@@ -97,13 +248,110 @@ export function NlRuleCompose({
     }
     setCompileBusy(true);
     setActivateError(null);
+    const initialTurn: ChatTurn = { role: "user", content: nlText.trim() };
+    setThread([initialTurn]);
     try {
       const out = await compileRule(agentFetch, nlText);
-      setResult(out);
+      applyResponse(out);
     } finally {
       setCompileBusy(false);
     }
-  }, [agentFetch, nlText]);
+  }, [agentFetch, applyResponse, nlText]);
+
+  /**
+   * PR-F-UX6: send an interview answer. Appends the answer to the thread,
+   * forwards the full chat history as `priorTurns` to the backend, and
+   * forces `mode=interview` so the architect keeps the loop rolling.
+   */
+  const handleInterviewAnswer = useCallback(
+    async (answer: string) => {
+      const nextThread: ChatTurn[] = [
+        ...thread,
+        { role: "user", content: answer },
+      ];
+      setThread(nextThread);
+      setCompileBusy(true);
+      try {
+        const priorTurns: ConversationTurn[] = nextThread.map((t) => ({
+          role: t.role,
+          content: t.content,
+        }));
+        const out = await compileRule(agentFetch, nlText, priorTurns, "interview");
+        applyResponse(out);
+      } finally {
+        setCompileBusy(false);
+      }
+    },
+    [agentFetch, applyResponse, nlText, thread],
+  );
+
+  /**
+   * PR-F-UX6: "Refine" — ask the architect to revise the proposal in
+   * response to a freeform tweak. We reuse the interview machinery: the
+   * tweak is appended to the thread as a user turn and the architect
+   * re-runs with mode=interview.
+   */
+  const handleRefineProposal = useCallback(async () => {
+    // The simplest "Refine" affordance is to wipe the proposal and let the
+    // architect re-interview. The thread is preserved so the user can build
+    // on the prior context.
+    setArchitectState({ kind: "idle" });
+    setCompileBusy(true);
+    try {
+      const priorTurns: ConversationTurn[] = thread.map((t) => ({
+        role: t.role,
+        content: t.content,
+      }));
+      const out = await compileRule(
+        agentFetch,
+        nlText,
+        priorTurns,
+        "interview",
+      );
+      applyResponse(out);
+    } finally {
+      setCompileBusy(false);
+    }
+  }, [agentFetch, applyResponse, nlText, thread]);
+
+  /**
+   * PR-F-UX6: activate an architect proposal.
+   *
+   * `mode: "single"` → one putCustomRule (or putSeamSpec / putDashboardCheck)
+   *                    call; no groupId.
+   * `mode: "hybrid"` → N saves sharing a newly-generated groupId. The
+   *                    dashboard's RulesTable groups by groupId and renders
+   *                    the hybrid composition as one logical row.
+   */
+  const handleActivateProposal = useCallback(async () => {
+    if (architectState.kind !== "proposal") return;
+    const proposal = architectState.proposal;
+    setActivateBusy(true);
+    setActivateError(null);
+    try {
+      const groupId = proposal.mode === "hybrid" ? newGroupId() : null;
+      for (const primitive of proposal.primitives) {
+        await activatePrimitive(agentFetch, primitive, groupId);
+      }
+      resetSurface();
+      setNlText("");
+      onActivated();
+    } catch (err) {
+      setActivateError(
+        err instanceof Error ? err.message : "Activate failed",
+      );
+    } finally {
+      setActivateBusy(false);
+    }
+  }, [agentFetch, architectState, onActivated, resetSurface]);
+
+  const handleAuthorManually = useCallback(() => {
+    // Drop to the wizard with whatever intent state was inferred. The
+    // wizard does NOT yet read the intent map back (that wiring is a
+    // separate follow-up); for now we just kick the parent and let it
+    // route to the wizard.
+    if (onAuthorManually) onAuthorManually();
+  }, [onAuthorManually]);
 
   /**
    * F3 secondary recovery action: when the compiler returns
@@ -167,6 +415,9 @@ export function NlRuleCompose({
       && (result.schemaIssues?.length ?? 0) === 0,
   );
 
+  const inInterviewLoop =
+    architectState.kind === "interview" || architectState.kind === "proposal";
+
   return (
     <section
       aria-label="Describe a rule in English"
@@ -177,9 +428,10 @@ export function NlRuleCompose({
           Describe a rule in English
         </h3>
         <p className="mt-0.5 text-xs text-secondary">
-          Type what you want the agent to do or not do — the compiler picks
-          the right backing primitive (custom rule, seam rewire, after-tool
-          check) and surfaces a draft for you to review before activating.
+          The compiler is a policy architect, not a sentence parser. Tell it
+          what you want; it will ask what it needs and propose the right
+          primitive — or a hybrid composition — with each component&apos;s trust
+          class shown honestly.
         </p>
       </header>
 
@@ -189,26 +441,26 @@ export function NlRuleCompose({
         value={nlText}
         onChange={(e) => setNlText(e.target.value)}
         rows={3}
-        placeholder='e.g. "deny shell_exec", "block answers when tests have not run on coding turns", "rewire fact-grounding to opt-in"'
+        placeholder='e.g. "audit AWS keys", "stop the agent from editing /etc/", "block answers when tests have not run on coding turns"'
         className="w-full resize-y rounded-lg border border-black/[0.10] bg-white px-3 py-2 text-sm leading-6 text-foreground shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
         aria-label="Rule policy in natural language"
+        disabled={inInterviewLoop}
       />
 
       <div className="flex items-center gap-2">
         <button
           type="button"
           onClick={handleCompile}
-          disabled={compileBusy || !nlText.trim()}
+          disabled={compileBusy || !nlText.trim() || inInterviewLoop}
           className="inline-flex items-center rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {compileBusy ? "Compiling…" : "Compile"}
         </button>
-        {result ? (
+        {result || inInterviewLoop ? (
           <button
             type="button"
             onClick={() => {
-              setResult(null);
-              setActivateError(null);
+              resetSurface();
             }}
             className="inline-flex items-center rounded-lg border border-black/[0.08] bg-white px-3 py-1.5 text-xs font-medium text-secondary hover:bg-black/[0.03]"
           >
@@ -216,6 +468,32 @@ export function NlRuleCompose({
           </button>
         ) : null}
       </div>
+
+      {thread.length > 0 ? (
+        <ChatThread turns={thread} busy={compileBusy} />
+      ) : null}
+
+      {architectState.kind === "interview"
+        ? architectState.questions.map((q, idx) => (
+            <InterviewMessage
+              key={`q-${idx}-${q.question}`}
+              question={q}
+              onAnswer={handleInterviewAnswer}
+              busy={compileBusy}
+            />
+          ))
+        : null}
+
+      {architectState.kind === "proposal" ? (
+        <ProposalCard
+          proposal={architectState.proposal}
+          busy={activateBusy}
+          errorText={activateError}
+          onActivate={handleActivateProposal}
+          onRefine={handleRefineProposal}
+          onAuthorManually={handleAuthorManually}
+        />
+      ) : null}
 
       {result ? (
         <CompileResultView
@@ -234,6 +512,56 @@ export function NlRuleCompose({
         />
       ) : null}
     </section>
+  );
+}
+
+
+/**
+ * ChatThread — minimal transcript of the architect interview. Surfaces
+ * the operator's intent + each architect turn in plain text so the user
+ * can see what was asked / answered before activating. The chip pickers
+ * and ProposalCard render OUT-OF-BAND below the thread (they own their
+ * own interactive state).
+ */
+function ChatThread({
+  turns,
+  busy,
+}: {
+  turns: ChatTurn[];
+  busy: boolean;
+}): React.ReactElement {
+  return (
+    <ol
+      aria-label="Architect chat thread"
+      className="space-y-2 rounded-xl border border-black/[0.05] bg-white/60 p-3"
+    >
+      {turns.map((t, idx) => (
+        <li
+          key={`turn-${idx}`}
+          className={`flex gap-2 text-xs leading-relaxed ${
+            t.role === "user" ? "text-foreground" : "text-blue-900"
+          }`}
+        >
+          <span
+            className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+              t.role === "user"
+                ? "bg-black/[0.05] text-secondary"
+                : "bg-blue-500/10 text-blue-700"
+            }`}
+          >
+            {t.role}
+          </span>
+          <span className="min-w-0 whitespace-pre-wrap break-words">
+            {t.content}
+          </span>
+        </li>
+      ))}
+      {busy ? (
+        <li className="text-[11px] italic text-secondary">
+          architect thinking…
+        </li>
+      ) : null}
+    </ol>
   );
 }
 
