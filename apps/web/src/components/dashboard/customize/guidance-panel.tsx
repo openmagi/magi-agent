@@ -20,6 +20,7 @@
 import React, { useEffect, useState } from "react";
 
 import { PageHint } from "./page-hint";
+import { TrustBadge } from "./trust-badge";
 
 
 export interface GuidancePanelProps {
@@ -41,12 +42,7 @@ export function GuidancePanel({
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <span
-          aria-label="Trust class: Advisory"
-          className="inline-flex items-center rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700"
-        >
-          Advisory
-        </span>
+        <TrustBadge trustClass="advisory" />
         <p className="text-xs text-secondary">
           Injected into the system prompt as operator guidance. The model is
           asked to honor these but no gate enforces them. For deterministic

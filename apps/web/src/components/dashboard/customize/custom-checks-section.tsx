@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { useAgentFetch } from "@/lib/local-api";
 import { slugifyCheckId } from "./custom-checks-section.slug";
+import { TrustBadge, type TrustClass } from "./trust-badge";
 import {
   deleteDashboardCheck,
   getDashboardChecks,
@@ -15,6 +16,23 @@ import {
 } from "@/lib/packs-dashboard-api";
 
 export { slugifyCheckId };
+
+/**
+ * Action → trust-class mapping for the customize check-row badge.
+ *
+ * The codebase ships `DashboardAction = "block" | "audit"` today; both are
+ * deterministic (the producer emits an EvidenceRecord and the pre-final gate
+ * decides — tool output is never mutated). The spec carves out a forward-only
+ * "override" / strip action that would rewrite tool output before the model
+ * sees it; that variant is the only hybrid path. Keep the carve-out wired so
+ * the badge lights up automatically the moment such an action is authored.
+ */
+export function trustClassForCheckAction(
+  action: DashboardAction | "override",
+): TrustClass {
+  if (action === "override") return "hybrid";
+  return "deterministic";
+}
 
 export interface CustomChecksSectionProps {
   /** Surfaces a save/delete error to the parent modal. */
@@ -190,7 +208,10 @@ export function CustomChecksSection({
               className="flex items-center justify-between gap-3 rounded-xl border border-black/[0.06] bg-white px-4 py-2.5"
             >
               <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-foreground">{check.label}</p>
+                <div className="flex items-center gap-2">
+                  <p className="truncate text-sm font-medium text-foreground">{check.label}</p>
+                  <TrustBadge trustClass={trustClassForCheckAction(check.action)} />
+                </div>
                 <p className="mt-0.5 text-[11px] text-secondary/80">
                   {check.scope} · {check.trigger.tool} · {check.action}
                 </p>

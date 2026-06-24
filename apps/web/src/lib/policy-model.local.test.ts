@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   extractEvidenceTypes,
   extractNamedConditions,
+  trustClassForPolicy,
   unifyPolicies,
   type Policy,
+  type PolicyConditionKind,
 } from "./policy-model";
 
 
@@ -281,5 +283,159 @@ describe("extractNamedConditions — user-defined reusable condition payloads", 
     for (const c of conditions) {
       expect(c.origin).toBe("user");
     }
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// PR-F5 — trust-class derivation
+// ---------------------------------------------------------------------------
+
+
+/** Build a minimal :class:`Policy` with the condition kind under test. The
+ *  rest of the fields are filled with safe defaults so the kind branch is
+ *  the only thing under test. */
+function buildPolicy(args: {
+  kind: PolicyConditionKind;
+  action?: string;
+  state?: Policy["state"];
+  source?: Policy["source"];
+}): Policy {
+  const source = args.source ?? "custom_rule";
+  return {
+    id: `${source}:fixture`,
+    name: "fixture",
+    description: "",
+    origin: source === "preset_seam" ? "builtin" : "user",
+    source,
+    state: args.state ?? "enabled",
+    when: { scope: "always", firesAt: "pre_final" },
+    condition: { kind: args.kind, summary: "" },
+    action: args.action ?? "block",
+    togglable: true,
+    editable: true,
+    deletable: true,
+    rawSource: { kind: "custom_rule", rule: {
+      id: "fixture",
+      scope: "always",
+      enabled: true,
+      firesAt: "pre_final",
+      action: "block",
+      what: { kind: args.kind, payload: {} },
+    } },
+  };
+}
+
+
+describe("trustClassForPolicy — verified mapping table (PR-F5)", () => {
+  // ---- Deterministic kinds ------------------------------------------------
+  it("maps evidence_ref → deterministic (frontend rename of backend deterministic_ref)", () => {
+    expect(trustClassForPolicy(buildPolicy({ kind: "evidence_ref" }))).toBe(
+      "deterministic",
+    );
+  });
+
+  it("maps shacl_constraint → deterministic (also covers field_constraint, lifted at transport)", () => {
+    expect(trustClassForPolicy(buildPolicy({ kind: "shacl_constraint" }))).toBe(
+      "deterministic",
+    );
+  });
+
+  it("maps tool_perm → deterministic", () => {
+    expect(trustClassForPolicy(buildPolicy({ kind: "tool_perm" }))).toBe(
+      "deterministic",
+    );
+  });
+
+  it("maps seam_action → deterministic (built-in preset rewire)", () => {
+    expect(
+      trustClassForPolicy(
+        buildPolicy({ kind: "seam_action", source: "seam_spec" }),
+      ),
+    ).toBe("deterministic");
+  });
+
+  // ---- Advisory kind ------------------------------------------------------
+  it("maps llm_criterion → advisory (LLM critic, results vary)", () => {
+    expect(trustClassForPolicy(buildPolicy({ kind: "llm_criterion" }))).toBe(
+      "advisory",
+    );
+  });
+
+  // ---- regex (dashboard_check) — action distinguisher ---------------------
+  it("maps regex action=block → deterministic (current dashboard_check)", () => {
+    expect(
+      trustClassForPolicy(
+        buildPolicy({
+          kind: "regex",
+          action: "block",
+          source: "dashboard_check",
+        }),
+      ),
+    ).toBe("deterministic");
+  });
+
+  it("maps regex action=audit → deterministic (observability only)", () => {
+    expect(
+      trustClassForPolicy(
+        buildPolicy({
+          kind: "regex",
+          action: "audit",
+          source: "dashboard_check",
+        }),
+      ),
+    ).toBe("deterministic");
+  });
+
+  it("maps regex action=override → hybrid (forward-compat: deterministic match + transform)", () => {
+    // No backend action emits "override" today (the type is the closed set
+    // { block, audit }); the branch is wired so a forthcoming strip /
+    // redact / override action lights up Hybrid automatically.
+    expect(
+      trustClassForPolicy(
+        buildPolicy({
+          kind: "regex",
+          action: "override",
+          source: "dashboard_check",
+        }),
+      ),
+    ).toBe("hybrid");
+  });
+
+  // ---- none kind (built-in preset_seam) -----------------------------------
+  it("maps none + state=preview → preview (shipped-but-not-wired preset)", () => {
+    expect(
+      trustClassForPolicy(
+        buildPolicy({
+          kind: "none",
+          state: "preview",
+          source: "preset_seam",
+        }),
+      ),
+    ).toBe("preview");
+  });
+
+  it("maps none + state=enabled → deterministic (built-in enforcing preset)", () => {
+    expect(
+      trustClassForPolicy(
+        buildPolicy({
+          kind: "none",
+          state: "enabled",
+          source: "preset_seam",
+        }),
+      ),
+    ).toBe("deterministic");
+  });
+
+  it("maps none + state=always-on → deterministic (security preset)", () => {
+    expect(
+      trustClassForPolicy(
+        buildPolicy({
+          kind: "none",
+          state: "always-on",
+          source: "preset_seam",
+        }),
+      ),
+    ).toBe("deterministic");
   });
 });

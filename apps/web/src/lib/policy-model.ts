@@ -360,6 +360,143 @@ export interface NamedConditionEntry {
 }
 
 
+// ---------------------------------------------------------------------------
+// PR-F5 — Trust-class derivation
+// ---------------------------------------------------------------------------
+
+
+/**
+ * Honesty taxonomy bucket attached to each :class:`Policy` for badging.
+ *
+ * The four buckets surface to operators how a policy is enforced at runtime
+ * so they can read the table without guessing whether a rule is byte-stable
+ * verifier code, a prompt nudge, or something in between:
+ *
+ *  * ``deterministic`` — runtime gate; the model cannot opt out. Backed by
+ *    verifier code (``deterministic_ref`` / ``shacl_constraint`` /
+ *    ``field_constraint`` / ``tool_perm`` / ``seam_action``) or a
+ *    ``dashboard_check`` whose action is ``block`` / ``audit``.
+ *  * ``advisory`` — LLM critic or system-prompt inject. Result may vary
+ *    between runs (``llm_criterion`` policies and the Guidance textarea).
+ *  * ``hybrid`` — deterministic match that also rewrites the tool output
+ *    (e.g. a ``dashboard_check`` with action ``override`` / strip). No
+ *    code path produces this today; the mapping is forward-compatible so
+ *    adding such an action later lights the badge automatically.
+ *  * ``preview`` — visible but not wired (preset enforcement = ``preview``).
+ */
+export type TrustClass = "deterministic" | "advisory" | "hybrid" | "preview";
+
+
+/**
+ * Structural input for :func:`trustClassForPolicy`.
+ *
+ * Accepts either a full unified :class:`Policy` or a synthesized bag from
+ * row adapters in ``rules-table.tsx`` that build a policy-like view from
+ * ``HarnessPresetItem`` / ``CustomRule`` / ``DashboardCheck`` / ``SeamSpec``
+ * without round-tripping through :func:`unifyPolicies`.
+ *
+ * ``condition.kind`` is typed as ``string`` (not :type:`PolicyConditionKind`)
+ * because adapter call sites may pass an unknown / future kind (e.g.
+ * ``rule.what?.kind ?? "rule"``); any unrecognized kind falls through to
+ * ``deterministic`` so a new backend kind never silently downgrades the
+ * trust badge.
+ */
+export interface PolicyTrustInput {
+  /** Drives the ``"none"`` + ``"preview"`` → ``preview`` bucket. Optional;
+   *  rows that don't carry state (default) read as enabled-ish. */
+  state?: string;
+  /** Used by the ``regex`` (``dashboard_check``) projection to distinguish
+   *  override / strip → ``hybrid`` from block / audit → ``deterministic``. */
+  action?: string;
+  /** Optional source tag carried by row adapters for documentation; not
+   *  read by the mapping today (the mapping is condition-driven). */
+  source?: string;
+  condition: { kind: string };
+}
+
+
+/**
+ * Derive the trust-class bucket for a unified :class:`Policy` (or any
+ * structurally similar :type:`PolicyTrustInput` synthesized by a row
+ * adapter — see ``rules-table.tsx`` and ``trust-badge.tsx``).
+ *
+ * This is the **single source of truth** for the trust-class taxonomy
+ * across the customize surface. The ``trust-badge.tsx`` module re-exports
+ * this function so existing call sites that import from ``./trust-badge``
+ * continue to work; both imports resolve to this implementation.
+ *
+ * Mapping table (verified against backend KIND + ROUTED_KIND set,
+ * not the stale spec — see discovery notes attached to PR-F5):
+ *
+ * | policy.condition.kind | additional signal     | trust class      |
+ * |-----------------------|-----------------------|------------------|
+ * | ``evidence_ref``      | —                     | ``deterministic``|
+ * | ``shacl_constraint``  | —                     | ``deterministic``|
+ * | ``tool_perm``         | —                     | ``deterministic``|
+ * | ``seam_action``       | —                     | ``deterministic``|
+ * | ``llm_criterion``     | —                     | ``advisory``     |
+ * | ``regex``             | action ``override``   | ``hybrid``       |
+ * | ``regex``             | action ``block``/``audit`` | ``deterministic`` |
+ * | ``none``              | preset ``preview``    | ``preview``      |
+ * | ``none``              | otherwise             | ``deterministic``|
+ * | (unknown / future)    | —                     | ``deterministic``|
+ *
+ * Notes
+ * -----
+ *  * The frontend renames the backend ``deterministic_ref`` kind to
+ *    ``evidence_ref`` at the adapter boundary
+ *    (:func:`customRuleToPolicy` → :func:`customRuleCondition`). The map
+ *    above keys on the frontend name (``evidence_ref``) accordingly.
+ *  * The backend ``field_constraint`` ROUTED_KIND is lifted to
+ *    ``shacl_constraint`` at the transport layer
+ *    (``_lift_field_constraint_to_shacl`` in ``transport/customize.py``),
+ *    so the runtime gate only ever sees ``shacl_constraint`` and both
+ *    authoring surfaces collapse onto the same Deterministic bucket.
+ *  * ``user_rules`` is a top-level overrides string (Guidance textarea),
+ *    NOT a :class:`Policy` — its trust-class badge is hard-coded
+ *    ``advisory`` inside ``guidance-panel.tsx`` rather than going through
+ *    this function.
+ *  * ``dashboard_check`` action ``override`` is not a real backend
+ *    variant today (the type is the closed set ``block | audit``); the
+ *    branch is wired so a forthcoming ``override`` / strip action lights
+ *    up the Hybrid badge without further changes here.
+ *  * Unknown / future ``condition.kind`` values fall through to
+ *    ``deterministic`` rather than blowing up — this keeps the customize
+ *    surface forward-compatible while still surfacing the safer (more
+ *    enforcing) default in the badge.
+ */
+export function trustClassForPolicy(policy: PolicyTrustInput): TrustClass {
+  const kind = policy.condition.kind;
+  switch (kind) {
+    case "llm_criterion":
+      return "advisory";
+    case "evidence_ref":
+    case "shacl_constraint":
+    case "tool_perm":
+    case "seam_action":
+      return "deterministic";
+    case "regex":
+      // dashboard_check projection — distinguished by action.
+      // Today the action is closed { block, audit } (both Deterministic);
+      // a future "override" / strip action would mutate tool output and
+      // therefore reads as Hybrid.
+      return policy.action === "override" ? "hybrid" : "deterministic";
+    case "none":
+      // Built-in preset_seam: fall through to the preset's enforcement
+      // metadata. Preview presets are inert; everything else is enforced
+      // by the runtime → Deterministic.
+      return policy.state === "preview" ? "preview" : "deterministic";
+    default:
+      // Unknown / future kinds (or row-adapter fallbacks like
+      // ``rule.what?.kind ?? "rule"``) — fall through to the safer
+      // Deterministic bucket. A new :type:`PolicyConditionKind` should
+      // be added to the switch above; this fallback prevents silent
+      // crashes if the rollout order slips.
+      return "deterministic";
+  }
+}
+
+
 /**
  * Extract evidence refs that policies CONSUME via deterministic_ref
  * conditions. The output is a per-policy index, NOT a catalog of the

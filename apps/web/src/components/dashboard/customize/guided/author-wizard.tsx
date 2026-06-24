@@ -74,6 +74,8 @@ import {
 } from "@/lib/packs-dashboard-api";
 import type { EvidenceTypeEntry } from "@/lib/policy-model";
 
+import { TrustBadge, type TrustClass } from "../trust-badge";
+
 import { RadioCard, WizardChrome } from "./wizard-chrome";
 
 
@@ -1183,10 +1185,30 @@ function defaultIdHint(draft: Draft): string {
 // ---------------------------------------------------------------------------
 
 
+/**
+ * F5 — derive the honesty trust class an operator can place in this draft.
+ *
+ * The wizard's only Advisory authoring path today is `llm_criterion`
+ * (the LLM critic): the rule is surfaced to the model as guidance and
+ * may be ignored. Every other conditionKind (evidence_ref / shacl /
+ * field_constraint / tool_perm / regex / domain* / none) routes to a
+ * deterministic runtime gate the model cannot opt out of.
+ *
+ * Keyed on `conditionKind` (not lifecycle / archetype) so adding a new
+ * Advisory authoring kind in the future re-classifies here, not at the
+ * call site.
+ */
+function trustClassForDraft(draft: Draft): TrustClass {
+  if (draft.conditionKind === "llm_criterion") return "advisory";
+  return "deterministic";
+}
+
+
 function ReviewStep({
   draft,
   refOptions,
 }: { draft: Draft; refOptions: RefOption[] }): React.ReactElement {
+  const trust = trustClassForDraft(draft);
   return (
     <div className="space-y-3">
       <h2 className="text-lg font-bold text-foreground">Review</h2>
@@ -1194,7 +1216,10 @@ function ReviewStep({
         Saving applies the policy to the runtime immediately.
       </p>
       <div className="rounded-xl border border-black/[0.06] bg-white p-4">
-        <p className="text-sm font-semibold text-foreground">What this policy does</p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-semibold text-foreground">What this policy does</p>
+          <TrustBadge trustClass={trust} />
+        </div>
         <p className="mt-1 text-xs leading-relaxed text-foreground">
           {describePolicy(draft, refOptions)}
         </p>

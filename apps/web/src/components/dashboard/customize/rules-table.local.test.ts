@@ -44,4 +44,18 @@ describe("RulesTable — unified Customize rules surface (Phase 1)", () => {
     expect(src).toContain('"always-on"');
     expect(src).toContain('"preview"');
   });
+
+  it("imports the shared TrustBadge and per-row helper (PR-F5)", () => {
+    // The Trust column is sourced from the shared component so the
+    // honesty taxonomy stays in lockstep with the GuidancePanel pill.
+    expect(src).toContain("TrustBadge");
+    expect(src).toContain("trustClassForPolicy");
+    expect(src).toMatch(/from\s+"\.\/trust-badge"/);
+  });
+
+  it("renders <TrustBadge> inside the per-row view so every rule shows its trust class (PR-F5)", () => {
+    // The pill must appear in the row body, not just the imports.
+    expect(src).toContain("<TrustBadge");
+    expect(src).toContain('ariaLabel="Trust class for this policy"');
+  });
 });
