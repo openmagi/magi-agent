@@ -173,7 +173,22 @@ class AutoCompactionEngine:
 
     @staticmethod
     def _format_conversation(messages: list[dict]) -> str:
-        parts: list[str] = []
+        # D-13: build a normalized segment per dict-message and route
+        # through the shared transcript renderer so the live ADK path
+        # (``adk_bridge/context_compaction._render_dropped_transcript``)
+        # and this dormant dict-message path share the role-bracket/line-
+        # join skeleton. Per-message 2000-char cap stays here (the
+        # auto_compact contract); no total cap / truncation marker so
+        # output is byte-identical to the pre-D-13 renderer. An empty
+        # content still emits ``[role]: `` because we pack the empty
+        # string as the only piece (the renderer joins pieces with
+        # spaces and prefixes with the role bracket unconditionally).
+        from magi_agent.context.transcript_render import (  # noqa: PLC0415
+            NormalizedSegment,
+            render_transcript,
+        )
+
+        segments: list[NormalizedSegment] = []
         for msg in messages:
             role = msg.get("role", "unknown")
             content = msg.get("content", "")
@@ -187,8 +202,10 @@ class AutoCompactionEngine:
                 content = "\n".join(text_parts)
             elif not isinstance(content, str):
                 content = str(content)
-            parts.append(f"[{role}]: {content[:2000]}")  # Cap per-message for summary prompt
-        return "\n\n".join(parts)
+            segments.append(
+                NormalizedSegment(role=role, pieces=(content[:2000],))
+            )
+        return render_transcript(segments)
 
     @staticmethod
     def _count_turns(messages: list[dict]) -> int:

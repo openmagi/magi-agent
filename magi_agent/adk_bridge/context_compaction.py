@@ -992,13 +992,16 @@ def _render_dropped_transcript(
 ) -> str:
     """Render the dropped prefix Contents to a bounded plain-text transcript.
 
-    Modeled on ``AutoCompactionEngine._format_conversation`` but adapted to ADK
-    ``types.Content`` / ``Part``: text parts contribute their text; function_call
-    parts render a concise ``[tool_call <name>]`` descriptor; function_response
-    parts render ``[tool_result <name>]: <payload>``. Each part segment and each
-    Content line is capped, and the whole transcript is capped to
-    :data:`_SUMMARY_TRANSCRIPT_MAX_CHARS` (with a truncation marker) so the
-    summary prompt stays sane regardless of how large the dropped prefix is.
+    Adapts ADK ``types.Content`` / ``Part`` into the shared
+    :func:`magi_agent.context.transcript_render.render_transcript`
+    skeleton (D-13): text parts contribute their text; function_call
+    parts render a concise ``[tool_call <name>]`` descriptor;
+    function_response parts render ``[tool_result <name>]: <payload>``.
+    Each piece is pre-capped here (per-piece caps differ across
+    providers, so they stay at the adapter side); the renderer applies
+    the whole-transcript cap to :data:`_SUMMARY_TRANSCRIPT_MAX_CHARS`
+    and appends the ``"\\n…[older context truncated]"`` marker on
+    truncation.
 
     G5: when ``skip_anchor`` is set (anchoring ON), a Content recognized as a
     prior-injected summary anchor (its first text Part starts with
@@ -1009,33 +1012,36 @@ def _render_dropped_transcript(
     Fully duck-typed and fail-soft: a malformed part contributes nothing rather
     than raising (the outer summarize path is fail-open anyway).
     """
-    lines: list[str] = []
-    used = 0
-    truncated = False
+    from magi_agent.context.transcript_render import (  # noqa: PLC0415
+        NormalizedSegment,
+        render_transcript,
+    )
+
+    segments_out: list[NormalizedSegment] = []
     for content in dropped:
         if skip_anchor and _anchor_text_from_content(content) is not None:
             continue
         try:
             role = getattr(content, "role", None) or "unknown"
             parts = getattr(content, "parts", None) or []
-            segments: list[str] = []
+            pieces: list[str] = []
             for part in parts:
                 try:
                     text = getattr(part, "text", None)
                     if isinstance(text, str) and text:
-                        segments.append(text[:_SUMMARY_SEGMENT_MAX_CHARS])
+                        pieces.append(text[:_SUMMARY_SEGMENT_MAX_CHARS])
                         continue
                     fc = getattr(part, "function_call", None)
                     if fc is not None:
                         name = getattr(fc, "name", None) or "?"
                         args = getattr(fc, "args", None)
                         if args:
-                            segments.append(
+                            pieces.append(
                                 f"[tool_call {name} "
                                 f"{str(args)[:_SUMMARY_CALL_ARGS_MAX_CHARS]}]"
                             )
                         else:
-                            segments.append(f"[tool_call {name}]")
+                            pieces.append(f"[tool_call {name}]")
                         continue
                     fr = getattr(part, "function_response", None)
                     if fr is not None:
@@ -1043,26 +1049,28 @@ def _render_dropped_transcript(
                         payload = _serialize_response_payload(
                             getattr(fr, "response", None)
                         )
-                        segments.append(
+                        pieces.append(
                             f"[tool_result {name}]: "
                             f"{payload[:_SUMMARY_RESULT_PAYLOAD_MAX_CHARS]}"
                         )
                 except Exception:
                     continue
-            if not segments:
+            # D-13: a Content whose parts contributed no pieces is
+            # filtered HERE (before segment construction) so the shared
+            # renderer never sees a bare ``[role]:`` line. Matches the
+            # pre-D-13 ``if not segments: continue`` behaviour.
+            if not pieces:
                 continue
-            line = f"[{role}]: {' '.join(segments)}"
+            segments_out.append(
+                NormalizedSegment(role=role, pieces=tuple(pieces))
+            )
         except Exception:
             continue
-        if used + len(line) > _SUMMARY_TRANSCRIPT_MAX_CHARS:
-            truncated = True
-            break
-        lines.append(line)
-        used += len(line)
-    transcript = "\n\n".join(lines)
-    if truncated:
-        transcript += "\n…[older context truncated]"
-    return transcript
+    return render_transcript(
+        segments_out,
+        total_cap=_SUMMARY_TRANSCRIPT_MAX_CHARS,
+        truncation_marker="\n…[older context truncated]",
+    )
 
 
 def _protected_text_contents(dropped: list[Any]) -> list[Any]:
