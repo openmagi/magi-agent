@@ -132,6 +132,43 @@ def _set_default_alias_aware(
     data.setdefault(alias, value)
 
 
+def _normalize_fail_mode(data: dict[str, object]) -> dict[str, object]:
+    """F-14: single source of truth for ``failOpen``/``failClosed`` inversion.
+
+    When exactly one of ``failOpen``/``failClosed`` is supplied (either the
+    snake_case ``fail_open``/``fail_closed`` form or the camelCase alias),
+    derive the other as its boolean inverse. When both or neither are
+    supplied the data is returned unchanged — the caller's downstream
+    validators / defaults take over (the ``hard_safety`` branch in
+    :meth:`VerifierMetadata._apply_hard_safety_defaults` explicitly fills
+    in the safer fail-closed value; ``FailureRoutingMetadata`` lets the
+    model defaults handle it).
+
+    Pre-F-14 this inversion was duplicated verbatim in two adjacent
+    ``model_validator(mode="before")`` blocks
+    (``FailureRoutingMetadata._infer_fail_mode`` +
+    ``VerifierMetadata._apply_hard_safety_defaults``); the duplication
+    invited drift toward a less-safe behavior on one side. This helper
+    is the single seam both validators consult.
+    """
+
+    has_fail_open = "failOpen" in data or "fail_open" in data
+    has_fail_closed = "failClosed" in data or "fail_closed" in data
+    if has_fail_open and not has_fail_closed:
+        value_to_invert = bool(data.get("failOpen", data.get("fail_open")))
+        if "fail_open" in data:
+            data["fail_closed"] = not value_to_invert
+        else:
+            data["failClosed"] = not value_to_invert
+    if has_fail_closed and not has_fail_open:
+        value_to_invert = bool(data.get("failClosed", data.get("fail_closed")))
+        if "fail_closed" in data:
+            data["fail_open"] = not value_to_invert
+        else:
+            data["failOpen"] = not value_to_invert
+    return data
+
+
 def _resolve_escalation_reason(
     *,
     escalationReason: str | None,
@@ -233,24 +270,10 @@ class FailureRoutingMetadata(VerifierBusModel):
     @model_validator(mode="before")
     @classmethod
     def _infer_fail_mode(cls, value: object) -> object:
+        # F-14: single ``_normalize_fail_mode`` seam — see helper docstring.
         if not isinstance(value, Mapping):
             return value
-        data = dict(value)
-        has_fail_open = "failOpen" in data or "fail_open" in data
-        has_fail_closed = "failClosed" in data or "fail_closed" in data
-        if has_fail_open and not has_fail_closed:
-            value_to_invert = bool(data.get("failOpen", data.get("fail_open")))
-            if "fail_open" in data:
-                data["fail_closed"] = not value_to_invert
-            else:
-                data["failClosed"] = not value_to_invert
-        if has_fail_closed and not has_fail_open:
-            value_to_invert = bool(data.get("failClosed", data.get("fail_closed")))
-            if "fail_closed" in data:
-                data["fail_open"] = not value_to_invert
-            else:
-                data["failOpen"] = not value_to_invert
-        return data
+        return _normalize_fail_mode(dict(value))
 
     @field_validator("actions")
     @classmethod
@@ -335,20 +358,8 @@ class VerifierMetadata(VerifierBusModel):
             _set_default_alias_aware(data, "default_enabled", "defaultEnabled", True)
             data.setdefault("disabled", False)
         else:
-            has_fail_open = "failOpen" in data or "fail_open" in data
-            has_fail_closed = "failClosed" in data or "fail_closed" in data
-            if has_fail_open and not has_fail_closed:
-                value_to_invert = bool(data.get("failOpen", data.get("fail_open")))
-                if "fail_open" in data:
-                    data["fail_closed"] = not value_to_invert
-                else:
-                    data["failClosed"] = not value_to_invert
-            if has_fail_closed and not has_fail_open:
-                value_to_invert = bool(data.get("failClosed", data.get("fail_closed")))
-                if "fail_closed" in data:
-                    data["fail_open"] = not value_to_invert
-                else:
-                    data["failOpen"] = not value_to_invert
+            # F-14: single ``_normalize_fail_mode`` seam — see helper docstring.
+            data = _normalize_fail_mode(data)
         return data
 
     @field_validator("verifier_id")
