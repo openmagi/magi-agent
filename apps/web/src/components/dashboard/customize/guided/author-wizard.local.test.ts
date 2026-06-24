@@ -124,9 +124,17 @@ describe("AuthorWizard — variable-length policy authoring (F1.5 + F-UX3)", () 
     );
   });
 
-  it("after_tool_use + target=specific omits 'llm_criterion' (use target=any + llmToolMatch field instead)", () => {
+  it("after_tool_use + target=specific exposes llm_criterion (PR-F-UX4 liberalization, auto-derives toolMatch)", () => {
+    // PR-F-UX4 — F6.5's "only target=any" restriction was an UX choice (don't
+    // make the user retype the tool name into a second field), NOT a backend
+    // constraint. F-UX4 liberalizes by auto-deriving `toolMatch=[draft.toolName]`
+    // in customRulePayload when target=specific + llm_criterion + after_tool_use,
+    // so both axes expose llm_criterion identically at the picker level.
     expect(src).toMatch(
-      /SpecificsStep already exposes its own `llmToolMatch`[\s\S]*?return \["none", "regex"\]/,
+      /PR-F-UX4 — liberalization: llm_criterion is now available under BOTH/,
+    );
+    expect(src).toMatch(
+      /toolTarget === "specific"\) \{[\s\S]*?return \["none", "regex", "llm_criterion"\]/,
     );
   });
 
@@ -653,9 +661,17 @@ describe("AuthorWizard — F6.5 BLOCKER fix: toolMatch on after-tool llm_criteri
     // The toolMatch emit MUST sit unconditionally inside the
     // `lifecycle === "after_tool_use"` branch — gating it on a sub-flag
     // would let the wizard emit a payload the backend validator rejects.
-    expect(src).toContain("payload.toolMatch = splitToolMatchList(draft.llmToolMatch)");
+    //
+    // PR-F-UX4: under target=specific the list is auto-derived from
+    // draft.toolName ([draft.toolName.trim()]); under target=any it is
+    // split from the user-typed llmToolMatch field. Both branches sit
+    // inside the same `lifecycle === "after_tool_use"` block, so
+    // toolMatch is still emitted on every after-tool path.
+    expect(src).toContain("payload.toolMatch =");
+    expect(src).toContain("[draft.toolName.trim()]");
+    expect(src).toContain("splitToolMatchList(draft.llmToolMatch)");
     expect(src).toMatch(
-      /draft\.lifecycle === "after_tool_use"[\s\S]*?payload\.toolMatch = splitToolMatchList/,
+      /draft\.lifecycle === "after_tool_use"[\s\S]*?payload\.toolMatch =[\s\S]*?\[draft\.toolName\.trim\(\)\][\s\S]*?splitToolMatchList\(draft\.llmToolMatch\)/,
     );
   });
 
@@ -666,7 +682,10 @@ describe("AuthorWizard — F6.5 BLOCKER fix: toolMatch on after-tool llm_criteri
     // Verified structurally: the toolMatch emit sits inside the
     // `if (draft.lifecycle === "after_tool_use")` block — the only branch
     // assigning payload.toolMatch.
-    const matches = src.match(/payload\.toolMatch = /g) ?? [];
+    // PR-F-UX4 ternary spans lines, so the assignment is `payload.toolMatch =\n  ...`.
+    // The regex tolerates the trailing space-or-newline so it counts the
+    // assignment regardless of formatter line wrapping.
+    const matches = src.match(/payload\.toolMatch =[\s\S]/g) ?? [];
     expect(matches.length).toBe(1);
   });
 
@@ -690,7 +709,13 @@ describe("AuthorWizard — F6.5 BLOCKER fix: toolMatch on after-tool llm_criteri
     // vitest — the firing test
     // `tests/customize_firing/test_llm_criterion_content_match_firing.py`
     // covers the runtime half with this exact payload shape.
-    expect(src).toContain("payload.toolMatch = splitToolMatchList(draft.llmToolMatch)");
+    //
+    // PR-F-UX4 — toolMatch emit is now a ternary on draft.toolTarget:
+    // target=specific → auto-derived [draft.toolName.trim()];
+    // target=any → splitToolMatchList(draft.llmToolMatch). Both paths
+    // satisfy the backend's non-empty list[str] contract.
+    expect(src).toContain("payload.toolMatch =");
+    expect(src).toContain("splitToolMatchList(draft.llmToolMatch)");
     expect(src).toContain("criterion: draft.criterion.trim()");
     expect(src).toContain("payload.contentMatch = {");
   });
@@ -1011,6 +1036,83 @@ describe("AuthorWizard — PR-F-UX2 runtime-field chip picker wiring", () => {
 // and swaps the freeform <input> for a real catalog-driven <select> so a
 // typo can no longer silently produce a no-match rule.
 // ---------------------------------------------------------------------------
+
+
+// ---------------------------------------------------------------------------
+// PR-F-UX4 — Condition matrix loosening + auto-populate combos.
+//
+// F6.5 hid llm_criterion under target=specific to avoid asking the operator
+// for the tool name twice; F-UX4 instead auto-derives the toolMatch list
+// from draft.toolName so the combo is exposable without duplicate entry.
+// Backend payload remains identical (one-tool list).
+// ---------------------------------------------------------------------------
+
+
+describe("AuthorWizard — PR-F-UX4 condition matrix loosening + auto-derive", () => {
+  it("after_tool_use + target=specific now exposes llm_criterion (was hidden in F6.5)", () => {
+    // Liberalization: the picker matrix matches the backend matrix. The
+    // wizard auto-derives toolMatch from the Trigger step's tool pick so
+    // the operator does not have to retype the tool name.
+    expect(src).toMatch(
+      /toolTarget === "specific"\) \{[\s\S]*?return \["none", "regex", "llm_criterion"\]/,
+    );
+  });
+
+  it("after_tool_use + target=any keeps offering none / regex / llm_criterion", () => {
+    // Symmetric matrix: both target axes expose the same condition list
+    // for after_tool_use. The only difference is where the toolMatch list
+    // comes from (auto-derived vs typed).
+    expect(src).toMatch(/return \["none", "regex", "llm_criterion"\]/);
+  });
+
+  it("customRulePayload auto-derives toolMatch=[draft.toolName] when target=specific", () => {
+    // The auto-derivation must sit inside the `lifecycle === "after_tool_use"`
+    // branch of the llm_criterion case so pre_final stays unchanged and the
+    // target=any path still consumes the user-typed llmToolMatch field.
+    expect(src).toContain('draft.toolTarget === "specific" && draft.toolName.trim().length > 0');
+    expect(src).toContain("? [draft.toolName.trim()]");
+    expect(src).toContain(": splitToolMatchList(draft.llmToolMatch)");
+  });
+
+  it("SpecificsStep hides the llmToolMatch text input when target=specific (auto-derived path)", () => {
+    // The text input must only render under target=any so the operator
+    // does not see a redundant field for the same data the Trigger step
+    // already supplied.
+    expect(src).toMatch(
+      /draft\.lifecycle === "after_tool_use" && draft\.toolTarget === "specific"[\s\S]*?Tool match \(from Trigger step\)/,
+    );
+    expect(src).toMatch(
+      /draft\.lifecycle === "after_tool_use" && draft\.toolTarget !== "specific"[\s\S]*?value=\{draft\.llmToolMatch\}/,
+    );
+  });
+
+  it("SpecificsStep renders the read-only Tool chip on the auto-derived path", () => {
+    // The chip surfaces the tool name so the operator can verify what the
+    // critic will fire against without surfacing an editable input.
+    expect(src).toContain("Tool: {draft.toolName.trim() || \"(none)\"}");
+    expect(src).toContain("Auto-derived from the Trigger step's tool pick");
+  });
+
+  it("stepIsComplete allows advancing on after_tool_use+llm_criterion+specific without llmToolMatch typed", () => {
+    // The completion gate must short-circuit when target=specific so the
+    // operator does not have to fill llmToolMatch (which is auto-derived
+    // from draft.toolName by customRulePayload).
+    expect(src).toContain('draft.toolTarget === "specific"');
+    expect(src).toMatch(
+      /draft\.lifecycle !== "after_tool_use"[\s\S]*?draft\.toolTarget === "specific"[\s\S]*?splitToolMatchList\(draft\.llmToolMatch\)\.length > 0/,
+    );
+  });
+
+  it("before_tool_use + target=specific keeps the documented 'no AND in tool_perm' restriction", () => {
+    // F-UX4 only loosens combos the backend can actually save. The
+    // before_tool_use + target=specific + (domain|path) AND combo is still
+    // refused because backend tool_perm.py honors a single matcher key per
+    // rule — no honest mapping today.
+    expect(src).toMatch(
+      /toolTarget === "specific"\) \{[\s\S]*?return \["none"\]/,
+    );
+  });
+});
 
 
 describe("AuthorWizard — PR-F-UX3 target merge into trigger + catalog dropdown", () => {

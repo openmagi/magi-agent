@@ -746,10 +746,13 @@ function availableConditionKinds(
   }
   if (lifecycle === "before_tool_use") {
     if (toolTarget === "specific") {
-      // tool_perm has no AND between tool name and url-shape matchers,
-      // so a per-tool rule can only fire unconditionally per call.
-      // Refusing the AND combo here keeps the wizard from assembling a
-      // draft the backend cannot save.
+      // tool_perm has no AND between tool name and url-shape matchers
+      // (backend `tool_perm.py` only honors a single matcher key per rule),
+      // so a per-tool rule can only fire unconditionally per call. Refusing
+      // the AND combo here keeps the wizard from assembling a draft the
+      // backend cannot save. The Specifics hint surfaces the same fact so
+      // operators aren't left guessing where domain/path matchers went —
+      // use target=any to author those.
       return ["none"];
     }
     // target=any: tool_perm has no wildcard matcher, so "no condition"
@@ -760,17 +763,17 @@ function availableConditionKinds(
     return ["domain", "domain_allowlist", "path", "path_allowlist"];
   }
   // after_tool_use
+  // PR-F-UX4 — liberalization: llm_criterion is now available under BOTH
+  // target=any AND target=specific. The backend validator
+  // (`magi_agent/customize/custom_rules.py:185`) requires a non-empty
+  // `toolMatch` list on every after_tool_use llm_criterion rule, but it
+  // does not care WHERE the wizard sourced that list from. When
+  // target=specific the wizard auto-derives `toolMatch=[draft.toolName]`
+  // in `customRulePayload`, hiding the duplicate-entry llmToolMatch text
+  // field — same backend payload as the target=any path (one-tool list
+  // with the chosen tool name) with no user re-typing.
   if (toolTarget === "specific") {
-    // llm_criterion is offered only under target=any because the
-    // SpecificsStep already exposes its own `llmToolMatch` text field
-    // for the backend-required per-tool filter (custom_rules.py:185-188
-    // rejects any after_tool_use llm_criterion without a non-empty
-    // toolMatch). Surfacing llm_criterion under target=specific too
-    // would force the user to fill BOTH the top-level toolName and the
-    // SpecificsStep llmToolMatch — duplicated tool entry, no clearer
-    // semantic. stepIsComplete enforces a non-empty llmToolMatch for
-    // the target=any path.
-    return ["none", "regex"];
+    return ["none", "regex", "llm_criterion"];
   }
   return ["none", "regex", "llm_criterion"];
 }
@@ -1072,8 +1075,30 @@ function SpecificsStep({
               llm_criterion rule and the runtime gate matches by exact
               membership. Without this input the wizard always emitted a
               payload that PUT /custom-rules rejected with HTTP 400. Hidden
-              on pre_final (no tool layer there). */}
-          {draft.lifecycle === "after_tool_use" ? (
+              on pre_final (no tool layer there).
+
+              PR-F-UX4 — when toolTarget=specific the trigger step already
+              named the tool, so the wizard auto-derives `toolMatch` from
+              `draft.toolName` and renders a read-only chip here rather
+              than asking the operator to retype it. The text input only
+              appears under target=any where the multi-tool list is the
+              only way to express a per-rule tool filter. */}
+          {draft.lifecycle === "after_tool_use" && draft.toolTarget === "specific" ? (
+            <div className="space-y-1">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+                Tool match (from Trigger step)
+              </span>
+              <div className="mt-1 inline-flex items-center gap-2 rounded-lg border border-black/[0.10] bg-gray-50/80 px-3 py-1.5 text-xs font-mono text-foreground">
+                Tool: {draft.toolName.trim() || "(none)"}
+              </div>
+              <p className="text-[11px] leading-relaxed text-secondary">
+                Auto-derived from the Trigger step's tool pick. To match
+                multiple tools, change Tool target to "Any tool" and supply
+                a comma-separated list.
+              </p>
+            </div>
+          ) : null}
+          {draft.lifecycle === "after_tool_use" && draft.toolTarget !== "specific" ? (
             <div className="space-y-1">
               <TextField
                 value={draft.llmToolMatch}
@@ -2033,9 +2058,18 @@ function stepIsComplete(currentKey: StepKey, draft: Draft): boolean {
           // (`magi_agent/customize/custom_rules.py:185`) rejects any
           // after_tool_use llm_criterion payload without one with HTTP 400.
           // pre_final has no tool layer so the list is omitted.
+          //
+          // PR-F-UX4: when toolTarget=specific, the toolMatch list is
+          // auto-derived from draft.toolName by customRulePayload (the
+          // llmToolMatch text input is hidden in SpecificsStep). The
+          // trigger step already enforces a non-empty toolName for
+          // target=specific, so the after_tool_use gate is satisfied
+          // automatically — the per-field gate here only needs to assert
+          // the llmToolMatch list when target=any.
           return (
             draft.criterion.trim().length > 0
             && (draft.lifecycle !== "after_tool_use"
+              || draft.toolTarget === "specific"
               || splitToolMatchList(draft.llmToolMatch).length > 0)
             && (!draft.llmContentMatchEnabled
               || draft.llmContentMatchPattern.trim().length > 0)
@@ -2248,7 +2282,19 @@ function customRulePayload(draft: Draft): Record<string, unknown> {
         // (`after_tool_gate.py:150`) skips the rule unless `tool_name in
         // tool_match`, so the list is the per-rule tool filter the
         // wizard's top-level Target step cannot express for this combo.
-        payload.toolMatch = splitToolMatchList(draft.llmToolMatch);
+        //
+        // PR-F-UX4: when toolTarget=specific, auto-derive the list from
+        // draft.toolName so the operator does not have to retype the tool
+        // name into the llmToolMatch field. SpecificsStep correspondingly
+        // hides the llmToolMatch input under target=specific and renders
+        // a read-only "Tool: <name>" chip instead. This is the per-combo
+        // auto-derivation that F-UX4 unlocks: backend payload is identical
+        // (one-tool list) but the wizard stops asking the same question
+        // twice.
+        payload.toolMatch =
+          draft.toolTarget === "specific" && draft.toolName.trim().length > 0
+            ? [draft.toolName.trim()]
+            : splitToolMatchList(draft.llmToolMatch);
         if (
           draft.llmContentMatchEnabled
           && draft.llmContentMatchPattern.trim().length > 0
