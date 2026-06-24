@@ -402,7 +402,7 @@ graph LR
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
-| __init__.py | — | quota, spend_guard | — |
+| __init__.py | Billing / spend-governance — reference contract (NOT wired into the OSS runtime). | quota, spend_guard | — |
 | quota.py | — | authority, context, safety | billing/__init__.py, billing/spend_guard.py |
 | spend_guard.py | — | authority, context, quota, safety | billing/__init__.py |
 
