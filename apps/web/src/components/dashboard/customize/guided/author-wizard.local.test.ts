@@ -6,47 +6,84 @@ const src = readFileSync(
   "utf8",
 );
 
-describe("AuthorWizard — variable-length policy authoring (F1.5)", () => {
-  it("declares step plan as a function of lifecycle (pre_final=6, tool-bearing=7)", () => {
-    // F1.5 separates tool targeting from per-call condition. pre_final has
-    // no tool layer so it stays 6 steps; tool-bearing lifecycles gain a
-    // dedicated "Target" step (Any tool / Specific tool) for a total of 7.
+describe("AuthorWizard — variable-length policy authoring (F1.5 + F-UX3)", () => {
+  it("declares step plan as a constant 6 steps for all lifecycles (F-UX3 collapse)", () => {
+    // PR-F-UX3 — F1.5's standalone Target step was collapsed back into the
+    // Trigger step as a sub-fieldset. The step plan no longer branches on
+    // lifecycle: every lifecycle returns the same 6-step list. The tool-
+    // target axis still exists, it just renders inside TriggerStep.
     expect(src).toContain("function stepPlan(lifecycle: Lifecycle): StepKey[]");
     expect(src).toMatch(
       /pre_final[\s\S]*?\["trigger", "condition", "specifics", "action", "name", "review"\]/,
     );
-    expect(src).toContain(
+    // The tool-bearing branch must ALSO return the 6-step plan, not the
+    // 7-step F1.5 plan that included "target". The asserted comment makes
+    // the intent explicit so a future regression renaming the branch
+    // doesn't accidentally re-introduce the 7-step plan.
+    expect(src).toMatch(
+      /Tool-bearing lifecycles[\s\S]*?return \["trigger", "condition", "specifics", "action", "name", "review"\]/,
+    );
+    // The 7-step plan from F1.5 must be gone.
+    expect(src).not.toContain(
       '["trigger", "target", "condition", "specifics", "action", "name", "review"]',
     );
+    // The standalone "target" key must be dropped from the StepKey union.
+    expect(src).not.toMatch(/type StepKey = [^;]*?"target"/);
   });
 
-  it("ships one step body per axis: trigger / target / condition / specifics / archetype / name / review", () => {
+  it("ships one step body per axis: trigger / condition / specifics / archetype / name / review (no TargetStep)", () => {
     expect(src).toContain("TriggerStep");
-    expect(src).toContain("TargetStep");
     expect(src).toContain("ConditionKindStep");
     expect(src).toContain("SpecificsStep");
     expect(src).toContain("ArchetypeStep");
     expect(src).toContain("NameStep");
     expect(src).toContain("ReviewStep");
+    // PR-F-UX3 — TargetStep deleted; its fields moved into TriggerStep.
+    expect(src).not.toContain("function TargetStep(");
+    expect(src).not.toMatch(/currentKey === "target"/);
   });
 
-  it("TargetStep is keyed off the dynamic step plan (currentKey === 'target')", () => {
-    // Target step is rendered conditionally on the StepKey enum, not a
-    // hardcoded index, so pre_final can skip it.
-    expect(src).toMatch(/currentKey === "target"[\s\S]*?TargetStep/);
-  });
-
-  it("Target step surfaces Any tool / Specific tool radio + tool-name input", () => {
+  it("TriggerStep surfaces Any tool / Specific tool radio + tool-name dropdown (folded-in target)", () => {
+    // PR-F-UX3 — the Tool target sub-fieldset lives inside TriggerStep,
+    // gated on lifecycleHasToolTarget(draft.lifecycle).
+    expect(src).toContain("Tool target");
     expect(src).toContain("Which tool(s) does this policy apply to?");
     expect(src).toContain("Any tool");
     expect(src).toContain("Specific tool");
     expect(src).toContain('toolTarget === "specific"');
+    // Replaces F1.5's freeform TextField with a real catalog dropdown.
+    expect(src).toContain("ToolNameSelect");
+    expect(src).toMatch(/<select[\s\S]*?value=\{value\}/);
   });
 
-  it("TriggerStep renders TWO radio fieldsets (lifecycle + scope)", () => {
-    expect(src.match(/<fieldset/g)?.length).toBe(2);
+  it("TriggerStep gates the Tool target sub-fieldset on tool-bearing lifecycles only", () => {
+    // pre_final / Tier 2 audit slots have no tool layer — the sub-fieldset
+    // must be hidden so the operator can't author a draft that drags a
+    // stale toolName into a non-tool lifecycle payload.
+    expect(src).toContain("lifecycleHasToolTarget");
+    expect(src).toMatch(
+      /function lifecycleHasToolTarget[\s\S]*?"before_tool_use"[\s\S]*?"after_tool_use"/,
+    );
+    expect(src).toContain("showToolTarget");
+  });
+
+  it("ToolNameSelect sources options from the catalog.tools prop (no freeform typing)", () => {
+    // PR-F-UX3 — typo risk eliminated: the dropdown enumerates real
+    // runtime tools so an operator cannot save a rule against a tool that
+    // doesn't exist. The catalog is threaded through TriggerStep via
+    // ``tools={catalog.tools}`` from the wizard hub.
+    expect(src).toContain("tools: ToolItem[]");
+    expect(src).toMatch(/<TriggerStep[\s\S]*?tools=\{catalog\.tools\}/);
+    expect(src).toMatch(/sorted\.map\(\(t\) => \{[\s\S]*?<option key=\{t\.name\}/);
+  });
+
+  it("TriggerStep renders THREE fieldsets when the lifecycle is tool-bearing (lifecycle + scope + tool target)", () => {
+    // F-UX3 adds the Tool target sub-fieldset to the existing
+    // lifecycle + scope pair. The fieldset count is 3 in the source.
+    expect(src.match(/<fieldset/g)?.length).toBe(3);
     expect(src).toContain("Lifecycle event");
     expect(src).toContain("Turn scope");
+    expect(src).toContain("Tool target");
   });
 
   it("drops the disabled 'emit' archetype (audit+(no condition) covers the same outcome)", () => {
@@ -87,9 +124,17 @@ describe("AuthorWizard — variable-length policy authoring (F1.5)", () => {
     );
   });
 
-  it("after_tool_use + target=specific omits 'llm_criterion' (use target=any + llmToolMatch field instead)", () => {
+  it("after_tool_use + target=specific exposes llm_criterion (PR-F-UX4 liberalization, auto-derives toolMatch)", () => {
+    // PR-F-UX4 — F6.5's "only target=any" restriction was an UX choice (don't
+    // make the user retype the tool name into a second field), NOT a backend
+    // constraint. F-UX4 liberalizes by auto-deriving `toolMatch=[draft.toolName]`
+    // in customRulePayload when target=specific + llm_criterion + after_tool_use,
+    // so both axes expose llm_criterion identically at the picker level.
     expect(src).toMatch(
-      /SpecificsStep already exposes its own `llmToolMatch`[\s\S]*?return \["none", "regex"\]/,
+      /PR-F-UX4 — liberalization: llm_criterion is now available under BOTH/,
+    );
+    expect(src).toMatch(
+      /toolTarget === "specific"\) \{[\s\S]*?return \["none", "regex", "llm_criterion"\]/,
     );
   });
 
@@ -616,9 +661,17 @@ describe("AuthorWizard — F6.5 BLOCKER fix: toolMatch on after-tool llm_criteri
     // The toolMatch emit MUST sit unconditionally inside the
     // `lifecycle === "after_tool_use"` branch — gating it on a sub-flag
     // would let the wizard emit a payload the backend validator rejects.
-    expect(src).toContain("payload.toolMatch = splitToolMatchList(draft.llmToolMatch)");
+    //
+    // PR-F-UX4: under target=specific the list is auto-derived from
+    // draft.toolName ([draft.toolName.trim()]); under target=any it is
+    // split from the user-typed llmToolMatch field. Both branches sit
+    // inside the same `lifecycle === "after_tool_use"` block, so
+    // toolMatch is still emitted on every after-tool path.
+    expect(src).toContain("payload.toolMatch =");
+    expect(src).toContain("[draft.toolName.trim()]");
+    expect(src).toContain("splitToolMatchList(draft.llmToolMatch)");
     expect(src).toMatch(
-      /draft\.lifecycle === "after_tool_use"[\s\S]*?payload\.toolMatch = splitToolMatchList/,
+      /draft\.lifecycle === "after_tool_use"[\s\S]*?payload\.toolMatch =[\s\S]*?\[draft\.toolName\.trim\(\)\][\s\S]*?splitToolMatchList\(draft\.llmToolMatch\)/,
     );
   });
 
@@ -629,7 +682,10 @@ describe("AuthorWizard — F6.5 BLOCKER fix: toolMatch on after-tool llm_criteri
     // Verified structurally: the toolMatch emit sits inside the
     // `if (draft.lifecycle === "after_tool_use")` block — the only branch
     // assigning payload.toolMatch.
-    const matches = src.match(/payload\.toolMatch = /g) ?? [];
+    // PR-F-UX4 ternary spans lines, so the assignment is `payload.toolMatch =\n  ...`.
+    // The regex tolerates the trailing space-or-newline so it counts the
+    // assignment regardless of formatter line wrapping.
+    const matches = src.match(/payload\.toolMatch =[\s\S]/g) ?? [];
     expect(matches.length).toBe(1);
   });
 
@@ -653,7 +709,13 @@ describe("AuthorWizard — F6.5 BLOCKER fix: toolMatch on after-tool llm_criteri
     // vitest — the firing test
     // `tests/customize_firing/test_llm_criterion_content_match_firing.py`
     // covers the runtime half with this exact payload shape.
-    expect(src).toContain("payload.toolMatch = splitToolMatchList(draft.llmToolMatch)");
+    //
+    // PR-F-UX4 — toolMatch emit is now a ternary on draft.toolTarget:
+    // target=specific → auto-derived [draft.toolName.trim()];
+    // target=any → splitToolMatchList(draft.llmToolMatch). Both paths
+    // satisfy the backend's non-empty list[str] contract.
+    expect(src).toContain("payload.toolMatch =");
+    expect(src).toContain("splitToolMatchList(draft.llmToolMatch)");
     expect(src).toContain("criterion: draft.criterion.trim()");
     expect(src).toContain("payload.contentMatch = {");
   });
@@ -768,5 +830,409 @@ describe("AuthorWizard — PR-F-UX5 evidence_ref vs verifier_passed split", () =
     expect(src).toMatch(
       /conditionKind === "verifier_passed"[\s\S]*?badge=\{[\s\S]*?"built-in"/,
     );
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// PR-F-UX1 — lifecycle audit (Tier 2 expansion + Tier 3 honest-disabled
+// surfacing). Backend matrix in magi_agent/customize/custom_rules.py restricts
+// the two new firesAt slots to llm_criterion + audit; the wizard mirrors that
+// restriction so an operator cannot assemble a draft the backend rejects.
+// ---------------------------------------------------------------------------
+
+
+describe("AuthorWizard — PR-F-UX1 lifecycle audit + Tier 2 expansion", () => {
+  it("Lifecycle union gains on_user_prompt_submit + on_subagent_stop", () => {
+    expect(src).toMatch(/type Lifecycle[\s\S]*?\| "on_user_prompt_submit"/);
+    expect(src).toMatch(/type Lifecycle[\s\S]*?\| "on_subagent_stop"/);
+  });
+
+  it("LIFECYCLE_OPTIONS lists Tier 1 (legacy 3) + Tier 2 (2 new) + Tier 3 (file-hook-only) entries", () => {
+    // Tier 1 — Tier markers must be present so renderers can distinguish
+    // active-vs-disabled and downstream test assertions can read the tier.
+    expect(src).toMatch(/id: "before_tool_use"[\s\S]*?tier: "tier1"/);
+    expect(src).toMatch(/id: "after_tool_use"[\s\S]*?tier: "tier1"/);
+    expect(src).toMatch(/id: "pre_final"[\s\S]*?tier: "tier1"/);
+    // Tier 2 — both new active slots
+    expect(src).toMatch(/id: "on_user_prompt_submit"[\s\S]*?tier: "tier2"/);
+    expect(src).toMatch(/id: "on_subagent_stop"[\s\S]*?tier: "tier2"/);
+    // Tier 3 — at least the four file-hook-only entries from the audit
+    expect(src).toMatch(/id: "before_llm_call"[\s\S]*?tier: "tier3"/);
+    expect(src).toMatch(/id: "after_llm_call"[\s\S]*?tier: "tier3"/);
+    expect(src).toMatch(/id: "on_session_start"[\s\S]*?tier: "tier3"/);
+    expect(src).toMatch(/id: "on_session_stop"[\s\S]*?tier: "tier3"/);
+  });
+
+  it("Tier 3 entries carry the honest 'file hook only' disabledReason tooltip", () => {
+    // The disabledReason becomes a native HTML tooltip so operators see WHY
+    // they cannot pick this option (Tier 3 = no custom_rule gate today).
+    expect(src).toContain("No custom_rule gate yet — file hooks via ~/.magi/settings.json instead.");
+    expect(src).toMatch(/disabledReason:\s*\n?\s*"No custom_rule gate yet/);
+  });
+
+  it("Tier 2 entries describe themselves as audit-only", () => {
+    // Backend matrix restricts the two new slots to llm_criterion + audit;
+    // the description must telegraph that contract so the operator sees
+    // up-front that block isn't an option here.
+    expect(src).toMatch(
+      /id: "on_user_prompt_submit"[\s\S]*?Audit-only/,
+    );
+    expect(src).toMatch(
+      /id: "on_subagent_stop"[\s\S]*?Audit-only/,
+    );
+  });
+
+  it("TriggerStep renders Tier 3 entries DISABLED with onClick suppressed", () => {
+    // The renderer flips ``disabled`` on tier3 entries; RadioCard then ignores
+    // clicks and dims the card so the option is visible-but-not-selectable.
+    expect(src).toMatch(/opt\.tier === "tier3"/);
+    expect(src).toMatch(/disabled=\{isDisabled\}/);
+    expect(src).toMatch(/disabledReason=\{opt\.disabledReason\}/);
+  });
+
+  it("stepPlan(on_user_prompt_submit) drops the target step (6-step plan)", () => {
+    // The two Tier 2 slots fire OUTSIDE the tool boundary so they have no
+    // tool target axis — same step shape as pre_final.
+    expect(src).toMatch(
+      /lifecycle === "on_user_prompt_submit" \|\| lifecycle === "on_subagent_stop"[\s\S]*?\["trigger", "condition", "specifics", "action", "name", "review"\]/,
+    );
+  });
+
+  it("availableConditionKinds(Tier 2) returns ONLY llm_criterion", () => {
+    // Backend ``_LEGAL`` matrix entry: only llm_criterion + audit at these
+    // slots. The wizard mirrors the restriction so an operator cannot
+    // assemble a draft the backend rejects.
+    expect(src).toMatch(
+      /lifecycle === "on_user_prompt_submit" \|\| lifecycle === "on_subagent_stop"[\s\S]*?return \["llm_criterion"\]/,
+    );
+  });
+
+  it("availableArchetypes(Tier 2) returns ONLY audit", () => {
+    // Mirrors the backend matrix: block/retry would change the surrounding
+    // runtime contract (byte-identical prompt assembly / already-emitted
+    // child output) and is deferred to a later PR.
+    expect(src).toMatch(
+      /lifecycle === "on_user_prompt_submit" \|\| lifecycle === "on_subagent_stop"[\s\S]*?return \["audit"\]/,
+    );
+  });
+
+  it("targetEventPhrase + whenForLifecycle describe both new lifecycles in plain English", () => {
+    // The Review step's sentence and the ArchetypeStep header must stay
+    // honest when the operator picks a Tier 2 slot — the existing wording
+    // assumes a tool boundary that does not exist here.
+    expect(src).toContain('"When the user submits a prompt"');
+    expect(src).toContain('"When a subagent finishes a turn"');
+  });
+
+  it("Review step skips the Target row for both new lifecycles", () => {
+    // The Target row is tool-bearing-only; the two Tier 2 slots have no
+    // tool axis so the row would render "(unnamed tool)" which is a lie.
+    expect(src).toMatch(
+      /lifecycle !== "pre_final"[\s\S]*?lifecycle !== "on_user_prompt_submit"[\s\S]*?lifecycle !== "on_subagent_stop"[\s\S]*?Target/,
+    );
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// PR-F-UX2 (F8 core) — RuntimeFieldChips wiring in SpecificsStep.
+//
+// The chip picker is rendered above every wizard text input that accepts a
+// runtime variable reference (regex pattern, contentMatch pattern,
+// llm_criterion criterion, SHACL TTL). Each input gets a ref so the
+// insertAtCaret helper can splice the chip token at the caret.
+// ---------------------------------------------------------------------------
+
+
+describe("AuthorWizard — PR-F-UX2 runtime-field chip picker wiring", () => {
+  it("imports RuntimeFieldChips from the colocated module", () => {
+    expect(src).toContain('import { RuntimeFieldChips }');
+    expect(src).toContain('from "./runtime-field-chips"');
+  });
+
+  it("ships the insertAtCaret helper for cursor-aware chip splicing", () => {
+    // Mirrors the chat-input acceptSlash / acceptKb pattern: read selection
+    // from the ref, splice the token, restore the caret via
+    // requestAnimationFrame.
+    expect(src).toContain("function insertAtCaret");
+    expect(src).toContain("selectionStart");
+    expect(src).toContain("selectionEnd");
+    expect(src).toContain("requestAnimationFrame");
+    expect(src).toContain("setSelectionRange");
+  });
+
+  it("TextField accepts an optional inputRef so SpecificsStep can read the caret", () => {
+    expect(src).toContain("inputRef?: React.Ref<HTMLInputElement>");
+    // The ref must be forwarded to the underlying <input>.
+    expect(src).toMatch(/<input[\s\S]*?ref=\{inputRef\}/);
+  });
+
+  it("SpecificsStep declares dedicated refs for each chip-bearing input", () => {
+    expect(src).toContain("regexInputRef");
+    expect(src).toContain("criterionInputRef");
+    expect(src).toContain("contentMatchInputRef");
+    expect(src).toContain("shaclTextareaRef");
+  });
+
+  it("SpecificsStep resolves chipTool from the wizard's Target step pick", () => {
+    // tool_input.* expansion needs the specific tool name; when target=any
+    // the chip endpoint surfaces the generic marker + alias hints instead.
+    expect(src).toContain("chipTool");
+    expect(src).toMatch(/toolTarget === "specific"[\s\S]*?draft\.toolName\.trim\(\)/);
+  });
+
+  it("RuntimeFieldChips renders above the regex pattern input", () => {
+    expect(src).toMatch(
+      /conditionKind === "regex"[\s\S]*?<RuntimeFieldChips[\s\S]*?condition="regex"/,
+    );
+  });
+
+  it("RuntimeFieldChips renders above the llm_criterion criterion input", () => {
+    expect(src).toMatch(
+      /<RuntimeFieldChips[\s\S]*?condition="llm_criterion"/,
+    );
+  });
+
+  it("RuntimeFieldChips renders above the llm_criterion contentMatch sub-form pattern", () => {
+    // contentMatch is the deterministic pre-filter pattern when the
+    // operator opts in; chip the same variable menu as the regex path.
+    expect(src).toMatch(
+      /<RuntimeFieldChips[\s\S]*?condition="contentMatch"/,
+    );
+  });
+
+  it("RuntimeFieldChips renders above the raw SHACL TTL textarea", () => {
+    expect(src).toMatch(
+      /conditionKind === "shacl"[\s\S]*?<RuntimeFieldChips[\s\S]*?condition="shacl"/,
+    );
+  });
+
+  it("every chip insertion routes through insertAtCaret + the corresponding ref", () => {
+    // The lifecycle + condition + tool tuple is repeated four times (regex,
+    // criterion, contentMatch, shacl). Each must hand a unique ref to
+    // insertAtCaret so caret restoration targets the right element.
+    // Pattern tolerates Prettier's per-arg line break (insertAtCaret(\n  refName)).
+    expect(src).toMatch(/insertAtCaret\(\s*regexInputRef/);
+    expect(src).toMatch(/insertAtCaret\(\s*criterionInputRef/);
+    expect(src).toMatch(/insertAtCaret\(\s*contentMatchInputRef/);
+    expect(src).toMatch(/insertAtCaret\(\s*shaclTextareaRef/);
+  });
+
+  it("SpecificsStep threads draft.lifecycle into each chip picker (not a hardcoded literal)", () => {
+    // The lifecycle prop must be dynamic so changing lifecycle on the
+    // Trigger step refetches the right chip menu for the chosen slot.
+    const occurrences = src.match(/<RuntimeFieldChips[\s\S]*?lifecycle=\{draft\.lifecycle\}/g) ?? [];
+    expect(occurrences.length).toBeGreaterThanOrEqual(4);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// PR-F-UX3 — Target merged into Trigger + tool catalog dropdown.
+//
+// F1.5 split tool targeting out of the Condition list into its own Target
+// step. F-UX3 folds it back into the Trigger step as a third sub-fieldset
+// and swaps the freeform <input> for a real catalog-driven <select> so a
+// typo can no longer silently produce a no-match rule.
+// ---------------------------------------------------------------------------
+
+
+// ---------------------------------------------------------------------------
+// PR-F-UX4 — Condition matrix loosening + auto-populate combos.
+//
+// F6.5 hid llm_criterion under target=specific to avoid asking the operator
+// for the tool name twice; F-UX4 instead auto-derives the toolMatch list
+// from draft.toolName so the combo is exposable without duplicate entry.
+// Backend payload remains identical (one-tool list).
+// ---------------------------------------------------------------------------
+
+
+describe("AuthorWizard — PR-F-UX4 condition matrix loosening + auto-derive", () => {
+  it("after_tool_use + target=specific now exposes llm_criterion (was hidden in F6.5)", () => {
+    // Liberalization: the picker matrix matches the backend matrix. The
+    // wizard auto-derives toolMatch from the Trigger step's tool pick so
+    // the operator does not have to retype the tool name.
+    expect(src).toMatch(
+      /toolTarget === "specific"\) \{[\s\S]*?return \["none", "regex", "llm_criterion"\]/,
+    );
+  });
+
+  it("after_tool_use + target=any keeps offering none / regex / llm_criterion", () => {
+    // Symmetric matrix: both target axes expose the same condition list
+    // for after_tool_use. The only difference is where the toolMatch list
+    // comes from (auto-derived vs typed).
+    expect(src).toMatch(/return \["none", "regex", "llm_criterion"\]/);
+  });
+
+  it("customRulePayload auto-derives toolMatch=[draft.toolName] when target=specific", () => {
+    // The auto-derivation must sit inside the `lifecycle === "after_tool_use"`
+    // branch of the llm_criterion case so pre_final stays unchanged and the
+    // target=any path still consumes the user-typed llmToolMatch field.
+    expect(src).toContain('draft.toolTarget === "specific" && draft.toolName.trim().length > 0');
+    expect(src).toContain("? [draft.toolName.trim()]");
+    expect(src).toContain(": splitToolMatchList(draft.llmToolMatch)");
+  });
+
+  it("SpecificsStep hides the llmToolMatch text input when target=specific (auto-derived path)", () => {
+    // The text input must only render under target=any so the operator
+    // does not see a redundant field for the same data the Trigger step
+    // already supplied.
+    expect(src).toMatch(
+      /draft\.lifecycle === "after_tool_use" && draft\.toolTarget === "specific"[\s\S]*?Tool match \(from Trigger step\)/,
+    );
+    expect(src).toMatch(
+      /draft\.lifecycle === "after_tool_use" && draft\.toolTarget !== "specific"[\s\S]*?value=\{draft\.llmToolMatch\}/,
+    );
+  });
+
+  it("SpecificsStep renders the read-only Tool chip on the auto-derived path", () => {
+    // The chip surfaces the tool name so the operator can verify what the
+    // critic will fire against without surfacing an editable input.
+    expect(src).toContain("Tool: {draft.toolName.trim() || \"(none)\"}");
+    expect(src).toContain("Auto-derived from the Trigger step's tool pick");
+  });
+
+  it("stepIsComplete allows advancing on after_tool_use+llm_criterion+specific without llmToolMatch typed", () => {
+    // The completion gate must short-circuit when target=specific so the
+    // operator does not have to fill llmToolMatch (which is auto-derived
+    // from draft.toolName by customRulePayload).
+    expect(src).toContain('draft.toolTarget === "specific"');
+    expect(src).toMatch(
+      /draft\.lifecycle !== "after_tool_use"[\s\S]*?draft\.toolTarget === "specific"[\s\S]*?splitToolMatchList\(draft\.llmToolMatch\)\.length > 0/,
+    );
+  });
+
+  it("before_tool_use + target=specific keeps the documented 'no AND in tool_perm' restriction", () => {
+    // F-UX4 only loosens combos the backend can actually save. The
+    // before_tool_use + target=specific + (domain|path) AND combo is still
+    // refused because backend tool_perm.py honors a single matcher key per
+    // rule — no honest mapping today.
+    expect(src).toMatch(
+      /toolTarget === "specific"\) \{[\s\S]*?return \["none"\]/,
+    );
+  });
+});
+
+
+describe("AuthorWizard — PR-F-UX3 target merge into trigger + catalog dropdown", () => {
+  it("StepKey union drops 'target'", () => {
+    // The standalone Target step is gone; the field union must not
+    // re-introduce the literal or downstream switch arms would silently
+    // become unreachable code.
+    expect(src).not.toMatch(/type StepKey = [^;]*?"target"/);
+    expect(src).toMatch(
+      /type StepKey =\s*"trigger" \| "condition" \| "specifics" \| "action" \| "name" \| "review"/,
+    );
+  });
+
+  it("stepPlan returns the same 6-step list for EVERY lifecycle (no 7-step branch)", () => {
+    // pre_final branch + Tier 2 branch + tool-bearing branch all return the
+    // same 6 keys; the lifecycle branching only survives so the function
+    // body stays explicit about each shape.
+    const sixSteps = '["trigger", "condition", "specifics", "action", "name", "review"]';
+    const occurrences = (src.match(new RegExp(sixSteps.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) ?? []).length;
+    expect(occurrences).toBeGreaterThanOrEqual(3);
+    // The F1.5 7-step list must NOT appear anywhere.
+    expect(src).not.toContain(
+      '["trigger", "target", "condition", "specifics", "action", "name", "review"]',
+    );
+  });
+
+  it("the standalone TargetStep component is deleted", () => {
+    expect(src).not.toContain("function TargetStep(");
+    expect(src).not.toMatch(/<TargetStep\b/);
+  });
+
+  it("the render dispatch no longer keys off currentKey === 'target'", () => {
+    expect(src).not.toMatch(/currentKey === "target"/);
+  });
+
+  it("lifecycleHasToolTarget is the single predicate gating the sub-fieldset", () => {
+    // Single source of truth: TriggerStep AND stepIsComplete("trigger")
+    // both consult lifecycleHasToolTarget so the tool-target axis can't
+    // drift between the two surfaces.
+    expect(src).toContain(
+      'function lifecycleHasToolTarget(lifecycle: Lifecycle): boolean',
+    );
+    expect(src).toMatch(
+      /lifecycleHasToolTarget[\s\S]*?return lifecycle === "before_tool_use" \|\| lifecycle === "after_tool_use"/,
+    );
+  });
+
+  it("TriggerStep accepts a tools prop typed ToolItem[] (catalog-driven dropdown)", () => {
+    expect(src).toContain("tools: ToolItem[]");
+    expect(src).toMatch(/import\s*\{[\s\S]*?type ToolItem[\s\S]*?\}\s*from\s*"@\/lib\/customize-api"/);
+  });
+
+  it("AuthorWizard threads catalog.tools through to TriggerStep", () => {
+    expect(src).toMatch(/<TriggerStep[\s\S]*?tools=\{catalog\.tools\}/);
+  });
+
+  it("Tool target sub-fieldset renders ONLY when lifecycleHasToolTarget(draft.lifecycle)", () => {
+    expect(src).toContain("showToolTarget");
+    expect(src).toMatch(
+      /const showToolTarget = lifecycleHasToolTarget\(draft\.lifecycle\)/,
+    );
+    expect(src).toMatch(/showToolTarget \? \(\s*\n?\s*<fieldset/);
+  });
+
+  it("Tool target sub-fieldset surfaces Any tool + Specific tool radios", () => {
+    expect(src).toContain("Tool target");
+    expect(src).toContain("Any tool");
+    expect(src).toContain("Specific tool");
+  });
+
+  it("ToolNameSelect is a <select> sourced from the tools prop (no freeform <input>)", () => {
+    // The dropdown enumerates the live catalog; the wizard no longer
+    // accepts freeform tool-name text input on the trigger step.
+    expect(src).toContain("function ToolNameSelect(");
+    expect(src).toMatch(/<select[\s\S]*?value=\{value\}[\s\S]*?onChange=\{[\s\S]*?\}/);
+    expect(src).toMatch(/sorted\.map\(\(t\) => \{[\s\S]*?<option key=\{t\.name\}/);
+    // The Trigger step renders the dropdown when target=specific, not the
+    // F1.5 TextField. The TextField call shape used by F1.5 is gone.
+    expect(src).not.toMatch(
+      /<TextField\s+value=\{draft\.toolName\}[\s\S]*?placeholder="shell_exec"/,
+    );
+  });
+
+  it("ToolNameSelect tolerates a stale toolName that is no longer in the catalog", () => {
+    // Round-trip safety: if a saved rule references a renamed/removed
+    // tool, the dropdown surfaces it disambiguated rather than silently
+    // snapping back to the placeholder option.
+    expect(src).toContain("valueInCatalog");
+    expect(src).toMatch(/not in catalog/);
+  });
+
+  it("stepIsComplete('trigger') gates on lifecycle + scope + (target axis when tool-bearing)", () => {
+    // Merged completion gate: non-tool-bearing lifecycles need only
+    // lifecycle + scope; tool-bearing lifecycles add the
+    // any-or-(specific-with-non-empty-name) check.
+    expect(src).toContain('case "trigger":');
+    expect(src).toContain("!draft.lifecycle || !draft.scope");
+    expect(src).toContain("lifecycleHasToolTarget(draft.lifecycle)");
+    expect(src).toMatch(
+      /draft\.toolTarget === "any"\s*\n?\s*\|\| \(draft\.toolTarget === "specific" && draft\.toolName\.trim\(\)\.length > 0\)/,
+    );
+    // The old standalone case is gone.
+    expect(src).not.toMatch(/case "target":/);
+  });
+
+  it("reseedDownstream resets toolTarget+toolName when lifecycle moves to a non-tool lifecycle", () => {
+    // Switching from before_tool_use to pre_final must drop any
+    // toolTarget="specific" pick — otherwise the Review row + payload
+    // emit would lie about a tool-name filter that the backend ignores at
+    // pre_final.
+    expect(src).toContain("reseedDownstream");
+    expect(src).toMatch(
+      /merged\.lifecycle === "pre_final"[\s\S]*?merged\.lifecycle === "on_user_prompt_submit"[\s\S]*?merged\.lifecycle === "on_subagent_stop"[\s\S]*?merged\.toolTarget = "any"[\s\S]*?merged\.toolName = ""/,
+    );
+  });
+
+  it("TriggerStep counts three <fieldset>s (lifecycle + scope + tool target)", () => {
+    // Sanity: the third sub-fieldset is present in the wizard source so
+    // the F-UX3 collapse actually happened. The Trigger step is the only
+    // step rendering <fieldset>s, so the file-wide count is 3.
+    expect(src.match(/<fieldset/g)?.length).toBe(3);
   });
 });

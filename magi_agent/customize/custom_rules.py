@@ -34,7 +34,30 @@ ACTIONS = frozenset({"block", "retry", "ask_approval", "audit", "override"})
 # derives the toolset for a spawned child agent (F4). The action is always
 # ``block`` (semantically: "apply the cap" — the rule subtracts/caps and the
 # spawn proceeds with the narrowed toolset).
-FIRES_AT = frozenset({"pre_final", "before_tool_use", "after_tool_use", "spawn"})
+#
+# PR-F-UX1: Tier 2 lifecycle expansion. Two new audit-only slots ride on top of
+# bus events that already fire in the runtime but did not previously have a
+# custom_rule path:
+# * ``on_user_prompt_submit`` — wired in ``runtime/message_builder._apply_prompt_transform``
+#   (BEFORE_SYSTEM_PROMPT hook). Audit-only (action=audit): records the inbound
+#   prompt against the rule without mutating the assembled system prompt; a
+#   block-action equivalent would touch the message builder's byte-identical
+#   contract and is therefore deferred.
+# * ``on_subagent_stop`` — wired adjacent to the AFTER_TURN_END callback in the
+#   child runner (governed turn end). Audit-only: the turn has already been
+#   emitted, so a block would be a false promise; the rule records a verdict
+#   for post-turn review.
+FIRES_AT = frozenset(
+    {
+        "pre_final",
+        "before_tool_use",
+        "after_tool_use",
+        "spawn",
+        # PR-F-UX1 Tier 2 — bus-emitted gates with new custom_rule paths.
+        "on_user_prompt_submit",
+        "on_subagent_stop",
+    }
+)
 
 # Allowed least-privilege projection slices (spec §9.1). ``conversation`` (full
 # session.events) is intentionally NOT allowed.
@@ -73,6 +96,14 @@ _LEGAL: dict[str, dict[str, frozenset[str]]] = {
     "llm_criterion": {
         "pre_final": frozenset({"block", "retry", "audit"}),
         "after_tool_use": frozenset({"override"}),
+        # PR-F-UX1 Tier 2 — audit-only at the two new bus-emitted gates.
+        # ``block`` would require a runtime contract change at message_builder
+        # (would mutate the byte-identical prompt assembly invariant) and
+        # post-turn-end (turn already emitted), so the conservative wire is
+        # audit-only: the criterion judge is invoked and the verdict recorded,
+        # the surrounding runtime contract is unchanged.
+        "on_user_prompt_submit": frozenset({"audit"}),
+        "on_subagent_stop": frozenset({"audit"}),
     },
     # audit/retry deferred: runtime always blocks on a failed shacl record regardless
     # of the stored action, so promising audit/retry here is a false contract.
@@ -93,6 +124,16 @@ def validate_custom_rule(rule: Any) -> list[str]:
     scope = rule.get("scope")
     if scope not in SCOPES:
         errors.append(f"scope must be one of {sorted(SCOPES)}")
+
+    # PR-F-UX6: optional ``groupId`` (non-empty string when present). Rules
+    # sharing a groupId are surfaced in the dashboard as one logical policy
+    # (hybrid composition: e.g. regex pre-filter + LLM critic). Backend gates
+    # still evaluate each rule independently — no new runtime gate. groupId is
+    # orthogonal to scope/firesAt/kind/action and does not enter the ``_LEGAL``
+    # matrix. Absent groupId is valid (ungrouped rule).
+    gid = rule.get("groupId")
+    if gid is not None and (not isinstance(gid, str) or not gid.strip()):
+        errors.append("groupId must be a non-empty string if provided")
 
     what = rule.get("what")
     if not isinstance(what, dict):

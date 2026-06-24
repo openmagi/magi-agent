@@ -171,6 +171,13 @@ export interface RadioCardProps {
   description?: string;
   badge?: string;
   monoLabel?: string;
+  // PR-F-UX1: visible-but-not-selectable. Used for Tier 3 lifecycle entries
+  // (hooks that have no custom_rule gate today and must be authored via
+  // ~/.magi/settings.json instead). The card renders fainter and ignores
+  // clicks; ``disabledReason`` becomes the native HTML tooltip so operators
+  // see WHY they cannot pick this option.
+  disabled?: boolean;
+  disabledReason?: string;
 }
 
 
@@ -181,16 +188,23 @@ export function RadioCard({
   description,
   badge,
   monoLabel,
+  disabled = false,
+  disabledReason,
 }: RadioCardProps): React.ReactElement {
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={disabled ? undefined : onClick}
       aria-pressed={checked}
+      aria-disabled={disabled || undefined}
+      disabled={disabled}
+      title={disabled ? disabledReason : undefined}
       className={`flex w-full items-start justify-between gap-3 rounded-xl border px-4 py-3 text-left transition-colors ${
-        checked
-          ? "border-primary bg-primary/[0.04]"
-          : "border-black/[0.08] bg-white hover:border-primary/40 hover:bg-primary/[0.02]"
+        disabled
+          ? "cursor-not-allowed border-black/[0.06] bg-gray-50/50 opacity-60"
+          : checked
+            ? "border-primary bg-primary/[0.04]"
+            : "border-black/[0.08] bg-white hover:border-primary/40 hover:bg-primary/[0.02]"
       }`}
     >
       <div className="min-w-0">

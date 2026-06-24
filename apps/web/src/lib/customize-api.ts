@@ -138,7 +138,12 @@ export interface CustomizeCatalog {
   controlPlane: ControlPlaneBehaviorItem[];
 }
 
-/** A structured custom verification rule (spec §9.1). P1 builds deterministic_ref. */
+/** A structured custom verification rule (spec §9.1). P1 builds deterministic_ref.
+ *
+ *  PR-F-UX6: optional `groupId` — rules sharing a non-empty groupId are
+ *  surfaced in the dashboard as one logical hybrid policy (the operator
+ *  sees one row + can drill into the composing primitives). Backend gates
+ *  still evaluate each rule independently. */
 export interface CustomRule {
   id?: string;
   scope: string;
@@ -147,6 +152,7 @@ export interface CustomRule {
   firesAt: string;
   action: string;
   projection?: string[];
+  groupId?: string;
 }
 
 export interface CustomizeOverrides {
@@ -646,6 +652,76 @@ export async function getEvidenceLiveCatalog(
 
 
 // ---------------------------------------------------------------------------
+// PR-F-UX2 (F8 core) — runtime-fields chip menu API client
+// ---------------------------------------------------------------------------
+
+/**
+ * One chip in the wizard's variable picker. Mirrors the backend's
+ * ``magi_agent.customize.runtime_fields.RuntimeField`` shape.
+ */
+export interface RuntimeFieldChip {
+  /** Canonical variable name (e.g. ``session_id``, ``tool_input.url``, ``evidence:TestRun.fields.command``). */
+  name: string;
+  /** JSON-Schema-style type ("string", "bool", "object", ...). */
+  type: string;
+  /** Human description; may be empty for tool-input properties whose manifest has no description. */
+  description: string;
+}
+
+/**
+ * Response shape from `GET /v1/app/customize/runtime-fields`.
+ *
+ * Fail-open contract (matches the backend): an unknown (lifecycle, condition)
+ * tuple returns ``{fields: [], context, source: 'unknown'}`` rather than
+ * 4xx/5xx so the chip picker silently falls back to a plain text input.
+ */
+export interface RuntimeFieldsResponse {
+  fields: RuntimeFieldChip[];
+  /** Echo of the resolved tuple ("lifecycle/condition[/tool]"). */
+  context: string;
+  /** Provenance marker — "fields_for_context" on a hit, "unknown" on miss. */
+  source: string;
+}
+
+/**
+ * Fetch the variable chip menu for a (lifecycle, condition, tool?) tuple.
+ *
+ * - Read-only (GET) and fail-open: a fetch / HTTP error returns an empty
+ *   chip list rather than throwing, so the consumer renders without a
+ *   try/catch wrapper.
+ * - Gated by ``MAGI_CUSTOMIZE_RUNTIME_FIELDS_ENDPOINT_ENABLED``; when OFF
+ *   the endpoint responds 404 and the chip picker degrades to "no chips".
+ */
+export async function getRuntimeFields(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  args: { lifecycle: string; condition: string; tool?: string | null },
+): Promise<RuntimeFieldsResponse> {
+  const params = new URLSearchParams({
+    lifecycle: args.lifecycle,
+    condition: args.condition,
+  });
+  if (args.tool) {
+    params.set("tool", args.tool);
+  }
+  const path = `/v1/app/customize/runtime-fields?${params.toString()}`;
+  const empty: RuntimeFieldsResponse = {
+    fields: [],
+    context: `${args.lifecycle}/${args.condition}`,
+    source: "unknown",
+  };
+  try {
+    const res = await fetch(path);
+    if (!res.ok) {
+      return empty;
+    }
+    return (await res.json()) as RuntimeFieldsResponse;
+  } catch {
+    return empty;
+  }
+}
+
+
+// ---------------------------------------------------------------------------
 // PR-D1/D2 — Unified NL → rule compiler API client
 // ---------------------------------------------------------------------------
 
@@ -663,7 +739,11 @@ export type RoutedKind =
   | "shacl_constraint"
   | "field_constraint"
   | "seam_spec"
-  | "custom_check";
+  | "custom_check"
+  // PR-F4: spawn-time toolset cap. PR-F-UX6 architect may surface this
+  // as a primitive in a hybrid composition (e.g. cap subagents + advisory
+  // critic on the parent answer).
+  | "capability_scope";
 
 /** Honest-degrade payload returned by the NL compiler when the rule
  *  references an evidence field that no producer is known to emit. */
@@ -688,6 +768,16 @@ export interface RuleReview {
  * `routedKind` / `draft` are null, `error` is explicitly null.
  * On compile failure: `ok: false`, `error` carries the reason.
  * Flag-OFF: `ok: false`, `error: "nl-rule compiler disabled"`.
+ *
+ * PR-F-UX6 interview-mode additions (sent only when
+ * MAGI_CUSTOMIZE_NL_INTERVIEW_MODE_ENABLED is ON):
+ *   - `mode: "interview"` + `questions: InterviewQuestion[]` — the compiler
+ *     needs more input; render each question with a chip picker per
+ *     `expects` tag.
+ *   - `mode: "proposal"` + `proposal: ArchitectProposal` — the compiler
+ *     proposes a single primitive OR a hybrid composition of N primitives
+ *     sharing a logical groupId; render the ProposalCard.
+ *   - Legacy callers without these fields keep working — `mode` is absent.
  */
 export interface RuleCompileResponse {
   ok: boolean;
@@ -708,22 +798,101 @@ export interface RuleCompileResponse {
    *  `field_not_in_catalog` (e.g. "Browse available fields at Customize >
    *  Reusable evidence."). */
   suggestion?: string;
+  /** PR-F-UX6: interview-mode response branch. Absent on legacy compile
+   *  success / clarifying-questions / error responses. */
+  mode?: "interview" | "proposal";
+  /** PR-F-UX6: present when `mode === "interview"`. */
+  questions?: InterviewQuestion[];
+  /** PR-F-UX6: present when `mode === "interview"` or `mode === "proposal"` —
+   *  the architect's structured intent map so the frontend can drop into
+   *  the wizard with pre-filled state. */
+  intent?: ArchitectIntent;
+  /** PR-F-UX6: present when `mode === "proposal"`. */
+  proposal?: ArchitectProposal;
+}
+
+/** PR-F-UX6 — the vocabulary of `expects` tags the architect may emit on
+ *  each open question. Drives the per-question chip-picker component in
+ *  the NL compose UI. */
+export type ArchitectExpects =
+  | "evidence_ref"
+  | "verifier_ref"
+  | "field"
+  | "tool_name"
+  | "lifecycle"
+  | "scope"
+  | "value"
+  | "freeform";
+
+/** PR-F-UX6 — one open question the architect needs answered before it can
+ *  propose a primitive. */
+export interface InterviewQuestion {
+  question: string;
+  expects: ArchitectExpects;
+  /** Optional closed-set inventory the operator may pick from (e.g. the
+   *  runtime tool names). Absent → freeform text input. */
+  inventory?: string[];
+}
+
+/** PR-F-UX6 — structured intent map the architect produces in `discover_intent`. */
+export interface ArchitectIntent {
+  whatToCheck: string;
+  whereInLifecycle: string;
+  whatToDoOnFail: string;
+  openQuestions: InterviewQuestion[];
+  confidence: number;
+}
+
+/** PR-F-UX6 — trust-class taxonomy the architect declares per primitive in
+ *  a proposal. Mirrors the frontend TrustBadge bucket names. */
+export type ArchitectTrustClass = "deterministic" | "advisory";
+
+/** PR-F-UX6 — one primitive within an architect proposal. `payload` is the
+ *  same shape the legacy one-shot compiler emits for `kind` (so the same
+ *  PUT routes accept it on activate). */
+export interface ArchitectPrimitive {
+  kind: RoutedKind;
+  payload: unknown;
+  trustClass: ArchitectTrustClass;
+  rationale: string;
+}
+
+/** PR-F-UX6 — full architect proposal. `mode: "single"` → one primitive;
+ *  `mode: "hybrid"` → N primitives composed and persisted under one
+ *  logical groupId. */
+export interface ArchitectProposal {
+  mode: "single" | "hybrid";
+  primitives: ArchitectPrimitive[];
+  summary: string;
+  explanation: string;
 }
 
 /**
  * Compiles a natural-language policy via `POST /v1/app/customize/rules/
  * compile`. Same error contract as `compileSeamSpec` / `compileCustomRule`:
  * never throws on a 4xx/5xx or network error.
+ *
+ * PR-F-UX6: `mode === "interview"` forces the architect interview path
+ * even on well-formed inputs (the UI's "Refine" affordance). Omit the
+ * arg to let the backend pick (legacy heuristic + flag-gated).
  */
 export async function compileRule(
   fetch: (path: string, init?: RequestInit) => Promise<Response>,
   nlText: string,
   priorTurns?: ConversationTurn[],
+  mode?: "interview",
 ): Promise<RuleCompileResponse> {
   try {
-    const bodyPayload: { nlText: string; priorTurns?: ConversationTurn[] } = { nlText };
+    const bodyPayload: {
+      nlText: string;
+      priorTurns?: ConversationTurn[];
+      mode?: "interview";
+    } = { nlText };
     if (priorTurns !== undefined && priorTurns.length > 0) {
       bodyPayload.priorTurns = priorTurns;
+    }
+    if (mode !== undefined) {
+      bodyPayload.mode = mode;
     }
     const res = await fetch(`/v1/app/customize/rules/compile`, {
       method: "POST",

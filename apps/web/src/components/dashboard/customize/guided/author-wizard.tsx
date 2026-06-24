@@ -6,27 +6,32 @@
  *
  * F1.5 restructure: tool targeting was previously conflated with the
  * per-call condition (a "Tool name" entry in the condition list). The
- * two are now distinct steps so the operator's mental model is:
+ * two are now distinct axes so the operator's mental model is:
  *   1. Which tool(s) does this policy apply to?
  *   2. Under what per-call condition does it fire?
  *
+ * PR-F-UX3 restructure: the standalone "Target" step is collapsed back
+ * into the "Trigger" step as a third sub-fieldset (tool-bearing lifecycles
+ * only). The freeform tool-name text input is replaced with a dropdown
+ * sourced from the runtime tool catalog (``catalog.tools``) so typo
+ * risk is eliminated. The wizard is 6 steps for ALL lifecycles.
+ *
  * Step ordering
  * -------------
- *   0. Trigger      (lifecycle + scope)
- *   1. Target       (Any tool / Specific tool)  [only for tool-bearing
- *                    lifecycles; skipped for pre_final]
- *   2. Condition    (per-call check, filtered by lifecycle + target)
- *   3. Specifics    (per-condition form; auto-skipped when condition=none)
- *   4. Action       (archetype, filtered by lifecycle; header phrasing
+ *   0. Trigger      (lifecycle + scope + tool target — the tool-target
+ *                    sub-fieldset only renders for tool-bearing lifecycles)
+ *   1. Condition    (per-call check, filtered by lifecycle + target)
+ *   2. Specifics    (per-condition form; auto-skipped when condition=none)
+ *   3. Action       (archetype, filtered by lifecycle; header phrasing
  *                    reflects the chosen condition trigger so positive
  *                    vs negative semantics survive)
- *   5. Name
- *   6. Review
+ *   4. Name
+ *   5. Review
  *
- * Total step count is dynamic: pre_final has 6 steps (target step is
- * absent because there is no tool layer at pre_final); before_tool_use
- * and after_tool_use have 7 steps. The wizard chrome's progress bar
- * adapts.
+ * Total step count is a constant 6 across all lifecycles. The
+ * tool-target sub-fieldset inside Trigger is the only piece that toggles
+ * on lifecycle (hidden for pre_final / on_user_prompt_submit /
+ * on_subagent_stop, where there is no tool layer).
  *
  * Routing — (lifecycle, target, condition) → backend primitive
  * ----------------------------------------------------------
@@ -57,7 +62,7 @@ import {
   HelpCircle,
   ShieldOff,
 } from "lucide-react";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   getEvidenceLiveCatalog,
@@ -65,6 +70,7 @@ import {
   type CustomRule,
   type CustomizeCatalog,
   type EvidenceLiveCatalogTypeEntry,
+  type ToolItem,
 } from "@/lib/customize-api";
 import { useAgentFetch } from "@/lib/local-api";
 import {
@@ -76,6 +82,7 @@ import type { EvidenceTypeEntry } from "@/lib/policy-model";
 
 import { TrustBadge, type TrustClass } from "../trust-badge";
 
+import { RuntimeFieldChips } from "./runtime-field-chips";
 import { RadioCard, WizardChrome } from "./wizard-chrome";
 
 
@@ -84,7 +91,14 @@ import { RadioCard, WizardChrome } from "./wizard-chrome";
 // ---------------------------------------------------------------------------
 
 
-type Lifecycle = "before_tool_use" | "after_tool_use" | "pre_final";
+type Lifecycle =
+  | "before_tool_use"
+  | "after_tool_use"
+  | "pre_final"
+  // PR-F-UX1 Tier 2 — bus-emitted gates with custom_rule paths wired in
+  // magi_agent.customize.lifecycle_audit (audit-only, llm_criterion only).
+  | "on_user_prompt_submit"
+  | "on_subagent_stop";
 type Scope = "always" | "coding" | "research" | "delivery" | "memory" | "task";
 type Archetype = "block" | "ask" | "audit" | "strip";
 type ToolTarget = "any" | "specific";
@@ -213,14 +227,27 @@ const EMPTY: Draft = {
 };
 
 
-// Variable step plan: pre_final has no tool layer.
-type StepKey = "trigger" | "target" | "condition" | "specifics" | "action" | "name" | "review";
+// PR-F-UX3 — single constant 6-step plan for every lifecycle. The
+// tool-target axis is folded into the Trigger step as a sub-fieldset
+// rendered conditionally on lifecycle, so the step plan no longer
+// branches on lifecycle. pre_final remains 6 steps and tool-bearing
+// lifecycles collapse from 7 → 6.
+type StepKey = "trigger" | "condition" | "specifics" | "action" | "name" | "review";
 
 function stepPlan(lifecycle: Lifecycle): StepKey[] {
   if (lifecycle === "pre_final") {
     return ["trigger", "condition", "specifics", "action", "name", "review"];
   }
-  return ["trigger", "target", "condition", "specifics", "action", "name", "review"];
+  // PR-F-UX1 Tier 2 — the two new lifecycle slots fire OUTSIDE the tool
+  // boundary (one before the system prompt is assembled, the other after the
+  // child's turn has emitted) so they have no tool target axis. Same step
+  // shape as pre_final.
+  if (lifecycle === "on_user_prompt_submit" || lifecycle === "on_subagent_stop") {
+    return ["trigger", "condition", "specifics", "action", "name", "review"];
+  }
+  // Tool-bearing lifecycles (before_tool_use / after_tool_use): tool target
+  // sub-fieldset renders inside TriggerStep, not as a separate step.
+  return ["trigger", "condition", "specifics", "action", "name", "review"];
 }
 
 
@@ -254,6 +281,19 @@ export function AuthorWizard({
   // which is no longer a valid combination.
   const reseedDownstream = (next: Partial<Draft>): Draft => {
     const merged = { ...draft, ...next };
+    // PR-F-UX3 — when the lifecycle changes to one with no tool layer
+    // (pre_final / Tier 2 audit-only slots), force the tool target back to
+    // ``any`` and clear the tool name. The tool-target sub-fieldset is
+    // hidden for these lifecycles and we don't want a stale "specific" pick
+    // bleeding into payloads / Review summaries.
+    if (
+      merged.lifecycle === "pre_final"
+      || merged.lifecycle === "on_user_prompt_submit"
+      || merged.lifecycle === "on_subagent_stop"
+    ) {
+      merged.toolTarget = "any";
+      merged.toolName = "";
+    }
     const kinds = availableConditionKinds(merged.lifecycle, merged.toolTarget);
     if (!kinds.includes(merged.conditionKind)) {
       merged.conditionKind = kinds[0] ?? "none";
@@ -368,10 +408,11 @@ export function AuthorWizard({
       error={saveError}
     >
       {currentKey === "trigger" ? (
-        <TriggerStep draft={draft} update={updateDraft} />
-      ) : null}
-      {currentKey === "target" ? (
-        <TargetStep draft={draft} update={updateDraft} />
+        <TriggerStep
+          draft={draft}
+          update={updateDraft}
+          tools={catalog.tools}
+        />
       ) : null}
       {currentKey === "condition" ? (
         <ConditionKindStep draft={draft} update={updateDraft} />
@@ -402,14 +443,107 @@ export function AuthorWizard({
 // ---------------------------------------------------------------------------
 
 
-const LIFECYCLE_OPTIONS: ReadonlyArray<{
-  id: Lifecycle;
+// PR-F-UX1: lifecycle audit results.
+//
+// Tier 1 (gate exists, custom_rule wired today): before_tool_use, after_tool_use,
+// pre_final. These are the legacy slots — every kind/action combo in
+// custom_rules._LEGAL is authored against one of these three.
+//
+// Tier 2 (gate exists, custom_rule path wired in this PR): on_user_prompt_submit
+// (BEFORE_SYSTEM_PROMPT bus event in runtime/message_builder) and
+// on_subagent_stop (AFTER_TURN_END callback in the child runner). Both are
+// audit-only at launch — backend ``_LEGAL`` restricts these slots to
+// ``llm_criterion`` + ``audit``. Block at these slots would change the
+// surrounding runtime contract (byte-identical prompt assembly /
+// already-emitted child output) and is deferred to a later PR.
+//
+// Tier 3 (hook exists but no runtime emitter, OR audit-redundant): rendered as
+// DISABLED radio cards with an honest tooltip pointing operators at file hooks
+// (~/.magi/settings.json). Surfacing them keeps the UI honest about what the
+// runtime can/cannot enforce; hiding them would invite operators to assume
+// they don't exist.
+type LifecycleTier = "tier1" | "tier2" | "tier3";
+
+interface LifecycleOption {
+  id: Lifecycle | string;
   label: string;
   description: string;
-}> = [
-  { id: "before_tool_use", label: "Before a tool runs", description: "Fires at PreToolUse — before the agent invokes a tool." },
-  { id: "after_tool_use", label: "After a tool returns", description: "Fires at PostToolUse — before the agent reads the tool's output." },
-  { id: "pre_final", label: "Before the final answer commits", description: "Fires just before the runtime accepts the agent's final answer." },
+  tier: LifecycleTier;
+  disabledReason?: string;
+}
+
+const LIFECYCLE_OPTIONS: ReadonlyArray<LifecycleOption> = [
+  // --- Tier 1 — wired today ------------------------------------------------
+  {
+    id: "before_tool_use",
+    label: "Before a tool runs",
+    description: "Fires at PreToolUse — before the agent invokes a tool.",
+    tier: "tier1",
+  },
+  {
+    id: "after_tool_use",
+    label: "After a tool returns",
+    description: "Fires at PostToolUse — before the agent reads the tool's output.",
+    tier: "tier1",
+  },
+  {
+    id: "pre_final",
+    label: "Before the final answer commits",
+    description: "Fires just before the runtime accepts the agent's final answer.",
+    tier: "tier1",
+  },
+  // --- Tier 2 — wired in PR-F-UX1, audit-only ------------------------------
+  {
+    id: "on_user_prompt_submit",
+    label: "When the user submits a prompt (audit-only)",
+    description:
+      "Fires at BEFORE_SYSTEM_PROMPT — adjacent to system-prompt assembly. Audit-only: records the criterion verdict without mutating the assembled prompt.",
+    tier: "tier2",
+  },
+  {
+    id: "on_subagent_stop",
+    label: "When a subagent finishes a turn (audit-only)",
+    description:
+      "Fires at AFTER_TURN_END — adjacent to the child-runner's turn-end callback. Audit-only: the child output has already been emitted, so blocks aren't honest at this slot.",
+    tier: "tier2",
+  },
+  // --- Tier 3 — visible but disabled (file hook only) ----------------------
+  {
+    id: "before_llm_call",
+    label: "Before each LLM call",
+    description:
+      "(file hook only — author via ~/.magi/settings.json) Fires every LLM call inside a turn; high blast radius, mostly subsumed by pre_final.",
+    tier: "tier3",
+    disabledReason:
+      "No custom_rule gate yet — file hooks via ~/.magi/settings.json instead.",
+  },
+  {
+    id: "after_llm_call",
+    label: "After each LLM call",
+    description:
+      "(file hook only — author via ~/.magi/settings.json) Per-LLM-call inspection; redundant with pre_final's egress gate.",
+    tier: "tier3",
+    disabledReason:
+      "No custom_rule gate yet — file hooks via ~/.magi/settings.json instead.",
+  },
+  {
+    id: "on_session_start",
+    label: "When a session starts",
+    description:
+      "(file hook only — author via ~/.magi/settings.json) No runtime emitter; CC SessionStart hook fires from the loader.",
+    tier: "tier3",
+    disabledReason:
+      "No custom_rule gate yet — file hooks via ~/.magi/settings.json instead.",
+  },
+  {
+    id: "on_session_stop",
+    label: "When a session stops",
+    description:
+      "(file hook only — author via ~/.magi/settings.json) No runtime emitter; CC Stop hook fires from the loader.",
+    tier: "tier3",
+    disabledReason:
+      "No custom_rule gate yet — file hooks via ~/.magi/settings.json instead.",
+  },
 ];
 
 
@@ -425,17 +559,34 @@ const SCOPE_OPTIONS: ReadonlyArray<{
 ];
 
 
+// PR-F-UX3 — tool-bearing lifecycles get a third sub-fieldset inside
+// the Trigger step (Tool target). The standalone TargetStep was removed
+// in F-UX3 to collapse the wizard back to a constant 6 steps. The
+// helper below is reused by TriggerStep so the predicate stays in one
+// place; it is also the gate stepIsComplete("trigger") consults.
+function lifecycleHasToolTarget(lifecycle: Lifecycle): boolean {
+  return lifecycle === "before_tool_use" || lifecycle === "after_tool_use";
+}
+
+
 function TriggerStep({
   draft,
   update,
-}: { draft: Draft; update: (patch: Partial<Draft>) => void }): React.ReactElement {
+  tools,
+}: {
+  draft: Draft;
+  update: (patch: Partial<Draft>) => void;
+  tools: ToolItem[];
+}): React.ReactElement {
+  const showToolTarget = lifecycleHasToolTarget(draft.lifecycle);
   return (
     <div className="space-y-5">
       <div className="space-y-2">
         <h2 className="text-lg font-bold text-foreground">When should this policy fire?</h2>
         <p className="text-xs text-secondary">
-          Two axes: <em>when</em> in the agent's lifecycle, and <em>on which
-          kind of turn</em>. Pick one of each.
+          Three axes: <em>when</em> in the agent's lifecycle, <em>on which
+          kind of turn</em>, and (for tool-bearing lifecycles)
+          <em> which tool(s)</em>. Pick one of each.
         </p>
       </div>
 
@@ -443,15 +594,23 @@ function TriggerStep({
         <legend className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
           Lifecycle event
         </legend>
-        {LIFECYCLE_OPTIONS.map((opt) => (
-          <RadioCard
-            key={opt.id}
-            checked={draft.lifecycle === opt.id}
-            onClick={() => update({ lifecycle: opt.id })}
-            label={opt.label}
-            description={opt.description}
-          />
-        ))}
+        {LIFECYCLE_OPTIONS.map((opt) => {
+          // Tier 3 entries render visible-but-disabled with an honest tooltip;
+          // the operator sees the option exists in the runtime but learns it
+          // needs a file hook authored via ~/.magi/settings.json instead.
+          const isDisabled = opt.tier === "tier3";
+          return (
+            <RadioCard
+              key={opt.id}
+              checked={draft.lifecycle === (opt.id as Lifecycle)}
+              onClick={() => update({ lifecycle: opt.id as Lifecycle })}
+              label={opt.label}
+              description={opt.description}
+              disabled={isDisabled}
+              disabledReason={opt.disabledReason}
+            />
+          );
+        })}
       </fieldset>
 
       <fieldset className="space-y-2">
@@ -468,49 +627,91 @@ function TriggerStep({
           />
         ))}
       </fieldset>
+
+      {showToolTarget ? (
+        <fieldset className="space-y-2">
+          <legend className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+            Tool target
+          </legend>
+          <p className="text-xs text-secondary">
+            Which tool(s) does this policy apply to? Apply to every tool call,
+            or narrow to a specific tool.
+          </p>
+          <RadioCard
+            checked={draft.toolTarget === "any"}
+            onClick={() => update({ toolTarget: "any" })}
+            label="Any tool"
+            description="Match every tool call regardless of name."
+          />
+          <RadioCard
+            checked={draft.toolTarget === "specific"}
+            onClick={() => update({ toolTarget: "specific" })}
+            label="Specific tool"
+            description="Match calls to a single named tool. Pick which one below."
+          />
+          {draft.toolTarget === "specific" ? (
+            <ToolNameSelect
+              value={draft.toolName}
+              onChange={(v) => update({ toolName: v })}
+              tools={tools}
+            />
+          ) : null}
+        </fieldset>
+      ) : null}
     </div>
   );
 }
 
 
-// ---------------------------------------------------------------------------
-// Step — Target (Which tool(s)? Only for tool-bearing lifecycles)
-// ---------------------------------------------------------------------------
-
-
-function TargetStep({
-  draft,
-  update,
-}: { draft: Draft; update: (patch: Partial<Draft>) => void }): React.ReactElement {
+// PR-F-UX3 — dropdown source for the tool-target sub-fieldset. Replaces
+// the freeform TextField the F1.5 TargetStep used so a typo can no
+// longer silently produce a no-match rule. Sorted by display name with
+// the runtime's source/dangerous markers preserved as suffix hints; the
+// stored value is the bare tool name (matches the backend tool_perm
+// match.tool exact-string compare).
+function ToolNameSelect({
+  value,
+  onChange,
+  tools,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  tools: ToolItem[];
+}): React.ReactElement {
+  // Sort by name so the dropdown is stable across renders; the catalog
+  // is already deduped by the customize-api fetcher.
+  const sorted = [...tools].sort((a, b) => a.name.localeCompare(b.name));
+  // If the current value is not in the catalog (e.g. wizard pre-filled
+  // from a saved rule that referenced a removed/renamed tool), surface
+  // it as a disambiguated option so the user can see it instead of the
+  // selector silently snapping back to the placeholder.
+  const valueInCatalog = sorted.some((t) => t.name === value);
   return (
-    <div className="space-y-3">
-      <h2 className="text-lg font-bold text-foreground">Which tool(s) does this policy apply to?</h2>
-      <p className="text-xs text-secondary">
-        Apply to every tool call, or narrow to a specific tool.
-      </p>
-      <div className="space-y-2">
-        <RadioCard
-          checked={draft.toolTarget === "any"}
-          onClick={() => update({ toolTarget: "any" })}
-          label="Any tool"
-          description="Match every tool call regardless of name."
-        />
-        <RadioCard
-          checked={draft.toolTarget === "specific"}
-          onClick={() => update({ toolTarget: "specific" })}
-          label="Specific tool"
-          description="Match calls to a single named tool. Pick which one below."
-        />
-      </div>
-      {draft.toolTarget === "specific" ? (
-        <TextField
-          value={draft.toolName}
-          onChange={(v) => update({ toolName: v })}
-          label="Tool name"
-          placeholder="shell_exec"
-        />
-      ) : null}
-    </div>
+    <label className="block">
+      <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+        Tool name
+      </span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        aria-label="Tool name"
+        className="mt-1 w-full rounded-lg border border-primary/30 bg-white px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+      >
+        <option value="">Select a tool…</option>
+        {!valueInCatalog && value ? (
+          <option value={value}>{value} (not in catalog)</option>
+        ) : null}
+        {sorted.map((t) => {
+          const suffix = t.dangerous ? " · dangerous" : "";
+          return (
+            <option key={t.name} value={t.name}>
+              {t.name}
+              {suffix}
+            </option>
+          );
+        })}
+      </select>
+    </label>
   );
 }
 
@@ -524,6 +725,14 @@ function availableConditionKinds(
   lifecycle: Lifecycle,
   toolTarget: ToolTarget,
 ): ConditionKind[] {
+  // PR-F-UX1 Tier 2 — both new slots accept ``llm_criterion`` ONLY (backend
+  // ``_LEGAL`` matrix restricts these slots to llm_criterion + audit). No
+  // deterministic kinds today: deterministic_ref needs an evidence ledger
+  // (pre_final), tool_perm needs a tool (before_tool_use), and shacl shapes
+  // need pre-final evidence records.
+  if (lifecycle === "on_user_prompt_submit" || lifecycle === "on_subagent_stop") {
+    return ["llm_criterion"];
+  }
   // pre_final has no tool layer; target is ignored.
   if (lifecycle === "pre_final") {
     // PR-F3: field_constraint is the deterministic SHACL-via-picker path
@@ -537,10 +746,13 @@ function availableConditionKinds(
   }
   if (lifecycle === "before_tool_use") {
     if (toolTarget === "specific") {
-      // tool_perm has no AND between tool name and url-shape matchers,
-      // so a per-tool rule can only fire unconditionally per call.
-      // Refusing the AND combo here keeps the wizard from assembling a
-      // draft the backend cannot save.
+      // tool_perm has no AND between tool name and url-shape matchers
+      // (backend `tool_perm.py` only honors a single matcher key per rule),
+      // so a per-tool rule can only fire unconditionally per call. Refusing
+      // the AND combo here keeps the wizard from assembling a draft the
+      // backend cannot save. The Specifics hint surfaces the same fact so
+      // operators aren't left guessing where domain/path matchers went —
+      // use target=any to author those.
       return ["none"];
     }
     // target=any: tool_perm has no wildcard matcher, so "no condition"
@@ -551,17 +763,17 @@ function availableConditionKinds(
     return ["domain", "domain_allowlist", "path", "path_allowlist"];
   }
   // after_tool_use
+  // PR-F-UX4 — liberalization: llm_criterion is now available under BOTH
+  // target=any AND target=specific. The backend validator
+  // (`magi_agent/customize/custom_rules.py:185`) requires a non-empty
+  // `toolMatch` list on every after_tool_use llm_criterion rule, but it
+  // does not care WHERE the wizard sourced that list from. When
+  // target=specific the wizard auto-derives `toolMatch=[draft.toolName]`
+  // in `customRulePayload`, hiding the duplicate-entry llmToolMatch text
+  // field — same backend payload as the target=any path (one-tool list
+  // with the chosen tool name) with no user re-typing.
   if (toolTarget === "specific") {
-    // llm_criterion is offered only under target=any because the
-    // SpecificsStep already exposes its own `llmToolMatch` text field
-    // for the backend-required per-tool filter (custom_rules.py:185-188
-    // rejects any after_tool_use llm_criterion without a non-empty
-    // toolMatch). Surfacing llm_criterion under target=specific too
-    // would force the user to fill BOTH the top-level toolName and the
-    // SpecificsStep llmToolMatch — duplicated tool entry, no clearer
-    // semantic. stepIsComplete enforces a non-empty llmToolMatch for
-    // the target=any path.
-    return ["none", "regex"];
+    return ["none", "regex", "llm_criterion"];
   }
   return ["none", "regex", "llm_criterion"];
 }
@@ -723,6 +935,23 @@ function SpecificsStep({
   judgmentRefOptions: RefOption[];
   liveCatalogTypes: EvidenceLiveCatalogTypeEntry[];
 }): React.ReactElement {
+  // PR-F-UX2 — refs for cursor-aware chip insertion. One ref per chip-bearing
+  // input; the chip click reads selectionStart from the right ref and splices
+  // at the caret via :func:`insertAtCaret`.
+  const regexInputRef = useRef<HTMLInputElement | null>(null);
+  const criterionInputRef = useRef<HTMLInputElement | null>(null);
+  const contentMatchInputRef = useRef<HTMLInputElement | null>(null);
+  const shaclTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // PR-F-UX2 — resolve the runtime-fields tool target. When the wizard's
+  // top-level Target step picked a specific tool, thread that name through
+  // so ``tool_input.*`` expands to the real manifest input_schema; otherwise
+  // pass null and the backend returns the generic marker + alias hints.
+  const chipTool =
+    draft.toolTarget === "specific" && draft.toolName.trim().length > 0
+      ? draft.toolName.trim()
+      : null;
+
   return (
     <div className="space-y-3">
       <h2 className="text-lg font-bold text-foreground">Fill in the details</h2>
@@ -810,19 +1039,33 @@ function SpecificsStep({
         )
       ) : null}
       {draft.conditionKind === "shacl" ? (
-        <label className="block">
-          <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
-            SHACL shape (Turtle)
-          </span>
-          <textarea
-            value={draft.shapeTtl}
-            onChange={(e) => update({ shapeTtl: e.target.value })}
-            rows={10}
-            placeholder={SHACL_PLACEHOLDER}
-            aria-label="SHACL shape"
-            className="mt-1 w-full resize-y rounded-lg border border-primary/30 bg-white px-3 py-2 text-xs font-mono text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+        <div className="space-y-2">
+          <RuntimeFieldChips
+            lifecycle={draft.lifecycle}
+            condition="shacl"
+            tool={chipTool}
+            onInsert={(token) =>
+              insertAtCaret(shaclTextareaRef, draft.shapeTtl, token, (next) =>
+                update({ shapeTtl: next }),
+              )
+            }
+            label="Available evidence fields"
           />
-        </label>
+          <label className="block">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+              SHACL shape (Turtle)
+            </span>
+            <textarea
+              ref={shaclTextareaRef}
+              value={draft.shapeTtl}
+              onChange={(e) => update({ shapeTtl: e.target.value })}
+              rows={10}
+              placeholder={SHACL_PLACEHOLDER}
+              aria-label="SHACL shape"
+              className="mt-1 w-full resize-y rounded-lg border border-primary/30 bg-white px-3 py-2 text-xs font-mono text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+            />
+          </label>
+        </div>
       ) : null}
       {draft.conditionKind === "llm_criterion" ? (
         <div className="space-y-3">
@@ -832,8 +1075,30 @@ function SpecificsStep({
               llm_criterion rule and the runtime gate matches by exact
               membership. Without this input the wizard always emitted a
               payload that PUT /custom-rules rejected with HTTP 400. Hidden
-              on pre_final (no tool layer there). */}
-          {draft.lifecycle === "after_tool_use" ? (
+              on pre_final (no tool layer there).
+
+              PR-F-UX4 — when toolTarget=specific the trigger step already
+              named the tool, so the wizard auto-derives `toolMatch` from
+              `draft.toolName` and renders a read-only chip here rather
+              than asking the operator to retype it. The text input only
+              appears under target=any where the multi-tool list is the
+              only way to express a per-rule tool filter. */}
+          {draft.lifecycle === "after_tool_use" && draft.toolTarget === "specific" ? (
+            <div className="space-y-1">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+                Tool match (from Trigger step)
+              </span>
+              <div className="mt-1 inline-flex items-center gap-2 rounded-lg border border-black/[0.10] bg-gray-50/80 px-3 py-1.5 text-xs font-mono text-foreground">
+                Tool: {draft.toolName.trim() || "(none)"}
+              </div>
+              <p className="text-[11px] leading-relaxed text-secondary">
+                Auto-derived from the Trigger step's tool pick. To match
+                multiple tools, change Tool target to "Any tool" and supply
+                a comma-separated list.
+              </p>
+            </div>
+          ) : null}
+          {draft.lifecycle === "after_tool_use" && draft.toolTarget !== "specific" ? (
             <div className="space-y-1">
               <TextField
                 value={draft.llmToolMatch}
@@ -849,12 +1114,25 @@ function SpecificsStep({
               </p>
             </div>
           ) : null}
-          <TextField
-            value={draft.criterion}
-            onChange={(v) => update({ criterion: v })}
-            label="LLM criterion (single sentence)"
-            placeholder="The answer cites at least one source."
-          />
+          <div className="space-y-2">
+            <RuntimeFieldChips
+              lifecycle={draft.lifecycle}
+              condition="llm_criterion"
+              tool={chipTool}
+              onInsert={(token) =>
+                insertAtCaret(criterionInputRef, draft.criterion, token, (next) =>
+                  update({ criterion: next }),
+                )
+              }
+            />
+            <TextField
+              value={draft.criterion}
+              onChange={(v) => update({ criterion: v })}
+              label="LLM criterion (single sentence)"
+              placeholder="The answer cites at least one source."
+              inputRef={criterionInputRef}
+            />
+          </div>
           {/* PR-F6.5 — deterministic contentMatch pre-filter on after-tool
               llm_criterion rules. The runtime gate only invokes the LLM
               critic when the tool output matches the pattern. Surface this
@@ -886,6 +1164,19 @@ function SpecificsStep({
               </label>
               {draft.llmContentMatchEnabled ? (
                 <div className="mt-3 space-y-2 border-t border-black/[0.06] pt-3">
+                  <RuntimeFieldChips
+                    lifecycle={draft.lifecycle}
+                    condition="contentMatch"
+                    tool={chipTool}
+                    onInsert={(token) =>
+                      insertAtCaret(
+                        contentMatchInputRef,
+                        draft.llmContentMatchPattern,
+                        token,
+                        (next) => update({ llmContentMatchPattern: next }),
+                      )
+                    }
+                  />
                   <TextField
                     value={draft.llmContentMatchPattern}
                     onChange={(v) => update({ llmContentMatchPattern: v })}
@@ -896,6 +1187,7 @@ function SpecificsStep({
                         : "AWS_SECRET"
                     }
                     mono
+                    inputRef={contentMatchInputRef}
                   />
                   <label className="flex items-center gap-2 text-xs text-secondary">
                     <input
@@ -927,12 +1219,23 @@ function SpecificsStep({
       ) : null}
       {draft.conditionKind === "regex" ? (
         <div className="space-y-2">
+          <RuntimeFieldChips
+            lifecycle={draft.lifecycle}
+            condition="regex"
+            tool={chipTool}
+            onInsert={(token) =>
+              insertAtCaret(regexInputRef, draft.regexPattern, token, (next) =>
+                update({ regexPattern: next }),
+              )
+            }
+          />
           <TextField
             value={draft.regexPattern}
             onChange={(v) => update({ regexPattern: v })}
             label="Pattern"
             placeholder={draft.regexIsRegex ? "AKIA[0-9A-Z]{16}" : "secret"}
             mono
+            inputRef={regexInputRef}
           />
           <label className="flex items-center gap-2 text-xs text-secondary">
             <input
@@ -1192,18 +1495,24 @@ magi:MyShape
     ] .`;
 
 
+// PR-F-UX2: optional ``inputRef`` forwards the underlying <input> so the
+// parent can read selectionStart/selectionEnd for cursor-aware chip
+// insertion (RuntimeFieldChips). Backward-compatible: existing callers
+// that don't pass ``inputRef`` are unaffected.
 function TextField({
   value,
   onChange,
   label,
   placeholder,
   mono,
+  inputRef,
 }: {
   value: string;
   onChange: (v: string) => void;
   label: string;
   placeholder?: string;
   mono?: boolean;
+  inputRef?: React.Ref<HTMLInputElement>;
 }): React.ReactElement {
   return (
     <label className="block">
@@ -1211,6 +1520,7 @@ function TextField({
         {label}
       </span>
       <input
+        ref={inputRef}
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -1222,6 +1532,42 @@ function TextField({
       />
     </label>
   );
+}
+
+
+// PR-F-UX2: cursor-aware chip insertion helper shared across the wizard's
+// chip-bearing inputs. Reads the current selection from the input/textarea
+// ref, splices the chip token at the caret, hands the new value to the
+// draft updater, and restores the caret after React commits.
+//
+// Mirrors the pattern from apps/web/src/components/chat/chat-input.tsx
+// (acceptSlash / acceptKb at lines 392-410 / 452-470) so the wizard's
+// chip insertion feels identical to the chat input's slash/kb autocomplete.
+function insertAtCaret(
+  ref: React.RefObject<HTMLInputElement | HTMLTextAreaElement | null>,
+  value: string,
+  token: string,
+  onChange: (next: string) => void,
+): void {
+  const el = ref.current;
+  const start =
+    el && typeof el.selectionStart === "number" ? el.selectionStart : value.length;
+  const end =
+    el && typeof el.selectionEnd === "number" ? el.selectionEnd : value.length;
+  const next = value.slice(0, start) + token + value.slice(end);
+  onChange(next);
+  const caret = start + token.length;
+  requestAnimationFrame(() => {
+    if (!ref.current) return;
+    try {
+      ref.current.setSelectionRange(caret, caret);
+      ref.current.focus();
+    } catch {
+      // setSelectionRange can throw if the element shape changed mid-flight;
+      // failing the cursor restoration is non-fatal — the value is already
+      // committed and the user can re-click to reposition.
+    }
+  });
 }
 
 
@@ -1241,6 +1587,12 @@ interface ArchetypeOption {
 function availableArchetypes(lifecycle: Lifecycle): Archetype[] {
   if (lifecycle === "before_tool_use") return ["block", "ask", "audit"];
   if (lifecycle === "after_tool_use") return ["block", "audit", "strip"];
+  // PR-F-UX1 Tier 2 — both new slots are audit-only at the backend matrix.
+  // Surfacing "block" here would let the wizard assemble a draft the backend
+  // ``_LEGAL`` table rejects (cleaner to refuse the action here than at PUT).
+  if (lifecycle === "on_user_prompt_submit" || lifecycle === "on_subagent_stop") {
+    return ["audit"];
+  }
   return ["block", "ask", "audit"];
 }
 
@@ -1337,6 +1689,14 @@ function fieldConstraintTriggerPhrase(draft: Draft): string {
 
 function targetEventPhrase(draft: Draft): string {
   if (draft.lifecycle === "pre_final") return "Before the final answer commits";
+  // PR-F-UX1 Tier 2 — surface the new lifecycle slots in plain English so the
+  // ArchetypeStep header and the Review-step sentence stay honest.
+  if (draft.lifecycle === "on_user_prompt_submit") {
+    return "When the user submits a prompt";
+  }
+  if (draft.lifecycle === "on_subagent_stop") {
+    return "When a subagent finishes a turn";
+  }
   if (draft.lifecycle === "before_tool_use") {
     return draft.toolTarget === "specific"
       ? `Before "${draft.toolName || "…"}" runs`
@@ -1482,7 +1842,9 @@ function ReviewStep({
           <dd className="font-mono text-foreground">{draft.ruleId || "(unnamed)"}</dd>
           <dt className="text-secondary">When</dt>
           <dd>{draft.scope} · {draft.lifecycle}</dd>
-          {draft.lifecycle !== "pre_final" ? (
+          {draft.lifecycle !== "pre_final"
+            && draft.lifecycle !== "on_user_prompt_submit"
+            && draft.lifecycle !== "on_subagent_stop" ? (
             <>
               <dt className="text-secondary">Target</dt>
               <dd>{draft.toolTarget === "any" ? "any tool" : draft.toolName || "(unnamed tool)"}</dd>
@@ -1521,6 +1883,13 @@ function describePolicy(draft: Draft, refOptions: RefOption[]): string {
 
 function whenForLifecycle(draft: Draft): string {
   if (draft.lifecycle === "pre_final") return "Before the final answer commits";
+  // PR-F-UX1 Tier 2 — describe the two new audit-only lifecycle slots.
+  if (draft.lifecycle === "on_user_prompt_submit") {
+    return "When the user submits a prompt";
+  }
+  if (draft.lifecycle === "on_subagent_stop") {
+    return "When a subagent finishes a turn";
+  }
   if (draft.lifecycle === "before_tool_use") {
     return draft.toolTarget === "specific"
       ? `Before "${draft.toolName}" runs`
@@ -1643,9 +2012,19 @@ function csv(s: string): string {
 function stepIsComplete(currentKey: StepKey, draft: Draft): boolean {
   switch (currentKey) {
     case "trigger":
-      return !!draft.lifecycle && !!draft.scope;
-    case "target":
-      return draft.toolTarget === "any" || draft.toolName.trim().length > 0;
+      // PR-F-UX3 — tool-target gate folded into the Trigger step. For
+      // tool-bearing lifecycles, the merged gate is (lifecycle && scope
+      // && (target=any || (target=specific && toolName non-empty))).
+      // For non-tool-bearing lifecycles (pre_final / on_user_prompt_submit
+      // / on_subagent_stop) the tool-target axis does not render and
+      // reseedDownstream forces toolTarget="any" so the gate simplifies
+      // to (lifecycle && scope).
+      if (!draft.lifecycle || !draft.scope) return false;
+      if (!lifecycleHasToolTarget(draft.lifecycle)) return true;
+      return (
+        draft.toolTarget === "any"
+        || (draft.toolTarget === "specific" && draft.toolName.trim().length > 0)
+      );
     case "condition":
       return !!draft.conditionKind;
     case "specifics":
@@ -1679,9 +2058,18 @@ function stepIsComplete(currentKey: StepKey, draft: Draft): boolean {
           // (`magi_agent/customize/custom_rules.py:185`) rejects any
           // after_tool_use llm_criterion payload without one with HTTP 400.
           // pre_final has no tool layer so the list is omitted.
+          //
+          // PR-F-UX4: when toolTarget=specific, the toolMatch list is
+          // auto-derived from draft.toolName by customRulePayload (the
+          // llmToolMatch text input is hidden in SpecificsStep). The
+          // trigger step already enforces a non-empty toolName for
+          // target=specific, so the after_tool_use gate is satisfied
+          // automatically — the per-field gate here only needs to assert
+          // the llmToolMatch list when target=any.
           return (
             draft.criterion.trim().length > 0
             && (draft.lifecycle !== "after_tool_use"
+              || draft.toolTarget === "specific"
               || splitToolMatchList(draft.llmToolMatch).length > 0)
             && (!draft.llmContentMatchEnabled
               || draft.llmContentMatchPattern.trim().length > 0)
@@ -1894,7 +2282,19 @@ function customRulePayload(draft: Draft): Record<string, unknown> {
         // (`after_tool_gate.py:150`) skips the rule unless `tool_name in
         // tool_match`, so the list is the per-rule tool filter the
         // wizard's top-level Target step cannot express for this combo.
-        payload.toolMatch = splitToolMatchList(draft.llmToolMatch);
+        //
+        // PR-F-UX4: when toolTarget=specific, auto-derive the list from
+        // draft.toolName so the operator does not have to retype the tool
+        // name into the llmToolMatch field. SpecificsStep correspondingly
+        // hides the llmToolMatch input under target=specific and renders
+        // a read-only "Tool: <name>" chip instead. This is the per-combo
+        // auto-derivation that F-UX4 unlocks: backend payload is identical
+        // (one-tool list) but the wizard stops asking the same question
+        // twice.
+        payload.toolMatch =
+          draft.toolTarget === "specific" && draft.toolName.trim().length > 0
+            ? [draft.toolName.trim()]
+            : splitToolMatchList(draft.llmToolMatch);
         if (
           draft.llmContentMatchEnabled
           && draft.llmContentMatchPattern.trim().length > 0

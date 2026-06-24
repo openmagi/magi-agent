@@ -138,6 +138,17 @@ def build_adk_callback_adapter(
                 raw_kwargs={"callback_context": callback_context},
             )
         )
+        # PR-F-UX1: the Tier 2 ``on_subagent_stop`` audit-only custom_rule
+        # fan-out is wired in :func:`magi_agent.runtime.governed_turn.run_governed_turn`
+        # (the canonical CLI/serve/child funnel), NOT here. ``build_adk_callback_adapter``
+        # has no production callers — the production after-agent path is
+        # ``adk_bridge.control_plane._AdkBridgeForward.after_agent_callback`` →
+        # ``_after_agent`` → ``control.on_after_agent`` fan-out — so a wire here
+        # would never run on a real subagent turn. Additionally, ADK's
+        # ``CallbackContext`` does not expose the child's final assistant text;
+        # the real ``final_text`` is computed inside
+        # ``child_runner_live._drive_one_turn`` and surfaced through the
+        # ``run_governed_turn`` event stream, where the new wire collects it.
 
     async def before_model_callback(
         *,

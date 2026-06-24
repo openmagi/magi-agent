@@ -897,6 +897,46 @@ FLAGS: tuple[FlagSpec, ...] = (
             "overrides file never blocks a spawn."
         ),
     ),
+    _b(
+        "MAGI_CUSTOMIZE_LIFECYCLE_EXPANSION_ENABLED",
+        stage="stage2",
+        summary=(
+            "PR-F-UX1 Tier 2 lifecycle expansion: activate the two new "
+            "audit-only custom_rule gate sites — on_user_prompt_submit "
+            "(wired adjacent to BEFORE_SYSTEM_PROMPT in "
+            "runtime/message_builder) and on_subagent_stop (wired adjacent "
+            "to AFTER_TURN_END in the child runner). Both fan-outs invoke "
+            "the existing llm_criterion judge per matching rule and record "
+            "audit verdicts only; the surrounding runtime contract is "
+            "byte-identical (no mutation of the assembled prompt, no block "
+            "of the post-turn emission). Triple-gated with "
+            "MAGI_CUSTOMIZE_VERIFICATION_ENABLED + "
+            "MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED; fail-open on any "
+            "customize-store fault. With no on_user_prompt_submit / "
+            "on_subagent_stop rules authored, runtime stays byte-identical "
+            "(the new fan-out is a no-op). Strict default-OFF."
+        ),
+    ),
+    _b(
+        "MAGI_CUSTOMIZE_RUNTIME_FIELDS_ENDPOINT_ENABLED",
+        stage="stage2",
+        summary=(
+            "PR-F-UX2 (F8 core): expose the read-only "
+            "GET /v1/app/customize/runtime-fields endpoint that returns the "
+            "set of runtime variables the wizard's chip picker renders above "
+            "regex / contentMatch / llm_criterion / SHACL inputs, per "
+            "(lifecycle, condition, tool?) tuple. Derivation is pure "
+            "(no I/O, no LLM): tool_input.* expands ToolManifest.input_schema, "
+            "evidence:<type>.fields.* reads the F2 _BUILTIN_FIELD_HINTS table, "
+            "and context-free vars (session_id, turn_id, ...) are hard-coded "
+            "per lifecycle from the runtime gate signatures. Endpoint is "
+            "registration-time only, never on the live turn hot path, and "
+            "fail-open (unknown tuples return empty fields rather than 5xx). "
+            "Strict default-OFF; lab opts in via LAB_EXPERIMENTAL_FLAGS so a "
+            "fresh install and hosted serve do not expose the surface until "
+            "the operator explicitly enables it."
+        ),
+    ),
     _pb(
         "MAGI_CREDENTIAL_AWARENESS_ENABLED",
         stage="stage2",
@@ -1160,6 +1200,28 @@ FLAGS: tuple[FlagSpec, ...] = (
             "Registration-time only — never on the runtime hot path. Requires "
             "a configured provider/key; fail-open (returns ok=False) when no "
             "model is available. Strict default-OFF."
+        ),
+        scope="public",
+        stage="stage2",
+    ),
+    _b(
+        "MAGI_CUSTOMIZE_NL_INTERVIEW_MODE_ENABLED",
+        summary=(
+            "PR-F-UX6: turn the NL compose surface from a one-shot parser into "
+            "an interview-driven policy architect. When ON AND the input is "
+            "underspecified, the compiler runs ``discover_intent`` to build a "
+            "structured intent map and asks 1-3 focused questions (each with "
+            "an 'expects' tag — evidence_ref / verifier_ref / field / "
+            "tool_name / lifecycle / scope / value / freeform — and an "
+            "optional inventory the frontend renders as chip pickers). Once "
+            "the intent is resolved the compiler runs "
+            "``propose_primitive_or_hybrid`` and may return a HYBRID "
+            "composition (multiple primitives sharing a logical groupId) — "
+            "e.g. regex pre-filter + LLM critic for AWS-key audits. With the "
+            "flag OFF or when the NL is already well-formed, the legacy "
+            "one-shot compile path is preserved byte-identically. "
+            "Registration-time only; fail-open when no model is available. "
+            "Strict default-OFF; lab opts in via LAB_EXPERIMENTAL_FLAGS."
         ),
         scope="public",
         stage="stage2",

@@ -250,6 +250,65 @@ def delete_custom_rule(rule_id: str, path: Path | None = None) -> dict[str, Any]
     return overrides
 
 
+def set_custom_rules_group(
+    rules: list[dict[str, Any]],
+    group_id: str,
+    path: Path | None = None,
+) -> dict[str, Any]:
+    """PR-F-UX6: persist N rules sharing the same ``groupId``.
+
+    Each rule in ``rules`` is stamped with ``groupId=group_id`` (overwriting any
+    pre-existing groupId on the entry) and then upserted via the same id-match
+    logic as :func:`set_custom_rule`. Callers are responsible for validating
+    each rule first (``custom_rules.validate_custom_rule``). Returns the
+    post-save overrides.
+
+    ``group_id`` MUST be a non-empty string. A short ValueError is raised on
+    bad input (matches the explicit-validation contract — silent acceptance
+    would surface as a malformed hybrid row in the dashboard).
+    """
+    if not isinstance(group_id, str) or not group_id.strip():
+        raise ValueError("group_id must be a non-empty string")
+    if not isinstance(rules, list) or not rules:
+        raise ValueError("rules must be a non-empty list")
+
+    target = path or customize_path()
+    overrides = load_overrides(target)
+    existing = overrides["verification"]["custom_rules"]
+    for rule in rules:
+        if not isinstance(rule, dict):
+            raise ValueError("each rule must be a dict")
+        stamped = {**rule, "groupId": group_id}
+        rid = stamped.get("id")
+        for i, prior in enumerate(existing):
+            if isinstance(prior, dict) and prior.get("id") == rid:
+                existing[i] = stamped
+                break
+        else:
+            existing.append(stamped)
+    save_overrides(overrides, target)
+    return overrides
+
+
+def delete_custom_rule_group(
+    group_id: str, path: Path | None = None
+) -> dict[str, Any]:
+    """PR-F-UX6: remove every custom rule whose ``groupId`` matches.
+
+    Sibling to :func:`delete_custom_rule` but groupId-keyed. No-op when no
+    rule carries the groupId. Returns the post-save overrides.
+    """
+    target = path or customize_path()
+    overrides = load_overrides(target)
+    verification = overrides["verification"]
+    verification["custom_rules"] = [
+        r for r in verification["custom_rules"]
+        if not (isinstance(r, dict) and r.get("groupId") == group_id)
+    ]
+    save_overrides(overrides, target)
+    return overrides
+
+
 def set_verification_budgets(
     budgets: dict[str, Any], path: Path | None = None
 ) -> dict[str, Any]:

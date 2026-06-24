@@ -192,6 +192,18 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     # registry so a fresh install / hosted serve stays byte-identical; lab opts
     # in so dogfood turns honor operator-authored budgets out-of-the-box.
     "MAGI_CUSTOMIZE_BUDGETS_ENABLED",
+    # PR-F-UX1 Tier 2 lifecycle expansion: activate the two new audit-only
+    # custom_rule gate sites (on_user_prompt_submit + on_subagent_stop).
+    # Both fan-outs are no-ops without authored rules; lab opts in so dogfood
+    # turns can exercise the wizard's new lifecycle options end-to-end.
+    "MAGI_CUSTOMIZE_LIFECYCLE_EXPANSION_ENABLED",
+    # PR-F-UX2 (F8 core) runtime-fields endpoint: backs the wizard's chip
+    # picker shown above regex / contentMatch / llm_criterion / SHACL inputs.
+    # Pure derivation (no I/O, no LLM), registration-time only, fail-open on
+    # unknown tuples. Lab opts in so dogfood wizard authoring sees the chips
+    # out-of-the-box; registry default stays OFF so a fresh install / hosted
+    # serve do not expose the surface until explicitly enabled.
+    "MAGI_CUSTOMIZE_RUNTIME_FIELDS_ENDPOINT_ENABLED",
     # NOTE: MAGI_CUSTOMIZE_VERIFICATION_ENABLED / MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED
     # are NOT here: they are profile-aware default-ON (``_pb``), so they resolve ON
     # in every non-safe profile (full AND lab) on their own. The lab seed only
@@ -202,6 +214,14 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     # opt in for lab. Without this the dashboard "Compile" button returns
     # ``nl-rule compiler disabled`` even though the user already has the UI.
     "MAGI_CUSTOMIZE_NL_RULE_COMPILER_ENABLED",
+    # PR-F-UX6 interview-driven NL authoring + hybrid primitive proposals.
+    # Registration-time only (never on the hot path) and fail-open when no
+    # provider key is configured, so safe to dogfood in lab. Without this the
+    # compose surface still works in the legacy one-shot mode — interview-mode
+    # only activates when the flag is ON AND the input is underspecified.
+    # Registry default stays OFF so a fresh install / hosted serve preserve the
+    # legacy compile path until the operator explicitly opts in.
+    "MAGI_CUSTOMIZE_NL_INTERVIEW_MODE_ENABLED",
     # Customize seam-spec endpoint. Registration-time / dashboard-authoring path
     # only, never on the live turn hot path, and fail-open when prerequisites are
     # missing — safe to dogfood in lab. Registry default stays OFF so a fresh
