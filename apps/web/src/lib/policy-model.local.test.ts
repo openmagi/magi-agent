@@ -203,6 +203,48 @@ describe("extractEvidenceTypes — auto-derived from policy list", () => {
     const entries = extractEvidenceTypes([]);
     expect(entries).toEqual([]);
   });
+
+  it("does NOT derive fake preset:<id> entries from preset_seam policies (F2.5)", () => {
+    // Regression: a prior implementation invented a `preset:<id>` evidence
+    // entry per built-in preset_seam policy under the comment "Surface the
+    // preset id itself as a known 'rule' name so users see the inventory".
+    // Presets are POLICIES (gates), not evidence emitters; the false
+    // derivation made the Evidence sub-tab a near-duplicate of the
+    // Policies sub-tab (38/38 matching counts) with CONSUMED-BY-0 /
+    // PRODUCED-BY-0 on every row. The real catalog of emit-able types
+    // comes from /v1/app/customize/evidence/live-catalog (F2); this
+    // function is now the per-ref consumer index only.
+    const policies: Policy[] = [
+      {
+        id: "preset_seam:answer-quality",
+        name: "Answer Quality",
+        description: "",
+        origin: "builtin",
+        source: "preset_seam",
+        state: "disabled",
+        when: { scope: "delivery", firesAt: "pre_final" },
+        condition: { kind: "preset", summary: "" },
+        action: "block",
+        togglable: true,
+        editable: false,
+        deletable: false,
+        rawSource: {
+          kind: "preset_seam",
+          preset: {
+            id: "answer-quality",
+            label: "Answer Quality",
+            description: "",
+            category: "delivery",
+            enabled: false,
+            mode: "block",
+          } as unknown as Policy["rawSource"]["preset"],
+        },
+      },
+    ];
+    const entries = extractEvidenceTypes(policies);
+    expect(entries.find((e) => e.ref === "preset:answer-quality")).toBeUndefined();
+    expect(entries).toEqual([]);
+  });
 });
 
 

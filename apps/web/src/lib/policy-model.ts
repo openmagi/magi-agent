@@ -331,15 +331,24 @@ export interface NamedConditionEntry {
 
 
 /**
- * Extract every named evidence ref referenced or emitted by any policy.
+ * Extract evidence refs that policies CONSUME via deterministic_ref
+ * conditions. The output is a per-policy index, NOT a catalog of the
+ * runtime's emit-able evidence types — that catalog comes from the
+ * /v1/app/customize/evidence/live-catalog endpoint (F2) which surfaces
+ * the producer-side schema directly.
  *
- * Currently magi-agent's runtime policies emit evidence implicitly (the
- * built-in PresetSeams don't have an explicit ``emit_evidence`` action —
- * their producer pack is the emitter), so the "producedBy" lists are
- * empty for built-in entries. User policies that reference an existing
- * evidence ref via ``deterministic_ref`` populate ``consumedBy``. As
- * Stage 5 adds first-class ``emit_evidence`` to Policy, producedBy will
- * fill in automatically.
+ * F2.5 fix: a prior implementation derived a fake ``preset:<id>`` entry
+ * per built-in preset_seam policy under the comment "Surface the preset
+ * id itself as a known 'rule' name so users see the inventory". Presets
+ * are policies (gates) — not evidence emitters — so those entries made
+ * the Evidence sub-tab a near-duplicate of the Policies sub-tab (38/38
+ * matching counts) with "CONSUMED BY 0 / PRODUCED BY 0" on every row.
+ * The derivation is gone; the Evidence tab now sources its catalog from
+ * the live-catalog endpoint and uses this function only for the per-ref
+ * consumer index.
+ *
+ * As Stage 5 adds a first-class ``emit_evidence`` action to Policy,
+ * ``producedBy`` will fill in automatically; today it stays empty.
  */
 export function extractEvidenceTypes(policies: Policy[]): EvidenceTypeEntry[] {
   const byRef = new Map<string, EvidenceTypeEntry>();
@@ -361,18 +370,6 @@ export function extractEvidenceTypes(policies: Policy[]): EvidenceTypeEntry[] {
   };
 
   for (const policy of policies) {
-    if (
-      policy.source === "preset_seam"
-      && policy.rawSource.kind === "preset_seam"
-    ) {
-      // Built-in preset's controls_refs are not exposed on HarnessPresetItem
-      // directly today; the runtime knows them. Surface the preset id itself
-      // as a known "rule" name so users see the inventory even if controls_refs
-      // is opaque. Backend can grow a "refs" field per preset later.
-      const ref = `preset:${policy.rawSource.preset.id}`;
-      const entry = upsert(ref, "builtin");
-      entry.label = policy.name;
-    }
     if (policy.condition.kind === "evidence_ref" && policy.condition.payload?.ref) {
       const ref = String(policy.condition.payload.ref);
       const entry = upsert(ref, policy.origin);
