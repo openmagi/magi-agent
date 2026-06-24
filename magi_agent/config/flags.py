@@ -880,6 +880,23 @@ FLAGS: tuple[FlagSpec, ...] = (
             "them)."
         ),
     ),
+    _b(
+        "MAGI_CUSTOMIZE_CAPABILITY_SCOPE_ENABLED",
+        stage="stage2",
+        summary=(
+            "Apply operator-authored capability_scope custom rules to the "
+            "spawned child's resolved toolset (F4): each enabled rule narrows "
+            "by denyTools and/or maxPermissionClass (tighten-only — never "
+            "widens). Sits between the parent-cap intersection "
+            "(MAGI_SUBAGENT_TOOL_TIGHTEN_ONLY_ENABLED) and the per-task "
+            "allowedTools/spawn_cap grants (MAGI_SPAWN_RECIPE_CAP_ENABLED). "
+            "Requires MAGI_CUSTOMIZE_VERIFICATION_ENABLED + "
+            "MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED. With no capability_scope rules "
+            "authored, the spawn toolset is byte-identical to before. Strict "
+            "default-OFF; fail-open on any customize-store fault so a broken "
+            "overrides file never blocks a spawn."
+        ),
+    ),
     _pb(
         "MAGI_CREDENTIAL_AWARENESS_ENABLED",
         stage="stage2",

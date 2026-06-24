@@ -1,5 +1,5 @@
 """Unified NL → Rule compiler — single LLM call that routes a natural-
-language policy to one of the seven backing rule primitives:
+language policy to one of the eight backing rule primitives:
 
     1. ``deterministic_ref``  → CustomRule (pre_final, evidence-ref check)
     2. ``tool_perm``          → CustomRule (before_tool_use, deny/ask)
@@ -10,6 +10,10 @@ language policy to one of the seven backing rule primitives:
     7. ``field_constraint``   → structured CustomRule (pre_final, IR compiles
        deterministically to SHACL; preferred over raw ``shacl_constraint``
        for single-field / cross-record-cardinality intents — PR-F3 2026-06-23)
+    8. ``capability_scope``   → CustomRule (spawn, narrows the toolset /
+       permission class of every spawned child agent — operator authoring
+       surface on top of the runtime parent-cap intersection — PR-F4
+       2026-06-23)
 
 Earlier work only had NL compilers for ``shacl_constraint`` (PR-A) and
 ``seam_spec`` (PR-C). Kevin's 2026-06-22 follow-up flagged this as a
@@ -68,6 +72,8 @@ from magi_agent.customize.shacl_compiler import (
 #: updating all three sites. ``field_constraint`` (PR-F3 2026-06-23) is the
 #: preferred structured form for single-field / cross-record-cardinality
 #: intents; raw ``shacl_constraint`` remains the power-user escape hatch.
+#: ``capability_scope`` (PR-F4 2026-06-23) is the operator authoring surface
+#: for narrowing the toolset / permission class of every spawned child agent.
 ROUTED_KINDS: Final[frozenset[str]] = frozenset(
     {
         "deterministic_ref",
@@ -77,6 +83,7 @@ ROUTED_KINDS: Final[frozenset[str]] = frozenset(
         "seam_spec",
         "custom_check",
         "field_constraint",
+        "capability_scope",
     }
 )
 
@@ -110,7 +117,9 @@ def schema_issues_for(routed_kind: str, draft: Any) -> list[str]:
         return validate_dashboard_check(draft)
     if routed_kind == "field_constraint":
         return _schema_issues_for_field_constraint(draft)
-    # Remaining 4 kinds all route through validate_custom_rule.
+    # Remaining 5 kinds all route through validate_custom_rule. PR-F4
+    # (2026-06-23) added ``capability_scope`` to that list via the kind
+    # register so the dispatcher needs no extra branch here.
     from magi_agent.customize.custom_rules import validate_custom_rule  # noqa: PLC0415
 
     return validate_custom_rule(draft)
@@ -285,6 +294,19 @@ matches its draft-shape contract.
     policy is "after a tool returns, inspect the result". Draft shape:
     {id, label, scope, enabled, trigger:{tool, match:{pattern, isRegex}},
     action:"block"|"audit"}.
+
+  capability_scope — Narrow the toolset / permission class of every
+    spawned subagent (operator-authored cap on top of the runtime parent
+    intersection). Pick this when the policy is shaped as "subagents
+    cannot use <tool>", "researcher subagent must be readonly", "delivery
+    subagent must not call shell", "spawned children are denied
+    <tool>", or "subagents are limited to safe_write at most". Always
+    tighten-only — never widens. Draft shape: CustomRule with
+    firesAt:"spawn", action:"block", and
+    what:{kind:"capability_scope", payload:{denyTools?:[str,...],
+    maxPermissionClass?:"readonly"|"safe_write"|null, tightenOnly:true}}.
+    At least one of denyTools or maxPermissionClass MUST be set; tightenOnly
+    MUST be true.
 """
 
 
@@ -297,7 +319,7 @@ _COMPILE_SYSTEM_INSTRUCTION_TMPL = (
     "The JSON object MUST have shape: "
     '{{"routedKind": "<one of: deterministic_ref, tool_perm, '
     "llm_criterion, shacl_constraint, seam_spec, custom_check, "
-    "field_constraint>\", "
+    "field_constraint, capability_scope>\", "
     '"draft": <kind-specific draft object>, '
     '"explanation": "<one-sentence plain-English summary of what this '
     "will do at runtime>\"}}\n\n"

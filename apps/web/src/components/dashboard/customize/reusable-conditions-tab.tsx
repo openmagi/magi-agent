@@ -25,6 +25,7 @@ const KIND_LABEL: Record<NamedConditionEntry["kind"], string> = {
   regex: "Regex / pattern",
   tool_perm: "Tool / domain match",
   evidence_ref: "Evidence ref",
+  capability_scope: "Subagent capability scope",
   seam_action: "Seam action",
   none: "Built-in",
 };

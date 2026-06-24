@@ -853,6 +853,56 @@ class RealLocalChildRunner:
             if parent_cap:
                 profile_tools = [t for t in profile_tools if _tool_name(t) in parent_cap]
 
+        # F4: operator-authored capability_scope custom rules (denyTools / max
+        # permission class). Sits AFTER parent-cap and BEFORE the orchestrator's
+        # per-task allowedTools/spawn_cap grants so the tighten-only chain is
+        # cleanly composed: profile ⟶ parent_cap ⟶ capability_scope ⟶ allowedTools
+        # ⟶ spawn_cap. Triple-gated: strict default-OFF F4 flag PLUS profile-aware
+        # customize master flags (verification + custom_rules). Fail-open on any
+        # customize-store fault so a broken overrides file never breaks a spawn.
+        from magi_agent.config.flags import flag_profile_bool  # noqa: PLC0415
+
+        if (
+            flag_bool("MAGI_CUSTOMIZE_CAPABILITY_SCOPE_ENABLED", env=self._env)
+            and flag_profile_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", env=self._env)
+            and flag_profile_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", env=self._env)
+        ):
+            try:
+                from magi_agent.customize.capability_scope import (  # noqa: PLC0415
+                    apply_capability_scope,
+                    apply_permission_class_filter,
+                )
+                from magi_agent.customize.store import load_overrides  # noqa: PLC0415
+                from magi_agent.customize.verification_policy import (  # noqa: PLC0415
+                    CustomizeVerificationPolicy,
+                )
+
+                policy = CustomizeVerificationPolicy.from_overrides(load_overrides())
+                rules = policy.enabled_capability_scope_rules()
+                if rules:
+                    profile_tools, capped_class = apply_capability_scope(
+                        profile_tools,
+                        rules=rules,
+                        tool_name_fn=_tool_name,
+                    )
+                    # F4 honesty contract: when a rule narrows the permission
+                    # class, intersect the toolset with the class's allowed
+                    # tool-name set so the UI promise (``Subagents capped at
+                    # readonly permission class``) is REAL — not just a label.
+                    # Tighten-only: this can only subtract, never widen.
+                    # ``capped_class is None`` (no rule asked for a cap) →
+                    # no-op, byte-identical to denyTools-only rules.
+                    if capped_class is not None:
+                        profile_tools = apply_permission_class_filter(
+                            profile_tools,
+                            permission_class=capped_class,
+                            tool_name_fn=_tool_name,
+                        )
+            except Exception:
+                # Fail-open: a broken customize.json or import failure must never
+                # block a spawn. The runtime stays byte-identical to pre-F4.
+                pass
+
         # Seam P2-T3: allowedTools is the orchestrator's explicit per-task grant.
         # Apply after parent-cap, before spawn_cap. Gated by same default-OFF flag.
         if flag_bool("MAGI_SPAWN_RECIPE_CAP_ENABLED", env=self._env):
