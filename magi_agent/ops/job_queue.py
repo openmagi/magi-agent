@@ -1,3 +1,38 @@
+"""Agent job-queue FSM — reference contract (NOT wired into the OSS runtime).
+
+This module ships a fail-closed, fully-tested specification of the agent
+job-queue lifecycle FSM (queued → running → completed / failed /
+dead_lettered / cancelled / timed_out), with an idempotency index, a
+lease timeout, and a redaction-aware authority projection (~890 LOC).
+It is intentionally NOT invoked by any live turn-loop, transport,
+gateway, or scheduler path in the OSS build:
+
+* :class:`AgentJobQueue` and the four free functions
+  (``timeout_expired_leases``, etc.) have ZERO non-test callers under
+  ``magi_agent/`` — confirmed by grep. The only references outside the
+  module itself are the unit tests in ``tests/test_ops_job_queue.py``
+  (which exist to document the contract) and a string mention in
+  ``tests/test_storage_content_addressed.py`` /
+  ``tests/test_ops_dead_trace_removed.py``.
+* The genuine durable agent work-queue is
+  :mod:`magi_agent.missions.work_queue` (SQLite-backed,
+  ``MAGI_WORK_QUEUE_*`` env-gated, dispatcher + watcher already shipped
+  under [[project-magi-work-queue]]). It is the right home for any new
+  durable-queue work.
+
+H-23 (P2 dead-code workstream, "zero-callers → label or delete"
+branch) makes this dormancy unmistakable. The opposite move — wiring
+``AgentJobQueue`` to the runtime, OR deleting the module outright —
+requires an explicit decision from the maintainer per the AGENTS.md
+"ask before changing semantics" guard. Labeling is the YAGNI-safe
+intermediate.
+
+The :data:`REFERENCE_CONTRACT` flag below is the machine-readable form
+of this docstring: meta-tests assert it is ``True`` so the dormancy is
+intentional rather than accidental dead code, and any future wiring PR
+must flip the flag in the same commit it adds the first live caller.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -14,6 +49,14 @@ from .safety import (
     safe_metadata,
     sanitize_validation_error,
 )
+
+
+#: H-23: declares this module as a *reference contract* (a fail-closed
+#: specification of an agent job-queue FSM), not a wired OSS-runtime
+#: job-queue. Flip to ``False`` only in the same PR that introduces a
+#: concrete live caller of :class:`AgentJobQueue` — that surfaces the
+#: contract-status change to review.
+REFERENCE_CONTRACT: bool = True
 
 
 JobRecordStatus = Literal[
@@ -824,6 +867,7 @@ def enqueue_job(
 
 
 __all__ = [
+    "REFERENCE_CONTRACT",
     "AgentJob",
     "AgentJobQueue",
     "EnqueueResult",
