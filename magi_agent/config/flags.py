@@ -362,6 +362,20 @@ FLAGS: tuple[FlagSpec, ...] = (
         kind="int",
     ),
     FlagSpec(
+        name="MAGI_CREDENTIAL_GRANT_TTL_S",
+        default=3600,
+        scope="public",
+        stage="stage2",
+        summary=(
+            "Lifetime in seconds of an in-chat credential-use approval grant. "
+            "After this window the egress proxy re-prompts for the credential "
+            "instead of injecting silently forever (a 'remember' approval, when "
+            "wired, writes a non-expiring grant). 0 or negative disables expiry "
+            "(approve-once-persistent)."
+        ),
+        kind="int",
+    ),
+    FlagSpec(
         name="MAGI_USAGE_PRICE_IN_PER_MTOK",
         default="",
         scope="public",

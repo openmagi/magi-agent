@@ -173,23 +173,29 @@ class LocalCredentialApprovalResolver:
             )
         except Exception:  # noqa: BLE001 - fail closed: treat as not granted
             return False
-        return any(a.get("credential_id") == credential_id for a in granted)
+        return any(
+            a.get("credential_id") == credential_id
+            and approvals_store.grant_is_active(a)
+            for a in granted
+        )
 
     def grant(self, credential_id: str, *, persistent: bool) -> None:
         """Record an approved grant the egress proxy will honor.
 
-        ``persistent`` is threaded for a later grant-scope phase (per-turn vs
-        remember); phase 1 writes a standard approved row either way, matching the
-        proxy's current approve-once semantics.
+        ``persistent`` (a "remember" approval) writes a non-expiring grant;
+        otherwise the grant expires after ``MAGI_CREDENTIAL_GRANT_TTL_S`` seconds
+        so the proxy re-prompts instead of injecting silently forever. A TTL of 0
+        or less also means no expiry.
         """
-        del persistent
         if not credential_id:
             return
+        granted_until = _grant_expiry(persistent=persistent)
         created = approvals_store.add_approval(
             credential_id=credential_id,
             requested_action="egress_credential_use",
             target_host="",
             reason="approved in chat",
+            granted_until=granted_until,
             path=self._approvals_path,
         )
         approvals_store.decide_approval(
@@ -197,3 +203,18 @@ class LocalCredentialApprovalResolver:
             approvals_store.STATUS_APPROVED,
             path=self._approvals_path,
         )
+
+
+def _grant_expiry(*, persistent: bool) -> str | None:
+    """ISO-8601 UTC expiry for a new grant, or None for a non-expiring grant."""
+    if persistent:
+        return None
+    from datetime import UTC, datetime, timedelta
+
+    from magi_agent.config.flags import flag_int
+
+    ttl = flag_int("MAGI_CREDENTIAL_GRANT_TTL_S") or 0
+    if ttl <= 0:
+        return None
+    expiry = datetime.now(UTC) + timedelta(seconds=ttl)
+    return expiry.isoformat().replace("+00:00", "Z")

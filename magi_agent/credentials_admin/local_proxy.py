@@ -123,9 +123,10 @@ def _approval_granted(
     grants use of ``credential_id``.
 
     The dashboard's approvals store is the source of truth. A credential is usable
-    when it has at least one approval in the ``approved`` state. ``approvals_path``
-    pins the store file (the hosted sidecar passes its ``AGENT_VAULT_STORE_DIR``
-    path; local serve leaves it None for the default ``~/.magi`` store).
+    when it has at least one approval in the ``approved`` state whose grant has
+    not expired (``granted_until``). ``approvals_path`` pins the store file (the
+    hosted sidecar passes its ``AGENT_VAULT_STORE_DIR`` path; local serve leaves
+    it None for the default ``~/.magi`` store).
     """
     try:
         approvals = approvals_store.list_approvals(
@@ -134,7 +135,10 @@ def _approval_granted(
     except Exception:  # noqa: BLE001 - fail closed: no approval => block
         logger.warning("approvals lookup failed; treating as not approved")
         return False
-    return any(a.get("credential_id") == credential_id for a in approvals)
+    return any(
+        a.get("credential_id") == credential_id and approvals_store.grant_is_active(a)
+        for a in approvals
+    )
 
 
 class CredentialInjectionAddon:

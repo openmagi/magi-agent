@@ -82,6 +82,7 @@ def public_approval(item: dict[str, Any]) -> dict[str, Any]:
         status = STATUS_PENDING
     decided_at = item.get("decided_at")
     reason = str(item.get("reason", ""))
+    granted_until = item.get("granted_until")
     return {
         "id": str(item.get("id", "")),
         "credential_id": str(item.get("credential_id", "")),
@@ -91,7 +92,26 @@ def public_approval(item: dict[str, Any]) -> dict[str, Any]:
         "reason": _safe_reason(reason),
         "created_at": str(item.get("created_at", "")),
         "decided_at": str(decided_at) if decided_at else None,
+        # Optional grant expiry (ISO-8601 UTC). None = no expiry (persistent /
+        # not an in-chat grant). Non-secret. Kept through the normalize round-trip
+        # so the egress proxy can honor it.
+        "granted_until": str(granted_until) if granted_until else None,
     }
+
+
+def grant_is_active(approval: dict[str, Any], *, now: str | None = None) -> bool:
+    """Whether an APPROVED approval currently grants use (expiry-aware).
+
+    True when status is ``approved`` AND it is non-expiring (``granted_until`` is
+    None) OR its expiry is still in the future. ``granted_until`` and ``_now()``
+    share one ISO-8601 UTC format, so a lexicographic compare is chronological.
+    """
+    if str(approval.get("status")) != STATUS_APPROVED:
+        return False
+    granted_until = approval.get("granted_until")
+    if not granted_until:
+        return True
+    return str(granted_until) > (now or _now())
 
 
 def _safe_reason(value: str) -> str:
@@ -148,6 +168,7 @@ def add_approval(
     requested_action: str,
     target_host: str,
     reason: str = "",
+    granted_until: str | None = None,
     path: Path | None = None,
 ) -> dict[str, Any]:
     """Append one pending approval request, save atomically, return projection."""
@@ -162,6 +183,7 @@ def add_approval(
         "reason": reason,
         "created_at": _now(),
         "decided_at": None,
+        "granted_until": granted_until,
     }
     projection = public_approval(record)
     data["approvals"].append(projection)
