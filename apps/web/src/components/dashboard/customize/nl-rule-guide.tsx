@@ -45,6 +45,19 @@ const EXAMPLES: ReadonlyArray<ExampleChip> = [
     label: "Deny shell_exec",
     text: "Before any tool call, deny the tool named shell_exec.",
   },
+  // F6 — path / pathAllowlist tool_perm phrasings. These route through
+  // before_tool_use tool_perm match.path / match.pathAllowlist and fire
+  // only for tools that surface a file/path argument.
+  {
+    archetype: "block",
+    label: "Deny writes under /etc/",
+    text: "Before any tool call, deny writes under /etc/.",
+  },
+  {
+    archetype: "ask",
+    label: "Only allow edits under /Users/me/proj/",
+    text: "Before any tool call, only allow edits under /Users/me/proj/.",
+  },
   {
     archetype: "ask",
     label: "Require approval on missing fact-grounding",
@@ -146,6 +159,7 @@ export function NlRuleGuide({
             yes={[
               'tool name match: "the tool is shell_exec"',
               'fetch domain (network tools only): "the fetch goes to example.com"',
+              'path prefix (file tools only): "deny writes under /etc/"',
               'evidence ref: "tests were run" / "fact-grounding passes"',
               'SHACL shape: "exitCode is 0 on every TestRun record"',
               'LLM criterion: "the answer cites at least one source"',

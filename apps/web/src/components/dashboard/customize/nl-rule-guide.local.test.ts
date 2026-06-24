@@ -58,6 +58,18 @@ describe("NlRuleGuide — same mental model as AuthorWizard", () => {
   });
 });
 
+describe("NlRuleGuide — F6 path / path_allowlist example phrasings", () => {
+  it("ships the deny-under-/etc/ tool_perm path example", () => {
+    expect(src).toContain("Before any tool call, deny writes under /etc/.");
+  });
+
+  it("ships the allow-only-/Users/me/proj/ tool_perm path_allowlist example", () => {
+    expect(src).toContain(
+      "Before any tool call, only allow edits under /Users/me/proj/.",
+    );
+  });
+});
+
 describe("NlRuleGuide — F3 field_constraint example phrasings", () => {
   it("ships at least three field_constraint examples covering eq/forEachExistsCovering/comparator phrasings", () => {
     expect(src).toContain(

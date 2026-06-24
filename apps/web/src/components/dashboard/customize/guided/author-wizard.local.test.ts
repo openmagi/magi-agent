@@ -80,8 +80,10 @@ describe("AuthorWizard — variable-length policy authoring (F1.5)", () => {
   it("before_tool_use + target=any omits 'none' (no wildcard matcher in backend)", () => {
     // tool_perm has no wildcard, so 'no condition' with target=any has no
     // honest backend mapping. The option is omitted instead of synthesised.
+    // F6 expanded the matcher list to include path + path_allowlist (the
+    // backend tool_perm matcher already supports both).
     expect(src).toMatch(
-      /target=any: tool_perm has no wildcard[\s\S]*?return \["domain", "domain_allowlist"\]/,
+      /target=any: tool_perm has no wildcard[\s\S]*?return \["domain", "domain_allowlist", "path", "path_allowlist"\]/,
     );
   });
 
@@ -296,6 +298,155 @@ describe("AuthorWizard — F3 field_constraint condition kind", () => {
 // ---------------------------------------------------------------------------
 // PR-F5 — TrustBadge in the Review step
 // ---------------------------------------------------------------------------
+
+
+// ---------------------------------------------------------------------------
+// PR-F6 — path / path_allowlist condition kinds (workspace-lock authoring)
+// ---------------------------------------------------------------------------
+
+
+describe("AuthorWizard — F6 path / path_allowlist condition kinds", () => {
+  it("declares path + path_allowlist as ConditionKind union members", () => {
+    // Additive: both join the existing kinds. Backend tool_perm matcher
+    // already supports match.path / match.pathAllowlist (see
+    // magi_agent/customize/tool_perm.py); F6 is the frontend surface.
+    expect(src).toMatch(/type ConditionKind[\s\S]*?\| "path"/);
+    expect(src).toMatch(/type ConditionKind[\s\S]*?\| "path_allowlist"/);
+  });
+
+  it("before_tool_use + target=any offers path + path_allowlist alongside domain / domain_allowlist", () => {
+    // The before-tool + any-tool branch is the only path tool_perm rules
+    // can be authored under — per-tool match has no AND with path matchers
+    // in the backend.
+    expect(src).toMatch(
+      /return \["domain", "domain_allowlist", "path", "path_allowlist"\]/,
+    );
+  });
+
+  it("registers CONDITION_META entries for path + path_allowlist", () => {
+    expect(src).toMatch(/path:\s*\{[\s\S]*?label:\s*"File \/ path"/);
+    expect(src).toMatch(
+      /path_allowlist:\s*\{[\s\S]*?label:\s*"Path allowlist"/,
+    );
+  });
+
+  it("adds pathPrefix + pathAllowlist draft fields", () => {
+    expect(src).toContain("pathPrefix: string");
+    expect(src).toContain("pathAllowlist: string");
+  });
+
+  it("SpecificsStep renders branches for path + path_allowlist", () => {
+    expect(src).toMatch(/draft\.conditionKind === "path"/);
+    expect(src).toMatch(/draft\.conditionKind === "path_allowlist"/);
+  });
+
+  it("stepIsComplete validates non-empty for path / path_allowlist", () => {
+    expect(src).toMatch(
+      /case "path":\s*\n\s*return draft\.pathPrefix\.trim\(\)\.length > 0/,
+    );
+    expect(src).toMatch(
+      /case "path_allowlist":\s*\n\s*return draft\.pathAllowlist\.trim\(\)\.length > 0/,
+    );
+  });
+
+  it("customRulePayload(before_tool_use+path) emits match.path = pathPrefix.trim()", () => {
+    expect(src).toContain("match: { path: draft.pathPrefix.trim() }");
+  });
+
+  it("customRulePayload(before_tool_use+path_allowlist) emits match.pathAllowlist as CSV split", () => {
+    expect(src).toMatch(/pathAllowlist: draft\.pathAllowlist[\s\S]*?\.split\(","\)/);
+  });
+
+  // F6 honesty audit — the path / path_allowlist CONDITION_META descriptions
+  // must only list tools whose manifest arg name is in the backend
+  // _PATH_ARG_KEYS = ("path","file","filename","filepath","filePath","pathRef")
+  // (magi_agent/customize/tool_perm.py). Glob/Grep surface only `pattern`
+  // (plus `glob` on Grep) — neither key intersects _PATH_ARG_KEYS, so the
+  // matcher silently does NOT fire on them. The wizard description must not
+  // claim otherwise.
+  describe("CONDITION_META path / path_allowlist tool-list honesty", () => {
+    // Tools whose input_schema actually surfaces a path-shaped key per
+    // magi_agent/tools/catalog.py + magi_agent/tools/file_tool_manifests.py.
+    // (Limited to the file-write/read/edit suite that operators reach for
+    // when authoring a workspace-lock rule.)
+    const PATH_BEARING_TOOLS = [
+      "FileRead",
+      "FileEdit",
+      "FileWrite",
+      "PatchApply",
+    ] as const;
+
+    // Tools that take `pattern` (not `path`) and so are NOT matched by the
+    // backend path / pathAllowlist matcher. They must NOT appear in the
+    // description as path-bearing.
+    const PATTERN_ONLY_TOOLS = ["Glob", "Grep"] as const;
+
+    function extractMetaDescription(kind: string): string {
+      // The description is the second property in each meta entry, so this
+      // regex tolerates label / description ordering and trailing commas.
+      const re = new RegExp(
+        `${kind}:\\s*\\{[\\s\\S]*?description:\\s*"([\\s\\S]*?)"[\\s\\S]*?\\}`,
+        "m",
+      );
+      const m = src.match(re);
+      if (!m) throw new Error(`CONDITION_META.${kind} not found`);
+      return m[1];
+    }
+
+    // Helper: identify tool-name tokens advertised as POSITIVE examples,
+    // i.e. CamelCase words appearing in the description, EXCLUDING any
+    // occurrence inside a negative ("not", "NOT", "does NOT", "not for")
+    // clause. We split the description at negative-clause boundaries and
+    // only scan the positive half.
+    function advertisedTools(desc: string): string[] {
+      // Cut everything from the first negative marker onwards so tokens
+      // listed as counter-examples ("Does NOT match Glob or Grep") are
+      // excluded from the "advertised" set.
+      const negMarkers = [
+        ". Does NOT",
+        "; not for",
+        ". Not for",
+        "; not ",
+        ". Not ",
+      ];
+      let positive = desc;
+      for (const marker of negMarkers) {
+        const idx = positive.indexOf(marker);
+        if (idx !== -1) positive = positive.slice(0, idx);
+      }
+      return Array.from(positive.matchAll(/\b([A-Z][a-z]+[A-Z][A-Za-z]*)\b/g)).map(
+        (m) => m[1],
+      );
+    }
+
+    it("path description does NOT advertise Glob / Grep as positive examples", () => {
+      const advertised = advertisedTools(extractMetaDescription("path"));
+      for (const tool of PATTERN_ONLY_TOOLS) {
+        expect(advertised).not.toContain(tool);
+      }
+    });
+
+    it("path description lists only tools whose manifest arg name intersects _PATH_ARG_KEYS", () => {
+      const advertised = advertisedTools(extractMetaDescription("path"));
+      // At least one path-bearing tool must be advertised (smoke).
+      expect(advertised.length).toBeGreaterThan(0);
+      // Every advertised tool must be a real path-bearing tool.
+      for (const tool of advertised) {
+        expect(PATH_BEARING_TOOLS).toContain(tool as (typeof PATH_BEARING_TOOLS)[number]);
+      }
+    });
+
+    it("path_allowlist description stays consistent with path (no Glob / Grep as positive examples)", () => {
+      // path_allowlist was already honest by omission; this test guards
+      // against regressions where someone copies the path description
+      // verbatim and reintroduces the Glob/Grep falsehood.
+      const advertised = advertisedTools(extractMetaDescription("path_allowlist"));
+      for (const tool of PATTERN_ONLY_TOOLS) {
+        expect(advertised).not.toContain(tool);
+      }
+    });
+  });
+});
 
 
 describe("AuthorWizard — F5 TrustBadge in Review step", () => {

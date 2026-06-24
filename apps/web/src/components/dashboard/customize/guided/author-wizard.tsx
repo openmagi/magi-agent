@@ -92,6 +92,8 @@ type ConditionKind =
   | "none"
   | "domain"
   | "domain_allowlist"
+  | "path"
+  | "path_allowlist"
   | "evidence_ref"
   | "shacl"
   | "llm_criterion"
@@ -126,6 +128,8 @@ interface Draft {
   // payload fields
   domain: string;
   domainAllowlist: string;
+  pathPrefix: string;
+  pathAllowlist: string;
   evidenceRef: string;
   shapeTtl: string;
   criterion: string;
@@ -159,6 +163,8 @@ const EMPTY: Draft = {
   archetype: "block",
   domain: "",
   domainAllowlist: "",
+  pathPrefix: "",
+  pathAllowlist: "",
   evidenceRef: "",
   shapeTtl: "",
   criterion: "",
@@ -485,8 +491,11 @@ function availableConditionKinds(
       return ["none"];
     }
     // target=any: tool_perm has no wildcard matcher, so "no condition"
-    // is omitted (no honest backend mapping).
-    return ["domain", "domain_allowlist"];
+    // is omitted (no honest backend mapping). F6 adds path / path_allowlist
+    // alongside domain / domain_allowlist — the backend tool_perm matcher
+    // already supports both via match.path / match.pathAllowlist, firing
+    // only for tools that surface a file/path argument.
+    return ["domain", "domain_allowlist", "path", "path_allowlist"];
   }
   // after_tool_use
   if (toolTarget === "specific") {
@@ -510,6 +519,16 @@ const CONDITION_META: Record<ConditionKind, { label: string; description: string
   domain_allowlist: {
     label: "Domain allowlist",
     description: "Fires when a fetch tool's URL host is NOT in the allowlist.",
+  },
+  path: {
+    label: "File / path",
+    description:
+      "Match when the tool acts on a path at or under this prefix. Only fires for tools whose argument schema surfaces a `path` (or alias: file, filename, filepath, filePath, pathRef) key. Examples: FileRead, FileEdit, FileWrite, PatchApply. Does NOT match Glob or Grep (whose arg is `pattern`, not `path`).",
+  },
+  path_allowlist: {
+    label: "Path allowlist",
+    description:
+      "Match when the tool's path argument is NOT under any allowed prefix. Same surface as 'File / path': only fires for tools whose argument schema surfaces a `path` (or alias) key (FileRead, FileEdit, FileWrite, PatchApply); not for Glob or Grep.",
   },
   evidence_ref: {
     label: "Evidence reference",
@@ -637,6 +656,24 @@ function SpecificsStep({
           onChange={(v) => update({ domainAllowlist: v })}
           label="Allowed domains (comma-separated)"
           placeholder="github.com, openmagi.ai"
+        />
+      ) : null}
+      {draft.conditionKind === "path" ? (
+        <TextField
+          value={draft.pathPrefix}
+          onChange={(v) => update({ pathPrefix: v })}
+          label="Path prefix"
+          placeholder="/etc/passwd"
+          mono
+        />
+      ) : null}
+      {draft.conditionKind === "path_allowlist" ? (
+        <TextField
+          value={draft.pathAllowlist}
+          onChange={(v) => update({ pathAllowlist: v })}
+          label="Allowed path prefixes (comma-separated)"
+          placeholder="/Users/me/proj, /tmp/scratch"
+          mono
         />
       ) : null}
       {draft.conditionKind === "evidence_ref" ? (
@@ -1048,6 +1085,10 @@ function triggerEventPhrase(draft: Draft, refOptions: RefOption[]): string {
       return `When ${lowerHead(targetPhrase)} fetches "${draft.domain || "…"}"`;
     case "domain_allowlist":
       return `When ${lowerHead(targetPhrase)} fetches a host outside the allowlist`;
+    case "path":
+      return `When ${lowerHead(targetPhrase)} touches a path under "${draft.pathPrefix || "…"}"`;
+    case "path_allowlist":
+      return `When ${lowerHead(targetPhrase)} touches a path outside the allowed prefixes`;
     case "regex":
       return `When ${lowerHead(targetPhrase)}'s output ${draft.regexIsRegex ? "matches the regex" : "contains"} "${draft.regexPattern || "…"}"`;
     case "llm_criterion":
@@ -1301,6 +1342,10 @@ function conditionClause(draft: Draft, refOptions: RefOption[]): string {
       return `the fetch domain is ${draft.domain}`;
     case "domain_allowlist":
       return `the fetch domain is NOT in [${csv(draft.domainAllowlist)}]`;
+    case "path":
+      return `the tool's path argument is at or under ${draft.pathPrefix}`;
+    case "path_allowlist":
+      return `the tool's path argument is NOT under any of [${csv(draft.pathAllowlist)}]`;
     case "evidence_ref": {
       const ref = refOptions.find((r) => r.ref === draft.evidenceRef);
       return `evidence "${ref?.label ?? draft.evidenceRef}" did not return ok`;
@@ -1361,6 +1406,10 @@ function stepIsComplete(currentKey: StepKey, draft: Draft): boolean {
           return draft.domain.trim().length > 0;
         case "domain_allowlist":
           return draft.domainAllowlist.trim().length > 0;
+        case "path":
+          return draft.pathPrefix.trim().length > 0;
+        case "path_allowlist":
+          return draft.pathAllowlist.trim().length > 0;
         case "evidence_ref":
           return draft.evidenceRef.length > 0;
         case "shacl":
@@ -1499,6 +1548,20 @@ function customRulePayload(draft: Draft): Record<string, unknown> {
       return {
         match: {
           domainAllowlist: draft.domainAllowlist
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+        },
+        decision,
+      };
+    }
+    if (draft.conditionKind === "path") {
+      return { match: { path: draft.pathPrefix.trim() }, decision };
+    }
+    if (draft.conditionKind === "path_allowlist") {
+      return {
+        match: {
+          pathAllowlist: draft.pathAllowlist
             .split(",")
             .map((s) => s.trim())
             .filter(Boolean),
