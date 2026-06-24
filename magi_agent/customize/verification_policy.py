@@ -177,3 +177,21 @@ class CustomizeVerificationPolicy:
 
     def mode(self, preset_id: str) -> str:
         return self.modes.get(preset_id, _DEFAULT_MODE)
+
+    def user_rules_advisory_text(self) -> str:
+        """Trimmed operator-supplied advisory text from the Customize Guidance field.
+
+        Returns the value of ``user_rules`` with leading/trailing whitespace
+        stripped, or ``""`` when the field is absent, empty, or whitespace-only.
+        Canonical read seam used by the F1 ``<user_advisory_rules>`` system
+        prompt envelope in ``runtime.message_builder._user_rules_block``; the
+        envelope is omitted entirely when this accessor returns ``""``, so a
+        blank Guidance field never produces a stray header.
+
+        Non-prompt consumers (dashboard renderers, audit logs) can read the
+        same canonical view without re-implementing trim/empty semantics.
+        """
+        text = self.user_rules
+        if not isinstance(text, str):
+            return ""
+        return text.strip()

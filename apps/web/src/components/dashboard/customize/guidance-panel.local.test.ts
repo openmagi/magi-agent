@@ -25,4 +25,21 @@ describe("GuidancePanel — UX restructure B soft-instructions surface", () => {
   it("seeds the draft from userRules and re-seeds on prop change", () => {
     expect(src).toContain("useEffect(() => setDraft(userRules)");
   });
+
+  it("renders a prominent Advisory trust-class badge (PR-F1)", () => {
+    expect(src).toContain("Trust class: Advisory");
+    expect(src).toMatch(/>\s*Advisory\s*</);
+  });
+
+  it("ships honest advisory helper copy that points at deterministic surfaces", () => {
+    expect(src).toContain(
+      "Injected into the system prompt as operator guidance.",
+    );
+    expect(src).toContain("The model is");
+    expect(src).toContain("asked to honor these but no gate enforces them.");
+    expect(src).toContain(
+      "For deterministic",
+    );
+    expect(src).toContain("rules use the Author wizard or NL compose.");
+  });
 });

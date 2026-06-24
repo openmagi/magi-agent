@@ -191,6 +191,12 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     # opt in for lab. Without this the dashboard "Compile" button returns
     # ``nl-rule compiler disabled`` even though the user already has the UI.
     "MAGI_CUSTOMIZE_NL_RULE_COMPILER_ENABLED",
+    # Customize seam-spec endpoint. Registration-time / dashboard-authoring path
+    # only, never on the live turn hot path, and fail-open when prerequisites are
+    # missing — safe to dogfood in lab. Registry default stays OFF so a fresh
+    # install and hosted serve do not expose the seam-spec surface until the
+    # operator explicitly opts in.
+    "MAGI_CUSTOMIZE_SEAM_SPEC_ENABLED",
     "MAGI_DASHBOARD_PACK_AUTHORING_ENABLED",
     "MAGI_DEEP_WEB_RESEARCH_ENABLED",
     "MAGI_DEFERRED_TOOLS_ENABLED",
@@ -232,6 +238,18 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     "MAGI_RESEARCH_FACT_GUIDANCE_ENABLED",
     "MAGI_SERVE_EVIDENCE_ENABLED",
     "MAGI_SESSION_TRANSCRIPT_ENABLED",
+    # SHACL rule compiler: turns customize raw.ttl / natural-language rules into
+    # SHACL shapes at authoring time (reviewer + human-approval gated). Pure
+    # compile-time path, no hot-turn impact, fail-open when pySHACL is absent.
+    # Registry default unchanged so fresh install / hosted serve stays OFF until
+    # the operator opts in.
+    "MAGI_SHACL_COMPILER_ENABLED",
+    # SHACL pre-final determinism verifier: validates evidence triples against
+    # compiled shapes during the deterministic producer pass. Default-OFF in
+    # registry so a fresh install / hosted serve never executes it; lab opts in
+    # so dogfood surfaces shape-violation regressions early. Fail-open if pySHACL
+    # is missing so the runtime degrades to the existing behavior.
+    "MAGI_SHACL_VERIFIER_ENABLED",
     "MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED",
     "MAGI_STEP_DECOMPOSITION_ENABLED",
     "MAGI_SUBAGENT_GOVERNED_TURN_ENABLED",
