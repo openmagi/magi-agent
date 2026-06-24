@@ -321,6 +321,7 @@ def test_no_secret_in_approval_records(monkeypatch, tmp_path) -> None:
         "reason",
         "created_at",
         "decided_at",
+        "granted_until",
     }
 
 
