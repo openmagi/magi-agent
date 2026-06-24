@@ -521,6 +521,12 @@ class ToolExecutionKernel:
                     )
                 }
             )
+            # If this approved resume is for an Agent Vault credential-use prompt,
+            # record the grant NOW, before the handler egresses, so the egress
+            # proxy injects the secret. No-op for non-credential approvals.
+            self.permission_policy.apply_credential_grant(
+                decision.metadata, persistent=False
+            )
 
         started = monotonic()
         call_record = build_tool_call_evidence(

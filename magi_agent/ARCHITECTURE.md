@@ -275,6 +275,7 @@ graph LR
     tools --> cli
     tools --> coding
     tools --> config
+    tools --> credentials_admin
     tools --> customize
     tools --> evidence
     tools --> firstparty
@@ -758,7 +759,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | Local "Credentials" registration admin surface for the OSS dashboard. | credentials_admin | channels/channel_credentials.py, channels/telegram_credentials.py, credentials_admin/approval_resolver.py, credentials_admin/local_proxy.py, credentials_admin/vault_server.py, transport/credentials.py, transport/integrations.py |
-| approval_resolver.py | Credential-use approval resolver seam (in-chat approval, phase 1). | credentials_admin, local_proxy_decision | — |
+| approval_resolver.py | Credential-use approval resolver seam (in-chat approval, phase 1). | credentials_admin, local_proxy_decision | tools/permission.py |
 | approvals_store.py | Local approval-request store for guarded credentials. | — | — |
 | local_proxy.py | mitmproxy addon + lifecycle for the local credential-injecting forward proxy. | credentials_admin, local_proxy_decision, local_vault | (root)/main.py, credentials_admin/vault_server.py |
 | local_proxy_decision.py | Pure decision core for the local credential-injecting forward proxy. | — | credentials_admin/approval_resolver.py, credentials_admin/local_proxy.py |
@@ -1769,7 +1770,7 @@ graph LR
 | memory_mode_guard.py | Tool-level memory-mode hard enforcement. | patch_apply, session_identity | cli/learning_recall.py, cli/memory_recall_block.py, cli/wiring.py, firstparty/packs/gates_policy_default/impl.py, gates/gate5b_full_toolhost.py, tools/core_toolhost.py, tools/local_readonly.py |
 | music_tools.py | MusicNotation tool — read musical notation from an image via vision model. | context, image_tools, result, spreadsheet_tools | tools/file_toolhost.py |
 | output_budget.py | — | manifest, result, safety | artifacts/local_result_store.py, plugins/mcp_adapter.py, tools/kernel.py |
-| permission.py | — | context, control, manifest, safety, tool_perm | firstparty/packs/gates_policy_default/impl.py, gates/gate5b_full_toolhost.py, tools/__init__.py, tools/dispatcher.py, tools/kernel.py |
+| permission.py | — | approval_resolver, context, control, manifest, safety, tool_perm | firstparty/packs/gates_policy_default/impl.py, gates/gate5b_full_toolhost.py, tools/__init__.py, tools/dispatcher.py, tools/kernel.py |
 | permission_scope.py | Mode-derived permission scope resolution (cluster 09 PR1). | manifest | cli/tool_runtime.py, cli/wiring.py |
 | persistent_python_toolhost.py | Additive first-party toolhost binder for the ``PersistentPython`` tool. | context, discovery, impl, python_exec, python_exec_worker, registry, result | cli/tool_runtime.py, runtime/openmagi_runtime.py |
 | plan_mode_toolhost.py | Route the catalog Enter/ExitPlanMode tools to the GA plan-act flow. | context, control_projection, env, registry, result | cli/tool_runtime.py, tools/tests/test_plan_mode_toolhost.py |

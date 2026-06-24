@@ -22,6 +22,7 @@ guards. NO secret or opaque vault_ref is ever returned by this module.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -82,6 +83,30 @@ def extract_egress_host(tool_name: str, arguments: dict[str, object]) -> str | N
         if host:
             return host.strip().lower()
     return None
+
+
+def default_credential_approval_resolver(
+    env: Mapping[str, str] | None = None,
+) -> CredentialApprovalResolver:
+    """Pick the resolver for the current runtime.
+
+    * local native vault enabled (and no external vault URL) -> local store impl,
+    * everything else (no vault, or a hosted external vault) -> inert null.
+
+    The hosted (sidecar admin API) resolver lands in a later phase; until then a
+    hosted deployment resolves to null, so the seam is inert there. Never raises.
+    """
+    import os
+
+    resolved_env = os.environ if env is None else env
+    try:
+        from magi_agent.credentials_admin import vault_local
+
+        if vault_local.local_vault_enabled(resolved_env):
+            return LocalCredentialApprovalResolver()
+    except Exception:  # noqa: BLE001 - resolver selection must never crash a turn
+        return NullCredentialApprovalResolver()
+    return NullCredentialApprovalResolver()
 
 
 class NullCredentialApprovalResolver:
