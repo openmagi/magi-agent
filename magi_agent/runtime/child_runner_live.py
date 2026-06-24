@@ -46,27 +46,40 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import inspect
-import logging
 import os
 import re
+import sys
 from collections.abc import Callable, Mapping
 from typing import Any
 
-_logger = logging.getLogger(__name__)
-
 #: Operator opt-in env for verbose child-runner empty-stream diagnostics.
-#: Default-OFF — when set to a truthy value, the legacy and governed
-#: collectors emit one ``logger.warning`` per turn naming the collected
-#: ``text_chunks`` count / ``summary`` length and the ``evidence_refs``
-#: count. Lets the operator see whether the empty-response guard fired
-#: AND why (zero text vs non-empty whitespace vs unexpected ref leakage)
-#: without having to add print statements to a production wheel.
+#: Default-OFF. When set to a truthy value, the empty-result and dispatch-
+#: trace helpers emit one line per event to ``sys.stderr`` (NOT through the
+#: ``logging`` system). Reason: ``magi-serve`` does not call
+#: ``logging.basicConfig`` / ``dictConfig``, so a ``_logger.warning(...)``
+#: would never reach the operator's serve log (this is exactly what the
+#: 0.1.84 repro hit: traces were called, never written). ``print(..., file=
+#: sys.stderr, flush=True)`` bypasses the logging system entirely and lands
+#: in the same stream uvicorn/pydantic warnings use.
 CHILD_RUNNER_EMPTY_DEBUG_ENV = "MAGI_CHILD_RUNNER_EMPTY_DEBUG"
 
 
 def _empty_debug_enabled(env: Mapping[str, str]) -> bool:
     raw = env.get(CHILD_RUNNER_EMPTY_DEBUG_ENV, "")
     return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _emit_trace(line: str) -> None:
+    """Write ``line`` to ``sys.stderr`` and flush. Never raise.
+
+    Used by every trace/empty-debug helper in this module + the boundary
+    so the operator's serve log captures the diagnostic regardless of
+    whether the application root logger has any handlers attached.
+    """
+    try:
+        print(line, file=sys.stderr, flush=True)
+    except Exception:  # noqa: BLE001 (logging must never break a turn).
+        return
 
 
 def _maybe_log_governed_collect_result(
@@ -86,20 +99,14 @@ def _maybe_log_governed_collect_result(
         return
     try:
         first_ref = evidence_refs[0] if evidence_refs else None
-        _logger.warning(
-            "[child_runner.empty_debug] governed_branch "
-            "provider=%s model=%s summary_len=%d "
-            "summary_stripped_len=%d evidence_refs_count=%d "
-            "first_ref=%r status=%s",
-            provider,
-            model,
-            len(summary),
-            len(summary.strip()),
-            len(evidence_refs),
-            first_ref,
-            status,
+        _emit_trace(
+            f"[child_runner.empty_debug] governed_branch "
+            f"provider={provider} model={model} summary_len={len(summary)} "
+            f"summary_stripped_len={len(summary.strip())} "
+            f"evidence_refs_count={len(evidence_refs)} "
+            f"first_ref={first_ref!r} status={status}"
         )
-    except Exception:  # noqa: BLE001 — logging must never break a turn.
+    except Exception:  # noqa: BLE001 (logging must never break a turn).
         return
 
 
@@ -119,16 +126,11 @@ def _maybe_log_legacy_collect_result(
         return
     try:
         first_ref = evidence_refs[0] if evidence_refs else None
-        _logger.warning(
-            "[child_runner.empty_debug] legacy_branch "
-            "provider=%s model=%s text_chunks=%d text_total_len=%d "
-            "evidence_refs_count=%d first_ref=%r",
-            provider,
-            model,
-            text_chunks,
-            text_total_len,
-            len(evidence_refs),
-            first_ref,
+        _emit_trace(
+            f"[child_runner.empty_debug] legacy_branch "
+            f"provider={provider} model={model} text_chunks={text_chunks} "
+            f"text_total_len={text_total_len} "
+            f"evidence_refs_count={len(evidence_refs)} first_ref={first_ref!r}"
         )
     except Exception:  # noqa: BLE001
         return
@@ -157,11 +159,7 @@ def _maybe_log_trace_entry(
     if not _empty_debug_enabled(env):
         return
     try:
-        _logger.warning(
-            "[child_runner.trace] entry req_provider=%r req_model=%r",
-            provider,
-            model,
-        )
+        _emit_trace(f"[child_runner.trace] entry req_provider={provider!r} req_model={model!r}")
     except Exception:  # noqa: BLE001
         return
 
@@ -178,11 +176,9 @@ def _maybe_log_trace_route(
     if not _empty_debug_enabled(env):
         return
     try:
-        _logger.warning(
-            "[child_runner.trace] route_resolved provider=%r model=%r validated=%s",
-            provider,
-            model,
-            validated,
+        _emit_trace(
+            f"[child_runner.trace] route_resolved provider={provider!r} "
+            f"model={model!r} validated={validated}"
         )
     except Exception:  # noqa: BLE001
         return
@@ -200,11 +196,9 @@ def _maybe_log_trace_key(
     if not _empty_debug_enabled(env):
         return
     try:
-        _logger.warning(
-            "[child_runner.trace] key_resolved provider=%r model=%r resolved=%s",
-            provider,
-            model,
-            key_resolved,
+        _emit_trace(
+            f"[child_runner.trace] key_resolved provider={provider!r} "
+            f"model={model!r} resolved={key_resolved}"
         )
     except Exception:  # noqa: BLE001
         return
@@ -223,11 +217,7 @@ def _maybe_log_trace_turn_enter(
     if not _empty_debug_enabled(env):
         return
     try:
-        _logger.warning(
-            "[child_runner.trace] turn_enter provider=%r model=%r",
-            provider,
-            model,
-        )
+        _emit_trace(f"[child_runner.trace] turn_enter provider={provider!r} model={model!r}")
     except Exception:  # noqa: BLE001
         return
 
@@ -247,13 +237,9 @@ def _maybe_log_trace_turn_exit(
     if not _empty_debug_enabled(env):
         return
     try:
-        _logger.warning(
-            "[child_runner.trace] turn_exit provider=%r model=%r "
-            "final_text_len=%d evidence_refs=%d",
-            provider,
-            model,
-            final_text_len,
-            evidence_refs_count,
+        _emit_trace(
+            f"[child_runner.trace] turn_exit provider={provider!r} model={model!r} "
+            f"final_text_len={final_text_len} evidence_refs={evidence_refs_count}"
         )
     except Exception:  # noqa: BLE001
         return
@@ -272,11 +258,7 @@ def _maybe_log_trace_degraded(
     if not _empty_debug_enabled(env):
         return
     try:
-        _logger.warning(
-            "[child_runner.trace] degraded status=%s reason=%s",
-            status,
-            reason,
-        )
+        _emit_trace(f"[child_runner.trace] degraded status={status} reason={reason}")
     except Exception:  # noqa: BLE001
         return
 
