@@ -178,6 +178,13 @@ export interface RadioCardProps {
   // see WHY they cannot pick this option.
   disabled?: boolean;
   disabledReason?: string;
+  // F-UX-EXTRA #1 — inline preview chips. When present, render a small row
+  // of representative variable tokens beneath the description so the operator
+  // can preview what the runtime exposes for this condition kind WITHOUT
+  // advancing to SpecificsStep. Chips are display-only (no per-chip click
+  // handler at the card level); the real interactive picker lives in
+  // SpecificsStep via :class:`RuntimeFieldChips`.
+  previewChips?: ReadonlyArray<string>;
 }
 
 
@@ -190,6 +197,7 @@ export function RadioCard({
   monoLabel,
   disabled = false,
   disabledReason,
+  previewChips,
 }: RadioCardProps): React.ReactElement {
   return (
     <button
@@ -214,6 +222,22 @@ export function RadioCard({
         ) : null}
         {description ? (
           <p className="mt-1 text-xs leading-relaxed text-secondary">{description}</p>
+        ) : null}
+        {previewChips && previewChips.length > 0 ? (
+          <div
+            className="mt-2 flex flex-wrap gap-1"
+            data-testid="radio-card-preview-chips"
+          >
+            {previewChips.map((chip) => (
+              <span
+                key={chip}
+                title={chip}
+                className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+              >
+                {chip}
+              </span>
+            ))}
+          </div>
         ) : null}
       </div>
       {badge ? (

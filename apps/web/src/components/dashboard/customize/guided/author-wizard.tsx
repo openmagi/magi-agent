@@ -1024,6 +1024,36 @@ function availableConditionKinds(
 }
 
 
+// F-UX-EXTRA #1 — representative variable chips rendered inline on each
+// Condition picker card. Display-only preview of the runtime variable
+// vocabulary the operator will see at SpecificsStep; the real interactive
+// chip menu (with backend-sourced labels/types) lives in
+// :class:`RuntimeFieldChips`. Sourced statically from the same vocab the
+// backend exposes via ``fields_for_context`` so the preview stays honest
+// without an extra fetch per card.
+//
+// Tokens here MUST match the canonical names ``RuntimeFieldChips`` inserts
+// (no ``$`` sigil). The interactive picker writes ``tool_input.url`` into
+// the pattern field, not ``$tool_input.url`` — keeping these literals
+// identical means the preview reads as a faithful taste of what the
+// operator will click on the next step.
+const CONDITION_PREVIEW_CHIPS: Record<ConditionKind, ReadonlyArray<string>> = {
+  none: [],
+  domain: ["tool_input.url"],
+  domain_allowlist: ["tool_input.url"],
+  path: ["tool_input.path"],
+  path_allowlist: ["tool_input.path"],
+  evidence_ref: ["evidence.ref", "evidence.ok"],
+  verifier_passed: ["verifier.ref", "verifier.ok"],
+  shacl: ["evidence.ref", "evidence.fields"],
+  llm_criterion: ["tool", "result"],
+  regex: ["tool_output"],
+  field_constraint: ["evidence.type", "evidence.field"],
+  prompt_injection: ["tool_input.command"],
+  output_rewrite: ["tool_output"],
+};
+
+
 const CONDITION_META: Record<ConditionKind, { label: string; description: string }> = {
   none: {
     label: "No condition",
@@ -1118,6 +1148,7 @@ function ConditionKindStep({
       <div className="space-y-2">
         {kinds.map((kind) => {
           const meta = CONDITION_META[kind];
+          const chips = CONDITION_PREVIEW_CHIPS[kind];
           return (
             <RadioCard
               key={kind}
@@ -1125,6 +1156,7 @@ function ConditionKindStep({
               onClick={() => update({ conditionKind: kind })}
               label={meta.label}
               description={meta.description}
+              previewChips={chips}
             />
           );
         })}
@@ -2343,6 +2375,32 @@ function NameStep({
   draft,
   update,
 }: { draft: Draft; update: (patch: Partial<Draft>) => void }): React.ReactElement {
+  // F-UX-EXTRA #2 — auto-fill the Policy ID from current draft state and
+  // keep it in sync as the operator changes any upstream axis. Once the
+  // operator types into the field, ``userEdited`` flips true and the
+  // auto-fill stops — manual edits are preserved on subsequent axis
+  // changes. A small "Reset to suggested" affordance reseeds the value
+  // and clears the flag.
+  const [userEdited, setUserEdited] = useState<boolean>(
+    () => draft.ruleId.length > 0,
+  );
+  const suggested = useMemo(() => deriveRuleId(draft), [draft]);
+
+  useEffect(() => {
+    if (userEdited) return;
+    if (draft.ruleId === suggested) return;
+    update({ ruleId: suggested });
+  }, [userEdited, suggested, draft.ruleId, update]);
+
+  const onChange = (v: string) => {
+    setUserEdited(true);
+    update({ ruleId: v });
+  };
+  const onReset = () => {
+    setUserEdited(false);
+    update({ ruleId: suggested });
+  };
+
   return (
     <div className="space-y-3">
       <h2 className="text-lg font-bold text-foreground">Name your policy</h2>
@@ -2351,13 +2409,25 @@ function NameStep({
       </p>
       <TextField
         value={draft.ruleId}
-        onChange={(v) => update({ ruleId: v })}
+        onChange={onChange}
         label="Policy ID"
         placeholder={defaultIdHint(draft)}
       />
-      <p className="text-[11px] text-secondary">
-        Lowercase alphanumeric + dash / underscore, max 128 chars.
-      </p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] text-secondary">
+          Lowercase alphanumeric + dash / underscore, max 128 chars.
+        </p>
+        {userEdited && draft.ruleId !== suggested ? (
+          <button
+            type="button"
+            onClick={onReset}
+            data-testid="reset-policy-id"
+            className="text-[11px] font-semibold text-primary underline-offset-2 hover:underline focus:outline-none focus:underline"
+          >
+            Reset to suggested
+          </button>
+        ) : null}
+      </div>
       <TextField
         value={draft.description}
         onChange={(v) => update({ description: v })}
@@ -2368,7 +2438,121 @@ function NameStep({
 }
 
 
+// F-UX-EXTRA #2 — friendly axis labels used to assemble the suggested
+// Policy ID. Kept colocated with :func:`deriveRuleId` so a future
+// lifecycle/archetype/condition addition only edits this one block.
+function lifecycleSlug(lifecycle: Lifecycle): string {
+  switch (lifecycle) {
+    case "before_tool_use":
+      return "before-tool";
+    case "after_tool_use":
+      return "after-tool";
+    case "pre_final":
+      return "pre-final";
+    case "on_user_prompt_submit":
+      return "on-prompt";
+    case "on_subagent_stop":
+      return "on-subagent-stop";
+    case "before_turn_start":
+      return "before-turn";
+    case "after_turn_end":
+      return "after-turn";
+    case "before_llm_call":
+      return "before-llm";
+    case "after_llm_call":
+      return "after-llm";
+    case "before_compaction":
+      return "before-compact";
+    case "after_compaction":
+      return "after-compact";
+    case "on_task_checkpoint":
+      return "on-task-checkpoint";
+    case "on_artifact_created":
+      return "on-artifact";
+  }
+}
+
+
+function conditionSlug(kind: ConditionKind): string {
+  switch (kind) {
+    case "none":
+      return "always";
+    case "llm_criterion":
+      return "critic";
+    case "field_constraint":
+      return "field";
+    case "prompt_injection":
+      return "prompt-inject";
+    case "output_rewrite":
+      return "output-rewrite";
+    case "evidence_ref":
+      return "evidence";
+    case "verifier_passed":
+      return "verifier";
+    case "domain":
+      return "domain";
+    case "domain_allowlist":
+      return "domain-allowlist";
+    case "path":
+      return "path";
+    case "path_allowlist":
+      return "path-allowlist";
+    case "shacl":
+      return "shacl";
+    case "regex":
+      return "regex";
+  }
+}
+
+
+function archetypeSlug(archetype: Archetype): string {
+  switch (archetype) {
+    case "block":
+      return "block";
+    case "ask":
+      return "ask";
+    case "audit":
+      return "audit";
+    case "strip":
+      return "strip";
+    case "mutate":
+      return "mutate";
+  }
+}
+
+
+/**
+ * F-UX-EXTRA #2 — derive a friendly Policy ID from current draft state.
+ *
+ * Pattern: ``${archetype}-${condition}-${lifecycleTail}``, lower-kebab,
+ * matches ``/^[a-z0-9][a-z0-9_-]{0,127}$/`` (the validator at the Name
+ * step) and trimmed to 50 chars so the resulting ID is short enough to
+ * read in the policy list. The condition slug folds the longer enum
+ * names ("llm_criterion" → "critic") so the rendered ID stays compact
+ * for the most common pickers.
+ */
+function deriveRuleId(draft: Draft): string {
+  const parts = [
+    archetypeSlug(draft.archetype),
+    conditionSlug(draft.conditionKind),
+    lifecycleSlug(draft.lifecycle),
+  ];
+  const joined = parts.join("-");
+  const safe = joined.toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-");
+  const trimmed = safe.slice(0, 50).replace(/^-+|-+$/g, "");
+  // The first char must be alphanumeric per the validator regex — drop a
+  // leading hyphen if the slugger left one behind.
+  return trimmed || "my-policy";
+}
+
+
 function defaultIdHint(draft: Draft): string {
+  // F-UX-EXTRA #2 — placeholder mirrors the suggested ID so the operator
+  // sees the same shape that the auto-fill will populate. Falls back to the
+  // legacy hardcoded hints when axes haven't been picked yet (defensive —
+  // the wizard always seeds an archetype/condition via reseedDownstream).
+  const derived = deriveRuleId(draft);
+  if (derived && derived !== "my-policy") return derived;
   if (draft.archetype === "block" && draft.lifecycle === "before_tool_use") return "deny-shell-exec";
   if (draft.archetype === "audit" && draft.lifecycle === "after_tool_use") return "block-aws-key-leak";
   if (draft.lifecycle === "pre_final") return "block-on-missing-tests";
