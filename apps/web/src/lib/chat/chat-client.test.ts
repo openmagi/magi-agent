@@ -2095,8 +2095,37 @@ describe("sendMessage SSE agent events", () => {
     expect(req.kind).toBe("tool_permission");
     expect(req.state).toBe("pending");
     expect(req.turnId).toBe("qa:turn");
-    expect(req.prompt).toBe("Allow FileRead?");
+    // The runtime-supplied reason is surfaced as the prompt (so an Agent Vault
+    // credential-use reason is shown to the user, not a generic "Allow X?").
+    expect(req.prompt).toBe("tool_use");
     expect(req.proposedInput).toEqual({ path: "memory/state.json" });
+  });
+
+  it("falls back to a generic prompt when a control_request has no reason", async () => {
+    mockSseFetch(
+      [
+        "event: agent",
+        'data: {"type":"control_request","request_id":"qa:turn:FileRead:2","tool_name":"FileRead","arguments":"{}","turn_id":"qa:turn"}',
+        "",
+        "data: [DONE]",
+        "",
+      ].join("\n"),
+    );
+
+    const requests: ControlRequestRecord[] = [];
+    await sendMessage("local", "general", [], {
+      onDelta: () => {},
+      onControlEvent: (event) => {
+        if (event.type === "control_request_created") requests.push(event.request);
+      },
+      onDone: () => {},
+      onError: (error) => {
+        throw error;
+      },
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].prompt).toBe("Allow FileRead?");
   });
 
   it("preserves bounded redacted tool previews from agent events", async () => {

@@ -1338,6 +1338,10 @@ function streamingControlRequestToControlRequest(
   }
   const toolName = typeof ev.tool_name === "string" && ev.tool_name ? ev.tool_name : "tool";
   const turnId = typeof ev.turn_id === "string" ? ev.turn_id : undefined;
+  // Prefer the runtime-supplied reason (e.g. an Agent Vault credential-use
+  // prompt explains which credential is used and that the value stays hidden);
+  // fall back to the generic ask when no reason is provided.
+  const reason = typeof ev.reason === "string" && ev.reason.trim() ? ev.reason.trim() : null;
   let proposedInput: unknown = ev.arguments;
   if (typeof proposedInput === "string") {
     try {
@@ -1354,7 +1358,7 @@ function streamingControlRequestToControlRequest(
     ...(turnId ? { turnId } : {}),
     channelName,
     source: "turn",
-    prompt: `Allow ${toolName}?`,
+    prompt: reason ?? `Allow ${toolName}?`,
     proposedInput,
     createdAt: Date.now(),
     expiresAt: Date.now() + 10 * 60_000,
