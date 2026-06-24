@@ -15,6 +15,32 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.79
+
+### Added
+- **Agent Vault — in-chat credential approval (phases 1, 2, 4, 5).** CredentialApprovalResolver seam (#911), wired into the require-approval path (#920), grants now expire on TTL (#922), and the approval card surfaces the requesting `reason` (#923).
+- **Customize authoring — F-series UX cluster.**
+  - F1 user_rules honest envelope + lab SHACL/seam_spec + 6-kind firing baseline (#917).
+  - F1.5 tool targeting separated from per-call condition (#919).
+  - F2 producer field schema audit + live input-space browser (#921); F2.5 fake `preset:<id>` Evidence-tab leak fix (#930).
+  - F3 `field_constraint` kind + NL honest-degrade guard (#929).
+  - F4 `capability_scope` custom_rule kind for subagent capability authoring (#937).
+  - F5 Deterministic / Advisory honesty badges across authoring surfaces (#938).
+  - F6 `path` / `path_allowlist` tool_perm conditions in author wizard + NL (#939).
+- **Evidence / packs hardening.** Unified gitdiff ref vocabulary on canonical `evidence:git-diff@1` (F-4, #933); F-11 single activation predicate for two-flag gate configs (#932); F-14 fail-mode inversion deduped into a single seam (#934).
+- **Operability.** `MAGI_CHILD_RUNNER_EMPTY_DEBUG` opt-in for bypass-path child-runner logging (#918).
+
+### Changed
+- **I-4 cluster — flag-registry consolidation (batches 13–17).** Massive consolidation of remaining raw `os.environ.get` reads. Flag-reads budget tightened **24 → 2** (cumulative since 0.1.75: **70 → 2**).
+  - Batch 13 — gateway/watchers configs (6): #925. Watchers routing was silently reverted by #928's net-delta-zero ratchet; restored in #935.
+  - Batch 14 — credentials store paths (4): #926.
+  - Batch 15 — small-batch knobs (7): #928.
+  - Batch 16 — shadow stream-event limit + cli config-path (2): #931.
+  - Batch 17 — split-line `MAGI_/CORE_AGENT_` reads (3): #936.
+
+### Fixed
+- **chat-core.** `loadChannelHistory` strips server-readable-user-turn marker rows in its decoded filter so the marker can't leak into history snapshots (#924).
+
 ## 0.1.78
 
 ### Added
