@@ -2395,27 +2395,48 @@ def flag_profile_bool(name: str, *, env: Mapping[str, str] | None = None) -> boo
 
 
 def flag_str(name: str, *, env: Mapping[str, str] | None = None) -> str | None:
-    """Read a registered ``str`` flag, falling back to the registry default."""
+    """Read a registered ``str`` flag, falling back to the registry default.
+
+    I-11 (Option A): the ``spec.default`` field is a union
+    ``str | bool | int | None`` shared across every flag kind. Narrow it
+    here with an ``isinstance`` check after the kind validator so the
+    return type is statically correct and the historical
+    ``# type: ignore[return-value]`` disappears. A defensively
+    mis-registered str-kind default that is not actually a ``str``
+    surfaces as ``None`` (the caller treats it the same as "unset"),
+    matching the prior behavioural contract.
+    """
 
     spec = get_flag(name)
     if spec.kind != "str":
         raise TypeError(f"flag {name!r} has kind {spec.kind!r}, not 'str'")
     raw = _resolve_env(env).get(name)
     if raw is None:
-        return spec.default  # type: ignore[return-value]
+        return spec.default if isinstance(spec.default, str) else None
     return raw
 
 
 def flag_int(name: str, *, env: Mapping[str, str] | None = None) -> int | None:
-    """Read a registered ``int`` flag; invalid values fall back to the default."""
+    """Read a registered ``int`` flag; invalid values fall back to the default.
+
+    I-11 (Option A): same narrowing pattern as :func:`flag_str` — the
+    union default is reduced to ``int | None`` here via ``isinstance``
+    so the two historical ``# type: ignore[return-value]`` lines
+    disappear. The ``isinstance(int)`` check intentionally rejects
+    ``bool`` (a subclass of ``int``) so a mis-registered ``bool``
+    default for an int flag surfaces as ``None`` rather than ``True/False``.
+    """
 
     spec = get_flag(name)
     if spec.kind != "int":
         raise TypeError(f"flag {name!r} has kind {spec.kind!r}, not 'int'")
     raw = _resolve_env(env).get(name)
+    default = spec.default if isinstance(spec.default, int) and not isinstance(
+        spec.default, bool
+    ) else None
     if raw is None:
-        return spec.default  # type: ignore[return-value]
+        return default
     try:
         return int(raw.strip())
     except (ValueError, AttributeError):
-        return spec.default  # type: ignore[return-value]
+        return default
