@@ -111,4 +111,54 @@ describe("describeDraft — plain-English live preview of the add-form draft", (
     expect(line).toContain("OR");
     expect(line).toContain("LLM critic");
   });
+
+  // -------------------------------------------------------------------------
+  // F4 — capability_scope (subagent toolset narrowing at spawn time)
+  // -------------------------------------------------------------------------
+
+  it("returns null for an empty capability_scope draft (no denyTools, no maxPermissionClass)", () => {
+    expect(
+      describeDraft({
+        ...base(),
+        kind: "capability_scope",
+        denyTools: [],
+        maxPermissionClass: null,
+      }),
+    ).toBeNull();
+  });
+
+  it("describes capability_scope with denyTools only", () => {
+    const line = describeDraft({
+      ...base(),
+      kind: "capability_scope",
+      denyTools: ["shell_exec"],
+      maxPermissionClass: null,
+    });
+    expect(line).toContain("Subagents");
+    expect(line).toContain("shell_exec");
+  });
+
+  it("describes capability_scope with maxPermissionClass only", () => {
+    const line = describeDraft({
+      ...base(),
+      kind: "capability_scope",
+      denyTools: [],
+      maxPermissionClass: "readonly",
+    });
+    expect(line).toContain("Subagents");
+    expect(line).toContain("readonly");
+  });
+
+  it("describes capability_scope with both denyTools and maxPermissionClass", () => {
+    const line = describeDraft({
+      ...base(),
+      kind: "capability_scope",
+      denyTools: ["shell_exec", "fs_write"],
+      maxPermissionClass: "safe_write",
+    });
+    expect(line).toContain("Subagents");
+    expect(line).toContain("shell_exec");
+    expect(line).toContain("fs_write");
+    expect(line).toContain("safe_write");
+  });
 });

@@ -20,9 +20,21 @@ from magi_agent.customize.what_menu import allowed_actions_for, is_known_ref
 CRITERION_MAX = 2000
 
 SCOPES = frozenset({"always", "coding", "research", "delivery", "memory", "task"})
-KINDS = frozenset({"deterministic_ref", "tool_perm", "llm_criterion", "shacl_constraint"})
+KINDS = frozenset(
+    {
+        "deterministic_ref",
+        "tool_perm",
+        "llm_criterion",
+        "shacl_constraint",
+        "capability_scope",
+    }
+)
 ACTIONS = frozenset({"block", "retry", "ask_approval", "audit", "override"})
-FIRES_AT = frozenset({"pre_final", "before_tool_use", "after_tool_use"})
+# ``spawn`` is the lifecycle slot for capability_scope rules — when the runtime
+# derives the toolset for a spawned child agent (F4). The action is always
+# ``block`` (semantically: "apply the cap" — the rule subtracts/caps and the
+# spawn proceeds with the narrowed toolset).
+FIRES_AT = frozenset({"pre_final", "before_tool_use", "after_tool_use", "spawn"})
 
 # Allowed least-privilege projection slices (spec §9.1). ``conversation`` (full
 # session.events) is intentionally NOT allowed.
@@ -65,6 +77,10 @@ _LEGAL: dict[str, dict[str, frozenset[str]]] = {
     # audit/retry deferred: runtime always blocks on a failed shacl record regardless
     # of the stored action, so promising audit/retry here is a false contract.
     "shacl_constraint": {"pre_final": frozenset({"block"})},
+    # F4: capability_scope fires at the spawn lifecycle slot. ``block`` is the
+    # only semantically meaningful action — the rule subtracts denied tools and
+    # caps the permission class; audit/retry have no spawn-time analogue.
+    "capability_scope": {"spawn": frozenset({"block"})},
 }
 
 
@@ -188,6 +204,14 @@ def validate_custom_rule(rule: Any) -> list[str]:
         rule_id = payload.get("ruleId")
         if rule_id is not None and not isinstance(rule_id, str):
             errors.append("shacl_constraint.payload.ruleId must be a string if provided")
+    elif kind == "capability_scope":
+        # F4: operator-authored spawn-time toolset cap. Lazy import keeps the
+        # capability_scope module optional at import-time (mirrors shacl).
+        from magi_agent.customize.capability_scope import (  # noqa: PLC0415
+            validate_capability_scope_payload,
+        )
+
+        errors.extend(validate_capability_scope_payload(payload))
 
     # (f) projection ⊆ whitelist (conversation rejected)
     projection = rule.get("projection")

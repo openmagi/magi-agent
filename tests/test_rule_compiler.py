@@ -123,10 +123,13 @@ _VALID_REVIEW_RESPONSE = (
 # ---------------------------------------------------------------------------
 
 
-def test_routed_kinds_lists_exactly_the_seven_supported_primitives() -> None:
+def test_routed_kinds_lists_exactly_the_eight_supported_primitives() -> None:
     # PR-F3 (2026-06-23): added ``field_constraint`` as the structured
     # alternative to raw ``shacl_constraint``. Coverage of the new kind
     # lives in tests/test_rule_compiler_field_constraint_routing.py.
+    # PR-F4 (2026-06-23): added ``capability_scope`` for operator-authored
+    # spawn-time tool/permission caps. Coverage of the new kind lives in
+    # tests/test_rule_compiler_capability_scope.py.
     assert ROUTED_KINDS == frozenset({
         "deterministic_ref",
         "tool_perm",
@@ -135,6 +138,7 @@ def test_routed_kinds_lists_exactly_the_seven_supported_primitives() -> None:
         "seam_spec",
         "custom_check",
         "field_constraint",
+        "capability_scope",
     })
 
 

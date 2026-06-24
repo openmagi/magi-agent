@@ -181,6 +181,11 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     "MAGI_COMPACTION_TOOL_PRUNE_ENABLED",
     "MAGI_COMPUTE_VIA_CODE_ENABLED",
     "MAGI_CROSS_VERIFY_ENABLED",
+    # F4 capability_scope custom rule: spawn-time toolset cap (deny tool names /
+    # max permission class) authored on top of the parent_cap intersection.
+    # Strict default-OFF in the registry so a fresh install / hosted serve stays
+    # byte-identical; lab opts in so dogfood spawns honor operator-authored caps.
+    "MAGI_CUSTOMIZE_CAPABILITY_SCOPE_ENABLED",
     # NOTE: MAGI_CUSTOMIZE_VERIFICATION_ENABLED / MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED
     # are NOT here: they are profile-aware default-ON (``_pb``), so they resolve ON
     # in every non-safe profile (full AND lab) on their own. The lab seed only

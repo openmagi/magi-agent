@@ -63,6 +63,7 @@ export type PolicyConditionKind =
   | "llm_criterion"     // LLM critic over text/state
   | "regex"             // regex match on a tool result or output
   | "tool_perm"         // tool name / domain match before invocation
+  | "capability_scope"  // narrows the spawned-child toolset (F4)
   | "seam_action"       // built-in preset seam rewire (compound)
   | "none";             // built-in preview / always-on, condition is implicit
 
@@ -201,6 +202,35 @@ function customRuleCondition(
     else if (Array.isArray(m.domainAllowlist))
       target = `outside [${(m.domainAllowlist as string[]).join(", ")}]`;
     return { kind, summary: `${verb} ${target}`, payload: { match: m, decision: payload.decision } };
+  }
+  if (kind === "capability_scope") {
+    // F4 — narrows the spawned-child toolset. Payload v1 (mirrors
+    // magi_agent/customize/capability_scope.py): denyTools (list[str]),
+    // maxPermissionClass ("readonly" | "safe_write" | null), tightenOnly (true).
+    const denyToolsRaw = payload.denyTools;
+    const denyTools = Array.isArray(denyToolsRaw)
+      ? (denyToolsRaw.filter((t) => typeof t === "string") as string[])
+      : [];
+    const maxClass =
+      typeof payload.maxPermissionClass === "string"
+        ? (payload.maxPermissionClass as string)
+        : null;
+    const parts: string[] = [];
+    if (denyTools.length > 0) {
+      parts.push(`denies ${denyTools.join(", ")}`);
+    }
+    if (maxClass) {
+      parts.push(`max class ${maxClass}`);
+    }
+    const summary =
+      parts.length > 0
+        ? `Caps spawned subagents (${parts.join(" / ")})`
+        : "Caps spawned subagents";
+    return {
+      kind,
+      summary,
+      payload: { denyTools, maxPermissionClass: maxClass },
+    };
   }
   return { kind: "evidence_ref", summary: "(unknown condition)" };
 }

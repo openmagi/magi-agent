@@ -144,6 +144,32 @@ class CustomizeVerificationPolicy:
             results.append({"ruleId": rule_id, "shapeTtl": shape_ttl})
         return results
 
+    def enabled_capability_scope_rules(self) -> list[dict[str, Any]]:
+        """Enabled ``capability_scope`` custom rules (F4 spawn-time toolset cap).
+
+        Returns the raw rule dicts (in stored order) whose ``what.kind`` is
+        ``"capability_scope"`` and whose ``firesAt`` is ``"spawn"``. The runtime
+        passes the result directly to
+        :func:`magi_agent.customize.capability_scope.apply_capability_scope`,
+        which reads ``rule["what"]["payload"]`` (denyTools / maxPermissionClass)
+        on each entry.
+
+        Malformed rules are silently skipped — never raises. Filtering is
+        scope-blind (capability_scope always fires at the single ``spawn`` slot;
+        per-role narrowing is deferred).
+        """
+        results: list[dict[str, Any]] = []
+        for rule in self.custom_rules:
+            if not rule.get("enabled", False):
+                continue
+            what = rule.get("what")
+            if not isinstance(what, dict) or what.get("kind") != "capability_scope":
+                continue
+            if rule.get("firesAt") != "spawn":
+                continue
+            results.append(rule)
+        return results
+
     def enabled_llm_criterion_rules(
         self, *, fires_at: str, current_scope: str | None = None
     ) -> list[dict[str, Any]]:

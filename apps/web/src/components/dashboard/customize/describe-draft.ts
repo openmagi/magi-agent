@@ -18,7 +18,15 @@ export type CustomRuleKind =
   | "tool_perm"
   | "llm_criterion"
   | "after_tool"
-  | "shacl_constraint";
+  | "shacl_constraint"
+  | "capability_scope";
+
+
+/** Permission class cap for ``capability_scope`` drafts. Mirrors the
+ *  runtime's ``_PERMISSION_CLASSES`` frozenset in
+ *  ``magi_agent/customize/capability_scope.py`` (``readonly`` / ``safe_write``
+ *  / ``null`` = uncapped). */
+export type CapabilityPermissionClass = "readonly" | "safe_write" | null;
 
 
 export interface CustomRuleDraft {
@@ -37,6 +45,12 @@ export interface CustomRuleDraft {
   shaclMode: "nl" | "raw";
   shaclPreviewOk: boolean;
   rawTtlHasContent: boolean;
+  /** F4 — capability_scope narrows the spawned-child toolset by removing
+   *  named tools. Empty list (default) = no tool denials authored yet. */
+  denyTools?: string[];
+  /** F4 — capability_scope caps the spawned-child permission class.
+   *  ``null`` (default) = no cap. */
+  maxPermissionClass?: CapabilityPermissionClass;
 }
 
 
@@ -74,6 +88,20 @@ export function describeDraft(d: CustomRuleDraft): string | null {
         .filter(Boolean)
         .join(", ")}]`;
     return `Before the agent calls a tool, ${verb} ${target}.`;
+  }
+  if (d.kind === "capability_scope") {
+    const denies = (d.denyTools ?? []).map((s) => s.trim()).filter(Boolean);
+    const cap = d.maxPermissionClass ?? null;
+    if (denies.length === 0 && !cap) return null;
+    const parts: string[] = [];
+    if (denies.length > 0) {
+      const toolList = denies.join(", ");
+      parts.push(`cannot use ${toolList}`);
+    }
+    if (cap) {
+      parts.push(`capped at ${cap} permission class`);
+    }
+    return `Subagents ${parts.join(", ")}.`;
   }
   if (d.kind === "after_tool") {
     if (!d.toolMatch.trim()) return null;
