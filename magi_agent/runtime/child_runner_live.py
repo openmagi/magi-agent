@@ -135,6 +135,153 @@ def _maybe_log_legacy_collect_result(
 
 
 # ---------------------------------------------------------------------------
+# Dispatch-path TRACE helpers (gated on the SAME empty-debug env). Kevin's
+# 0.1.82 repro with empty-debug=1 produced ZERO governed/legacy collector
+# log lines for the silent-empty cases (proving the collector itself never
+# ran). These helpers cover the path BEFORE the collector: run_child entry,
+# route resolution outcome, key resolution outcome, _drive_one_turn enter +
+# exit, and the degraded ``_blocked``/``_failed`` emissions. When the next
+# repro fires, the operator sees exactly which step terminated the dispatch.
+# Default-OFF; helpers swallow every internal exception so logging can never
+# break a turn.
+# ---------------------------------------------------------------------------
+
+
+def _maybe_log_trace_entry(
+    env: Mapping[str, str],
+    *,
+    provider: object,
+    model: object,
+) -> None:
+    """Log on RealLocalChildRunner.run_child entry (what the parent sent)."""
+    if not _empty_debug_enabled(env):
+        return
+    try:
+        _logger.warning(
+            "[child_runner.trace] entry req_provider=%r req_model=%r",
+            provider,
+            model,
+        )
+    except Exception:  # noqa: BLE001
+        return
+
+
+def _maybe_log_trace_route(
+    env: Mapping[str, str],
+    *,
+    provider: object,
+    model: object,
+    validated: object,
+) -> None:
+    """Log AFTER ``_resolve_route`` + ``_validate_route`` so the operator
+    sees both the canonical route and whether the registry accepted it."""
+    if not _empty_debug_enabled(env):
+        return
+    try:
+        _logger.warning(
+            "[child_runner.trace] route_resolved provider=%r model=%r validated=%s",
+            provider,
+            model,
+            validated,
+        )
+    except Exception:  # noqa: BLE001
+        return
+
+
+def _maybe_log_trace_key(
+    env: Mapping[str, str],
+    *,
+    provider: object,
+    model: object,
+    key_resolved: object,
+) -> None:
+    """Log AFTER ``_resolve_provider_config``. True iff a usable key was
+    located (file/env/injected); false routes the dispatch to ``_blocked``."""
+    if not _empty_debug_enabled(env):
+        return
+    try:
+        _logger.warning(
+            "[child_runner.trace] key_resolved provider=%r model=%r resolved=%s",
+            provider,
+            model,
+            key_resolved,
+        )
+    except Exception:  # noqa: BLE001
+        return
+
+
+def _maybe_log_trace_turn_enter(
+    env: Mapping[str, str],
+    *,
+    provider: object,
+    model: object,
+) -> None:
+    """Log JUST BEFORE ``_drive_one_turn``. If turn_enter prints but the
+    collector emits nothing, the failure is INSIDE the turn (ADK stream /
+    governed collector); if turn_enter never prints, the failure is in
+    route/key resolution above."""
+    if not _empty_debug_enabled(env):
+        return
+    try:
+        _logger.warning(
+            "[child_runner.trace] turn_enter provider=%r model=%r",
+            provider,
+            model,
+        )
+    except Exception:  # noqa: BLE001
+        return
+
+
+def _maybe_log_trace_turn_exit(
+    env: Mapping[str, str],
+    *,
+    provider: object,
+    model: object,
+    final_text_len: int,
+    evidence_refs_count: int,
+) -> None:
+    """Log AFTER ``_drive_one_turn`` returns normally. The empty-summary
+    success path the existing #918 collector loggers already catch from
+    inside the collector. Logged separately here so the trace remains
+    coherent (every entry has a matching exit) when both fire."""
+    if not _empty_debug_enabled(env):
+        return
+    try:
+        _logger.warning(
+            "[child_runner.trace] turn_exit provider=%r model=%r "
+            "final_text_len=%d evidence_refs=%d",
+            provider,
+            model,
+            final_text_len,
+            evidence_refs_count,
+        )
+    except Exception:  # noqa: BLE001
+        return
+
+
+def _maybe_log_trace_degraded(
+    env: Mapping[str, str],
+    *,
+    status: object,
+    reason: object,
+) -> None:
+    """Log every ``_degraded`` emission (blocked/failed). This is the most
+    informative single line for Kevin's empty-result hunt: it tells him
+    whether the dispatch died at route_unknown / key_missing / timeout /
+    turn_error / llm_empty_response."""
+    if not _empty_debug_enabled(env):
+        return
+    try:
+        _logger.warning(
+            "[child_runner.trace] degraded status=%s reason=%s",
+            status,
+            reason,
+        )
+    except Exception:  # noqa: BLE001
+        return
+
+
+# ---------------------------------------------------------------------------
 # Env-gate constants and helper (mirrors artifacts/file_delivery_live.py)
 # ---------------------------------------------------------------------------
 
@@ -327,10 +474,22 @@ class RealLocalChildRunner:
         reason; the boundary re-sanitises the output.
         """
         child_execution_id = self._child_execution_id(request)
+        # Operator-opt-in dispatch trace (MAGI_CHILD_RUNNER_EMPTY_DEBUG=1).
+        # The trace is BEFORE the try because seeing the entry log with no
+        # subsequent route_resolved line tells us _resolve_route itself
+        # raised (extremely unlikely; included for completeness).
+        _maybe_log_trace_entry(
+            self._env,
+            provider=getattr(request, "provider", None),
+            model=getattr(request, "model", None),
+        )
         try:
             # --- Resolve + validate the child's model route -------------------
             provider, model = self._resolve_route(request)
             route = self._validate_route(provider, model)
+            _maybe_log_trace_route(
+                self._env, provider=provider, model=model, validated=route is not None
+            )
             if route is None:
                 return self._blocked(
                     child_execution_id,
@@ -346,6 +505,12 @@ class RealLocalChildRunner:
 
             # --- Resolve the provider key (degrade if absent) -----------------
             config = self._resolve_provider_config(route_provider, route_model)
+            _maybe_log_trace_key(
+                self._env,
+                provider=route_provider,
+                model=route_model,
+                key_resolved=config is not None,
+            )
             if config is None:
                 return self._blocked(
                     child_execution_id,
@@ -353,7 +518,15 @@ class RealLocalChildRunner:
                 )
 
             # --- Drive ONE turn and collect the final text + evidence ---------
+            _maybe_log_trace_turn_enter(self._env, provider=route_provider, model=route_model)
             final_text, evidence_refs = await self._drive_one_turn(config, request)
+            _maybe_log_trace_turn_exit(
+                self._env,
+                provider=route_provider,
+                model=route_model,
+                final_text_len=len(final_text or ""),
+                evidence_refs_count=len(evidence_refs or ()),
+            )
         except asyncio.TimeoutError:
             # Hung/slow model exceeded the turn budget — degrade (never raise).
             return self._failed(
@@ -573,17 +746,19 @@ class RealLocalChildRunner:
         # (written by the producer in subagents.py, Task F1).  Absent or falsy
         # ⇒ "incognito" (safe default; byte-identical to today when the producer
         # did not set it, i.e. gate-OFF spawn paths).
-        memory_inherit_enabled = flag_bool(
-            "MAGI_CHILD_MEMORY_INHERIT_ENABLED", env=self._env
-        )
+        memory_inherit_enabled = flag_bool("MAGI_CHILD_MEMORY_INHERIT_ENABLED", env=self._env)
 
         # spawnDepth in request.metadata becomes parent_depth for derive().
         metadata = getattr(request, "metadata", None) or {}
         raw_depth = metadata.get("spawnDepth") if isinstance(metadata, dict) else None
-        parent_depth = int(raw_depth) if isinstance(raw_depth, int) and not isinstance(raw_depth, bool) else 0
-        parent_memory_mode: str = str(
-            metadata.get("parentMemoryMode") or "incognito"
-        ) if isinstance(metadata, dict) else "incognito"
+        parent_depth = (
+            int(raw_depth) if isinstance(raw_depth, int) and not isinstance(raw_depth, bool) else 0
+        )
+        parent_memory_mode: str = (
+            str(metadata.get("parentMemoryMode") or "incognito")
+            if isinstance(metadata, dict)
+            else "incognito"
+        )
 
         # --- Extract recipeRefs → pinned_recipe_pack_ids (TY2) ---------------
         # When MAGI_SPAWN_RECIPE_BIND_ENABLED is ON and the request carries
@@ -688,10 +863,7 @@ class RealLocalChildRunner:
             )
             legacy_pinned_refs: tuple[str, ...] = (
                 tuple(legacy_raw_refs)
-                if (
-                    legacy_raw_refs
-                    and flag_bool("MAGI_SPAWN_RECIPE_BIND_ENABLED", env=self._env)
-                )
+                if (legacy_raw_refs and flag_bool("MAGI_SPAWN_RECIPE_BIND_ENABLED", env=self._env))
                 else ()
             )
             workspace = self._workspace_root or tempfile.mkdtemp()
@@ -1009,9 +1181,11 @@ class RealLocalChildRunner:
     # ------------------------------------------------------------------ #
 
     def _blocked(self, child_execution_id: str, *, reason: str) -> dict[str, object]:
+        _maybe_log_trace_degraded(self._env, status="blocked", reason=reason)
         return self._degraded(child_execution_id, status="blocked", reason=reason)
 
     def _failed(self, child_execution_id: str, *, reason: str) -> dict[str, object]:
+        _maybe_log_trace_degraded(self._env, status="failed", reason=reason)
         return self._degraded(child_execution_id, status="failed", reason=reason)
 
     @staticmethod
