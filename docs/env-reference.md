@@ -147,8 +147,11 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED` (default off) — Hard-block denied materialised routes before provider calls (cli/engine._runner_policy_route_blocking_enabled). Intentionally NOT part of the default full-runtime profile: materialised denials can be stale while the configured model is still capable. Default OFF (route denials emit audit metadata and the turn continues).
 - `MAGI_RUNNER_POLICY_ROUTING_ENABLED` (default off) — Emit and attach safe runner-policy routes during phase routing (cli/engine._runner_policy_routing_enabled). Code default OFF; installed/local full-runtime profiles and hosted canary profiles opt in explicitly via env.
 - `MAGI_RUNTIME_PROFILE` (no default) — Runtime profile selector (safe/off/minimal/conservative/eval/lab). Safe profiles disable default-ON resilience seams; lab opts into the full experimental flat-flag tier (local-full + experimental extras).
+- `MAGI_SCHEDULER_DB_PATH` (no default) — Explicit path to the scheduler persistence DB. Empty uses ``<MAGI_STATE_DIR>/scheduler/jobs.db``.
 - `MAGI_SCHEDULER_KILL_SWITCH_ENABLED` (default off) — Force the scheduler executor into shadow mode regardless of per-bot config — emergency kill-switch for runaway jobs.
 - `MAGI_SCHEDULER_LOCK_DIR` (no default) — Override directory for scheduler advisory lock files. Empty uses ``~/.magi/scheduler/``. ``~`` is expanded and the path is confined to a safe parent at resolve time.
+- `MAGI_SCHEDULER_OWNER_DIGEST` (no default) — Owner-identity digest to embed on scheduler claims. Empty uses the runtime-resolved default.
+- `MAGI_SCHEDULER_READINESS_EXECUTION_MODE` (no default) — Execution mode for the scheduler readiness gate (consumed by ``gateway/watchers``). Empty defers to the watcher's resolved default.
 - `MAGI_SELF_INTROSPECTION_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Advertise the InspectSelfEvidence tool (default-ON full profile).
 - `MAGI_SERVE_EVIDENCE_ENABLED` (default off) — Write per-turn tool evidence JSONL from the hosted gate5b4c3 serving runner (default-OFF; default dir = observability home/evidence, overridable via MAGI_EVIDENCE_LEDGER_DIR).
 - `MAGI_SERVE_TOKEN_ESTIMATE_REAL` (default off) — Replace ``shadow/gate5b4c3_runner_input_adapter._estimate_tokens`` from UTF-8 byte length to a real character/BPE estimate (``shared/token_estimation.count_text_tokens``). Pre-E-14 the byte heuristic over-counted ASCII ~4× and CJK ~3×, so the serve path spuriously dropped Korean/CJK turns as ``input_token_budget_exceeded``. Default-OFF for soak per AGENTS.md flag-promotion-verification — flip to default-ON after canary verification. The byte cap (``max_sanitized_input_bytes``) is the real DoS guard, enforced at the contract validator and untouched by this flag.
@@ -195,6 +198,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_VISION_PROVIDER` (no default) — Optional provider for MAGI_VISION_MODEL (anthropic|openai|gemini|fireworks); unset inherits the main provider's credentials.
 - `MAGI_WORKER_ROUTING_LLM_ENABLED` (default off) — Honour a planner-emitted worker_role for subagent routing instead of keyword inference; strict default-OFF (OFF is byte-identical to today).
 - `MAGI_WORK_QUEUE_BOARD_API_ENABLED` (default off) — Mount the read-only work-queue board HTTP API.
+- `MAGI_WORK_QUEUE_CLAIMER` (no default) — Claimer id used on work-queue lease acquisitions. Empty uses the runtime-resolved default.
 - `MAGI_WORK_QUEUE_DB_PATH` (no default) — Explicit path to the work-queue SQLite db. Empty uses ``<MAGI_STATE_DIR>/work_queue.db`` (default ``~/.magi/work_queue.db``).
 - `MAGI_WORK_QUEUE_ENABLED` (default off) — Enable the durable multi-agent work-queue (task board + dispatcher).
 - `MAGI_WORK_QUEUE_EXECUTOR_ENABLED` (default off) — Enable the durable work-queue dispatcher tick loop.
