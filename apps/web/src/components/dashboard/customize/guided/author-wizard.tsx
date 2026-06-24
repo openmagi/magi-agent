@@ -119,7 +119,28 @@ type Lifecycle =
   // default 3) hard-caps the combined before+after invocations to
   // prevent runaway critic cost.
   | "before_llm_call"
-  | "after_llm_call";
+  | "after_llm_call"
+  // PR-F-LIFE3 Tier 2 — four NEW emitter slots that ride on existing
+  // runtime chokepoints. Fan-outs live in
+  // magi_agent.customize.lifecycle_audit (run_before_compaction_audit,
+  // run_after_compaction_audit, run_task_checkpoint_audit,
+  // run_artifact_created_audit) and are gated by
+  // MAGI_CUSTOMIZE_LIFECYCLE_EXTRA_EMITTERS_ENABLED. All four are
+  // audit-only — no mutator / deterministic_ref fan-out at these
+  // chokepoints in v1 (honest-degrade).
+  //   * before_compaction / after_compaction — wired around
+  //     MagiContextCompactionPlugin._apply_tail_trim (covers both
+  //     automatic threshold/real-token decision and manual /compact).
+  //   * on_task_checkpoint — wired at each work-queue task status
+  //     transition (claimed / completed / failed / short_circuited)
+  //     inside WorkQueueDriver.run_once.
+  //   * on_artifact_created — wired after a successful
+  //     artifact_provider.write_artifact ok-status branch inside
+  //     FileDeliveryBoundary.execute.
+  | "before_compaction"
+  | "after_compaction"
+  | "on_task_checkpoint"
+  | "on_artifact_created";
 type Scope = "always" | "coding" | "research" | "delivery" | "memory" | "task";
 // PR-F-MUT3 — "mutate" is a friendly grouping archetype that surfaces the
 // two mutator conditionKinds (prompt_injection + output_rewrite) as a
@@ -322,6 +343,17 @@ function stepPlan(lifecycle: Lifecycle): StepKey[] {
   if (lifecycle === "before_llm_call" || lifecycle === "after_llm_call") {
     return ["trigger", "condition", "specifics", "action", "name", "review"];
   }
+  // PR-F-LIFE3 Tier 2 — four new emitter slots (compaction / task
+  // checkpoint / artifact created) all fire OUTSIDE the tool boundary so
+  // they share the same 6-step plan as the other Tier 2 audit-only slots.
+  if (
+    lifecycle === "before_compaction"
+    || lifecycle === "after_compaction"
+    || lifecycle === "on_task_checkpoint"
+    || lifecycle === "on_artifact_created"
+  ) {
+    return ["trigger", "condition", "specifics", "action", "name", "review"];
+  }
   // Tool-bearing lifecycles (before_tool_use / after_tool_use): tool target
   // sub-fieldset renders inside TriggerStep, not as a separate step.
   return ["trigger", "condition", "specifics", "action", "name", "review"];
@@ -373,6 +405,14 @@ export function AuthorWizard({
       // PR-F-LIFE2 — per-LLM-call slots fire outside any tool boundary.
       || merged.lifecycle === "before_llm_call"
       || merged.lifecycle === "after_llm_call"
+      // PR-F-LIFE3 — compaction / task-checkpoint / artifact-created slots
+      // fire at runtime chokepoints outside any tool boundary. A stale
+      // ``specific`` tool pick from a prior lifecycle must not bleed into
+      // Review summaries.
+      || merged.lifecycle === "before_compaction"
+      || merged.lifecycle === "after_compaction"
+      || merged.lifecycle === "on_task_checkpoint"
+      || merged.lifecycle === "on_artifact_created"
     ) {
       merged.toolTarget = "any";
       merged.toolName = "";
@@ -654,6 +694,35 @@ const LIFECYCLE_OPTIONS: ReadonlyArray<LifecycleOption> = [
       "Fires once per LLM call within a turn — capped at 3 invocations per turn by default (env MAGI_CUSTOMIZE_LLM_CALL_AUDIT_BUDGET) to prevent runaway critic cost. Audit-only: inspects the model's just-emitted text without rewriting it.",
     tier: "tier2",
   },
+  // --- Tier 2 — wired in PR-F-LIFE3, audit-only ----------------------------
+  {
+    id: "before_compaction",
+    label: "Before compaction (audit-only)",
+    description:
+      "Fires immediately before the context-compaction plugin trims the model request — covers both the automatic threshold/real-token decision path and the manual /compact force path. Audit-only: inspects the about-to-be-trimmed context size without altering the compaction decision.",
+    tier: "tier2",
+  },
+  {
+    id: "after_compaction",
+    label: "After compaction (audit-only)",
+    description:
+      "Fires immediately after the context-compaction plugin completes a tail-drop or summary-head injection. Audit-only: inspects how much context was kept vs dropped (the compaction has already taken effect by this point).",
+    tier: "tier2",
+  },
+  {
+    id: "on_task_checkpoint",
+    label: "On task checkpoint (audit-only)",
+    description:
+      "Fires at each durable work-queue task status transition — claimed / completed / failed / short_circuited — inside the dispatcher tick. Audit-only: inspects per-task summaries / errors without interfering with dispatch.",
+    tier: "tier2",
+  },
+  {
+    id: "on_artifact_created",
+    label: "On artifact created (audit-only)",
+    description:
+      "Fires immediately after a successful artifact write through the file-delivery boundary (ok-status branch only). Audit-only: inspects the artifact ref + a bounded excerpt without rewriting the written bytes.",
+    tier: "tier2",
+  },
   {
     id: "on_session_start",
     label: "When a session starts",
@@ -882,6 +951,21 @@ function availableConditionKinds(
   // (no honest target — neither rewriting the outbound prompt nor
   // rewriting the model's response is supported by the audit-only wire).
   if (lifecycle === "before_llm_call" || lifecycle === "after_llm_call") {
+    return ["llm_criterion"];
+  }
+  // PR-F-LIFE3 Tier 2 — four new emitter slots accept ``llm_criterion``
+  // only. Honest-degrade matches the F-LIFE1/2 pattern: deterministic_ref
+  // / tool_perm / mutator kinds have no runtime fan-out at the compaction
+  // plugin, work-queue driver, or file-delivery boundary (the runtime
+  // sites call only the lifecycle_audit fan-out helpers). Exposing them
+  // here would let the operator persist a rule the backend ``_LEGAL``
+  // matrix rejects (validator-side block) AND the runtime cannot honor.
+  if (
+    lifecycle === "before_compaction"
+    || lifecycle === "after_compaction"
+    || lifecycle === "on_task_checkpoint"
+    || lifecycle === "on_artifact_created"
+  ) {
     return ["llm_criterion"];
   }
   // pre_final has no tool layer; target is ignored.
@@ -2021,6 +2105,23 @@ function availableArchetypes(lifecycle: Lifecycle): Archetype[] {
   if (lifecycle === "before_llm_call" || lifecycle === "after_llm_call") {
     return ["audit"];
   }
+  // PR-F-LIFE3 — four new emitter slots are audit-only. Block at the
+  // compaction / task-checkpoint / artifact-created chokepoints has no
+  // honest meaning: the compaction has already been decided by the
+  // surrounding plugin (the audit wraps the call, it does not gate it),
+  // a task transition has already been recorded by the work-queue store
+  // (the audit fires AFTER the state write), and an artifact has already
+  // been written by the provider (the audit fires AFTER the ok-status
+  // branch). Surfacing block would let the operator assemble a draft the
+  // backend ``_LEGAL`` matrix rejects.
+  if (
+    lifecycle === "before_compaction"
+    || lifecycle === "after_compaction"
+    || lifecycle === "on_task_checkpoint"
+    || lifecycle === "on_artifact_created"
+  ) {
+    return ["audit"];
+  }
   return ["block", "ask", "audit"];
 }
 
@@ -2165,6 +2266,19 @@ function targetEventPhrase(draft: Draft): string {
   }
   if (draft.lifecycle === "after_llm_call") {
     return "After each LLM call";
+  }
+  // PR-F-LIFE3 Tier 2 — four new emitter lifecycle phrasings.
+  if (draft.lifecycle === "before_compaction") {
+    return "Before context compaction";
+  }
+  if (draft.lifecycle === "after_compaction") {
+    return "After context compaction";
+  }
+  if (draft.lifecycle === "on_task_checkpoint") {
+    return "On a work-queue task checkpoint";
+  }
+  if (draft.lifecycle === "on_artifact_created") {
+    return "On a newly-created artifact";
   }
   if (draft.lifecycle === "before_tool_use") {
     return draft.toolTarget === "specific"
@@ -2319,7 +2433,13 @@ function ReviewStep({
             && draft.lifecycle !== "after_turn_end"
             // PR-F-LIFE2 — per-LLM-call lifecycles have no tool layer.
             && draft.lifecycle !== "before_llm_call"
-            && draft.lifecycle !== "after_llm_call" ? (
+            && draft.lifecycle !== "after_llm_call"
+            // PR-F-LIFE3 — compaction / task-checkpoint / artifact-created
+            // lifecycles fire at runtime chokepoints outside any tool boundary.
+            && draft.lifecycle !== "before_compaction"
+            && draft.lifecycle !== "after_compaction"
+            && draft.lifecycle !== "on_task_checkpoint"
+            && draft.lifecycle !== "on_artifact_created" ? (
             <>
               <dt className="text-secondary">Target</dt>
               <dd>{draft.toolTarget === "any" ? "any tool" : draft.toolName || "(unnamed tool)"}</dd>
@@ -2378,6 +2498,19 @@ function whenForLifecycle(draft: Draft): string {
   }
   if (draft.lifecycle === "after_llm_call") {
     return "After each LLM call";
+  }
+  // PR-F-LIFE3 Tier 2 — describe the four new emitter lifecycle slots.
+  if (draft.lifecycle === "before_compaction") {
+    return "Before context compaction";
+  }
+  if (draft.lifecycle === "after_compaction") {
+    return "After context compaction";
+  }
+  if (draft.lifecycle === "on_task_checkpoint") {
+    return "On a work-queue task checkpoint";
+  }
+  if (draft.lifecycle === "on_artifact_created") {
+    return "On a newly-created artifact";
   }
   if (draft.lifecycle === "before_tool_use") {
     return draft.toolTarget === "specific"

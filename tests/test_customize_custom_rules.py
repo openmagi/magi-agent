@@ -509,3 +509,116 @@ def test_life2_firesat_slots_listed_in_FIRES_AT():
 
     assert "before_llm_call" in FIRES_AT
     assert "after_llm_call" in FIRES_AT
+
+
+# ---------------------------------------------------------------------------
+# PR-F-LIFE3 — four NEW emitter slots: before_compaction / after_compaction /
+# on_task_checkpoint / on_artifact_created. All four accept (llm_criterion +
+# audit) ONLY. Honest-degrade matches the F-LIFE1/2 pattern: deterministic_ref
+# / tool_perm / mutator kinds have no runtime fan-out at these chokepoints
+# (the compaction plugin / work-queue driver / file-delivery boundary call
+# only the lifecycle_audit fan-out helpers). Wired by:
+#   * magi_agent/adk_bridge/context_compaction.py
+#     (run_before_compaction_audit + run_after_compaction_audit)
+#   * magi_agent/missions/work_queue/driver.py
+#     (run_task_checkpoint_audit at claimed/completed/failed/short_circuited)
+#   * magi_agent/artifacts/file_delivery.py
+#     (run_artifact_created_audit on the write_artifact ok-status branch)
+# All gated by MAGI_CUSTOMIZE_LIFECYCLE_EXTRA_EMITTERS_ENABLED.
+# ---------------------------------------------------------------------------
+
+
+def test_llm_criterion_audit_at_before_compaction_accepted():
+    rule = _llm(firesAt="before_compaction", action="audit")
+    assert validate_custom_rule(rule) == []
+
+
+def test_llm_criterion_audit_at_after_compaction_accepted():
+    rule = _llm(firesAt="after_compaction", action="audit")
+    assert validate_custom_rule(rule) == []
+
+
+def test_llm_criterion_audit_at_on_task_checkpoint_accepted():
+    rule = _llm(firesAt="on_task_checkpoint", action="audit")
+    assert validate_custom_rule(rule) == []
+
+
+def test_llm_criterion_audit_at_on_artifact_created_accepted():
+    rule = _llm(firesAt="on_artifact_created", action="audit")
+    assert validate_custom_rule(rule) == []
+
+
+def test_llm_criterion_block_at_before_compaction_rejected():
+    """Block at a compaction chokepoint has no honest meaning: the
+    compaction decision is owned by the surrounding plugin, not the audit
+    fan-out — keep audit-only in v1."""
+    rule = _llm(firesAt="before_compaction", action="block")
+    errs = validate_custom_rule(rule)
+    assert any("before_compaction" in e and "audit" in e for e in errs), errs
+
+
+def test_llm_criterion_block_at_after_compaction_rejected():
+    rule = _llm(firesAt="after_compaction", action="block")
+    errs = validate_custom_rule(rule)
+    assert any("after_compaction" in e and "audit" in e for e in errs), errs
+
+
+def test_llm_criterion_retry_at_on_task_checkpoint_rejected():
+    """retry has no honest meaning at the work-queue dispatcher boundary
+    (the task transition has already been recorded by the time the audit
+    fires)."""
+    rule = _llm(firesAt="on_task_checkpoint", action="retry")
+    errs = validate_custom_rule(rule)
+    assert any("on_task_checkpoint" in e and "audit" in e for e in errs), errs
+
+
+def test_llm_criterion_block_at_on_artifact_created_rejected():
+    """Block at on_artifact_created is honestly impossible — the artifact
+    has already been written by the provider by the time this emit
+    fires. Keep audit-only."""
+    rule = _llm(firesAt="on_artifact_created", action="block")
+    errs = validate_custom_rule(rule)
+    assert any("on_artifact_created" in e and "audit" in e for e in errs), errs
+
+
+def test_deterministic_ref_at_before_compaction_rejected_no_runtime_fanout():
+    """deterministic_ref has no fan-out at the four new emitter slots —
+    the surrounding runtime sites only call the lifecycle_audit helpers
+    (which consume llm_criterion only). Reject so operators don't
+    persist inert rules."""
+    rule = _det(firesAt="before_compaction", action="audit")
+    errs = validate_custom_rule(rule)
+    assert any("before_compaction" in e for e in errs), errs
+
+
+def test_deterministic_ref_at_on_task_checkpoint_rejected_no_runtime_fanout():
+    rule = _det(firesAt="on_task_checkpoint", action="audit")
+    errs = validate_custom_rule(rule)
+    assert any("on_task_checkpoint" in e for e in errs), errs
+
+
+def test_deterministic_ref_at_on_artifact_created_rejected_no_runtime_fanout():
+    rule = _det(firesAt="on_artifact_created", action="audit")
+    errs = validate_custom_rule(rule)
+    assert any("on_artifact_created" in e for e in errs), errs
+
+
+def test_tool_perm_at_before_compaction_rejected():
+    """tool_perm has no honest mapping at a compaction chokepoint (no
+    tool invocation is in flight at the model-callback before-trim
+    boundary)."""
+    rule = _tool(firesAt="before_compaction", action="block")
+    errs = validate_custom_rule(rule)
+    assert any("before_compaction" in e for e in errs), errs
+
+
+def test_life3_firesat_slots_listed_in_FIRES_AT():
+    """Guard against drift — all four PR-F-LIFE3 emitter slots must be
+    members of FIRES_AT so the validator's ``firesAt must be one of …``
+    check accepts them."""
+    from magi_agent.customize.custom_rules import FIRES_AT
+
+    assert "before_compaction" in FIRES_AT
+    assert "after_compaction" in FIRES_AT
+    assert "on_task_checkpoint" in FIRES_AT
+    assert "on_artifact_created" in FIRES_AT

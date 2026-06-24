@@ -16,6 +16,13 @@ runner is async, so each task is run via ``asyncio.run(runner.run_task(...))``.
 When ``run_once`` is offloaded to a thread by a ``run_forever`` loop, blocking
 is safe.
 
+PR-F-LIFE3: at each task status transition (claimed / completed / failed /
+short_circuited) the driver fires the ``on_task_checkpoint`` custom_rule
+audit fan-out behind a fail-open envelope so a misbehaving rule cannot
+wedge dispatch. The emit is gated by
+:func:`magi_agent.customize.lifecycle_audit.lifecycle_extra_emitters_enabled`
+so the OFF contract is byte-identical to before this PR.
+
 Forbidden imports: google.adk, network, subprocess (runner is injected).
 """
 from __future__ import annotations
@@ -30,6 +37,56 @@ from magi_agent.missions.work_queue.store import WorkQueueStore
 from magi_agent.missions.work_queue.runner import WorkTaskRunner
 
 logger = logging.getLogger(__name__)
+
+
+def _emit_task_checkpoint_sync(
+    *, task_id: str, checkpoint_kind: str, summary_text: str
+) -> None:
+    """PR-F-LIFE3 sync helper: fire the ``on_task_checkpoint`` audit fan-out.
+
+    ``run_once`` is synchronous (the work-queue driver runs in a worker
+    thread) so the async fan-out is invoked via ``asyncio.run`` — which
+    must NOT collide with an outer event loop. The helper checks the
+    triple-gate first, then short-circuits on OFF, so the OFF cost is
+    one helper call + one comparison. On ON the call is wrapped in a
+    fresh asyncio loop. Fail-open at every step: any failure (import
+    error, busy event loop, fan-out raise) leaves the dispatcher tick
+    intact.
+    """
+    try:
+        from magi_agent.customize.lifecycle_audit import (
+            lifecycle_extra_emitters_enabled,
+            run_task_checkpoint_audit,
+        )
+
+        if not lifecycle_extra_emitters_enabled():
+            return None
+        try:
+            from magi_agent.adk_bridge.lifecycle_llm_call_control import (
+                _build_critic_factory,
+            )
+
+            factory = _build_critic_factory()
+        except Exception:
+            factory = None
+        try:
+            asyncio.run(
+                run_task_checkpoint_audit(
+                    task_id=task_id,
+                    checkpoint_kind=checkpoint_kind,
+                    summary_text=summary_text,
+                    model_factory=factory,
+                )
+            )
+        except RuntimeError:
+            # An outer event loop is already running (unexpected on this
+            # sync path, but defensive): drop the emit rather than
+            # raising into the dispatcher.
+            return None
+    except Exception:
+        # Fail-open: never break dispatch.
+        return None
+    return None
 
 
 class WorkQueueTickResult(BaseModel):
@@ -112,6 +169,12 @@ class WorkQueueDriver:
                 continue
 
             claimed += 1
+            # PR-F-LIFE3: on_task_checkpoint emit — claimed transition.
+            _emit_task_checkpoint_sync(
+                task_id=claimed_task.id,
+                checkpoint_kind="claimed",
+                summary_text=claimed_task.title,
+            )
 
             # Exactly-once at dispatch: keyed tasks must be enqueued via
             # store.create_idempotent (unique idempotency_key constraint).
@@ -125,6 +188,13 @@ class WorkQueueDriver:
                 if prior is not None:
                     self._store.complete(claimed_task.id, result=prior.result)
                     short_circuited += 1
+                    # PR-F-LIFE3: on_task_checkpoint emit — short-circuit
+                    # transition (treated as completed-via-dedupe).
+                    _emit_task_checkpoint_sync(
+                        task_id=claimed_task.id,
+                        checkpoint_kind="short_circuited",
+                        summary_text=prior.result or "",
+                    )
                     continue
 
             try:
@@ -137,11 +207,23 @@ class WorkQueueDriver:
                     error=f"unhandled exception: {exc}",
                 )
                 failed += 1
+                # PR-F-LIFE3: on_task_checkpoint emit — failed (exception).
+                _emit_task_checkpoint_sync(
+                    task_id=task.id,
+                    checkpoint_kind="failed",
+                    summary_text=f"unhandled exception: {exc}",
+                )
                 continue
 
             if result.outcome == "completed":
                 self._store.complete(task.id, result=result.summary)
                 completed += 1
+                # PR-F-LIFE3: on_task_checkpoint emit — completed transition.
+                _emit_task_checkpoint_sync(
+                    task_id=task.id,
+                    checkpoint_kind="completed",
+                    summary_text=result.summary or "",
+                )
             else:
                 self._store.record_failure(
                     task.id,
@@ -149,6 +231,12 @@ class WorkQueueDriver:
                     error=result.error,
                 )
                 failed += 1
+                # PR-F-LIFE3: on_task_checkpoint emit — failed transition.
+                _emit_task_checkpoint_sync(
+                    task_id=task.id,
+                    checkpoint_kind="failed",
+                    summary_text=result.error or "",
+                )
 
         return WorkQueueTickResult(
             reclaimed=reclaimed,

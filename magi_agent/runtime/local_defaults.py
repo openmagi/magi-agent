@@ -216,6 +216,18 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     # hosted serve stays byte-identical (the ADK plugin is not
     # registered when the master flag is OFF).
     "MAGI_CUSTOMIZE_LLM_CALL_HOOKS_ENABLED",
+    # PR-F-LIFE3 Tier 2 lifecycle expansion (four new emitter slots):
+    # activate audit-only custom_rule gate sites at before_compaction,
+    # after_compaction (wired around MagiContextCompactionPlugin
+    # ._apply_tail_trim), on_task_checkpoint (wired at each work-queue
+    # task status transition inside WorkQueueDriver.run_once), and
+    # on_artifact_created (wired after a successful
+    # FileDeliveryBoundary.execute write_artifact ok-status branch). All
+    # four fan-outs are no-ops without authored rules; lab opts in so
+    # dogfood turns can exercise the wizard's new lifecycle options
+    # end-to-end. Strict default-OFF in the registry so a fresh
+    # install / hosted serve stay byte-identical.
+    "MAGI_CUSTOMIZE_LIFECYCLE_EXTRA_EMITTERS_ENABLED",
     # PR-F-MUT1 prompt_injection mutator: append to a tool's arguments before
     # dispatch OR append a new section to the assembled system prompt. Both
     # wires are no-ops without authored rules; lab opts in so dogfood turns
