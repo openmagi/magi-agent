@@ -998,7 +998,7 @@ class Gate5B4C3LiveRunnerBoundary:
                     # cause of fail-closed "runner_incomplete" turns. Continue while
                     # the model still has unsatisfied tool-call intent we can run.
                     if (
-                        event_count >= 64
+                        event_count >= _MANUAL_TOOL_EVENT_LIMIT
                         or not function_calls
                         or function_responses_seen
                         or not self._adk_tools
@@ -1036,7 +1036,7 @@ class Gate5B4C3LiveRunnerBoundary:
                         ],
                         role="user",
                     )
-                    if event_count >= 64:
+                    if event_count >= _MANUAL_TOOL_EVENT_LIMIT:
                         break
         except TimeoutError:
             return _result(

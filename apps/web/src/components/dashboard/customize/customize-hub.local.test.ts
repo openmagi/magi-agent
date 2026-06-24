@@ -84,3 +84,52 @@ describe("CustomizeHub — Policy unification (PR-E1)", () => {
     expect(src).toContain("loadBudgets");
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// PR-F-UX5 — evidence vs verifier/condition split + counter formulas
+// ---------------------------------------------------------------------------
+
+
+describe("CustomizeHub — PR-F-UX5 counters + built-in judgment merge", () => {
+  it("imports extractBuiltinJudgmentRefs for the Conditions tab merge", () => {
+    expect(src).toContain("extractBuiltinJudgmentRefs");
+  });
+
+  it("derives builtinJudgments from the catalog (sourced from judgmentMenu)", () => {
+    // The source of truth for built-in verifier primitives is
+    // ``catalog.verification.judgmentMenu``; the hub must memoise the
+    // extraction on the catalog (not the policies) so a customize PATCH
+    // does not re-run it unnecessarily.
+    expect(src).toContain("extractBuiltinJudgmentRefs(data.catalog)");
+    expect(src).toContain("builtinJudgments");
+  });
+
+  it("Evidence sub-tab counter sums catalog.evidenceMenu + user-consumed evidenceTypes", () => {
+    // F-UX5 spec: the counter must reflect the actual count of evidence
+    // types (not just the F2.5 user-only count). The body of the tab
+    // renders both halves so the counter mirrors the visible row count.
+    expect(src).toContain(
+      "data.catalog.verification.evidenceMenu.length",
+    );
+    expect(src).toContain("+ evidenceTypes.length");
+  });
+
+  it("Conditions sub-tab counter sums builtinJudgments + user-authored conditions", () => {
+    // F-UX5 spec: counter = judgmentMenu.length +
+    // extractNamedConditions(policies).length. The Conditions tab body
+    // merges both halves under an origin badge; the counter equals the row
+    // count there.
+    expect(src).toContain("builtinJudgments.length + conditions.length");
+  });
+
+  it("ReusableConditionsTab receives builtinEntries={builtinJudgments}", () => {
+    // The Conditions tab body needs the built-in list as a separate prop
+    // (origin-badged differently from user-authored conditions); without
+    // this wire the merge happens at hub-level but the tab never sees the
+    // built-in half.
+    expect(src).toMatch(
+      /<ReusableConditionsTab[\s\S]*?builtinEntries=\{builtinJudgments\}/,
+    );
+  });
+});
