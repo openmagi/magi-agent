@@ -70,8 +70,12 @@ from magi_agent.recipes.ledger_task import (
 # ---------------------------------------------------------------------------
 
 def _ledger_orchestrator_enabled() -> bool:
-    """Return True when ``MAGI_LEDGER_ORCHESTRATOR_ENABLED=true`` in the env."""
-    return os.environ.get("MAGI_LEDGER_ORCHESTRATOR_ENABLED", "").lower() in ("1", "true", "yes")
+    """Return True when ``MAGI_LEDGER_ORCHESTRATOR_ENABLED`` truthy."""
+    # I-4: routed through the typed flag registry. Pre-I-4 truthy set
+    # ``{1, true, yes}`` widens to canonical ``{1, true, yes, on}``.
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_LEDGER_ORCHESTRATOR_ENABLED")
 
 
 # ---------------------------------------------------------------------------

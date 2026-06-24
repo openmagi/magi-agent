@@ -400,11 +400,11 @@ def _prompt_transform_hooks_enabled() -> bool:
     Follows the same convention as ``MAGI_PROMPT_CACHE_ENABLED`` /
     ``MAGI_SESSION_PERSISTENCE_ENABLED`` — truthy on ``"1"``/``"true"``/``"yes"``.
     """
-    return os.environ.get("MAGI_PROMPT_TRANSFORM_HOOKS_ENABLED", "0").lower() in (
-        "1",
-        "true",
-        "yes",
-    )
+    # I-4: routed through the typed flag registry. Pre-I-4 truthy set
+    # ``{1, true, yes}`` widens to canonical ``{1, true, yes, on}``.
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_PROMPT_TRANSFORM_HOOKS_ENABLED")
 
 
 def _available_subagent_models_block() -> str:

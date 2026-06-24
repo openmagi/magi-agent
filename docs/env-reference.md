@@ -45,6 +45,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_CREDENTIAL_AWARENESS_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Inject a redacted summary of registered Agent Vault credentials into the system prompt each turn so the agent can acknowledge that a credential EXISTS (service / auth scheme / approval requirement) without ever seeing the secret value (the broker injects it on egress). Profile-aware default-ON (full runtime profile; OFF under safe/eval). With no registered credentials this is byte-identical (the block is empty).
 - `MAGI_CREDENTIAL_GRANT_TTL_S` (default `3600`) — Lifetime in seconds of an in-chat credential-use approval grant. After this window the egress proxy re-prompts for the credential instead of injecting silently forever (a 'remember' approval, when wired, writes a non-expiring grant). 0 or negative disables expiry (approve-once-persistent).
 - `MAGI_CROSS_VERIFY_ENABLED` (default off) — Enable the cross-verification gate over spawned-agent results.
+- `MAGI_CUSTOMIZE` (no default) — Explicit path to the customize.json store. Empty falls back to ``<MAGI_CONFIG>'s dir>/customize.json`` or ``~/.magi/customize.json``.
 - `MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Load and compile dashboard Customize *custom rules* (~/.magi/customize.json verification.custom_rules). Profile-aware default-ON (full profile; OFF under safe/eval). Requires MAGI_CUSTOMIZE_VERIFICATION_ENABLED. With no custom rules this is byte-identical (rules persist but add nothing until the user builds them).
 - `MAGI_CUSTOMIZE_NL_RULE_COMPILER_ENABLED` (default off) — Enable the POST /v1/app/customize/rules/compile endpoint: a single NL → rule compiler that auto-routes the user's policy to one of six backing primitives (deterministic_ref / tool_perm / llm_criterion / shacl_constraint / seam_spec / custom_check). Returns a structured draft + LLM critic verdict + deterministic schemaIssues; the caller activates by hitting the matching existing PUT route (custom-rules / seams / dashboard-checks). Registration-time only — never on the runtime hot path. Requires a configured provider/key; fail-open (returns ok=False) when no model is available. Strict default-OFF.
 - `MAGI_CUSTOMIZE_SEAM_SPEC_ENABLED` (default off) — Enable the customize PresetSeam NL-spec endpoints: POST /v1/app/customize/seams/compile (NL→SeamSpec via LLM, registration-time only), PUT /v1/app/customize/seams (persist an approved spec), DELETE /v1/app/customize/seams/{id}. OFF keeps the routes dormant and the runtime ``seam_for_user`` returns the byte-identical builtin seam (no spec is read from the overrides file). Strict default-OFF; the runtime hot path is unchanged.
@@ -69,6 +70,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_EVIDENCE_COMPLETION_GATE_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Block turn completion when required evidence is missing (default-ON full profile).
 - `MAGI_EVIDENCE_LEDGER_DIR` (no default) — Directory for opt-in durable per-session JSONL evidence ledgers; unset keeps the lean in-memory live view only.
 - `MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Build per-turn EvidenceLedger objects (default-ON full profile).
+- `MAGI_EXECUTION_TRACE` (default off) — Enable telemetry execution-trace context capture. Default-OFF; ON adds trace bookkeeping per turn.
 - `MAGI_EXTERNAL_HOOKS_ENABLED` (default off) — Master switch for the external hooks framework (LLM-classified + HTTP webhook tap callbacks). Default-OFF.
 - `MAGI_FACTS_REPLAN_ENABLED` (default off) — Inject a periodic in-context facts survey (given/learned/look-up/derive) + plan refresh into the live model loop every N working steps.
 - `MAGI_FACTS_REPLAN_INTERVAL` (default `4`) — Working steps between facts surveys (>= 1; a non-positive value disables the control).
@@ -97,6 +99,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_LEARNING_INJECTION_ENABLED` (default off) — Inject learned skills/refinements into the runtime prompt.
 - `MAGI_LEARNING_LIVE_ENABLED` (default off) — Allow the learning loop to run with live model-backed proposers.
 - `MAGI_LEARNING_REFLECTION_ENABLED` (default off) — Enable post-turn reflection that feeds the learning loop.
+- `MAGI_LEDGER_ORCHESTRATOR_ENABLED` (default off) — Enable the ledger-orchestrator recipe seam. Default-OFF (GAIA benchmark code).
 - `MAGI_LLM_API_BASE` (no default) — Optional LiteLlm ``api_base`` URL routing every model build through a gateway (in-cluster api-proxy holding provider keys). Unset ⇒ direct-to-provider (default).
 - `MAGI_LLM_API_HEADER` (default `x-api-key`) — Auth header name used to forward ``MAGI_LLM_API_KEY`` to the gateway (default ``x-api-key``). Empty resolves to the default.
 - `MAGI_LLM_API_KEY` (no default) — Credential paired with ``MAGI_LLM_API_BASE``: surfaced as the litellm ``api_key`` AND an explicit auth header so OpenAI-prefixed models still present the gateway token. SENSITIVE — never logged or persisted; treat as a secret like ``MAGI_DISCORD_BOT_TOKEN``.
@@ -124,6 +127,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_OBSERVABILITY_ENABLED` (default off) — Enable the hook-tap observability module (bot-activity visibility).
 - `MAGI_OBS_CHANNEL_INTERVAL_S` (default `10`) — Seconds between observability channel snapshots.
 - `MAGI_OBS_HEALTH_INTERVAL_S` (default `5`) — Seconds between observability health snapshots.
+- `MAGI_OBS_HOME` (no default) — Override for the observability home directory. Empty uses ``<cwd>/.openmagi``.
 - `MAGI_OBS_MAX_EVENTS` (default `200000`) — Maximum events kept in the observability store before pruning.
 - `MAGI_OBS_MISSION_INTERVAL_S` (default `30`) — Seconds between observability mission snapshots.
 - `MAGI_OBS_REPLAY_BUFFER` (default `200`) — Observability event replay buffer size.
@@ -137,6 +141,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_PROMPT_EXAMPLES_ENABLED` (default off) — Append the <action_discipline_examples> prompt block (positive/negative contrast pairs: act-vs-ask, finish-vs-defer) in build_cli_instruction.
 - `MAGI_PROMPT_REDFLAGS_ENABLED` (default off) — Append the <red_flags> anti-rationalization prompt block ("this thought means stop and correct course" table) in build_cli_instruction.
 - `MAGI_PROMPT_SEARCH_RULES_ENABLED` (default off) — Append the search-decision heuristics prompt block in build_cli_instruction. Even when ON the block only fires when web tools are available (BRAVE_API_KEY AND FIRECRAWL_API_KEY).
+- `MAGI_PROMPT_TRANSFORM_HOOKS_ENABLED` (default off) — Run runtime/message_builder's prompt-transform hooks around each turn's prompt build. Default-OFF.
 - `MAGI_READ_LEDGER_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Record full reads in the per-turn ledger and enforce read-before-edit on the gate5b full toolhost (default-ON full profile).
 - `MAGI_READ_QUALITY_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Quality-of-life FileRead output: 1-indexed line numbers, line/byte caps with continue-offset footer, binary detection, did-you-mean filename suggestions on miss (default-ON full profile).
 - `MAGI_RECIPE_INTENT_BINDING_ENABLED` (default off) — Bind emit-only recipe intents (provider / channel / artifact / scheduler) to hint-level runner effects (doc 05 PR-3 / A1-G2). Strict default-OFF (OFF byte-identical to today). Hard enforcement stays deferred to 14-controlplane.

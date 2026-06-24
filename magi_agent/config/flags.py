@@ -2218,6 +2218,51 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
+    # --- Misc knobs (I-4 batch 15) -----------------------------------------
+    FlagSpec(
+        name="MAGI_CUSTOMIZE",
+        default="",
+        scope="public",
+        stage="stage2",
+        summary=(
+            "Explicit path to the customize.json store. Empty falls "
+            "back to ``<MAGI_CONFIG>'s dir>/customize.json`` or "
+            "``~/.magi/customize.json``."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_OBS_HOME",
+        default="",
+        scope="public",
+        stage="stage2",
+        summary=(
+            "Override for the observability home directory. Empty uses "
+            "``<cwd>/.openmagi``."
+        ),
+        kind="str",
+    ),
+    _b(
+        "MAGI_LEDGER_ORCHESTRATOR_ENABLED",
+        summary=(
+            "Enable the ledger-orchestrator recipe seam. Default-OFF "
+            "(GAIA benchmark code)."
+        ),
+    ),
+    _b(
+        "MAGI_EXECUTION_TRACE",
+        summary=(
+            "Enable telemetry execution-trace context capture. "
+            "Default-OFF; ON adds trace bookkeeping per turn."
+        ),
+    ),
+    _b(
+        "MAGI_PROMPT_TRANSFORM_HOOKS_ENABLED",
+        summary=(
+            "Run runtime/message_builder's prompt-transform hooks "
+            "around each turn's prompt build. Default-OFF."
+        ),
+    ),
 )
 
 

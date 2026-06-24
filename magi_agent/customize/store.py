@@ -43,10 +43,13 @@ _USER_RULES_MAX = 20_000
 
 def customize_path() -> Path:
     """Locate customize.json beside the runtime config (env-overridable)."""
-    override = os.environ.get("MAGI_CUSTOMIZE")
+    # I-4: routed through the typed flag registry.
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    override = flag_str("MAGI_CUSTOMIZE") or None
     if override:
         return Path(override)
-    config = os.environ.get("MAGI_CONFIG")
+    config = flag_str("MAGI_CONFIG") or None
     if config:
         return Path(config).parent / "customize.json"
     return Path.home() / ".magi" / "customize.json"
