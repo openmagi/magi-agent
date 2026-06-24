@@ -952,13 +952,10 @@ def register_chat_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         try:
             payload = await request.json()
         except (JSONDecodeError, ValueError):
-            if not route_config.enabled:
-                return _fallback_response(
-                    status_code=503,
-                    status="python_disabled",
-                    reason="canary_gate_disabled",
-                    runtime=runtime,
-                )
+            # H-36: the outer ``if not route_config.enabled`` guard at the
+            # top of this handler already short-circuits when the route is
+            # disabled. Re-checking it here was dead defensive scaffolding;
+            # malformed JSON unconditionally returns 400 ``malformed_json``.
             return _fallback_response(
                 status_code=400,
                 status="python_error",

@@ -72,14 +72,41 @@ class JinaReaderProvider:
         default_headers: dict[str, str] = {"X-Return-Format": "markdown"}
         if api_key:
             default_headers["Authorization"] = f"Bearer {api_key}"
+        # H-36: track whether we OWN the httpx.Client so ``close()`` knows
+        # to close it. An injected client belongs to the caller and we
+        # must never close it on their behalf.
+        self._owns_client: bool = client is None
         resolved_client = client if client is not None else httpx.Client(
             headers=default_headers,
             follow_redirects=False,
         )
+        self._client: httpx.Client = resolved_client
         self._fetch_provider = LiveFetchProvider(
             client=resolved_client,
             timeout_s=self._timeout_s,
         )
+        self._closed: bool = False
+
+    def close(self) -> None:
+        """Close the owned httpx.Client. Idempotent. A caller-supplied
+        client (injected via ``client=...``) is NOT closed — the caller
+        owns that lifecycle.
+        """
+        if self._closed:
+            return
+        self._closed = True
+        if self._owns_client:
+            try:
+                self._client.close()
+            except Exception:
+                # Best-effort cleanup; never raise from ``close()``.
+                pass
+
+    def __enter__(self) -> "JinaReaderProvider":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
 
     def reader(self, request: object) -> Mapping[str, object]:
         """Fetch ``request.url`` via Jina Reader → ``{"url", "title", "content", "metadata"}``.
