@@ -54,10 +54,13 @@ _SECRET_TEXT_RE = re.compile(
 
 def approvals_path() -> Path:
     """Locate approvals.json beside the runtime config (env-overridable)."""
-    override = os.environ.get("MAGI_CREDENTIAL_APPROVALS")
+    # I-4: routed through the typed flag registry.
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    override = flag_str("MAGI_CREDENTIAL_APPROVALS") or None
     if override:
         return Path(override)
-    config = os.environ.get("MAGI_CONFIG")
+    config = flag_str("MAGI_CONFIG") or None
     if config:
         return Path(config).parent / "credential_approvals.json"
     return Path.home() / ".magi" / "credential_approvals.json"
