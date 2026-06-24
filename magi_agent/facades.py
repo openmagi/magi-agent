@@ -11,7 +11,6 @@ from magi_agent.hooks.bus import HookBus, HookBusRunResult
 from magi_agent.hooks.context import HookContext
 from magi_agent.hooks.manifest import HookPoint
 from magi_agent.hooks.replace_payloads import (
-    AfterToolUseReplace,
     BeforeToolUseReplace,
     coerce_replace_payload,
 )
@@ -51,18 +50,6 @@ async def execute_tool_with_hooks(
     :func:`magi_agent.customize.prompt_injection.apply_prompt_injection_to_tool_args`.
     The HookBus replace branch runs FIRST so a hook-authored full replacement
     composes deterministically with the rule-driven append.
-
-    F-MUT2: symmetric wire on the AFTER_TOOL_USE side. When the after-hook
-    bus returns ``final_action == "replace"`` the typed payload
-    :class:`AfterToolUseReplace` overlays its non-None fields
-    (``result_text`` → ``output``, ``status``, ``structured_data`` →
-    ``metadata``) onto the dispatched :class:`ToolResult`. Then, when the
-    F-MUT2 master flag ``MAGI_CUSTOMIZE_OUTPUT_REWRITE_ENABLED`` is ON, any
-    enabled ``output_rewrite`` rules get a chance to rewrite the result text
-    via
-    :func:`magi_agent.customize.output_rewrite.apply_output_rewrite_to_tool_result`.
-    The HookBus replace branch runs FIRST so a hook-authored full overlay
-    composes deterministically with the rule-driven redact.
     """
     before_result = hook_bus.run(
         point=HookPoint.BEFORE_TOOL_USE,
@@ -177,69 +164,6 @@ def _maybe_apply_prompt_injection_to_tool_args(
         return apply_prompt_injection_to_tool_args(arguments, rules, tool_name)
     except Exception:  # noqa: BLE001 — fail-open
         return arguments
-
-
-def _maybe_apply_output_rewrite(
-    *, result: ToolResult, tool_name: str
-) -> ToolResult:
-    """F-MUT2 helper: project ``output_rewrite`` rules onto ``result``.
-
-    Triple-gated by :func:`_output_rewrite_enabled` (master flag +
-    verification + custom_rules). Fail-open: any import / I/O / validation
-    error returns the unmodified ``result``. Returns the original instance
-    when no rules apply (byte-identical to today's behavior).
-    """
-    try:
-        if not _output_rewrite_enabled():
-            return result
-        # Lazy imports keep the facades module's hot-path free of
-        # customize/ transitive imports when the flag is OFF.
-        from magi_agent.customize.output_rewrite import (  # noqa: PLC0415
-            apply_output_rewrite_to_tool_result,
-        )
-        from magi_agent.customize.store import load_overrides  # noqa: PLC0415
-        from magi_agent.customize.verification_policy import (  # noqa: PLC0415
-            CustomizeVerificationPolicy,
-        )
-
-        policy = CustomizeVerificationPolicy.from_overrides(load_overrides())
-        rules = policy.enabled_output_rewrite_rules(fires_at="after_tool_use")
-        if not rules:
-            return result
-        return apply_output_rewrite_to_tool_result(result, rules, tool_name)
-    except Exception:  # noqa: BLE001 — fail-open
-        return result
-
-
-def _output_rewrite_enabled() -> bool:
-    """Triple-gate check used by the F-MUT2 facades wire.
-
-    Returns ``True`` only when:
-
-    * ``MAGI_CUSTOMIZE_OUTPUT_REWRITE_ENABLED`` is strict-truthy ON,
-    * ``MAGI_CUSTOMIZE_VERIFICATION_ENABLED`` resolves ON via the profile-aware
-      reader (full / lab profile; OFF under safe/eval),
-    * ``MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED`` resolves ON via the profile-aware
-      reader.
-
-    Fail-open: any import error returns ``False`` so the call site stays a
-    no-op when the flag layer cannot be read.
-    """
-    try:
-        from magi_agent.config.flags import (  # noqa: PLC0415
-            flag_bool,
-            flag_profile_bool,
-        )
-    except Exception:
-        return False
-    try:
-        return (
-            flag_bool("MAGI_CUSTOMIZE_OUTPUT_REWRITE_ENABLED")
-            and flag_profile_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED")
-            and flag_profile_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED")
-        )
-    except Exception:
-        return False
 
 
 def _prompt_injection_enabled() -> bool:

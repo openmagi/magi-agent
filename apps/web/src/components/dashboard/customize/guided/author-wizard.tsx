@@ -130,13 +130,7 @@ type ConditionKind =
   // append a new system-prompt section). SpecificsStep branches on lifecycle
   // to render the right picker; both surfaces compile to the new backend
   // ``prompt_injection`` kind.
-  | "prompt_injection"
-  // PR-F-MUT2 — second mutator kind. Single lifecycle slot
-  // (after_tool_use → re.sub-based redact of tool output text BEFORE the
-  // model reads it). SpecificsStep renders the redact picker (pattern +
-  // replacement + scope + isRegex); compiles to the new backend
-  // ``output_rewrite`` kind.
-  | "output_rewrite";
+  | "prompt_injection";
 
 
 // PR-F3: deterministic operators for field_constraint. The eight
@@ -215,14 +209,6 @@ interface Draft {
   piValue: string;
   piConditionEnabled: boolean;
   piConditionPattern: string;
-  // PR-F-MUT2 — output_rewrite draft fields. Single lifecycle slot
-  // (after_tool_use); shape compiles to the backend ``output_rewrite``
-  // payload (mode locked to "redact" in v1; pattern + replacement + scope
-  // + isRegex; toolMatch derived from draft.toolName when target=specific).
-  orPattern: string;
-  orReplacement: string;
-  orScope: "match_only" | "full_output";
-  orIsRegex: boolean;
   // common
   ruleId: string;
   description: string;
@@ -262,10 +248,6 @@ const EMPTY: Draft = {
   piValue: "",
   piConditionEnabled: false,
   piConditionPattern: "",
-  orPattern: "",
-  orReplacement: "",
-  orScope: "match_only",
-  orIsRegex: true,
   ruleId: "",
   description: "",
 };
@@ -936,16 +918,6 @@ const CONDITION_META: Record<ConditionKind, { label: string; description: string
     description:
       "Mutator: appends a value to a tool's argument (before tool use) or to the assembled system prompt (on user prompt submit). v1 is append-only.",
   },
-  output_rewrite: {
-    // PR-F-MUT2 — single meta entry; SpecificsStep renders the redact
-    // picker (pattern + replacement + scope + isRegex). The Mutator trust
-    // badge (F-MUT3) makes it explicit that this policy rewrites traffic.
-    // ``summarize`` / ``replace`` modes are deferred to v2 with an
-    // admin-tier flag.
-    label: "Rewrite tool output (mutator)",
-    description:
-      "Mutator: redacts a pattern in a tool's output before the model reads it (regex or literal). v1 is redact-only — summarize / replace require a v2 admin-tier flag.",
-  },
 };
 
 
@@ -1375,13 +1347,6 @@ function SpecificsStep({
           <PromptInjectionToolArgPicker draft={draft} update={update} />
         )
       ) : null}
-      {/* PR-F-MUT2 — output_rewrite picker. Single surface (after_tool_use
-          only). Renders pattern + replacement + scope + isRegex; the wizard
-          derives toolMatch.include from draft.toolName when
-          target=specific so the operator does not have to retype it. */}
-      {draft.conditionKind === "output_rewrite" ? (
-        <OutputRewriteRedactPicker draft={draft} update={update} />
-      ) : null}
     </div>
   );
 }
@@ -1493,89 +1458,6 @@ function PromptInjectionSystemPromptPicker({
           aria-label="Section to append"
           className="mt-1 w-full resize-y rounded-lg border border-primary/30 bg-white px-3 py-2 text-xs text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
         />
-      </label>
-    </div>
-  );
-}
-
-
-// ---------------------------------------------------------------------------
-// PR-F-MUT2 — output_rewrite picker (after_tool_use redact mode)
-// ---------------------------------------------------------------------------
-
-
-function OutputRewriteRedactPicker({
-  draft,
-  update,
-}: {
-  draft: Draft;
-  update: (patch: Partial<Draft>) => void;
-}): React.ReactElement {
-  return (
-    <div className="space-y-3">
-      <div className="space-y-1">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
-          Mode (auto)
-        </span>
-        <div className="mt-1 inline-flex items-center gap-2 rounded-lg border border-black/[0.10] bg-gray-50/80 px-3 py-1.5 text-xs font-mono text-foreground">
-          redact
-        </div>
-        <p className="text-[11px] leading-relaxed text-secondary">
-          v1 supports redact only — the matched substring is replaced with
-          the replacement string. summarize / replace require a v2
-          admin-tier flag.
-        </p>
-      </div>
-      <TextField
-        value={draft.orPattern}
-        onChange={(v) => update({ orPattern: v })}
-        label="Pattern to match in the tool output"
-        placeholder={draft.orIsRegex ? "AKIA[0-9A-Z]{16}" : "AWS_SECRET"}
-        mono
-      />
-      <TextField
-        value={draft.orReplacement}
-        onChange={(v) => update({ orReplacement: v })}
-        label="Replacement string"
-        placeholder="***"
-        mono
-      />
-      <label className="flex items-center gap-2 text-xs text-secondary">
-        <input
-          type="checkbox"
-          checked={draft.orIsRegex}
-          onChange={(e) => update({ orIsRegex: e.target.checked })}
-          className="rounded border-black/[0.20] text-primary focus:ring-primary/30"
-        />
-        Treat pattern as a regular expression (uncheck for a literal-string
-        match)
-      </label>
-      <label className="block">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
-          Scope
-        </span>
-        <select
-          value={draft.orScope}
-          onChange={(e) =>
-            update({
-              orScope: e.target.value as Draft["orScope"],
-            })
-          }
-          aria-label="Rewrite scope"
-          className="mt-1 w-full rounded-lg border border-primary/30 bg-white px-3 py-2 text-xs text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-        >
-          <option value="match_only">
-            match_only — replace each match individually (default)
-          </option>
-          <option value="full_output">
-            full_output — apply the substitution against the entire output
-          </option>
-        </select>
-        <p className="mt-1 text-[11px] leading-relaxed text-secondary">
-          In v1 both scopes route to <code>re.sub</code>, which only
-          replaces matches; the axis exists so v2 can add a wrap-whole
-          mode without re-shaping the persisted payload.
-        </p>
       </label>
     </div>
   );
@@ -2024,11 +1906,6 @@ function triggerEventPhrase(draft: Draft, refOptions: RefOption[]): string {
         return "On every user prompt submission";
       }
       return `When ${lowerHead(targetPhrase)} is invoked`;
-    case "output_rewrite":
-      // PR-F-MUT2 — phrasing surfaces the pattern that drives the redact.
-      // Unconditional within the matched scope: every tool result whose
-      // text matches the pattern is rewritten before the model reads it.
-      return `When ${lowerHead(targetPhrase)} contains "${draft.orPattern || "…"}"`;
   }
 }
 
@@ -2369,17 +2246,6 @@ function conditionClause(draft: Draft, refOptions: RefOption[]): string {
             : "";
         return `append "${draft.piValue}" to tool arg "${target}"${tool}${cond}`;
       }
-    case "output_rewrite": {
-      // PR-F-MUT2 — review-summary phrasing. Mode is locked to redact in
-      // v1; surface the pattern + replacement so the operator sees the
-      // exact mutation before activating.
-      const tool =
-        draft.toolTarget === "specific" && draft.toolName.trim().length > 0
-          ? ` (only for "${draft.toolName.trim()}")`
-          : "";
-      const verb = draft.orIsRegex ? "regex" : "literal";
-      return `redact ${verb} "${draft.orPattern || "(unset)"}" → "${draft.orReplacement}" in tool output${tool}`;
-    }
   }
 }
 
@@ -2562,11 +2428,6 @@ function customRuleKind(draft: Draft): string {
   // an operator authoring an inject-on-shell_exec rule doesn't silently
   // downcast to a tool_perm deny.
   if (draft.conditionKind === "prompt_injection") return "prompt_injection";
-  // PR-F-MUT2 — output_rewrite routes to its own backend kind. Same
-  // precedence concern as prompt_injection: must precede any
-  // lifecycle-keyed fallback so the wizard's mutator pick lands on the
-  // right kind end-to-end.
-  if (draft.conditionKind === "output_rewrite") return "output_rewrite";
   if (draft.lifecycle === "before_tool_use") {
     // before_tool authoring always routes to tool_perm: target=specific
     // sets match.tool; target=any with domain* sets the url-shape matcher.
@@ -2617,11 +2478,6 @@ function customRuleAction(draft: Draft): string {
   // record is written). Force audit here so an operator who picked any
   // archetype upstream still produces a valid rule.
   if (draft.conditionKind === "prompt_injection") return "audit";
-  // PR-F-MUT2 — output_rewrite is also audit-only at the backend
-  // ``_LEGAL`` matrix (same fail-honest reason: by the time the rewrite
-  // event is recorded, the mutation already happened). Force audit so any
-  // archetype the operator picked upstream resolves to a valid action.
-  if (draft.conditionKind === "output_rewrite") return "audit";
   switch (draft.archetype) {
     case "block":
       return "block";
@@ -2660,29 +2516,6 @@ function splitToolMatchList(raw: string): string[] {
 
 
 function customRulePayload(draft: Draft): Record<string, unknown> {
-  // PR-F-MUT2 — output_rewrite payload. Single lifecycle slot
-  // (after_tool_use); shape matches the backend
-  // validate_output_rewrite_payload contract:
-  //   {mode: "redact", pattern, replacement, scope, isRegex,
-  //    toolMatch?: {include?: [str]}}
-  // toolMatch.include is auto-derived from draft.toolName when
-  // target=specific so the operator does not have to retype the tool name.
-  if (draft.conditionKind === "output_rewrite") {
-    const payload: Record<string, unknown> = {
-      mode: "redact",
-      pattern: draft.orPattern.trim(),
-      replacement: draft.orReplacement,
-      scope: draft.orScope,
-      isRegex: draft.orIsRegex,
-    };
-    if (
-      draft.toolTarget === "specific"
-      && draft.toolName.trim().length > 0
-    ) {
-      payload.toolMatch = { include: [draft.toolName.trim()] };
-    }
-    return payload;
-  }
   // PR-F-MUT1 — prompt_injection payload. Branches on lifecycle because the
   // two slots have different required-field shapes (see backend
   // validate_prompt_injection_payload):

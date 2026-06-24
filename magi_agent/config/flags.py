@@ -940,27 +940,6 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
-        "MAGI_CUSTOMIZE_OUTPUT_REWRITE_ENABLED",
-        stage="stage2",
-        summary=(
-            "PR-F-MUT2: activate the ``output_rewrite`` custom_rule kind. "
-            "When ON the runtime applies enabled output_rewrite rules at the "
-            "``after_tool_use`` lifecycle slot, rewriting the dispatched "
-            "ToolResult's output text BEFORE the model reads it. v1 ships a "
-            "single ``redact`` mode (re.sub(pattern, replacement, text)) with "
-            "optional toolMatch include/exclude filters; ``summarize`` and "
-            "``replace`` modes are deferred to v2 with an admin-tier flag. "
-            "Wired in magi_agent/facades.py:execute_tool_with_hooks after the "
-            "AFTER_TOOL_USE hook's typed replace consumer (parallel to the "
-            "F-MUT1 BEFORE_TOOL_USE consumer). Triple-gated with "
-            "MAGI_CUSTOMIZE_VERIFICATION_ENABLED + "
-            "MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED; fail-open on any "
-            "customize-store fault so a broken overrides file never breaks a "
-            "turn. With no output_rewrite rules authored, runtime stays "
-            "byte-identical (the new wires are a no-op). Strict default-OFF."
-        ),
-    ),
-    _b(
         "MAGI_CUSTOMIZE_RUNTIME_FIELDS_ENDPOINT_ENABLED",
         stage="stage2",
         summary=(
