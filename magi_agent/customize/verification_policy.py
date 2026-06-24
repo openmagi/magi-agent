@@ -44,6 +44,11 @@ class CustomizeVerificationPolicy:
     # Structured custom rules (verification.custom_rules[]). Raw dicts as stored;
     # compilation/validation lives in customize.custom_rules + real_runner.
     custom_rules: tuple[dict[str, Any], ...] = ()
+    # PR-F7 (2026-06-23): per-bot cost budgets. Same dict shape as
+    # ``verification.budgets`` on disk: ``{budget_name: positive_int}``. Only
+    # str→positive-int pairs survive the load. Consumed by
+    # :func:`magi_agent.customize.budgets_apply.apply_budgets_if_enabled`.
+    budgets: dict[str, int] = field(default_factory=dict)
 
     @classmethod
     def from_overrides(cls, overrides: dict[str, Any]) -> "CustomizeVerificationPolicy":
@@ -70,7 +75,37 @@ class CustomizeVerificationPolicy:
         custom_rules = tuple(
             r for r in v.get("custom_rules", []) if isinstance(r, dict)
         )
-        return cls(presets, recipes, hooks, modes, rules, preset_overrides, custom_rules)
+        budgets = {
+            key: int(value)
+            for key, value in (v.get("budgets", {}) or {}).items()
+            if isinstance(key, str)
+            and isinstance(value, int)
+            and not isinstance(value, bool)
+            and value > 0
+        }
+        return cls(
+            presets,
+            recipes,
+            hooks,
+            modes,
+            rules,
+            preset_overrides,
+            custom_rules,
+            budgets,
+        )
+
+    def budget(self, name: str) -> int | None:
+        """Resolved positive-int budget for ``name`` (PR-F7), or ``None`` when
+        the operator has not authored an override.
+
+        ``name`` is one of ``maxToolCallsPerTurn`` / ``maxStepsBrakeHard`` /
+        ``loopGuardHardThreshold``; unknown names return ``None`` so a caller
+        can probe new keys defensively without raising.
+        """
+        value = self.budgets.get(name)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return value
+        return None
 
     def is_enabled(self, preset_id: str) -> bool:
         return preset_id in self.enabled_presets

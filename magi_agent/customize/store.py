@@ -25,6 +25,17 @@ DEFAULT_OVERRIDES: dict[str, Any] = {
         # list and layers it on top of ``PRESET_SEAMS``. Empty by default so
         # OFF is byte-identical to before.
         "seam_specs": [],
+        # PR-F7 (2026-06-23): per-bot cost budgets. Surfaced via the
+        # Customize "Budgets" sub-tab and applied at turn entry by
+        # :func:`magi_agent.customize.budgets_apply.apply_budgets_if_enabled`
+        # as ``setdefault`` overrides for the live MAGI_* env (operator env
+        # always wins). Empty dict by default so OFF is byte-identical.
+        # Supported keys (all optional, positive int):
+        #   - "maxToolCallsPerTurn"     -> MAGI_TOOL_MAX_CALLS_PER_TURN
+        #   - "maxStepsBrakeHard"       -> MAGI_MAX_STEPS_BRAKE_HARD (sentinel; no
+        #                                  numeric flag is registered today)
+        #   - "loopGuardHardThreshold"  -> MAGI_LOOP_GUARD_HARD_THRESHOLD
+        "budgets": {},
     },
     "tools": {},
     "user_rules": "",
@@ -68,6 +79,21 @@ def _normalize(data: dict[str, Any]) -> dict[str, Any]:
                 verification[key], type(merged["verification"][key])
             ):
                 merged["verification"][key] = verification[key]
+        # PR-F7: budgets is a typed-int dict. Keep only str→positive-int pairs
+        # so malformed entries never reach the runtime applier (mirrors the
+        # control_plane defensive filter below).
+        budgets_raw = verification.get("budgets")
+        if isinstance(budgets_raw, dict):
+            merged["verification"]["budgets"] = {
+                key: int(value)
+                for key, value in budgets_raw.items()
+                if isinstance(key, str)
+                and isinstance(value, int)
+                and not isinstance(value, bool)
+                and value > 0
+            }
+        else:
+            merged["verification"]["budgets"] = {}
     tools = data.get("tools")
     if isinstance(tools, dict):
         merged["tools"] = tools
@@ -220,6 +246,31 @@ def delete_custom_rule(rule_id: str, path: Path | None = None) -> dict[str, Any]
         r for r in verification["custom_rules"]
         if not (isinstance(r, dict) and r.get("id") == rule_id)
     ]
+    save_overrides(overrides, target)
+    return overrides
+
+
+def set_verification_budgets(
+    budgets: dict[str, Any], path: Path | None = None
+) -> dict[str, Any]:
+    """Replace the persisted ``verification.budgets`` map (PR-F7).
+
+    The caller is responsible for shape-validating the values; non-positive
+    ints, booleans, and non-str keys are silently dropped by ``_normalize`` on
+    load so a malformed write can never poison the live runtime applier.
+    Returns the post-save overrides view.
+    """
+    target = path or customize_path()
+    overrides = load_overrides(target)
+    sanitized = {
+        key: int(value)
+        for key, value in (budgets or {}).items()
+        if isinstance(key, str)
+        and isinstance(value, int)
+        and not isinstance(value, bool)
+        and value > 0
+    }
+    overrides["verification"]["budgets"] = sanitized
     save_overrides(overrides, target)
     return overrides
 

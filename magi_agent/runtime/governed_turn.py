@@ -38,6 +38,15 @@ async def run_governed_turn(
         can cancel the turn externally.  When ``None`` a fresh event is created
         (today's behavior).
     """
+    # PR-F7: project operator-authored Customize budgets onto the live env
+    # BEFORE the runtime/engine is built so the downstream readers
+    # (CoreToolhostHandlerSet.from_env at bind_core_toolhost_handlers time,
+    # parse_loop_guard_env at build_default_plugin time) see the seeded value.
+    # No-op (and triple-gated) when the F7 flag is OFF; ``setdefault`` semantics
+    # mean explicit operator env always wins. Fail-open so a malformed budget
+    # map can never break a turn — see budgets_apply.apply_budgets_if_enabled.
+    _maybe_apply_customize_budgets()
+
     rt = runtime if runtime is not None else _build_runtime(ctx)
     cancel = cancel if cancel is not None else asyncio.Event()
     stream = rt.engine.run_turn_stream(  # type: ignore[union-attr]
@@ -149,6 +158,34 @@ class _BookendCollector:
             )
         except Exception:
             return
+
+
+def _maybe_apply_customize_budgets() -> None:
+    """PR-F7 applier hook called at the top of every governed turn.
+
+    Loads the persisted Customize overrides, builds a resolved
+    :class:`CustomizeVerificationPolicy`, and projects each authored budget
+    onto ``os.environ`` via ``setdefault``. Triple-gated by
+    :func:`magi_agent.customize.budgets_apply.apply_budgets_if_enabled`; the
+    flag-OFF path bails before any I/O so the OFF behavior is byte-identical.
+    All exceptions are swallowed — a broken customize.json must never break
+    a turn.
+    """
+    try:
+        import os  # noqa: PLC0415
+
+        from magi_agent.customize.budgets_apply import (  # noqa: PLC0415
+            apply_budgets_if_enabled,
+        )
+        from magi_agent.customize.store import load_overrides  # noqa: PLC0415
+        from magi_agent.customize.verification_policy import (  # noqa: PLC0415
+            CustomizeVerificationPolicy,
+        )
+
+        policy = CustomizeVerificationPolicy.from_overrides(load_overrides())
+        apply_budgets_if_enabled(env=os.environ, policy=policy)
+    except Exception:
+        return
 
 
 def _build_runtime(ctx: TurnContext) -> object:
