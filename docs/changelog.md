@@ -1,3 +1,15 @@
+# 0.1.83 (2026-06-24)
+
+## Dashboard
+- Drop purple mesh backdrop, use clean grid background (#974).
+
+## Flag registry (I-1 series)
+- Batch 1: 6 compaction/recovery parse_env reads through flag_bool (#975).
+- Batch 2: 2 tool-reflection parse_env reads + 2 FlagSpec registrations (#976).
+- Batch 3: 8 literal-string parse_env reads + 7 FlagSpec registrations (#977).
+
+Cumulative since 0.1.82: 16 raw _is_true(env.get(...)) reads collapsed to typed flag_bool; 9 new FlagSpecs in the registry.
+
 # 0.1.82 (2026-06-24)
 
 ## Customize (F-UX series wrap)
