@@ -80,46 +80,6 @@ FIRES_AT = frozenset(
         # rule whose verdict the parent caller can act on.
         "before_turn_start",
         "after_turn_end",
-        # PR-F-LIFE2 Tier 2 — per-LLM-call gates. Wired adjacent to the ADK
-        # before_model_callback / after_model_callback boundaries inside the
-        # runner stream (see
-        # ``magi_agent/adk_bridge/lifecycle_llm_call_control.py``). Audit-only
-        # in v1 because every emit fires on the hot per-call path; the
-        # surrounding plugin maintains a per-(session, turn) critic budget
-        # (env ``MAGI_CUSTOMIZE_LLM_CALL_AUDIT_BUDGET``, default 3) that hard-
-        # caps fan-out cost. Honest-degrade: deterministic_ref / mutator
-        # kinds are NOT exposed here in v1 (no runtime fan-out).
-        "before_llm_call",
-        "after_llm_call",
-        # PR-F-LIFE3 Tier 2 — four NEW emitter slots that ride on existing
-        # runtime chokepoints but did not previously have a custom_rule path.
-        # Audit-only by default (same honest-degrade rationale as F-LIFE1/2):
-        # the runtime fan-out only consumes ``llm_criterion`` rules and
-        # records verdicts; deterministic_ref / tool_perm / mutator kinds are
-        # NOT exposed here (no runtime fan-out → exposing them would let the
-        # validator accept an inert rule). All four sites are gated by the
-        # ``MAGI_CUSTOMIZE_LIFECYCLE_EXTRA_EMITTERS_ENABLED`` master switch +
-        # triple-gate so OFF callers stay byte-identical.
-        # * ``before_compaction`` — fires immediately before
-        #   ``MagiContextCompactionPlugin._apply_tail_trim`` runs (covers
-        #   BOTH the automatic threshold/real-token decision path AND the
-        #   manual /compact force path). Use to inspect the pre-compaction
-        #   context window size / count.
-        # * ``after_compaction`` — fires immediately after a successful
-        #   tail-drop returns from ``_apply_tail_trim``. Use to inspect the
-        #   summary head / dropped-event count.
-        # * ``on_task_checkpoint`` — fires at each work-queue task status
-        #   transition (claimed / completed / failed) inside
-        #   ``WorkQueueDriver.run_once``. Use to inspect terminal-state
-        #   summaries / errors.
-        # * ``on_artifact_created`` — fires after a successful
-        #   ``artifact_provider.write_artifact`` inside
-        #   ``FileDeliveryBoundary.execute`` (ok-status branch only). Use
-        #   to inspect newly-written artifact refs / content digests.
-        "before_compaction",
-        "after_compaction",
-        "on_task_checkpoint",
-        "on_artifact_created",
     }
 )
 
@@ -190,27 +150,6 @@ _LEGAL: dict[str, dict[str, frozenset[str]]] = {
         # deterministic_ref note above; the rationale matches.
         "before_turn_start": frozenset({"audit"}),
         "after_turn_end": frozenset({"audit"}),
-        # PR-F-LIFE2 — audit-only at the new per-LLM-call slots. The
-        # surrounding ADK plugin caps fan-out at
-        # ``MAGI_CUSTOMIZE_LLM_CALL_AUDIT_BUDGET`` invocations per turn
-        # (default 3) to prevent runaway critic cost — block / retry are
-        # deferred until a stricter cost-ceiling story lands. As with the
-        # turn-boundary slots, deterministic_ref / mutator kinds are NOT
-        # added here (honest-degrade — no runtime fan-out).
-        "before_llm_call": frozenset({"audit"}),
-        "after_llm_call": frozenset({"audit"}),
-        # PR-F-LIFE3 — audit-only at the four new emitter slots. The
-        # surrounding runtime sites (context_compaction plugin / work-queue
-        # driver / file-delivery boundary) call the lifecycle_audit fan-out
-        # helpers behind a try/except envelope so an audit failure cannot
-        # break the live compaction / task dispatch / artifact write. As
-        # with the turn-boundary and per-LLM-call slots,
-        # deterministic_ref / tool_perm / mutator kinds are NOT added
-        # here (honest-degrade — no runtime fan-out at these chokepoints).
-        "before_compaction": frozenset({"audit"}),
-        "after_compaction": frozenset({"audit"}),
-        "on_task_checkpoint": frozenset({"audit"}),
-        "on_artifact_created": frozenset({"audit"}),
     },
     # audit/retry deferred: runtime always blocks on a failed shacl record regardless
     # of the stored action, so promising audit/retry here is a false contract.

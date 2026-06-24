@@ -197,6 +197,13 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     # Both fan-outs are no-ops without authored rules; lab opts in so dogfood
     # turns can exercise the wizard's new lifecycle options end-to-end.
     "MAGI_CUSTOMIZE_LIFECYCLE_EXPANSION_ENABLED",
+    # PR-F-LIFE1 Tier 2 lifecycle expansion (turn boundaries): activate the
+    # two new audit-only custom_rule gate sites (before_turn_start +
+    # after_turn_end) wired in run_governed_turn. Both fan-outs are no-ops
+    # without authored rules; lab opts in so dogfood turns can exercise the
+    # wizard's new lifecycle options end-to-end. Strict default-OFF in the
+    # registry so a fresh install / hosted serve stays byte-identical.
+    "MAGI_CUSTOMIZE_LIFECYCLE_TURN_HOOKS_ENABLED",
     # PR-F-MUT1 prompt_injection mutator: append to a tool's arguments before
     # dispatch OR append a new section to the assembled system prompt. Both
     # wires are no-ops without authored rules; lab opts in so dogfood turns
