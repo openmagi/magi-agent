@@ -57,12 +57,14 @@ import {
   HelpCircle,
   ShieldOff,
 } from "lucide-react";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 import {
+  getEvidenceLiveCatalog,
   putCustomRule,
   type CustomRule,
   type CustomizeCatalog,
+  type EvidenceLiveCatalogTypeEntry,
 } from "@/lib/customize-api";
 import { useAgentFetch } from "@/lib/local-api";
 import {
@@ -91,7 +93,25 @@ type ConditionKind =
   | "evidence_ref"
   | "shacl"
   | "llm_criterion"
-  | "regex";
+  | "regex"
+  | "field_constraint";
+
+
+// PR-F3: deterministic operators for field_constraint. The eight
+// single-record operators map 1:1 to SHACL constraints on
+// magi:field_<key>; forEachExistsCovering is the cross-record cardinality
+// form used for "for each entry in <source.field>, there exists a
+// <target>" patterns (intent 2 endgame).
+type FieldOperator =
+  | "eq"
+  | "neq"
+  | "gt"
+  | "lt"
+  | "ge"
+  | "le"
+  | "exists"
+  | "notExists"
+  | "forEachExistsCovering";
 
 
 interface Draft {
@@ -109,6 +129,19 @@ interface Draft {
   criterion: string;
   regexPattern: string;
   regexIsRegex: boolean;
+  // PR-F3: field_constraint structured IR.
+  // Single-record form: (fcEvidenceType, fcField, fcOperator, fcValue).
+  // Cross-record form (operator = forEachExistsCovering): the source side
+  // reuses (fcEvidenceType, fcField); the target side adds the four
+  // fcCrossTarget* fields and fcCrossCovering names the join key.
+  fcEvidenceType: string;
+  fcField: string;
+  fcOperator: FieldOperator;
+  fcValue: string;
+  fcCrossSourceType: string;
+  fcCrossSourceField: string;
+  fcCrossTargetType: string;
+  fcCrossTargetField: string;
   // common
   ruleId: string;
   description: string;
@@ -129,6 +162,14 @@ const EMPTY: Draft = {
   criterion: "",
   regexPattern: "",
   regexIsRegex: false,
+  fcEvidenceType: "",
+  fcField: "",
+  fcOperator: "eq",
+  fcValue: "",
+  fcCrossSourceType: "",
+  fcCrossSourceField: "",
+  fcCrossTargetType: "",
+  fcCrossTargetField: "",
   ruleId: "",
   description: "",
 };
@@ -197,6 +238,23 @@ export function AuthorWizard({
     () => buildRefOptions(catalog, evidenceTypes),
     [catalog, evidenceTypes],
   );
+
+  // PR-F3: field_constraint picker reads from the F2 evidence live-catalog
+  // so it can hide inert-producer types (empty registeredFields). The
+  // helper is fail-open: on network/HTTP error it resolves to an empty
+  // catalog and the picker renders the honest "no fields available" state.
+  const [liveCatalogTypes, setLiveCatalogTypes] = useState<
+    EvidenceLiveCatalogTypeEntry[]
+  >([]);
+  useEffect(() => {
+    let cancelled = false;
+    void getEvidenceLiveCatalog(agentFetch).then((cat) => {
+      if (!cancelled) setLiveCatalogTypes(cat.evidenceTypes);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [agentFetch]);
 
   // The Specifics step has nothing to ask when conditionKind=none.
   const isSpecificsEmpty = draft.conditionKind === "none";
@@ -267,6 +325,7 @@ export function AuthorWizard({
           draft={draft}
           update={updateDraft}
           refOptions={refOptions}
+          liveCatalogTypes={liveCatalogTypes}
         />
       ) : null}
       {currentKey === "action" ? (
@@ -410,7 +469,10 @@ function availableConditionKinds(
 ): ConditionKind[] {
   // pre_final has no tool layer; target is ignored.
   if (lifecycle === "pre_final") {
-    return ["evidence_ref", "shacl", "llm_criterion"];
+    // PR-F3: field_constraint is the deterministic SHACL-via-picker path
+    // and is the preferred default for evidence-shape rules — it sits
+    // beside the raw `shacl` escape hatch (TTL textarea) for power users.
+    return ["evidence_ref", "shacl", "llm_criterion", "field_constraint"];
   }
   if (lifecycle === "before_tool_use") {
     if (toolTarget === "specific") {
@@ -462,6 +524,11 @@ const CONDITION_META: Record<ConditionKind, { label: string; description: string
   regex: {
     label: "Regex / literal pattern",
     description: "Fires when the tool output matches a regex or literal substring.",
+  },
+  field_constraint: {
+    label: "Field constraint",
+    description:
+      "Pick an evidence type, field, operator, and value. Deterministic SHACL compile, no LLM.",
   },
 };
 
@@ -541,10 +608,12 @@ function SpecificsStep({
   draft,
   update,
   refOptions,
+  liveCatalogTypes,
 }: {
   draft: Draft;
   update: (patch: Partial<Draft>) => void;
   refOptions: RefOption[];
+  liveCatalogTypes: EvidenceLiveCatalogTypeEntry[];
 }): React.ReactElement {
   return (
     <div className="space-y-3">
@@ -630,6 +699,236 @@ function SpecificsStep({
             />
             Treat as regular expression
           </label>
+        </div>
+      ) : null}
+      {draft.conditionKind === "field_constraint" ? (
+        <FieldConstraintPicker
+          draft={draft}
+          update={update}
+          liveCatalogTypes={liveCatalogTypes}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// PR-F3 — field_constraint picker (evidence type → field → operator → value)
+// ---------------------------------------------------------------------------
+
+
+/**
+ * Picker for the deterministic SHACL-via-picker path. Only types with a
+ * non-empty `registeredFields` vocabulary are shown — silently letting
+ * the user author a shape against a producer-less type would compile to a
+ * vacuous SHACL shape (no triples, always passes) and that's exactly the
+ * silent-non-firing failure the live-catalog filter is designed to prevent.
+ *
+ * Operator catalogue (deterministic; no LLM at compile time):
+ *  - eq / neq / gt / lt / ge / le : single-record value comparison on
+ *    magi:field_<fcField>. Numeric operators expect a number in fcValue
+ *    and route to xsd:decimal at compile time.
+ *  - exists / notExists : single-record cardinality only; no value input.
+ *  - forEachExistsCovering : cross-record cardinality. Hides the single
+ *    value input and surfaces (source.field, target.type, target.field)
+ *    instead. Spec §5 acceptance #1: "each changed file covered by passing
+ *    TestRun" lowers to this operator with covering = source.entry.
+ */
+function FieldConstraintPicker({
+  draft,
+  update,
+  liveCatalogTypes,
+}: {
+  draft: Draft;
+  update: (patch: Partial<Draft>) => void;
+  liveCatalogTypes: EvidenceLiveCatalogTypeEntry[];
+}): React.ReactElement {
+  // Inert-producer hide invariant: only surface types that have a
+  // non-empty registered field vocabulary. Producer-less types would
+  // compile to a vacuous shape.
+  const authorableTypes = useMemo(
+    () => liveCatalogTypes.filter((t) => t.registeredFields.length > 0),
+    [liveCatalogTypes],
+  );
+  const selectedType = authorableTypes.find(
+    (t) => t.type === draft.fcEvidenceType,
+  );
+  const isCrossRecord = draft.fcOperator === "forEachExistsCovering";
+  const valueless =
+    draft.fcOperator === "exists" || draft.fcOperator === "notExists";
+  const numeric =
+    draft.fcOperator === "gt"
+    || draft.fcOperator === "lt"
+    || draft.fcOperator === "ge"
+    || draft.fcOperator === "le";
+  const crossTargetType = authorableTypes.find(
+    (t) => t.type === draft.fcCrossTargetType,
+  );
+
+  if (authorableTypes.length === 0) {
+    return (
+      <p className="rounded-xl border border-dashed border-black/[0.10] bg-gray-50/80 px-4 py-6 text-center text-xs text-secondary">
+        No evidence types with a registered field vocabulary are available.
+        Field constraints require the producer to publish at least one field
+        — see the docs for extending an evidence producer.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Step 3a: evidence type picker (inert-producer types hidden).
+          Plain div with role=group rather than a HTML form group so the
+          TriggerStep group-count assertion stays at 2 — the other radio
+          groups in this picker follow the same pattern. */}
+      <div role="group" aria-label="Evidence type" className="space-y-2">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+          Evidence type
+        </span>
+        <div className="space-y-2">
+          {authorableTypes.map((t) => (
+            <RadioCard
+              key={t.type}
+              checked={draft.fcEvidenceType === t.type}
+              onClick={() =>
+                update({ fcEvidenceType: t.type, fcField: "" })
+              }
+              label={t.type}
+              description={`${t.registeredFields.length} field${
+                t.registeredFields.length === 1 ? "" : "s"
+              } · ${t.fieldsPopulatedRecently.length} populated recently`}
+              monoLabel={t.type}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Step 3b: field picker (only after a type is chosen) */}
+      {selectedType ? (
+        selectedType.registeredFields.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-black/[0.10] bg-gray-50/80 px-4 py-6 text-center text-xs text-secondary">
+            No fields available — producer extension needed.
+          </p>
+        ) : (
+          <div role="group" aria-label="Field" className="space-y-2">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+              Field
+            </span>
+            <div className="space-y-2">
+              {selectedType.registeredFields.map((f) => (
+                <RadioCard
+                  key={f}
+                  checked={draft.fcField === f}
+                  onClick={() => update({ fcField: f })}
+                  label={f}
+                  description=""
+                  monoLabel={`magi:field_${f}`}
+                />
+              ))}
+            </div>
+          </div>
+        )
+      ) : null}
+
+      {/* Step 3c: operator picker (always available once a field is chosen) */}
+      {draft.fcField ? (
+        <label className="block">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+            Operator
+          </span>
+          <select
+            value={draft.fcOperator}
+            onChange={(e) =>
+              update({ fcOperator: e.target.value as FieldOperator })
+            }
+            aria-label="Operator"
+            className="mt-1 w-full rounded-lg border border-primary/30 bg-white px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+          >
+            <option value="eq">equals (eq)</option>
+            <option value="neq">not equals (neq)</option>
+            <option value="gt">greater than (gt)</option>
+            <option value="lt">less than (lt)</option>
+            <option value="ge">greater or equal (ge)</option>
+            <option value="le">less or equal (le)</option>
+            <option value="exists">exists</option>
+            <option value="notExists">not exists (notExists)</option>
+            <option value="forEachExistsCovering">
+              for-each-exists-covering (cross-record)
+            </option>
+          </select>
+        </label>
+      ) : null}
+
+      {/* Step 3d: value input — hidden for exists / notExists, and
+          replaced by the cross-record sub-form for forEachExistsCovering. */}
+      {draft.fcField && !valueless && !isCrossRecord ? (
+        <TextField
+          value={draft.fcValue}
+          onChange={(v) => update({ fcValue: v })}
+          label={numeric ? "Value (number)" : "Value"}
+          placeholder={numeric ? "0" : "expected"}
+          mono
+        />
+      ) : null}
+
+      {/* Cross-record sub-form: source.field is the same as (fcEvidenceType,
+          fcField) above. Add target.evidenceType + target.field here. */}
+      {draft.fcField && isCrossRecord ? (
+        <div className="space-y-3 rounded-xl border border-black/[0.06] bg-gray-50/60 p-3">
+          <p className="text-[11px] text-secondary">
+            For each entry in <code>{draft.fcEvidenceType}.{draft.fcField}</code>
+            , assert that a covering record exists in the target type below.
+          </p>
+          <div role="group" aria-label="Target evidence type" className="space-y-2">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+              Target evidence type
+            </span>
+            <div className="space-y-2">
+              {authorableTypes.map((t) => (
+                <RadioCard
+                  key={t.type}
+                  checked={draft.fcCrossTargetType === t.type}
+                  onClick={() =>
+                    update({
+                      fcCrossTargetType: t.type,
+                      fcCrossTargetField: "",
+                      // Mirror source picks into the cross-record IR so the
+                      // payload writer doesn't have to special-case both
+                      // shapes.
+                      fcCrossSourceType: draft.fcEvidenceType,
+                      fcCrossSourceField: draft.fcField,
+                    })
+                  }
+                  label={t.type}
+                  description={`${t.registeredFields.length} field${
+                    t.registeredFields.length === 1 ? "" : "s"
+                  }`}
+                  monoLabel={t.type}
+                />
+              ))}
+            </div>
+          </div>
+          {crossTargetType
+          && crossTargetType.registeredFields.length > 0 ? (
+            <div role="group" aria-label="Target field" className="space-y-2">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+                Target field (covering key)
+              </span>
+              <div className="space-y-2">
+                {crossTargetType.registeredFields.map((f) => (
+                  <RadioCard
+                    key={f}
+                    checked={draft.fcCrossTargetField === f}
+                    onClick={() => update({ fcCrossTargetField: f })}
+                    label={f}
+                    description=""
+                    monoLabel={`magi:field_${f}`}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -757,6 +1056,26 @@ function triggerEventPhrase(draft: Draft, refOptions: RefOption[]): string {
     }
     case "shacl":
       return "When the SHACL shape does NOT conform on any evidence record";
+    case "field_constraint":
+      return fieldConstraintTriggerPhrase(draft);
+  }
+}
+
+
+function fieldConstraintTriggerPhrase(draft: Draft): string {
+  const ev = draft.fcEvidenceType || "…";
+  const f = draft.fcField || "…";
+  switch (draft.fcOperator) {
+    case "exists":
+      return `When ${ev}.${f} is missing`;
+    case "notExists":
+      return `When ${ev}.${f} is present`;
+    case "forEachExistsCovering":
+      return `When some entry in ${ev}.${f} has no covering ${
+        draft.fcCrossTargetType || "…"
+      }.${draft.fcCrossTargetField || "…"}`;
+    default:
+      return `When ${ev}.${f} ${draft.fcOperator} ${draft.fcValue || "…"} is false`;
   }
 }
 
@@ -967,6 +1286,26 @@ function conditionClause(draft: Draft, refOptions: RefOption[]): string {
       return `an LLM critic judges "${draft.criterion}" is false`;
     case "regex":
       return `the result ${draft.regexIsRegex ? "matches regex" : "contains"} "${draft.regexPattern}"`;
+    case "field_constraint":
+      return fieldConstraintClause(draft);
+  }
+}
+
+
+function fieldConstraintClause(draft: Draft): string {
+  const ev = draft.fcEvidenceType || "(unset)";
+  const f = draft.fcField || "(unset)";
+  switch (draft.fcOperator) {
+    case "exists":
+      return `${ev}.${f} is missing`;
+    case "notExists":
+      return `${ev}.${f} is present`;
+    case "forEachExistsCovering":
+      return `some entry in ${ev}.${f} has no covering ${
+        draft.fcCrossTargetType || "(unset)"
+      }.${draft.fcCrossTargetField || "(unset)"}`;
+    default:
+      return `${ev}.${f} ${draft.fcOperator} ${draft.fcValue || "(unset)"} is false`;
   }
 }
 
@@ -1005,6 +1344,8 @@ function stepIsComplete(currentKey: StepKey, draft: Draft): boolean {
           return draft.criterion.trim().length > 0;
         case "regex":
           return draft.regexPattern.trim().length > 0;
+        case "field_constraint":
+          return fieldConstraintIsComplete(draft);
       }
     // eslint-disable-next-line no-fallthrough
     case "action":
@@ -1069,8 +1410,33 @@ function customRuleKind(draft: Draft): string {
   }
   if (draft.conditionKind === "evidence_ref") return "deterministic_ref";
   if (draft.conditionKind === "shacl") return "shacl_constraint";
+  // PR-F3: field_constraint is the structured-picker path; it stores as
+  // shacl_constraint on the backend with an authoredAs IR carried inside
+  // the payload for round-trip editing.
+  if (draft.conditionKind === "field_constraint") return "shacl_constraint";
   if (draft.conditionKind === "regex") return "llm_criterion"; // after-tool regex via LLM kind (the only path other than dashboard_check)
   return "llm_criterion";
+}
+
+
+/**
+ * PR-F3: a field_constraint draft is "complete" once enough has been
+ * picked that the backend deterministic compiler can synthesise a
+ * non-vacuous shape. The branches mirror the picker's progressive
+ * disclosure (type → field → operator → value or cross-record target).
+ */
+function fieldConstraintIsComplete(draft: Draft): boolean {
+  if (!draft.fcEvidenceType.trim() || !draft.fcField.trim()) return false;
+  if (draft.fcOperator === "exists" || draft.fcOperator === "notExists") {
+    return true;
+  }
+  if (draft.fcOperator === "forEachExistsCovering") {
+    return (
+      draft.fcCrossTargetType.trim().length > 0
+      && draft.fcCrossTargetField.trim().length > 0
+    );
+  }
+  return draft.fcValue.trim().length > 0;
 }
 
 
@@ -1131,7 +1497,62 @@ function customRulePayload(draft: Draft): Record<string, unknown> {
       };
     case "llm_criterion":
       return { criterion: draft.criterion.trim() };
+    case "field_constraint":
+      // Storage kind is shacl_constraint (see customRuleKind). The
+      // structured IR rides in `authoredAs` so re-opening the rule in the
+      // wizard surfaces chips, not raw TTL. `shapeTtl` is left empty here
+      // and synthesised server-side by field_constraint_compiler so the
+      // frontend never has to ship a partial Turtle builder.
+      return {
+        shapeTtl: "",
+        authoredAs: {
+          kind: "field_constraint",
+          ...fieldConstraintIR(draft),
+        },
+      };
     default:
       return {};
   }
+}
+
+
+/**
+ * Build the field_constraint authoredAs IR body (without the outer
+ * `kind` discriminator — the caller adds that so the literal text
+ * `kind: "field_constraint"` appears once next to `authoredAs:`).
+ * Matches the schema in
+ * docs/plans/2026-06-23-customize-depth-enrichment-design.md §5 PR-F3:
+ * single-record form has `{operator, evidenceType, field, value?}`;
+ * forEachExistsCovering form has `{operator, source:{type,field},
+ * target:{type,field,covering}}`.
+ */
+function fieldConstraintIR(draft: Draft): Record<string, unknown> {
+  const operator = draft.fcOperator;
+  if (operator === "forEachExistsCovering") {
+    return {
+      operator,
+      source: {
+        evidenceType: draft.fcEvidenceType,
+        field: draft.fcField,
+      },
+      target: {
+        evidenceType: draft.fcCrossTargetType,
+        field: draft.fcCrossTargetField,
+        covering: "source.entry",
+      },
+    };
+  }
+  if (operator === "exists" || operator === "notExists") {
+    return {
+      operator,
+      evidenceType: draft.fcEvidenceType,
+      field: draft.fcField,
+    };
+  }
+  return {
+    operator,
+    evidenceType: draft.fcEvidenceType,
+    field: draft.fcField,
+    value: draft.fcValue.trim(),
+  };
 }
