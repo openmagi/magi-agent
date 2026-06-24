@@ -21,6 +21,40 @@ set-intersection of ``BUILTIN_EVIDENCE_TYPES`` and ``_inferred_refs``. Keep the
 base refs in sync with ``_inferred_refs`` and the config-gated entries in sync
 with their ``cli/engine.py`` satisfier gate; ``test_customize_what_menu`` guards
 both invariants.
+
+PR-F-UX5 — evidence vs verifier/condition split
+-----------------------------------------------
+
+The same descriptor set is also viewable as two disjoint UX buckets:
+
+* **evidence_refs** — entries whose ref prefix is ``evidence:``. These are raw
+  producer records the runtime captures from tools/skills/spawns. They are the
+  *input* a deterministic rule operates against. Surfaced to the wizard's
+  "Check evidence record present" picker AND used as the source for the
+  field-constraint type picker (verifiers have no traversable fields).
+* **judgment_refs** — entries whose ref prefix is ``verifier:`` OR is an
+  unprefixed named-judgment ref (e.g. the bare ``fact_grounding`` token).
+  These are verdict primitives — judgments produced by built-in verifier code
+  that has already evaluated some evidence and emitted a pass/fail. Surfaced
+  to the wizard's new "Check verifier / condition passed" picker, where they
+  live alongside user-authored named conditions in the Conditions tab with
+  origin badges.
+
+Both buckets route to the SAME backend storage payload
+(``kind: deterministic_ref``, ``payload: {ref}``) — the split is purely a UX
+clarification (raw evidence vs verdict primitive), not a new wire shape.
+
+Ref-name stability invariant
+----------------------------
+
+Storage keys ``custom_rules.what.payload.ref`` reference these refs verbatim
+and ``preset_map.controls_refs`` keys onto them; recipe-emitted ref strings in
+``recipes/compiler.py``, ``recipes/reliability_policy.py``,
+``recipes/recipe_routing.py``, ``firstparty/packs/evidence_gitdiff/pack.toml``
+and ``evidence/local_tool_collector`` emit them too. Therefore the 6 ref
+strings (including the bare ``fact_grounding`` and the
+``evidence:artifact-delivery-ref`` token, NOT renamed to a ``verifier:`` form)
+must stay byte-identical when split.
 """
 
 from __future__ import annotations
@@ -147,9 +181,59 @@ def what_menu(env: Mapping[str, str] | None = None) -> list[dict[str, Any]]:
     """Return the WHAT-menu descriptors (lists, JSON-serializable).
 
     Config-gated entries appear only while their producer is currently active.
+
+    .. deprecated:: PR-F-UX5
+        Prefer :func:`evidence_menu` and :func:`judgment_menu` for the
+        ergonomically-split UX shape. This function is preserved as the
+        union of both buckets for back-compat with existing call sites
+        (``customRuleMenu`` catalog field, NL compiler, tests).
     """
     return [
         {**e, "allowedActions": list(e["allowedActions"])} for e in _active_entries(env)
+    ]
+
+
+def _is_evidence_ref(ref: str) -> bool:
+    """Classify a menu entry as raw-evidence (vs verdict-primitive).
+
+    A ref is an evidence record iff it carries the ``evidence:`` prefix; every
+    other ref (``verifier:*`` or unprefixed named judgments such as
+    ``fact_grounding``) is a verdict primitive surfaced by built-in verifier
+    code. See module docstring for why the bare ``fact_grounding`` token and
+    the ``evidence:artifact-delivery-ref`` token are NOT renamed despite their
+    semantic-vs-prefix mismatch — the strings are byte-keyed across storage,
+    preset_map, recipes, and the local tool collector.
+    """
+    return ref.startswith("evidence:")
+
+
+def evidence_menu(env: Mapping[str, str] | None = None) -> list[dict[str, Any]]:
+    """Return only the raw-evidence ref descriptors (``evidence:*`` prefix).
+
+    These are the producer records a deterministic rule operates against — the
+    inputs, not the verdicts. Source for the wizard's "Check evidence record
+    present" picker and the (only) source for the field-constraint type picker
+    (verifiers have no traversable fields).
+    """
+    return [
+        {**e, "allowedActions": list(e["allowedActions"])}
+        for e in _active_entries(env)
+        if _is_evidence_ref(e["ref"])
+    ]
+
+
+def judgment_menu(env: Mapping[str, str] | None = None) -> list[dict[str, Any]]:
+    """Return only the verdict-primitive ref descriptors.
+
+    Entries are built-in verifier outputs: ``verifier:*`` refs and unprefixed
+    named-judgment refs (such as the bare ``fact_grounding`` token). Source
+    for the wizard's "Check verifier / condition passed" picker; the Conditions
+    tab merges these with user-authored named conditions under an origin badge.
+    """
+    return [
+        {**e, "allowedActions": list(e["allowedActions"])}
+        for e in _active_entries(env)
+        if not _is_evidence_ref(e["ref"])
     ]
 
 

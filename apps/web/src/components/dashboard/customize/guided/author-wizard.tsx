@@ -94,7 +94,11 @@ type ConditionKind =
   | "domain_allowlist"
   | "path"
   | "path_allowlist"
+  // PR-F-UX5 — two UX-distinct kinds that share the same backend payload
+  // (kind: "deterministic_ref", payload: {ref}). The split is purely a
+  // clarification of intent (raw evidence record vs verdict primitive).
   | "evidence_ref"
+  | "verifier_passed"
   | "shacl"
   | "llm_criterion"
   | "regex"
@@ -268,9 +272,27 @@ export function AuthorWizard({
     if (step >= newPlan.length) setStep(newPlan.length - 1);
   };
 
-  const refOptions = useMemo(
-    () => buildRefOptions(catalog, evidenceTypes),
+  // PR-F-UX5 — two disjoint picker sources:
+  //   * evidenceRefOptions reads catalog.evidenceMenu (raw evidence records,
+  //     ``evidence:*``). Surfaced under the ``evidence_ref`` condition kind
+  //     AND used as the type source for the field_constraint picker.
+  //   * judgmentRefOptions reads catalog.judgmentMenu (verdict primitives:
+  //     ``verifier:*`` and bare named judgments). Surfaced under the new
+  //     ``verifier_passed`` condition kind.
+  // Legacy ``refOptions`` is kept as the union so the existing trigger /
+  // describe / review helpers can resolve a ref label regardless of which
+  // bucket the user picked it from.
+  const evidenceRefOptions = useMemo(
+    () => buildRefOptionsFromMenu(catalog.verification.evidenceMenu, evidenceTypes),
     [catalog, evidenceTypes],
+  );
+  const judgmentRefOptions = useMemo(
+    () => buildRefOptionsFromMenu(catalog.verification.judgmentMenu, []),
+    [catalog],
+  );
+  const refOptions = useMemo(
+    () => [...evidenceRefOptions, ...judgmentRefOptions],
+    [evidenceRefOptions, judgmentRefOptions],
   );
 
   // PR-F3: field_constraint picker reads from the F2 evidence live-catalog
@@ -358,7 +380,8 @@ export function AuthorWizard({
         <SpecificsStep
           draft={draft}
           update={updateDraft}
-          refOptions={refOptions}
+          evidenceRefOptions={evidenceRefOptions}
+          judgmentRefOptions={judgmentRefOptions}
           liveCatalogTypes={liveCatalogTypes}
         />
       ) : null}
@@ -506,7 +529,11 @@ function availableConditionKinds(
     // PR-F3: field_constraint is the deterministic SHACL-via-picker path
     // and is the preferred default for evidence-shape rules — it sits
     // beside the raw `shacl` escape hatch (TTL textarea) for power users.
-    return ["evidence_ref", "shacl", "llm_criterion", "field_constraint"];
+    // PR-F-UX5: ``verifier_passed`` joins beside ``evidence_ref`` so the
+    // operator picks raw-evidence-record-present vs verdict-primitive-passed
+    // as two distinct intents — both compile to ``deterministic_ref`` on
+    // the backend, the split lives at the UX layer only.
+    return ["evidence_ref", "verifier_passed", "shacl", "llm_criterion", "field_constraint"];
   }
   if (lifecycle === "before_tool_use") {
     if (toolTarget === "specific") {
@@ -564,8 +591,21 @@ const CONDITION_META: Record<ConditionKind, { label: string; description: string
       "Match when the tool's path argument is NOT under any allowed prefix. Same surface as 'File / path': only fires for tools whose argument schema surfaces a `path` (or alias) key (FileRead, FileEdit, FileWrite, PatchApply); not for Glob or Grep.",
   },
   evidence_ref: {
-    label: "Evidence reference",
-    description: "Fires when a named evidence ref did not return ok this turn.",
+    // PR-F-UX5 — labelled around the raw producer record (input shape) so the
+    // operator picks "is a record of type X present?" distinctly from the
+    // verdict-primitive form (verifier_passed).
+    label: "Check evidence record present",
+    description:
+      "Raw evidence: fires when a producer-emitted record (e.g. evidence:git-diff) did NOT return ok this turn.",
+  },
+  verifier_passed: {
+    // PR-F-UX5 — verdict-primitive picker. Compiles to the SAME backend
+    // payload as evidence_ref (kind: deterministic_ref, payload: {ref}); the
+    // split is a UX clarification so the operator sees raw-input vs verdict
+    // as two distinct intents in the picker.
+    label: "Check verifier / condition passed",
+    description:
+      "Verdict primitive: fires when a built-in verifier or a named user condition did NOT return ok this turn.",
   },
   shacl: {
     label: "SHACL shape",
@@ -631,12 +671,20 @@ interface RefOption {
 }
 
 
-function buildRefOptions(
-  catalog: CustomizeCatalog,
+/**
+ * PR-F-UX5 — build picker options from a SINGLE catalog menu (evidenceMenu
+ * OR judgmentMenu). The evidence-side caller also passes
+ * ``catalog`` policy-derived ``evidenceTypes`` so user evidence refs
+ * authored by other rules also appear in the picker; judgment-side callers
+ * pass ``[]`` because authoring a verifier is not a user surface (verifiers
+ * are runtime code per F-UX5 design principle 1).
+ */
+function buildRefOptionsFromMenu(
+  menu: CustomizeCatalog["verification"]["evidenceMenu"],
   evidenceTypes: EvidenceTypeEntry[],
 ): RefOption[] {
   const out: RefOption[] = [];
-  for (const item of catalog.verification.customRuleMenu) {
+  for (const item of menu) {
     out.push({
       ref: item.ref,
       label: item.label,
@@ -661,12 +709,18 @@ function buildRefOptions(
 function SpecificsStep({
   draft,
   update,
-  refOptions,
+  evidenceRefOptions,
+  judgmentRefOptions,
   liveCatalogTypes,
 }: {
   draft: Draft;
   update: (patch: Partial<Draft>) => void;
-  refOptions: RefOption[];
+  // PR-F-UX5 — split refOptions: evidence picker reads raw-evidence refs only;
+  // verifier_passed picker reads verdict-primitive refs only. Field-constraint
+  // picker (FieldConstraintPicker) keeps reading liveCatalogTypes which is
+  // already evidence-shape-only (it filters by registeredFields presence).
+  evidenceRefOptions: RefOption[];
+  judgmentRefOptions: RefOption[];
   liveCatalogTypes: EvidenceLiveCatalogTypeEntry[];
 }): React.ReactElement {
   return (
@@ -710,13 +764,13 @@ function SpecificsStep({
         />
       ) : null}
       {draft.conditionKind === "evidence_ref" ? (
-        refOptions.length === 0 ? (
+        evidenceRefOptions.length === 0 ? (
           <p className="rounded-xl border border-dashed border-black/[0.10] bg-gray-50/80 px-4 py-6 text-center text-xs text-secondary">
-            No evidence refs available in this runtime.
+            No evidence records available in this runtime.
           </p>
         ) : (
           <div className="space-y-2">
-            {refOptions.map((opt) => (
+            {evidenceRefOptions.map((opt) => (
               <RadioCard
                 key={opt.ref}
                 checked={draft.evidenceRef === opt.ref}
@@ -724,6 +778,31 @@ function SpecificsStep({
                 label={opt.label}
                 description={opt.description}
                 badge={opt.origin === "user" ? "user" : undefined}
+                monoLabel={opt.ref}
+              />
+            ))}
+          </div>
+        )
+      ) : null}
+      {/* PR-F-UX5 — verifier_passed picker reads judgmentMenu (verdict
+          primitives). Same draft slot as evidence_ref (``evidenceRef``)
+          because both compile to the same backend ``deterministic_ref``
+          payload; the picker just narrows the visible inventory. */}
+      {draft.conditionKind === "verifier_passed" ? (
+        judgmentRefOptions.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-black/[0.10] bg-gray-50/80 px-4 py-6 text-center text-xs text-secondary">
+            No verifiers or named conditions available in this runtime.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {judgmentRefOptions.map((opt) => (
+              <RadioCard
+                key={opt.ref}
+                checked={draft.evidenceRef === opt.ref}
+                onClick={() => update({ evidenceRef: opt.ref })}
+                label={opt.label}
+                description={opt.description}
+                badge={opt.origin === "user" ? "user" : "built-in"}
                 monoLabel={opt.ref}
               />
             ))}
@@ -1223,6 +1302,13 @@ function triggerEventPhrase(draft: Draft, refOptions: RefOption[]): string {
       const ref = refOptions.find((r) => r.ref === draft.evidenceRef);
       return `When evidence "${ref?.label ?? (draft.evidenceRef || "…")}" did NOT return ok`;
     }
+    case "verifier_passed": {
+      // PR-F-UX5 — verdict-primitive phrasing. Same draft slot as evidence_ref
+      // (the wizard reuses ``evidenceRef`` for both pickers since storage is
+      // shared); the trigger sentence flips to "verifier" wording.
+      const ref = refOptions.find((r) => r.ref === draft.evidenceRef);
+      return `When verifier "${ref?.label ?? (draft.evidenceRef || "…")}" did NOT return ok`;
+    }
     case "shacl":
       return "When the SHACL shape does NOT conform on any evidence record";
     case "field_constraint":
@@ -1476,6 +1562,12 @@ function conditionClause(draft: Draft, refOptions: RefOption[]): string {
       const ref = refOptions.find((r) => r.ref === draft.evidenceRef);
       return `evidence "${ref?.label ?? draft.evidenceRef}" did not return ok`;
     }
+    case "verifier_passed": {
+      // PR-F-UX5 — verdict-primitive phrasing mirrors evidence_ref but is
+      // labelled around the verifier (judgment), not the raw record.
+      const ref = refOptions.find((r) => r.ref === draft.evidenceRef);
+      return `verifier "${ref?.label ?? draft.evidenceRef}" did not return ok`;
+    }
     case "shacl":
       return "the SHACL shape does NOT conform on any evidence record";
     case "llm_criterion": {
@@ -1569,6 +1661,9 @@ function stepIsComplete(currentKey: StepKey, draft: Draft): boolean {
         case "path_allowlist":
           return draft.pathAllowlist.trim().length > 0;
         case "evidence_ref":
+        case "verifier_passed":
+          // PR-F-UX5 — both kinds share the ``evidenceRef`` draft slot since
+          // they compile to the same backend ``deterministic_ref`` payload.
           return draft.evidenceRef.length > 0;
         case "shacl":
           return draft.shapeTtl.trim().length > 0;
@@ -1657,7 +1752,13 @@ function customRuleKind(draft: Draft): string {
     // sets match.tool; target=any with domain* sets the url-shape matcher.
     return "tool_perm";
   }
+  // PR-F-UX5 — evidence_ref + verifier_passed BOTH compile to the same
+  // backend ``deterministic_ref`` kind (with payload {ref}). The UX split is
+  // purely a clarification of intent (raw evidence record vs verdict
+  // primitive); persisted shape is identical, so existing custom_rules.py
+  // validator + persisted rules round-trip unchanged.
   if (draft.conditionKind === "evidence_ref") return "deterministic_ref";
+  if (draft.conditionKind === "verifier_passed") return "deterministic_ref";
   if (draft.conditionKind === "shacl") return "shacl_constraint";
   // PR-F3: field_constraint is the structured-picker path; it stores as
   // shacl_constraint on the backend with an authoredAs IR carried inside
@@ -1765,6 +1866,11 @@ function customRulePayload(draft: Draft): Record<string, unknown> {
   // pre_final / after-tool llm_criterion paths.
   switch (draft.conditionKind) {
     case "evidence_ref":
+    case "verifier_passed":
+      // PR-F-UX5 — same backend payload for both UX kinds (kind:
+      // deterministic_ref, payload: {ref}). The split lives only in the
+      // wizard picker (evidenceMenu vs judgmentMenu); on disk the rules
+      // are indistinguishable.
       return { ref: draft.evidenceRef };
     case "shacl":
       return { shapeTtl: draft.shapeTtl.trim() };
