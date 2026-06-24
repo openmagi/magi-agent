@@ -691,7 +691,12 @@ def _project_content_parts(
             # nothing for thought parts. When on, surface streaming thought as
             # thinking_delta; sse.py redacts/forwards it for the public path.
             thought_text = getattr(part, "text", None)
-            if thought_text and event.partial and _truthy_env("MAGI_STREAM_THINKING"):
+            # I-1: route through the typed flag registry (default-OFF
+            # ``FlagSpec`` mirrors the ``_truthy_env`` missing/empty → False
+            # semantics byte-identically).
+            from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+            if thought_text and event.partial and flag_bool("MAGI_STREAM_THINKING"):
                 agent_events.append(
                     {"type": "thinking_delta", "delta": _public_stream_text(thought_text)}
                 )

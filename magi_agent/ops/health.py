@@ -121,7 +121,12 @@ def scheduler_executor_health_projection(
 
     cfg = JobExecutionConfig.from_env()
     executor_enabled: bool = cfg.executor_enabled
-    kill_switch_enabled = _truthy_env("MAGI_SCHEDULER_KILL_SWITCH_ENABLED")
+    # I-1: route the registered flag through ``flag_bool`` for typed
+    # discoverability; byte-identical to ``_truthy_env`` because the
+    # registered default is ``False``.
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    kill_switch_enabled = flag_bool("MAGI_SCHEDULER_KILL_SWITCH_ENABLED")
     live_authorized = (
         executor_enabled
         and not cfg.shadow

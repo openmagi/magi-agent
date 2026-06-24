@@ -109,8 +109,15 @@ def _streaming_response(content: AsyncIterator[bytes]) -> StreamingResponse:
 
 
 def _streaming_chat_enabled() -> bool:
-    """Return True when ``MAGI_STREAMING_CHAT`` is truthy. Evaluated per-call."""
-    return _truthy_env("MAGI_STREAMING_CHAT")
+    """Return True when ``MAGI_STREAMING_CHAT`` is truthy. Evaluated per-call.
+
+    I-1: routed through the typed flag registry. The ``FlagSpec`` is
+    registered default-OFF so the previous ``_truthy_env`` semantics
+    (missing/empty → False) survive byte-identically.
+    """
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_STREAMING_CHAT")
 
 
 def _local_full_access(runtime: object) -> bool:

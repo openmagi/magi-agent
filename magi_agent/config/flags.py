@@ -2618,6 +2618,26 @@ FLAGS: tuple[FlagSpec, ...] = (
             "``[[project-magi-computer-use]]``."
         ),
     ),
+    # I-1: register the two transport/streaming knobs so the ``_truthy_env``
+    # call sites can route through ``flag_bool``. Strict default-OFF preserves
+    # ``_truthy_env``'s "missing/empty → False" semantics byte-identically.
+    _b(
+        "MAGI_STREAMING_CHAT",
+        summary=(
+            "Hosted ``/v1/chat/stream`` SSE route activation. Default-OFF; "
+            "the legacy completions endpoint stays the only chat surface "
+            "when OFF."
+        ),
+    ),
+    _b(
+        "MAGI_STREAM_THINKING",
+        summary=(
+            "Pass-through thinking-delta events to the public SSE surface "
+            "(``transport/sse``, ``shadow/gate5b4c3_live_runner_boundary``, "
+            "``adk_bridge/event_adapter``). Default-OFF clips thinking text "
+            "before it reaches any external consumer."
+        ),
+    ),
 )
 
 
