@@ -43,17 +43,24 @@ describe("AuthorWizard — variable-length policy authoring (F1.5 + F-UX3)", () 
     expect(src).not.toMatch(/currentKey === "target"/);
   });
 
-  it("TriggerStep surfaces Any tool / Specific tool radio + tool-name dropdown (folded-in target)", () => {
+  it("TriggerStep surfaces Any tool / Specific tool radio + tool-name combobox (folded-in target)", () => {
     // PR-F-UX3 — the Tool target sub-fieldset lives inside TriggerStep,
     // gated on lifecycleHasToolTarget(draft.lifecycle).
+    // PR-F-UX7 — the dropdown is now a native combobox
+    // (<input list="tool-name-options"> + <datalist>), so the catalog
+    // pre-populates suggestions while free-text typing is still allowed
+    // for tools that join the runtime dynamically.
     expect(src).toContain("Tool target");
     expect(src).toContain("Which tool(s) does this policy apply to?");
     expect(src).toContain("Any tool");
     expect(src).toContain("Specific tool");
     expect(src).toContain('toolTarget === "specific"');
-    // Replaces F1.5's freeform TextField with a real catalog dropdown.
+    // Replaces F1.5's freeform TextField with a real catalog-backed
+    // combobox (F-UX3 introduced a <select>; F-UX7 swapped it for a
+    // <input list="..."> + <datalist> so free-text is still accepted).
     expect(src).toContain("ToolNameSelect");
-    expect(src).toMatch(/<select[\s\S]*?value=\{value\}/);
+    expect(src).toMatch(/<input[\s\S]*?list=\{listId\}[\s\S]*?value=\{value\}/);
+    expect(src).toContain('<datalist id={listId}>');
   });
 
   it("TriggerStep gates the Tool target sub-fieldset on tool-bearing lifecycles only", () => {
@@ -67,14 +74,18 @@ describe("AuthorWizard — variable-length policy authoring (F1.5 + F-UX3)", () 
     expect(src).toContain("showToolTarget");
   });
 
-  it("ToolNameSelect sources options from the catalog.tools prop (no freeform typing)", () => {
-    // PR-F-UX3 — typo risk eliminated: the dropdown enumerates real
-    // runtime tools so an operator cannot save a rule against a tool that
-    // doesn't exist. The catalog is threaded through TriggerStep via
-    // ``tools={catalog.tools}`` from the wizard hub.
+  it("ToolNameSelect sources datalist options from the catalog.tools prop (free-text fallback allowed)", () => {
+    // PR-F-UX3 — the suggestion list enumerates real runtime tools so
+    // an operator picking from the dropdown cannot save a rule against
+    // a tool that doesn't exist. The catalog is threaded through
+    // TriggerStep via ``tools={catalog.tools}`` from the wizard hub.
+    // PR-F-UX7 — switched <select>+<option> to <datalist>+<option>; the
+    // input itself still binds the value (free-text accepted), and the
+    // datalist supplies type-ahead suggestions sourced from the same
+    // catalog.tools prop.
     expect(src).toContain("tools: ToolItem[]");
     expect(src).toMatch(/<TriggerStep[\s\S]*?tools=\{catalog\.tools\}/);
-    expect(src).toMatch(/sorted\.map\(\(t\) => \{[\s\S]*?<option key=\{t\.name\}/);
+    expect(src).toMatch(/sorted\.map\(\(t\) => \(?\s*\n?\s*(?:\/\/[^\n]*\n\s*)*<option key=\{t\.name\}/);
   });
 
   it("TriggerStep renders THREE fieldsets when the lifecycle is tool-bearing (lifecycle + scope + tool target)", () => {
@@ -1494,14 +1505,20 @@ describe("AuthorWizard — PR-F-UX3 target merge into trigger + catalog dropdown
     expect(src).toContain("Specific tool");
   });
 
-  it("ToolNameSelect is a <select> sourced from the tools prop (no freeform <input>)", () => {
-    // The dropdown enumerates the live catalog; the wizard no longer
-    // accepts freeform tool-name text input on the trigger step.
+  it("ToolNameSelect is a native combobox (<input list> + <datalist>) sourced from the tools prop", () => {
+    // PR-F-UX3 introduced the catalog-backed dropdown; PR-F-UX7 evolved
+    // it from a hard <select> to a native combobox so the operator can
+    // EITHER pick a known tool from the suggestion list OR type a
+    // free-text fallback (e.g. a dynamically-registered tool not yet in
+    // the catalog snapshot). The <input> binds the value; the datalist
+    // supplies type-ahead options sourced from the same tools prop.
     expect(src).toContain("function ToolNameSelect(");
-    expect(src).toMatch(/<select[\s\S]*?value=\{value\}[\s\S]*?onChange=\{[\s\S]*?\}/);
-    expect(src).toMatch(/sorted\.map\(\(t\) => \{[\s\S]*?<option key=\{t\.name\}/);
-    // The Trigger step renders the dropdown when target=specific, not the
-    // F1.5 TextField. The TextField call shape used by F1.5 is gone.
+    expect(src).toMatch(/<input[\s\S]*?list=\{listId\}[\s\S]*?value=\{value\}/);
+    expect(src).toContain('<datalist id={listId}>');
+    expect(src).toMatch(/sorted\.map\(\(t\) => \(?\s*\n?\s*(?:\/\/[^\n]*\n\s*)*<option key=\{t\.name\}/);
+    expect(src).toContain('data-testid="tool-name-combobox"');
+    // The Trigger step renders the combobox when target=specific, not
+    // the F1.5 TextField. The TextField call shape used by F1.5 is gone.
     expect(src).not.toMatch(
       /<TextField\s+value=\{draft\.toolName\}[\s\S]*?placeholder="shell_exec"/,
     );
@@ -1509,8 +1526,11 @@ describe("AuthorWizard — PR-F-UX3 target merge into trigger + catalog dropdown
 
   it("ToolNameSelect tolerates a stale toolName that is no longer in the catalog", () => {
     // Round-trip safety: if a saved rule references a renamed/removed
-    // tool, the dropdown surfaces it disambiguated rather than silently
-    // snapping back to the placeholder option.
+    // tool, the wizard surfaces an honest "(not in catalog)" hint
+    // beneath the input instead of silently snapping back to the
+    // placeholder. PR-F-UX7 replaced the F-UX3 synthetic <option> with
+    // a sibling hint span — the input itself already shows the raw
+    // value, so the operator can edit it directly.
     expect(src).toContain("valueInCatalog");
     expect(src).toMatch(/not in catalog/);
   });
@@ -1933,5 +1953,111 @@ describe("AuthorWizard — F-UX-EXTRA #2 auto-fill Policy ID", () => {
     expect(src).toMatch(
       /function defaultIdHint[\s\S]*?const derived = deriveRuleId\(draft\)/,
     );
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// PR-F-UX7 — Trigger step inlining + tool name combobox.
+//
+// Per discovery, F-UX3 already collapsed the wizard from 7→6 steps by
+// inlining the Tool target sub-fieldset inside TriggerStep, so the "6→5
+// collapse" premise of the spec is stale (no standalone target step
+// exists). The remaining F-UX7 work is the second half: convert the
+// catalog-backed <select> ToolNameSelect into a native combobox
+// (<input list="tool-name-options"> + <datalist>) so the operator can
+// EITHER pick a known runtime tool from the suggestion list OR type a
+// free-text fallback for a dynamically-registered tool not yet in the
+// catalog snapshot. Step plan stays at 6.
+// ---------------------------------------------------------------------------
+
+
+describe("AuthorWizard — PR-F-UX7 tool name combobox", () => {
+  it("step plan stays at a constant 6 entries (F-UX3 already collapsed 7→6)", () => {
+    // F-UX7's spec text mentions "6→5" but the wizard was already at 6
+    // before F-UX7 (no standalone "target" step existed since F-UX3).
+    // The combobox change does not move steps; assert the plan stays at
+    // 6 so a future refactor does not silently bring back the 7th step.
+    const sixSteps = '["trigger", "condition", "specifics", "action", "name", "review"]';
+    expect(src).toContain(sixSteps);
+    // The F1.5 7-step list must still NOT appear (defense in depth with
+    // the F-UX3 test below).
+    expect(src).not.toContain(
+      '["trigger", "target", "condition", "specifics", "action", "name", "review"]',
+    );
+    // The 5-step variant the spec hypothesised is also absent — the
+    // wizard does not shrink to 5 because the tool target axis lives
+    // inside Trigger as a sub-fieldset, not as a removed step.
+    expect(src).not.toContain(
+      '["trigger", "condition", "specifics", "name", "review"]',
+    );
+  });
+
+  it("ToolNameSelect renders a native <input list=...> combobox bound to the catalog datalist", () => {
+    // Native combobox pattern: <input type="text" list="..."> +
+    // <datalist id="..."><option value="X"/></datalist>. Browsers
+    // surface the datalist as a type-ahead suggestion list, and the
+    // input still accepts arbitrary text so a free-text fallback works
+    // on day 1 (no custom Popover needed).
+    expect(src).toMatch(/<input[\s\S]*?type="text"[\s\S]*?list=\{listId\}/);
+    expect(src).toMatch(/value=\{value\}[\s\S]*?onChange=\{\(e\) => onChange\(e\.target\.value\)\}/);
+    expect(src).toContain('<datalist id={listId}>');
+    expect(src).toContain('const listId = "tool-name-options"');
+  });
+
+  it("ToolNameSelect carries data-testid='tool-name-combobox' for browser tests", () => {
+    // The spec calls out the testid by name so DOM-level tests can
+    // target the combobox without coupling to layout classes.
+    expect(src).toContain('data-testid="tool-name-combobox"');
+  });
+
+  it("ToolNameSelect accepts free-text outside the catalog (datalist is suggestion, not validation)", () => {
+    // The <datalist> only suggests; the <input> binds the raw value
+    // without filtering. The validator on Next-step click
+    // (stepIsComplete("trigger")) only enforces non-empty when
+    // toolTarget=specific, so any typed string passes through to the
+    // backend tool_perm match.tool comparison as-is.
+    expect(src).toMatch(/draft\.toolTarget === "specific" && draft\.toolName\.trim\(\)\.length > 0/);
+    // The synthetic "(not in catalog)" <option> from F-UX3 is gone —
+    // the input already renders the raw value, so the operator can
+    // edit it directly.
+    expect(src).not.toMatch(
+      /<option value=\{value\}>\{value\} \(not in catalog\)<\/option>/,
+    );
+    // Free-text safety hint surfaces beneath the input so the operator
+    // understands they typed something the runtime does not currently
+    // expose.
+    expect(src).toContain("saved as a free-text tool name");
+  });
+
+  it("ToolNameSelect's datalist enumerates catalog tools (no <select> wrapper)", () => {
+    // Suggestion options come from the same sorted catalog the F-UX3
+    // dropdown used; the only structural change is the wrapper element.
+    expect(src).toMatch(/sorted\.map\(\(t\) => \(?\s*\n?\s*(?:\/\/[^\n]*\n\s*)*<option key=\{t\.name\} value=\{t\.name\}/);
+    // The F-UX3 <select value={value}> wrapper is gone (the suggestion
+    // list lives in <datalist> instead).
+    expect(src).not.toMatch(/<select\s+value=\{value\}/);
+  });
+
+  it("ToolNameSelect surfaces the dangerous-tool hint via a sibling warning chip (NOT <option label>)", () => {
+    // F-UX7 review pass: Chrome/Edge ignore <option label> on
+    // <datalist> entries entirely, so a label-based dangerous signal
+    // was invisible on the majority browser. The chip below the input
+    // is browser-portable and screen-reader-visible via
+    // aria-describedby.
+    expect(src).toContain('data-testid="tool-name-dangerous-warning"');
+    expect(src).toMatch(/matchedDangerous = sorted\.some\(/);
+    // The stored value stays a clean bare tool name (no suffix mixed
+    // into option text or value).
+    expect(src).not.toMatch(/const hint = t\.dangerous/);
+    expect(src).not.toContain('label={hint || undefined}');
+  });
+
+  it("ToolNameSelect wires aria-describedby for both warning hints", () => {
+    // Screen-reader users get the (not in catalog) + dangerous warnings
+    // alongside the Tool name label, not silently dropped.
+    expect(src).toContain('aria-describedby={describedBy}');
+    expect(src).toContain('id={notInCatalogId}');
+    expect(src).toContain('id={dangerousId}');
   });
 });
