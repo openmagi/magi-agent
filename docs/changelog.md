@@ -1,3 +1,28 @@
+# 0.1.81 (2026-06-24)
+
+## Customize
+- F-UX5: evidence vs verifier/condition model split; Conditions tab unification (#956).
+
+## Performance / correctness
+- H-27: PyBM25Backend reindex cached by (root, max_mtime, file_count) (#951).
+- H-29 step 1: paired_verdict default auto-selects t-critical at small n (#953).
+
+## Reference contracts (zero behavior change)
+- H-6: billing/ labeled as reference contract, not wired into OSS runtime (#948).
+- H-23: ops/job_queue.py labeled as reference contract (#959).
+- H-36 #5: ledger_orchestrator._assemble_answer labeled benchmark-only dormant (#957).
+
+## Refactors / cleanup
+- A-11: scheduler tick_summary scrubbed through lenient redaction (#947).
+- G-2: cli/event_projection unified single source (#958).
+- H-35: redundant in-function json import dropped from headless (#954).
+- H-36 items 1+2+4: dead-branch + httpx leak cleanups (#952).
+- H-36 #3: magic literal 64 replaced with _MANUAL_TOOL_EVENT_LIMIT (#955).
+- I-11: flag_str/flag_int narrowed at the reader; three type-ignores deleted (#960).
+
+## Tests
+- E-3 meta-test: every registry model has a context window (#961).
+
 # 0.1.80 (2026-06-24)
 
 ## Customize
