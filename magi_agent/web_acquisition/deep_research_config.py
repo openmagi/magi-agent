@@ -65,7 +65,10 @@ def deep_research_config_from_env() -> DeepResearchConfig:
     All env-var overrides are clamped to valid ranges; malformed values
     fall back to the defaults defined on ``DeepResearchConfig``.
     """
-    enabled = _is_true(os.environ.get(DEEP_RESEARCH_ENABLED_ENV, ""))
+    # I-1: route through the typed flag registry (default-OFF strict bool).
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    enabled = flag_bool(DEEP_RESEARCH_ENABLED_ENV)
     max_queries = _int_env(DEEP_RESEARCH_MAX_QUERIES_ENV, 3, lo=1, hi=8)
     max_iterations = _int_env(DEEP_RESEARCH_MAX_ITERATIONS_ENV, 2, lo=1, hi=4)
     cross_verify_raw = os.environ.get(DEEP_RESEARCH_CROSS_VERIFY_ENV, "1")
