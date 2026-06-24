@@ -2046,45 +2046,7 @@ function availableArchetypes(lifecycle: Lifecycle): Archetype[] {
   if (lifecycle === "on_user_prompt_submit") {
     return ["audit", "mutate"];
   }
-  // PR-F-LIFE1 — ``on_subagent_stop`` is lifted past audit-only: the
-  // backend ``_LEGAL`` matrix now accepts (llm_criterion × on_subagent_stop
-  // × {audit, block, ask}). Block / ask are directives to the PARENT
-  // caller (the child output has already been emitted, so the wizard reads
-  // the verb as "tell the parent the subagent failed the criterion"). The
-  // audit row is still recorded in either case.
   if (lifecycle === "on_subagent_stop") {
-    return ["block", "ask", "audit"];
-  }
-  // PR-F-LIFE1 — both turn-boundary slots stay audit-only at the wizard
-  // (matches the backend ``_LEGAL`` entries). Block at top-level turn entry
-  // would require a runtime contract change (the engine stream has not
-  // started yet) and at top-level turn end the emission has already
-  // completed, so the conservative wire is audit-only.
-  if (lifecycle === "before_turn_start" || lifecycle === "after_turn_end") {
-    return ["audit"];
-  }
-  // PR-F-LIFE2 — per-LLM-call slots are audit-only. Block at the per-call
-  // boundary would amplify the runaway-cost risk (one bad rule blocks
-  // every LLM call within a turn) and the surrounding plugin's per-turn
-  // critic budget already enforces the cost ceiling for audit verdicts.
-  if (lifecycle === "before_llm_call" || lifecycle === "after_llm_call") {
-    return ["audit"];
-  }
-  // PR-F-LIFE3 — four new emitter slots are audit-only. Block at the
-  // compaction / task-checkpoint / artifact-created chokepoints has no
-  // honest meaning: the compaction has already been decided by the
-  // surrounding plugin (the audit wraps the call, it does not gate it),
-  // a task transition has already been recorded by the work-queue store
-  // (the audit fires AFTER the state write), and an artifact has already
-  // been written by the provider (the audit fires AFTER the ok-status
-  // branch). Surfacing block would let the operator assemble a draft the
-  // backend ``_LEGAL`` matrix rejects.
-  if (
-    lifecycle === "before_compaction"
-    || lifecycle === "after_compaction"
-    || lifecycle === "on_task_checkpoint"
-    || lifecycle === "on_artifact_created"
-  ) {
     return ["audit"];
   }
   return ["block", "ask", "audit"];
