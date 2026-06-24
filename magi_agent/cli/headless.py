@@ -1066,8 +1066,8 @@ async def run_headless(
         assistant_text = _accumulate_text(events)
         governance_mode, research_audit = _research_governance()
         if research_audit is not None:
-            import json as _json  # noqa: PLC0415
-
+            # H-35: ``_json`` is already imported at module top (line 25);
+            # the in-function re-import was redundant cargo-cult deferral.
             for event in events:
                 research_audit.observe_event(event.type, event.payload)  # type: ignore[attr-defined]
             report = research_audit.report(assistant_text, mode=governance_mode)  # type: ignore[attr-defined]
