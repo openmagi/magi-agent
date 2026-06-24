@@ -839,11 +839,12 @@ graph LR
 | event_projection.py | — | public_events, reports, runtime_issuance, source_ledger, types, verifier_bus | research/research_first_canary.py |
 | extraction.py | — | result, transcript, types | evidence/local_tool_collector.py |
 | extractors.py | — | types | evidence/__init__.py |
-| final_output_gate.py | — | calculation_policy, evidence_first_projection, model_tiers, uncertainty_policy | cli/engine.py, harness/long_context_eval.py, runtime/goal_nudge.py |
+| final_output_gate.py | — | calculation_policy, evidence_first_projection, gate_activation, model_tiers, uncertainty_policy | cli/engine.py, harness/long_context_eval.py, runtime/goal_nudge.py |
 | first_party_activity.py | First-party activity evidence — versioned payloads + dispatch-seam builders. | context, ledger, result, types | evidence/local_tool_collector.py, tools/dispatcher.py |
 | first_party_gate.py | Static gate for first-party activity capture. | discovery | cli/tool_runtime.py, cli/wiring.py, gates/gate5b_full_toolhost.py, tools/dispatcher.py |
 | gate1a_egress_correlation.py | — | — | evidence/observed_egress.py, gates/gate8_readiness.py, shadow/gate5b4c3_live_runner_boundary.py, transport/chat.py, transport/chat_routes.py |
 | gate2_durable_evidence.py | Durable evidence store for Gate 2 selected sandbox canary. | — | transport/chat.py, transport/gate2_sandbox_canary.py |
+| gate_activation.py | F-11 — single activation helper for two-flag gate configs. | — | evidence/final_output_gate.py, recipes/coding_evidence_gate.py |
 | ledger.py | — | authority, builtin, safety, types | cli/engine.py, evidence/__init__.py, evidence/first_party_activity.py, evidence/local_tool_collector.py, harness/general_automation/constraint_reinjection.py, harness/general_automation/live_gate.py, harness/general_automation/task_completion.py, harness/verifier_bus.py, introspection/projection.py, introspection/tool.py, shadow/audit_reporter.py |
 | ledger_semantics.py | — | — | — |
 | ledger_store.py | Reader + retention for the durable evidence-ledger files. | — | customize/live_catalog.py, evidence/local_tool_collector.py, evidence/run_view.py, runtime/governed_turn.py, shadow/gate5b4c3_live_runner_boundary.py |
@@ -1394,7 +1395,7 @@ graph LR
 |---|---|---|---|
 | __init__.py | — | compiler, recipes, selector_validation | cli/engine.py |
 | best_of_n.py | General Best-of-N budgeted test-time scaling wrapper. | manifest | recipes/cross_verify.py |
-| coding_evidence_gate.py | — | authority, coding_verification, types | — |
+| coding_evidence_gate.py | — | authority, coding_verification, gate_activation, types | — |
 | coding_mutation.py | — | authority, edit_matching, env, read_ledger | recipes/coding_subagents.py |
 | coding_subagents.py | — | authority, coding_mutation, read_ledger, runtime | — |
 | compiler.py | — | discovery, env, learning_usage | cli/real_runner.py, cli/tests/test_force_recipe_source_grounded_selection.py, cli/tests/test_runtime_policy_wiring.py, cli/tests/test_source_grounded_recipe_gate_integration.py, packs/dashboard_authored.py, packs/registries.py, recipes/__init__.py, recipes/first_party/discovery.py, recipes/first_party/learning_usage.py, recipes/kernel_recipe_packs.py, recipes/materializer.py, recipes/recipe_routing.py, recipes/workflow_recipe.py, shadow/gate2_recipe_profile_resolver.py, transport/chat.py, transport/chat_routes.py |
