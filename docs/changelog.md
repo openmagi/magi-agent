@@ -1,3 +1,14 @@
+# 0.1.80 (2026-06-24)
+
+## Customize
+- F6.5: `llm_criterion + contentMatch` combo in author wizard; deterministic regex pre-filter before LLM critic (#943).
+
+## Web dashboard
+- Bundle regen catch-up for F2/F2.5/F4/F5/F6/F6.5 (#944).
+
+## CI
+- Gate web_dashboard bundle freshness against `apps/web/src/` changes; prevents bundle/source drift recurring (#945).
+
 # Changelog
 
 Open Magi Agent is in early beta. For the authoritative list of tagged builds and
