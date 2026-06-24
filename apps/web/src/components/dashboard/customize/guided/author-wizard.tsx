@@ -108,18 +108,7 @@ type Lifecycle =
   // so an operator can author a "subagent must produce a summary"-style
   // rule whose verdict the parent caller can act on.
   | "before_turn_start"
-  | "after_turn_end"
-  // PR-F-LIFE2 Tier 2 — per-LLM-call gates. Fan-outs live in
-  // magi_agent.customize.lifecycle_audit (run_before_llm_call_audit +
-  // run_after_llm_call_audit) and are wired into the ADK
-  // before_model_callback / after_model_callback boundary by
-  // magi_agent.adk_bridge.lifecycle_llm_call_control. Audit-only at
-  // the backend matrix — every emit fires on the per-call hot path so
-  // a per-turn critic budget (env MAGI_CUSTOMIZE_LLM_CALL_AUDIT_BUDGET,
-  // default 3) hard-caps the combined before+after invocations to
-  // prevent runaway critic cost.
-  | "before_llm_call"
-  | "after_llm_call";
+  | "after_turn_end";
 type Scope = "always" | "coding" | "research" | "delivery" | "memory" | "task";
 // PR-F-MUT3 — "mutate" is a friendly grouping archetype that surfaces the
 // two mutator conditionKinds (prompt_injection + output_rewrite) as a
@@ -316,12 +305,6 @@ function stepPlan(lifecycle: Lifecycle): StepKey[] {
   if (lifecycle === "before_turn_start" || lifecycle === "after_turn_end") {
     return ["trigger", "condition", "specifics", "action", "name", "review"];
   }
-  // PR-F-LIFE2 Tier 2 — per-LLM-call slots fire INSIDE the runner stream but
-  // OUTSIDE any tool boundary. Same constant 6-step plan as the other
-  // audit-only lifecycle slots — no per-tool target axis to author.
-  if (lifecycle === "before_llm_call" || lifecycle === "after_llm_call") {
-    return ["trigger", "condition", "specifics", "action", "name", "review"];
-  }
   // Tool-bearing lifecycles (before_tool_use / after_tool_use): tool target
   // sub-fieldset renders inside TriggerStep, not as a separate step.
   return ["trigger", "condition", "specifics", "action", "name", "review"];
@@ -370,9 +353,6 @@ export function AuthorWizard({
       // PR-F-LIFE1 — turn-boundary slots have no tool axis.
       || merged.lifecycle === "before_turn_start"
       || merged.lifecycle === "after_turn_end"
-      // PR-F-LIFE2 — per-LLM-call slots fire outside any tool boundary.
-      || merged.lifecycle === "before_llm_call"
-      || merged.lifecycle === "after_llm_call"
     ) {
       merged.toolTarget = "any";
       merged.toolName = "";
@@ -639,6 +619,21 @@ const LIFECYCLE_OPTIONS: ReadonlyArray<LifecycleOption> = [
       "Fires once per top-level turn after the engine stream completes — use for session-level checks (rare). Audit-only: the top-level emission has already completed, so blocks aren't honest at this slot.",
     tier: "tier2",
   },
+  // --- Tier 2 — wired in PR-F-LIFE1, audit-only ----------------------------
+  {
+    id: "before_turn_start",
+    label: "When a top-level turn starts (audit-only)",
+    description:
+      "Fires once per top-level turn before the engine stream starts — use for session-level checks (rare). Audit-only: records the criterion verdict without mutating the inbound prompt or blocking the turn.",
+    tier: "tier2",
+  },
+  {
+    id: "after_turn_end",
+    label: "When a top-level turn ends (audit-only)",
+    description:
+      "Fires once per top-level turn after the engine stream completes — use for session-level checks (rare). Audit-only: the top-level emission has already completed, so blocks aren't honest at this slot.",
+    tier: "tier2",
+  },
   // --- Tier 2 — wired in PR-F-LIFE2, audit-only with per-turn cost ceiling -
   {
     id: "before_llm_call",
@@ -862,6 +857,17 @@ function availableConditionKinds(
     return ["llm_criterion", "prompt_injection"];
   }
   if (lifecycle === "on_subagent_stop") {
+    return ["llm_criterion"];
+  }
+  // PR-F-LIFE1 Tier 2 — turn-boundary slots accept ``llm_criterion`` only.
+  // evidence_ref / verifier_passed compile to ``deterministic_ref``, which
+  // has no runtime fan-out at the turn-boundary slots (see custom_rules.py
+  // _LEGAL). Exposing them in the wizard would let the operator persist a
+  // rule the runtime cannot honor. Mutator kinds (prompt_injection /
+  // output_rewrite) are NOT exposed at turn boundaries in v1 because there
+  // is no honest mutation target at top-level turn entry (engine has not
+  // started) or exit (the emission has already completed).
+  if (lifecycle === "before_turn_start" || lifecycle === "after_turn_end") {
     return ["llm_criterion"];
   }
   // pre_final has no tool layer; target is ignored.
@@ -1977,7 +1983,21 @@ function availableArchetypes(lifecycle: Lifecycle): Archetype[] {
   if (lifecycle === "on_user_prompt_submit") {
     return ["audit", "mutate"];
   }
+  // PR-F-LIFE1 — ``on_subagent_stop`` is lifted past audit-only: the
+  // backend ``_LEGAL`` matrix now accepts (llm_criterion × on_subagent_stop
+  // × {audit, block, ask}). Block / ask are directives to the PARENT
+  // caller (the child output has already been emitted, so the wizard reads
+  // the verb as "tell the parent the subagent failed the criterion"). The
+  // audit row is still recorded in either case.
   if (lifecycle === "on_subagent_stop") {
+    return ["block", "ask", "audit"];
+  }
+  // PR-F-LIFE1 — both turn-boundary slots stay audit-only at the wizard
+  // (matches the backend ``_LEGAL`` entries). Block at top-level turn entry
+  // would require a runtime contract change (the engine stream has not
+  // started yet) and at top-level turn end the emission has already
+  // completed, so the conservative wire is audit-only.
+  if (lifecycle === "before_turn_start" || lifecycle === "after_turn_end") {
     return ["audit"];
   }
   return ["block", "ask", "audit"];
@@ -2117,13 +2137,6 @@ function targetEventPhrase(draft: Draft): string {
   }
   if (draft.lifecycle === "after_turn_end") {
     return "When a top-level turn ends";
-  }
-  // PR-F-LIFE2 Tier 2 — per-LLM-call lifecycle phrasing.
-  if (draft.lifecycle === "before_llm_call") {
-    return "Before each LLM call";
-  }
-  if (draft.lifecycle === "after_llm_call") {
-    return "After each LLM call";
   }
   if (draft.lifecycle === "before_tool_use") {
     return draft.toolTarget === "specific"
@@ -2275,10 +2288,7 @@ function ReviewStep({
             && draft.lifecycle !== "on_subagent_stop"
             // PR-F-LIFE1 — turn-boundary lifecycles have no tool layer.
             && draft.lifecycle !== "before_turn_start"
-            && draft.lifecycle !== "after_turn_end"
-            // PR-F-LIFE2 — per-LLM-call lifecycles have no tool layer.
-            && draft.lifecycle !== "before_llm_call"
-            && draft.lifecycle !== "after_llm_call" ? (
+            && draft.lifecycle !== "after_turn_end" ? (
             <>
               <dt className="text-secondary">Target</dt>
               <dd>{draft.toolTarget === "any" ? "any tool" : draft.toolName || "(unnamed tool)"}</dd>
@@ -2330,13 +2340,6 @@ function whenForLifecycle(draft: Draft): string {
   }
   if (draft.lifecycle === "after_turn_end") {
     return "When a top-level turn ends";
-  }
-  // PR-F-LIFE2 Tier 2 — describe the two new per-LLM-call lifecycle slots.
-  if (draft.lifecycle === "before_llm_call") {
-    return "Before each LLM call";
-  }
-  if (draft.lifecycle === "after_llm_call") {
-    return "After each LLM call";
   }
   if (draft.lifecycle === "before_tool_use") {
     return draft.toolTarget === "specific"
