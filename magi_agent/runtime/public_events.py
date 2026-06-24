@@ -64,6 +64,8 @@ _TOOL_INPUT_PREVIEW_KEYS = (
     "filename",
     "workspacePath",
     "workspace_path",
+    "prompt",
+    "task",
 )
 _RULE_CHECK_AUTHORITY_FIELD = "_openmagiRuleCheckAuthority"
 _RULE_CHECK_AUTHORITY_TOKEN = object()
