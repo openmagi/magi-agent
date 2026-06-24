@@ -197,6 +197,13 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     # Both fan-outs are no-ops without authored rules; lab opts in so dogfood
     # turns can exercise the wizard's new lifecycle options end-to-end.
     "MAGI_CUSTOMIZE_LIFECYCLE_EXPANSION_ENABLED",
+    # PR-F-UX2 (F8 core) runtime-fields endpoint: backs the wizard's chip
+    # picker shown above regex / contentMatch / llm_criterion / SHACL inputs.
+    # Pure derivation (no I/O, no LLM), registration-time only, fail-open on
+    # unknown tuples. Lab opts in so dogfood wizard authoring sees the chips
+    # out-of-the-box; registry default stays OFF so a fresh install / hosted
+    # serve do not expose the surface until explicitly enabled.
+    "MAGI_CUSTOMIZE_RUNTIME_FIELDS_ENDPOINT_ENABLED",
     # NOTE: MAGI_CUSTOMIZE_VERIFICATION_ENABLED / MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED
     # are NOT here: they are profile-aware default-ON (``_pb``), so they resolve ON
     # in every non-safe profile (full AND lab) on their own. The lab seed only

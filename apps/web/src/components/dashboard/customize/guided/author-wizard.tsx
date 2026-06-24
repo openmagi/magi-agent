@@ -57,7 +57,7 @@ import {
   HelpCircle,
   ShieldOff,
 } from "lucide-react";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   getEvidenceLiveCatalog,
@@ -76,6 +76,7 @@ import type { EvidenceTypeEntry } from "@/lib/policy-model";
 
 import { TrustBadge, type TrustClass } from "../trust-badge";
 
+import { RuntimeFieldChips } from "./runtime-field-chips";
 import { RadioCard, WizardChrome } from "./wizard-chrome";
 
 
@@ -846,6 +847,23 @@ function SpecificsStep({
   judgmentRefOptions: RefOption[];
   liveCatalogTypes: EvidenceLiveCatalogTypeEntry[];
 }): React.ReactElement {
+  // PR-F-UX2 — refs for cursor-aware chip insertion. One ref per chip-bearing
+  // input; the chip click reads selectionStart from the right ref and splices
+  // at the caret via :func:`insertAtCaret`.
+  const regexInputRef = useRef<HTMLInputElement | null>(null);
+  const criterionInputRef = useRef<HTMLInputElement | null>(null);
+  const contentMatchInputRef = useRef<HTMLInputElement | null>(null);
+  const shaclTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // PR-F-UX2 — resolve the runtime-fields tool target. When the wizard's
+  // top-level Target step picked a specific tool, thread that name through
+  // so ``tool_input.*`` expands to the real manifest input_schema; otherwise
+  // pass null and the backend returns the generic marker + alias hints.
+  const chipTool =
+    draft.toolTarget === "specific" && draft.toolName.trim().length > 0
+      ? draft.toolName.trim()
+      : null;
+
   return (
     <div className="space-y-3">
       <h2 className="text-lg font-bold text-foreground">Fill in the details</h2>
@@ -933,19 +951,33 @@ function SpecificsStep({
         )
       ) : null}
       {draft.conditionKind === "shacl" ? (
-        <label className="block">
-          <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
-            SHACL shape (Turtle)
-          </span>
-          <textarea
-            value={draft.shapeTtl}
-            onChange={(e) => update({ shapeTtl: e.target.value })}
-            rows={10}
-            placeholder={SHACL_PLACEHOLDER}
-            aria-label="SHACL shape"
-            className="mt-1 w-full resize-y rounded-lg border border-primary/30 bg-white px-3 py-2 text-xs font-mono text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+        <div className="space-y-2">
+          <RuntimeFieldChips
+            lifecycle={draft.lifecycle}
+            condition="shacl"
+            tool={chipTool}
+            onInsert={(token) =>
+              insertAtCaret(shaclTextareaRef, draft.shapeTtl, token, (next) =>
+                update({ shapeTtl: next }),
+              )
+            }
+            label="Available evidence fields"
           />
-        </label>
+          <label className="block">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+              SHACL shape (Turtle)
+            </span>
+            <textarea
+              ref={shaclTextareaRef}
+              value={draft.shapeTtl}
+              onChange={(e) => update({ shapeTtl: e.target.value })}
+              rows={10}
+              placeholder={SHACL_PLACEHOLDER}
+              aria-label="SHACL shape"
+              className="mt-1 w-full resize-y rounded-lg border border-primary/30 bg-white px-3 py-2 text-xs font-mono text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+            />
+          </label>
+        </div>
       ) : null}
       {draft.conditionKind === "llm_criterion" ? (
         <div className="space-y-3">
@@ -972,12 +1004,25 @@ function SpecificsStep({
               </p>
             </div>
           ) : null}
-          <TextField
-            value={draft.criterion}
-            onChange={(v) => update({ criterion: v })}
-            label="LLM criterion (single sentence)"
-            placeholder="The answer cites at least one source."
-          />
+          <div className="space-y-2">
+            <RuntimeFieldChips
+              lifecycle={draft.lifecycle}
+              condition="llm_criterion"
+              tool={chipTool}
+              onInsert={(token) =>
+                insertAtCaret(criterionInputRef, draft.criterion, token, (next) =>
+                  update({ criterion: next }),
+                )
+              }
+            />
+            <TextField
+              value={draft.criterion}
+              onChange={(v) => update({ criterion: v })}
+              label="LLM criterion (single sentence)"
+              placeholder="The answer cites at least one source."
+              inputRef={criterionInputRef}
+            />
+          </div>
           {/* PR-F6.5 — deterministic contentMatch pre-filter on after-tool
               llm_criterion rules. The runtime gate only invokes the LLM
               critic when the tool output matches the pattern. Surface this
@@ -1009,6 +1054,19 @@ function SpecificsStep({
               </label>
               {draft.llmContentMatchEnabled ? (
                 <div className="mt-3 space-y-2 border-t border-black/[0.06] pt-3">
+                  <RuntimeFieldChips
+                    lifecycle={draft.lifecycle}
+                    condition="contentMatch"
+                    tool={chipTool}
+                    onInsert={(token) =>
+                      insertAtCaret(
+                        contentMatchInputRef,
+                        draft.llmContentMatchPattern,
+                        token,
+                        (next) => update({ llmContentMatchPattern: next }),
+                      )
+                    }
+                  />
                   <TextField
                     value={draft.llmContentMatchPattern}
                     onChange={(v) => update({ llmContentMatchPattern: v })}
@@ -1019,6 +1077,7 @@ function SpecificsStep({
                         : "AWS_SECRET"
                     }
                     mono
+                    inputRef={contentMatchInputRef}
                   />
                   <label className="flex items-center gap-2 text-xs text-secondary">
                     <input
@@ -1050,12 +1109,23 @@ function SpecificsStep({
       ) : null}
       {draft.conditionKind === "regex" ? (
         <div className="space-y-2">
+          <RuntimeFieldChips
+            lifecycle={draft.lifecycle}
+            condition="regex"
+            tool={chipTool}
+            onInsert={(token) =>
+              insertAtCaret(regexInputRef, draft.regexPattern, token, (next) =>
+                update({ regexPattern: next }),
+              )
+            }
+          />
           <TextField
             value={draft.regexPattern}
             onChange={(v) => update({ regexPattern: v })}
             label="Pattern"
             placeholder={draft.regexIsRegex ? "AKIA[0-9A-Z]{16}" : "secret"}
             mono
+            inputRef={regexInputRef}
           />
           <label className="flex items-center gap-2 text-xs text-secondary">
             <input
@@ -1315,18 +1385,24 @@ magi:MyShape
     ] .`;
 
 
+// PR-F-UX2: optional ``inputRef`` forwards the underlying <input> so the
+// parent can read selectionStart/selectionEnd for cursor-aware chip
+// insertion (RuntimeFieldChips). Backward-compatible: existing callers
+// that don't pass ``inputRef`` are unaffected.
 function TextField({
   value,
   onChange,
   label,
   placeholder,
   mono,
+  inputRef,
 }: {
   value: string;
   onChange: (v: string) => void;
   label: string;
   placeholder?: string;
   mono?: boolean;
+  inputRef?: React.Ref<HTMLInputElement>;
 }): React.ReactElement {
   return (
     <label className="block">
@@ -1334,6 +1410,7 @@ function TextField({
         {label}
       </span>
       <input
+        ref={inputRef}
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -1345,6 +1422,42 @@ function TextField({
       />
     </label>
   );
+}
+
+
+// PR-F-UX2: cursor-aware chip insertion helper shared across the wizard's
+// chip-bearing inputs. Reads the current selection from the input/textarea
+// ref, splices the chip token at the caret, hands the new value to the
+// draft updater, and restores the caret after React commits.
+//
+// Mirrors the pattern from apps/web/src/components/chat/chat-input.tsx
+// (acceptSlash / acceptKb at lines 392-410 / 452-470) so the wizard's
+// chip insertion feels identical to the chat input's slash/kb autocomplete.
+function insertAtCaret(
+  ref: React.RefObject<HTMLInputElement | HTMLTextAreaElement | null>,
+  value: string,
+  token: string,
+  onChange: (next: string) => void,
+): void {
+  const el = ref.current;
+  const start =
+    el && typeof el.selectionStart === "number" ? el.selectionStart : value.length;
+  const end =
+    el && typeof el.selectionEnd === "number" ? el.selectionEnd : value.length;
+  const next = value.slice(0, start) + token + value.slice(end);
+  onChange(next);
+  const caret = start + token.length;
+  requestAnimationFrame(() => {
+    if (!ref.current) return;
+    try {
+      ref.current.setSelectionRange(caret, caret);
+      ref.current.focus();
+    } catch {
+      // setSelectionRange can throw if the element shape changed mid-flight;
+      // failing the cursor restoration is non-fatal — the value is already
+      // committed and the user can re-click to reposition.
+    }
+  });
 }
 
 

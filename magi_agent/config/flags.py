@@ -917,6 +917,26 @@ FLAGS: tuple[FlagSpec, ...] = (
             "(the new fan-out is a no-op). Strict default-OFF."
         ),
     ),
+    _b(
+        "MAGI_CUSTOMIZE_RUNTIME_FIELDS_ENDPOINT_ENABLED",
+        stage="stage2",
+        summary=(
+            "PR-F-UX2 (F8 core): expose the read-only "
+            "GET /v1/app/customize/runtime-fields endpoint that returns the "
+            "set of runtime variables the wizard's chip picker renders above "
+            "regex / contentMatch / llm_criterion / SHACL inputs, per "
+            "(lifecycle, condition, tool?) tuple. Derivation is pure "
+            "(no I/O, no LLM): tool_input.* expands ToolManifest.input_schema, "
+            "evidence:<type>.fields.* reads the F2 _BUILTIN_FIELD_HINTS table, "
+            "and context-free vars (session_id, turn_id, ...) are hard-coded "
+            "per lifecycle from the runtime gate signatures. Endpoint is "
+            "registration-time only, never on the live turn hot path, and "
+            "fail-open (unknown tuples return empty fields rather than 5xx). "
+            "Strict default-OFF; lab opts in via LAB_EXPERIMENTAL_FLAGS so a "
+            "fresh install and hosted serve do not expose the surface until "
+            "the operator explicitly enables it."
+        ),
+    ),
     _pb(
         "MAGI_CREDENTIAL_AWARENESS_ENABLED",
         stage="stage2",

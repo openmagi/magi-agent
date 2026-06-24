@@ -646,6 +646,76 @@ export async function getEvidenceLiveCatalog(
 
 
 // ---------------------------------------------------------------------------
+// PR-F-UX2 (F8 core) — runtime-fields chip menu API client
+// ---------------------------------------------------------------------------
+
+/**
+ * One chip in the wizard's variable picker. Mirrors the backend's
+ * ``magi_agent.customize.runtime_fields.RuntimeField`` shape.
+ */
+export interface RuntimeFieldChip {
+  /** Canonical variable name (e.g. ``session_id``, ``tool_input.url``, ``evidence:TestRun.fields.command``). */
+  name: string;
+  /** JSON-Schema-style type ("string", "bool", "object", ...). */
+  type: string;
+  /** Human description; may be empty for tool-input properties whose manifest has no description. */
+  description: string;
+}
+
+/**
+ * Response shape from `GET /v1/app/customize/runtime-fields`.
+ *
+ * Fail-open contract (matches the backend): an unknown (lifecycle, condition)
+ * tuple returns ``{fields: [], context, source: 'unknown'}`` rather than
+ * 4xx/5xx so the chip picker silently falls back to a plain text input.
+ */
+export interface RuntimeFieldsResponse {
+  fields: RuntimeFieldChip[];
+  /** Echo of the resolved tuple ("lifecycle/condition[/tool]"). */
+  context: string;
+  /** Provenance marker — "fields_for_context" on a hit, "unknown" on miss. */
+  source: string;
+}
+
+/**
+ * Fetch the variable chip menu for a (lifecycle, condition, tool?) tuple.
+ *
+ * - Read-only (GET) and fail-open: a fetch / HTTP error returns an empty
+ *   chip list rather than throwing, so the consumer renders without a
+ *   try/catch wrapper.
+ * - Gated by ``MAGI_CUSTOMIZE_RUNTIME_FIELDS_ENDPOINT_ENABLED``; when OFF
+ *   the endpoint responds 404 and the chip picker degrades to "no chips".
+ */
+export async function getRuntimeFields(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  args: { lifecycle: string; condition: string; tool?: string | null },
+): Promise<RuntimeFieldsResponse> {
+  const params = new URLSearchParams({
+    lifecycle: args.lifecycle,
+    condition: args.condition,
+  });
+  if (args.tool) {
+    params.set("tool", args.tool);
+  }
+  const path = `/v1/app/customize/runtime-fields?${params.toString()}`;
+  const empty: RuntimeFieldsResponse = {
+    fields: [],
+    context: `${args.lifecycle}/${args.condition}`,
+    source: "unknown",
+  };
+  try {
+    const res = await fetch(path);
+    if (!res.ok) {
+      return empty;
+    }
+    return (await res.json()) as RuntimeFieldsResponse;
+  } catch {
+    return empty;
+  }
+}
+
+
+// ---------------------------------------------------------------------------
 // PR-D1/D2 — Unified NL → rule compiler API client
 // ---------------------------------------------------------------------------
 
