@@ -89,12 +89,12 @@ openmagi	magi_agent/cli/tool_runtime.py	1
 openmagi	magi_agent/cli/wiring.py	2
 openmagi	magi_agent/composio/config.py	1
 openmagi	magi_agent/config/env.py	3
-openmagi	magi_agent/config/flags.py	2
+openmagi	magi_agent/config/flags.py	3
 openmagi	magi_agent/config/models.py	1
 openmagi	magi_agent/connectors/credential_lease.py	6
 openmagi	magi_agent/connectors/marketplace.py	6
 openmagi	magi_agent/connectors/registry.py	6
-openmagi	magi_agent/customize/catalog.py	9
+openmagi	magi_agent/customize/catalog.py	10
 openmagi	magi_agent/customize/field_constraint_compiler.py	1
 openmagi	magi_agent/customize/rule_compiler.py	2
 openmagi	magi_agent/customize/shacl_compiler.py	1
@@ -151,7 +151,7 @@ openmagi	magi_agent/plugins/shell_testrun_safe_subset.py	1
 openmagi	magi_agent/plugins/tool_projection.py	22
 openmagi	magi_agent/recipes/coding_evidence_gate.py	1
 openmagi	magi_agent/recipes/coding_mutation.py	1
-openmagi	magi_agent/recipes/compiler.py	86
+openmagi	magi_agent/recipes/compiler.py	89
 openmagi	magi_agent/recipes/cross_verify.py	4
 openmagi	magi_agent/recipes/first_party/discovery.py	10
 openmagi	magi_agent/recipes/first_party/learning_usage.py	10
@@ -183,7 +183,7 @@ openmagi	magi_agent/runtime/heartbeat_store.py	6
 openmagi	magi_agent/runtime/hosted_defaults.py	2
 openmagi	magi_agent/runtime/hosted_runtime.py	3
 openmagi	magi_agent/runtime/llm_stream_reader.py	1
-openmagi	magi_agent/runtime/local_defaults.py	1
+openmagi	magi_agent/runtime/local_defaults.py	2
 openmagi	magi_agent/runtime/message_builder.py	1
 openmagi	magi_agent/runtime/no_agent_watchdog.py	3
 openmagi	magi_agent/runtime/openmagi_runtime.py	4

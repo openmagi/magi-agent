@@ -128,6 +128,7 @@ _DECISION_COORDINATION_OVERRIDES: frozenset[tuple[str, str]] = frozenset(
         ("channels/runtime_boundary.py", "ChannelRuntimeDecision"),
         ("channels/telegram_adapter.py", "TelegramAdapterDecision"),
         ("channels/telegram_boundary.py", "TelegramRuntimeDecision"),
+        ("config/models.py", "PythonGate8ReadinessConfig"),
         ("config/models.py", "PythonRuntimeAuthorityConfig"),
         ("harness/coding/code_intelligence_contracts.py", "CodeIntelligenceReport"),
         ("harness/coding/ownership_projection.py", "CodingRecipeOwnershipProjection"),

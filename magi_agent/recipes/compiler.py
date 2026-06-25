@@ -2540,6 +2540,48 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             validatorSetMetadata=("VerifierBoundary:agentmemory-provider:metadata-only",),
         ),
         RecipePackManifest(
+            packId="openmagi.self-improvement",
+            displayName="Self Improvement",
+            description=(
+                "Gated self-improvement proposal recipe boundary. Surfaces "
+                "evidence/validator/approval-gate refs the runtime layer can "
+                "subtract when an operator disables Self Improvement in the "
+                "Customize dashboard. Pack itself stays default-off — the "
+                "live loop is additionally gated by MAGI_LEARNING_ENABLED / "
+                "MAGI_CUSTOMIZE_SELF_IMPROVEMENT_ENABLED and by the two "
+                "frozen policies "
+                "(policy:self-improvement.eval-observation-required@1, "
+                "policy:self-improvement.no-direct-mutation@1)."
+            ),
+            whenToUse=(
+                "When the operator has opted in to the learned-skills / "
+                "self-improvement proposal loop and a turn must be subject "
+                "to the eval-observation + no-direct-mutation gates."
+            ),
+            taskProfileSelectors=("self-improvement", "learning"),
+            # Metadata-only refs; no live tools are granted. Disabling the
+            # recipe in the Customize dashboard subtracts these from the
+            # assembled requirements (see real_runner._customize_recipe_drop).
+            instructionRefs=("instruction:self-improvement:proposal-only",),
+            callbackRefs=("callback:self-improvement:proposal-capture",),
+            validatorRefs=(
+                "validator:self-improvement:eval-observation-required",
+                "validator:self-improvement:no-direct-mutation",
+            ),
+            approvalGateRefs=("approval:self-improvement:mutation-human-review",),
+            evidenceRefs=("evidence:self-improvement:eval-observation-ref",),
+            auditRefs=("audit:self-improvement:proposal-boundary",),
+            adkPrimitiveOwnership=common_adk_owners,
+            openmagiBoundaryOwnership=common_openmagi_owners
+            + (
+                "OpenMagi self-improvement owns proposal-loop metadata only; "
+                "no live runner/tool/callback is bound at materialization",
+            ),
+            callbackSetMetadata=("CallbackSet:self-improvement:metadata-only",),
+            validatorSetMetadata=("ValidatorSet:self-improvement:metadata-only",),
+            approvalGateMetadata=("ApprovalGate:self-improvement:metadata-only",),
+        ),
+        RecipePackManifest(
             packId="openmagi.channel-delivery",
             displayName="Channel Delivery",
             description=(

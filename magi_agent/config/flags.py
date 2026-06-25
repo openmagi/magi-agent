@@ -216,6 +216,17 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_LEARNING_REFLECTION_ENABLED",
         summary="Enable post-turn reflection that feeds the learning loop.",
     ),
+    _b(
+        "MAGI_CUSTOMIZE_SELF_IMPROVEMENT_ENABLED",
+        summary=(
+            "Operator opt-in sibling gate for the Customize dashboard's Self "
+            "Improvement recipe (F-LIFE5). Default-OFF. When set truthy the "
+            "self-improvement recipe pack ('openmagi.self-improvement') is "
+            "treated as active for evidence-ref subtraction. The two safety "
+            "policies (eval-observation-required, no-direct-mutation) remain "
+            "in force regardless of this flag."
+        ),
+    ),
     # --- Channels / always-on ----------------------------------------------
     _b(
         "MAGI_GOAL_LOOP_ENABLED",

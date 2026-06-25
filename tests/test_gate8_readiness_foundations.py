@@ -805,6 +805,11 @@ def test_gate8_config_cannot_be_constructed_with_write_authority() -> None:
         workspaceMutationAllowed=True,
         missionSchedulerAllowed=True,
         backgroundTaskAllowed=True,
+        # ``selfImprovementAllowed`` is now an operator-flippable ``bool``
+        # (F-LIFE5) so the Customize dashboard's Self Improvement recipe can
+        # actually take effect when MAGI_LEARNING_ENABLED /
+        # MAGI_CUSTOMIZE_SELF_IMPROVEMENT_ENABLED is on. The frozen
+        # ``Literal[False]`` write-authority fields below are still locked.
         selfImprovementAllowed=True,
     )
 
@@ -816,7 +821,10 @@ def test_gate8_config_cannot_be_constructed_with_write_authority() -> None:
     assert config.workspace_mutation_allowed is False
     assert config.mission_scheduler_allowed is False
     assert config.background_task_allowed is False
-    assert config.self_improvement_allowed is False
+    # F-LIFE5: schema now lets operators opt in via the primary __init__
+    # surface. The escape hatches (model_construct / model_copy without
+    # explicit override) still force-false; see test_self_improvement_config.
+    assert config.self_improvement_allowed is True
 
 
 def test_gate8_readiness_import_boundary_is_pure_contract_only() -> None:

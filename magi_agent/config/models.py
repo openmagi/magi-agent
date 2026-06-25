@@ -881,9 +881,21 @@ class PythonGate8ReadinessConfig(_FalseOnlyModel):
         default=False,
         alias="backgroundTaskAllowed",
     )
-    self_improvement_allowed: Literal[False] = Field(
+    self_improvement_allowed: bool = Field(
         default=False,
         alias="selfImprovementAllowed",
+        description=(
+            "Operator opt-in for the self-improvement loop. Requires the "
+            "MAGI_LEARNING_ENABLED master flag (or "
+            "MAGI_CUSTOMIZE_SELF_IMPROVEMENT_ENABLED sibling) at runtime AND "
+            "the Customize dashboard's Self Improvement recipe to be enabled. "
+            "Safety policies "
+            "(policy:self-improvement.eval-observation-required@1, "
+            "policy:self-improvement.no-direct-mutation@1) remain enforced "
+            "regardless of this flag. Construction surfaces other than the "
+            "primary ``__init__`` / ``model_validate`` path force the value "
+            "back to False so an unaudited code path cannot leak True."
+        ),
     )
 
     @field_validator("environment_allowlist", mode="before")
@@ -896,6 +908,53 @@ class PythonGate8ReadinessConfig(_FalseOnlyModel):
         if isinstance(value, tuple | list):
             return tuple(str(item).strip() for item in value if str(item).strip())
         return ()
+
+    # ``self_improvement_allowed`` is typed ``bool`` (legitimately mutable via
+    # ``__init__`` / ``model_validate`` so operators can opt in) but the
+    # ``model_construct`` / ``model_copy`` escape hatches MUST force it back
+    # to False so a caller that bypasses validation cannot leak True. Mirrors
+    # the ``_UNSAFE_CONSTRUCT_COPY_FIELDS`` pattern on
+    # :class:`PythonRuntimeAuthorityConfig`.
+    _UNSAFE_CONSTRUCT_COPY_FIELDS: ClassVar[tuple[str, ...]] = (
+        "self_improvement_allowed",
+    )
+
+    @classmethod
+    def _force_unsafe_bool_fields_false(
+        cls, values: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        payload = dict(values)
+        for field_name in cls._UNSAFE_CONSTRUCT_COPY_FIELDS:
+            field = cls.model_fields[field_name]
+            payload.pop(field_name, None)
+            payload[field.alias or field_name] = False
+        return payload
+
+    @classmethod
+    def model_construct(
+        cls,
+        _fields_set: set[str] | None = None,
+        **values: Any,
+    ) -> Self:
+        return super().model_construct(
+            _fields_set,
+            **cls._force_unsafe_bool_fields_false(values),
+        )
+
+    def model_copy(
+        self,
+        *,
+        update: Mapping[str, Any] | None = None,
+        deep: bool = False,
+    ) -> Self:
+        _ = deep
+        payload = self.model_dump(by_alias=True, mode="python", warnings=False)
+        if update:
+            payload.update(dict(update))
+        return type(self).model_validate(
+            type(self)._force_unsafe_bool_fields_false(payload)
+        )
+
 
 class PythonRuntimeAuthorityConfig(_FalseOnlyModel):
     """Runtime authority flags.

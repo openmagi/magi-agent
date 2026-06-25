@@ -294,6 +294,10 @@ def test_pack_registry_catalog_is_metadata_only_and_has_expected_first_party_pac
         "openmagi.missions",
         "openmagi.scheduled-work",
         "openmagi.memory-agentmemory",
+        # F-LIFE5 — self-improvement pack so the Customize "Self Improvement"
+        # recipe toggle resolves to a real PackRegistry entry; default-off
+        # and additionally gated by MAGI_LEARNING_ENABLED at runtime.
+        "openmagi.self-improvement",
         "openmagi.channel-delivery",
         "openmagi.office-automation",
         "openmagi.artifact-delivery",
