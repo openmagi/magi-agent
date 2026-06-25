@@ -202,6 +202,20 @@ def build_gate5b_user_visible_chat_route_config_from_env(
     )
 
 
+def _read_quality_max_lines(env: Mapping[str, str]) -> int:
+    """I-1: typed-registry read for the read-quality max-lines budget.
+
+    The ``FlagSpec`` is registered with ``default=2000``; ``flag_int``
+    catches parse failures and falls back to that same default, so this
+    one-liner is byte-identical to the prior
+    ``_int_env(env.get("MAGI_READ_QUALITY_MAX_LINES"), fallback=2000)``.
+    """
+
+    from magi_agent.config.flags import flag_int  # noqa: PLC0415
+
+    return flag_int("MAGI_READ_QUALITY_MAX_LINES", env=env) or 2000
+
+
 def _gate1a_readonly_tools_enabled(env: Mapping[str, str]) -> bool:
     """I-1: typed-registry read for the gate1a read-only toolhost master
     switch. The ``FlagSpec`` is registered default-OFF so the prior
@@ -423,10 +437,11 @@ def build_gate5b_full_toolhost_config_from_env(
             "lspDiagnosticsCap": lsp_diagnostics.cap,
             "lspDiagnosticsTimeoutMs": lsp_diagnostics.timeout_ms,
             "readQualityEnabled": is_read_quality_enabled(env),
-            "readMaxLines": _int_env(
-                env.get("MAGI_READ_QUALITY_MAX_LINES"),
-                fallback=2000,
-            ),
+            # I-1: route through the typed flag registry. ``flag_int``
+            # returns the registered default (2000) for unset / malformed
+            # values, byte-identical to the prior
+            # ``_int_env(env.get("..."), fallback=2000)`` shape.
+            "readMaxLines": _read_quality_max_lines(env),
             "ripgrepEnabled": _is_true(env.get("MAGI_RIPGREP_ENABLED")),
             "applyPatchEnabled": apply_patch_enabled(env),
             "applyPatchModelId": (

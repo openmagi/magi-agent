@@ -3518,6 +3518,20 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
+    # I-1: read-quality tools max-lines budget. Operator-visible; matches the
+    # existing ``readMaxLines`` advertised on the hosted tools-config surface.
+    FlagSpec(
+        name="MAGI_READ_QUALITY_MAX_LINES",
+        default=2000,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Maximum number of lines the read-quality tool surface reports "
+            "per file. Default 2000; malformed (non-integer) values fall "
+            "back to the default."
+        ),
+        kind="int",
+    ),
 )
 
 

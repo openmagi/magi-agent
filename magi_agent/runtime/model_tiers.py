@@ -376,8 +376,13 @@ def _empty_debug_enabled_local(env: Mapping[str, str]) -> bool:
     imports from this module). The two predicates must accept the same
     truthiness set: ``1``/``true``/``yes``/``on`` (case-insensitive).
     """
-    raw = env.get("MAGI_CHILD_RUNNER_EMPTY_DEBUG", "")
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+    # I-1: route through the typed flag registry. The ``FlagSpec`` is
+    # registered as a strict default-OFF ``_b(...)``; ``flag_bool``
+    # shares the canonical ``env_bool`` truthy parser with the
+    # ``{1, true, yes, on}`` set this predicate hand-rolled.
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_CHILD_RUNNER_EMPTY_DEBUG", env=env)
 
 
 def _emit_deprecated_redirect_trace(from_model: str, to_model: str) -> None:
