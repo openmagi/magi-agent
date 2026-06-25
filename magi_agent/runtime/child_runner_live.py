@@ -805,12 +805,29 @@ class RealLocalChildRunner:
             evidence_refs=evidence_refs,
             status=_status,
         )
+        # PR-3 (Containment hardening): honor the collector's authoritative
+        # status verdict BEFORE the AND-condition empty-shape guard below.
+        # The collector returns ``(summary, evidence_refs, status)`` and
+        # ``status`` is "completed" iff the terminal ``EngineResult`` was
+        # ``Terminal.completed``; anything else (e.g. ``Terminal.failed``)
+        # MUST surface as a typed failure. Pre-PR-3 the third tuple element
+        # was bound to ``_status`` and never read, so the only protection
+        # against a silent ship-as-completed was the AND-condition guard
+        # ``if not summary and not evidence_refs`` below. Kevin's 0.1.85
+        # repro fingerprint had evidence_refs=18refs + summary="" + status=
+        # failed; the AND-guard passed (refs were non-empty) and the failed
+        # turn shipped as ``status="completed"`` (the silent-empty bug class).
+        # Raising the typed exception here routes through ``run_child``'s
+        # existing catch as ``status="failed"`` reason
+        # ``child_llm_collector_status_<status>`` (sanitised slug).
+        if _status != "completed":
+            raise _ChildLlmTurnError(f"{_DEGRADE_LLM_ERROR_PREFIX}collector_status_{_status}")
         # Silent-no-op detection (governed-path parity with PR #854's legacy
         # guard). The governed collector returned ``("", (), "completed")``
         # which is the same shape as the anthropic/google 100ms repro Kevin
-        # chased on 0.1.74 — under MAGI_SUBAGENT_GOVERNED_TURN_ENABLED=1 (lab
-        # profile auto-enables it), the legacy collector's empty-response
-        # guard is bypassed, so the same protection has to live here too.
+        # chased on 0.1.74 (under MAGI_SUBAGENT_GOVERNED_TURN_ENABLED=1, which
+        # lab profile auto-enables, the legacy collector's empty-response
+        # guard is bypassed, so the same protection has to live here too).
         # Raises the typed exception that ``run_child`` routes to a typed
         # ``failed`` envelope with reason ``child_llm_empty_response``.
         if not summary and not evidence_refs:
@@ -914,17 +931,29 @@ class RealLocalChildRunner:
             evidence_refs=evidence_refs,
         )
         # Silent-no-op detection. The ADK stream completed with ZERO collected
-        # text AND no tool-call evidence — either the runner yielded no events
-        # at all (the anthropic/gemini 100ms repro Kevin chased for days), or
+        # text AND no tool-call evidence (either the runner yielded no events
+        # at all, the anthropic/gemini 100ms repro Kevin chased for days, or
         # it yielded only thought-only / signature-only parts that the text
-        # extractor cannot turn into a user answer. PR #827 caught the ADK
+        # extractor cannot turn into a user answer). PR #827 caught the ADK
         # ``error_code`` event shape via the in-loop classifier; this guard
         # closes the still-silent shape (no events, no errors, no text, no
         # tool calls). Raising the typed exception routes through the same
-        # ``run_child`` catch path as a real ``error_code`` — SpawnAgent ends
-        # up status="failed" with reason ``child_llm_empty_response`` instead
-        # of the dangerous status="ok" summary="" that triggered the parent
-        # agent's 43-action chaotic filesystem/DB spelunking on 0.1.66+.
+        # ``run_child`` catch path as a real ``error_code``, so SpawnAgent
+        # ends up status="failed" with reason ``child_llm_empty_response``
+        # instead of the dangerous status="ok" summary="" that triggered
+        # the parent agent's 43-action chaotic filesystem/DB spelunking
+        # on 0.1.66+.
+        #
+        # PR-3 asymmetry note: the governed branch above honours a
+        # collector-reported ``status != "completed"`` via a typed-error
+        # raise just before its own empty-shape guard. The legacy branch
+        # here drives ADK ``runner.run_async`` directly and never receives
+        # a terminal-status signal (ADK's stream model has no ``Terminal``
+        # equivalent), so the in-loop ``_classify_child_event_error``
+        # raises on ANY non-benign ``error_code`` event and the
+        # empty-shape guard below covers the still-silent shape. No
+        # status-aware raise is added here because there is no status to
+        # honour on this path.
         if not texts and not evidence_refs:
             raise _ChildLlmTurnError(f"{_DEGRADE_LLM_ERROR_PREFIX}empty_response")
         return "\n".join(texts), evidence_refs

@@ -1110,12 +1110,25 @@ def _envelope_from_output(
         str(data.get("childExecutionId") or f"child:{request.task_id}")
     )
     input_status = data.get("status")
-    status = input_status if input_status in {"completed", "blocked", "failed"} else "completed"
+    # PR-3 (Containment hardening): default to ``"failed"`` for any status
+    # NOT in the whitelist. Pre-PR-3 this branch coerced unknown / absent
+    # statuses to ``"completed"`` (that silent rewrite is exactly the shape
+    # Kevin's 0.1.85 trace fingerprint surfaced across 23 versions): the
+    # child runner crashed mid-build, returned a half-shaped mapping
+    # without a ``status`` key, and the boundary shipped a clean-looking
+    # ``status="completed"`` envelope. The parent agent treated the empty
+    # answer as authoritative and went hunting through the filesystem for
+    # "the answer that must be there somewhere". Defaulting to ``failed``
+    # surfaces the shape problem as a real failure the parent can route
+    # to error-recovery / user escalation. The whitelist itself is
+    # preserved so correct child runners keep working byte-identical.
+    status = input_status if input_status in {"completed", "blocked", "failed"} else "failed"
     # Operator-opt-in trace (MAGI_CHILD_RUNNER_EMPTY_DEBUG=1). The status
     # coercion above SILENTLY rewrites any unexpected/absent ``status`` to
-    # ``"completed"`` (a known way to land on the dangerous status=ok +
-    # empty-summary envelope shape the parent agent then treats as a real
-    # child answer. This log surfaces the coercion when it happens.
+    # ``"failed"`` (the safe default per PR-3). This log surfaces the
+    # rewrite when it happens, so the operator can immediately tell whether
+    # the dispatched child shipped an unexpected status the boundary just
+    # rewrote.
     _maybe_log_trace_envelope_coercion(
         os.environ,
         input_status=input_status,
