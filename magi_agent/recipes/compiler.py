@@ -2568,7 +2568,7 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
                 "validator:self-improvement:eval-observation-required",
                 "validator:self-improvement:no-direct-mutation",
             ),
-            approvalGateRefs=("approval:self-improvement:human-review",),
+            approvalGateRefs=("approval:self-improvement:mutation-human-review",),
             evidenceRefs=("evidence:self-improvement:eval-observation-ref",),
             auditRefs=("audit:self-improvement:proposal-boundary",),
             adkPrimitiveOwnership=common_adk_owners,
