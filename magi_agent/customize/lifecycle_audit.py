@@ -1560,6 +1560,74 @@ async def _run_shell_fan_out(
     return audits, verdict
 
 
+async def run_shell_command_at_before_tool_use(
+    *,
+    tool_name: str,
+    tool_args: dict[str, Any] | None = None,
+    remaining_budget: int | None = None,
+    decrement_fn: Callable[[], None] | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> tuple[list[AuditRecord], GateVerdict]:
+    """F-EXEC1 fan-out for ``firesAt == "before_tool_use"``.
+
+    Tool-boundary slot that honors ``block`` (the tool has not dispatched
+    yet). Wraps :func:`_run_shell_fan_out` so the per-(session, turn)
+    budget plumbing is identical to the 9 turn / llm / compaction
+    helpers. Facades delegates here so the shared ``shell_budget_for``
+    counter caps tool-boundary spawns alongside the other slots.
+    """
+    stdin_json: dict[str, Any] = {
+        "lifecycle": "before_tool_use",
+        "tool_name": tool_name,
+    }
+    if tool_args is not None:
+        stdin_json["tool_args"] = tool_args
+    return await _run_shell_fan_out(
+        fires_at="before_tool_use",
+        stdin_json=stdin_json,
+        honor_block_action=True,
+        remaining_budget=remaining_budget,
+        policy_loader=policy_loader,
+        env=env,
+        decrement_fn=decrement_fn,
+    )
+
+
+async def run_shell_command_at_after_tool_use(
+    *,
+    tool_name: str,
+    tool_output: str = "",
+    remaining_budget: int | None = None,
+    decrement_fn: Callable[[], None] | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> list[AuditRecord]:
+    """F-EXEC1 fan-out for ``firesAt == "after_tool_use"`` (audit-only).
+
+    Tool has already returned by the time this slot fires, so a
+    ``block`` verdict cannot un-execute the call. We coerce
+    ``honor_block_action=False`` so an authored ``block`` rule is
+    recorded as audit + ``passed: false`` without flipping the gate
+    verdict. Wraps :func:`_run_shell_fan_out` so the per-turn budget
+    plumbing is identical to the 9 turn / llm / compaction helpers.
+    """
+    audits, _ = await _run_shell_fan_out(
+        fires_at="after_tool_use",
+        stdin_json={
+            "lifecycle": "after_tool_use",
+            "tool_name": tool_name,
+            "tool_output": tool_output[:4096],
+        },
+        honor_block_action=False,
+        remaining_budget=remaining_budget,
+        policy_loader=policy_loader,
+        env=env,
+        decrement_fn=decrement_fn,
+    )
+    return audits
+
+
 async def run_shell_command_at_pre_final(
     *,
     draft_text: str = "",
