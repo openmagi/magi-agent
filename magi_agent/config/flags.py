@@ -2848,6 +2848,61 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="bool",
     ),
+    # I-1: hosted runtime-authority request flags. Both are operator
+    # request signals that the runtime accompanies with a mandatory
+    # gate authority. Strict default-OFF — missing/empty stays at the
+    # ``PythonRuntimeAuthorityConfig()`` (no user-visible / no canary)
+    # default the original ``_is_true`` form produced.
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_USER_VISIBLE_OUTPUT",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted runtime authority request: allow user-visible output. "
+            "Must be paired with ``CORE_AGENT_PYTHON_CANARY_ROUTING`` and "
+            "a sanctioning gate authority (gate8 or gate5b user-visible "
+            "canary). Default-OFF; hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_CANARY_ROUTING",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted runtime authority request: allow canary routing. Must "
+            "be paired with ``CORE_AGENT_PYTHON_USER_VISIBLE_OUTPUT`` and "
+            "a sanctioning gate authority. Default-OFF; hosted-only."
+        ),
+        kind="bool",
+    ),
+    # I-1: hosted gate5b kill switches.
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE5B_KILL_SWITCH",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted gate5b global kill switch. When truthy, the user-"
+            "visible canary authority check raises. Default-OFF; "
+            "hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_KILL_SWITCH",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted gate5b user-visible canary kill switch. When truthy, "
+            "the gate5b user-visible canary authority check raises. "
+            "Default-OFF; hosted-only."
+        ),
+        kind="bool",
+    ),
 )
 
 

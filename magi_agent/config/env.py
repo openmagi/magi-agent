@@ -1812,8 +1812,13 @@ def parse_python_runtime_authority_env(env: Mapping[str, str]) -> PythonRuntimeA
             "CORE_AGENT_PYTHON_OUTPUT_MODE must be diagnostic_only, health_only, off, or user_visible_canary"
         )
 
-    user_visible_requested = _is_true(env.get("CORE_AGENT_PYTHON_USER_VISIBLE_OUTPUT"))
-    canary_requested = _is_true(env.get("CORE_AGENT_PYTHON_CANARY_ROUTING"))
+    # I-1: route the three runtime-authority signals through the typed
+    # flag registry. Byte-identical to ``_is_true`` because the
+    # ``FlagSpec``s are strict default-OFF ``bool``.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    user_visible_requested = flag_bool("CORE_AGENT_PYTHON_USER_VISIBLE_OUTPUT", env=env)
+    canary_requested = flag_bool("CORE_AGENT_PYTHON_CANARY_ROUTING", env=env)
     if user_visible_requested or canary_requested:
         if user_visible_requested is not canary_requested:
             missing_or_partial = (
@@ -1822,7 +1827,7 @@ def parse_python_runtime_authority_env(env: Mapping[str, str]) -> PythonRuntimeA
                 else "CORE_AGENT_PYTHON_CANARY_ROUTING"
             )
             raise RuntimeEnvError(f"{missing_or_partial} is not approved")
-        if _is_true(env.get("CORE_AGENT_PYTHON_GATE8_SELECTED_AUTHORITY_ENABLED")):
+        if flag_bool("CORE_AGENT_PYTHON_GATE8_SELECTED_AUTHORITY_ENABLED", env=env):
             _validate_gate8_selected_authority(env, output_mode)
         else:
             _validate_gate5b_user_visible_canary_authority(env, output_mode)
@@ -1850,9 +1855,14 @@ def _validate_gate5b_user_visible_canary_authority(
         raise RuntimeEnvError("CORE_AGENT_PYTHON_OUTPUT_MODE must be user_visible_canary")
     if (env.get("CORE_AGENT_PYTHON_CHAT_ROUTE") or "").strip().lower() != "on":
         raise RuntimeEnvError("CORE_AGENT_PYTHON_CHAT_ROUTE must be on")
-    if _is_true(env.get("CORE_AGENT_PYTHON_GATE5B_KILL_SWITCH")):
+    # I-1: route the two gate5b kill switches through the typed flag
+    # registry. Byte-identical to ``_is_true`` because both
+    # ``FlagSpec``s are strict default-OFF ``bool``.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    if flag_bool("CORE_AGENT_PYTHON_GATE5B_KILL_SWITCH", env=env):
         raise RuntimeEnvError("Gate 5B global kill switch is active")
-    if _is_true(env.get("CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_KILL_SWITCH")):
+    if flag_bool("CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_KILL_SWITCH", env=env):
         raise RuntimeEnvError("Gate 5B user-visible canary kill switch is active")
 
     bot_digest = _sha256_digest(env.get("BOT_ID") or "")
