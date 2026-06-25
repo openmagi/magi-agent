@@ -5,6 +5,7 @@ First-party and user impls register through the IDENTICAL path (§1 "no privileg
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from itertools import count
@@ -18,6 +19,8 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 Origin = Literal["first_party", "user"]
 PrimitiveImpl = Callable[..., Any]
 _FIRST_PARTY_PACK_ID_PREFIX = "open" "magi."
+
+logger = logging.getLogger(__name__)
 
 
 class ForbiddenRefError(KeyError):
@@ -216,6 +219,79 @@ def _provide_recipe(registries: PackRegistries) -> Callable[..., None]:
     def register(ref: str, manifest: Any) -> None:
         registries.recipes.replace(ref, manifest)
     return register
+
+
+def _register_code_recipe(
+    registries: PackRegistries, ref: str, callable_impl: Any, *, pack_id: str
+) -> bool:
+    """Invoke a code-recipe ``spec_callable`` ONCE and register its manifest (PR4).
+
+    Determinism contract: ``callable_impl`` is invoked exactly once here, at
+    registration time (never during a turn); it must be idempotent and side-effect
+    free. It returns a :class:`RecipePackManifest` or a dict (validated through
+    ``model_validate``). Untrusted (non first-party) packs additionally pass the
+    SAME compose-only external trust boundary as declarative recipe specs
+    (``validate_external_recipe_pack``: R1 ext-namespace / R4 no-hardSafety / R6
+    no-ownership / R7 no-defaultEnabled) AND the SAME R2 ref-closure: their refs
+    must resolve in the first-party recipe-pack ref universe, else the dangling
+    code recipe is dropped. Fail-closed: any failure drops the pack with a warning
+    and returns ``False`` (never raises). Returns ``True`` when the manifest
+    reached ``registries.recipes``.
+    """
+    from magi_agent.recipes.compiler import PackRegistry, RecipePackManifest
+    from magi_agent.recipes.kernel_recipe_packs import (
+        build_recipe_ref_universe,
+        recipe_pack_ref_closure_reason,
+        validate_external_recipe_pack,
+    )
+
+    try:
+        result = callable_impl()
+    except Exception:  # noqa: BLE001 - a broken publisher never crashes the run
+        logger.warning("code recipe %r dropped (spec_callable raised)", ref)
+        return False
+
+    if isinstance(result, RecipePackManifest):
+        manifest = result
+    elif isinstance(result, dict):
+        try:
+            manifest = RecipePackManifest.model_validate(result)
+        except Exception:  # noqa: BLE001 - malformed manifest drops, never raises
+            logger.warning("code recipe %r dropped (invalid manifest)", ref)
+            return False
+    else:
+        logger.warning(
+            "code recipe %r dropped (spec_callable returned %s, expected "
+            "RecipePackManifest or dict)",
+            ref,
+            type(result).__name__,
+        )
+        return False
+
+    # Trust by provenance, mirroring kernel_recipe_packs: bundled first-party
+    # packs register as-is; user/ext packs must pass the compose-only boundary.
+    trusted = pack_id.startswith(_FIRST_PARTY_PACK_ID_PREFIX)
+    if not trusted:
+        reason = validate_external_recipe_pack(manifest)
+        if reason:
+            logger.warning("code recipe %r dropped (%s)", ref, reason)
+            return False
+        # R2 ref-closure for code recipes: resolve against the trusted first-party
+        # recipe-pack universe ONLY (the candidate cannot contribute to its own
+        # universe; see _drop_unresolved_external_recipe_packs). Code recipes
+        # register one at a time into a keyed registry (no post-load pass like the
+        # declarative PackRegistry), so the universe is the stable first-party
+        # baseline.
+        universe = build_recipe_ref_universe(
+            PackRegistry.with_first_party_packs().values()
+        )
+        closure_reason = recipe_pack_ref_closure_reason(manifest, universe)
+        if closure_reason:
+            logger.warning("code recipe %r dropped (%s)", ref, closure_reason)
+            return False
+
+    registries.recipes.replace(ref, manifest)
+    return True
 
 
 def _provide_connector(registries: PackRegistries) -> Callable[..., None]:

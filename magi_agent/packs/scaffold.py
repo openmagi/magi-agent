@@ -278,6 +278,34 @@ defaultEnabled = true
 toolRefs = ["FileRead"]
 '''
 
+# Code-computed recipe-as-code impl (PR4). The callable is invoked ONCE at
+# registration (NOT during a turn) and must be idempotent + side-effect free; it
+# returns a dict (or RecipePackManifest). An UNTRUSTED pack must use an ``ext.``
+# packId and must NOT set hardSafety/ownership/defaultEnabled (compose-only trust
+# boundary). Activation requires MAGI_RECIPE_AS_CODE_ENABLED (default-OFF).
+_RECIPE_CODE_TEMPLATE = '''\
+"""User code recipe — computes its RecipePackManifest with YOUR OWN code.
+
+``provide_recipe`` is invoked once at registration (never during a turn): keep it
+idempotent and side-effect free. Return a dict (or RecipePackManifest). Untrusted
+packs must use an ``ext.`` packId and stay non-hard-safety / non-default-enabled.
+"""
+from __future__ import annotations
+
+
+def provide_recipe() -> dict:
+    return {
+        "packId": __PACK_ID__,
+        "version": "1",
+        "displayName": __DISPLAY__,
+        "description": "User-authored code-computed recipe.",
+        # FileWrite is a canonical known-ref (CompileRecipePackCatalog.default), so
+        # this recipe passes R2 ref-closure. Untrusted recipes may only reference
+        # refs that exist in the trusted runtime (catalog + first-party recipes).
+        "toolRefs": ["FileWrite"],
+    }
+'''
+
 _SMOKE_HEADER = '''\
 """Smoke test scaffolded by `magi pack new` — verifies this pack loads through
 the REAL pack loader with zero sys.path setup. Run: pytest <this file>."""

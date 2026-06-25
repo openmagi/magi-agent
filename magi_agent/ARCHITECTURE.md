@@ -1337,9 +1337,9 @@ graph LR
 | hook_projection.py | Expose the previously-unexposed ``HookRegistry`` discovery into the live | bus, registries | — |
 | loader.py | Pack loader (D3/D6): discovery -> lazy impl import -> registry registration. | catalog_build, discovery, manifest, types | packs/catalog_build.py, packs/registries.py, packs/user_evidence.py |
 | manifest.py | Static pack manifest schema (D2/D3). | — | packs/discovery.py, packs/loader.py, packs/scaffold.py |
-| registries.py | Typed primitive registries (D3/D4). One keyed registry for all 8 provides types. | compiler, context, control_plane, discovery, kernel_roles, loader, packs, registry | adk_bridge/control_plane.py, gates/gate5b_full_toolhost.py, harness/goal_loop_control.py, harness/memory_compaction.py, harness/scheduler_executor.py, packs/connector_projection.py, packs/hook_projection.py, packs/user_evidence.py |
+| registries.py | Typed primitive registries (D3/D4). One keyed registry for all 8 provides types. | compiler, context, control_plane, discovery, kernel_recipe_packs, kernel_roles, loader, packs, registry | adk_bridge/control_plane.py, gates/gate5b_full_toolhost.py, harness/goal_loop_control.py, harness/memory_compaction.py, harness/scheduler_executor.py, packs/connector_projection.py, packs/hook_projection.py, packs/user_evidence.py |
 | scaffold.py | `magi pack new` scaffolding engine (Pack B1). | manifest | cli/app.py |
-| types.py | Kernel-owned catalog contract (D4) — re-homed from the deleted authoring plane. | — | packs/catalog_build.py, packs/loader.py |
+| types.py | Kernel-owned catalog contract (D4) — re-homed from the deleted authoring plane. | — | packs/catalog_build.py, packs/loader.py, recipes/kernel_recipe_packs.py |
 | user_evidence.py | Load user-authored EVIDENCE_PRODUCER pack runtime emitters (PR3). | context, discovery, loader, registries | cli/engine.py |
 
 ### permissions/
@@ -1426,7 +1426,7 @@ graph LR
 | cross_verify.py | Unified cross-verification recipe — fan out one prompt across N models, vote. | best_of_n, manifest, runtime | — |
 | effective_contract.py | — | composition, hook_composition, merge_algebra | recipes/projection.py |
 | hook_composition.py | — | — | recipes/effective_contract.py |
-| kernel_recipe_packs.py | Fold kernel-loaded ``recipe`` provides into the recipe-compile PackRegistry. | compiler, discovery, flags | cli/engine.py, cli/real_runner.py, cli/tool_runtime.py, recipes/recipe_routing.py, recipes/workflow_recipe.py, shadow/gate2_recipe_profile_resolver.py, transport/chat_routes.py |
+| kernel_recipe_packs.py | Fold kernel-loaded ``recipe`` provides into the recipe-compile PackRegistry. | compiler, discovery, flags, types | cli/engine.py, cli/real_runner.py, cli/tool_runtime.py, packs/registries.py, recipes/recipe_routing.py, recipes/workflow_recipe.py, shadow/gate2_recipe_profile_resolver.py, transport/chat_routes.py |
 | ledger_budget.py | Ledger budget policy — deterministic per-task budget contract. | — | recipes/ledger_orchestrator.py |
 | ledger_orchestrator.py | Ledger-based orchestration loop — single-agent mode. | flags, ledger_budget, ledger_progress, ledger_task | — |
 | ledger_progress.py | Progress ledger contracts — stall detection & per-step self-assessment. | — | recipes/ledger_orchestrator.py |
