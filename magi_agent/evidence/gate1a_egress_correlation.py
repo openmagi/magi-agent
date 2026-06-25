@@ -84,8 +84,16 @@ def build_gate1a_proxy_http_options(
 
 
 def safe_proxy_url_from_env(env: Mapping[str, str]) -> str | None:
+    # I-1: route the gate1a override through the typed flag registry;
+    # the standard ``HTTPS_PROXY`` / ``https_proxy`` fall-throughs stay
+    # as raw env reads (not MAGI_/CORE_AGENT_ prefixed — out of scope
+    # for the I-1 inventory). ``flag_str`` returns "" for unset which
+    # matches the prior ``env.get(...) → None`` short-circuit because
+    # the ``or`` chain only treats both as falsy.
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
     value = (
-        env.get("CORE_AGENT_PYTHON_GATE1A_EGRESS_PROXY_URL")
+        flag_str("CORE_AGENT_PYTHON_GATE1A_EGRESS_PROXY_URL", env=env)
         or env.get("HTTPS_PROXY")
         or env.get("https_proxy")
         or ""
