@@ -151,6 +151,25 @@ def _inline_handler_for(
         from magi_agent.packs.context import ToolCtx, SessionReadView  # noqa: PLC0415
 
         try:
+            # Defense-in-depth (not isolation): when capability enforcement is ON,
+            # hand the USER tool impl the RESTRICTED tool capability set so it can
+            # only read session through the typed surface. OFF: None (full set,
+            # byte-identical). The restricted tool set equals the ToolCtx default
+            # ({READ_SESSION}), so this is byte-identical either way today; it is
+            # wired for ABI-surface completeness and forward-compat. A raise is
+            # caught by the surrounding except -> ToolResult error (fail-closed).
+            from magi_agent.config.env import (  # noqa: PLC0415
+                pack_capability_enforcement_enabled,
+            )
+
+            restricted_caps = None
+            if pack_capability_enforcement_enabled():
+                from magi_agent.packs.context import (  # noqa: PLC0415
+                    PrimitiveType,
+                    restricted_capabilities_for,
+                )
+
+                restricted_caps = restricted_capabilities_for(PrimitiveType.TOOL)
             emit = context.emit_progress
             tool_ctx = ToolCtx(
                 tool_name=tool_name,
@@ -161,6 +180,7 @@ def _inline_handler_for(
                     turn_index=0,
                 ),
                 emit_progress=(lambda msg: emit(msg)) if emit is not None else None,
+                capabilities=restricted_caps,
             )
             output = inline_handler(arguments, tool_ctx)
             from inspect import isawaitable  # noqa: PLC0415

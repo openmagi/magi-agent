@@ -492,6 +492,15 @@ FLAGS: tuple[FlagSpec, ...] = (
             "so it can satisfy a required evidence ref."
         ),
     ),
+    _b(
+        "MAGI_PACK_CAPABILITY_ENFORCEMENT_ENABLED",
+        summary=(
+            "Hand user/untrusted pack impls a RESTRICTED capability set per "
+            "primitive type so capability tokens are enforced through the typed "
+            "context surface (defense-in-depth, not isolation). OFF: full set, "
+            "byte-identical."
+        ),
+    ),
     FlagSpec(
         name="MAGI_CODE_ACTION_TIMEOUT_MS",
         default=30_000,
