@@ -3,19 +3,26 @@
  *
  * Encodes the honesty taxonomy that the rest of the customize tab speaks:
  *
- *  * deterministic — runtime gate; the model cannot opt out
- *  * advisory      — prompt-injected guidance; the model may ignore it
- *  * hybrid        — a check that both records evidence AND may rewrite the
- *                    tool output (e.g. dashboard_check action="override" /
- *                    strip). Currently no built-in action takes this branch,
- *                    but the badge is forward-compatible so adding such an
- *                    action later lights it up automatically.
- *  * preview       — visible but inert; not feeding the runtime
- *  * mutator       — actively rewrites or injects traffic (PR-F-MUT1 +
- *                    PR-F-MUT2). Distinct amber-yellow palette so an
- *                    operator never mistakes a mutator for a passive
- *                    advisory critic. Carries an explicit "modifies
- *                    traffic" tooltip (PR-F-MUT3).
+ *  * deterministic    — runtime gate; the model cannot opt out
+ *  * advisory         — prompt-injected guidance; the model may ignore it
+ *  * hybrid           — a check that both records evidence AND may rewrite the
+ *                       tool output (e.g. dashboard_check action="override" /
+ *                       strip). Currently no built-in action takes this
+ *                       branch, but the badge is forward-compatible so adding
+ *                       such an action later lights it up automatically.
+ *  * preview          — visible but inert; not feeding the runtime
+ *  * mutator          — actively rewrites or injects traffic (PR-F-MUT1 +
+ *                       PR-F-MUT2). Distinct amber-yellow palette so an
+ *                       operator never mistakes a mutator for a passive
+ *                       advisory critic. Carries an explicit "modifies
+ *                       traffic" tooltip (PR-F-MUT3).
+ *  * operator_defined — external operator-authored shell script (PR-F-EXEC1 +
+ *                       PR-F-EXEC2 — shell_command / shell_check). Dedicated
+ *                       amber-red palette + Terminal icon so an operator can
+ *                       see, before activating, that magi does NOT verify the
+ *                       script body and the verdict is whatever the operator
+ *                       wrote. Carries an explicit "external script" tooltip
+ *                       (PR-F-EXEC3).
  *
  * The component intentionally lives under `customize/` (not the generic
  * `ui/_ds/Badge`) because the trust-class semantics belong to this domain,
@@ -24,6 +31,7 @@
  * byte-equivalent for the advisory variant.
  */
 
+import { Terminal } from "lucide-react";
 import type { ReactElement } from "react";
 
 import {
@@ -81,11 +89,14 @@ const PALETTE: Record<TrustClass, string> = {
   // operator hovering the badge sees the honest mutation warning before
   // activating the policy.
   mutator: "bg-yellow-400/15 text-yellow-900 ring-1 ring-inset ring-yellow-500/30",
-  // F-EXEC1 — fifth class placeholder palette. F-EXEC3 ships the dedicated
-  // amber-red (#dc8f3d) ramp + Terminal icon; until then we re-use the
-  // mutator amber palette so the badge renders honestly as "warm, not
-  // green" without crashing on the new variant.
-  operator_defined: "bg-orange-400/20 text-orange-900 ring-1 ring-inset ring-orange-500/40",
+  // F-EXEC3 — dedicated amber-red (#dc8f3d-ish) ramp. Distinct from the
+  // mutator yellow-400 hue and the destructive red palette: amber-600
+  // background tint + amber-900 ink + amber-700 inset ring reads as
+  // "warmer, more alarming than advisory" without colliding with either
+  // sibling. Paired with the Terminal icon below so the operator sees
+  // both the colour and the affordance before activating the rule.
+  operator_defined:
+    "bg-amber-600/15 text-amber-900 ring-1 ring-inset ring-amber-700/40",
 };
 
 const DEFAULT_LABEL: Record<TrustClass, string> = {
@@ -130,7 +141,11 @@ export function TrustBadge({
   // F-MUT3 — empty default tooltip for non-mutator variants is OMITTED from
   // the DOM (``title={undefined}``) so the existing four variants render
   // byte-equivalently to their pre-F-MUT3 markup; only ``mutator`` carries
-  // the explicit "modifies traffic" hover warning.
+  // the explicit "modifies traffic" hover warning. F-EXEC3 adds the
+  // ``operator_defined`` variant which ALSO carries a tooltip (external
+  // script warning) and an inline Terminal icon — the icon is the only
+  // glyph in any variant, so non-operator_defined badges still render
+  // byte-equivalently.
   const resolvedTooltip = tooltip ?? DEFAULT_TOOLTIP[trustClass];
   const titleAttr =
     resolvedTooltip && resolvedTooltip.length > 0 ? resolvedTooltip : undefined;
@@ -144,6 +159,13 @@ export function TrustBadge({
         className,
       )}
     >
+      {trustClass === "operator_defined" ? (
+        <Terminal
+          aria-hidden="true"
+          className="mr-1 h-3 w-3 shrink-0"
+          data-testid="trust-badge-icon-operator-defined"
+        />
+      ) : null}
       {text}
     </span>
   );

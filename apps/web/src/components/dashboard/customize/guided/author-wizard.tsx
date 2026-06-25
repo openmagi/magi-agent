@@ -61,6 +61,7 @@ import {
   Filter,
   HelpCircle,
   ShieldOff,
+  Terminal,
 } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
@@ -176,7 +177,16 @@ type Scope = "always" | "coding" | "research" | "delivery" | "memory" | "task";
 // after_tool_use → output_rewrite). The backend customRuleKind /
 // customRuleAction wiring already routes by conditionKind, so adding
 // "mutate" here costs nothing at save time.
-type Archetype = "block" | "ask" | "audit" | "strip" | "mutate";
+//
+// PR-F-EXEC3 — "shell" is the same shape friendly grouping archetype for the
+// two operator-defined shell conditionKinds (shell_command + shell_check).
+// Selecting it snaps conditionKind based on the active lifecycle:
+//   * pre_final or before_tool_use     → shell_check (verifier verdict)
+//   * any other shell-eligible slot    → shell_command (side-effect script)
+// Reverse path mirrors the mutator wiring: picking shell_command /
+// shell_check via ConditionKindStep snaps archetype back to "shell" so the
+// Review summary trust badge renders Operator-defined honestly.
+type Archetype = "block" | "ask" | "audit" | "strip" | "mutate" | "shell";
 type ToolTarget = "any" | "specific";
 type ConditionKind =
   | "none"
@@ -560,6 +570,37 @@ export function AuthorWizard({
       // gated by the same lifecycle set).
       if (archetypes.includes("mutate")) {
         merged.archetype = "mutate";
+      }
+    }
+    // PR-F-EXEC3 — same forward / reverse snap pattern as the mutator
+    // archetype above. When the operator picks the "Run shell script"
+    // archetype, snap conditionKind to the matching shell kind so the
+    // SpecificsStep renders the F-EXEC ShellCommandPicker / ShellCheckPicker
+    // without a second click. Verifier slots (pre_final + before_tool_use)
+    // map to ``shell_check`` so the verdict-shaped contract is honoured;
+    // every other shell-eligible slot maps to ``shell_command`` (side-effect
+    // script). Reverse path: if conditionKind moves AWAY from a shell kind
+    // (e.g. the operator manually picks llm_criterion via the
+    // ConditionKindStep), and was previously a shell kind, snap archetype
+    // back to a non-shell default so the Review summary trust badge stays
+    // honest about which axis is driving the rule.
+    if (merged.archetype === "shell") {
+      const isVerifierSlot =
+        merged.lifecycle === "pre_final"
+        || merged.lifecycle === "before_tool_use";
+      merged.conditionKind = isVerifierSlot ? "shell_check" : "shell_command";
+    } else if (
+      merged.conditionKind === "shell_command"
+      || merged.conditionKind === "shell_check"
+    ) {
+      // Operator picked a shell conditionKind directly via ConditionKindStep
+      // — promote archetype to "shell" so the Action step + Review trust
+      // badge agree with the actual rule shape. Same defensive guard as the
+      // mutator branch above (availableConditionKinds and
+      // availableArchetypes are gated by the same lifecycle set so the
+      // promotion always succeeds for legitimate combinations).
+      if (archetypes.includes("shell")) {
+        merged.archetype = "shell";
       }
     }
     return merged;
@@ -2957,16 +2998,31 @@ function availableArchetypes(lifecycle: Lifecycle): Archetype[] {
   // hook is wired there (a turn that already emitted has no honest mutation
   // target). Selecting "mutate" snaps conditionKind to the matching kind in
   // reseedDownstream so the SpecificsStep renders the F-MUT picker.
-  if (lifecycle === "before_tool_use") return ["block", "ask", "audit", "mutate"];
-  if (lifecycle === "after_tool_use") return ["block", "audit", "strip", "mutate"];
-  // PR-F-UX1 Tier 2 — both new slots are audit-only at the backend matrix.
-  // Surfacing "block" here would let the wizard assemble a draft the backend
-  // ``_LEGAL`` table rejects (cleaner to refuse the action here than at PUT).
-  // PR-F-MUT3 — on_user_prompt_submit additionally accepts "mutate" because
-  // prompt_injection is wired there (system-prompt section append). The
-  // sibling slot on_subagent_stop stays audit-only (no mutator hook).
+  //
+  // PR-F-EXEC3 — "shell" appears in 11 lifecycle slots — the same 11 slots
+  // where ``shell_command`` and/or ``shell_check`` are exposed by
+  // availableConditionKinds. Mirror per-lifecycle additions below so the
+  // archetype picker stays in lock-step with the condition picker; the
+  // archetype card is hidden on slots with no operator-defined hook
+  // (``before_llm_call`` / ``after_llm_call`` / ``on_task_complete`` /
+  // ``on_session_start`` / ``on_session_end``).
+  if (lifecycle === "before_tool_use") {
+    return ["block", "ask", "audit", "mutate", "shell"];
+  }
+  if (lifecycle === "after_tool_use") {
+    return ["block", "audit", "strip", "mutate", "shell"];
+  }
+  // PR-F-UX1 Tier 2 — wired at the canonical governed-turn funnel.
+  // PR-F-LIFE4a lifted the matrix to {audit, block}: a block-action
+  // criterion can short-circuit the engine stream BEFORE rt.engine
+  // .run_turn_stream is invoked. "ask" was deliberately left out at this
+  // slot (no honest approval surface for the inbound-prompt boundary
+  // today — the design matrix lists {audit, block} only).
+  // PR-F-MUT3 keeps "mutate" because prompt_injection is wired here
+  // (system-prompt section append). PR-F-EXEC3 keeps "shell" because
+  // shell_command is exposed at this slot.
   if (lifecycle === "on_user_prompt_submit") {
-    return ["audit", "mutate"];
+    return ["block", "audit", "mutate", "shell"];
   }
   // PR-F-LIFE1 — ``on_subagent_stop`` is lifted past audit-only: the
   // backend ``_LEGAL`` matrix now accepts (llm_criterion × on_subagent_stop
@@ -2975,39 +3031,59 @@ function availableArchetypes(lifecycle: Lifecycle): Archetype[] {
   // the verb as "tell the parent the subagent failed the criterion"). The
   // audit row is still recorded in either case.
   if (lifecycle === "on_subagent_stop") {
-    return ["block", "ask", "audit"];
+    return ["block", "ask", "audit", "shell"];
   }
-  // PR-F-LIFE1 — both turn-boundary slots stay audit-only at the wizard
-  // (matches the backend ``_LEGAL`` entries). Block at top-level turn entry
-  // would require a runtime contract change (the engine stream has not
-  // started yet) and at top-level turn end the emission has already
-  // completed, so the conservative wire is audit-only.
-  if (lifecycle === "before_turn_start" || lifecycle === "after_turn_end") {
-    return ["audit"];
+  // PR-F-LIFE4a — ``before_turn_start`` lifted to {audit, block, ask} so
+  // the operator can author a "block this turn if (criterion)" rule that
+  // ACTUALLY short-circuits the turn at the canonical funnel BEFORE the
+  // engine stream is started. ``ask`` is honest-degrade today (records
+  // requires_approval=true and proceeds — see ASK tooltip note). The
+  // sibling ``after_turn_end`` stays audit-only (emission has already
+  // completed by the time the audit fires).
+  if (lifecycle === "before_turn_start") {
+    return ["block", "ask", "audit", "shell"];
+  }
+  if (lifecycle === "after_turn_end") {
+    return ["audit", "shell"];
   }
   // PR-F-LIFE2 — per-LLM-call slots are audit-only. Block at the per-call
   // boundary would amplify the runaway-cost risk (one bad rule blocks
   // every LLM call within a turn) and the surrounding plugin's per-turn
   // critic budget already enforces the cost ceiling for audit verdicts.
   if (lifecycle === "before_llm_call" || lifecycle === "after_llm_call") {
-    return ["audit"];
+    return ["block", "audit"];
   }
-  // PR-F-LIFE3 — four new emitter slots are audit-only. Block at the
-  // compaction / task-checkpoint / artifact-created chokepoints has no
-  // honest meaning: the compaction has already been decided by the
-  // surrounding plugin (the audit wraps the call, it does not gate it),
-  // a task transition has already been recorded by the work-queue store
-  // (the audit fires AFTER the state write), and an artifact has already
-  // been written by the provider (the audit fires AFTER the ok-status
-  // branch). Surfacing block would let the operator assemble a draft the
-  // backend ``_LEGAL`` matrix rejects.
-  if (
-    lifecycle === "before_compaction"
-    || lifecycle === "after_compaction"
-    || lifecycle === "on_task_checkpoint"
-    || lifecycle === "on_artifact_created"
-  ) {
-    return ["audit"];
+  // PR-F-LIFE4a — four new emitter slots, lifted per the runtime contract
+  // each chokepoint honestly supports:
+  // * before_compaction: {audit, block} — the gate consult tells the
+  //   compaction plugin to SKIP the tail-drop on block.
+  // * after_compaction: {audit} only — compaction has already taken
+  //   effect on llm_request.contents by the time the audit fires.
+  // * on_task_checkpoint: {audit, block, ask} — the gate consult tells
+  //   the work-queue driver to halt further state advancement on block;
+  //   ask is honest-degrade today (proceeds + records requires_approval).
+  //   PR-F-LIFE4a review pass NOTE: block / ask only fire at the
+  //   ``claimed`` transition (pre-execution gate). At completed / failed /
+  //   short_circuited transitions the verdict is recorded as audit-only —
+  //   post-execution revert needs a compensating-action wire (follow-up).
+  //   The block-card subtext below carries this caveat so an operator
+  //   picking block at this slot is not surprised.
+  // * on_artifact_created: {audit, ask} — the artifact has already been
+  //   written by the provider, so block is honestly impossible; ask
+  //   surfaces a requires_approval directive on the delivery receipt so
+  //   a follow-up approval surface can hold downstream channel delivery.
+  if (lifecycle === "before_compaction") {
+    // PR-F-EXEC3 — shell_command is exposed here; archetype mirrors.
+    return ["block", "audit", "shell"];
+  }
+  if (lifecycle === "after_compaction") {
+    return ["audit", "shell"];
+  }
+  if (lifecycle === "on_task_checkpoint") {
+    return ["block", "ask", "audit", "shell"];
+  }
+  if (lifecycle === "on_artifact_created") {
+    return ["ask", "audit", "shell"];
   }
   // PR-F-LIFE4b — task / session boundary slots, lifted per the runtime
   // contract each chokepoint honestly supports:
@@ -3030,7 +3106,10 @@ function availableArchetypes(lifecycle: Lifecycle): Archetype[] {
   if (lifecycle === "on_session_end") {
     return ["audit"];
   }
-  return ["block", "ask", "audit"];
+  // pre_final (fallback): shell archetype is exposed because the lifecycle
+  // is shell-eligible (shell_command + shell_check both gate the final
+  // answer commit at this slot — see availableConditionKinds).
+  return ["block", "ask", "audit", "shell"];
 }
 
 
@@ -3072,6 +3151,23 @@ const ARCHETYPE_META: Record<Archetype, ArchetypeOption> = {
     description:
       "Inject a value into a tool call or system prompt, or rewrite a tool's output before the model reads it. Modifies traffic — the trust badge will show Mutator.",
     icon: <ShieldOff className="h-5 w-5" />,
+  },
+  // PR-F-EXEC3 — friendly grouping card that surfaces the two operator-
+  // defined conditionKinds (shell_command + shell_check) as a first-class
+  // action archetype. Selecting it snaps conditionKind based on the active
+  // lifecycle (handled by reseedDownstream) so the SpecificsStep picker
+  // appears next: ``shell_check`` at the two verifier slots (pre_final +
+  // before_tool_use) and ``shell_command`` everywhere else. The label is
+  // intentionally "Run shell script" so the operator sees both concrete
+  // shapes the choice covers; the trust badge in Review then renders
+  // Operator-defined (amber-red + Terminal icon) honestly with the
+  // "magi does NOT verify the script" tooltip.
+  shell: {
+    id: "shell",
+    label: "Run shell script",
+    description:
+      "Operator-authored shell command or verifier. Runs as a subprocess with a bounded timeout and an env-var allowlist. magi does NOT verify the script body — the trust badge will show Operator-defined.",
+    icon: <Terminal className="h-5 w-5" />,
   },
 };
 
@@ -3430,6 +3526,15 @@ function archetypeSlug(archetype: Archetype): string {
       return "strip";
     case "mutate":
       return "mutate";
+    case "shell":
+      // PR-F-EXEC3 — slug for the operator-defined shell archetype.
+      // Distinct from conditionSlug("shell_command")="shell" because the
+      // derived rule id assembles ``${archetypeSlug}-${conditionSlug}-…``
+      // and the shell conditionKinds already carry their own slugs
+      // ("shell" / "shell-check"). Picking "shell-run" here keeps the
+      // resulting id readable (e.g. ``shell-run-shell-check-pre-final``)
+      // without colliding with either condition slug.
+      return "shell-run";
   }
 }
 
@@ -3493,6 +3598,24 @@ function defaultIdHint(draft: Draft): string {
  */
 function trustClassForDraft(draft: Draft): TrustClass {
   if (draft.conditionKind === "llm_criterion") return "advisory";
+  // PR-F-MUT3 — both mutator kinds carry the Mutator trust class so the
+  // Review summary surfaces the amber-yellow "modifies traffic" badge.
+  if (
+    draft.conditionKind === "prompt_injection"
+    || draft.conditionKind === "output_rewrite"
+  ) {
+    return "mutator";
+  }
+  // PR-F-EXEC3 — both operator-defined shell kinds carry the
+  // Operator-defined trust class so the Review summary surfaces the
+  // amber-red badge + Terminal icon + "magi does NOT verify the script"
+  // tooltip honestly before the operator activates the rule.
+  if (
+    draft.conditionKind === "shell_command"
+    || draft.conditionKind === "shell_check"
+  ) {
+    return "operator_defined";
+  }
   return "deterministic";
 }
 
@@ -3654,6 +3777,22 @@ function archetypeVerb(draft: Draft): string {
       return draft.lifecycle === "after_tool_use"
         ? "rewrite the tool output before the model reads it"
         : "inject context into the agent's next call";
+    case "shell":
+      // PR-F-EXEC3 — verifier slots run the script as a verdict source
+      // (``shell_check``: stdout JSON or exit code 0 → passed); every
+      // other shell-eligible slot runs the script for its side effect
+      // (``shell_command``: exit code drives the gate verdict if the slot
+      // is gate-shaped, otherwise the run is audit-only). The verb stays
+      // honest about which contract is active so the Review summary does
+      // not mis-describe the rule.
+      if (
+        draft.conditionKind === "shell_check"
+        || draft.lifecycle === "pre_final"
+        || draft.lifecycle === "before_tool_use"
+      ) {
+        return "run an operator shell verifier (verdict from stdout JSON or exit code)";
+      }
+      return "run an operator shell command (exit code drives gate verdict)";
   }
 }
 
@@ -4075,6 +4214,16 @@ function customRuleAction(draft: Draft): string {
       // archetype="mutate" but a non-mutator conditionKind (today
       // unreachable; staying audit keeps the resulting rule honest with
       // the backend ``_LEGAL`` matrix).
+      return "audit";
+    case "shell":
+      // PR-F-EXEC3 — defensive fallback. Same shape as the mutator branch
+      // above: reseedDownstream snaps conditionKind to shell_command /
+      // shell_check when archetype="shell" is selected, both of which are
+      // intercepted by the early-return shell branches at the top of this
+      // function. This case fires only if an upstream caller hands a draft
+      // with archetype="shell" but a non-shell conditionKind (today
+      // unreachable; audit is the honest default that round-trips through
+      // every ``_LEGAL`` slot).
       return "audit";
   }
 }

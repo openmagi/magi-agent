@@ -62,6 +62,18 @@ export interface HandoffDraft {
   orReplacement?: string;
   orScope?: string;
   orIsRegex?: boolean;
+  // PR-F-EXEC3 — shell_command / shell_check draft slice. Same shape as
+  // the wizard's :class:`Draft` exposes (source + inline body OR file path
+  // + timeout + env-var allowlist + shell interpreter). The serializer
+  // surfaces each non-empty field as a "key: value" entry in the primer so
+  // the NL compose surface picks up where the wizard left off without the
+  // operator re-typing the script identity.
+  shSource?: "inline" | "file";
+  shInline?: string;
+  shPath?: string;
+  shTimeoutSeconds?: number;
+  shEnvVars?: string;
+  shShell?: "bash" | "sh";
   ruleId?: string;
   description?: string;
 }
@@ -218,6 +230,31 @@ function buildFilledClause(draft: HandoffDraft): string | null {
     pushIf("output-rewrite scope", draft.orScope);
   }
   if (draft.orIsRegex === false) entries.push("output-rewrite regex: off");
+  // PR-F-EXEC3 — shell payload subset. Each field is omitted when empty so
+  // the primer reads naturally for very-early-stage drafts (e.g. the
+  // operator picked the "shell" archetype but hasn't typed a script yet).
+  // shInline can grow long; the pushIf clip at 120 chars keeps the primer
+  // under PRIMER_MAX_CHARS for any realistic script paste.
+  if (draft.shSource) {
+    pushIf("shell source", draft.shSource);
+  }
+  pushIf("shell script", draft.shInline);
+  pushIf("shell script path", draft.shPath);
+  if (
+    typeof draft.shTimeoutSeconds === "number"
+    && Number.isFinite(draft.shTimeoutSeconds)
+    && draft.shTimeoutSeconds !== 30
+  ) {
+    // 30s is the EMPTY-draft default; only surface it when the operator
+    // bumped the timeout so the primer stays minimal in the common case.
+    entries.push(`shell timeout: ${draft.shTimeoutSeconds}s`);
+  }
+  pushIf("shell env-var allowlist", draft.shEnvVars);
+  if (draft.shShell && draft.shShell !== "bash") {
+    // bash is the EMPTY-draft default; only surface it when the operator
+    // picked the alternate sh interpreter.
+    pushIf("shell interpreter", draft.shShell);
+  }
   pushIf("policy id", draft.ruleId);
   pushIf("description", draft.description);
 
@@ -294,6 +331,14 @@ function stepFieldHint(
         return "prompt-injection picker";
       case "output_rewrite":
         return "output-rewrite picker";
+      // PR-F-EXEC3 — both operator-defined shell kinds reuse the same
+      // ShellCommandPicker / ShellCheckPicker layout. Distinct hint
+      // strings keep the primer honest about which contract the operator
+      // was stuck on (verifier verdict vs side-effect script).
+      case "shell_command":
+        return "shell command picker";
+      case "shell_check":
+        return "shell verifier picker";
       default:
         return null;
     }

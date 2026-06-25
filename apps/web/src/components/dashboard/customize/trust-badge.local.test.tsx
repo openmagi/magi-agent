@@ -10,7 +10,7 @@ const src = readFileSync(
 );
 
 describe("TrustBadge — shared trust-class badge primitive", () => {
-  it("exports the five-trust-class taxonomy union (deterministic/advisory/hybrid/preview/mutator)", () => {
+  it("exports the six-trust-class taxonomy union (deterministic/advisory/hybrid/preview/mutator/operator_defined)", () => {
     expect(src).toContain("deterministic");
     expect(src).toContain("advisory");
     expect(src).toContain("hybrid");
@@ -18,6 +18,9 @@ describe("TrustBadge — shared trust-class badge primitive", () => {
     // PR-F-MUT3 — fifth bucket for prompt_injection + output_rewrite
     // primitives. Forwarded from policy-model.ts where the literal lives.
     expect(src).toContain("mutator");
+    // PR-F-EXEC3 — sixth bucket for shell_command + shell_check primitives.
+    // Forwarded from policy-model.ts where the literal lives.
+    expect(src).toContain("operator_defined");
     expect(src).toMatch(/export\s+type\s+TrustClass/);
   });
 
@@ -156,5 +159,97 @@ describe("TrustBadge — F-MUT3 mutator variant", () => {
     );
     // aria-label still names the trust bucket (not the tooltip).
     expect(html).toContain('aria-label="Trust class: Mutator"');
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// PR-F-EXEC3 — Operator-defined variant (5th meaningful trust-class)
+// ---------------------------------------------------------------------------
+
+
+describe("TrustBadge — F-EXEC3 operator_defined variant", () => {
+  it("renders the Operator-defined variant with the amber-red palette + visible label", () => {
+    const html = renderToStaticMarkup(
+      <TrustBadge trustClass="operator_defined" />,
+    );
+    expect(html).toContain("Operator-defined");
+    expect(html).toContain('aria-label="Trust class: Operator-defined"');
+    // PR-F-EXEC3 — amber-red ramp (amber-600 tint + amber-900 ink +
+    // amber-700 ring) distinct from advisory amber, deterministic emerald,
+    // hybrid violet, preview blue, and mutator yellow so an operator never
+    // confuses an operator-defined shell script for any of the built-in
+    // primitives. The palette is what tells the operator "magi did not
+    // write this — verify the script body before activating".
+    expect(html).toContain("bg-amber-600/15");
+    expect(html).toContain("text-amber-900");
+    expect(html).toContain("ring-amber-700/40");
+    // Negative: must NOT collide with the other variants' hues.
+    expect(html).not.toContain("text-emerald-700");
+    expect(html).not.toContain("text-amber-700");
+    expect(html).not.toContain("text-yellow-900");
+    expect(html).not.toContain("text-violet-700");
+    expect(html).not.toContain("text-blue-700");
+  });
+
+  it("renders the spec 'external script' tooltip via title attribute", () => {
+    const html = renderToStaticMarkup(
+      <TrustBadge trustClass="operator_defined" />,
+    );
+    // The exact spec sentence — assert phrasing so the warning cannot
+    // silently soften over time. magi does NOT verify the script body and
+    // the operator must be told so before activating.
+    expect(html).toContain("External script authored by the operator");
+    expect(html).toContain("magi does NOT verify the script");
+    expect(html).toContain(
+      "Confirm the command does what you expect before activating",
+    );
+    expect(html).toMatch(/title="External script authored by the operator/);
+  });
+
+  it("renders the Terminal icon glyph inline beside the visible label", () => {
+    const html = renderToStaticMarkup(
+      <TrustBadge trustClass="operator_defined" />,
+    );
+    // The Terminal icon is the only inline glyph on the badge — its
+    // presence is the visual cue that the rule body lives outside magi.
+    // Pinned via data-testid so the assertion does not break on a future
+    // lucide-react SVG markup change.
+    expect(html).toContain(
+      'data-testid="trust-badge-icon-operator-defined"',
+    );
+    // The label still renders next to the icon.
+    expect(html).toContain("Operator-defined");
+  });
+
+  it("non-operator_defined variants ship NO Terminal icon (back-compat byte-equivalence)", () => {
+    // The other five variants (deterministic / advisory / hybrid / preview /
+    // mutator) never carried a glyph; F-EXEC3 must not introduce one on
+    // those variants or downstream a11y snapshots / CSS expectations
+    // regress.
+    for (const tc of [
+      "deterministic",
+      "advisory",
+      "hybrid",
+      "preview",
+      "mutator",
+    ] as const) {
+      const html = renderToStaticMarkup(<TrustBadge trustClass={tc} />);
+      expect(html).not.toContain("trust-badge-icon-operator-defined");
+    }
+  });
+
+  it("accepts a caller-supplied tooltip override (parity with label override)", () => {
+    const html = renderToStaticMarkup(
+      <TrustBadge
+        trustClass="operator_defined"
+        tooltip="This shell hook is sandboxed to a /tmp dir."
+      />,
+    );
+    expect(html).toContain(
+      'title="This shell hook is sandboxed to a /tmp dir."',
+    );
+    // aria-label still names the trust bucket (not the tooltip).
+    expect(html).toContain('aria-label="Trust class: Operator-defined"');
   });
 });

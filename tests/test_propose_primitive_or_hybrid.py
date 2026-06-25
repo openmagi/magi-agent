@@ -59,7 +59,7 @@ def _factory(response_text: str):
 
 
 def test_proposal_trust_classes_is_two_canonical() -> None:
-    assert PROPOSAL_TRUST_CLASSES == frozenset({"deterministic", "advisory", "mutator"})
+    assert PROPOSAL_TRUST_CLASSES == frozenset({"deterministic", "advisory", "mutator", "operator_defined"})
 
 
 # ---------------------------------------------------------------------------

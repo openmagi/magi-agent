@@ -103,9 +103,11 @@ describe("AuthorWizard — variable-length policy authoring (F1.5 + F-UX3)", () 
     expect(src).not.toMatch(/id:\s*"emit"/);
     // PR-F-MUT3 — extends the union with 'mutate' (Inject / Rewrite card).
     // The 4 original archetypes remain wired; 'mutate' joins as a friendly
-    // grouping for the two mutator conditionKinds.
+    // grouping for the two mutator conditionKinds. PR-F-EXEC3 appends
+    // 'shell' as the parallel friendly grouping for the two operator-
+    // defined shell conditionKinds (shell_command + shell_check).
     expect(src).toContain(
-      'type Archetype = "block" | "ask" | "audit" | "strip" | "mutate"',
+      'type Archetype = "block" | "ask" | "audit" | "strip" | "mutate" | "shell"',
     );
   });
 
@@ -193,6 +195,85 @@ describe("AuthorWizard — variable-length policy authoring (F1.5 + F-UX3)", () 
     expect(src).toContain("availableArchetypes");
     expect(src).toMatch(/before_tool_use[\s\S]*?"block", "ask", "audit"/);
     expect(src).toMatch(/after_tool_use[\s\S]*?"block", "audit", "strip"/);
+  });
+
+  // -------------------------------------------------------------------------
+  // PR-F-LIFE4a — action matrix normalization across lifecycle slots. Each
+  // pin-test mirrors the backend ``_LEGAL`` lift exactly so wizard drafts
+  // assemble actions the validator accepts. The fan-through tests in
+  // tests/test_customize_custom_rules.py + tests/customize_firing/
+  // test_life4a_gate_firing.py prove the runtime end of the same matrix.
+  // -------------------------------------------------------------------------
+
+  it("F-LIFE4a — on_user_prompt_submit lifts to block + audit + mutate (+ shell from F-EXEC3)", () => {
+    // Backend: _LEGAL["llm_criterion"]["on_user_prompt_submit"] = {audit, block}
+    // Wizard preserves "mutate" because prompt_injection wires here.
+    // PR-F-EXEC3 appends "shell" because shell_command is exposed at this slot.
+    expect(src).toMatch(
+      /lifecycle === "on_user_prompt_submit"\)\s*\{\s*return \["block", "audit", "mutate", "shell"\]/,
+    );
+  });
+
+  it("F-LIFE4a — before_turn_start lifts to block + ask + audit (+ shell from F-EXEC3)", () => {
+    // Backend: _LEGAL["llm_criterion"]["before_turn_start"] = {audit, block, ask_approval}
+    // PR-F-EXEC3 appends "shell" because shell_command is exposed at this slot.
+    expect(src).toMatch(
+      /lifecycle === "before_turn_start"\)\s*\{\s*return \["block", "ask", "audit", "shell"\]/,
+    );
+  });
+
+  it("F-LIFE4a — after_turn_end stays audit-only (no honest block target) (+ shell from F-EXEC3)", () => {
+    // PR-F-EXEC3 appends "shell" — even audit-only slots expose the
+    // operator-defined archetype so a side-effect script can run.
+    expect(src).toMatch(
+      /lifecycle === "after_turn_end"\)\s*\{\s*return \["audit", "shell"\]/,
+    );
+  });
+
+  it("F-LIFE4a — before_llm_call + after_llm_call lift to block + audit (no shell — not eligible)", () => {
+    // Backend: _LEGAL["llm_criterion"]["before_llm_call"|"after_llm_call"] = {audit, block}
+    // PR-F-EXEC3 does NOT append "shell" here (per-call cost-hot path is
+    // shell-ineligible at v1 per availableConditionKinds — only llm_criterion).
+    expect(src).toMatch(
+      /lifecycle === "before_llm_call" \|\| lifecycle === "after_llm_call"\)\s*\{\s*return \["block", "audit"\]/,
+    );
+  });
+
+  it("F-LIFE4a — before_compaction lifts to block + audit (+ shell from F-EXEC3)", () => {
+    // Backend: _LEGAL["llm_criterion"]["before_compaction"] = {audit, block}
+    // PR-F-EXEC3 appends "shell" — shell_command is exposed at this slot.
+    // The branch carries an inline comment so the regex spans whitespace +
+    // comment between the open-brace and the return statement.
+    expect(src).toMatch(
+      /lifecycle === "before_compaction"\)[\s\S]*?return \["block", "audit", "shell"\]/,
+    );
+  });
+
+  it("F-LIFE4a — after_compaction stays audit-only (+ shell from F-EXEC3)", () => {
+    expect(src).toMatch(
+      /lifecycle === "after_compaction"\)\s*\{\s*return \["audit", "shell"\]/,
+    );
+  });
+
+  it("F-LIFE4a — on_task_checkpoint lifts to block + ask + audit (+ shell from F-EXEC3)", () => {
+    // Backend: _LEGAL["llm_criterion"]["on_task_checkpoint"] = {audit, block, ask_approval}
+    expect(src).toMatch(
+      /lifecycle === "on_task_checkpoint"\)\s*\{\s*return \["block", "ask", "audit", "shell"\]/,
+    );
+  });
+
+  it("F-LIFE4a — on_artifact_created lifts to ask + audit only (+ shell from F-EXEC3)", () => {
+    // Backend: _LEGAL["llm_criterion"]["on_artifact_created"] = {audit, ask_approval}
+    expect(src).toMatch(
+      /lifecycle === "on_artifact_created"\)\s*\{\s*return \["ask", "audit", "shell"\]/,
+    );
+  });
+
+  it("F-LIFE4a — ask archetype carries honest-degrade tooltip about provisional approval surface", () => {
+    // The ask card's description must explain that ask records
+    // requires_approval=true today and approval surfaces are a follow-up.
+    expect(src).toContain("requires_approval=true");
+    expect(src).toContain("follow-up");
   });
 
   it("action step header composes a per-trigger phrase (target + condition together)", () => {
@@ -955,27 +1036,30 @@ describe("AuthorWizard — PR-F-UX1 lifecycle audit + Tier 2 expansion", () => {
     );
   });
 
-  it("availableArchetypes(on_subagent_stop) is lifted to [block, ask, audit] (PR-F-LIFE1)", () => {
+  it("availableArchetypes(on_subagent_stop) is lifted to [block, ask, audit, shell] (PR-F-LIFE1 + PR-F-EXEC3)", () => {
     // PR-F-LIFE1 lifts ``on_subagent_stop`` past audit-only — the backend
     // ``_LEGAL`` matrix now accepts (llm_criterion × on_subagent_stop ×
     // {audit, block, ask_approval}). The block / ask verbs are directives
     // to the PARENT caller (the child output has already been emitted),
     // not a mutation of the already-emitted output. The audit row is
-    // recorded in either case.
+    // recorded in either case. PR-F-EXEC3 appends "shell" because
+    // shell_command is exposed at this slot.
     expect(src).toMatch(
-      /lifecycle === "on_subagent_stop"\) \{[\s\S]*?return \["block", "ask", "audit"\]/,
+      /lifecycle === "on_subagent_stop"\) \{[\s\S]*?return \["block", "ask", "audit", "shell"\]/,
     );
   });
 
-  it("availableArchetypes(on_user_prompt_submit) adds mutate to audit (PR-F-MUT3)", () => {
+  it("availableArchetypes(on_user_prompt_submit) — lifts to block + audit + mutate + shell", () => {
     // The Tier 2 slot on_user_prompt_submit accepts prompt_injection
     // (system-prompt section append) — the wizard surfaces it via the
-    // friendly "Inject / Rewrite" archetype card. The backend
-    // ``_LEGAL`` matrix still restricts the resulting action to audit
-    // (the mutation has already taken effect by the time the audit row
-    // is written), so customRuleAction forces action=audit downstream.
+    // friendly "Inject / Rewrite" archetype card. PR-F-LIFE4a lifted the
+    // backend matrix from {audit} to {audit, block}: the gate fan-out
+    // short-circuits the engine stream when a block-action criterion
+    // fails. Mutate is still surfaced for prompt_injection authoring.
+    // PR-F-EXEC3 additionally appends "shell" because shell_command is
+    // exposed at this slot.
     expect(src).toMatch(
-      /lifecycle === "on_user_prompt_submit"\) \{[\s\S]*?return \["audit", "mutate"\]/,
+      /lifecycle === "on_user_prompt_submit"\) \{[\s\S]*?return \["block", "audit", "mutate", "shell"\]/,
     );
   });
 
@@ -1055,13 +1139,20 @@ describe("AuthorWizard — PR-F-LIFE1 turn-boundary lifecycle expansion", () => 
     );
   });
 
-  it("availableArchetypes(turn-boundary) returns ONLY audit", () => {
-    // Mirrors the backend matrix entries
-    // (llm_criterion × before_turn_start × {audit}) /
-    // (llm_criterion × after_turn_end × {audit}). Block / ask are deferred
-    // (no honest runtime target at top-level boundaries).
+  it("availableArchetypes(turn-boundary) — PR-F-LIFE4a lifted before_turn_start, after_turn_end stays audit-only (+ shell from PR-F-EXEC3)", () => {
+    // PR-F-LIFE4a updated the matrix:
+    //   * before_turn_start → {audit, block, ask_approval} (gate fan-out
+    //     short-circuits the engine stream BEFORE rt.engine.run_turn_stream)
+    //   * after_turn_end stays {audit} (emission already completed, no
+    //     honest target for block / ask)
+    // PR-F-EXEC3 appends "shell" to BOTH slots — shell_command is exposed
+    // at both, audit-only-with-shell at after_turn_end.
+    // The two slots therefore live in separate if-branches now.
     expect(src).toMatch(
-      /lifecycle === "before_turn_start" \|\| lifecycle === "after_turn_end"\) \{[\s\S]*?return \["audit"\]/,
+      /lifecycle === "before_turn_start"\)\s*\{\s*return \["block", "ask", "audit", "shell"\]/,
+    );
+    expect(src).toMatch(
+      /lifecycle === "after_turn_end"\)\s*\{\s*return \["audit", "shell"\]/,
     );
   });
 
@@ -1232,14 +1323,25 @@ describe("AuthorWizard — PR-F-LIFE3 four new emitter slots", () => {
     );
   });
 
-  it("availableArchetypes(F-LIFE3 slots) returns ONLY audit", () => {
-    // Mirrors the backend matrix entries — block/ask/retry have no honest
-    // semantics at the compaction / task-checkpoint / artifact-created
-    // chokepoints (the underlying runtime decision has already been made
-    // by the time the audit fires). The if-block must close on
-    // on_artifact_created and short-circuit to return ["audit"].
+  it("availableArchetypes(F-LIFE3 slots) — PR-F-LIFE4a lifts subset per honest runtime contract (+ shell from PR-F-EXEC3)", () => {
+    // PR-F-LIFE4a per-slot lift:
+    //   * before_compaction → {audit, block} (plugin skips tail-drop)
+    //   * after_compaction stays {audit} (already applied)
+    //   * on_task_checkpoint → {audit, block, ask_approval} (driver halts)
+    //   * on_artifact_created → {audit, ask_approval} (artifact already written)
+    // PR-F-EXEC3 appends "shell" to all four slots — shell_command is
+    // exposed at every F-LIFE3 emitter slot (audit-only side-effect script).
     expect(src).toMatch(
-      /lifecycle === "on_artifact_created"\s*\)\s*\{\s*return \["audit"\];?\s*\}/,
+      /lifecycle === "before_compaction"\)\s*\{[\s\S]*?return \["block", "audit", "shell"\]/,
+    );
+    expect(src).toMatch(
+      /lifecycle === "after_compaction"\)\s*\{\s*return \["audit", "shell"\]/,
+    );
+    expect(src).toMatch(
+      /lifecycle === "on_task_checkpoint"\)\s*\{\s*return \["block", "ask", "audit", "shell"\]/,
+    );
+    expect(src).toMatch(
+      /lifecycle === "on_artifact_created"\)\s*\{\s*return \["ask", "audit", "shell"\]/,
     );
   });
 
@@ -1901,44 +2003,54 @@ describe("AuthorWizard — F-MUT3 'Inject / Rewrite' archetype card", () => {
     );
   });
 
-  it("availableArchetypes(before_tool_use) appends 'mutate' for the prompt_injection card", () => {
+  it("availableArchetypes(before_tool_use) appends 'mutate' for the prompt_injection card (+ shell from PR-F-EXEC3)", () => {
     // before_tool_use → prompt_injection (append to tool args). The card sits
     // last so the existing block / ask / audit picks stay first in the visual
-    // order operators are used to.
+    // order operators are used to. PR-F-EXEC3 appends "shell" because
+    // both shell_command and shell_check are exposed at this slot.
     expect(src).toMatch(
-      /lifecycle === "before_tool_use"\) return \["block", "ask", "audit", "mutate"\]/,
+      /lifecycle === "before_tool_use"\)[\s\S]*?return \["block", "ask", "audit", "mutate", "shell"\]/,
     );
   });
 
-  it("availableArchetypes(after_tool_use) appends 'mutate' for the output_rewrite card", () => {
+  it("availableArchetypes(after_tool_use) appends 'mutate' for the output_rewrite card (+ shell from PR-F-EXEC3)", () => {
     // after_tool_use → output_rewrite (redact tool result). Sits beside the
     // existing 'strip' card; both are surface-level "modify the output" verbs
     // but 'strip' routes to dashboard_check action=override and 'mutate'
-    // routes to the new output_rewrite kind.
+    // routes to the new output_rewrite kind. PR-F-EXEC3 appends "shell"
+    // because shell_command is exposed at this slot (audit-only — the tool
+    // has already returned, but a side-effect script still has value).
     expect(src).toMatch(
-      /lifecycle === "after_tool_use"\) return \["block", "audit", "strip", "mutate"\]/,
+      /lifecycle === "after_tool_use"\)[\s\S]*?return \["block", "audit", "strip", "mutate", "shell"\]/,
     );
   });
 
-  it("availableArchetypes(on_user_prompt_submit) exposes mutate beside audit", () => {
+  it("availableArchetypes(on_user_prompt_submit) exposes mutate beside block + audit (+ shell from PR-F-EXEC3)", () => {
     // prompt_injection (system-prompt section append) is wired here; the
-    // card is the operator's entry point. on_subagent_stop intentionally
-    // stays audit-only (no mutator hook).
+    // mutate card is the operator's entry point. PR-F-LIFE4a added "block"
+    // alongside (gate fan-out short-circuits the engine stream when a
+    // block-action criterion fails). on_subagent_stop keeps its own set
+    // (block + ask + audit) from F-LIFE1. PR-F-EXEC3 appends "shell"
+    // because shell_command is exposed at this slot.
     expect(src).toMatch(
-      /lifecycle === "on_user_prompt_submit"\) \{[\s\S]*?return \["audit", "mutate"\]/,
+      /lifecycle === "on_user_prompt_submit"\) \{[\s\S]*?return \["block", "audit", "mutate", "shell"\]/,
     );
   });
 
-  it("availableArchetypes hides 'mutate' on pre_final and on_subagent_stop (no mutator hook)", () => {
+  it("availableArchetypes hides 'mutate' on pre_final and on_subagent_stop (no mutator hook); pre_final still exposes 'shell' (PR-F-EXEC3)", () => {
     // pre_final has no tool boundary or system-prompt slot. on_subagent_stop
     // fires after the child has already emitted — mutation has no honest
-    // target. The wizard must not surface a card the operator cannot save.
+    // target. The wizard must not surface a mutate card the operator cannot
+    // save. PR-F-EXEC3 STILL exposes "shell" at pre_final and
+    // on_subagent_stop because shell_command (side-effect script) and
+    // shell_check (verifier at pre_final) are honestly wired there.
     expect(src).toMatch(
-      /lifecycle === "on_subagent_stop"\) \{[\s\S]*?return \["audit"\]/,
+      /lifecycle === "on_subagent_stop"\) \{[\s\S]*?return \["block", "ask", "audit", "shell"\]/,
     );
     // The default-branch fallback (used by pre_final + any unknown lifecycle)
-    // remains the original 3 archetypes — no mutate.
-    expect(src).toMatch(/return \["block", "ask", "audit"\];\s*\n\}/);
+    // gains "shell" because pre_final is shell-eligible (shell_command +
+    // shell_check both gate the final answer commit at this slot).
+    expect(src).toMatch(/return \["block", "ask", "audit", "shell"\];\s*\n\}/);
   });
 
   it("ARCHETYPE_META registers a 'mutate' entry labelled 'Inject / Rewrite (mutator)'", () => {
@@ -2716,6 +2828,141 @@ describe("AuthorWizard — PR-F-EXEC2 shell_check condition kind", () => {
   it("conditionSlug returns 'shell-check' for shell_check (distinct from shell_command's 'shell')", () => {
     expect(src).toMatch(
       /case "shell_check":[\s\S]*?return "shell-check"/,
+    );
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// PR-F-EXEC3 — Operator-defined "shell" archetype card + reseed wiring +
+// trust class derivation.
+// ---------------------------------------------------------------------------
+
+
+describe("AuthorWizard — F-EXEC3 'Run shell script' archetype card", () => {
+  it("extends the Archetype union with 'shell'", () => {
+    // PR-F-EXEC3 adds a friendly grouping for the two operator-defined
+    // shell conditionKinds (shell_command + shell_check). Mirrors the
+    // F-MUT3 'mutate' pattern: the backend customRuleKind /
+    // customRuleAction wiring routes by conditionKind, so adding 'shell'
+    // here costs nothing at save time.
+    expect(src).toMatch(/type Archetype[\s\S]*?\| "shell"/);
+  });
+
+  it("ARCHETYPE_META carries the 'shell' entry with Terminal icon + Operator-defined warning copy", () => {
+    // Label + description name the two underlying conditionKinds and ship
+    // the explicit "magi does NOT verify the script" framing so the
+    // operator sees the trust-class story before activating.
+    expect(src).toContain('label: "Run shell script"');
+    expect(src).toMatch(
+      /shell:\s*\{[\s\S]*?description:[\s\S]*?magi does NOT verify the script/,
+    );
+    expect(src).toMatch(/shell:\s*\{[\s\S]*?icon: <Terminal /);
+  });
+
+  it("Lucide Terminal icon is imported alongside the other archetype icons", () => {
+    expect(src).toMatch(/from "lucide-react"[\s\S]*?Terminal/);
+    // Defensive: the import block lists Terminal as a sibling, not a stray
+    // ad-hoc import next to a different module.
+    expect(src).toMatch(
+      /import \{[\s\S]*?Terminal,?[\s\S]*?\} from "lucide-react";/,
+    );
+  });
+
+  it("availableArchetypes appends 'shell' on every shell-eligible lifecycle (11 slots)", () => {
+    // The 11 slots are exactly the union of shell_command + shell_check
+    // exposure in availableConditionKinds (see the F-EXEC1 / F-EXEC2
+    // sibling tests above). Honest-degrade: the five
+    // shell-INeligible slots (per-LLM-call + task/session boundary) MUST
+    // NOT include 'shell' — they have no shell hook wired at v1.
+    const eligibleHits = [
+      /lifecycle === "before_tool_use"\)[\s\S]*?return \[[\s\S]*?"shell"\]/,
+      /lifecycle === "after_tool_use"\)[\s\S]*?return \[[\s\S]*?"shell"\]/,
+      /lifecycle === "on_user_prompt_submit"\)[\s\S]*?return \[[\s\S]*?"shell"\]/,
+      /lifecycle === "on_subagent_stop"\)[\s\S]*?return \[[\s\S]*?"shell"\]/,
+      /lifecycle === "before_turn_start"\)[\s\S]*?return \[[\s\S]*?"shell"\]/,
+      /lifecycle === "after_turn_end"\)[\s\S]*?return \[[\s\S]*?"shell"\]/,
+      /lifecycle === "before_compaction"\)[\s\S]*?return \[[\s\S]*?"shell"\]/,
+      /lifecycle === "after_compaction"\)[\s\S]*?return \[[\s\S]*?"shell"\]/,
+      /lifecycle === "on_task_checkpoint"\)[\s\S]*?return \[[\s\S]*?"shell"\]/,
+      /lifecycle === "on_artifact_created"\)[\s\S]*?return \[[\s\S]*?"shell"\]/,
+    ];
+    for (const re of eligibleHits) expect(src).toMatch(re);
+    // pre_final lives in the default-branch return; assert separately so
+    // the fallback row also includes 'shell'.
+    expect(src).toMatch(/return \["block", "ask", "audit", "shell"\];/);
+  });
+
+  it("availableArchetypes hides 'shell' on the five shell-INeligible slots", () => {
+    // before_llm_call / after_llm_call — per-call cost-hot path.
+    expect(src).toMatch(
+      /lifecycle === "before_llm_call" \|\| lifecycle === "after_llm_call"\)\s*\{\s*return \["block", "audit"\]/,
+    );
+    // on_task_complete / on_session_start / on_session_end — task/session
+    // boundary slots are not shell-eligible at v1.
+    expect(src).toMatch(
+      /lifecycle === "on_task_complete"\)\s*\{\s*return \["block", "ask", "audit"\]/,
+    );
+    expect(src).toMatch(
+      /lifecycle === "on_session_start"\)\s*\{\s*return \["block", "audit"\]/,
+    );
+    expect(src).toMatch(
+      /lifecycle === "on_session_end"\)\s*\{\s*return \["audit"\]/,
+    );
+  });
+
+  it("reseedDownstream snaps conditionKind to shell_check at verifier slots when archetype='shell'", () => {
+    // Forward snap: pre_final + before_tool_use are the two v1 gate slots
+    // where the verdict-shaped shell_check honors block. Picking the
+    // shell archetype at those slots should select shell_check so the
+    // SpecificsStep renders the verifier picker without a second click.
+    expect(src).toMatch(
+      /merged\.archetype === "shell"[\s\S]*?lifecycle === "pre_final"[\s\S]*?lifecycle === "before_tool_use"[\s\S]*?shell_check/,
+    );
+  });
+
+  it("reseedDownstream snaps conditionKind to shell_command at every other shell-eligible slot", () => {
+    // The forward-snap branch must fall through to shell_command for
+    // every non-verifier slot so the SpecificsStep renders the
+    // side-effect ShellCommandPicker.
+    expect(src).toMatch(
+      /merged\.archetype === "shell"[\s\S]*?isVerifierSlot \? "shell_check" : "shell_command"/,
+    );
+  });
+
+  it("reseedDownstream snaps archetype to 'shell' when conditionKind picks shell_command / shell_check directly", () => {
+    // Reverse snap: if the operator manually picks shell_command or
+    // shell_check via ConditionKindStep, archetype must promote to 'shell'
+    // so the Review summary trust badge agrees with the actual rule shape.
+    expect(src).toMatch(
+      /conditionKind === "shell_command"[\s\S]*?conditionKind === "shell_check"[\s\S]*?archetypes\.includes\("shell"\)[\s\S]*?merged\.archetype = "shell"/,
+    );
+  });
+
+  it("trustClassForDraft maps shell_command / shell_check to 'operator_defined'", () => {
+    // The Review step's TrustBadge must surface the Operator-defined
+    // amber-red badge with the "magi does NOT verify the script" tooltip
+    // honestly before the operator activates the rule.
+    expect(src).toMatch(
+      /conditionKind === "shell_command"[\s\S]*?conditionKind === "shell_check"[\s\S]*?return "operator_defined"/,
+    );
+  });
+
+  it("archetypeSlug returns 'shell-run' for the shell archetype (distinct from condition slugs)", () => {
+    // The derived rule id assembles ``${archetypeSlug}-${conditionSlug}-…``;
+    // picking 'shell-run' for the archetype keeps the id readable without
+    // colliding with the two condition slugs ("shell" and "shell-check").
+    expect(src).toMatch(/case "shell":[\s\S]*?return "shell-run"/);
+  });
+
+  it("archetypeVerb returns honest shell verbs for verifier vs side-effect slots", () => {
+    // The verifier verb mentions the verdict source (stdout JSON / exit code);
+    // the side-effect verb names the gate semantics (exit code drives verdict).
+    expect(src).toContain(
+      "run an operator shell verifier (verdict from stdout JSON or exit code)",
+    );
+    expect(src).toContain(
+      "run an operator shell command (exit code drives gate verdict)",
     );
   });
 });

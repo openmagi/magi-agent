@@ -31,7 +31,11 @@ interface ExampleChip {
   // PR-F-MUT3 — "mutate" surfaces the mutator examples (output_rewrite /
   // prompt_injection) so the operator sees that NL inputs CAN compose
   // traffic-rewriting policies, not just deny / audit gates.
-  archetype: "block" | "ask" | "audit" | "strip" | "mutate";
+  // PR-F-EXEC3 — "shell" surfaces the operator-defined examples
+  // (shell_command / shell_check) so the operator sees that NL inputs
+  // CAN compose operator-authored subprocess hooks too. The chip hue
+  // mirrors the TrustBadge operator_defined amber-red ramp.
+  archetype: "block" | "ask" | "audit" | "strip" | "mutate" | "shell";
   label: string;
   text: string;
 }
@@ -126,6 +130,24 @@ const EXAMPLES: ReadonlyArray<ExampleChip> = [
     label: "Always inject --dry-run on shell_exec",
     text: "Before shell_exec is called, always inject --dry-run into the command argument.",
   },
+  // PR-F-EXEC3 — operator-defined shell examples. The NL compiler's F-UX6
+  // interview now recognises 'run script' / 'execute command' / 'shell
+  // hook' (→ shell_command) and 'verify via shell' / 'check via exit
+  // code' (→ shell_check). Seed an example for each shape so the
+  // operator sees that NL can compose operator-authored subprocess
+  // hooks. The trust badge in the proposal card will render as
+  // Operator-defined (amber-red + Terminal icon) with the explicit
+  // "magi does NOT verify the script" tooltip.
+  {
+    archetype: "shell",
+    label: "Notify Slack on tool error",
+    text: "After any tool returns with a non-zero exit code, run the shell script notify-slack.sh to alert the on-call channel.",
+  },
+  {
+    archetype: "shell",
+    label: "Run pytest before committing",
+    text: "Before the final answer commits, verify via the shell script run-pytest.sh — the agent may finalize only when pytest exits 0.",
+  },
 ];
 
 
@@ -214,6 +236,17 @@ export function NlRuleGuide({
               '"redact / scrub / mask <pattern> from the output" (mutator, after-tool)',
               '"inject / append / always add <value> to <tool arg>" (mutator, before-tool)',
               '"remind / tell the model / add to context <text>" (mutator, user-prompt-submit)',
+              // PR-F-EXEC3 — operator-defined shell verbs the F-UX6
+              // interview now recognises. 'run script' / 'execute
+              // command' / 'shell hook' route to shell_command (side-effect
+              // subprocess) at 11 lifecycle slots; 'verify via shell' /
+              // 'check via exit code' route to shell_check (verifier
+              // verdict) at pre_final + before_tool_use. Both kinds
+              // surface the Operator-defined trust badge (amber-red +
+              // Terminal icon) with the "magi does NOT verify the
+              // script" tooltip.
+              '"run / execute / shell out <script>" (operator-defined, 11 lifecycle slots)',
+              '"verify via shell / check via exit code <script>" (operator-defined, verifier slots)',
             ]}
           />
 
@@ -258,6 +291,12 @@ const ARCHETYPE_TONE: Record<ExampleChip["archetype"], string> = {
   // so chip + downstream proposal badge render the same hue. Distinct from
   // both 'ask' (advisory amber-800) and 'block' (destructive red).
   mutate: "bg-yellow-400/15 text-yellow-900",
+  // PR-F-EXEC3 — mirrors the TrustBadge operator_defined amber-red ramp
+  // (amber-600 tint + amber-900 ink). Distinct from the mutator
+  // amber-yellow so an operator scanning the chip strip can tell at a
+  // glance which examples compose an operator-authored subprocess vs a
+  // built-in traffic mutator.
+  shell: "bg-amber-600/15 text-amber-900",
 };
 
 

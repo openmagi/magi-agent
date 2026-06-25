@@ -265,3 +265,123 @@ describe("serializeDraftToPrimer — closing + length cap", () => {
     expect(out.length).toBeLessThanOrEqual(PRIMER_MAX_CHARS);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// PR-F-EXEC3 — Operator-defined shell draft primer rendering.
+// ---------------------------------------------------------------------------
+
+
+describe("serializeDraftToPrimer — F-EXEC3 shell draft primer", () => {
+  it("captures the inline shell_command draft (source + script + timeout + env)", () => {
+    const out = serializeDraftToPrimer(
+      makeDraft({
+        lifecycle: "after_tool_use",
+        conditionKind: "shell_command",
+        archetype: "shell",
+        shSource: "inline",
+        shInline: "curl -fsS https://notify.example/slack",
+        shTimeoutSeconds: 60,
+        shEnvVars: "SLACK_TOKEN",
+        shShell: "bash",
+      }),
+      "specifics",
+    );
+    // Source kind surfaces as a key:value.
+    expect(out).toContain("shell source: inline");
+    // The script body rides through (clipped to 120 chars by pushIf).
+    expect(out).toContain(
+      "shell script: curl -fsS https://notify.example/slack",
+    );
+    // Non-default timeout surfaces.
+    expect(out).toContain("shell timeout: 60s");
+    // Env-var allowlist surfaces.
+    expect(out).toContain("shell env-var allowlist: SLACK_TOKEN");
+    // The conditionKind opening clause names the shell shape.
+    expect(out).toContain('"shell_command" condition');
+  });
+
+  it("captures the file-sourced shell_check verifier draft", () => {
+    const out = serializeDraftToPrimer(
+      makeDraft({
+        lifecycle: "pre_final",
+        conditionKind: "shell_check",
+        archetype: "shell",
+        shSource: "file",
+        shPath: "/usr/local/bin/run-tests.sh",
+        shTimeoutSeconds: 300,
+        shShell: "sh",
+      }),
+      "specifics",
+    );
+    expect(out).toContain("shell source: file");
+    expect(out).toContain("shell script path: /usr/local/bin/run-tests.sh");
+    expect(out).toContain("shell timeout: 300s");
+    expect(out).toContain("shell interpreter: sh");
+    expect(out).toContain('"shell_check" condition');
+  });
+
+  it("omits the default timeout (30s) + default interpreter (bash) for honest-degrade", () => {
+    // The wizard's EMPTY draft seeds shTimeoutSeconds=30 + shShell="bash";
+    // those defaults should NOT surface in the primer because they carry
+    // no operator intent — only non-default values are honest signals to
+    // forward to the NL compose surface.
+    const out = serializeDraftToPrimer(
+      makeDraft({
+        lifecycle: "before_tool_use",
+        conditionKind: "shell_command",
+        archetype: "shell",
+        shSource: "inline",
+        shInline: "echo hi",
+        shTimeoutSeconds: 30,
+        shShell: "bash",
+      }),
+      "specifics",
+    );
+    expect(out).not.toContain("shell timeout: 30s");
+    expect(out).not.toContain("shell interpreter: bash");
+    // The script body still rides through (load-bearing).
+    expect(out).toContain("shell script: echo hi");
+  });
+
+  it("clips a very long inline script body to a single-line excerpt", () => {
+    const longScript = "echo " + "x".repeat(300);
+    const out = serializeDraftToPrimer(
+      makeDraft({
+        lifecycle: "pre_final",
+        conditionKind: "shell_check",
+        archetype: "shell",
+        shSource: "inline",
+        shInline: longScript,
+      }),
+      "specifics",
+    );
+    expect(out).toContain("...");
+    // Honest-degrade: the primer must not echo the full 300-char paste.
+    expect(out.indexOf("x".repeat(200))).toBe(-1);
+  });
+
+  it("emits the shell-command stuck hint on the specifics step", () => {
+    const out = serializeDraftToPrimer(
+      makeDraft({
+        lifecycle: "after_tool_use",
+        conditionKind: "shell_command",
+        archetype: "shell",
+      }),
+      "specifics",
+    );
+    expect(out).toContain("shell command picker");
+  });
+
+  it("emits the shell-verifier stuck hint on the specifics step", () => {
+    const out = serializeDraftToPrimer(
+      makeDraft({
+        lifecycle: "pre_final",
+        conditionKind: "shell_check",
+        archetype: "shell",
+      }),
+      "specifics",
+    );
+    expect(out).toContain("shell verifier picker");
+  });
+});

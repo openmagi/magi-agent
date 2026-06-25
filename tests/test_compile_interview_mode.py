@@ -618,3 +618,272 @@ async def test_propose_rejects_invalid_trust_class() -> None:
     result = await propose_primitive_or_hybrid(intent, model_factory=factory)
     assert result["ok"] is False
     assert "unparseable" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# PR-F-EXEC3 — Operator-defined vocabulary, intent recognition, and proposal
+# kinds for shell_command + shell_check.
+# ---------------------------------------------------------------------------
+
+
+def test_proposal_trust_classes_includes_operator_defined() -> None:
+    """The trust-class vocab MUST include ``operator_defined`` so the parser
+    accepts shell_command / shell_check proposals — without this widening the
+    architect could only express deterministic / advisory / mutator and would
+    have to downgrade operator-authored subprocess hooks to a lie."""
+
+    assert "operator_defined" in PROPOSAL_TRUST_CLASSES
+    # Existing buckets remain — additive only.
+    assert "deterministic" in PROPOSAL_TRUST_CLASSES
+    assert "advisory" in PROPOSAL_TRUST_CLASSES
+    assert "mutator" in PROPOSAL_TRUST_CLASSES
+
+
+def test_proposal_kinds_widens_with_two_shell_kinds() -> None:
+    """The proposal-kind set widens with the two operator-defined shell kinds
+    (shell_command + shell_check) so the parser accepts shell-shaped
+    primitives end-to-end."""
+
+    assert "shell_command" in PROPOSAL_KINDS
+    assert "shell_check" in PROPOSAL_KINDS
+    # The mutator + legacy ROUTED_KINDS remain members — additive only.
+    assert "prompt_injection" in PROPOSAL_KINDS
+    assert "output_rewrite" in PROPOSAL_KINDS
+    for kind in (
+        "deterministic_ref",
+        "tool_perm",
+        "llm_criterion",
+        "shacl_constraint",
+        "seam_spec",
+        "custom_check",
+        "field_constraint",
+        "capability_scope",
+    ):
+        assert kind in PROPOSAL_KINDS
+
+
+def test_discover_intent_prompt_carries_shell_recognition_vocab() -> None:
+    """The Stage A system prompt MUST teach the model the operator-defined
+    verb families ('run script' / 'execute command' / 'shell out' /
+    'verify via shell' / 'check via exit code') and the honest-degrade
+    warning that mutator / shell signals must not be downgraded to
+    llm_criterion / audit. Asserts the prompt text directly so a future
+    refactor cannot silently drop the vocab."""
+
+    from magi_agent.customize.rule_compiler import (
+        _DISCOVER_INTENT_SYSTEM_INSTRUCTION_TMPL,
+    )
+
+    prompt = _DISCOVER_INTENT_SYSTEM_INSTRUCTION_TMPL
+    # Shell-command verb family (side-effect script).
+    assert "run script" in prompt
+    assert "execute command" in prompt
+    assert "shell out" in prompt
+    assert "shell hook" in prompt
+    # Shell-check verb family (verifier verdict).
+    assert "verify via shell" in prompt
+    assert "check via exit code" in prompt or "exit code" in prompt
+    # The whatToDoOnFail enum additions.
+    assert "shell_run" in prompt
+    assert "shell_verify" in prompt
+    # Verifier slots called out for shell_check intent.
+    assert "pre_final" in prompt
+    assert "before_tool_use" in prompt
+    # The honest-degrade warning — the architect must NOT silently
+    # downgrade an operator-defined intent to llm_criterion / audit.
+    # Both the mutator stanza ("do not downgrade") and the shell stanza
+    # ("do not downgrade") fire the same phrase, so the assertion holds
+    # for either source.
+    assert (
+        "do not downgrade" in prompt.lower() or "not downgrade" in prompt.lower()
+    )
+    # The trustClass framing the architect must use for shell primitives.
+    assert "operator_defined" in prompt
+
+
+def test_propose_primitive_prompt_carries_the_two_shell_kind_payload_shapes() -> None:
+    """The Stage B proposal prompt MUST teach the model both shell payload
+    shapes (shell_command file source + shell_check inline verifier) AND
+    ship both canonical examples from the spec so the proposed primitives
+    are pre-flight valid against the backend ShellPayload validator."""
+
+    from magi_agent.customize.rule_compiler import (
+        _PROPOSE_PRIMITIVE_SYSTEM_INSTRUCTION_TMPL,
+    )
+
+    prompt = _PROPOSE_PRIMITIVE_SYSTEM_INSTRUCTION_TMPL
+    # Shell kind names appear in the kind enum.
+    assert "shell_command" in prompt
+    assert "shell_check" in prompt
+    # Trust class enum carries the operator-defined bucket.
+    assert "operator_defined" in prompt
+    # ShellPayload shape — required fields the backend validator enforces.
+    assert "timeout_seconds" in prompt
+    assert "env_vars" in prompt
+    assert "shell:" in prompt or "'bash'|'sh'" in prompt
+    # shell_command canonical example (Notify Slack on tool error).
+    assert "notify-slack" in prompt
+    assert "after_tool_use" in prompt
+    # shell_check canonical example (pytest gate at pre_final).
+    assert "pytest" in prompt
+    assert "passed" in prompt
+    # The "magi does NOT verify the script" honesty hint.
+    assert (
+        "magi does NOT verify the script" in prompt
+        or "Operator-defined badge" in prompt
+    )
+
+
+_SHELL_COMMAND_PROPOSAL_RESPONSE = json.dumps(
+    {
+        "mode": "single",
+        "primitives": [
+            {
+                "kind": "shell_command",
+                "payload": {
+                    "source": "file",
+                    "path": "/usr/local/bin/notify-slack.sh",
+                    "timeout_seconds": 30,
+                    "env_vars": ["SLACK_TOKEN"],
+                    "shell": "bash",
+                },
+                "trustClass": "operator_defined",
+                "rationale": "Notify the on-call Slack channel when any tool returns a non-zero exit code.",
+                "description": "Runs notify-slack.sh on tool error (audit-only side effect).",
+            }
+        ],
+        "summary": "Notify Slack on tool error.",
+        "explanation": "Operator-defined side effect — no built-in primitive can dispatch to Slack without operator credentials, so a shell hook is the honest fit.",
+    }
+)
+
+
+_SHELL_CHECK_PROPOSAL_RESPONSE = json.dumps(
+    {
+        "mode": "single",
+        "primitives": [
+            {
+                "kind": "shell_check",
+                "payload": {
+                    "source": "inline",
+                    "inline": 'pytest -q && echo "{\\"passed\\": true}" || echo "{\\"passed\\": false}"',
+                    "timeout_seconds": 300,
+                    "env_vars": [],
+                    "shell": "bash",
+                },
+                "trustClass": "operator_defined",
+                "rationale": "Gate the final answer on a real pytest run so the agent cannot finalize while tests fail.",
+                "description": "Runs pytest at pre_final; exit 0 ⇒ allow final answer.",
+            }
+        ],
+        "summary": "Run pytest before committing.",
+        "explanation": "Operator-defined verifier — the operator wants the verdict to come from their own test runner, not from an LLM critic's judgment.",
+    }
+)
+
+
+@pytest.mark.asyncio
+async def test_propose_emits_shell_command_operator_defined_for_shell_run_intent() -> None:
+    """Resolved intent 'run notify-slack.sh on tool error' → Stage B emits a
+    shell_command primitive with trustClass=operator_defined and the
+    spec-sentence payload shape (file source + script path + timeout +
+    env-var allowlist + shell)."""
+
+    factory = _factory_seq(_SHELL_COMMAND_PROPOSAL_RESPONSE)
+    intent = {
+        "whatToCheck": "run notify-slack.sh on tool error",
+        "whereInLifecycle": "after_tool_use",
+        "whatToDoOnFail": "shell_run",
+        "openQuestions": [],
+        "confidence": 0.95,
+    }
+    result = await propose_primitive_or_hybrid(intent, model_factory=factory)
+    assert result["ok"] is True, result
+    proposal = result["proposal"]
+    assert proposal["mode"] == "single"
+    assert len(proposal["primitives"]) == 1
+    prim = proposal["primitives"][0]
+    assert prim["kind"] == "shell_command"
+    assert prim["trustClass"] == "operator_defined"
+    payload = prim["payload"]
+    assert payload["source"] == "file"
+    assert payload["path"] == "/usr/local/bin/notify-slack.sh"
+    assert payload["timeout_seconds"] == 30
+    assert payload["env_vars"] == ["SLACK_TOKEN"]
+    assert payload["shell"] == "bash"
+    # The one-line description rides through the parser.
+    assert isinstance(prim["description"], str)
+    assert "notify-slack" in prim["description"]
+
+
+@pytest.mark.asyncio
+async def test_propose_emits_shell_check_operator_defined_for_shell_verify_intent() -> None:
+    """Resolved intent 'exit 0 if tests pass' → Stage B emits a shell_check
+    primitive with trustClass=operator_defined and the spec-sentence
+    payload shape (inline body + bounded timeout + bash interpreter).
+    Block honored at pre_final per the v1 _LEGAL matrix."""
+
+    factory = _factory_seq(_SHELL_CHECK_PROPOSAL_RESPONSE)
+    intent = {
+        "whatToCheck": "exit 0 if pytest passes",
+        "whereInLifecycle": "pre_final",
+        "whatToDoOnFail": "shell_verify",
+        "openQuestions": [],
+        "confidence": 0.95,
+    }
+    result = await propose_primitive_or_hybrid(intent, model_factory=factory)
+    assert result["ok"] is True, result
+    proposal = result["proposal"]
+    assert proposal["mode"] == "single"
+    assert len(proposal["primitives"]) == 1
+    prim = proposal["primitives"][0]
+    assert prim["kind"] == "shell_check"
+    assert prim["trustClass"] == "operator_defined"
+    payload = prim["payload"]
+    assert payload["source"] == "inline"
+    assert "pytest" in payload["inline"]
+    assert "passed" in payload["inline"]
+    assert payload["timeout_seconds"] == 300
+    assert payload["shell"] == "bash"
+    assert "pytest" in prim["description"]
+
+
+@pytest.mark.asyncio
+async def test_propose_rejects_shell_primitive_with_invalid_trust_class() -> None:
+    """Honest-degrade: a shell primitive labelled with the wrong trustClass
+    (e.g. 'deterministic' to hide the external-script story) MUST be
+    rejected by the parser. The architect cannot launder an operator-
+    defined subprocess behind a built-in trust label."""
+
+    bad_response = json.dumps(
+        {
+            "mode": "single",
+            "primitives": [
+                {
+                    "kind": "shell_command",
+                    "payload": {
+                        "source": "inline",
+                        "inline": "echo hi",
+                        "timeout_seconds": 30,
+                        "env_vars": [],
+                        "shell": "bash",
+                    },
+                    "trustClass": "shell",  # invalid — not in PROPOSAL_TRUST_CLASSES
+                    "rationale": "bad",
+                }
+            ],
+            "summary": "",
+            "explanation": "",
+        }
+    )
+    factory = _factory_seq(bad_response)
+    intent = {
+        "whatToCheck": "run echo",
+        "whereInLifecycle": "after_tool_use",
+        "whatToDoOnFail": "shell_run",
+        "openQuestions": [],
+        "confidence": 0.9,
+    }
+    result = await propose_primitive_or_hybrid(intent, model_factory=factory)
+    assert result["ok"] is False
+    assert "unparseable" in result["error"]
