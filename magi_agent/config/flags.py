@@ -2903,6 +2903,53 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="bool",
     ),
+    # I-1: hosted gate-config ENABLED knobs consumed by ``transport/chat_shared``
+    # builders. All strict default-OFF — missing/empty stays at the existing
+    # ``enabled=False`` default ``_is_true(env.get(...))`` produced.
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_ENABLED",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted gate5b user-visible canary chat-route activation. "
+            "Default-OFF; hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_ENABLED",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted gate1a read-only toolhost activation (route- and "
+            "kill-switch gated). Default-OFF; hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_ENABLED",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted gate2 sandbox-canary workspace chat-route activation. "
+            "Default-OFF; hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_SELECTED_PROVIDER_ENABLED",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted gate2 sandbox-canary selected-provider routing seam. "
+            "Default-OFF; hosted-only."
+        ),
+        kind="bool",
+    ),
 )
 
 

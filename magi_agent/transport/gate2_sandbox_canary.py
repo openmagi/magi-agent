@@ -348,8 +348,13 @@ def build_gate2_sandbox_workspace_canary_config_from_env(
     runtime_config: object,
 ) -> Gate2SandboxWorkspaceCanaryConfig:
     del runtime_config
+    # I-1: route the two ENABLED master switches through the typed flag
+    # registry. Byte-identical to ``_is_true`` because both ``FlagSpec``s
+    # are strict default-OFF ``bool``.
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
     return Gate2SandboxWorkspaceCanaryConfig(
-        enabled=_is_true(env.get("CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_ENABLED")),
+        enabled=flag_bool("CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_ENABLED", env=env),
         killSwitchEnabled=_env_bool_default_true(
             env.get("CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_KILL_SWITCH")
         ),
@@ -366,8 +371,8 @@ def build_gate2_sandbox_workspace_canary_config_from_env(
             env.get("CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_ENV_ALLOWLIST", "")
         ),
         sandboxRoot=env.get("CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_ROOT"),
-        selectedMutationProviderEnabled=_is_true(
-            env.get("CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_SELECTED_PROVIDER_ENABLED")
+        selectedMutationProviderEnabled=flag_bool(
+            "CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_SELECTED_PROVIDER_ENABLED", env=env
         ),
         durableEvidenceStore=_build_gate2_durable_evidence_store(env),
     )
@@ -377,7 +382,10 @@ def _build_gate2_durable_evidence_store(
     env: Mapping[str, str],
 ) -> Gate2DurableEvidenceStore | None:
     """Create a durable evidence store when Gate 2 selected provider is enabled."""
-    if not _is_true(env.get("CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_SELECTED_PROVIDER_ENABLED")):
+    # I-1: route through the typed flag registry.
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    if not flag_bool("CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_SELECTED_PROVIDER_ENABLED", env=env):
         return None
     sandbox_root = env.get("CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_ROOT")
     if not sandbox_root:
