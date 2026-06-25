@@ -6,6 +6,8 @@ while adding zero duplicated logic.
 
 from __future__ import annotations
 
+from typing import Any
+
 from magi_agent.harness.resolved import ResolvedHarnessPresetState
 from magi_agent.hooks.bus import HookBus, HookBusRunResult
 from magi_agent.hooks.context import HookContext
@@ -109,6 +111,20 @@ async def execute_tool_with_hooks(
     # a blocked ToolResult immediately (no dispatch, no after-hook). Rules
     # with ``action == "audit"`` always run to completion and never block.
     blocked = await _maybe_apply_shell_command_before_tool(
+        tool_name=tool_name, arguments=arguments
+    )
+    if blocked is not None:
+        return blocked, before_result, None
+
+    # F-EXEC2 shell_check rule condition at ``before_tool_use``. Triple-gated
+    # + fail-open. Mirrors the F-EXEC1 short-circuit semantics: a rule with
+    # ``action == "block"`` whose script reports ``passed=false`` (or exits
+    # non-zero in exit-code fallback mode) returns a blocked ToolResult
+    # immediately so dispatch is skipped. Shares the per-(session, turn)
+    # MAGI_CUSTOMIZE_SHELL_AUDIT_BUDGET counter with F-EXEC1 via
+    # :func:`shell_budget_for` so cross-kind spawning is bounded by the
+    # SAME ceiling within a turn.
+    blocked = await _maybe_apply_shell_check_before_tool(
         tool_name=tool_name, arguments=arguments
     )
     if blocked is not None:
@@ -371,6 +387,70 @@ async def _maybe_apply_shell_command_after_tool(
         return
 
 
+async def _maybe_apply_shell_check_before_tool(
+    *, tool_name: str, arguments: dict[str, object]
+) -> ToolResult | None:
+    """F-EXEC2 facades helper: before-dispatch ``shell_check`` consumer.
+
+    Triple-gated by :func:`_shell_check_enabled`. Delegates to the
+    :func:`magi_agent.customize.lifecycle_audit.run_shell_check_at_before_tool_use`
+    fan-out helper so the budget plumbing, rule loading, and verdict
+    reduction stay in one place. Threads the shared per-(session, turn)
+    shell budget through :func:`magi_agent.adk_bridge
+    .lifecycle_shell_command_control.shell_budget_for` (resolves identity
+    from the active turn ContextVar published by ``run_governed_turn``).
+    Returns a blocked :class:`ToolResult` on a ``block`` verdict; ``None``
+    otherwise. Fail-open: any unexpected exception returns ``None``.
+    """
+    try:
+        if not _shell_check_enabled():
+            return None
+        from magi_agent.adk_bridge.lifecycle_shell_command_control import (  # noqa: PLC0415
+            shell_budget_for,
+        )
+        from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+            run_shell_check_at_before_tool_use,
+        )
+
+        remaining, decrement_fn = shell_budget_for()
+        # _safe_json returns either the original dict (when serialisable) or a
+        # str fallback; the fan-out helper expects ``dict | None`` so we coerce
+        # the fallback case to ``None`` and let the script see only the
+        # lifecycle / tool_name keys.
+        safe_args: dict[str, Any] | None = None
+        if isinstance(arguments, dict):
+            snapshot = _safe_json(arguments)
+            if isinstance(snapshot, dict):
+                safe_args = snapshot
+        audits, verdict = await run_shell_check_at_before_tool_use(
+            tool_name=tool_name,
+            tool_args=safe_args,
+            remaining_budget=remaining,
+            decrement_fn=decrement_fn,
+        )
+        if verdict == "block":
+            blocking = next(
+                (
+                    audit
+                    for audit in audits
+                    if isinstance(audit, dict) and audit.get("passed") is False
+                ),
+                {},
+            )
+            return ToolResult(
+                status="blocked",
+                metadata={
+                    "blocked_by": "shell_check_rule",
+                    "rule_id": blocking.get("rule_id"),
+                    "exit_code": blocking.get("exit_code"),
+                    "reason": blocking.get("reason"),
+                },
+            )
+        return None
+    except Exception:  # noqa: BLE001 — fail-open
+        return None
+
+
 def _safe_json(obj: object) -> object:
     """Best-effort JSON-friendly snapshot of ``obj`` (cap dict / list depth)."""
     try:
@@ -409,6 +489,37 @@ def _shell_command_enabled() -> bool:
     try:
         return (
             flag_bool("MAGI_CUSTOMIZE_SHELL_COMMAND_ENABLED")
+            and flag_profile_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED")
+            and flag_profile_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED")
+        )
+    except Exception:
+        return False
+
+
+def _shell_check_enabled() -> bool:
+    """Triple-gate check used by the F-EXEC2 facades wire.
+
+    Returns ``True`` only when:
+
+    * ``MAGI_CUSTOMIZE_SHELL_CHECK_ENABLED`` is strict-truthy ON,
+    * ``MAGI_CUSTOMIZE_VERIFICATION_ENABLED`` resolves ON via the profile-aware
+      reader (full / lab profile; OFF under safe/eval),
+    * ``MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED`` resolves ON via the profile-aware
+      reader.
+
+    Fail-open: any import error returns ``False`` so the call site stays a
+    no-op when the flag layer cannot be read.
+    """
+    try:
+        from magi_agent.config.flags import (  # noqa: PLC0415
+            flag_bool,
+            flag_profile_bool,
+        )
+    except Exception:
+        return False
+    try:
+        return (
+            flag_bool("MAGI_CUSTOMIZE_SHELL_CHECK_ENABLED")
             and flag_profile_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED")
             and flag_profile_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED")
         )

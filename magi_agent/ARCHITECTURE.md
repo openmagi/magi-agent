@@ -338,7 +338,7 @@ graph LR
 | __init__.py | — | — | (root)/main.py, cli/tui/app.py |
 | __main__.py | — | main | — |
 | app.py | — | active_sessions, app_api, board_api, bootstrap, chat, config, control_requests, credentials, customize, debug_trace, health, integrations, learning_dashboard, observability, openmagi_runtime, packs_dashboard, plugins, shadow_invocations, streaming_chat_route, tools, web_dashboard | (root)/main.py |
-| facades.py | High-level entry-point facades that compose existing modules. | bus, context, dispatcher, flags, manifest, output_rewrite, prompt_injection, replace_payloads, resolved, result, shell_command, store, verification_policy | — |
+| facades.py | High-level entry-point facades that compose existing modules. | bus, context, dispatcher, flags, lifecycle_audit, lifecycle_shell_command_control, manifest, output_rewrite, prompt_injection, replace_payloads, resolved, result, shell_command, store, verification_policy | — |
 | main.py | — | _truthy, app, chat, control_plane_overrides, env, flags, hosted_defaults, install_profile_bootstrap, local_defaults, local_proxy, local_vault, memory_bootstrap, models, observed_egress, openmagi_runtime, otel_noise, providers, store, vault_local, vault_server | (root)/__main__.py, cli/tests/test_app.py |
 
 ### adk_bridge/
@@ -358,7 +358,7 @@ graph LR
 | gemini_content_ordering.py | Gemini content-ordering repair for the ADK before_model hook. | — | adk_bridge/control_plane.py |
 | lifecycle_llm_call_control.py | LifecycleLlmCallAuditControl — PR-F-LIFE2 per-LLM-call audit fan-out. | control_plane, lifecycle_audit, wiring | adk_bridge/control_plane.py, adk_bridge/lifecycle_session_control.py, artifacts/file_delivery.py, missions/work_queue/driver.py |
 | lifecycle_session_control.py | LifecycleSessionControl — PR-F-LIFE4b first-fire-per-session adapter. | control_plane, lifecycle_audit, lifecycle_llm_call_control, wiring | adk_bridge/control_plane.py |
-| lifecycle_shell_command_control.py | LifecycleShellCommandControl — PR-F-EXEC1 per-turn shell budget plugin. | control_plane, lifecycle_audit | adk_bridge/context_compaction.py, adk_bridge/control_plane.py, artifacts/file_delivery.py, missions/work_queue/driver.py, runtime/governed_turn.py |
+| lifecycle_shell_command_control.py | LifecycleShellCommandControl — PR-F-EXEC1 per-turn shell budget plugin. | control_plane, lifecycle_audit | (root)/facades.py, adk_bridge/context_compaction.py, adk_bridge/control_plane.py, artifacts/file_delivery.py, missions/work_queue/driver.py, runtime/governed_turn.py |
 | local_runner.py | — | control_plane, live_gate, local_toolhost, session_service, task_completion | shadow/fixture_runner.py |
 | local_toolhost.py | — | — | adk_bridge/local_runner.py |
 | memory_service.py | — | — | — |
@@ -795,7 +795,7 @@ graph LR
 | criterion_engine.py | Generic LLM criterion-judgment engine (P3). | egress_gate | cli/engine.py, customize/after_tool_gate.py, customize/lifecycle_audit.py |
 | custom_rules.py | Custom verification-rule schema + validation (spec §9.1). | capability_scope, output_rewrite, prompt_injection, shacl_verifier, shell_runner, what_menu | customize/rule_compiler.py, transport/customize.py |
 | field_constraint_compiler.py | Deterministic SHACL-shape synthesizer for the ``field_constraint`` IR. | shacl_compiler, shacl_ontology, types | customize/rule_compiler.py, transport/customize.py |
-| lifecycle_audit.py | Customize Tier 2 lifecycle audit gates (PR-F-UX1). | criterion_engine, flags, shell_command, store, verification_policy | adk_bridge/context_compaction.py, adk_bridge/lifecycle_llm_call_control.py, adk_bridge/lifecycle_session_control.py, adk_bridge/lifecycle_shell_command_control.py, artifacts/file_delivery.py, missions/work_queue/driver.py, runtime/governed_turn.py |
+| lifecycle_audit.py | Customize Tier 2 lifecycle audit gates (PR-F-UX1). | criterion_engine, flags, shell_check, shell_command, store, verification_policy | (root)/facades.py, adk_bridge/context_compaction.py, adk_bridge/lifecycle_llm_call_control.py, adk_bridge/lifecycle_session_control.py, adk_bridge/lifecycle_shell_command_control.py, artifacts/file_delivery.py, missions/work_queue/driver.py, runtime/governed_turn.py |
 | live_catalog.py | Live evidence-catalog view (PR-F2). | ledger_store, shacl_compiler, store, what_menu | transport/customize.py |
 | output_rewrite.py | F-MUT2 — ``output_rewrite`` custom_rule kind. | result | (root)/facades.py, customize/custom_rules.py |
 | preset_map.py | Canonical preset id → runtime-seam map for the Customize verification tab. | scope, seam_apply, seam_spec | cli/real_runner.py, customize/catalog.py, customize/seam_apply.py, customize/seam_compiler.py, customize/seam_spec.py |
@@ -808,8 +808,9 @@ graph LR
 | seam_compiler.py | NL → SeamSpec compiler — registration-time only, fail-open everywhere. | preset_map, seam_spec, shacl_compiler | transport/customize.py |
 | seam_spec.py | SeamSpec — declarative PresetSeam mutation IR for the NL rule builder. | preset_map | customize/preset_map.py, customize/rule_compiler.py, customize/seam_apply.py, customize/seam_compiler.py, transport/customize.py |
 | shacl_compiler.py | SHACL compiler module -- Tasks 3.1 + 3.2: pure helpers + NL-to-SHACL compiler. | builtin, providers, readonly_classifier, shacl_verifier, types | customize/field_constraint_compiler.py, customize/live_catalog.py, customize/rule_compiler.py, customize/runtime_fields.py, customize/seam_compiler.py, transport/customize.py |
+| shell_check.py | F-EXEC2 — ``shell_check`` custom_rule kind apply helpers. | shell_runner | customize/lifecycle_audit.py |
 | shell_command.py | F-EXEC1 — ``shell_command`` custom_rule kind apply helpers. | shell_runner | (root)/facades.py, customize/lifecycle_audit.py |
-| shell_runner.py | F-EXEC-AUDIT — Subprocess runner foundation for operator-defined shell hooks. | — | customize/custom_rules.py, customize/shell_command.py |
+| shell_runner.py | F-EXEC-AUDIT — Subprocess runner foundation for operator-defined shell hooks. | — | customize/custom_rules.py, customize/shell_check.py, customize/shell_command.py |
 | store.py | — | flags | (root)/facades.py, (root)/main.py, cli/app.py, cli/engine.py, cli/real_runner.py, cli/tests/test_document_coverage_seam_wiring.py, customize/__init__.py, customize/after_tool_gate.py, customize/lifecycle_audit.py, customize/live_catalog.py, customize/runtime_gate.py, customize/tool_perm.py, runtime/child_runner_live.py, runtime/governed_turn.py, runtime/message_builder.py, runtime/openmagi_runtime.py, transport/customize.py |
 | tool_perm.py | Custom tool-permission rule matching (P2). | flags, store, verification_policy | customize/runtime_fields.py, tools/permission.py |
 | verification_policy.py | — | scope | (root)/facades.py, cli/engine.py, cli/real_runner.py, customize/after_tool_gate.py, customize/apply.py, customize/budgets_apply.py, customize/lifecycle_audit.py, customize/runtime_gate.py, customize/tool_perm.py, runtime/child_runner_live.py, runtime/governed_turn.py, runtime/message_builder.py |

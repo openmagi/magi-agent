@@ -143,6 +143,13 @@ async def run_governed_turn(
     # shell collector. Mirrors _AfterTurnEndCollector — fires shell_command
     # rules at the ``after_turn_end`` slot on top-level turn boundaries.
     shell_after_turn_end_collector = _ShellAfterTurnEndCollector.maybe_create(ctx)
+    shell_pre_final_collector = _ShellPreFinalCollector.maybe_create(ctx)
+    # PR-F-EXEC2: pre_final shell_check (verifier) collector, sibling of
+    # the F-EXEC1 shell_command collector above. Both run on the FIRST
+    # EngineResult so an operator authoring a mix of action + condition
+    # rules at the same slot gets both verifiers; either ``block`` verdict
+    # short-circuits to a synthetic policy-blocked terminal.
+    shell_check_pre_final_collector = _ShellCheckPreFinalCollector.maybe_create(ctx)
 
     # PR-F-EXEC1 shell_command lifecycle: CHILD-only ``on_subagent_stop``
     # shell collector. Mirrors _SubagentStopCollector — fires shell_command
@@ -180,21 +187,31 @@ async def run_governed_turn(
                 turn_end_collector.observe(item)
             if task_complete_collector is not None:
                 task_complete_collector.observe(item)
-            _kind, _has_text_delta, _evidence_refs_count = _describe_stream_item(item)
-            if _stream_index < 5:
-                _maybe_log_trace_engine_stream_yield(
-                    _trace_env,
-                    index=_stream_index,
-                    kind=_kind,
-                    has_text_delta=_has_text_delta,
-                    evidence_refs_in_payload=_evidence_refs_count,
+            if shell_subagent_stop_collector is not None:
+                shell_subagent_stop_collector.observe(item)
+            if shell_after_turn_end_collector is not None:
+                shell_after_turn_end_collector.observe(item)
+            if shell_pre_final_collector is not None:
+                shell_pre_final_collector.observe(item)
+            if shell_check_pre_final_collector is not None:
+                shell_check_pre_final_collector.observe(item)
+            # PR-F-EXEC1/F-EXEC2: pre_final shell gate. Fires on the FIRST
+            # sight of an EngineResult — the synthesis pass is about to
+            # commit. If the operator's pre_final shell_command rule with
+            # action=block exits non-zero, OR the shell_check rule reports
+            # passed=false, replace the item with a synthetic
+            # ``customize_policy_blocked`` terminal so downstream consumers
+            # (CLI REPL, serve transport, telemetry) see the block
+            # honestly. F-EXEC1 is checked FIRST so its semantics win when
+            # both fire on the same EngineResult.
+            replaced = None
+            if shell_pre_final_collector is not None:
+                replaced = await shell_pre_final_collector.maybe_replace(item, ctx)
+            if replaced is None and shell_check_pre_final_collector is not None:
+                replaced = await shell_check_pre_final_collector.maybe_replace(
+                    item, ctx
                 )
-            _last_index = _stream_index
-            _last_kind = _kind
-            _last_has_text_delta = _has_text_delta
-            _last_evidence_refs = _evidence_refs_count
-            _stream_index += 1
-            yield item
+            yield replaced if replaced is not None else item
     finally:
         # Emit the LAST yield separately when the stream produced more than
         # the first-five window already covered. Avoids a double-log on
@@ -1112,6 +1129,111 @@ class _ShellPreFinalCollector:
                     ctx=ctx,
                     slot="pre_final",
                     reason="shell_command exit_code>0 with action=block",
+                )
+        except Exception:
+            return None
+        return None
+
+
+class _ShellCheckPreFinalCollector:
+    """F-EXEC2 sibling of :class:`_ShellPreFinalCollector` for shell_check.
+
+    Accumulates the in-progress final text and fires the ``pre_final``
+    shell_check fan-out on the FIRST sight of an ``EngineResult`` so the
+    pre-synthesis gate decision arrives BEFORE the final answer commits.
+
+    Honors ``action == "block"``: when any pre_final rule with
+    ``action=block`` whose script reports ``passed=false`` (or exits
+    non-zero in exit-code fallback mode) wins the verdict reduction,
+    :meth:`maybe_replace` returns a synthetic ``customize_policy_blocked``
+    terminal that the caller yields in place of the original EngineResult.
+    Otherwise (proceed verdict) returns ``None`` so the caller yields the
+    original item verbatim.
+
+    Wired in parallel with the F-EXEC1 :class:`_ShellPreFinalCollector` so
+    an operator authoring BOTH a shell_command and a shell_check at the
+    same slot gets both verifiers; either can short-circuit. Shares the
+    per-(session, turn) MAGI_CUSTOMIZE_SHELL_AUDIT_BUDGET counter via
+    :func:`_resolve_shell_budget_for_ctx` so the cross-kind cap is
+    honored even when only one kind is enabled.
+
+    Fully fail-open: any exception in observe / maybe_replace falls back
+    to "no replacement" so a turn never breaks because of audit
+    bookkeeping.
+    """
+
+    __slots__ = ("_ctx", "_result_text", "_fired")
+
+    def __init__(self, ctx: TurnContext) -> None:
+        self._ctx = ctx
+        self._result_text = ""
+        self._fired = False
+
+    @classmethod
+    def maybe_create(
+        cls, ctx: TurnContext
+    ) -> "_ShellCheckPreFinalCollector | None":
+        try:
+            from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+                shell_check_enabled,
+            )
+
+            if not shell_check_enabled():
+                return None
+            return cls(ctx)
+        except Exception:
+            return None
+
+    def observe(self, item: object) -> None:
+        try:
+            payload = getattr(item, "payload", None)
+            if not isinstance(payload, dict):
+                return
+            kind = payload.get("type")
+            if kind == "response_clear":
+                self._result_text = ""
+            elif kind == "text_delta":
+                delta = payload.get("delta")
+                if isinstance(delta, str):
+                    self._result_text += delta
+        except Exception:
+            return
+
+    async def maybe_replace(
+        self, item: object, ctx: TurnContext
+    ) -> object | None:
+        """If *item* is an EngineResult and pre_final shell_check verdict is
+        ``block``, return a synthetic policy-blocked terminal.
+
+        Otherwise return ``None`` (caller yields the original item).
+        """
+        if self._fired:
+            return None
+        try:
+            from magi_agent.cli.contracts import EngineResult  # noqa: PLC0415
+        except Exception:
+            return None
+        if not isinstance(item, EngineResult):
+            return None
+        # One-shot: even if the call below errors / proceeds, we don't
+        # re-fire on subsequent EngineResults this turn.
+        self._fired = True
+        try:
+            from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+                run_shell_check_at_pre_final,
+            )
+
+            remaining, decrement_fn = _resolve_shell_budget_for_ctx(ctx)
+            _, verdict = await run_shell_check_at_pre_final(
+                draft_text=self._result_text,
+                remaining_budget=remaining,
+                decrement_fn=decrement_fn,
+            )
+            if verdict == "block":
+                return _build_policy_blocked_terminal(
+                    ctx=ctx,
+                    slot="pre_final",
+                    reason="shell_check passed=false with action=block",
                 )
         except Exception:
             return None

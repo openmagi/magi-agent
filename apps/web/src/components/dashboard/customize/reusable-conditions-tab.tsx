@@ -61,6 +61,11 @@ const KIND_LABEL: Record<NamedConditionEntry["kind"], string> = {
   // the Conditions tab honestly signals "external script, magi does not
   // verify" before the row opens (F-EXEC3 ships the dedicated badge).
   shell_command: "Shell command (operator-defined)",
+  // PR-F-EXEC2 — operator-authored shell VERIFIER. Sibling label so the
+  // Conditions tab distinguishes the verdict-shaped kind from the
+  // action-shaped sibling; both carry the same Operator-defined warning
+  // (the verifier script is also unverified by magi).
+  shell_check: "Shell check (operator-defined)",
   seam_action: "Seam action",
   none: "Built-in",
 };

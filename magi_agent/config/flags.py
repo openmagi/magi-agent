@@ -1106,9 +1106,43 @@ FLAGS: tuple[FlagSpec, ...] = (
             "budget_exhausted skip record per call (no subprocess spawn) "
             "so a misbehaving rule cannot multiply shell cost without "
             "bound. Default 5. Read raw from the env on each turn (no "
-            "flag_int wrapper needed)."
+            "flag_int wrapper needed). PR-F-EXEC2 reuses the SAME counter "
+            "for ``shell_check`` condition-kind invocations so an operator "
+            "authoring a mix of action + condition shell rules still gets "
+            "one shared cost ceiling per turn."
         ),
         kind="int",
+    ),
+    _b(
+        "MAGI_CUSTOMIZE_SHELL_CHECK_ENABLED",
+        stage="stage2",
+        summary=(
+            "PR-F-EXEC2: activate the ``shell_check`` custom_rule condition "
+            "kind. When ON the runtime applies enabled shell_check rules at "
+            "two gate slots (``pre_final`` and ``before_tool_use``) as a "
+            "deterministic-shaped verdict source: the operator-authored "
+            "script reads a context envelope from stdin (JSON: lifecycle, "
+            "tool_name?, tool_args?, draft_excerpt?) and emits one of two "
+            "shapes on stdout — preferred ``{passed: bool, reason?: str}`` "
+            "JSON or fallback exit-code (0 = passed, non-zero = failed). "
+            "Subprocess execution shares :mod:`magi_agent.customize.shell_runner` "
+            "with F-EXEC1 (same whitelisted env, bounded timeout, "
+            "start_new_session + SIGKILL group-kill on timeout). The "
+            "per-(session, turn) budget counter "
+            "(MAGI_CUSTOMIZE_SHELL_AUDIT_BUDGET, default 5) is SHARED with "
+            "F-EXEC1 shell_command via "
+            ":func:`magi_agent.adk_bridge.lifecycle_shell_command_control"
+            ".shell_budget_for` so a turn that fires 3 shell_command spawns "
+            "+ 3 shell_check spawns hits the cap at the 6th invocation "
+            "regardless of kind. Fail-open everywhere: any runner "
+            "exception / unparseable stdout / missing context returns "
+            "``passed=True`` (audit-only honest-degrade — a condition that "
+            "cannot evaluate must never block a turn). Triple-gated with "
+            "MAGI_CUSTOMIZE_VERIFICATION_ENABLED + "
+            "MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED. With no shell_check "
+            "rules authored, runtime stays byte-identical (the new wire "
+            "is a no-op). Strict default-OFF."
+        ),
     ),
     _b(
         "MAGI_CUSTOMIZE_OUTPUT_REWRITE_ENABLED",

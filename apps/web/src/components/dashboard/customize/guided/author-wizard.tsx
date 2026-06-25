@@ -213,7 +213,19 @@ type ConditionKind =
   // the visual badge; for now the wizard surfaces a warning subtext on
   // the picker card and the trustClassForPolicy mapping returns
   // "operator_defined" with the existing palette as a placeholder).
-  | "shell_command";
+  | "shell_command"
+  // PR-F-EXEC2 — operator-authored shell-script VERIFIER. Same payload
+  // shape as ``shell_command`` (source + timeout + env_vars + shell)
+  // but the runtime treats the result as a verdict: stdout JSON
+  // ``{passed, reason?}`` is honored when parseable, with ``exit_code
+  // == 0`` ⇒ passed as a deterministic fallback. v1 wires two gate
+  // slots (pre_final + before_tool_use) where ``block`` is honored;
+  // every other slot accepts the kind through the validator but the
+  // runtime fan-out is audit-only. SpecificsStep reuses the same
+  // ``ShellCommandPicker`` layout (same field set). Trust class:
+  // Operator-defined (same amber-red warning as shell_command —
+  // F-EXEC3 ships the dedicated badge).
+  | "shell_check";
 
 
 // PR-F3: deterministic operators for field_constraint. The eight
@@ -1588,6 +1600,9 @@ function availableConditionKinds(
     // the backend, the split lives at the UX layer only.
     // PR-F-EXEC1 — shell_command joins at pre_final (block honored — exit
     // code 1 from the script short-circuits final answer commit).
+    // PR-F-EXEC2 — shell_check joins at pre_final (block honored — the
+    // verifier's ``{passed:false}`` verdict short-circuits the final
+    // answer commit). Sibling to shell_command but verdict-shaped.
     return [
       "evidence_ref",
       "verifier_passed",
@@ -1595,6 +1610,7 @@ function availableConditionKinds(
       "llm_criterion",
       "field_constraint",
       "shell_command",
+      "shell_check",
     ];
   }
   if (lifecycle === "before_tool_use") {
@@ -1611,7 +1627,10 @@ function availableConditionKinds(
       // chosen tool. condition.tool is auto-derived from draft.toolName.
       // PR-F-EXEC1 — shell_command joins as an operator-authored gate /
       // side-effect script before dispatch. block action honored.
-      return ["none", "prompt_injection", "shell_command"];
+      // PR-F-EXEC2 — shell_check joins as the verdict-shaped sibling:
+      // the verifier inspects {tool_name, tool_args} on stdin and a
+      // failed verdict (passed=false / non-zero exit) blocks dispatch.
+      return ["none", "prompt_injection", "shell_command", "shell_check"];
     }
     // target=any: tool_perm has no wildcard matcher, so "no condition"
     // is omitted (no honest backend mapping). F6 adds path / path_allowlist
@@ -1623,6 +1642,9 @@ function availableConditionKinds(
     // pinning a single tool.
     // PR-F-EXEC1 — shell_command joins on target=any so an operator can
     // author a per-tool-call shell gate / side-effect for ALL tools.
+    // PR-F-EXEC2 — shell_check joins as the verdict-shaped sibling on
+    // target=any: a single verifier script can gate dispatch of any tool
+    // based on the {tool_name, tool_args} envelope on stdin.
     return [
       "domain",
       "domain_allowlist",
@@ -1630,6 +1652,7 @@ function availableConditionKinds(
       "path_allowlist",
       "prompt_injection",
       "shell_command",
+      "shell_check",
     ];
   }
   // after_tool_use
@@ -1681,6 +1704,10 @@ const CONDITION_PREVIEW_CHIPS: Record<ConditionKind, ReadonlyArray<string>> = {
   prompt_injection: ["tool_input.command"],
   output_rewrite: ["tool_output"],
   shell_command: ["tool", "tool_args", "tool_output"],
+  // PR-F-EXEC2 — same runtime variable chip preview as shell_command
+  // (the verifier sees the same context envelope on stdin and can read
+  // tool / tool_args / draft_excerpt fields off the JSON body).
+  shell_check: ["tool", "tool_args", "tool_output"],
 };
 
 
@@ -1768,6 +1795,16 @@ const CONDITION_META: Record<ConditionKind, { label: string; description: string
     label: "Run a shell command",
     description:
       "Runs an operator-authored shell script (bash / sh) at the chosen lifecycle slot. This command runs as you on the host. magi does not verify the script. Exit code 0 = pass; non-zero blocks at pre_final / before_tool_use.",
+  },
+  shell_check: {
+    // PR-F-EXEC2 — operator-authored subprocess VERIFIER. Same Operator-
+    // defined trust warning as shell_command. Distinct copy makes the
+    // verdict semantics explicit: the script's stdout JSON
+    // ``{passed, reason?}`` is the canonical verdict, with exit-code 0
+    // as a deterministic fallback when stdout is not JSON.
+    label: "Shell script check",
+    description:
+      "Runs an operator-authored script as a verifier. This command runs as you on the host. magi does not verify the script. Stdout JSON {passed, reason?} is the canonical verdict; exit code 0 = pass as a fallback. Blocks at pre_final / before_tool_use when the verdict is failed and the action is block.",
   },
 };
 
@@ -2218,6 +2255,16 @@ function SpecificsStep({
       {draft.conditionKind === "shell_command" ? (
         <ShellCommandPicker draft={draft} update={update} />
       ) : null}
+      {/* PR-F-EXEC2 — shell_check picker. Same surface as ShellCommandPicker
+          (same fields drive the shared ShellPayload). Reuses the same
+          picker so an operator who already authored a shell_command rule
+          immediately recognises the form. Compiles to the backend
+          ``shell_check`` kind via customRuleKind. Available at the two
+          gate slots (pre_final + before_tool_use) where the verdict
+          drives a block. */}
+      {draft.conditionKind === "shell_check" ? (
+        <ShellCheckPicker draft={draft} update={update} />
+      ) : null}
     </div>
   );
 }
@@ -2549,6 +2596,30 @@ function ShellCommandPicker({
       </p>
     </div>
   );
+}
+
+
+// ---------------------------------------------------------------------------
+// PR-F-EXEC2 — shell_check picker (operator-authored subprocess verifier)
+// ---------------------------------------------------------------------------
+
+
+/**
+ * PR-F-EXEC2 picker. The verifier kind shares the same payload shape as
+ * shell_command (source + timeout + env_vars + shell), so the picker is a
+ * thin wrapper over :func:`ShellCommandPicker`. The "magi does not verify
+ * the script" Operator-defined warning rendered inside ``ShellCommandPicker``
+ * applies verbatim — the only behavioural difference (verdict-shaped vs
+ * action-shaped) is invisible to the operator at authoring time.
+ */
+function ShellCheckPicker({
+  draft,
+  update,
+}: {
+  draft: Draft;
+  update: (patch: Partial<Draft>) => void;
+}): React.ReactElement {
+  return <ShellCommandPicker draft={draft} update={update} />;
 }
 
 
@@ -3063,6 +3134,12 @@ function triggerEventPhrase(draft: Draft, refOptions: RefOption[]): string {
       // unconditional within the matched scope (lifecycle + tool target);
       // the script's exit code drives any gate verdict downstream.
       return `When the operator shell hook runs at ${draft.lifecycle}`;
+    case "shell_check":
+      // PR-F-EXEC2 — operator-authored verifier. The trigger frames the
+      // verdict source ("the shell verifier says false") so the Action
+      // step header reads naturally; the script's stdout JSON or exit
+      // code drives the gate downstream.
+      return `When the operator shell verifier returns "failed" at ${draft.lifecycle}`;
   }
 }
 
@@ -3331,6 +3408,12 @@ function conditionSlug(kind: ConditionKind): string {
     case "shell_command":
       // PR-F-EXEC1 — slug for the operator-defined shell action kind.
       return "shell";
+    case "shell_check":
+      // PR-F-EXEC2 — slug for the operator-defined shell verifier kind.
+      // Distinct from "shell" so the derived rule id reads as
+      // ``${archetype}-shell-check-${lifecycle}`` rather than colliding
+      // with the action kind's slug.
+      return "shell-check";
   }
 }
 
@@ -3679,6 +3762,17 @@ function conditionClause(draft: Draft, refOptions: RefOption[]): string {
           : `file ${draft.shPath || "(unset)"}`;
       return `run operator shell hook (${sourceLabel}, ${draft.shShell}, ${draft.shTimeoutSeconds}s timeout)`;
     }
+    case "shell_check": {
+      // PR-F-EXEC2 — review-summary phrasing. Surfaces the verdict
+      // contract ("stdout JSON or exit code") so the operator sees the
+      // verifier semantics at activation time. The full inline script
+      // is NOT echoed (use the picker to read it).
+      const sourceLabel =
+        draft.shSource === "inline"
+          ? "inline script"
+          : `file ${draft.shPath || "(unset)"}`;
+      return `run operator shell verifier (${sourceLabel}, ${draft.shShell}, ${draft.shTimeoutSeconds}s timeout; stdout JSON {passed,reason} or exit code 0 = pass)`;
+    }
   }
 }
 
@@ -3799,6 +3893,17 @@ function stepIsComplete(currentKey: StepKey, draft: Draft): boolean {
             draft.orPattern.trim().length > 0
             && draft.orReplacement.length > 0
           );
+        case "shell_command":
+        case "shell_check":
+          // PR-F-EXEC1 + PR-F-EXEC2 — the two operator-defined shell
+          // kinds share the same Specifics gate: either an inline body
+          // OR a file path is non-empty. The other fields (timeout /
+          // shell / env_vars) have safe defaults at the EMPTY draft
+          // so they never block step completion.
+          if (draft.shSource === "inline") {
+            return draft.shInline.trim().length > 0;
+          }
+          return draft.shPath.trim().length > 0;
       }
     // eslint-disable-next-line no-fallthrough
     case "action":
@@ -3870,6 +3975,11 @@ function customRuleKind(draft: Draft): string {
   // before the lifecycle-keyed fallback so the operator's shell pick lands
   // on the right kind regardless of slot.
   if (draft.conditionKind === "shell_command") return "shell_command";
+  // PR-F-EXEC2 — shell_check routes to its own backend kind. Same
+  // EARLY-RETURN concern as shell_command — must precede the
+  // lifecycle-keyed fallback so the verifier pick lands on the right
+  // backend kind regardless of slot.
+  if (draft.conditionKind === "shell_check") return "shell_check";
   if (draft.lifecycle === "before_tool_use") {
     // before_tool authoring always routes to tool_perm: target=specific
     // sets match.tool; target=any with domain* sets the url-shape matcher.
@@ -3937,6 +4047,16 @@ function customRuleAction(draft: Draft): string {
     if (blockEligible && draft.archetype === "block") return "block";
     return "audit";
   }
+  // PR-F-EXEC2 — shell_check uses the same two-slot block-eligibility as
+  // shell_command (pre_final + before_tool_use are the v1 gate-honoring
+  // slots; the rest of the _LEGAL matrix accepts the kind but only as
+  // audit at v1 since the runtime fan-out fires audit-only there).
+  if (draft.conditionKind === "shell_check") {
+    const blockEligible =
+      draft.lifecycle === "pre_final" || draft.lifecycle === "before_tool_use";
+    if (blockEligible && draft.archetype === "block") return "block";
+    return "audit";
+  }
   switch (draft.archetype) {
     case "block":
       return "block";
@@ -3980,7 +4100,13 @@ function customRulePayload(draft: Draft): Record<string, unknown> {
   //   {source: "inline"|"file", inline?, path?, timeout_seconds, env_vars, shell}
   // EARLY-RETURN before the lifecycle-keyed fallbacks so the operator's
   // shell pick lands on the right payload shape regardless of slot.
-  if (draft.conditionKind === "shell_command") {
+  // PR-F-EXEC2 — shell_check payload is IDENTICAL to shell_command's
+  // (both kinds share the same ShellPayload pydantic model). Folded into
+  // one branch so a future payload-shape change touches one place.
+  if (
+    draft.conditionKind === "shell_command"
+    || draft.conditionKind === "shell_check"
+  ) {
     const payload: Record<string, unknown> = {
       source: draft.shSource,
       timeout_seconds: Math.min(

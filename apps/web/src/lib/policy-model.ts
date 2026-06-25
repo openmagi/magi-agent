@@ -83,6 +83,14 @@ export type PolicyConditionKind =
   // the dedicated amber-red badge palette; until then the badge falls
   // back to a placeholder rendering for this literal.
   | "shell_command"
+  // F-EXEC2 — operator-authored subprocess VERIFIER. Same payload shape
+  // as ``shell_command`` (source + timeout + env_vars + shell) but the
+  // runtime treats the script output as a verdict: stdout JSON
+  // ``{passed, reason?}`` (preferred) or exit code 0 = passed
+  // (fallback). Same ``operator_defined`` trust class as
+  // ``shell_command``; the wizard surfaces the same "magi does not
+  // verify the script" warning before activation.
+  | "shell_check"
   | "seam_action"       // built-in preset seam rewire (compound)
   | "none";             // built-in preview / always-on, condition is implicit
 
@@ -267,6 +275,38 @@ function customRuleCondition(
         scope: payload.scope ?? "match_only",
         isRegex: payload.isRegex ?? true,
         toolMatch: payload.toolMatch,
+      },
+    };
+  }
+  if (kind === "shell_command" || kind === "shell_check") {
+    // F-EXEC1 (shell_command) + F-EXEC2 (shell_check) — round-trip a
+    // persisted operator shell rule into a Policy condition. Both kinds
+    // share the same ``ShellPayload`` shape; only the runtime semantics
+    // differ (action vs verifier). The summary mirrors the wizard's
+    // Review-step phrasing so the dashboard reads consistently.
+    const source = typeof payload.source === "string" ? payload.source : "inline";
+    const inline = typeof payload.inline === "string" ? payload.inline : "";
+    const path = typeof payload.path === "string" ? payload.path : "";
+    const shell = typeof payload.shell === "string" ? payload.shell : "bash";
+    const timeout =
+      typeof payload.timeout_seconds === "number"
+        ? payload.timeout_seconds
+        : 30;
+    const sourceLabel =
+      source === "inline"
+        ? "inline script"
+        : `file ${path || "(unset)"}`;
+    const kindLabel = kind === "shell_check" ? "shell verifier" : "shell hook";
+    return {
+      kind,
+      summary: `Run operator ${kindLabel} (${sourceLabel}, ${shell}, ${timeout}s timeout)`,
+      payload: {
+        source,
+        inline,
+        path,
+        shell,
+        timeout_seconds: timeout,
+        env_vars: Array.isArray(payload.env_vars) ? payload.env_vars : [],
       },
     };
   }
@@ -570,12 +610,14 @@ export function trustClassForPolicy(policy: PolicyTrustInput): TrustClass {
       // default rendering for these literals.
       return "mutator";
     case "shell_command":
-      // F-EXEC1 — fifth trust class. Operator-authored shell script;
-      // magi does NOT verify the script body. F-EXEC3 ships the
-      // dedicated amber-red badge palette + Terminal icon; until then
-      // trust-badge.tsx falls back to its existing palette so the badge
-      // still renders (any unknown variant defaults to the "deterministic"
-      // visual rather than crashing).
+    case "shell_check":
+      // F-EXEC1 (shell_command) + F-EXEC2 (shell_check) — both kinds
+      // share the same operator_defined trust class. The script body is
+      // never verified by magi; the operator owns the trust boundary.
+      // F-EXEC3 ships the dedicated amber-red badge palette + Terminal
+      // icon; until then trust-badge.tsx falls back to its existing
+      // palette so the badge still renders (any unknown variant
+      // defaults to the "deterministic" visual rather than crashing).
       return "operator_defined";
     case "none":
       // Built-in preset_seam: fall through to the preset's enforcement

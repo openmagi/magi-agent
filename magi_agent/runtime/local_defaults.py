@@ -262,6 +262,18 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     # install / hosted serve stays byte-identical (hosted activation is
     # explicitly deferred to v2 with a separate admin-tier flag).
     "MAGI_CUSTOMIZE_SHELL_COMMAND_ENABLED",
+    # PR-F-EXEC2 shell_check condition kind: operator-authored subprocess
+    # verifier (script reads slot context envelope from stdin, emits
+    # ``{passed, reason}`` JSON on stdout — exit-code fallback when stdout
+    # is not parseable JSON). Reuses the same shell_runner module + the
+    # same MAGI_CUSTOMIZE_SHELL_AUDIT_BUDGET per-(session, turn) counter
+    # as F-EXEC1 so a turn that fires a mix of shell_command + shell_check
+    # rules hits one shared cost ceiling. Wire is a no-op without authored
+    # rules; lab opts in so dogfood turns can exercise the wizard's
+    # new condition kind end-to-end. Strict default-OFF in the registry
+    # so a fresh install / hosted serve stay byte-identical (hosted
+    # activation is explicitly deferred to v2 alongside F-EXEC1).
+    "MAGI_CUSTOMIZE_SHELL_CHECK_ENABLED",
     # PR-F-UX2 (F8 core) runtime-fields endpoint: backs the wizard's chip
     # picker shown above regex / contentMatch / llm_criterion / SHACL inputs.
     # Pure derivation (no I/O, no LLM), registration-time only, fail-open on

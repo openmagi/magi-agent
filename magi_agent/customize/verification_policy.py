@@ -333,6 +333,43 @@ class CustomizeVerificationPolicy:
             return candidates
         return [rule for rule in candidates if _rule_scope_matches(rule, current_scope)]
 
+    def enabled_shell_check_rules(
+        self, *, fires_at: str, current_scope: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Enabled ``shell_check`` custom rules for a fire-at point (F-EXEC2).
+
+        Mirrors :meth:`enabled_shell_command_rules` exactly: filter on
+        ``enabled`` + ``firesAt == fires_at`` + ``what.kind ==
+        "shell_check"``. When ``current_scope`` is supplied the result is
+        additionally narrowed by :func:`_rule_scope_matches`; otherwise
+        the scope-blind list is returned. Consumed by:
+
+        * :mod:`magi_agent.customize.lifecycle_audit` shell_check fan-out
+          helpers (pre_final / before_tool_use as primary gate slots in
+          v1; other slots accepted by the validator but audit-only at
+          the runtime).
+
+        Per-turn cost is bounded by the SAME
+        ``MAGI_CUSTOMIZE_SHELL_AUDIT_BUDGET`` counter shared with
+        ``shell_command`` via
+        :func:`magi_agent.adk_bridge.lifecycle_shell_command_control
+        .shell_budget_for`. The runtime apply helper
+        (:func:`magi_agent.customize.shell_check.apply_shell_check_rule`)
+        accepts the raw rule dicts returned here and fail-open on any
+        individual malformed rule.
+        """
+        candidates = [
+            rule
+            for rule in self.custom_rules
+            if rule.get("enabled", False)
+            and rule.get("firesAt") == fires_at
+            and isinstance(rule.get("what"), dict)
+            and rule["what"].get("kind") == "shell_check"
+        ]
+        if current_scope is None:
+            return candidates
+        return [rule for rule in candidates if _rule_scope_matches(rule, current_scope)]
+
     def enabled_output_rewrite_rules(
         self, *, fires_at: str, current_scope: str | None = None
     ) -> list[dict[str, Any]]:

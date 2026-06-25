@@ -166,12 +166,23 @@ def shell_budget_for(
     """
     try:
         # Lazy import keeps an OFF-path call ~free (avoids the lifecycle_audit
-        # transitive customize imports when the master flag is OFF).
+        # transitive customize imports when both master flags are OFF).
+        # F-EXEC2 union: gate on shell_command OR shell_check so an operator
+        # who enables ONLY shell_check still gets a real (remaining,
+        # decrement_fn) pair instead of the OFF sentinel — otherwise the
+        # fan-out helper would see ``remaining_budget=None`` and bypass every
+        # cap branch, contradicting the shared-budget contract documented in
+        # flags.py and verification_policy.py.
         from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+            shell_check_enabled,
             shell_command_enabled,
         )
 
-        if not shell_command_enabled(env=dict(env) if env is not None else None):
+        env_dict = dict(env) if env is not None else None
+        if not (
+            shell_command_enabled(env=env_dict)
+            or shell_check_enabled(env=env_dict)
+        ):
             return (None, _no_op_decrement)
     except Exception:
         return (None, _no_op_decrement)
@@ -348,11 +359,16 @@ class LifecycleShellCommandControl(BaseLoopControl):
         very first shell rule of the turn.
         """
         try:
+            # F-EXEC2 union: warm up state when EITHER master flag is ON so a
+            # shell_check-only operator still gets per-turn state initialised
+            # at the first model call (the shared budget map is the only
+            # mechanism that enforces the cross-kind ceiling).
             from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+                shell_check_enabled,
                 shell_command_enabled,
             )
 
-            if not shell_command_enabled():
+            if not (shell_command_enabled() or shell_check_enabled()):
                 return None
             session_id, turn_id = self._resolve_identity(callback_context)
             if session_id is None or turn_id is None:
@@ -381,22 +397,28 @@ class LifecycleShellCommandControl(BaseLoopControl):
 def build_lifecycle_shell_command_control(
     env: Mapping[str, str] | None = None,
 ) -> LifecycleShellCommandControl | None:
-    """Build the control when F-EXEC1 master flag is ON; else ``None``.
+    """Build the control when F-EXEC1 OR F-EXEC2 master flag is ON; else ``None``.
 
     Returning ``None`` keeps the control plane byte-identical to today for
     OFF callers (the build helper in
     :mod:`magi_agent.adk_bridge.control_plane` skips registration). The
-    per-call ``shell_command_enabled`` check is also performed inside the
-    ``on_before_model`` hook so a runtime flip after registration also
-    short-circuits cleanly.
+    per-call enable check is also performed inside the ``on_before_model``
+    hook so a runtime flip after registration also short-circuits cleanly.
+    F-EXEC2 union: registering on shell_check ON (with shell_command OFF)
+    keeps the shared per-turn budget map warmed for the shell_check fan-out
+    helpers — the cap only works when somebody initialises state.
     """
     try:
         from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+            shell_check_enabled,
             shell_command_enabled,
         )
     except Exception:
         return None
-    if not shell_command_enabled(env=dict(env) if env is not None else None):
+    env_dict = dict(env) if env is not None else None
+    if not (
+        shell_command_enabled(env=env_dict) or shell_check_enabled(env=env_dict)
+    ):
         return None
     return LifecycleShellCommandControl(budget_default=_parse_budget(env))
 

@@ -127,9 +127,10 @@ describe("AuthorWizard — variable-length policy authoring (F1.5 + F-UX3)", () 
     // adds ``prompt_injection`` here as a mutator (not a deny gate) — it
     // doesn't introduce an AND, the rule fires on every call to the
     // chosen tool. PR-F-EXEC1 appends ``shell_command`` as a third option
-    // (operator-defined side-effect / gate script).
+    // (operator-defined side-effect / gate script). PR-F-EXEC2 appends
+    // ``shell_check`` as the verdict-shaped sibling.
     expect(src).toMatch(
-      /toolTarget === "specific"[\s\S]*?return \["none", "prompt_injection", "shell_command"\]/,
+      /toolTarget === "specific"[\s\S]*?return \["none", "prompt_injection", "shell_command", "shell_check"\]/,
     );
   });
 
@@ -140,9 +141,10 @@ describe("AuthorWizard — variable-length policy authoring (F1.5 + F-UX3)", () 
     // backend tool_perm matcher already supports both). PR-F-MUT1 appends
     // ``prompt_injection`` — a mutator, not a deny gate. PR-F-EXEC1 also
     // appends ``shell_command`` so an operator can author a per-call
-    // shell gate for ALL tools.
+    // shell gate for ALL tools. PR-F-EXEC2 appends ``shell_check`` as
+    // the verdict-shaped sibling on the same axis.
     expect(src).toMatch(
-      /target=any: tool_perm has no wildcard[\s\S]*?return \[\s*"domain",\s*"domain_allowlist",\s*"path",\s*"path_allowlist",\s*"prompt_injection",\s*"shell_command",?\s*\]/,
+      /target=any: tool_perm has no wildcard[\s\S]*?return \[\s*"domain",\s*"domain_allowlist",\s*"path",\s*"path_allowlist",\s*"prompt_injection",\s*"shell_command",\s*"shell_check",?\s*\]/,
     );
   });
 
@@ -155,7 +157,10 @@ describe("AuthorWizard — variable-length policy authoring (F1.5 + F-UX3)", () 
     // PR-F-MUT2 appends ``output_rewrite`` to the same list as a Mutator
     // entry; the picker still surfaces llm_criterion in both target modes.
     // PR-F-EXEC1 appends ``shell_command`` as an audit-only side-effect
-    // shell hook (tool already returned).
+    // shell hook (tool already returned). PR-F-EXEC2 does NOT append
+    // ``shell_check`` at after_tool_use (the tool already returned, so a
+    // verifier verdict has no honest gate target — the validator's _LEGAL
+    // matrix exposes only audit there).
     expect(src).toMatch(
       /PR-F-UX4 — liberalization: llm_criterion is now available under BOTH/,
     );
@@ -176,9 +181,11 @@ describe("AuthorWizard — variable-length policy authoring (F1.5 + F-UX3)", () 
     // operator picks raw-evidence vs verdict-primitive distinctly. Both
     // compile to ``deterministic_ref`` on the backend (storage unchanged).
     // F3's ``field_constraint`` and the raw ``shacl`` escape hatch remain.
-    // PR-F-EXEC1 appends ``shell_command`` (block honored).
+    // PR-F-EXEC1 appends ``shell_command`` (block honored). PR-F-EXEC2
+    // appends ``shell_check`` as the verdict-shaped sibling (block
+    // honored — verifier's {passed:false} short-circuits final commit).
     expect(src).toMatch(
-      /pre_final[\s\S]*?return \[\s*"evidence_ref",\s*"verifier_passed",\s*"shacl",\s*"llm_criterion",\s*"field_constraint",\s*"shell_command",?\s*\]/,
+      /pre_final[\s\S]*?return \[\s*"evidence_ref",\s*"verifier_passed",\s*"shacl",\s*"llm_criterion",\s*"field_constraint",\s*"shell_command",\s*"shell_check",?\s*\]/,
     );
   });
 
@@ -397,9 +404,10 @@ describe("AuthorWizard — F6 path / path_allowlist condition kinds", () => {
     // in the backend. PR-F-MUT1 appends ``prompt_injection`` to the same
     // branch (mutator surface, not a deny gate); the domain/path matchers
     // remain unchanged. PR-F-EXEC1 appends ``shell_command`` (operator-
-    // defined gate / side-effect script).
+    // defined gate / side-effect script). PR-F-EXEC2 appends ``shell_check``
+    // as the verdict-shaped sibling on the same axis.
     expect(src).toMatch(
-      /return \[\s*"domain",\s*"domain_allowlist",\s*"path",\s*"path_allowlist",\s*"prompt_injection",\s*"shell_command",?\s*\]/,
+      /return \[\s*"domain",\s*"domain_allowlist",\s*"path",\s*"path_allowlist",\s*"prompt_injection",\s*"shell_command",\s*"shell_check",?\s*\]/,
     );
   });
 
@@ -1552,9 +1560,10 @@ describe("AuthorWizard — PR-F-UX4 condition matrix loosening + auto-derive", (
     // refused because backend tool_perm.py honors a single matcher key per
     // rule — no honest mapping today. PR-F-MUT1 adds ``prompt_injection``
     // alongside ``none`` (it's a mutator, not a deny gate); PR-F-EXEC1
-    // appends ``shell_command``; the domain/path AND combo stays excluded.
+    // appends ``shell_command``; PR-F-EXEC2 appends ``shell_check`` as
+    // the verdict-shaped sibling; the domain/path AND combo stays excluded.
     expect(src).toMatch(
-      /toolTarget === "specific"\) \{[\s\S]*?return \["none", "prompt_injection", "shell_command"\]/,
+      /toolTarget === "specific"\) \{[\s\S]*?return \["none", "prompt_injection", "shell_command", "shell_check"\]/,
     );
   });
 });
@@ -1718,13 +1727,15 @@ describe("AuthorWizard — F-MUT1 prompt_injection kind", () => {
   });
 
   it("availableConditionKinds surfaces prompt_injection on before_tool_use (both target modes)", () => {
-    // target=specific: ["none", "prompt_injection", "shell_command"]
+    // target=specific: ["none", "prompt_injection", "shell_command", "shell_check"]
+    // (PR-F-EXEC2 appends shell_check as the verdict-shaped sibling.)
     expect(src).toMatch(
-      /toolTarget === "specific"\)[\s\S]*?return \["none", "prompt_injection", "shell_command"\]/,
+      /toolTarget === "specific"\)[\s\S]*?return \["none", "prompt_injection", "shell_command", "shell_check"\]/,
     );
-    // target=any: domain/path matchers + prompt_injection + shell_command.
+    // target=any: domain/path matchers + prompt_injection + shell_command +
+    // shell_check (PR-F-EXEC2 appends here too).
     expect(src).toMatch(
-      /return \[\s*"domain",\s*"domain_allowlist",\s*"path",\s*"path_allowlist",\s*"prompt_injection",\s*"shell_command",?\s*\]/,
+      /return \[\s*"domain",\s*"domain_allowlist",\s*"path",\s*"path_allowlist",\s*"prompt_injection",\s*"shell_command",\s*"shell_check",?\s*\]/,
     );
   });
 
@@ -2601,6 +2612,110 @@ describe("AuthorWizard — PR-F-EXEC1 shell_command action kind", () => {
     );
     expect(src).toMatch(
       /conditionKind === "shell_command"[\s\S]*?env_vars:/,
+    );
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// PR-F-EXEC2 — shell_check condition kind (operator-authored subprocess
+// VERIFIER). Same payload shape as shell_command but the runtime treats
+// the script output as a verdict (stdout JSON {passed, reason?} or
+// exit-code fallback). v1 wires two gate slots (pre_final +
+// before_tool_use) where the persisted ``action == "block"`` is honored.
+// ---------------------------------------------------------------------------
+
+
+describe("AuthorWizard — PR-F-EXEC2 shell_check condition kind", () => {
+  it("declares 'shell_check' as a ConditionKind union member", () => {
+    expect(src).toMatch(/type ConditionKind[\s\S]*?\| "shell_check"/);
+  });
+
+  it("availableConditionKinds appends shell_check at pre_final (block honored)", () => {
+    // pre_final is one of the two v1 gate slots — the verifier's
+    // ``{passed:false}`` verdict short-circuits final answer commit.
+    expect(src).toMatch(
+      /pre_final[\s\S]*?return \[\s*"evidence_ref",\s*"verifier_passed",\s*"shacl",\s*"llm_criterion",\s*"field_constraint",\s*"shell_command",\s*"shell_check",?\s*\]/,
+    );
+  });
+
+  it("availableConditionKinds appends shell_check at before_tool_use target=specific", () => {
+    // The per-tool dispatch gate — the verifier inspects {tool_name,
+    // tool_args} and a failed verdict blocks dispatch.
+    expect(src).toMatch(
+      /toolTarget === "specific"[\s\S]*?return \["none", "prompt_injection", "shell_command", "shell_check"\]/,
+    );
+  });
+
+  it("availableConditionKinds appends shell_check at before_tool_use target=any", () => {
+    // The any-tool gate — the same verifier can pre-screen ANY dispatch
+    // based on the stdin envelope.
+    expect(src).toMatch(
+      /return \[\s*"domain",\s*"domain_allowlist",\s*"path",\s*"path_allowlist",\s*"prompt_injection",\s*"shell_command",\s*"shell_check",?\s*\]/,
+    );
+  });
+
+  it("CONDITION_META registers a 'Shell script check' label with the operator-defined warning", () => {
+    expect(src).toMatch(
+      /shell_check:\s*\{[\s\S]*?label:\s*"Shell script check"/,
+    );
+    expect(src).toMatch(
+      /shell_check:\s*\{[\s\S]*?magi does not verify the script/,
+    );
+  });
+
+  it("CONDITION_PREVIEW_CHIPS registers a shell_check entry with tool / tool_args / tool_output chips", () => {
+    // Same chip preview as shell_command — both kinds see the same
+    // context envelope on stdin.
+    expect(src).toMatch(
+      /shell_check:\s*\["tool",\s*"tool_args",\s*"tool_output"\]/,
+    );
+  });
+
+  it("SpecificsStep renders the ShellCheckPicker when conditionKind === 'shell_check'", () => {
+    expect(src).toMatch(
+      /draft\.conditionKind === "shell_check"[\s\S]*?<ShellCheckPicker/,
+    );
+  });
+
+  it("ShellCheckPicker reuses ShellCommandPicker", () => {
+    // The verifier shares the SAME payload shape as the action kind, so
+    // the picker is a thin wrapper. Pinning the wrapper keeps a future
+    // refactor from accidentally divergent surfaces.
+    expect(src).toMatch(
+      /function ShellCheckPicker[\s\S]*?return <ShellCommandPicker/,
+    );
+  });
+
+  it("customRuleKind routes 'shell_check' to its own backend kind", () => {
+    expect(src).toMatch(
+      /conditionKind === "shell_check"[\s\S]*?return "shell_check"/,
+    );
+  });
+
+  it("customRuleAction maps 'shell_check' archetype=block → 'block' at the two gate slots", () => {
+    // Only pre_final + before_tool_use accept block in the v1 _LEGAL
+    // matrix; every other slot is audit-only and the wizard force-routes
+    // to action=audit to round-trip through the backend validator.
+    expect(src).toMatch(
+      /conditionKind === "shell_check"[\s\S]*?lifecycle === "pre_final" \|\| draft\.lifecycle === "before_tool_use"/,
+    );
+    expect(src).toMatch(
+      /conditionKind === "shell_check"[\s\S]*?archetype === "block"[\s\S]*?return "block"/,
+    );
+  });
+
+  it("customRulePayload compiles shell_check to the same ShellPayload shape as shell_command", () => {
+    // Folded into the same payload-builder branch as shell_command — both
+    // kinds share the same ``ShellPayload`` pydantic model on the backend.
+    expect(src).toMatch(
+      /conditionKind === "shell_command"\s*\|\|\s*draft\.conditionKind === "shell_check"/,
+    );
+  });
+
+  it("conditionSlug returns 'shell-check' for shell_check (distinct from shell_command's 'shell')", () => {
+    expect(src).toMatch(
+      /case "shell_check":[\s\S]*?return "shell-check"/,
     );
   });
 });

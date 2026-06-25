@@ -155,6 +155,32 @@ def lifecycle_extra_emitters_enabled(env: dict[str, str] | None = None) -> bool:
         return False
 
 
+def shell_check_enabled(env: dict[str, str] | None = None) -> bool:
+    """PR-F-EXEC2 triple-gate check for the ``shell_check`` condition kind
+    fan-outs.
+
+    Mirrors :func:`shell_command_enabled` but keys on the F-EXEC2 master
+    switch ``MAGI_CUSTOMIZE_SHELL_CHECK_ENABLED``. Every shell_check
+    fan-out helper (``pre_final`` / ``before_tool_use`` as the two primary
+    v1 gate slots) calls this helper FIRST so the OFF path is byte-
+    identical: no policy load, no subprocess spawn, no per-turn budget
+    tracking. Fail-open: any import error returns ``False`` so the call
+    site stays a no-op when the flag layer cannot be read.
+    """
+    try:
+        from magi_agent.config.flags import flag_bool, flag_profile_bool  # noqa: PLC0415
+    except Exception:
+        return False
+    try:
+        return (
+            flag_bool("MAGI_CUSTOMIZE_SHELL_CHECK_ENABLED", env=env)
+            and flag_profile_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", env=env)
+            and flag_profile_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", env=env)
+        )
+    except Exception:
+        return False
+
+
 def shell_command_enabled(env: dict[str, str] | None = None) -> bool:
     """PR-F-EXEC1 triple-gate check for the ``shell_command`` action kind
     fan-outs.
@@ -1713,6 +1739,194 @@ async def run_shell_command_at_on_artifact_created(
     return audits
 
 
+# ---------------------------------------------------------------------------
+# PR-F-EXEC2 — shell_check condition fan-out helpers
+# ---------------------------------------------------------------------------
+#
+# shell_check is a VERIFIER (verdict-shaped) rather than an action. v1 wires
+# two primary gate slots — ``pre_final`` and ``before_tool_use`` — modelled
+# after the F-EXEC1 shell_command gate-honoring slots. The fan-out shape
+# mirrors :func:`_run_shell_fan_out` (triple-gate → policy load → per-rule
+# apply under shared budget) with two contract differences:
+#
+#   1. Each rule is invoked via
+#      :func:`magi_agent.customize.shell_check.apply_shell_check_rule`,
+#      which parses the script's stdout as ``{passed, reason?}`` JSON or
+#      falls back to ``exit_code == 0``. The audit record's ``passed``
+#      field is the verifier's verdict.
+#   2. Gate decision is reduced from the per-rule verdicts via the same
+#      F-LIFE4a ``_gate_decision_from_audits`` reducer used for
+#      llm_criterion. Only rules whose persisted ``action == "block"``
+#      with ``passed == False`` contribute to the "block" verdict.
+#
+# Per-turn cost shares the SAME ``MAGI_CUSTOMIZE_SHELL_AUDIT_BUDGET`` counter
+# as F-EXEC1 (single ceiling across both kinds) — the helper accepts the
+# same ``remaining_budget`` + ``decrement_fn`` pair as
+# :func:`_run_shell_fan_out` so callers thread one shared budget through.
+
+
+async def _run_shell_check_fan_out(
+    *,
+    fires_at: str,
+    stdin_json: dict | None,
+    honor_block_action: bool,
+    remaining_budget: int | None,
+    policy_loader: Callable[[], Any] | None,
+    env: dict[str, str] | None,
+    decrement_fn: Callable[[], None] | None = None,
+) -> tuple[list[AuditRecord], GateVerdict]:
+    """Shared body for the F-EXEC2 shell_check fan-out helpers.
+
+    Returns ``(audits, verdict)``. ``verdict`` is ``"proceed"`` when
+    ``honor_block_action`` is False. Otherwise the per-rule audits are
+    reduced via :func:`_gate_decision_from_audits` over rules whose
+    persisted ``action == "block"`` — a failed (``passed=False``) verdict
+    on any such rule short-circuits the worst-of-N reducer to ``"block"``.
+
+    Budget semantics match :func:`_run_shell_fan_out`: when
+    ``remaining_budget`` is non-None and <= 0 the helper emits a single
+    ``budget_exhausted`` audit record and returns ``"proceed"`` (the
+    runner is never invoked). The local counter decrements on every
+    successful spawn AND calls ``decrement_fn`` (when provided) so the
+    SHARED per-(session, turn) counter tracks cross-kind consumption.
+    """
+    if not shell_check_enabled(env=env):
+        return [], "proceed"
+    try:
+        loader = policy_loader or _default_policy_loader
+        policy = loader()
+        rules = policy.enabled_shell_check_rules(fires_at=fires_at)
+    except Exception:
+        return [], "proceed"
+    if not rules:
+        return [], "proceed"
+    if remaining_budget is not None and remaining_budget <= 0:
+        try:
+            from magi_agent.customize.shell_check import (  # noqa: PLC0415
+                budget_exhausted_record,
+            )
+
+            return [budget_exhausted_record()], "proceed"
+        except Exception:
+            return [], "proceed"
+
+    try:
+        from magi_agent.customize.shell_check import (  # noqa: PLC0415
+            apply_shell_check_rule,
+        )
+    except Exception:
+        return [], "proceed"
+
+    audits: list[AuditRecord] = []
+    budget = remaining_budget
+    spawned_rules: list[dict[str, Any]] = []
+    for rule in rules:
+        if budget is not None and budget <= 0:
+            try:
+                from magi_agent.customize.shell_check import (  # noqa: PLC0415
+                    budget_exhausted_record,
+                )
+
+                audits.append(budget_exhausted_record())
+            except Exception:
+                pass
+            break
+        audit = await apply_shell_check_rule(
+            rule,
+            tool_name=None,
+            stdin_json=stdin_json,
+        )
+        audits.append(audit)
+        spawned_rules.append(rule)
+        if audit.get("status") in {"evaluated", "timeout"}:
+            if budget is not None:
+                budget -= 1
+            if decrement_fn is not None:
+                try:
+                    decrement_fn()
+                except Exception:
+                    # Fail-open: a broken decrement_fn must never wedge a turn.
+                    pass
+
+    if not honor_block_action:
+        return audits, "proceed"
+    try:
+        verdict = _gate_decision_from_audits(
+            [r for r in spawned_rules if isinstance(r, dict)],
+            audits,
+            allowed_actions=frozenset({"block"}),
+        )
+    except Exception:
+        verdict = "proceed"
+    return audits, verdict
+
+
+async def run_shell_check_at_pre_final(
+    *,
+    draft_text: str = "",
+    remaining_budget: int | None = None,
+    decrement_fn: Callable[[], None] | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> tuple[list[AuditRecord], GateVerdict]:
+    """F-EXEC2 fan-out for ``firesAt == "pre_final"`` (gate honored).
+
+    Pre-final is one of the two primary v1 gate slots: the synthesis pass
+    hasn't committed yet so a verifier's ``passed=False`` (or non-zero
+    exit code) verdict can short-circuit final answer assembly. The
+    caller interprets ``"block"`` as "synthesise a policy-blocked
+    outcome".
+    """
+    stdin_json = {
+        "lifecycle": "pre_final",
+        "draft_excerpt": draft_text[:4096],
+    }
+    return await _run_shell_check_fan_out(
+        fires_at="pre_final",
+        stdin_json=stdin_json,
+        honor_block_action=True,
+        remaining_budget=remaining_budget,
+        policy_loader=policy_loader,
+        env=env,
+        decrement_fn=decrement_fn,
+    )
+
+
+async def run_shell_check_at_before_tool_use(
+    *,
+    tool_name: str = "",
+    tool_args: dict[str, Any] | None = None,
+    remaining_budget: int | None = None,
+    decrement_fn: Callable[[], None] | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> tuple[list[AuditRecord], GateVerdict]:
+    """F-EXEC2 fan-out for ``firesAt == "before_tool_use"`` (gate honored).
+
+    The pre-dispatch gate slot: the verifier sees the tool name + args on
+    stdin, and a ``passed=False`` (or non-zero exit code) verdict tells
+    the caller to short-circuit dispatch. ``tool_args`` is forwarded as
+    a dict so the script can branch on argument shapes; the caller is
+    responsible for any size capping (the runner truncates stdout/stderr
+    but stdin is whatever the caller hands in).
+    """
+    stdin_json: dict[str, Any] = {
+        "lifecycle": "before_tool_use",
+        "tool_name": tool_name,
+    }
+    if tool_args is not None:
+        stdin_json["tool_args"] = tool_args
+    return await _run_shell_check_fan_out(
+        fires_at="before_tool_use",
+        stdin_json=stdin_json,
+        honor_block_action=True,
+        remaining_budget=remaining_budget,
+        policy_loader=policy_loader,
+        env=env,
+        decrement_fn=decrement_fn,
+    )
+
+
 __all__ = [
     "AuditRecord",
     "lifecycle_expansion_enabled",
@@ -1721,6 +1935,7 @@ __all__ = [
     "lifecycle_extra_emitters_enabled",
     "session_task_emitters_enabled",
     "shell_command_enabled",
+    "shell_check_enabled",
     "run_shell_command_at_pre_final",
     "run_shell_command_at_on_user_prompt_submit",
     "run_shell_command_at_on_subagent_stop",
@@ -1730,6 +1945,8 @@ __all__ = [
     "run_shell_command_at_after_compaction",
     "run_shell_command_at_on_task_checkpoint",
     "run_shell_command_at_on_artifact_created",
+    "run_shell_check_at_pre_final",
+    "run_shell_check_at_before_tool_use",
     "run_user_prompt_submit_audit",
     "run_subagent_stop_audit",
     "run_before_turn_start_audit",
