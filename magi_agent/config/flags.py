@@ -3398,6 +3398,71 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
+    # I-1: composio integration knobs (``composio/config.resolve_composio_config``).
+    # Every parser handles empty-string identically to None, so ``flag_str``
+    # default ``""`` is byte-identical to the prior ``env.get(NAME)`` →
+    # ``None`` chain.
+    FlagSpec(
+        name="MAGI_COMPOSIO_ENABLED",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Composio integration mode (``on`` / ``off`` / ``auto``). "
+            "Default ``auto`` activates when ``COMPOSIO_API_KEY`` is set and "
+            "the ``composio`` package is importable; ``on`` requires both "
+            "and fails-loud when missing; ``off`` disables unconditionally."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_COMPOSIO_CREDENTIAL_SOURCE",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Composio credential source (``env`` / ``hosted``). Default ``env`` "
+            "uses the operator's own ``COMPOSIO_API_KEY``; ``hosted`` brokers "
+            "credentials through the platform master key (Open Magi Pro+)."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_COMPOSIO_ENTITY_ID",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Composio entity id override. Empty/unset falls back to the "
+            "runtime-derived entity (``<USER_ID>:<BOT_ID>``) and finally "
+            "to ``default``."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_COMPOSIO_TOOLKITS",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Comma-separated Composio toolkit allowlist (e.g. "
+            "``gmail,google_calendar,slack``). Empty/unset enables every "
+            "toolkit Composio surfaces."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_COMPOSIO_MCP_URL",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Composio MCP server URL override (rarely needed; defaults to "
+            "Composio's hosted endpoint). Must be a valid HTTP(S) URL when "
+            "set."
+        ),
+        kind="str",
+    ),
 )
 
 
