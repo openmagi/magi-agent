@@ -384,10 +384,16 @@ def load_into_registries(
     )
     from magi_agent.packs.loader import RecordingSink, load_packs
 
+    from magi_agent.packs.signing import filter_trusted_packs
+
     if registries is None:
         registries = PackRegistries()
     discovered = discover_pack_files(list(bases))
     enabled = resolve_enabled_packs(discovered, load_packs_config())
+    # Curated-trust gate (model A): when MAGI_PACK_SIGNING_REQUIRED is ON, drop
+    # untrusted user packs before any impl is imported. OFF returns ``enabled``
+    # unchanged (byte-identical). Bundled first-party packs are always kept.
+    enabled = filter_trusted_packs(enabled)
     sink = RecordingSink()
     result = load_packs(enabled, sink)
     report = project_into_registries(result.primitives, registries)

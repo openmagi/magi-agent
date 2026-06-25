@@ -3663,6 +3663,43 @@ def pack_capability_enforcement_enabled(
     return flag_bool(MAGI_PACK_CAPABILITY_ENFORCEMENT_ENABLED_ENV, env=source)
 
 
+MAGI_PACK_SIGNING_REQUIRED_ENV = "MAGI_PACK_SIGNING_REQUIRED"
+MAGI_TRUSTED_PACK_DIGESTS_ENV = "MAGI_TRUSTED_PACK_DIGESTS"
+
+
+def pack_signing_required(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the curated-trust pack-signing gate (model A).
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the
+    discover->enabled pipeline never computes a pack digest and every discovered
+    pack flows through unchanged (byte-identical to before). When ON, only packs
+    whose content digest is in ``trusted_pack_digests`` are loaded; an untrusted
+    user/third-party pack is dropped before load (bundled first-party packs are
+    exempt). Like the other pack gates this is additive and deliberately does NOT
+    follow the runtime-profile default-ON convention.
+    """
+    from .flags import flag_bool
+
+    source = os.environ if env is None else env
+    return flag_bool(MAGI_PACK_SIGNING_REQUIRED_ENV, env=source)
+
+
+def trusted_pack_digests(env: Mapping[str, str] | None = None) -> frozenset[str]:
+    """Operator's curated allowlist of trusted pack content digests (model A).
+
+    Parses ``MAGI_TRUSTED_PACK_DIGESTS`` (comma-separated sha256 hex) into a
+    casefolded frozenset. Empty/unset -> empty set (no third-party pack trusted).
+    Only consulted when :func:`pack_signing_required` is ON. Never raises.
+    """
+    from .flags import flag_str
+
+    source = os.environ if env is None else env
+    raw = flag_str(MAGI_TRUSTED_PACK_DIGESTS_ENV, env=source) or ""
+    return frozenset(
+        value.strip().casefold() for value in raw.split(",") if value.strip()
+    )
+
+
 MAGI_PERMISSION_SCOPE_FROM_MODE_ENV = "MAGI_PERMISSION_SCOPE_FROM_MODE"
 MAGI_PERMISSION_SCOPE_LEGACY_FULL_TOOLHOST_ENV = (
     "MAGI_PERMISSION_SCOPE_LEGACY_FULL_TOOLHOST"
