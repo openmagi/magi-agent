@@ -30,6 +30,7 @@ import {
   useCustomize,
   patchToolOverride,
   patchVerificationOverride,
+  patchRecipeOverride,
   patchControlPlaneOverride,
   putRules,
   putCustomRule,
@@ -42,6 +43,7 @@ import type {
   BudgetsResponse,
   ConversationTurn,
   CustomRule,
+  CustomizeOverrides,
   ShaclCompileResponse,
   VerificationBudgets,
 } from "@/lib/customize-api";
@@ -342,6 +344,124 @@ export function CustomizeHub({
     [agentFetch],
   );
 
+  // --- Recipes allowlist (F-UX10) ------------------------------------------
+  // ``verification.recipes[]`` is allowlist-shaped: empty = no opt-out
+  // (legacy default, every recipe behaves as enabled); non-empty filters out
+  // refs contributed by recipe ids NOT in the list. The toggle UI shows
+  // ``enabledRecipeIds.has(id) || enabledRecipeIds.size === 0`` as ON so the
+  // user sees the live runtime view; the PATCH then mutates the bucket per
+  // ``set_verification_override`` (append on enable, remove on disable).
+  const [enabledRecipeIds, setEnabledRecipeIds] = useState<Set<string>>(new Set());
+  const [recipePending, setRecipePending] = useState<Set<string>>(new Set());
+  const [recipeError, setRecipeError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setEnabledRecipeIds(
+      new Set(data?.overrides.verification.recipes ?? []),
+    );
+  }, [data]);
+
+  // Catalog list of recipes the dashboard renders. Pulled up above
+  // ``handleToggleRecipe`` so the first-disable seed branch can read every
+  // peer recipe's id + packIds without a TDZ hazard.
+  const recipes = useMemo(
+    () => data?.catalog.verification.recipes ?? [],
+    [data],
+  );
+
+  // F-UX10 first-disable seed: from the legacy default state the persisted
+  // ``verification.recipes[]`` is empty, which the backend semantics treat as
+  // "no override → every recipe ON". A naïve PATCH(false, id) is a silent
+  // no-op (``set_verification_override`` only ``remove()``s when the id is
+  // already in the list) and the toggle snaps back to ON. To honour the
+  // first-disable intent we explicitly seed the allowlist with every OTHER
+  // mapped recipe first (sequential PATCHes so the backend can validate each
+  // id against the curated catalog and 404 on typos), then the recipe being
+  // disabled is implicitly excluded. ``packIds.length > 0`` filters out UI-
+  // only labels whose toggle is disabled in the panel anyway.
+  const handleToggleRecipe = useCallback(
+    (id: string, enabled: boolean) => {
+      // Optimistic update — append/remove the id, mirroring the backend
+      // ``set_verification_override`` semantics. For the first-disable case
+      // the optimistic set is seeded with every OTHER mapped recipe so the
+      // UI immediately reflects the post-seed allowlist (the row being
+      // disabled greys out, the rest stay ON).
+      const firstDisable =
+        enabled === false && enabledRecipeIds.size === 0;
+      const otherMapped = firstDisable
+        ? recipes
+            .filter(
+              (r) =>
+                r.id !== id &&
+                Array.isArray(r.packIds) &&
+                r.packIds.length > 0,
+            )
+            .map((r) => r.id)
+        : [];
+      setEnabledRecipeIds((prev) => {
+        if (firstDisable) return new Set(otherMapped);
+        const next = new Set(prev);
+        if (enabled) next.add(id);
+        else next.delete(id);
+        return next;
+      });
+      setRecipeError(null);
+      setRecipePending((prev) => new Set(prev).add(id));
+      const persist = async (): Promise<CustomizeOverrides> => {
+        if (firstDisable) {
+          // Seed the allowlist with every OTHER mapped recipe so the backend
+          // flips from the "no override → everything ON" state into an
+          // explicit allowlist that omits ``id``. Sequential PATCH calls keep
+          // the unknown-id 404 guard intact and let any single failure abort
+          // the seed before it corrupts the list.
+          let overrides: CustomizeOverrides | null = null;
+          for (const seedId of otherMapped) {
+            overrides = await patchRecipeOverride(agentFetch, seedId, true);
+          }
+          if (overrides === null) {
+            // No other mapped recipes to seed (only one mapped recipe exists
+            // in the catalog and the user disabled it). Fall through to the
+            // normal PATCH(false) — once the bucket is non-empty the
+            // ``remove()`` branch fires, but with zero mapped peers the
+            // allowlist would round-trip to ``[]`` again. In that degenerate
+            // shape there is nothing to bulk-seed; we surface a banner so the
+            // operator understands why the toggle cannot disable.
+            throw new Error(
+              `Cannot disable "${id}" — no other mapped recipes to seed the allowlist with. Add another recipe pack first.`,
+            );
+          }
+          return overrides;
+        }
+        return patchRecipeOverride(agentFetch, id, enabled);
+      };
+      persist()
+        .then((overrides) => {
+          setEnabledRecipeIds(new Set(overrides.verification.recipes ?? []));
+        })
+        .catch((err: unknown) => {
+          // Revert the optimistic state change so the toggle snaps back.
+          setEnabledRecipeIds((prev) => {
+            if (firstDisable) return new Set();
+            const next = new Set(prev);
+            if (enabled) next.delete(id);
+            else next.add(id);
+            return next;
+          });
+          setRecipeError(
+            err instanceof Error ? err.message : `Failed to update recipe "${id}"`,
+          );
+        })
+        .finally(() => {
+          setRecipePending((prev) => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+        });
+    },
+    [agentFetch, enabledRecipeIds, recipes],
+  );
+
   // --- Budgets (PR-F7) ------------------------------------------------------
   // Independent fetch from /v1/app/customize/budgets so the UI carries the
   // `effectiveEnv` snapshot the dashboard /v1/app/customize GET does not emit.
@@ -382,8 +502,6 @@ export function CustomizeHub({
     },
     [agentFetch],
   );
-
-  const recipes = useMemo(() => data?.catalog.verification.recipes ?? [], [data]);
 
   if (loading) {
     return (
@@ -506,7 +624,15 @@ export function CustomizeHub({
           />
         ) : null}
 
-        {section === "recipes" ? <RecipesPanel recipes={recipes} /> : null}
+        {section === "recipes" ? (
+          <RecipesPanel
+            recipes={recipes}
+            enabledRecipeIds={enabledRecipeIds}
+            pendingIds={recipePending}
+            error={recipeError}
+            onToggle={handleToggleRecipe}
+          />
+        ) : null}
 
         {section === "hooks" ? <HooksPanel /> : null}
       </section>
@@ -889,15 +1015,76 @@ const LABEL_FOR_CHOICE: Record<AddRuleChoice, string> = {
 
 
 /**
- * Phase 3 recipe allowlist UI — read-only list for now.
+ * Phase 3 recipe allowlist UI — per-row toggle (F-UX10, 2026-06-24).
  *
  * The catalog row carries ``packIds: string[]`` from Phase 3
  * (``customize.catalog.RECIPE_ID_TO_PACK_IDS``). When the array is empty the
- * recipe is a UI-only label — toggling does nothing in the runtime, so the row
- * is greyed out and honest about it. When non-empty, the toggle would set the
- * ``enabled_recipes`` allowlist; this PR ships the read-only surface only.
+ * recipe is a UI-only label — toggling persists in ``verification.recipes[]``
+ * but the runtime has no packIds to filter, so the row is greyed out and the
+ * toggle is disabled (with an explanatory tooltip) to keep the contract
+ * honest.
+ *
+ * Allowlist semantics (single source of truth =
+ * ``set_verification_override`` / ``_disabled_recipe_pack_refs``):
+ *   - ``enabledRecipeIds.size === 0`` (no operator override) → every recipe
+ *     row reads as enabled (byte-identical to legacy behavior).
+ *   - Otherwise → only ids in ``enabledRecipeIds`` are enabled; the rest
+ *     have their mapped pack's evidence/validator refs filtered out at
+ *     assembly time.
+ *
+ * The PATCH is optimistic: the toggle snaps to the new state immediately,
+ * the backend response reconciles the allowlist, and a failure reverts the
+ * row and surfaces the error banner so the operator never sees a silent
+ * disagreement between UI state and disk state.
  */
-function RecipesPanel({ recipes }: { recipes: ReadonlyArray<{ id: string; title: string; category: string; description: string; packIds?: string[]; enabled?: boolean }> }): React.ReactElement {
+function RecipeToggle({
+  checked,
+  onChange,
+  label,
+  disabled,
+  title,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  label: string;
+  disabled?: boolean;
+  title?: string;
+}): React.ReactElement {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      title={title}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
+        checked ? "bg-primary" : "bg-black/15"
+      }`}
+    >
+      <span
+        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-200 ${
+          checked ? "translate-x-6" : "translate-x-1"
+        }`}
+      />
+    </button>
+  );
+}
+
+function RecipesPanel({
+  recipes,
+  enabledRecipeIds,
+  pendingIds,
+  error,
+  onToggle,
+}: {
+  recipes: ReadonlyArray<{ id: string; title: string; category: string; description: string; packIds?: string[]; enabled?: boolean }>;
+  enabledRecipeIds: Set<string>;
+  pendingIds: Set<string>;
+  error: string | null;
+  onToggle: (id: string, enabled: boolean) => void;
+}): React.ReactElement {
   if (recipes.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-black/[0.10] bg-gray-50/80 px-4 py-8 text-center text-sm leading-6 text-secondary">
@@ -905,16 +1092,32 @@ function RecipesPanel({ recipes }: { recipes: ReadonlyArray<{ id: string; title:
       </div>
     );
   }
+  // Allowlist semantics: empty list → no opt-out → every row reads as
+  // enabled. Once at least one id is present, only listed ids are enabled.
+  const hasExplicitAllowlist = enabledRecipeIds.size > 0;
   return (
     <div className="space-y-2">
+      {error ? (
+        <div className="mb-4 rounded-xl border border-amber-500/25 bg-amber-500/[0.08] px-4 py-3 text-xs leading-5 text-amber-800">
+          {error}
+        </div>
+      ) : null}
       <p className="mb-3 text-xs leading-relaxed text-secondary">
         Recipes contributed by first-party packs. An empty <code>packIds</code> means the
-        UI label has no live mapping — toggling it would be a no-op, so the row is
-        greyed out. Mapped recipes can be opted in/out via the allowlist (write surface
-        ships in a follow-up PR).
+        UI label has no live mapping — the toggle is disabled because flipping it would
+        have no runtime effect. Mapped recipes can be opted in/out via the allowlist:
+        with no override, every recipe is enabled; the first opt-out seeds the allowlist
+        with every other mapped recipe (so only the one you turned off is dropped), then
+        the list behaves as an explicit allowlist (only the ids you keep on stay enabled).
       </p>
       {recipes.map((r) => {
         const mapped = Array.isArray(r.packIds) && r.packIds.length > 0;
+        const checked = hasExplicitAllowlist ? enabledRecipeIds.has(r.id) : true;
+        const isPending = pendingIds.has(r.id);
+        const toggleDisabled = !mapped || isPending;
+        const tooltip = !mapped
+          ? "UI label has no live mapping; toggling is a no-op"
+          : undefined;
         return (
           <div
             key={r.id}
@@ -943,6 +1146,13 @@ function RecipesPanel({ recipes }: { recipes: ReadonlyArray<{ id: string; title:
                 </p>
               ) : null}
             </div>
+            <RecipeToggle
+              checked={checked}
+              onChange={(next) => onToggle(r.id, next)}
+              label={`Toggle recipe ${r.title}`}
+              disabled={toggleDisabled}
+              title={tooltip}
+            />
           </div>
         );
       })}
