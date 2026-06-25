@@ -65,11 +65,18 @@ def resolve_vault_dir(env: Mapping[str, str] | None = None) -> Path:
       2. ``<MAGI_CONFIG parent>/vault`` when ``MAGI_CONFIG`` is set.
       3. ``~/.magi/vault``.
     """
+    # I-1: route both knobs through the typed flag registry.
+    # ``flag_str`` returns "" for unset (matching the registered
+    # default); the truthy ``if override:`` / ``if config:`` checks
+    # already gate on non-empty strings so the empty default is
+    # byte-identical to the prior ``env.get(...)`` → None chain.
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
     env = os.environ if env is None else env
-    override = env.get("MAGI_VAULT_DIR")
+    override = flag_str("MAGI_VAULT_DIR", env=env)
     if override:
         return Path(override)
-    config = env.get("MAGI_CONFIG")
+    config = flag_str("MAGI_CONFIG", env=env)
     if config:
         return Path(config).parent / "vault"
     return Path.home() / ".magi" / "vault"

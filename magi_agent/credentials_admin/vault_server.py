@@ -83,9 +83,15 @@ class VaultServerConfig:
         self.admin_port = _parse_port(
             env.get("AGENT_VAULT_ADMIN_PORT"), _DEFAULT_ADMIN_PORT
         )
+        # I-1: route ``MAGI_VAULT_DIR`` through the typed flag registry.
+        # ``flag_str`` returns "" for unset which is falsy, so the
+        # ``AGENT_VAULT_STORE_DIR`` → ``MAGI_VAULT_DIR`` →
+        # ``_DEFAULT_STORE_DIR`` precedence chain is byte-identical.
+        from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
         self.store_dir = Path(
             env.get("AGENT_VAULT_STORE_DIR")
-            or env.get("MAGI_VAULT_DIR")
+            or flag_str("MAGI_VAULT_DIR", env=env)
             or _DEFAULT_STORE_DIR
         )
         self.bot_id = env.get("VAULT_BOT_ID") or ""
