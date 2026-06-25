@@ -3381,6 +3381,23 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
+    # I-1: vault directory override consumed by both the local vault
+    # backend (``credentials_admin/local_vault.resolve_vault_dir``) and
+    # the sidecar admin server (``credentials_admin/vault_server``).
+    # Operator-visible; empty/unset falls through to the next layer.
+    FlagSpec(
+        name="MAGI_VAULT_DIR",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Override the local credential vault directory. Resolution "
+            "order: ``MAGI_VAULT_DIR`` > ``<MAGI_CONFIG parent>/vault`` "
+            "> ``~/.magi/vault``. The sidecar vault server prefers "
+            "``AGENT_VAULT_STORE_DIR`` over this knob when both are set."
+        ),
+        kind="str",
+    ),
 )
 
 
