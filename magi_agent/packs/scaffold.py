@@ -100,35 +100,52 @@ def provide(ctx: ValidatorCtx) -> ValidatorVerdict | None:
     return ctx.verdict()
 ''',
     "tool": '''\
-"""User tool provider — registers a ToolManifest via the typed provide context."""
+"""User tool provider — registers a ToolManifest AND a runnable inline handler.
+
+The inline handler ``(args, ctx) -> output`` receives the narrow ToolCtx (read
+args + session + a progress sink); it needs NO WorkspaceHostView. Replace the
+body with your own logic (call an API, compute something) and return a dict.
+A tool that reads/writes workspace files instead can author the gate5b workspace
+seam via ``context.register_workspace_handler(name, handler)`` whose handler is
+``(args, WorkspaceHostView) -> output``.
+"""
 from __future__ import annotations
 
-from magi_agent.packs.context import ToolProvideContext
+from collections.abc import Mapping
+
+from magi_agent.packs.context import ToolCtx, ToolProvideContext
 from magi_agent.tools.catalog import CORE_TOOL_INPUT_SCHEMA
 from magi_agent.tools.manifest import Budget, ToolManifest, ToolSource
 
 
+def handler(args: Mapping[str, object], ctx: ToolCtx) -> dict[str, object]:
+    """Echo the ``text`` argument back. Replace with your own logic."""
+    return {"echoed": str(args.get("text", "")), "tool": ctx.tool_name}
+
+
 def provide(context: ToolProvideContext) -> None:
-    context.register(
-        ToolManifest(
-            name=__REF__,
-            description="Describe what this tool does.",
-            kind="external",
-            source=ToolSource(kind="external", package=__PACK_ID__),
-            permission="read",
-            input_schema=CORE_TOOL_INPUT_SCHEMA,
-            timeout_ms=30_000,
-            budget=Budget(max_calls_per_turn=10, max_parallel=1),
-            dangerous=False,
-            is_concurrency_safe=True,
-            mutates_workspace=False,
-            parallel_safety="readonly",
-            available_in_modes=("plan", "act"),
-            tags=("user",),
-            enabled_by_default=True,
-            opt_out=True,
-        )
+    manifest = ToolManifest(
+        name=__REF__,
+        description="Describe what this tool does.",
+        kind="external",
+        source=ToolSource(kind="external", package=__PACK_ID__),
+        permission="read",
+        input_schema=CORE_TOOL_INPUT_SCHEMA,
+        timeout_ms=30_000,
+        budget=Budget(max_calls_per_turn=10, max_parallel=1),
+        dangerous=False,
+        is_concurrency_safe=True,
+        mutates_workspace=False,
+        parallel_safety="readonly",
+        available_in_modes=("plan", "act"),
+        tags=("user",),
+        enabled_by_default=True,
+        opt_out=True,
     )
+    if context.register_handler is not None:
+        context.register_handler(manifest, handler)
+    else:  # pragma: no cover - projector predates the inline-handler seam
+        context.register(manifest)
 ''',
     "callback": '''\
 """User callback provider — registers a HookManifest + handler (non-blocking)."""
@@ -336,6 +353,25 @@ def test_provider_registers_at_least_one_control() -> None:
     assert registered, "provider registered no LoopControl"
 '''
 
+_SMOKE_TOOL_DISPATCH = '''\
+
+
+def test_tool_inline_handler_runs() -> None:
+    from magi_agent.packs.registries import PackRegistries, project_into_registries
+
+    result, _catalog = load_from_bases([PACKS_BASE], RecordingSink())
+    registries = PackRegistries()
+    project_into_registries(result.primitives, registries)
+    handler = registries.tool_inline_handlers.resolve(REF)
+    assert handler is not None, "scaffolded tool bound no inline handler"
+    output = handler({"text": "hi"}, _StubToolCtx())
+    assert isinstance(output, dict)
+
+
+class _StubToolCtx:
+    tool_name = REF
+'''
+
 # Types whose generated smoke test exercises project_into_registries.
 _PROJECTION_TYPES: frozenset[str] = frozenset(
     {"tool", "callback", "evidence_producer", "recipe", "connector", "harness"}
@@ -415,6 +451,8 @@ def scaffold_pack(ptype: str, name: str, dest_root: Path) -> ScaffoldResult:
     smoke = _render(_SMOKE_HEADER, PTYPE=repr(ptype), REF=repr(ref))
     if ptype in _PROJECTION_TYPES:
         smoke += _SMOKE_PROJECTION
+        if ptype == "tool":
+            smoke += _SMOKE_TOOL_DISPATCH
     elif ptype == "validator":
         smoke += _SMOKE_VALIDATOR
     elif ptype == "control_plane":

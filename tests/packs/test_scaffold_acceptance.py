@@ -35,11 +35,16 @@ def _run_generated_smoke(test_path: Path, tmp_path: Path) -> subprocess.Complete
     )
 
 
-@pytest.mark.parametrize("ptype,name", [("validator", "accept-check"), ("tool", "accept-tool")])
-def test_generated_smoke_test_passes_under_real_pytest(ptype, name, tmp_path) -> None:
+# validator emits 2 generated tests (load + verdict); tool emits 3 (load +
+# projection + inline-handler dispatch).
+@pytest.mark.parametrize(
+    "ptype,name,expected",
+    [("validator", "accept-check", "2 passed"), ("tool", "accept-tool", "3 passed")],
+)
+def test_generated_smoke_test_passes_under_real_pytest(ptype, name, expected, tmp_path) -> None:
     meta = scaffold_pack(ptype, name, tmp_path / "packs")
 
     proc = _run_generated_smoke(meta.test_path, tmp_path)
 
     assert proc.returncode == 0, f"generated smoke test failed:\n{proc.stdout}\n{proc.stderr}"
-    assert "2 passed" in proc.stdout, proc.stdout
+    assert expected in proc.stdout, proc.stdout

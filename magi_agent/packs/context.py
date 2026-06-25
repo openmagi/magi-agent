@@ -318,11 +318,16 @@ class ToolProvideContext:
     ``register_workspace_handler`` (Pack C1) additionally lets a tool pack bind a
     WORKSPACE handler ``(args, WorkspaceHostView) -> output`` keyed by tool name —
     the gate5b toolhost executes it inside its unchanged dispatch envelope.
-    ``None`` when the projector predates C1 (backward compatible). No god-object,
-    no first-party-only kwarg."""
+    ``register_handler`` (PR6) lets a tool pack ship a PLAIN inline handler
+    ``(args: Mapping[str, object], tool_ctx: ToolCtx) -> output`` (sync or async)
+    that needs no WorkspaceHostView (path safety / read ledger / bounded shell are
+    workspace-file concerns); it registers the manifest AND the handler in one
+    call. ``None`` when the projector predates the matching seam (both backward
+    compatible). No god-object, no first-party-only kwarg."""
 
     register: Callable[[Any], None]
     register_workspace_handler: Callable[[str, Any], None] | None = None
+    register_handler: Callable[[Any, Any], None] | None = None
 
 
 @dataclass(frozen=True)

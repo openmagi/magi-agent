@@ -187,6 +187,9 @@ class PackRegistries:
         self.memory_strategies = KeyedRefRegistry()
         # C1: gate5b workspace tool handlers, keyed by TOOL NAME (not provides ref).
         self.workspace_tool_handlers = KeyedRefRegistry()
+        # PR6: plain inline tool handlers ``(args, ToolCtx) -> output``, keyed by
+        # TOOL NAME. These need no WorkspaceHostView (a vanilla third-party tool).
+        self.tool_inline_handlers = KeyedRefRegistry()
         self._hook_handlers: dict[str, Any] = {}
 
     @classmethod
@@ -252,6 +255,21 @@ def _provide_workspace_handler(registries: PackRegistries) -> Callable[[str, Any
     return register
 
 
+def _provide_tool_handler(registries: PackRegistries) -> Callable[[Any, Any], None]:
+    """PR6: register a manifest AND a plain inline handler in one call.
+
+    The handler ``(args: Mapping[str, object], tool_ctx: ToolCtx) -> output`` is
+    keyed by ``manifest.name`` so the CLI merge can bind it directly without a
+    WorkspaceHostView."""
+
+    register_manifest = _provide_tool(registries, ref="")
+
+    def register(manifest: Any, handler: Any) -> None:
+        register_manifest(manifest)
+        registries.tool_inline_handlers.replace(manifest.name, handler)
+    return register
+
+
 def project_into_registries(
     primitives: "tuple[LoadedPrimitive, ...] | list[LoadedPrimitive]",
     registries: PackRegistries,
@@ -306,6 +324,7 @@ def project_into_registries(
             impl(_ctx.ToolProvideContext(
                 register=_provide_tool(registries, ref),
                 register_workspace_handler=_provide_workspace_handler(registries),
+                register_handler=_provide_tool_handler(registries),
             ))
             registered.append(ref)
         elif ptype == "evidence_producer":
