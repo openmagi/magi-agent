@@ -1,4 +1,4 @@
-# Customize matrix end-to-end harness (PR-F-QA1)
+# Customize matrix end-to-end harness (PR-F-QA1 + F-QA2)
 
 End-to-end coverage for the `_LEGAL` matrix in
 `magi_agent/customize/custom_rules.py`. Iterates every legal
@@ -7,16 +7,13 @@ storage API, drives a synthetic trigger at the matching runtime
 chokepoint, asserts the verdict matches the matrix-declared action,
 cleans up.
 
-## What this PR covers (F-QA1)
+## What's covered (F-QA1 + F-QA2)
 
-Three slots (the most-used ones):
+### F-QA1 — tool-use slots (3)
 
 - `pre_final`
 - `before_tool_use`
 - `after_tool_use`
-
-Combined with every legal kind, that is **22 combos** out of the full
-matrix's 76. The remaining 14 lifecycle slots ship in F-QA2-5.
 
 | Kind                 | pre_final | before_tool_use | after_tool_use |
 |----------------------|-----------|-----------------|----------------|
@@ -29,13 +26,39 @@ matrix's 76. The remaining 14 lifecycle slots ship in F-QA2-5.
 | `shell_command`      | block / audit | block / audit | audit |
 | `shell_check`        | block / audit | block / audit | audit |
 
-`capability_scope` fires at `spawn` only — covered in F-QA4.
+### F-QA2 — turn-boundary slots (4)
+
+All four funnel through `run_governed_turn` (the canonical
+CLI/serve/child entry point). `before_turn_start` /
+`on_user_prompt_submit` are GATE slots — `block` short-circuits the
+engine stream BEFORE `rt.engine.run_turn_stream` is invoked.
+`after_turn_end` fires in the finally block on TOP-LEVEL turns
+(audit-only by `_LEGAL` — block excluded). `on_subagent_stop` fires
+in the finally block on CHILD turns (`ctx.depth > 0`); F-LIFE1
+lifted the action set to `{audit, block, ask_approval}` for
+authorability but runtime parent-surfacing is NOT wired yet (TODO
+per F-LIFE1 review pass — the asserter records the audit but does
+NOT assert a parent-side block).
+
+| Kind               | before_turn_start | after_turn_end | on_user_prompt_submit | on_subagent_stop |
+|--------------------|-------------------|----------------|-----------------------|------------------|
+| `llm_criterion`    | audit / block / ask_approval | audit | audit / block | audit / block / ask_approval |
+| `prompt_injection` | — | — | audit | — |
+| `shell_command`    | audit | audit | audit | audit |
+| `shell_check`      | audit / block / ask_approval | audit | audit / block | audit / block / ask_approval |
+
+`capability_scope` (spawn-only) ships in F-QA4. The remaining
+~10 lifecycle slots (LLM_CALL / compaction / task / artifact /
+session) ship in F-QA3-5.
 
 ## How to run
 
 ```bash
 # From the repo root
 pytest tests/e2e/customize/test_matrix_tool_use.py -v
+pytest tests/e2e/customize/test_matrix_turn_boundary.py -v
+# Or both at once
+pytest tests/e2e/customize/ -v
 ```
 
 Collection alone (sanity check the matrix without executing rules):
@@ -94,18 +117,34 @@ gate. At least one of these must be exported when those rows ship:
 
 ## Cost envelope
 
-F-QA1 with the patched judge: **$0** in API calls (no live LLM round
-trips). Shell rules spawn real `bash`/`sh` subprocesses; the inline
-scripts are `exit 0` / `exit 1` / `echo '{"passed": true}'` only.
+F-QA1 + F-QA2 with the patched judge: **$0** in API calls (no live LLM
+round trips). The F-QA2 turn-boundary slots heavily exercise
+`llm_criterion` (4 slots × 3 actions for that kind alone), so the
+`patched_judge` fixture is doing most of the work — without it the
+matrix would be the most expensive slice in the suite. Shell rules
+spawn real `bash`/`sh` subprocesses; the inline scripts are `exit 0`
+/ `exit 1` / `echo '{"passed": true}'` only.
 
-F-QA3 (planned) with live LLM rows enabled: estimated **$0.50-2** per
-full matrix run with a cheap binary-verdict critic model.
+F-QA3 (planned) with live LLM rows enabled: estimated **$1-4** per
+full matrix run with a cheap binary-verdict critic model (the
+F-QA2 llm_criterion-heavy turn-boundary axis pushes the per-run
+cost above the F-QA1-only estimate; budget conservatively).
 
 ## Runtime
 
 F-QA1 full matrix run: ~30-90 seconds (22 combos, each authoring a
 rule, driving 1 trigger, and asserting). Shell rules dominate the
 wall-clock (subprocess startup is ~10-50ms per spawn).
+
+F-QA2 adds **~20 combos** (4 slots × kinds × actions per the
+turn-boundary table above). Each row drives a real
+`run_governed_turn` with a fake engine + monkeypatched judge — no
+subprocess spawn, no LLM round trip — so the F-QA2 slice runs in
+~20-40 seconds. The shell_command / shell_check rows still spawn
+real subprocesses for their pre-final / before-tool-use siblings
+(F-QA1), but the F-QA2 turn-boundary shell rows fire the audit
+fan-out helpers which do NOT spawn at all when the matching rule's
+inline script is the trivial `exit 0` / `exit 1`.
 
 ## What's intentionally NOT covered
 
@@ -126,15 +165,16 @@ wall-clock (subprocess startup is ~10-50ms per spawn).
 
 ## File layout
 
-| File                       | Role                                       |
-|----------------------------|--------------------------------------------|
-| `matrix.py`                | `iter_legal_combinations`, scope filters   |
-| `payload_factory.py`       | Per-kind minimal valid rule dict           |
-| `triggers.py`              | Per-slot synthetic trigger drivers         |
-| `asserter.py`              | Per-action verdict assertions              |
-| `conftest.py`              | Fixtures (flags, judge, identity, cleanup) |
-| `test_matrix_tool_use.py`  | Parametrized 5-step pattern                |
-| `README.md`                | This file                                  |
+| File                            | Role                                       |
+|---------------------------------|--------------------------------------------|
+| `matrix.py`                     | `iter_legal_combinations`, scope filters (F_QA1_SLOTS / F_QA2_SLOTS) |
+| `payload_factory.py`            | Per-kind minimal valid rule dict           |
+| `triggers.py`                   | Per-slot synthetic trigger drivers (F-QA1 tool-use + F-QA2 turn-boundary) |
+| `asserter.py`                   | Per-action verdict assertions              |
+| `conftest.py`                   | Fixtures (flags, judge, identity, cleanup) |
+| `test_matrix_tool_use.py`       | F-QA1 parametrized matrix (3 tool-use slots) |
+| `test_matrix_turn_boundary.py`  | F-QA2 parametrized matrix (4 turn-boundary slots) |
+| `README.md`                     | This file                                  |
 
 ## Adding a new kind / slot / action
 

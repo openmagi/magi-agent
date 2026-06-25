@@ -38,6 +38,20 @@ from typing import Any
 from tests.e2e.customize.triggers import TriggerOutcome
 
 
+# F-QA2 turn-boundary slot set. The asserter delegates to dedicated
+# branches for these because the trigger outcome is shaped around
+# ``run_governed_turn``'s yielded items + engine-invocation telemetry,
+# not the per-kind side-effect bag the F-QA1 tool-use slots populate.
+_F_QA2_TURN_BOUNDARY_SLOTS = frozenset(
+    {
+        "before_turn_start",
+        "after_turn_end",
+        "on_user_prompt_submit",
+        "on_subagent_stop",
+    }
+)
+
+
 def assert_action_honored(
     outcome: TriggerOutcome,
     *,
@@ -60,6 +74,21 @@ def assert_action_honored(
 
     if not payload_should_fire:
         _assert_did_not_fire(outcome, ctx=ctx)
+        return
+
+    # F-QA2: turn-boundary slots route to a dedicated assertion family.
+    # The trigger drives a real ``run_governed_turn`` and the outcome's
+    # side_effects bag carries ``items`` / ``engine_invoked`` /
+    # ``blocked_terminals`` instead of the per-kind shapes the F-QA1
+    # tool-use branches inspect.
+    if slot in _F_QA2_TURN_BOUNDARY_SLOTS:
+        _assert_turn_boundary_honored(
+            outcome,
+            kind=kind,
+            slot=slot,
+            expected_action=expected_action,
+            ctx=ctx,
+        )
         return
 
     if expected_action == "audit":
@@ -307,6 +336,191 @@ def _assert_override_honored(
     assert override.get("status") == "blocked", (
         f"override dict expected status='blocked'; got {override!r} ({ctx})"
     )
+
+
+# ---------------------------------------------------------------------------
+# F-QA2 turn-boundary assertions
+# ---------------------------------------------------------------------------
+
+
+def _assert_turn_boundary_honored(
+    outcome: TriggerOutcome,
+    *,
+    kind: str,
+    slot: str,
+    expected_action: str,
+    ctx: str,
+) -> None:
+    """Assert ``run_governed_turn`` honored a turn-boundary rule per ``_LEGAL``.
+
+    Slot semantics (per :mod:`magi_agent.runtime.governed_turn`):
+
+    * ``before_turn_start`` / ``on_user_prompt_submit`` — these are GATE
+      slots. ``block``-action MUST short-circuit the funnel BEFORE the
+      engine stream is consumed (``engine_invoked == False`` and the
+      yielded list is a single synthetic
+      ``EngineResult(terminal=Terminal.aborted)`` whose error string
+      identifies the blocking slot). ``audit`` / ``ask_approval`` are
+      honest-degrade today — the turn proceeds, engine is invoked, and
+      no synthetic policy-blocked terminal appears.
+
+    * ``after_turn_end`` — audit-only by ``_LEGAL`` (block excluded).
+      The turn MUST complete: engine invoked, no synthetic terminal in
+      the yielded items, ``runtime_verdict == "proceed"``.
+
+    * ``on_subagent_stop`` — ``_LEGAL`` accepts
+      ``{audit, block, ask_approval}`` for authorability (F-LIFE1
+      lift), but the runtime parent-surfacing wire is NOT built yet
+      (TODO per F-LIFE1 review pass). The asserter:
+        * verifies the engine WAS invoked (child turn ran),
+        * verifies no synthetic policy-blocked terminal appears
+          (parent SpawnAgent does not yet consume the verdict),
+        * does NOT assert any caller-side block / requires_approval
+          surface — the contract is "audit ledger captures the verdict;
+          runtime surfacing is a follow-up".
+    """
+    side = outcome.side_effects
+    items = side.get("items", [])
+    engine_invoked = bool(side.get("engine_invoked"))
+    blocked_terminals = side.get("blocked_terminals", [])
+
+    if slot in {"before_turn_start", "on_user_prompt_submit"}:
+        if expected_action == "block":
+            # shell_check block at turn-boundary slots is HONEST-DEGRADE in
+            # v1 per the ``custom_rules._LEGAL`` shell_check comment:
+            # "Other lifecycle slots are accepted by the validator
+            # (mirroring llm_criterion's matrix) for forward-compat
+            # authoring, but in v1 the runtime fan-out helpers fire them
+            # audit-only — the verifier records the per-rule verdict
+            # alongside the llm_criterion audit but does not gate the
+            # surrounding chokepoint."
+            # Concretely: ``_maybe_run_before_turn_start_gate`` and
+            # ``_maybe_run_user_prompt_submit_gate`` only consult
+            # ``llm_criterion`` rules. A shell_check block-action rule at
+            # one of these slots is recorded by the audit but does NOT
+            # short-circuit the engine stream. The matrix accepts that
+            # contract — runtime parity follows in a separate PR.
+            if kind == "shell_check":
+                assert engine_invoked, (
+                    f"shell_check block at {slot!r} is audit-only in v1 "
+                    f"(runtime gate consults llm_criterion only) — engine "
+                    f"MUST still run; got engine_invoked={engine_invoked!r} "
+                    f"({ctx})"
+                )
+                # No synthetic policy-blocked terminal should appear.
+                unexpected = [
+                    i for i in items
+                    if _looks_like_policy_blocked_for_slot(i, slot=slot)
+                ]
+                assert not unexpected, (
+                    f"shell_check block at {slot!r} MUST NOT short-circuit "
+                    f"in v1 (audit-only honest-degrade); got "
+                    f"unexpected={unexpected!r} ({ctx})"
+                )
+                return
+            # llm_criterion / shacl_constraint: a true GATE block.
+            # Engine MUST NOT have been invoked; the synthetic
+            # policy-blocked terminal MUST be the only yielded item.
+            assert outcome.runtime_verdict == "block", (
+                f"turn-boundary block expected verdict='block'; "
+                f"got verdict={outcome.runtime_verdict!r} ({ctx})"
+            )
+            assert not engine_invoked, (
+                f"turn-boundary block at {slot!r} MUST short-circuit "
+                f"BEFORE rt.engine.run_turn_stream is invoked; "
+                f"got engine_invoked={engine_invoked!r} "
+                f"calls={side.get('engine_run_turn_stream_calls')!r} ({ctx})"
+            )
+            assert len(items) == 1, (
+                f"turn-boundary block expected exactly one yielded item "
+                f"(the synthetic policy-blocked terminal); got "
+                f"{len(items)} items={items!r} ({ctx})"
+            )
+            return
+        # audit / ask_approval at a gate slot: honest-degrade — turn
+        # proceeds, engine IS invoked, NO synthetic policy-blocked
+        # terminal appears among yielded items.
+        assert engine_invoked, (
+            f"turn-boundary {expected_action!r} at {slot!r} MUST proceed "
+            f"(engine invoked); got engine_invoked={engine_invoked!r} ({ctx})"
+        )
+        # Inspect items for a stray synthetic terminal — there should be
+        # none on a non-block action.
+        unexpected = [
+            i for i in items
+            if _looks_like_policy_blocked_for_slot(i, slot=slot)
+        ]
+        assert not unexpected, (
+            f"turn-boundary {expected_action!r} at {slot!r} MUST NOT emit "
+            f"a synthetic policy-blocked terminal; got "
+            f"unexpected={unexpected!r} ({ctx})"
+        )
+        return
+
+    if slot == "after_turn_end":
+        # Audit-only per _LEGAL. Engine MUST be invoked; no synthetic
+        # terminal should appear in the items.
+        assert engine_invoked, (
+            f"after_turn_end {expected_action!r} MUST let the engine run; "
+            f"got engine_invoked={engine_invoked!r} ({ctx})"
+        )
+        assert not blocked_terminals, (
+            f"after_turn_end is audit-only — a synthetic policy-blocked "
+            f"terminal MUST NOT appear; got {blocked_terminals!r} ({ctx})"
+        )
+        assert outcome.runtime_verdict == "proceed", (
+            f"after_turn_end expected verdict='proceed'; "
+            f"got {outcome.runtime_verdict!r} ({ctx})"
+        )
+        return
+
+    if slot == "on_subagent_stop":
+        # Authorability-lift (F-LIFE1) but no parent-surfacing wire yet.
+        # Verify: child turn ran (engine invoked), no synthetic
+        # policy-blocked terminal appears. DO NOT assert any parent-side
+        # block — that's the F-LIFE1 follow-up TODO.
+        assert engine_invoked, (
+            f"on_subagent_stop {expected_action!r} MUST let the child "
+            f"engine run; got engine_invoked={engine_invoked!r} ({ctx})"
+        )
+        assert not blocked_terminals, (
+            f"on_subagent_stop runtime parent-surfacing is NOT wired yet "
+            f"(F-LIFE1 TODO); the slot MUST NOT emit a synthetic "
+            f"policy-blocked terminal even on action={expected_action!r}; "
+            f"got {blocked_terminals!r} ({ctx})"
+        )
+        # Verdict label: trigger always reports "proceed" because the
+        # parent path does not short-circuit on this slot today.
+        assert outcome.runtime_verdict == "proceed", (
+            f"on_subagent_stop runtime_verdict expected 'proceed' "
+            f"(audit-only at the parent funnel today); "
+            f"got {outcome.runtime_verdict!r} ({ctx})"
+        )
+        # ``kind`` is informational here — the audit ledger contents
+        # are covered by the per-kind firing tests in
+        # ``tests/customize_firing/``. The matrix row's job is to
+        # confirm the wire stayed alive AND that runtime did not
+        # accidentally activate the missing parent-surfacing path.
+        _ = kind
+        return
+
+    raise AssertionError(
+        f"_assert_turn_boundary_honored has no branch for slot={slot!r} ({ctx})"
+    )
+
+
+def _looks_like_policy_blocked_for_slot(item: object, *, slot: str) -> bool:
+    """True iff *item* is a synthetic ``customize_policy_blocked`` for *slot*."""
+    try:
+        from magi_agent.cli.contracts import EngineResult, Terminal
+    except Exception:
+        return False
+    if not isinstance(item, EngineResult):
+        return False
+    if item.terminal is not Terminal.aborted:
+        return False
+    error = item.error or ""
+    return "customize_policy_blocked" in error and slot in error
 
 
 def _assert_did_not_fire(outcome: TriggerOutcome, *, ctx: str) -> None:
