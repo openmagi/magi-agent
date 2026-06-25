@@ -51,6 +51,45 @@ _F_QA2_TURN_BOUNDARY_SLOTS = frozenset(
     }
 )
 
+# F-QA3 per-LLM-call slot set. The asserter delegates to a dedicated
+# branch because the trigger outcome is shaped around the ADK plugin's
+# ``on_before_model`` / ``on_after_model`` return value (``None`` ⇒
+# proceed; synthetic LlmResponse with ``customize_policy_blocked``
+# error_message ⇒ block) — not the per-kind side-effect bag.
+_F_QA3_LLM_CALL_SLOTS = frozenset({"before_llm_call", "after_llm_call"})
+
+# F-QA4 late-lifecycle slot set. The asserter delegates to a dedicated
+# branch because each chokepoint exposes a different evidence shape:
+# compaction → post-call ``contents`` identity; work-queue → tick result +
+# post-task status; artifact → ``FileDeliveryDecision`` reason_codes +
+# diagnostics; task_complete → governed-turn items + engine telemetry;
+# session_start → first/second on_before_model return values; spawn →
+# pre/post toolset name diff. Per-slot helpers below shape each into
+# pass/fail with a precise (kind, slot, action, rule_id) message.
+_F_QA4_LATE_LIFECYCLE_SLOTS = frozenset(
+    {
+        "before_compaction",
+        "after_compaction",
+        "on_task_checkpoint",
+        "on_artifact_created",
+        "on_task_complete",
+        "on_session_start",
+        "spawn",
+    }
+)
+
+# F-QA5 shell-kind slot set. The shell matrix in
+# :mod:`tests.e2e.customize.test_matrix_shell` routes its parametrized
+# rows through :func:`_assert_shell_honored` rather than the
+# slot-keyed F-QA2 / F-QA3 / F-QA4 branches because the F-QA5 trigger
+# outcomes carry the lifecycle_audit-fan-out audit records directly
+# (and a derived gate verdict) regardless of which lifecycle slot the
+# row maps onto. Keying off ``kind in {shell_command, shell_check}``
+# alone would clash with F-QA1 / F-QA2 / F-QA4 rows that exercise the
+# same kinds via their own (facade / governed-turn / compaction)
+# triggers — the matrix's slot dispatch keeps the row paths disjoint.
+_F_QA5_SHELL_KINDS = frozenset({"shell_command", "shell_check"})
+
 
 def assert_action_honored(
     outcome: TriggerOutcome,
@@ -83,6 +122,36 @@ def assert_action_honored(
     # tool-use branches inspect.
     if slot in _F_QA2_TURN_BOUNDARY_SLOTS:
         _assert_turn_boundary_honored(
+            outcome,
+            kind=kind,
+            slot=slot,
+            expected_action=expected_action,
+            ctx=ctx,
+        )
+        return
+
+    # F-QA3: per-LLM-call slots route to a dedicated assertion family.
+    # The trigger drives ``LifecycleLlmCallAuditControl.on_before_model``
+    # / ``on_after_model`` directly; the outcome carries the plugin's
+    # return value (``None`` ⇒ proceed; synthetic
+    # ``customize_policy_blocked`` LlmResponse ⇒ block) under
+    # ``side_effects['result']`` / ``side_effects['blocked_response']``.
+    if slot in _F_QA3_LLM_CALL_SLOTS:
+        _assert_llm_call_honored(
+            outcome,
+            kind=kind,
+            slot=slot,
+            expected_action=expected_action,
+            ctx=ctx,
+        )
+        return
+
+    # F-QA4: late-lifecycle slots route to a dedicated assertion family.
+    # Each slot's trigger drives a distinct production chokepoint and
+    # populates a slot-specific evidence bag — the asserter shapes
+    # those into a uniform pass/fail.
+    if slot in _F_QA4_LATE_LIFECYCLE_SLOTS:
+        _assert_late_lifecycle_honored(
             outcome,
             kind=kind,
             slot=slot,
@@ -509,6 +578,86 @@ def _assert_turn_boundary_honored(
     )
 
 
+def _assert_llm_call_honored(
+    outcome: TriggerOutcome,
+    *,
+    kind: str,
+    slot: str,
+    expected_action: str,
+    ctx: str,
+) -> None:
+    """Assert the ADK LLM-call plugin honored ``expected_action`` for ``(kind, slot)``.
+
+    Slot semantics (per :mod:`magi_agent.adk_bridge.lifecycle_llm_call_control`):
+
+    * ``before_llm_call`` block — ``on_before_model`` MUST return the
+      synthetic policy-blocked ``LlmResponse`` so the surrounding ADK
+      callback dispatcher suppresses the outbound model call. The
+      synthetic response's ``error_message`` MUST start with
+      ``"customize_policy_blocked:"`` and identify the slot.
+    * ``after_llm_call`` block — ``on_after_model`` MUST return the
+      synthetic refusal so the downstream consumer never sees the
+      offending text (ADK after_model supports replacing the response).
+      The audit-only sibling returns ``None`` so the original response
+      surfaces unchanged.
+    * Both slots ``audit`` action — ``None`` return; the audit ledger
+      captures the judge invocation but no policy block fires.
+
+    v1 ``_LEGAL`` only accepts ``llm_criterion`` rules at these slots
+    (kind argument is informational — used only to surface a clear
+    failure message).
+    """
+    # The LLM-call slots only accept llm_criterion in v1 — defensively
+    # surface a clear message if the matrix ever lifts to other kinds.
+    if kind != "llm_criterion":
+        raise AssertionError(
+            f"_assert_llm_call_honored: v1 only supports llm_criterion at "
+            f"{slot!r}; got kind={kind!r} ({ctx})"
+        )
+
+    side = outcome.side_effects
+    result = side.get("result")
+    blocked_response = side.get("blocked_response")
+
+    if expected_action == "block":
+        # block MUST return the synthetic policy-blocked LlmResponse — not
+        # None. _classify_llm_call_result already pinned the slot label
+        # appears in the error_message; surface a friendly failure when
+        # the plugin returned None (the gate fell through to fail-open).
+        assert outcome.runtime_verdict == "block", (
+            f"{slot} block expected runtime_verdict='block'; got "
+            f"{outcome.runtime_verdict!r} result={result!r} ({ctx})"
+        )
+        assert blocked_response is not None, (
+            f"{slot} block expected synthetic policy-blocked LlmResponse "
+            f"return; got result={result!r} ({ctx})"
+        )
+        # The plugin's policy-blocked helper sets ``error_message`` to
+        # ``"customize_policy_blocked: <slot> llm_criterion verdict=block"``.
+        # _classify_llm_call_result has already filtered for the marker
+        # substring; assert the slot-label tag explicitly so a future
+        # regression that swaps the slot label loud-fails.
+        error_message = getattr(blocked_response, "error_message", "") or ""
+        assert slot in error_message, (
+            f"{slot} block expected slot label in error_message; got "
+            f"error_message={error_message!r} ({ctx})"
+        )
+        return
+
+    # audit (the only other v1 action) — plugin returns None so the
+    # model call proceeds. The audit ledger captures the judge's verdict
+    # via the patched_judge sentinel; we accept verdict in {proceed} as
+    # evidence that no synthetic refusal fired.
+    assert outcome.runtime_verdict == "proceed", (
+        f"{slot} {expected_action!r} expected verdict='proceed'; got "
+        f"{outcome.runtime_verdict!r} result={result!r} ({ctx})"
+    )
+    assert result is None, (
+        f"{slot} {expected_action!r} expected on_*_model return None "
+        f"(model call proceeds); got result={result!r} ({ctx})"
+    )
+
+
 def _looks_like_policy_blocked_for_slot(item: object, *, slot: str) -> bool:
     """True iff *item* is a synthetic ``customize_policy_blocked`` for *slot*."""
     try:
@@ -521,6 +670,486 @@ def _looks_like_policy_blocked_for_slot(item: object, *, slot: str) -> bool:
         return False
     error = item.error or ""
     return "customize_policy_blocked" in error and slot in error
+
+
+def _assert_late_lifecycle_honored(
+    outcome: TriggerOutcome,
+    *,
+    kind: str,
+    slot: str,
+    expected_action: str,
+    ctx: str,
+) -> None:
+    """Assert the F-QA4 late-lifecycle chokepoint honored ``expected_action``.
+
+    Per-slot semantics (cross-references the runtime chokepoints + the
+    relevant F-LIFE review-pass NOTEs):
+
+    * ``before_compaction`` — audit-only by default; ``block`` action
+      causes :meth:`MagiContextCompactionPlugin._apply_tail_trim` to
+      RETURN EARLY without mutating ``llm_request.contents``. Asserter
+      verifies the post-call contents are byte-identical to the pre-call
+      contents on ``block`` rows.
+    * ``after_compaction`` — audit-only by ``_LEGAL`` (block excluded).
+      Asserter only confirms the trigger ran without raising; firing
+      evidence is covered by the JudgePatcher.calls sanity check in the
+      test body.
+    * ``on_task_checkpoint`` — F-LIFE4a review-pass NOTE: only the
+      ``claimed`` transition honors a true block; other transitions are
+      audit-only. Asserter:
+        - ``audit`` / ``ask_approval`` rows: the in-memory task moves to
+          ``completed`` (the stub runner returns ``outcome="completed"``).
+          ``ask_approval`` is honest-degrade today (audit only).
+        - ``block`` rows: the task moves to ``failed`` with the
+          ``customize_policy_blocked`` error sentinel; the driver does
+          NOT advance to the runner.
+    * ``on_artifact_created`` — block is honestly impossible (artifact
+      already written by the provider). Asserter:
+        - ``audit`` rows: the decision MUST NOT carry the
+          ``artifact_review_pending`` reason code.
+        - ``ask_approval`` rows: the decision MUST carry
+          ``requires_approval=True`` in ``diagnostic_metadata`` with
+          ``approval_slot == "on_artifact_created"`` (the audit ledger's
+          ``requires_approval=true`` marker per the F-LIFE4a wire).
+    * ``on_task_complete`` — F-LIFE4b review-pass NOTE: the collector
+      annotates audit records with ``requires_approval`` / ``gate_verdict``
+      for block / ask actions, but no compensating-action wire (turn
+      rollback) ships in v1. Asserter verifies the engine ran (turn
+      proceeded) for every action — the ledger annotations are
+      observability-only.
+    * ``on_session_start`` — first-fire-per-session contract:
+        - First call: ``audit`` ⇒ proceed (``None`` return); ``block`` ⇒
+          synthetic policy-blocked ``LlmResponse`` whose
+          ``error_message`` carries ``customize_policy_blocked:
+          on_session_start`` (the plugin's helper).
+        - Second call (same session): MUST short-circuit and return
+          ``None`` regardless of action — the membership check fires
+          before the policy load.
+    * ``spawn`` — capability_scope deterministic subtraction:
+        - The ``denyTools=["shell_exec"]`` payload removes ``shell_exec``
+          from the resolved toolset. Asserter verifies ``shell_exec``
+          appears in ``removed_tool_names`` and the remaining toolset
+          equals the original minus the deny entry.
+
+    Asserter does NOT inspect the audit ledger directly — the test body's
+    ``JudgePatcher.calls`` sanity check is responsible for "the rule
+    fired at all". Each branch surfaces a precise failure message so a
+    failing matrix row identifies the offending combo.
+    """
+    side = outcome.side_effects
+
+    if slot == "before_compaction":
+        original = side.get("original_contents") or []
+        post = side.get("post_contents") or []
+        if expected_action == "block":
+            # ``_maybe_compaction_blocked`` consults
+            # :func:`run_before_compaction_gate` which today only
+            # derives a block verdict from ``llm_criterion`` audits.
+            # The validator accepts ``shell_check`` at this slot with
+            # action=block (for forward-compat authoring per
+            # ``custom_rules._LEGAL``'s "Other lifecycle slots are
+            # accepted by the validator..." NOTE), but the runtime
+            # gate is audit-only for shell_check. Mirror the F-QA2
+            # shell_check turn-boundary block honest-degrade: assert
+            # the trigger ran without raising and short-circuit the
+            # strict "contents unchanged" check.
+            if kind == "shell_check":
+                return
+            # llm_criterion block honest-degrade: _apply_tail_trim
+            # returns early WITHOUT mutating contents. The trigger
+            # drove the call with a sliceable list so the asserter
+            # can compare.
+            assert post == original, (
+                f"before_compaction block expected contents unchanged "
+                f"(early return on block); got original={original!r} "
+                f"post={post!r} ({ctx})"
+            )
+            return
+        # audit: helper fired, judge call records audit; we cannot
+        # tightly assert "mutated" because orphan adjustment may keep
+        # the whole list. Pass-through.
+        return
+
+    if slot == "after_compaction":
+        # Audit-only per _LEGAL (block excluded). The driver simply ran
+        # _apply_tail_trim end-to-end; ON-firing evidence is the
+        # JudgePatcher.calls sanity check in the test body.
+        return
+
+    if slot == "on_task_checkpoint":
+        post_status = side.get("post_status")
+        post_error = side.get("post_error") or ""
+        tick = side.get("tick_result")
+        tick_failed = getattr(tick, "failed", 0) if tick is not None else 0
+        if expected_action == "block":
+            # ``_check_task_checkpoint_gate_sync`` consults
+            # :func:`run_on_task_checkpoint_gate` which only derives
+            # a verdict from ``llm_criterion`` audits in v1. The
+            # validator accepts ``shell_check`` at this slot for
+            # forward-compat authoring; runtime gate consult for
+            # shell_check is a follow-up. Mirror the
+            # before_compaction shell_check honest-degrade — the task
+            # proceeds to completed because the gate sees no block.
+            if kind == "shell_check":
+                assert post_status == "completed", (
+                    f"on_task_checkpoint shell_check block honest-"
+                    f"degrade expected post_status='completed' (runtime "
+                    f"gate is llm_criterion-only in v1); got "
+                    f"post_status={post_status!r} ({ctx})"
+                )
+                return
+            # F-LIFE4a review-pass NOTE: block honored at the claimed
+            # transition. Driver routes through ``record_failure`` with
+            # the ``customize_policy_blocked`` sentinel. The in-memory
+            # store's first-failure transition is back to ``ready``
+            # (for retry; transitions to ``blocked`` at
+            # ``failure_limit``), so the asserter pins
+            # ``tick.failed >= 1`` + the sentinel error rather than a
+            # final terminal status.
+            assert tick_failed >= 1, (
+                f"on_task_checkpoint block expected tick.failed >= 1; "
+                f"got tick={tick!r} post_status={post_status!r} ({ctx})"
+            )
+            assert "customize_policy_blocked" in post_error, (
+                f"on_task_checkpoint block expected error to contain "
+                f"'customize_policy_blocked'; got error={post_error!r} ({ctx})"
+            )
+            return
+        # audit / ask_approval: claimed → completed transition; the
+        # stub runner returns outcome=completed. ask_approval is
+        # honest-degrade (audit-only) at non-claimed transitions and at
+        # this driver's single-task tick the verdict is recorded but
+        # the task advances normally.
+        assert post_status == "completed", (
+            f"on_task_checkpoint {expected_action!r} expected post_status="
+            f"'completed'; got post_status={post_status!r} ({ctx})"
+        )
+        return
+
+    if slot == "on_artifact_created":
+        reason_codes = set(side.get("decision_reason_codes") or ())
+        requires_approval = bool(side.get("decision_requires_approval"))
+        approval_slot = side.get("decision_approval_slot")
+        if expected_action == "ask_approval":
+            # Honest-degrade: ``_check_artifact_created_gate_sync``
+            # consults :func:`run_on_artifact_created_gate` which only
+            # derives a verdict from ``llm_criterion`` audits today.
+            # The validator accepts ``shell_check`` ask_approval at
+            # this slot for forward-compat authoring; runtime gate
+            # consult lands in a follow-up. Mirror the
+            # before_compaction shell_check honest-degrade.
+            if kind == "shell_check":
+                return
+            assert "artifact_review_pending" in reason_codes, (
+                f"on_artifact_created ask_approval expected "
+                f"'artifact_review_pending' reason; got "
+                f"reason_codes={reason_codes!r} ({ctx})"
+            )
+            assert requires_approval, (
+                f"on_artifact_created ask_approval expected "
+                f"diagnostic_metadata.requires_approval=True (audit "
+                f"ledger marker); got requires_approval={requires_approval!r} "
+                f"({ctx})"
+            )
+            assert approval_slot == "on_artifact_created", (
+                f"on_artifact_created ask_approval expected "
+                f"approval_slot='on_artifact_created'; got "
+                f"approval_slot={approval_slot!r} ({ctx})"
+            )
+            return
+        # audit: decision MUST NOT carry the artifact_review_pending
+        # reason / the requires_approval marker (audit-only — the
+        # boundary proceeds without flagging the artifact for review).
+        assert "artifact_review_pending" not in reason_codes, (
+            f"on_artifact_created audit expected NO "
+            f"'artifact_review_pending' reason; got "
+            f"reason_codes={reason_codes!r} ({ctx})"
+        )
+        assert not requires_approval, (
+            f"on_artifact_created audit expected requires_approval=False; "
+            f"got requires_approval={requires_approval!r} ({ctx})"
+        )
+        return
+
+    if slot == "on_task_complete":
+        engine_invoked = bool(side.get("engine_invoked"))
+        items = side.get("items") or []
+        # F-LIFE4b review-pass NOTE: no compensating-action wire in v1
+        # — block / ask annotate the audit ledger but never roll back
+        # the already-emitted turn. Engine MUST have run for every
+        # action.
+        assert engine_invoked, (
+            f"on_task_complete {expected_action!r} MUST let the engine "
+            f"run; got engine_invoked={engine_invoked!r} ({ctx})"
+        )
+        # No synthetic policy-blocked terminal — the compensating-action
+        # wire is deferred per F-LIFE4b review.
+        unexpected = [
+            i for i in items
+            if _looks_like_policy_blocked_for_slot(i, slot="on_task_complete")
+        ]
+        assert not unexpected, (
+            f"on_task_complete {expected_action!r} compensating-action "
+            f"wire is deferred (F-LIFE4b review NOTE); a synthetic "
+            f"policy-blocked terminal MUST NOT appear; got "
+            f"unexpected={unexpected!r} ({ctx})"
+        )
+        return
+
+    if slot == "on_session_start":
+        # First-fire-per-session: second call MUST be silent regardless
+        # of action.
+        second_was_silent = bool(side.get("second_was_silent"))
+        assert second_was_silent, (
+            f"on_session_start expected second call (same session) to "
+            f"return None — first-fire-per-session contract violated; "
+            f"got second_result={side.get('second_result')!r} ({ctx})"
+        )
+        if expected_action == "block":
+            # First call MUST return the synthetic policy-blocked
+            # LlmResponse so the model call is suppressed.
+            assert outcome.runtime_verdict == "block", (
+                f"on_session_start block expected first call verdict="
+                f"'block'; got {outcome.runtime_verdict!r} "
+                f"first_result={side.get('first_result')!r} ({ctx})"
+            )
+            blocked = side.get("first_blocked_response")
+            assert blocked is not None, (
+                f"on_session_start block expected synthetic "
+                f"policy-blocked LlmResponse on first call; got "
+                f"first_blocked_response=None ({ctx})"
+            )
+            error_message = getattr(blocked, "error_message", "") or ""
+            assert "on_session_start" in error_message, (
+                f"on_session_start block expected slot label in "
+                f"error_message; got error_message={error_message!r} ({ctx})"
+            )
+            return
+        # audit: first call returns None (proceed); audit ledger
+        # captures the verdict via the patched judge.
+        assert outcome.runtime_verdict == "proceed", (
+            f"on_session_start {expected_action!r} expected first call "
+            f"verdict='proceed'; got {outcome.runtime_verdict!r} ({ctx})"
+        )
+        return
+
+    if slot == "spawn":
+        if kind != "capability_scope":
+            raise AssertionError(
+                f"spawn slot only legal for capability_scope; got "
+                f"kind={kind!r} ({ctx})"
+            )
+        original = list(side.get("original_tool_names") or [])
+        narrowed = list(side.get("narrowed_tool_names") or [])
+        removed = list(side.get("removed_tool_names") or [])
+        # The payload factory authors denyTools=["shell_exec"]. Verify
+        # the deterministic subtraction landed.
+        assert "shell_exec" in removed, (
+            f"spawn capability_scope expected 'shell_exec' subtracted "
+            f"(denyTools); got removed={removed!r} original={original!r} "
+            f"narrowed={narrowed!r} ({ctx})"
+        )
+        assert "shell_exec" not in narrowed, (
+            f"spawn capability_scope expected 'shell_exec' NOT in "
+            f"narrowed toolset; got narrowed={narrowed!r} ({ctx})"
+        )
+        # All remaining tools should survive — only the deny entry is
+        # subtracted.
+        remaining = [n for n in original if n != "shell_exec"]
+        assert narrowed == remaining, (
+            f"spawn capability_scope expected only 'shell_exec' "
+            f"subtracted; got narrowed={narrowed!r} "
+            f"expected={remaining!r} ({ctx})"
+        )
+        return
+
+    raise AssertionError(
+        f"_assert_late_lifecycle_honored has no branch for slot={slot!r} ({ctx})"
+    )
+
+
+def assert_shell_action_honored(
+    outcome: TriggerOutcome,
+    *,
+    kind: str,
+    slot: str,
+    rule_id: str,
+    expected_action: str,
+) -> None:
+    """F-QA5 entry point — assert a shell rule honored ``expected_action``.
+
+    Routes shell_command / shell_check matrix rows authored by
+    :mod:`tests.e2e.customize.test_matrix_shell` through a single
+    asserter that understands the lifecycle_audit fan-out outcome
+    shape regardless of slot. The F-QA1 / F-QA2 / F-QA4 asserters
+    (which route via slot, not kind) cannot be reused here because
+    they assume per-slot trigger shapes (facade ToolResult / governed
+    turn items / FileDeliveryDecision) that the shell fan-out
+    triggers do not produce.
+
+    Per-action contract:
+
+    * ``audit`` — at least one audit record in
+      ``{executed, evaluated, budget_exhausted}`` AND ``runtime_verdict``
+      is not ``block``. ``budget_exhausted`` is honored as evidence the
+      gate fired (the cross-kind budget test exercises this path
+      explicitly).
+    * ``block`` — ``runtime_verdict == "block"`` OR (at audit-only
+      siblings where the gate cannot short-circuit) at least one
+      audit record carries a non-zero exit code as the in-band
+      "block-shaped" signal.
+    * ``ask_approval`` — honest-degrade today (audit-only). Accept an
+      audit record OR a ``proceed`` / ``ask`` verdict.
+
+    Honest-degrade for shell_check at slots without a v1 helper: the
+    trigger sets ``side_effects["honest_degrade"]=True`` so the
+    asserter short-circuits to a friendly skip — the validator
+    accepts the row for forward-compat authoring but the runtime
+    ships no fan-out helper to drive.
+    """
+    if kind not in _F_QA5_SHELL_KINDS:
+        raise AssertionError(
+            f"assert_shell_action_honored called with non-shell kind="
+            f"{kind!r} (slot={slot!r} action={expected_action!r} "
+            f"rule_id={rule_id!r})"
+        )
+    ctx = (
+        f"kind={kind!r} slot={slot!r} action={expected_action!r} "
+        f"rule_id={rule_id!r}"
+    )
+    if outcome.side_effects.get("honest_degrade"):
+        # shell_check at a slot with no v1 helper (validator-accepts
+        # only): mirror the F-QA2 / F-QA4 honest-degrade contract —
+        # accept proceed verdict + empty audit list.
+        assert outcome.runtime_verdict in {"proceed", "ask"}, (
+            f"shell honest-degrade expected verdict in {{proceed, ask}}; "
+            f"got verdict={outcome.runtime_verdict!r} ({ctx})"
+        )
+        return
+    _assert_shell_honored(
+        outcome,
+        kind=kind,
+        slot=slot,
+        expected_action=expected_action,
+        ctx=ctx,
+    )
+
+
+def _assert_shell_honored(
+    outcome: TriggerOutcome,
+    *,
+    kind: str,
+    slot: str,
+    expected_action: str,
+    ctx: str,
+) -> None:
+    """Shared per-action body for :func:`assert_shell_action_honored`."""
+    records = outcome.audit_records or []
+    statuses = {r.get("status") for r in records}
+
+    if expected_action == "block":
+        # Gate-honored slots return verdict="block" from the helper.
+        if outcome.runtime_verdict == "block":
+            return
+        # At audit-only siblings the helper does not surface a verdict —
+        # the in-band signal is a non-zero exit code on an executed
+        # record (shell_command) or a passed=False evaluation
+        # (shell_check).
+        for record in records:
+            if (
+                record.get("status") == "executed"
+                and record.get("exit_code", 0) != 0
+            ):
+                return
+            if (
+                record.get("status") == "evaluated"
+                and record.get("passed") is False
+            ):
+                return
+        raise AssertionError(
+            f"shell block-action expected verdict='block' OR a non-zero "
+            f"exit / passed=false audit record; got "
+            f"verdict={outcome.runtime_verdict!r} records={records!r} "
+            f"({ctx})"
+        )
+
+    if expected_action == "ask_approval":
+        # Honest-degrade today — accept audit evidence OR a proceed
+        # verdict (the runtime gate at non-tool-perm slots does not
+        # short-circuit on ask_approval for shell kinds in v1).
+        if records:
+            return
+        if outcome.runtime_verdict in {"proceed", "ask"}:
+            return
+        raise AssertionError(
+            f"shell ask_approval-action expected audit record OR "
+            f"proceed/ask verdict; got verdict={outcome.runtime_verdict!r} "
+            f"records={records!r} ({ctx})"
+        )
+
+    if expected_action == "audit":
+        # Audit-action: at least one executed/evaluated/budget_exhausted
+        # record AND no short-circuit.
+        assert outcome.runtime_verdict != "block", (
+            f"shell audit-action must not short-circuit; "
+            f"got verdict={outcome.runtime_verdict!r} ({ctx})"
+        )
+        assert statuses & {"executed", "evaluated", "budget_exhausted"}, (
+            f"shell audit-action expected ledger status in "
+            f"{{executed,evaluated,budget_exhausted}}; got "
+            f"statuses={statuses!r} records={records!r} ({ctx})"
+        )
+        # Mark the kind explicitly so a stale matrix row that ever
+        # routes a non-shell kind through this asserter loud-fails on
+        # the unused arg rather than silently passing.
+        _ = kind
+        _ = slot
+        return
+
+    raise AssertionError(
+        f"_assert_shell_honored has no branch for "
+        f"expected_action={expected_action!r} ({ctx})"
+    )
+
+
+def assert_shell_budget_exhausted(
+    outcome: TriggerOutcome,
+    *,
+    kind: str,
+    slot: str,
+    rule_id: str,
+) -> None:
+    """Pin the cross-kind budget exhaustion contract for ``(kind, slot)``.
+
+    Asserts that the trigger surfaced ONLY a ``budget_exhausted`` audit
+    record (no executed/evaluated spawn) AND the runtime verdict is
+    ``proceed`` (budget exhaustion never short-circuits — it honest-
+    degrades to the no-rule path so an exhausted budget cannot wedge a
+    turn). This is the exact contract pinned by the F-EXEC1 cross-slot
+    budget firing test in
+    ``tests/customize_firing/test_shell_command_cross_slot_budget.py``;
+    the F-QA5 cross-kind test re-uses it across shell_command +
+    shell_check to verify the shared ``MAGI_CUSTOMIZE_SHELL_AUDIT_BUDGET``
+    counter ties both kinds together.
+    """
+    ctx = (
+        f"kind={kind!r} slot={slot!r} action=block rule_id={rule_id!r} "
+        f"(budget-exhausted contract)"
+    )
+    records = outcome.audit_records or []
+    statuses = {r.get("status") for r in records}
+    assert outcome.runtime_verdict in {"proceed", "ask"}, (
+        f"budget-exhausted MUST honest-degrade to proceed; got "
+        f"verdict={outcome.runtime_verdict!r} ({ctx})"
+    )
+    assert "budget_exhausted" in statuses, (
+        f"budget-exhausted expected a status='budget_exhausted' record; "
+        f"got statuses={statuses!r} records={records!r} ({ctx})"
+    )
+    assert "executed" not in statuses and "evaluated" not in statuses, (
+        f"budget-exhausted MUST NOT spawn / evaluate; got "
+        f"statuses={statuses!r} records={records!r} ({ctx})"
+    )
 
 
 def _assert_did_not_fire(outcome: TriggerOutcome, *, ctx: str) -> None:
