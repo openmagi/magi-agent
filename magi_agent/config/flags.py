@@ -3163,6 +3163,39 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="bool",
     ),
+    # I-1: local vault seam operator knobs (``credentials_admin/vault_local``).
+    # Three master bools register strict default-OFF; the URL string was
+    # already registered. All operator-visible — the env-reference
+    # generator should list them.
+    _b(
+        "MAGI_VAULT_ADMIN_ENABLED",
+        summary=(
+            "Master switch for the local credential vault seam. Default-OFF "
+            "leaves ``register_credential`` inert (returns "
+            "``{'disabled': True}``); when ON the external vault path "
+            "requires ``MAGI_VAULT_ADMIN_URL`` and the native local vault "
+            "path requires ``MAGI_LOCAL_VAULT_ENABLED``."
+        ),
+    ),
+    _b(
+        "MAGI_LOCAL_VAULT_ENABLED",
+        summary=(
+            "Activate the native local credential vault backend. Default-OFF "
+            "at the library level; the local serve / dashboard bootstrap "
+            "flips it on via ``setdefault`` in ``runtime/local_defaults.py``. "
+            "Forced OFF when ``MAGI_VAULT_ADMIN_URL`` is configured (the "
+            "external HTTP backend then takes precedence)."
+        ),
+    ),
+    _b(
+        "MAGI_LOCAL_VAULT_PROXY_ENABLED",
+        summary=(
+            "Activate the local credential-injecting forward proxy. "
+            "Default-OFF; requires the native local vault to also be "
+            "active (``MAGI_LOCAL_VAULT_ENABLED``) and is forced OFF when "
+            "``MAGI_VAULT_ADMIN_URL`` is configured."
+        ),
+    ),
 )
 
 
