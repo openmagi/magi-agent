@@ -117,7 +117,19 @@ def resolve_composio_config(
     *,
     package_available: bool | None = None,
 ) -> ComposioConfig:
-    enabled_mode, enabled_valid = _parse_enabled_mode(env.get("MAGI_COMPOSIO_ENABLED"))
+    # I-1: route the five MAGI_COMPOSIO_* knobs through the typed flag
+    # registry. Byte-identical to the prior ``env.get(NAME)`` form
+    # because every ``_parse_*`` parser treats ``""`` and ``None``
+    # identically (``if raw is None or not raw.strip(): ...`` shape),
+    # and ``flag_str`` returns ``""`` for unset matching the registered
+    # default. ``COMPOSIO_API_KEY`` keeps its raw ``env.get`` shape —
+    # it's the upstream provider's own credential name (no MAGI_/CORE_
+    # prefix; out of scope for the I-1 inventory).
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    enabled_mode, enabled_valid = _parse_enabled_mode(
+        flag_str("MAGI_COMPOSIO_ENABLED", env=env)
+    )
     api_key = _trim(env.get("COMPOSIO_API_KEY"))
     package_ready = (
         _composio_package_available()
@@ -125,17 +137,22 @@ def resolve_composio_config(
         else package_available
     )
     source, source_valid = _parse_credential_source(
-        env.get("MAGI_COMPOSIO_CREDENTIAL_SOURCE"),
+        flag_str("MAGI_COMPOSIO_CREDENTIAL_SOURCE", env=env),
         api_key,
     )
-    explicit_entity, entity_valid = _parse_explicit_entity_id(
-        env.get("MAGI_COMPOSIO_ENTITY_ID"),
-    )
+    # ``_parse_explicit_entity_id`` distinguishes ``None`` (unset, valid)
+    # from ``""`` (set-but-empty, INVALID), so map the registry's
+    # ``""`` default back to ``None`` to preserve the unset-is-valid
+    # semantics the prior ``env.get(...)`` chain relied on.
+    _entity_raw = flag_str("MAGI_COMPOSIO_ENTITY_ID", env=env) or None
+    explicit_entity, entity_valid = _parse_explicit_entity_id(_entity_raw)
     runtime_entity = _runtime_entity(env)
     entity_id = explicit_entity or runtime_entity or "default"
-    toolkits, toolkits_valid = _parse_toolkits(env.get("MAGI_COMPOSIO_TOOLKITS"))
+    toolkits, toolkits_valid = _parse_toolkits(
+        flag_str("MAGI_COMPOSIO_TOOLKITS", env=env)
+    )
     mcp_url_override, mcp_url_override_valid = _parse_mcp_url_override(
-        env.get("MAGI_COMPOSIO_MCP_URL")
+        flag_str("MAGI_COMPOSIO_MCP_URL", env=env)
     )
 
     configured = api_key is not None
