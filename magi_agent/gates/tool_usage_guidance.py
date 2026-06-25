@@ -74,12 +74,10 @@ TOOL_USAGE_GUIDANCE: dict[str, str] = {
         "self-contained brief. To run the child on a specific model, pass BOTH "
         "`provider` AND `model` exactly matching one of the routes listed below. "
         "Do NOT invent model names or pass `model` without its matching "
-        "`provider` (a mismatch is rejected as child_model_route_unknown), and "
-        "do NOT spawn for work you can finish directly in fewer steps. "
-        "Also pass `taskTitle` (a SHORT public-safe label, ≤ 64 chars, e.g. "
-        "'Cross-validate 1+1 across 3 SOTA models') — this is shown to the "
-        "user as the agent's chip label, so keep it descriptive but free of "
-        "private prompt content."
+        "`provider` (rejected as child_model_route_unknown). Pass `taskTitle` "
+        "(a SHORT public-safe label, <= 64 chars, shown to the user as the "
+        "chip label) — keep it descriptive but free of private prompt content. "
+        "Do NOT spawn for work you can finish directly in fewer steps."
     ),
     "AskUserQuestion": (
         "Use when: a genuine decision blocks progress and the answer is not "
