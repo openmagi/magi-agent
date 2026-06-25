@@ -41,6 +41,107 @@ F_QA2_SLOTS: frozenset[str] = frozenset(
     }
 )
 
+# F-QA3 scope axis: per-LLM-call slots driven through the ADK plugin
+# ``LifecycleLlmCallAuditControl`` (on_before_model / on_after_model).
+# v1 ``_LEGAL`` only accepts ``llm_criterion`` rules at these slots;
+# F-LIFE4a lifted the action set from audit-only to ``{audit, block}``
+# — block at before_llm_call SUPPRESSES the outbound model call by
+# returning a synthetic policy-blocked LlmResponse; block at
+# after_llm_call REPLACES the just-emitted response with the synthetic
+# refusal. The same per-turn critic budget
+# (``MAGI_CUSTOMIZE_LLM_CALL_AUDIT_BUDGET``, default 3) applies to both
+# slots — the budget is shared so a single misbehaving rule cannot
+# exceed the cost ceiling across before/after combined.
+F_QA3_SLOTS: frozenset[str] = frozenset(
+    {
+        "before_llm_call",
+        "after_llm_call",
+    }
+)
+
+# F-QA4 scope axis: late-lifecycle slots driven through their respective
+# runtime chokepoints —
+# * ``before_compaction`` / ``after_compaction`` →
+#   :meth:`MagiContextCompactionPlugin._apply_tail_trim`
+#   (audit + ``before_compaction`` gate consult).
+# * ``on_task_checkpoint`` →
+#   :meth:`WorkQueueDriver.run_once` (audit at every transition; gate
+#   honored at ``claimed`` only — see F-LIFE4a review pass NOTE).
+# * ``on_artifact_created`` →
+#   :meth:`FileDeliveryBoundary.execute` (audit + ``ask_approval`` gate;
+#   block is honestly impossible — the artifact was already written).
+# * ``on_task_complete`` →
+#   :class:`_OnTaskCompleteCollector.run_audit` inside
+#   ``run_governed_turn`` (audit; block/ask are validator-accepted but
+#   the compensating-action wire is deferred per F-LIFE4b review).
+# * ``on_session_start`` →
+#   :meth:`LifecycleSessionControl.on_before_model` (first-fire-per-
+#   session; block returns a synthetic policy-blocked LlmResponse).
+# * ``spawn`` →
+#   :func:`magi_agent.customize.capability_scope.apply_capability_scope`
+#   (only legal slot for ``capability_scope`` rules — subtracts the
+#   denied tools from the resolved child toolset).
+#
+# ``on_session_end`` is in ``_LEGAL`` but explicitly EXCLUDED from
+# :data:`F_QA4_SLOTS` because F-LIFE4b ships no transport-side emit wire
+# in v1 — the slot is wizard-authored only, the runtime audit ledger
+# stays silent until a follow-up adds the emit. The matrix test file
+# auto-skips ``on_session_end`` rows via ``pytest.mark.skipif`` keyed on
+# the slot value so a future enablement only needs to flip one constant.
+F_QA4_SLOTS: frozenset[str] = frozenset(
+    {
+        "before_compaction",
+        "after_compaction",
+        "on_task_checkpoint",
+        "on_artifact_created",
+        "on_task_complete",
+        "on_session_start",
+        "spawn",
+    }
+)
+
+# F-QA5 scope axis: the full lifecycle slot set across which the
+# ``shell_command`` and ``shell_check`` kinds are legal in
+# :data:`magi_agent.customize.custom_rules._LEGAL`. Authoring these as a
+# single set lets the F-QA5 matrix iterate every per-slot fan-out helper
+# (11 ``shell_command`` slots × 2 ``shell_check`` primary slots, with
+# overlap on ``pre_final`` / ``before_tool_use`` / ``after_tool_use`` /
+# ``on_user_prompt_submit`` / ``on_subagent_stop`` / ``before_turn_start``
+# / ``after_turn_end`` / ``before_compaction`` / ``after_compaction`` /
+# ``on_task_checkpoint`` / ``on_artifact_created``) without re-deriving
+# the per-kind slot list at every test site. The matrix's
+# ``iter_legal_combinations_for_slots`` projector filters the full
+# ``_LEGAL`` rows to this slot set; ``test_matrix_shell.py`` further
+# narrows to ``{shell_command, shell_check}`` kinds so the F-QA5 slice
+# does not double-count rows already covered by F-QA1 / F-QA2 / F-QA4
+# under other kinds (``llm_criterion`` etc.).
+#
+# The union mirrors the 9 ``run_shell_command_at_*`` helpers exported
+# from :mod:`magi_agent.customize.lifecycle_audit` plus the 2
+# ``run_shell_check_at_*`` helpers — those are the only fan-out
+# functions the runtime exposes today; any future helper addition lifts
+# the matrix automatically once the corresponding ``_LEGAL`` row is
+# added.
+F_QA5_SHELL_SLOTS: frozenset[str] = frozenset(
+    {
+        # shell_command + shell_check overlap (gate-honored on both)
+        "pre_final",
+        "before_tool_use",
+        # shell_command-only or audit-only on shell_check
+        "after_tool_use",
+        # turn-boundary + subagent stop
+        "on_user_prompt_submit",
+        "on_subagent_stop",
+        "before_turn_start",
+        "after_turn_end",
+        # compaction + work-queue + artifact
+        "before_compaction",
+        "after_compaction",
+        "on_task_checkpoint",
+        "on_artifact_created",
+    }
+)
+
 
 def iter_legal_combinations() -> Iterable[tuple[str, str, str]]:
     """Yield every ``(kind, fires_at, action)`` tuple from the full ``_LEGAL`` matrix.
