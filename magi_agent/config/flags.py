@@ -982,6 +982,36 @@ FLAGS: tuple[FlagSpec, ...] = (
         kind="int",
     ),
     _b(
+        "MAGI_CUSTOMIZE_LIFECYCLE_SESSION_TASK_EMITTERS_ENABLED",
+        stage="stage2",
+        summary=(
+            "PR-F-LIFE4b Tier 2 lifecycle expansion (task / session "
+            "boundary emitters): activate custom_rule gate sites at three "
+            "runtime chokepoints that previously had no custom_rule path "
+            "— on_task_complete (wired in run_governed_turn's finally "
+            "block, fires when the agent declares a multi-turn user task "
+            "done via a line-anchored <task_done> marker in the final "
+            "assistant text — operator must instruct the agent to emit "
+            "the marker as a control signal), "
+            "on_session_start (wired by LifecycleSessionControl in the "
+            "adk_bridge, fires once per session on the FIRST model call "
+            "via a FIFO-bounded per-session 'seen' OrderedDict), and "
+            "on_session_end (audit-only; the transport-side emit wire "
+            "is honest-degrade in v1 — the wizard exposes the slot so "
+            "operators can author rules ahead of the transport wire, "
+            "but the runtime never fires until a follow-up adds the "
+            "emit). All three fan-outs invoke the existing llm_criterion "
+            "judge per matching rule. Triple-gated with "
+            "MAGI_CUSTOMIZE_VERIFICATION_ENABLED + "
+            "MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED; fail-open on any "
+            "customize-store fault. With no on_task_complete / "
+            "on_session_start / on_session_end rules authored, runtime "
+            "stays byte-identical (the new fan-outs and the "
+            "LifecycleSessionControl plugin are no-ops). Strict "
+            "default-OFF."
+        ),
+    ),
+    _b(
         "MAGI_CUSTOMIZE_LIFECYCLE_EXTRA_EMITTERS_ENABLED",
         stage="stage2",
         summary=(
