@@ -290,52 +290,52 @@ async def _maybe_apply_shell_command_before_tool(
 ) -> ToolResult | None:
     """F-EXEC1 facades helper: before-dispatch ``shell_command`` consumer.
 
-    Triple-gated by :func:`_shell_command_enabled`. Returns a blocked
-    :class:`ToolResult` when any enabled ``shell_command`` rule with
-    ``firesAt == "before_tool_use"`` AND ``action == "block"`` exits with a
-    non-zero code (first failing rule wins). Returns ``None`` otherwise —
-    audit-action rules run silently; ``proceed`` verdict means dispatch
-    continues normally. Fail-open: any unexpected exception returns ``None``
-    (no block).
+    Triple-gated by :func:`_shell_command_enabled`. Delegates to
+    :func:`magi_agent.customize.lifecycle_audit.run_shell_command_at_before_tool_use`
+    so the per-(session, turn) ``shell_budget_for`` counter caps
+    tool-boundary spawns alongside the 9 turn / llm / compaction slots.
+    Returns a blocked :class:`ToolResult` on a ``block`` verdict; ``None``
+    otherwise. Fail-open: any unexpected exception returns ``None``.
     """
     try:
         if not _shell_command_enabled():
             return None
-        from magi_agent.customize.shell_command import (  # noqa: PLC0415
-            apply_shell_command_rule,
+        from magi_agent.adk_bridge.lifecycle_shell_command_control import (  # noqa: PLC0415
+            shell_budget_for,
         )
-        from magi_agent.customize.store import load_overrides  # noqa: PLC0415
-        from magi_agent.customize.verification_policy import (  # noqa: PLC0415
-            CustomizeVerificationPolicy,
+        from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+            run_shell_command_at_before_tool_use,
         )
 
-        policy = CustomizeVerificationPolicy.from_overrides(load_overrides())
-        rules = policy.enabled_shell_command_rules(fires_at="before_tool_use")
-        if not rules:
-            return None
-
-        stdin_json = {
-            "lifecycle": "before_tool_use",
-            "tool_name": tool_name,
-            "tool_args": _safe_json(arguments),
-        }
-
-        for rule in rules:
-            audit, verdict = await apply_shell_command_rule(
-                rule,
-                tool_name=tool_name,
-                stdin_json=stdin_json,
-                honor_block_action=True,
+        safe_args: dict[str, Any] | None = None
+        if isinstance(arguments, dict):
+            snapshot = _safe_json(arguments)
+            if isinstance(snapshot, dict):
+                safe_args = snapshot
+        remaining, decrement_fn = shell_budget_for()
+        audits, verdict = await run_shell_command_at_before_tool_use(
+            tool_name=tool_name,
+            tool_args=safe_args,
+            remaining_budget=remaining,
+            decrement_fn=decrement_fn,
+        )
+        if verdict == "block":
+            blocking = next(
+                (
+                    audit
+                    for audit in audits
+                    if isinstance(audit, dict) and audit.get("passed") is False
+                ),
+                {},
             )
-            if verdict == "block":
-                return ToolResult(
-                    status="blocked",
-                    metadata={
-                        "blocked_by": "shell_command_rule",
-                        "rule_id": audit.get("rule_id"),
-                        "exit_code": audit.get("exit_code"),
-                    },
-                )
+            return ToolResult(
+                status="blocked",
+                metadata={
+                    "blocked_by": "shell_command_rule",
+                    "rule_id": blocking.get("rule_id"),
+                    "exit_code": blocking.get("exit_code"),
+                },
+            )
         return None
     except Exception:  # noqa: BLE001 — fail-open
         return None
@@ -346,43 +346,31 @@ async def _maybe_apply_shell_command_after_tool(
 ) -> None:
     """F-EXEC1 facades helper: after-dispatch ``shell_command`` consumer.
 
-    Triple-gated by :func:`_shell_command_enabled`. Audit-only — the tool
-    has already returned by the time we observe it. Iterates every enabled
-    ``shell_command`` rule with ``firesAt == "after_tool_use"`` and invokes
-    the runner under the shared per-turn budget cap (the budget itself is
-    maintained by
-    :class:`magi_agent.adk_bridge.lifecycle_shell_command_control
-    .LifecycleShellCommandControl`; facades stays stateless). Fail-open on
-    any exception.
+    Triple-gated by :func:`_shell_command_enabled`. Delegates to
+    :func:`magi_agent.customize.lifecycle_audit.run_shell_command_at_after_tool_use`
+    so the per-(session, turn) ``shell_budget_for`` counter caps
+    tool-boundary spawns alongside the 9 turn / llm / compaction slots.
+    Audit-only — the tool has already returned, so any ``block`` rule is
+    recorded as audit + ``passed: false`` without un-executing the call.
+    Fail-open on any exception.
     """
     try:
         if not _shell_command_enabled():
             return
-        from magi_agent.customize.shell_command import (  # noqa: PLC0415
-            apply_shell_command_rule,
+        from magi_agent.adk_bridge.lifecycle_shell_command_control import (  # noqa: PLC0415
+            shell_budget_for,
         )
-        from magi_agent.customize.store import load_overrides  # noqa: PLC0415
-        from magi_agent.customize.verification_policy import (  # noqa: PLC0415
-            CustomizeVerificationPolicy,
+        from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+            run_shell_command_at_after_tool_use,
         )
 
-        policy = CustomizeVerificationPolicy.from_overrides(load_overrides())
-        rules = policy.enabled_shell_command_rules(fires_at="after_tool_use")
-        if not rules:
-            return
-
-        stdin_json = {
-            "lifecycle": "after_tool_use",
-            "tool_name": tool_name,
-            "tool_output": result_output[:4096],
-        }
-        for rule in rules:
-            await apply_shell_command_rule(
-                rule,
-                tool_name=tool_name,
-                stdin_json=stdin_json,
-                honor_block_action=False,
-            )
+        remaining, decrement_fn = shell_budget_for()
+        await run_shell_command_at_after_tool_use(
+            tool_name=tool_name,
+            tool_output=result_output,
+            remaining_budget=remaining,
+            decrement_fn=decrement_fn,
+        )
     except Exception:  # noqa: BLE001 — fail-open
         return
 
