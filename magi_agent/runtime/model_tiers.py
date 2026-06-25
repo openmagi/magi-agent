@@ -54,9 +54,7 @@ _MODEL_CONFIG = ConfigDict(
     hide_input_in_errors=True,
 )
 _PROVIDER_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
-_MODEL_RE = re.compile(
-    r"^(?=.{1,128}$)[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*){0,5}$"
-)
+_MODEL_RE = re.compile(r"^(?=.{1,128}$)[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*){0,5}$")
 # C-12: single label-shape regex. The pre-C-12 module shipped two byte-identical
 # regexes that differed only by including ``/`` in the rejected char class
 # (``_UNSAFE_LABEL_RE`` rejected ``/``; ``_UNSAFE_MODEL_LABEL_RE`` allowed it).
@@ -371,6 +369,61 @@ class _LazyAliasMap(dict):
 _PROVIDER_REGISTRY_ALIASES: dict[str, frozenset[str]] = _LazyAliasMap()
 
 
+def _empty_debug_enabled_local(env: Mapping[str, str]) -> bool:
+    """Local mirror of ``child_runner_live._empty_debug_enabled``.
+
+    Mirrors the parse to avoid a circular import (``child_runner_live`` already
+    imports from this module). The two predicates must accept the same
+    truthiness set: ``1``/``true``/``yes``/``on`` (case-insensitive).
+    """
+    raw = env.get("MAGI_CHILD_RUNNER_EMPTY_DEBUG", "")
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _emit_deprecated_redirect_trace(from_model: str, to_model: str) -> None:
+    """Emit the one-line ``deprecated_redirect`` stamp on stderr.
+
+    Mirrors the ``child_runner_live._emit_trace`` shape (stderr + flush, never
+    raise) so the operator's serve log captures the line under the SAME debug
+    env. Inlined here to avoid a circular import; the stamp prefix
+    ``[model_tiers.trace]`` keeps it greppable separately from the child-runner
+    traces.
+    """
+    import sys  # noqa: PLC0415 - local import keeps module-load cost untouched.
+
+    try:
+        print(
+            f"[model_tiers.trace] deprecated_redirect from={from_model} to={to_model}",
+            file=sys.stderr,
+            flush=True,
+        )
+    except Exception:  # noqa: BLE001 - tracing must never break a turn.
+        return
+
+
+def _catalog_deprecation_lookup(provider: str, model: str) -> tuple[bool, str | None]:
+    """Return ``(deprecated, replacement)`` for a catalog record.
+
+    Fail-soft: any error (catalog load failure, unknown id, label normalisation
+    quirks) returns ``(False, None)`` so the caller treats the route as
+    non-deprecated. The lookup honours the catalog's provider-aliases map so
+    ``google``/``gemini`` resolve to the same record.
+
+    Surfaced as a module-level function (not inlined) so the redirect test can
+    monkeypatch it without rebuilding the whole catalog singleton.
+    """
+    try:
+        from magi_agent.models.catalog import ModelCatalog  # noqa: PLC0415
+
+        catalog = ModelCatalog.builtin()
+        record = catalog.record(provider, model)
+        if record is None:
+            return (False, None)
+        return (bool(record.deprecated), record.replacement or None)
+    except Exception:  # noqa: BLE001 - fail-soft, never raise.
+        return (False, None)
+
+
 def _keyed_registry_providers(
     env: Mapping[str, str],
 ) -> set[str] | None:
@@ -418,9 +471,7 @@ def _keyed_registry_providers(
         return None
 
 
-def resolve_child_route(
-    provider: str, model: str, env: Mapping[str, str]
-) -> ChildRoute | None:
+def resolve_child_route(provider: str, model: str, env: Mapping[str, str]) -> ChildRoute | None:
     """Canonical ACCEPTANCE authority for a child-spawn ``(provider, model)``.
 
     Returns the route a child may run on, else ``None`` (caller blocks). A route
@@ -457,9 +508,7 @@ def resolve_child_route(
             pass
 
     try:
-        resolved = ModelTierRegistry.with_defaults().resolve(
-            provider=provider, model=model
-        )
+        resolved = ModelTierRegistry.with_defaults().resolve(provider=provider, model=model)
     except Exception:  # noqa: BLE001 — label-validation failure → not a registry route.
         resolved = None
     if resolved is not None:
@@ -467,11 +516,42 @@ def resolve_child_route(
         if not any("unknown_model" in code for code in reason_codes):
             resolved_provider = str(getattr(resolved, "provider", provider))
             resolved_model = str(getattr(resolved, "model", model))
+            # PR-4: catalog ``deprecated -> replacement`` auto-redirect.
+            #
+            # If the resolved (provider, model) is tagged ``deprecated=True``
+            # with a non-empty ``replacement`` in builtin_catalog.json, re-resolve
+            # against the registry under the replacement id. If the replacement
+            # itself does not resolve (catalog authoring bug; unknown id), fall
+            # back to the original deprecated route so the caller still gets a
+            # usable ChildRoute. Single redirect, no loop: we only consult the
+            # deprecation lookup once on the original id, never on the
+            # replacement.
+            deprecated, replacement = _catalog_deprecation_lookup(resolved_provider, resolved_model)
+            if deprecated and replacement:
+                try:
+                    redirect = ModelTierRegistry.with_defaults().resolve(
+                        provider=resolved_provider, model=replacement
+                    )
+                except Exception:  # noqa: BLE001 - fail-soft.
+                    redirect = None
+                redirect_codes = tuple(getattr(redirect, "reason_codes", ()) or ())
+                if redirect is not None and not any(
+                    "unknown_model" in code for code in redirect_codes
+                ):
+                    redirected_provider = str(getattr(redirect, "provider", resolved_provider))
+                    redirected_model = str(getattr(redirect, "model", replacement))
+                    if _empty_debug_enabled_local(env):
+                        _emit_deprecated_redirect_trace(resolved_model, redirected_model)
+                    resolved_provider = redirected_provider
+                    resolved_model = redirected_model
+                # else: unresolvable replacement, fail-soft to the original
+                # deprecated route (no crash, no infinite loop).
+
             # Key-aware filter: if keyed is not None, only accept when the
             # resolved provider is in the keyed set OR it is the selected route.
             if keyed is None or resolved_provider in keyed:
                 return ChildRoute(resolved_provider, resolved_model)
-            # Not in keyed set — check if it is the selected (configured) route.
+            # Not in keyed set - check if it is the selected (configured) route.
             if (
                 sel_provider is not None
                 and sel_model is not None
@@ -484,10 +564,7 @@ def resolve_child_route(
     # Always accept if the (provider, model) matches the selected route
     # (handles custom model ids not in the static registry).
     if keyed is not None and sel_provider is not None and sel_model is not None:
-        if (
-            provider.strip().casefold() == sel_provider
-            and model.strip().casefold() == sel_model
-        ):
+        if provider.strip().casefold() == sel_provider and model.strip().casefold() == sel_model:
             return ChildRoute(provider, model)
 
     try:
@@ -527,6 +604,12 @@ def available_child_model_routes(env: Mapping[str, str]) -> list[str]:
         for (provider, model), record in ModelTierRegistry.with_defaults()._records.items():
             if keyed is not None and provider not in keyed:
                 continue
+            # PR-4: hide catalog-deprecated routes from the system-prompt feed
+            # so the parent agent never picks a deprecated id from the visible
+            # list. Fail-soft: any lookup error keeps the route in the output.
+            deprecated, _ = _catalog_deprecation_lookup(provider, model)
+            if deprecated:
+                continue
             tiers[f"{provider}:{model}"] = str(getattr(record, "tier", "") or "")
     except Exception:  # noqa: BLE001 — registry read must never raise here.
         pass
@@ -552,9 +635,7 @@ def available_child_model_routes(env: Mapping[str, str]) -> list[str]:
             tiers.setdefault(f"{provider}:{model}", "")
     except Exception:  # noqa: BLE001 — allowlist read must never raise here.
         pass
-    return [
-        f"{route} ({tier})" if tier else route for route, tier in sorted(tiers.items())
-    ]
+    return [f"{route} ({tier})" if tier else route for route, tier in sorted(tiers.items())]
 
 
 __all__ = [
