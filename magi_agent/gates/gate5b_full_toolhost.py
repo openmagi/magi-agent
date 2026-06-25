@@ -2130,6 +2130,41 @@ def _pack_loaded_workspace_runtime() -> tuple[Mapping[str, object], tuple[object
     return build_tool_host_runtime_from_packs()
 
 
+def build_hosted_pack_workspace_runtime(
+    env: "Mapping[str, str] | None" = None,
+) -> tuple[dict[str, object], tuple[object, ...]]:
+    """Load the hosted per-tenant gate5b workspace runtime (default-OFF seam).
+
+    When ``MAGI_HOSTED_PACKS_ENABLED`` is OFF (default) OR ``MAGI_HOSTED_PACKS_DIR``
+    is unset, returns ``({}, ())`` and imports nothing under the pack runtime, so
+    the production serving path is byte-identical. When ON with a dir set, packs
+    are discovered + loaded + projected from THAT directory ONLY (never ~/.magi or
+    cwd) via ``build_tool_host_runtime_from_packs``, which applies the COMMIT-1
+    pack-signing trust filter. Fail-open: any discovery/load error collapses to an
+    empty runtime so a malformed hosted pack never breaks serving.
+    """
+    from magi_agent.config.env import (  # noqa: PLC0415
+        hosted_packs_dir,
+        hosted_packs_enabled,
+    )
+
+    if not hosted_packs_enabled(env):
+        return {}, ()
+    packs_dir = hosted_packs_dir(env)
+    if packs_dir is None:
+        return {}, ()
+    try:
+        from magi_agent.packs.registries import (  # noqa: PLC0415
+            build_tool_host_runtime_from_packs,
+        )
+
+        handlers, policies = build_tool_host_runtime_from_packs([packs_dir])
+        return dict(handlers), tuple(policies)
+    except Exception:  # noqa: BLE001 - a malformed hosted pack must not break serving
+        logger.warning("hosted pack discovery failed; loading none", exc_info=True)
+        return {}, ()
+
+
 def _apply_orchestrator_profile_serve(
     full_names: tuple[str, ...],
     env: Mapping[str, str] | None = None,
@@ -2178,6 +2213,16 @@ def build_gate5b_full_toolhost_bundle(
     # in-module paths (dual-load escape hatch for isolation tests).
     if workspace_handlers is None and dispatch_policies is None:
         workspace_handlers, dispatch_policies = _pack_loaded_workspace_runtime()
+        # Hosted per-tenant pack overlay (default-OFF): when
+        # MAGI_HOSTED_PACKS_ENABLED + MAGI_HOSTED_PACKS_DIR are set, merge the
+        # hosted dir's signed/trusted packs ON TOP of the bundled runtime. OFF
+        # returns ({}, ()) so the merged result is byte-identical to the bundled
+        # runtime (no extra handlers, no extra policies). Hosted handlers win on a
+        # name collision (last-wins), mirroring the loader's override contract.
+        hosted_handlers, hosted_policies = build_hosted_pack_workspace_runtime()
+        if hosted_handlers or hosted_policies:
+            workspace_handlers = {**dict(workspace_handlers), **hosted_handlers}
+            dispatch_policies = (*tuple(dispatch_policies), *hosted_policies)
     safe_config = Gate5BFullToolHostConfig.model_validate(config or {})
     workspace = Path(workspace_root)
     selected_scope_error = _selected_scope_error(safe_config, scope or {}, workspace)

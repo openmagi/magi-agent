@@ -8,9 +8,10 @@ content digest over a discovered pack and, when the operator opts in via
 Default-OFF is byte-identical: :func:`filter_trusted_packs` returns the input
 list object unchanged and never computes a digest when signing is not required.
 
-Bundled FIRST-PARTY packs (``magi_agent/firstparty/packs``, pack_id prefix
-``openmagi.``) are trusted by being bundled and are NEVER dropped by the gate;
-the allowlist governs only user/third-party packs.
+Bundled FIRST-PARTY packs (``magi_agent/firstparty/packs``, identified by the
+first-party pack-id prefix in ``_FIRST_PARTY_PACK_ID_PREFIX``) are trusted by
+being bundled and are NEVER dropped by the gate; the allowlist governs only
+user/third-party packs.
 
 Distribution (a signed registry, key management, hosted provisioning injection)
 is a separate, later, approval-gated effort. This module is the local-runtime
@@ -124,7 +125,8 @@ def filter_trusted_packs(
     untouched and computes no digest (byte-identical to today). When ON, each
     non-first-party pack whose content digest is absent from
     ``MAGI_TRUSTED_PACK_DIGESTS`` is dropped (a warning naming pack_id + digest is
-    logged). Bundled first-party packs (``openmagi.`` prefix) are always kept.
+    logged). Bundled first-party packs (the first-party pack-id prefix) are
+    always kept.
 
     Order is preserved so the downstream last-wins / base-precedence contract is
     unchanged for the packs that survive.
