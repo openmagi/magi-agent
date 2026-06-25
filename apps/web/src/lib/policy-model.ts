@@ -74,6 +74,15 @@ export type PolicyConditionKind =
   // Mutator trust class as ``prompt_injection`` — surfaces "this policy
   // modifies traffic" via :func:`trustClassForPolicy`.
   | "output_rewrite"
+  // F-EXEC1 — operator-authored subprocess action. Runs an operator-
+  // written shell script (bash/sh) at the chosen lifecycle slot; exit
+  // code 0 = pass, non-zero blocks at pre_final / before_tool_use.
+  // Maps to the new ``operator_defined`` trust class via
+  // :func:`trustClassForPolicy` — the wizard surfaces an explicit "magi
+  // does not verify the script" warning before activation. F-EXEC3 ships
+  // the dedicated amber-red badge palette; until then the badge falls
+  // back to a placeholder rendering for this literal.
+  | "shell_command"
   | "seam_action"       // built-in preset seam rewire (compound)
   | "none";             // built-in preview / always-on, condition is implicit
 
@@ -442,7 +451,19 @@ export interface NamedConditionEntry {
  *    adding such an action later lights the badge automatically.
  *  * ``preview`` — visible but not wired (preset enforcement = ``preview``).
  */
-export type TrustClass = "deterministic" | "advisory" | "hybrid" | "preview" | "mutator";
+export type TrustClass =
+  | "deterministic"
+  | "advisory"
+  | "hybrid"
+  | "preview"
+  | "mutator"
+  // F-EXEC1 — fifth class. Operator-authored shell-script policies
+  // (``shell_command`` kind today; F-EXEC2 adds ``shell_check``). magi
+  // does NOT verify the script — the operator owns the trust boundary.
+  // F-EXEC3 ships the dedicated amber-red palette + Terminal icon; until
+  // then trust-badge.tsx falls back to its existing palette for any
+  // unknown variant so this addition does not break the v1 badge.
+  | "operator_defined";
 
 
 /**
@@ -548,6 +569,14 @@ export function trustClassForPolicy(policy: PolicyTrustInput): TrustClass {
       // trust-badge.tsx; until then the badge falls through to its
       // default rendering for these literals.
       return "mutator";
+    case "shell_command":
+      // F-EXEC1 — fifth trust class. Operator-authored shell script;
+      // magi does NOT verify the script body. F-EXEC3 ships the
+      // dedicated amber-red badge palette + Terminal icon; until then
+      // trust-badge.tsx falls back to its existing palette so the badge
+      // still renders (any unknown variant defaults to the "deterministic"
+      // visual rather than crashing).
+      return "operator_defined";
     case "none":
       // Built-in preset_seam: fall through to the preset's enforcement
       // metadata. Preview presets are inert; everything else is enforced

@@ -1062,6 +1062,55 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_CUSTOMIZE_SHELL_COMMAND_ENABLED",
+        stage="stage2",
+        summary=(
+            "PR-F-EXEC1: activate the ``shell_command`` custom_rule kind. "
+            "When ON the runtime applies enabled shell_command rules at 11 "
+            "lifecycle slots: ``before_tool_use`` (block honored when the "
+            "script exits non-zero; wired in magi_agent/facades.py:"
+            "execute_tool_with_hooks after the F-MUT1/F-MUT2 mutator "
+            "consumers); ``after_tool_use`` (audit-only — dispatch already "
+            "returned; same facades wire); plus 9 lifecycle_audit fan-out "
+            "helpers covering pre_final (block honored), "
+            "on_user_prompt_submit, on_subagent_stop, before_turn_start, "
+            "after_turn_end, before_compaction, after_compaction, "
+            "on_task_checkpoint, and on_artifact_created (all audit-only). "
+            "Subprocess execution uses magi_agent.customize.shell_runner."
+            "run_shell_payload with whitelisted env (PATH/HOME/LANG/LC_ALL/"
+            "USER/TZ + operator-declared env_vars), bounded timeout "
+            "[1, 600] seconds, and start_new_session+SIGKILL group-kill on "
+            "timeout. A per-(session, turn) budget "
+            "(MAGI_CUSTOMIZE_SHELL_AUDIT_BUDGET, default 5) maintained by "
+            "LifecycleShellCommandControl hard-caps the combined spawn "
+            "count per turn so a misbehaving rule cannot fan out across "
+            "slots. Triple-gated with MAGI_CUSTOMIZE_VERIFICATION_ENABLED "
+            "+ MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED; fail-open everywhere. "
+            "Self-hosted only — hosted serve activation requires a "
+            "separate admin-tier flag (deferred to v2). With no "
+            "shell_command rules authored, runtime stays byte-identical "
+            "(the new wires are a no-op). Strict default-OFF."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_CUSTOMIZE_SHELL_AUDIT_BUDGET",
+        default=5,
+        scope="public",
+        stage="stage2",
+        summary=(
+            "PR-F-EXEC1 per-turn shell-command cost ceiling: maximum "
+            "combined shell_command subprocess spawns across ALL 11 "
+            "lifecycle slots within a single logical turn (per "
+            "(session_id, turn_id) tuple). When the budget reaches zero "
+            "the lifecycle_audit shell fan-outs short-circuit to a single "
+            "budget_exhausted skip record per call (no subprocess spawn) "
+            "so a misbehaving rule cannot multiply shell cost without "
+            "bound. Default 5. Read raw from the env on each turn (no "
+            "flag_int wrapper needed)."
+        ),
+        kind="int",
+    ),
+    _b(
         "MAGI_CUSTOMIZE_OUTPUT_REWRITE_ENABLED",
         stage="stage2",
         summary=(

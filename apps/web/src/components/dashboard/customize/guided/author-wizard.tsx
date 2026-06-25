@@ -204,7 +204,16 @@ type ConditionKind =
   // model reads it). SpecificsStep renders the redact picker (pattern +
   // replacement + scope + isRegex); compiles to the new backend
   // ``output_rewrite`` kind.
-  | "output_rewrite";
+  | "output_rewrite"
+  // PR-F-EXEC1 — operator-authored shell-command action. Available at
+  // 11 lifecycle slots (pre_final, before/after_tool_use, and 8 Tier 2
+  // audit slots). SpecificsStep renders the shell picker (inline / file
+  // source + timeout + env_vars + shell). Compiles to the new backend
+  // ``shell_command`` kind. Trust class: Operator-defined (F-EXEC3 ships
+  // the visual badge; for now the wizard surfaces a warning subtext on
+  // the picker card and the trustClassForPolicy mapping returns
+  // "operator_defined" with the existing palette as a placeholder).
+  | "shell_command";
 
 
 // PR-F3: deterministic operators for field_constraint. The eight
@@ -291,6 +300,17 @@ interface Draft {
   orReplacement: string;
   orScope: "match_only" | "full_output";
   orIsRegex: boolean;
+  // PR-F-EXEC1 — shell_command draft fields. Source is inline (textarea)
+  // OR file path. Timeout is in seconds (bounded [1, 600] by the backend
+  // validator). env_vars is a comma-separated list of operator-declared
+  // env names to forward to the subprocess on top of the default
+  // PATH/HOME/LANG/LC_ALL/USER/TZ whitelist. shell is bash | sh.
+  shSource: "inline" | "file";
+  shInline: string;
+  shPath: string;
+  shTimeoutSeconds: number;
+  shEnvVars: string;
+  shShell: "bash" | "sh";
   // common
   ruleId: string;
   description: string;
@@ -334,6 +354,12 @@ const EMPTY: Draft = {
   orReplacement: "",
   orScope: "match_only",
   orIsRegex: true,
+  shSource: "inline",
+  shInline: "",
+  shPath: "",
+  shTimeoutSeconds: 30,
+  shEnvVars: "",
+  shShell: "bash",
   ruleId: "",
   description: "",
 };
@@ -1486,10 +1512,13 @@ function availableConditionKinds(
   // on_subagent_stop stays llm_criterion-only because the turn has already
   // emitted (mutation has no honest target).
   if (lifecycle === "on_user_prompt_submit") {
-    return ["llm_criterion", "prompt_injection"];
+    // PR-F-EXEC1 — shell_command joins as a third option (audit-only at
+    // this slot — the prompt has already been assembled by the time the
+    // audit fires).
+    return ["llm_criterion", "prompt_injection", "shell_command"];
   }
   if (lifecycle === "on_subagent_stop") {
-    return ["llm_criterion"];
+    return ["llm_criterion", "shell_command"];
   }
   // PR-F-LIFE1 Tier 2 — turn-boundary slots accept ``llm_criterion`` only.
   // evidence_ref / verifier_passed compile to ``deterministic_ref``, which
@@ -1500,7 +1529,11 @@ function availableConditionKinds(
   // is no honest mutation target at top-level turn entry (engine has not
   // started) or exit (the emission has already completed).
   if (lifecycle === "before_turn_start" || lifecycle === "after_turn_end") {
-    return ["llm_criterion"];
+    // PR-F-EXEC1 — shell_command joins as a second option at the
+    // turn-boundary slots (audit-only — the turn has not started yet at
+    // before_turn_start, but a script that does work besides the gate
+    // verdict has obvious value; after_turn_end is post-emission).
+    return ["llm_criterion", "shell_command"];
   }
   // PR-F-LIFE2 Tier 2 — per-LLM-call slots accept ``llm_criterion`` only.
   // Honest-degrade matches the turn-boundary slots: deterministic_ref has
@@ -1524,7 +1557,10 @@ function availableConditionKinds(
     || lifecycle === "on_task_checkpoint"
     || lifecycle === "on_artifact_created"
   ) {
-    return ["llm_criterion"];
+    // PR-F-EXEC1 — shell_command joins at all four F-LIFE3 emitter slots
+    // (audit-only — each event has already taken effect or is about to be
+    // applied; useful for slack/telemetry/lint-runner side-effects).
+    return ["llm_criterion", "shell_command"];
   }
   // PR-F-LIFE4b Tier 2 — task / session boundary slots accept
   // ``llm_criterion`` only. Honest-degrade matches the F-LIFE1/2/3
@@ -1550,7 +1586,16 @@ function availableConditionKinds(
     // operator picks raw-evidence-record-present vs verdict-primitive-passed
     // as two distinct intents — both compile to ``deterministic_ref`` on
     // the backend, the split lives at the UX layer only.
-    return ["evidence_ref", "verifier_passed", "shacl", "llm_criterion", "field_constraint"];
+    // PR-F-EXEC1 — shell_command joins at pre_final (block honored — exit
+    // code 1 from the script short-circuits final answer commit).
+    return [
+      "evidence_ref",
+      "verifier_passed",
+      "shacl",
+      "llm_criterion",
+      "field_constraint",
+      "shell_command",
+    ];
   }
   if (lifecycle === "before_tool_use") {
     if (toolTarget === "specific") {
@@ -1564,7 +1609,9 @@ function availableConditionKinds(
       // PR-F-MUT1 — prompt_injection sits beside ``none`` for the per-tool
       // case: it appends a value to a chosen arg key on every call of the
       // chosen tool. condition.tool is auto-derived from draft.toolName.
-      return ["none", "prompt_injection"];
+      // PR-F-EXEC1 — shell_command joins as an operator-authored gate /
+      // side-effect script before dispatch. block action honored.
+      return ["none", "prompt_injection", "shell_command"];
     }
     // target=any: tool_perm has no wildcard matcher, so "no condition"
     // is omitted (no honest backend mapping). F6 adds path / path_allowlist
@@ -1574,7 +1621,16 @@ function availableConditionKinds(
     // PR-F-MUT1 — prompt_injection appears here too so an operator can
     // author "append X to <key> for any tool that surfaces <key>" without
     // pinning a single tool.
-    return ["domain", "domain_allowlist", "path", "path_allowlist", "prompt_injection"];
+    // PR-F-EXEC1 — shell_command joins on target=any so an operator can
+    // author a per-tool-call shell gate / side-effect for ALL tools.
+    return [
+      "domain",
+      "domain_allowlist",
+      "path",
+      "path_allowlist",
+      "prompt_injection",
+      "shell_command",
+    ];
   }
   // after_tool_use
   // PR-F-UX4 — liberalization: llm_criterion is now available under BOTH
@@ -1591,9 +1647,9 @@ function availableConditionKinds(
   // under both tool-target modes; the wizard derives the toolMatch.include
   // filter from draft.toolName when target=specific.
   if (toolTarget === "specific") {
-    return ["none", "regex", "llm_criterion", "output_rewrite"];
+    return ["none", "regex", "llm_criterion", "output_rewrite", "shell_command"];
   }
-  return ["none", "regex", "llm_criterion", "output_rewrite"];
+  return ["none", "regex", "llm_criterion", "output_rewrite", "shell_command"];
 }
 
 
@@ -1624,6 +1680,7 @@ const CONDITION_PREVIEW_CHIPS: Record<ConditionKind, ReadonlyArray<string>> = {
   field_constraint: ["evidence.type", "evidence.field"],
   prompt_injection: ["tool_input.command"],
   output_rewrite: ["tool_output"],
+  shell_command: ["tool", "tool_args", "tool_output"],
 };
 
 
@@ -1702,6 +1759,15 @@ const CONDITION_META: Record<ConditionKind, { label: string; description: string
     label: "Rewrite tool output (mutator)",
     description:
       "Mutator: redacts a pattern in a tool's output before the model reads it (regex or literal). v1 is redact-only — summarize / replace require a v2 admin-tier flag.",
+  },
+  shell_command: {
+    // PR-F-EXEC1 — operator-authored subprocess. The wizard surfaces an
+    // explicit "magi does not verify the script" warning subtext so the
+    // operator understands the Operator-defined trust class before
+    // activating. F-EXEC3 ships the visual amber-red badge.
+    label: "Run a shell command",
+    description:
+      "Runs an operator-authored shell script (bash / sh) at the chosen lifecycle slot. This command runs as you on the host. magi does not verify the script. Exit code 0 = pass; non-zero blocks at pre_final / before_tool_use.",
   },
 };
 
@@ -2141,6 +2207,17 @@ function SpecificsStep({
       {draft.conditionKind === "output_rewrite" ? (
         <OutputRewriteRedactPicker draft={draft} update={update} />
       ) : null}
+      {/* PR-F-EXEC1 — shell_command picker. Operator authors an inline
+          script or pins a file path on the host. Compiles to the backend
+          ``shell_command`` kind. Available at 11 lifecycle slots; the
+          ``block`` action is honored only at pre_final / before_tool_use
+          (other slots ignore non-zero exit codes and record audit-only).
+          The picker surfaces an explicit "magi does not verify the script"
+          warning so the operator never confuses this with the deterministic
+          / advisory kinds. */}
+      {draft.conditionKind === "shell_command" ? (
+        <ShellCommandPicker draft={draft} update={update} />
+      ) : null}
     </div>
   );
 }
@@ -2336,6 +2413,140 @@ function OutputRewriteRedactPicker({
           mode without re-shaping the persisted payload.
         </p>
       </label>
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// PR-F-EXEC1 — shell_command picker (operator-authored subprocess)
+// ---------------------------------------------------------------------------
+
+
+function ShellCommandPicker({
+  draft,
+  update,
+}: {
+  draft: Draft;
+  update: (patch: Partial<Draft>) => void;
+}): React.ReactElement {
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl border border-amber-300/40 bg-amber-50 px-3 py-2.5 text-[11px] leading-relaxed text-amber-900">
+        <span className="font-semibold uppercase tracking-wider text-amber-900">
+          Operator-defined
+        </span>
+        <span className="ml-2">
+          This command runs as you on the host. magi does not verify the
+          script. Confirm the command does what you expect before activating.
+        </span>
+      </div>
+      <div className="space-y-1">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+          Script source
+        </span>
+        <div className="flex gap-2">
+          <label className="flex items-center gap-2 text-xs text-secondary">
+            <input
+              type="radio"
+              name="shSource"
+              value="inline"
+              checked={draft.shSource === "inline"}
+              onChange={() => update({ shSource: "inline" })}
+              className="text-primary focus:ring-primary/30"
+            />
+            Inline script
+          </label>
+          <label className="flex items-center gap-2 text-xs text-secondary">
+            <input
+              type="radio"
+              name="shSource"
+              value="file"
+              checked={draft.shSource === "file"}
+              onChange={() => update({ shSource: "file" })}
+              className="text-primary focus:ring-primary/30"
+            />
+            File on host
+          </label>
+        </div>
+      </div>
+      {draft.shSource === "inline" ? (
+        <label className="block">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+            Inline shell script
+          </span>
+          <textarea
+            value={draft.shInline}
+            onChange={(e) => update({ shInline: e.target.value })}
+            rows={6}
+            placeholder="#!/usr/bin/env bash&#10;echo 'shell hook ran for' &quot;$tool_name&quot;"
+            aria-label="Inline shell script"
+            className="mt-1 w-full resize-y rounded-lg border border-primary/30 bg-white px-3 py-2 text-xs font-mono text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+          />
+          <p className="mt-1 text-[11px] leading-relaxed text-secondary">
+            Stdin receives JSON with the lifecycle context (tool_name,
+            tool_args, etc.). Stdout / stderr are captured (4KB cap per stream).
+          </p>
+        </label>
+      ) : (
+        <TextField
+          value={draft.shPath}
+          onChange={(v) => update({ shPath: v })}
+          label="Absolute path to script on host"
+          placeholder="/Users/me/.magi/hooks/notify.sh"
+          mono
+        />
+      )}
+      <div className="grid grid-cols-2 gap-3">
+        <label className="block">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+            Timeout (seconds)
+          </span>
+          <input
+            type="number"
+            min={1}
+            max={600}
+            value={draft.shTimeoutSeconds}
+            onChange={(e) =>
+              update({ shTimeoutSeconds: Number(e.target.value) || 30 })
+            }
+            aria-label="Shell timeout seconds"
+            className="mt-1 w-full rounded-lg border border-primary/30 bg-white px-3 py-2 text-xs font-mono text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+          />
+          <p className="mt-1 text-[11px] leading-relaxed text-secondary">
+            Range [1, 600]. Default 30. On timeout the process group is
+            SIGKILLed.
+          </p>
+        </label>
+        <label className="block">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+            Shell binary
+          </span>
+          <select
+            value={draft.shShell}
+            onChange={(e) =>
+              update({ shShell: e.target.value as Draft["shShell"] })
+            }
+            aria-label="Shell binary"
+            className="mt-1 w-full rounded-lg border border-primary/30 bg-white px-3 py-2 text-xs text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+          >
+            <option value="bash">bash</option>
+            <option value="sh">sh</option>
+          </select>
+        </label>
+      </div>
+      <TextField
+        value={draft.shEnvVars}
+        onChange={(v) => update({ shEnvVars: v })}
+        label="Forward env vars (comma-separated)"
+        placeholder="MY_API_KEY, SLACK_WEBHOOK_URL"
+        mono
+      />
+      <p className="text-[11px] leading-relaxed text-secondary">
+        Default whitelist: PATH, HOME, LANG, LC_ALL, USER, TZ. Add operator-
+        declared env names here to forward extra variables (secrets are NOT
+        forwarded unless explicitly declared).
+      </p>
     </div>
   );
 }
@@ -2847,6 +3058,11 @@ function triggerEventPhrase(draft: Draft, refOptions: RefOption[]): string {
       // Unconditional within the matched scope: every tool result whose
       // text matches the pattern is rewritten before the model reads it.
       return `When ${lowerHead(targetPhrase)} contains "${draft.orPattern || "…"}"`;
+    case "shell_command":
+      // PR-F-EXEC1 — operator-authored subprocess. The trigger is
+      // unconditional within the matched scope (lifecycle + tool target);
+      // the script's exit code drives any gate verdict downstream.
+      return `When the operator shell hook runs at ${draft.lifecycle}`;
   }
 }
 
@@ -3112,6 +3328,9 @@ function conditionSlug(kind: ConditionKind): string {
       return "shacl";
     case "regex":
       return "regex";
+    case "shell_command":
+      // PR-F-EXEC1 — slug for the operator-defined shell action kind.
+      return "shell";
   }
 }
 
@@ -3449,6 +3668,17 @@ function conditionClause(draft: Draft, refOptions: RefOption[]): string {
       const verb = draft.orIsRegex ? "regex" : "literal";
       return `redact ${verb} "${draft.orPattern || "(unset)"}" → "${draft.orReplacement}" in tool output${tool}`;
     }
+    case "shell_command": {
+      // PR-F-EXEC1 — review-summary phrasing. Surface source kind +
+      // timeout so the operator can sanity-check the script identity
+      // before activating. The full inline script is NOT echoed (too
+      // long for the review row); use the picker if needed.
+      const sourceLabel =
+        draft.shSource === "inline"
+          ? "inline script"
+          : `file ${draft.shPath || "(unset)"}`;
+      return `run operator shell hook (${sourceLabel}, ${draft.shShell}, ${draft.shTimeoutSeconds}s timeout)`;
+    }
   }
 }
 
@@ -3636,6 +3866,10 @@ function customRuleKind(draft: Draft): string {
   // lifecycle-keyed fallback so the wizard's mutator pick lands on the
   // right kind end-to-end.
   if (draft.conditionKind === "output_rewrite") return "output_rewrite";
+  // PR-F-EXEC1 — shell_command routes to its own backend kind. EARLY-RETURN
+  // before the lifecycle-keyed fallback so the operator's shell pick lands
+  // on the right kind regardless of slot.
+  if (draft.conditionKind === "shell_command") return "shell_command";
   if (draft.lifecycle === "before_tool_use") {
     // before_tool authoring always routes to tool_perm: target=specific
     // sets match.tool; target=any with domain* sets the url-shape matcher.
@@ -3691,6 +3925,18 @@ function customRuleAction(draft: Draft): string {
   // event is recorded, the mutation already happened). Force audit so any
   // archetype the operator picked upstream resolves to a valid action.
   if (draft.conditionKind === "output_rewrite") return "audit";
+  // PR-F-EXEC1 — shell_command honors the operator's archetype pick at the
+  // two slots whose backend ``_LEGAL`` matrix exposes ``block`` (pre_final
+  // and before_tool_use); every other slot is audit-only. The wizard maps
+  // ``block`` archetype → ``block`` action ONLY when the lifecycle accepts
+  // it; otherwise it forces audit so the persisted rule round-trips
+  // through the backend validator.
+  if (draft.conditionKind === "shell_command") {
+    const blockEligible =
+      draft.lifecycle === "pre_final" || draft.lifecycle === "before_tool_use";
+    if (blockEligible && draft.archetype === "block") return "block";
+    return "audit";
+  }
   switch (draft.archetype) {
     case "block":
       return "block";
@@ -3729,6 +3975,31 @@ function splitToolMatchList(raw: string): string[] {
 
 
 function customRulePayload(draft: Draft): Record<string, unknown> {
+  // PR-F-EXEC1 — shell_command payload. Shape matches the backend
+  // ShellPayload (frozen pydantic model, extra=forbid):
+  //   {source: "inline"|"file", inline?, path?, timeout_seconds, env_vars, shell}
+  // EARLY-RETURN before the lifecycle-keyed fallbacks so the operator's
+  // shell pick lands on the right payload shape regardless of slot.
+  if (draft.conditionKind === "shell_command") {
+    const payload: Record<string, unknown> = {
+      source: draft.shSource,
+      timeout_seconds: Math.min(
+        600,
+        Math.max(1, Math.trunc(draft.shTimeoutSeconds || 30))
+      ),
+      shell: draft.shShell,
+      env_vars: draft.shEnvVars
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    };
+    if (draft.shSource === "inline") {
+      payload.inline = draft.shInline;
+    } else {
+      payload.path = draft.shPath.trim();
+    }
+    return payload;
+  }
   // PR-F-MUT2 — output_rewrite payload. Single lifecycle slot
   // (after_tool_use); shape matches the backend
   // validate_output_rewrite_payload contract:

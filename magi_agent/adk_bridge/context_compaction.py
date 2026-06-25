@@ -667,6 +667,14 @@ class MagiContextCompactionPlugin(BasePlugin):
         happen when the master flag resolves ON. The audit fan-out itself
         is fail-open (see :mod:`magi_agent.customize.lifecycle_audit`), so a
         misbehaving rule cannot wedge this call site.
+
+        PR-F-EXEC1: this helper ALSO fires the sibling shell_command fan-out
+        at the same slot (gated independently by ``shell_command_enabled``)
+        so an operator-authored ``shell_command`` rule with
+        ``firesAt=before_compaction`` or ``after_compaction`` runs from this
+        same chokepoint. The shell fan-out is dispatched after the
+        llm_criterion audit so both surfaces see consistent ordering across
+        all 4 compaction slots (before / after × pure-drop / summary-head).
         """
         from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
             lifecycle_extra_emitters_enabled,
@@ -674,8 +682,6 @@ class MagiContextCompactionPlugin(BasePlugin):
             run_before_compaction_audit,
         )
 
-        if not lifecycle_extra_emitters_enabled():
-            return None
         try:
             model_id = _resolve_model_id(llm_request) or "(unknown)"
         except Exception:
@@ -685,11 +691,15 @@ class MagiContextCompactionPlugin(BasePlugin):
             frame = (
                 f"pre_compaction: contents={size}, model={model_id[:64]}"
             )
-            # Lazy critic factory build (mirrors lifecycle_llm_call_control).
-            factory = self._build_lifecycle_critic_factory()
-            await run_before_compaction_audit(
-                pre_compaction_text=frame,
-                model_factory=factory,
+            if lifecycle_extra_emitters_enabled():
+                # Lazy critic factory build (mirrors lifecycle_llm_call_control).
+                factory = self._build_lifecycle_critic_factory()
+                await run_before_compaction_audit(
+                    pre_compaction_text=frame,
+                    model_factory=factory,
+                )
+            await self._maybe_emit_shell_command_compaction(
+                slot="before_compaction", frame_text=frame
             )
         else:
             dc = dropped_count if isinstance(dropped_count, int) else -1
@@ -697,12 +707,92 @@ class MagiContextCompactionPlugin(BasePlugin):
                 f"post_compaction: kept={size}, dropped={dc}, "
                 f"model={model_id[:64]}"
             )
-            factory = self._build_lifecycle_critic_factory()
-            await run_after_compaction_audit(
-                summary_text=frame,
-                model_factory=factory,
+            if lifecycle_extra_emitters_enabled():
+                factory = self._build_lifecycle_critic_factory()
+                await run_after_compaction_audit(
+                    summary_text=frame,
+                    model_factory=factory,
+                )
+            await self._maybe_emit_shell_command_compaction(
+                slot="after_compaction", frame_text=frame
             )
         return None
+
+    async def _maybe_emit_shell_command_compaction(
+        self, *, slot: str, frame_text: str
+    ) -> None:
+        """PR-F-EXEC1 — fire ``shell_command`` fan-out at before/after_compaction.
+
+        Audit-only at both slots (compaction is mid-decision and the
+        shell hook is not a deterministic gate). Triple-gated +
+        fail-open by the sibling helper; OFF path is byte-identical.
+        Threads the shared per-(session, turn) budget from the
+        ``_ACTIVE_TURN_IDENTITY`` ContextVar published by
+        ``run_governed_turn``.
+        """
+        try:
+            from magi_agent.adk_bridge.lifecycle_shell_command_control import (  # noqa: PLC0415
+                shell_budget_for,
+            )
+            from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+                run_shell_command_at_after_compaction,
+                run_shell_command_at_before_compaction,
+                shell_command_enabled,
+            )
+
+            if not shell_command_enabled():
+                return
+            remaining, decrement_fn = shell_budget_for()
+            if slot == "before_compaction":
+                await run_shell_command_at_before_compaction(
+                    pre_compaction_text=frame_text,
+                    remaining_budget=remaining,
+                    decrement_fn=decrement_fn,
+                )
+            else:
+                await run_shell_command_at_after_compaction(
+                    summary_text=frame_text,
+                    remaining_budget=remaining,
+                    decrement_fn=decrement_fn,
+                )
+        except Exception:
+            return
+
+    async def _maybe_compaction_blocked(
+        self,
+        *,
+        contents: list[Any],
+        llm_request: Any,
+    ) -> bool:
+        """PR-F-LIFE4a — consult the ``before_compaction`` gate; return True on block.
+
+        Fast OFF-path: the triple-gate inside the helper short-circuits when
+        the master flag is OFF, so this call is one helper roundtrip + one
+        comparison on the OFF path. Fail-open: any exception returns False
+        (proceed with the tail-drop).
+        """
+        try:
+            from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+                lifecycle_extra_emitters_enabled,
+                run_before_compaction_gate,
+            )
+
+            if not lifecycle_extra_emitters_enabled():
+                return False
+            try:
+                model_id = _resolve_model_id(llm_request) or "(unknown)"
+            except Exception:
+                model_id = "(unknown)"
+            size = len(contents) if isinstance(contents, list) else 0
+            frame = f"pre_compaction: contents={size}, model={model_id[:64]}"
+            factory = self._build_lifecycle_critic_factory()
+            verdict = await run_before_compaction_gate(
+                pre_compaction_text=frame,
+                model_factory=factory,
+            )
+            return verdict == "block"
+        except Exception:
+            return False
 
     @staticmethod
     def _build_lifecycle_critic_factory() -> Any | None:

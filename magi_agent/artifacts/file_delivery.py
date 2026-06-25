@@ -29,6 +29,13 @@ def _emit_artifact_created_sync(
     short-circuit. Fail-open at every step (import error, busy outer event
     loop, fan-out raise) so a misbehaving rule cannot wedge the artifact
     write path.
+
+    PR-F-EXEC1: this helper ALSO drives the sibling shell_command fan-out
+    at ``on_artifact_created`` so an operator-authored ``shell_command``
+    rule with ``firesAt=on_artifact_created`` runs from this same
+    chokepoint when the boundary successfully writes an artifact. Gated
+    independently by ``shell_command_enabled`` so OFF for shell stays
+    byte-identical even when the llm_criterion path is ON.
     """
     try:
         from magi_agent.customize.lifecycle_audit import (
@@ -36,30 +43,78 @@ def _emit_artifact_created_sync(
             run_artifact_created_audit,
         )
 
-        if not lifecycle_extra_emitters_enabled():
-            return None
-        try:
-            from magi_agent.adk_bridge.lifecycle_llm_call_control import (
-                _build_critic_factory,
-            )
+        if lifecycle_extra_emitters_enabled():
+            try:
+                from magi_agent.adk_bridge.lifecycle_llm_call_control import (
+                    _build_critic_factory,
+                )
 
-            factory = _build_critic_factory()
-        except Exception:
-            factory = None
+                factory = _build_critic_factory()
+            except Exception:
+                factory = None
+            try:
+                asyncio.run(
+                    run_artifact_created_audit(
+                        artifact_ref=artifact_ref,
+                        artifact_excerpt=artifact_excerpt,
+                        model_factory=factory,
+                    )
+                )
+            except RuntimeError:
+                # Outer event loop already running on this sync path — drop
+                # the emit rather than raising into the artifact write.
+                pass
+
+        # PR-F-EXEC1 shell_command fan-out at on_artifact_created. Gated
+        # independently of lifecycle_extra_emitters so an operator can
+        # author a shell hook without enabling the llm_criterion path.
+        _emit_shell_command_artifact_created_sync(
+            artifact_ref=artifact_ref,
+            artifact_excerpt=artifact_excerpt,
+        )
+    except Exception:
+        # Fail-open: never break artifact writes.
+        return None
+    return None
+
+
+def _emit_shell_command_artifact_created_sync(
+    *, artifact_ref: str, artifact_excerpt: str = ""
+) -> None:
+    """PR-F-EXEC1 sync helper: fire ``shell_command`` at ``on_artifact_created``.
+
+    Audit-only at this slot — the artifact has already been written by the
+    provider, so an after-fact block has no honest semantics here.
+    Triple-gated + fail-open by :func:`shell_command_enabled`. Threads
+    the shared per-(session, turn) budget from the
+    ``_ACTIVE_TURN_IDENTITY`` ContextVar; when the boundary is invoked
+    outside a governed turn (e.g. by a webhook-driven delivery), the
+    identity is unset and the cap resolves to ``None`` (no cap).
+    """
+    try:
+        from magi_agent.adk_bridge.lifecycle_shell_command_control import (
+            shell_budget_for,
+        )
+        from magi_agent.customize.lifecycle_audit import (
+            run_shell_command_at_on_artifact_created,
+            shell_command_enabled,
+        )
+
+        if not shell_command_enabled():
+            return None
+        remaining, decrement_fn = shell_budget_for()
         try:
             asyncio.run(
-                run_artifact_created_audit(
+                run_shell_command_at_on_artifact_created(
                     artifact_ref=artifact_ref,
                     artifact_excerpt=artifact_excerpt,
-                    model_factory=factory,
+                    remaining_budget=remaining,
+                    decrement_fn=decrement_fn,
                 )
             )
         except RuntimeError:
-            # Outer event loop already running on this sync path — drop
-            # the emit rather than raising into the artifact write.
             return None
     except Exception:
-        # Fail-open: never break artifact writes.
         return None
     return None
 

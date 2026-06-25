@@ -57,6 +57,10 @@ const KIND_LABEL: Record<NamedConditionEntry["kind"], string> = {
   // the Conditions tab honestly signals "rewrites traffic" before the row
   // opens.
   output_rewrite: "Output rewrite (mutator)",
+  // PR-F-EXEC1 — operator-authored shell action. Labelled distinctly so
+  // the Conditions tab honestly signals "external script, magi does not
+  // verify" before the row opens (F-EXEC3 ships the dedicated badge).
+  shell_command: "Shell command (operator-defined)",
   seam_action: "Seam action",
   none: "Built-in",
 };

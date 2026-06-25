@@ -155,6 +155,35 @@ def lifecycle_extra_emitters_enabled(env: dict[str, str] | None = None) -> bool:
         return False
 
 
+def shell_command_enabled(env: dict[str, str] | None = None) -> bool:
+    """PR-F-EXEC1 triple-gate check for the ``shell_command`` action kind
+    fan-outs.
+
+    Mirrors :func:`lifecycle_expansion_enabled` but keys on the F-EXEC1
+    master switch ``MAGI_CUSTOMIZE_SHELL_COMMAND_ENABLED``. Every
+    shell_command fan-out helper (pre_final, on_user_prompt_submit,
+    on_subagent_stop, before_turn_start, after_turn_end, before_compaction,
+    after_compaction, on_task_checkpoint, on_artifact_created) calls this
+    helper FIRST so the OFF path is byte-identical: no policy load, no
+    subprocess spawn, no per-turn budget tracking.
+
+    Fail-open: any import error returns ``False`` so the call site stays a
+    no-op when the flag layer cannot be read.
+    """
+    try:
+        from magi_agent.config.flags import flag_bool, flag_profile_bool  # noqa: PLC0415
+    except Exception:
+        return False
+    try:
+        return (
+            flag_bool("MAGI_CUSTOMIZE_SHELL_COMMAND_ENABLED", env=env)
+            and flag_profile_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", env=env)
+            and flag_profile_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", env=env)
+        )
+    except Exception:
+        return False
+
+
 def session_task_emitters_enabled(env: dict[str, str] | None = None) -> bool:
     """PR-F-LIFE4b triple-gate check for the three task / session boundary
     emitter slots.
@@ -1354,6 +1383,336 @@ async def run_on_session_start_gate(
     )
 
 
+# ---------------------------------------------------------------------------
+# PR-F-EXEC1 — shell_command action fan-out helpers
+# ---------------------------------------------------------------------------
+#
+# Nine audit-only lifecycle slots fire the operator-authored shell_command
+# kind beyond the two tool-boundary slots that facades.py handles directly.
+# Every helper shares the same shape:
+#
+#   1. Triple-gate via :func:`shell_command_enabled`.
+#   2. Load the per-slot ``enabled_shell_command_rules`` list.
+#   3. Iterate the rules, respecting the optional per-turn budget
+#      threaded in by the caller (the LifecycleShellCommandControl ADK
+#      plugin maintains the per-(session, turn) counter; see its
+#      docstring). When the budget reaches zero the helper short-circuits
+#      to a single ``budget_exhausted`` record per call WITHOUT invoking
+#      the runner.
+#   4. Apply each rule via
+#      :func:`magi_agent.customize.shell_command.apply_shell_command_rule`
+#      with ``honor_block_action=False`` (audit-only) at every slot
+#      EXCEPT ``pre_final`` which honors block (first failing block-
+#      action rule short-circuits and the caller surfaces a synthetic
+#      "policy_blocked" outcome).
+#
+# Fail-open everywhere: any exception in the policy load / runner / etc.
+# returns an empty list so a buggy rule cannot wedge the surrounding
+# runtime chokepoint.
+
+
+async def _run_shell_fan_out(
+    *,
+    fires_at: str,
+    stdin_json: dict | None,
+    honor_block_action: bool,
+    remaining_budget: int | None,
+    policy_loader: Callable[[], Any] | None,
+    env: dict[str, str] | None,
+    decrement_fn: Callable[[], None] | None = None,
+) -> tuple[list[AuditRecord], GateVerdict]:
+    """Shared body for the 9 audit-fan-out helpers below.
+
+    Returns ``(audits, verdict)``. ``verdict`` is always ``"proceed"`` when
+    ``honor_block_action`` is False; otherwise it is ``"block"`` on the
+    first rule whose persisted ``action == "block"`` returns a non-zero
+    exit code, else ``"proceed"``.
+
+    Budget semantics: when ``remaining_budget`` is non-None and <= 0 the
+    helper emits a single ``budget_exhausted`` audit record and returns
+    ``"proceed"`` immediately (the runner is never invoked). The local
+    counter is decremented after every successful spawn; when
+    ``decrement_fn`` is provided it is also called so the SHARED per-turn
+    counter (in ``adk_bridge.lifecycle_shell_command_control._SHARED_BUDGET``)
+    tracks cross-slot consumption — the 6th spawn across slots short-
+    circuits at the next slot's accessor, not the 6th spawn within a
+    single slot.
+    """
+    if not shell_command_enabled(env=env):
+        return [], "proceed"
+    try:
+        loader = policy_loader or _default_policy_loader
+        policy = loader()
+        rules = policy.enabled_shell_command_rules(fires_at=fires_at)
+    except Exception:
+        return [], "proceed"
+    if not rules:
+        return [], "proceed"
+    if remaining_budget is not None and remaining_budget <= 0:
+        try:
+            from magi_agent.customize.shell_command import (  # noqa: PLC0415
+                budget_exhausted_record,
+            )
+
+            return [budget_exhausted_record()], "proceed"
+        except Exception:
+            return [], "proceed"
+
+    try:
+        from magi_agent.customize.shell_command import (  # noqa: PLC0415
+            apply_shell_command_rule,
+        )
+    except Exception:
+        return [], "proceed"
+
+    audits: list[AuditRecord] = []
+    verdict: GateVerdict = "proceed"
+    budget = remaining_budget
+    for rule in rules:
+        if budget is not None and budget <= 0:
+            try:
+                from magi_agent.customize.shell_command import (  # noqa: PLC0415
+                    budget_exhausted_record,
+                )
+
+                audits.append(budget_exhausted_record())
+            except Exception:
+                pass
+            break
+        audit, rule_verdict = await apply_shell_command_rule(
+            rule,
+            tool_name=None,
+            stdin_json=stdin_json,
+            honor_block_action=honor_block_action,
+        )
+        audits.append(audit)
+        if audit.get("status") in {"executed", "timeout"}:
+            if budget is not None:
+                budget -= 1
+            if decrement_fn is not None:
+                try:
+                    decrement_fn()
+                except Exception:
+                    # Fail-open: a broken decrement_fn must never wedge a turn.
+                    pass
+        if honor_block_action and rule_verdict == "block" and verdict == "proceed":
+            verdict = "block"
+    return audits, verdict
+
+
+async def run_shell_command_at_pre_final(
+    *,
+    draft_text: str = "",
+    remaining_budget: int | None = None,
+    decrement_fn: Callable[[], None] | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> tuple[list[AuditRecord], GateVerdict]:
+    """F-EXEC1 fan-out for ``firesAt == "pre_final"``.
+
+    Pre-final is the only non-tool-boundary slot that honors ``block``:
+    the synthesis pass hasn't committed yet so a script's non-zero exit
+    can short-circuit final answer assembly. Caller (the pre-final gate
+    site) interprets ``"block"`` as "synthesise a policy-blocked outcome".
+    """
+    stdin_json = {
+        "lifecycle": "pre_final",
+        "draft_excerpt": draft_text[:4096],
+    }
+    return await _run_shell_fan_out(
+        fires_at="pre_final",
+        stdin_json=stdin_json,
+        honor_block_action=True,
+        remaining_budget=remaining_budget,
+        policy_loader=policy_loader,
+        env=env,
+        decrement_fn=decrement_fn,
+    )
+
+
+async def run_shell_command_at_on_user_prompt_submit(
+    *,
+    prompt_text: str = "",
+    remaining_budget: int | None = None,
+    decrement_fn: Callable[[], None] | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> list[AuditRecord]:
+    """F-EXEC1 fan-out for ``firesAt == "on_user_prompt_submit"`` (audit)."""
+    audits, _ = await _run_shell_fan_out(
+        fires_at="on_user_prompt_submit",
+        stdin_json={"lifecycle": "on_user_prompt_submit", "prompt": prompt_text[:4096]},
+        honor_block_action=False,
+        remaining_budget=remaining_budget,
+        policy_loader=policy_loader,
+        env=env,
+        decrement_fn=decrement_fn,
+    )
+    return audits
+
+
+async def run_shell_command_at_on_subagent_stop(
+    *,
+    final_text: str = "",
+    remaining_budget: int | None = None,
+    decrement_fn: Callable[[], None] | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> list[AuditRecord]:
+    """F-EXEC1 fan-out for ``firesAt == "on_subagent_stop"`` (audit)."""
+    audits, _ = await _run_shell_fan_out(
+        fires_at="on_subagent_stop",
+        stdin_json={"lifecycle": "on_subagent_stop", "final_text": final_text[:4096]},
+        honor_block_action=False,
+        remaining_budget=remaining_budget,
+        policy_loader=policy_loader,
+        env=env,
+        decrement_fn=decrement_fn,
+    )
+    return audits
+
+
+async def run_shell_command_at_before_turn_start(
+    *,
+    prompt_text: str = "",
+    remaining_budget: int | None = None,
+    decrement_fn: Callable[[], None] | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> list[AuditRecord]:
+    """F-EXEC1 fan-out for ``firesAt == "before_turn_start"`` (audit)."""
+    audits, _ = await _run_shell_fan_out(
+        fires_at="before_turn_start",
+        stdin_json={"lifecycle": "before_turn_start", "prompt": prompt_text[:4096]},
+        honor_block_action=False,
+        remaining_budget=remaining_budget,
+        policy_loader=policy_loader,
+        env=env,
+        decrement_fn=decrement_fn,
+    )
+    return audits
+
+
+async def run_shell_command_at_after_turn_end(
+    *,
+    final_text: str = "",
+    remaining_budget: int | None = None,
+    decrement_fn: Callable[[], None] | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> list[AuditRecord]:
+    """F-EXEC1 fan-out for ``firesAt == "after_turn_end"`` (audit)."""
+    audits, _ = await _run_shell_fan_out(
+        fires_at="after_turn_end",
+        stdin_json={"lifecycle": "after_turn_end", "final_text": final_text[:4096]},
+        honor_block_action=False,
+        remaining_budget=remaining_budget,
+        policy_loader=policy_loader,
+        env=env,
+        decrement_fn=decrement_fn,
+    )
+    return audits
+
+
+async def run_shell_command_at_before_compaction(
+    *,
+    pre_compaction_text: str = "",
+    remaining_budget: int | None = None,
+    decrement_fn: Callable[[], None] | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> list[AuditRecord]:
+    """F-EXEC1 fan-out for ``firesAt == "before_compaction"`` (audit)."""
+    audits, _ = await _run_shell_fan_out(
+        fires_at="before_compaction",
+        stdin_json={
+            "lifecycle": "before_compaction",
+            "pre_compaction": pre_compaction_text[:4096],
+        },
+        honor_block_action=False,
+        remaining_budget=remaining_budget,
+        policy_loader=policy_loader,
+        env=env,
+        decrement_fn=decrement_fn,
+    )
+    return audits
+
+
+async def run_shell_command_at_after_compaction(
+    *,
+    summary_text: str = "",
+    remaining_budget: int | None = None,
+    decrement_fn: Callable[[], None] | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> list[AuditRecord]:
+    """F-EXEC1 fan-out for ``firesAt == "after_compaction"`` (audit)."""
+    audits, _ = await _run_shell_fan_out(
+        fires_at="after_compaction",
+        stdin_json={"lifecycle": "after_compaction", "summary": summary_text[:4096]},
+        honor_block_action=False,
+        remaining_budget=remaining_budget,
+        policy_loader=policy_loader,
+        env=env,
+        decrement_fn=decrement_fn,
+    )
+    return audits
+
+
+async def run_shell_command_at_on_task_checkpoint(
+    *,
+    task_id: str = "",
+    checkpoint_kind: str = "",
+    summary_text: str = "",
+    remaining_budget: int | None = None,
+    decrement_fn: Callable[[], None] | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> list[AuditRecord]:
+    """F-EXEC1 fan-out for ``firesAt == "on_task_checkpoint"`` (audit)."""
+    audits, _ = await _run_shell_fan_out(
+        fires_at="on_task_checkpoint",
+        stdin_json={
+            "lifecycle": "on_task_checkpoint",
+            "task_id": task_id[:128],
+            "checkpoint_kind": checkpoint_kind[:32],
+            "summary": summary_text[:1024],
+        },
+        honor_block_action=False,
+        remaining_budget=remaining_budget,
+        policy_loader=policy_loader,
+        env=env,
+        decrement_fn=decrement_fn,
+    )
+    return audits
+
+
+async def run_shell_command_at_on_artifact_created(
+    *,
+    artifact_ref: str = "",
+    artifact_excerpt: str = "",
+    remaining_budget: int | None = None,
+    decrement_fn: Callable[[], None] | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> list[AuditRecord]:
+    """F-EXEC1 fan-out for ``firesAt == "on_artifact_created"`` (audit)."""
+    audits, _ = await _run_shell_fan_out(
+        fires_at="on_artifact_created",
+        stdin_json={
+            "lifecycle": "on_artifact_created",
+            "artifact_ref": artifact_ref[:256],
+            "excerpt": artifact_excerpt[:1024],
+        },
+        honor_block_action=False,
+        remaining_budget=remaining_budget,
+        policy_loader=policy_loader,
+        env=env,
+        decrement_fn=decrement_fn,
+    )
+    return audits
+
+
 __all__ = [
     "AuditRecord",
     "lifecycle_expansion_enabled",
@@ -1361,6 +1720,16 @@ __all__ = [
     "llm_call_hooks_enabled",
     "lifecycle_extra_emitters_enabled",
     "session_task_emitters_enabled",
+    "shell_command_enabled",
+    "run_shell_command_at_pre_final",
+    "run_shell_command_at_on_user_prompt_submit",
+    "run_shell_command_at_on_subagent_stop",
+    "run_shell_command_at_before_turn_start",
+    "run_shell_command_at_after_turn_end",
+    "run_shell_command_at_before_compaction",
+    "run_shell_command_at_after_compaction",
+    "run_shell_command_at_on_task_checkpoint",
+    "run_shell_command_at_on_artifact_created",
     "run_user_prompt_submit_audit",
     "run_subagent_stop_audit",
     "run_before_turn_start_audit",
