@@ -108,11 +108,15 @@ def loaded_user_evidence_producers(
         resolve_enabled_packs,
     )
     from magi_agent.packs.loader import RecordingSink, load_packs  # noqa: PLC0415
+    from magi_agent.packs.signing import filter_trusted_packs  # noqa: PLC0415
 
     search_bases = list(bases) if bases is not None else list(default_search_bases())
     try:
         discovered = discover_pack_files(search_bases)
         enabled = resolve_enabled_packs(discovered, load_packs_config())
+        # Curated-trust gate (model A): drop untrusted user packs before any impl
+        # is imported when MAGI_PACK_SIGNING_REQUIRED is ON (OFF byte-identical).
+        enabled = filter_trusted_packs(enabled)
         user_refs = _user_origin_evidence_refs(enabled)
         if not user_refs:
             return {}

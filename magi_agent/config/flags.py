@@ -523,6 +523,56 @@ FLAGS: tuple[FlagSpec, ...] = (
             "byte-identical."
         ),
     ),
+    _b(
+        "MAGI_PACK_SIGNING_REQUIRED",
+        stage="stage2",
+        summary=(
+            "Curated-trust gate (trust model A): when ON, only packs whose "
+            "content digest (see magi_agent.packs.signing.compute_pack_digest) "
+            "appears in the MAGI_TRUSTED_PACK_DIGESTS allowlist are loaded; an "
+            "untrusted user/third-party pack is dropped before load. Bundled "
+            "first-party packs (pack_id prefix openmagi.) are exempt (trusted by "
+            "being bundled). Strict default-OFF: when unset NO digest is computed "
+            "and the discover->enabled pipeline is byte-identical to today."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_TRUSTED_PACK_DIGESTS",
+        default="",
+        scope="public",
+        stage="stage2",
+        summary=(
+            "Comma-separated sha256 hex digests of packs the operator has "
+            "curated/approved (trust model A allowlist). Only consulted when "
+            "MAGI_PACK_SIGNING_REQUIRED is ON; unset means no third-party pack "
+            "is trusted."
+        ),
+        kind="str",
+    ),
+    _b(
+        "MAGI_HOSTED_PACKS_ENABLED",
+        stage="stage2",
+        scope="hosted",
+        summary=(
+            "Let the HOSTED serving toolhost load + activate packs from a "
+            "configurable per-tenant directory (MAGI_HOSTED_PACKS_DIR), applying "
+            "the pack-signing trust gate. Strict default-OFF: when unset the "
+            "production serving path is byte-identical (no pack discovery, no "
+            "import). Scoped to MAGI_HOSTED_PACKS_DIR only (never ~/.magi or cwd)."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_HOSTED_PACKS_DIR",
+        default="",
+        scope="hosted",
+        stage="stage2",
+        summary=(
+            "Per-tenant directory the hosted serving path discovers packs under "
+            "when MAGI_HOSTED_PACKS_ENABLED is ON. Unset means no hosted packs "
+            "are loaded even when the flag is on."
+        ),
+        kind="str",
+    ),
     FlagSpec(
         name="MAGI_CODE_ACTION_TIMEOUT_MS",
         default=30_000,
