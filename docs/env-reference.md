@@ -79,6 +79,10 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_EDIT_FUZZY_MATCH_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Use the 9-stage fuzzy-match cascade for FileEdit (default-ON full profile).
 - `MAGI_EDIT_RETRY_REFLECTION_ENABLED` (default off) — Reflect on failed edits before retrying (coding repair loop).
 - `MAGI_EGRESS_GATE_ENABLED` (default off) — Run the evidence-grounded critic gate before chat egress.
+- `MAGI_EGRESS_PROXY_AUTH` (no default) — Egress proxy bearer/basic auth credential (kept out of ``EgressProxyConfig.__repr__`` per its ``field(repr=False)`` marker — the runtime value MUST NOT be echoed in discovery dumps; this registration only inventories the knob name).
+- `MAGI_EGRESS_PROXY_CA_CERT_PATH` (no default) — PEM CA bundle path the proxy presents. Required when ``MAGI_EGRESS_PROXY_ENABLED`` is truthy; ``EgressProxyConfig.validate`` raises if missing or unreadable.
+- `MAGI_EGRESS_PROXY_ENABLED` (default off) — Force the egress proxy on at the runtime boundary. Requires ``MAGI_EGRESS_PROXY_URL`` + ``MAGI_EGRESS_PROXY_CA_CERT_PATH`` when ON or ``EgressProxyConfig.validate`` raises. Default-OFF.
+- `MAGI_EGRESS_PROXY_URL` (no default) — Egress proxy origin URL (``http://`` or ``https://``, no path / query / fragment / embedded credentials). Required when ``MAGI_EGRESS_PROXY_ENABLED`` is truthy.
 - `MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED` (default off) — Enable PR4 R2 corrective recovery: when the main agent ends a turn with zero text after tool calls, the engine re-invokes once with a 'produce your final answer now' nudge. Default-OFF in the registry; LAB_EXPERIMENTAL_FLAGS opts it in for lab / dogfood profiles so the dashboard stops showing the 'no final answer text arrived' fallback banner.
 - `MAGI_ERROR_RECOVERY_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Enable automatic error-recovery retries (default-ON full profile).
 - `MAGI_EVAL_AUTONOMY_ENABLED` (default off) — Eval-profile autonomy seam: opts the eval profile into looser-permission autonomous loops via ``EVAL_RUNTIME_ENV_DEFAULTS``. Default-OFF.

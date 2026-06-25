@@ -3196,6 +3196,55 @@ FLAGS: tuple[FlagSpec, ...] = (
             "``MAGI_VAULT_ADMIN_URL`` is configured."
         ),
     ),
+    # I-1: egress-proxy operator knobs (``egress_proxy/config.py``
+    # ``EgressProxyConfig.from_env``). All operator-visible — the
+    # public env-reference generator should list them.
+    _b(
+        "MAGI_EGRESS_PROXY_ENABLED",
+        summary=(
+            "Force the egress proxy on at the runtime boundary. Requires "
+            "``MAGI_EGRESS_PROXY_URL`` + ``MAGI_EGRESS_PROXY_CA_CERT_PATH`` "
+            "when ON or ``EgressProxyConfig.validate`` raises. Default-OFF."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_EGRESS_PROXY_URL",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Egress proxy origin URL (``http://`` or ``https://``, no "
+            "path / query / fragment / embedded credentials). Required "
+            "when ``MAGI_EGRESS_PROXY_ENABLED`` is truthy."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_EGRESS_PROXY_AUTH",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Egress proxy bearer/basic auth credential (kept out of "
+            "``EgressProxyConfig.__repr__`` per its ``field(repr=False)`` "
+            "marker — the runtime value MUST NOT be echoed in discovery "
+            "dumps; this registration only inventories the knob name)."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_EGRESS_PROXY_CA_CERT_PATH",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "PEM CA bundle path the proxy presents. Required when "
+            "``MAGI_EGRESS_PROXY_ENABLED`` is truthy; "
+            "``EgressProxyConfig.validate`` raises if missing or "
+            "unreadable."
+        ),
+        kind="str",
+    ),
 )
 
 
