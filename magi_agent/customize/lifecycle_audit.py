@@ -155,6 +155,39 @@ def lifecycle_extra_emitters_enabled(env: dict[str, str] | None = None) -> bool:
         return False
 
 
+def session_task_emitters_enabled(env: dict[str, str] | None = None) -> bool:
+    """PR-F-LIFE4b triple-gate check for the three task / session boundary
+    emitter slots.
+
+    Mirrors :func:`lifecycle_extra_emitters_enabled` but keys on the F-LIFE4b
+    master switch ``MAGI_CUSTOMIZE_LIFECYCLE_SESSION_TASK_EMITTERS_ENABLED``
+    so the three new slot families (on_task_complete / on_session_start /
+    on_session_end) can be staged independently of the F-LIFE3 four-emitter
+    family. Each emit site (governed_turn finally block / ADK
+    before_model first-fire detection / transport session-end hook when
+    wired) calls this helper FIRST so the OFF path is byte-identical (no
+    policy load, no critic factory build, no per-session OrderedDict
+    bookkeeping).
+
+    Fail-open: any import error returns ``False`` so the call site stays a
+    no-op when the flag layer cannot be read.
+    """
+    try:
+        from magi_agent.config.flags import flag_bool, flag_profile_bool  # noqa: PLC0415
+    except Exception:
+        return False
+    try:
+        return (
+            flag_bool(
+                "MAGI_CUSTOMIZE_LIFECYCLE_SESSION_TASK_EMITTERS_ENABLED", env=env
+            )
+            and flag_profile_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", env=env)
+            and flag_profile_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", env=env)
+        )
+    except Exception:
+        return False
+
+
 def _default_policy_loader() -> Any:
     from magi_agent.customize.store import load_overrides  # noqa: PLC0415
     from magi_agent.customize.verification_policy import (  # noqa: PLC0415
@@ -683,12 +716,651 @@ async def run_artifact_created_audit(
     )
 
 
+# ---------------------------------------------------------------------------
+# PR-F-LIFE4a — gate fan-out helpers
+# ---------------------------------------------------------------------------
+#
+# The audit fan-outs above record per-rule verdicts but never act on them. The
+# F-LIFE4a "gate" helpers wrap the same fan-out machinery and reduce the
+# per-rule audit list to a single worst-of-N decision string so the calling
+# runtime site can short-circuit (block / ask) the surrounding operation.
+#
+# Decision precedence (worst-wins): ``block`` > ``ask`` > ``proceed``.
+# Only rules whose persisted ``action`` is NOT ``audit`` participate in the
+# gate decision — pure audit-recording rules continue to flow through the
+# parallel ``run_X_audit`` helpers above and never block.
+#
+# Fail-open invariant: any exception (import failure, policy load error,
+# critic failure) returns ``"proceed"`` so a misbehaving rule cannot wedge a
+# turn. The caller is expected to wrap each call in its own try/except as a
+# second belt — gate verdicts MUST NOT travel via exceptions.
+#
+# Honest-degrade for ``ask``: until a real approval surface lands, the
+# runtime treats ``ask`` as ``audit`` (proceed but record ``requires_approval
+# =true`` on the audit ledger). The gate STILL returns the literal string
+# ``"ask"`` so the call site can layer richer treatment (e.g. surface a
+# directive in the receipt) when it knows how.
+
+GateVerdict = str  # one of: "proceed", "block", "ask"
+
+
+def _gate_decision_from_audits(
+    rules: list[dict[str, Any]],
+    audits: list[AuditRecord],
+    *,
+    allowed_actions: frozenset[str],
+) -> GateVerdict:
+    """Reduce per-rule audits to one worst-of-N gate verdict.
+
+    Only rules whose persisted ``action`` is in ``allowed_actions`` participate
+    (``action == "audit"`` rules are ignored — they record verdicts via the
+    sibling audit fan-out and never block). A rule's verdict counts as a
+    block / ask only when the audit ``status == "evaluated"`` AND
+    ``passed`` is False (the criterion judge actually rejected the draft).
+    Any other status (skipped / error / budget_exhausted) is fail-open and
+    does NOT contribute to a block — the audit fan-out's existing fail-open
+    contract carries through.
+    """
+    rule_by_id: dict[Any, dict[str, Any]] = {r.get("id"): r for r in rules}
+    worst: GateVerdict = "proceed"
+    for audit in audits:
+        if not isinstance(audit, dict):
+            continue
+        if audit.get("status") != "evaluated":
+            continue
+        if audit.get("passed", True):
+            continue
+        rule = rule_by_id.get(audit.get("rule_id"))
+        if not isinstance(rule, dict):
+            continue
+        action = rule.get("action")
+        if action not in allowed_actions:
+            continue
+        if action == "block":
+            return "block"
+        if action == "ask_approval" and worst == "proceed":
+            worst = "ask"
+    return worst
+
+
+def derive_gate_verdict_from_audits(
+    audits: list[AuditRecord],
+    *,
+    fires_at: str,
+    allowed_actions: frozenset[str],
+    enabled_fn: Callable[[dict[str, str] | None], bool],
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> GateVerdict:
+    """PR-F-LIFE4a review pass — derive a gate verdict from EXISTING audit records.
+
+    Used by hot-path callers (e.g.
+    :class:`magi_agent.adk_bridge.lifecycle_llm_call_control.LifecycleLlmCallAuditControl`)
+    that already invoked the audit fan-out and want to AVOID paying a
+    second criterion-judge invocation just to derive a gate verdict.
+    The audit list is reduced via :func:`_gate_decision_from_audits` using
+    the same allowed-action filter the matching gate helper would use.
+
+    Fail-open semantics match :func:`_gate_via_audit`: any exception
+    (flag-read failure, policy load failure, malformed record) returns
+    ``"proceed"`` so a buggy rule cannot block a turn.
+    """
+    try:
+        if not enabled_fn(env):
+            return "proceed"
+    except Exception:
+        return "proceed"
+    try:
+        loader = policy_loader or _default_policy_loader
+        policy = loader()
+        rules = policy.enabled_llm_criterion_rules(fires_at=fires_at)
+    except Exception:
+        return "proceed"
+    gating_rules = [
+        r for r in rules
+        if isinstance(r, dict) and r.get("action") in allowed_actions
+    ]
+    if not gating_rules:
+        return "proceed"
+    try:
+        return _gate_decision_from_audits(
+            gating_rules,
+            audits,
+            allowed_actions=allowed_actions,
+        )
+    except Exception:
+        return "proceed"
+
+
+async def _gate_via_audit(
+    fan_out: Callable[..., Awaitable[list[AuditRecord]]],
+    *,
+    fires_at: str,
+    enabled_fn: Callable[[dict[str, str] | None], bool],
+    policy_loader: Callable[[], Any] | None,
+    env: dict[str, str] | None,
+    allowed_actions: frozenset[str],
+    fan_out_kwargs: dict[str, Any],
+) -> GateVerdict:
+    """Shared body for the F-LIFE4a gate helpers.
+
+    Loads the policy, fan-outs to the same ``_audit_one_rule`` machinery as
+    the audit helpers above, then reduces to one verdict via
+    :func:`_gate_decision_from_audits`. Fail-open everywhere: any exception
+    returns ``"proceed"`` so a buggy rule cannot block a turn.
+    """
+    try:
+        if not enabled_fn(env):
+            return "proceed"
+    except Exception:
+        return "proceed"
+    try:
+        loader = policy_loader or _default_policy_loader
+        policy = loader()
+        rules = policy.enabled_llm_criterion_rules(fires_at=fires_at)
+    except Exception:
+        return "proceed"
+    # Pre-filter to non-audit rules so the fan-out skips work entirely when no
+    # gating rule exists (the audit-only siblings already covered audit rules).
+    gating_rules = [
+        r for r in rules
+        if isinstance(r, dict) and r.get("action") in allowed_actions
+    ]
+    if not gating_rules:
+        return "proceed"
+    try:
+        audits = await fan_out(**fan_out_kwargs)
+    except Exception:
+        return "proceed"
+    try:
+        return _gate_decision_from_audits(
+            gating_rules,
+            audits,
+            allowed_actions=allowed_actions,
+        )
+    except Exception:
+        return "proceed"
+
+
+async def run_user_prompt_submit_gate(
+    *,
+    prompt_text: str,
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> GateVerdict:
+    """PR-F-LIFE4a gate for ``on_user_prompt_submit``.
+
+    Returns ``"block"`` when any enabled ``llm_criterion`` rule with
+    ``action == "block"`` reports a failed (passed=False) evaluated verdict;
+    ``"proceed"`` otherwise. Fail-open at every layer — never raises.
+    """
+    return await _gate_via_audit(
+        run_user_prompt_submit_audit,
+        fires_at="on_user_prompt_submit",
+        enabled_fn=lifecycle_expansion_enabled,
+        policy_loader=policy_loader,
+        env=env,
+        allowed_actions=frozenset({"block"}),
+        fan_out_kwargs={
+            "prompt_text": prompt_text,
+            "model_factory": model_factory,
+            "invoke": invoke,
+            "policy_loader": policy_loader,
+            "env": env,
+        },
+    )
+
+
+async def run_before_turn_start_gate(
+    *,
+    prompt_text: str,
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> GateVerdict:
+    """PR-F-LIFE4a gate for ``before_turn_start``.
+
+    Supports both ``block`` and ``ask_approval`` actions. The caller (the
+    governed-turn entry) is expected to short-circuit the engine stream on
+    ``"block"`` and route ``"ask"`` to an approval surface (in v1 the
+    runtime treats ask as audit + requires_approval — see helper note).
+    """
+    return await _gate_via_audit(
+        run_before_turn_start_audit,
+        fires_at="before_turn_start",
+        enabled_fn=lifecycle_turn_hooks_enabled,
+        policy_loader=policy_loader,
+        env=env,
+        allowed_actions=frozenset({"block", "ask_approval"}),
+        fan_out_kwargs={
+            "prompt_text": prompt_text,
+            "model_factory": model_factory,
+            "invoke": invoke,
+            "policy_loader": policy_loader,
+            "env": env,
+        },
+    )
+
+
+async def run_before_llm_call_gate(
+    *,
+    prompt_text: str,
+    critic_budget_remaining: int,
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> GateVerdict:
+    """PR-F-LIFE4a gate for ``before_llm_call``.
+
+    Returns ``"block"`` when any block-action criterion fails. Inherits the
+    per-turn critic budget from :func:`run_before_llm_call_audit` — when the
+    budget is exhausted the underlying fan-out emits a ``budget_exhausted``
+    skip record and the gate returns ``"proceed"`` (fail-open: cannot block
+    on an audit that never ran).
+    """
+    if critic_budget_remaining <= 0:
+        # Mirror the audit helper's budget gate — never block on a call the
+        # critic was never paid to evaluate.
+        return "proceed"
+    return await _gate_via_audit(
+        run_before_llm_call_audit,
+        fires_at="before_llm_call",
+        enabled_fn=llm_call_hooks_enabled,
+        policy_loader=policy_loader,
+        env=env,
+        allowed_actions=frozenset({"block"}),
+        fan_out_kwargs={
+            "prompt_text": prompt_text,
+            "model_factory": model_factory,
+            "invoke": invoke,
+            "policy_loader": policy_loader,
+            "env": env,
+            "critic_budget_remaining": critic_budget_remaining,
+        },
+    )
+
+
+async def run_after_llm_call_gate(
+    *,
+    draft_text: str,
+    critic_budget_remaining: int,
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> GateVerdict:
+    """PR-F-LIFE4a gate for ``after_llm_call``.
+
+    Block verdict signals the caller (the ADK after_model boundary) to
+    suppress the just-emitted response. Same per-turn critic budget
+    treatment as :func:`run_before_llm_call_gate`.
+    """
+    if critic_budget_remaining <= 0:
+        return "proceed"
+    return await _gate_via_audit(
+        run_after_llm_call_audit,
+        fires_at="after_llm_call",
+        enabled_fn=llm_call_hooks_enabled,
+        policy_loader=policy_loader,
+        env=env,
+        allowed_actions=frozenset({"block"}),
+        fan_out_kwargs={
+            "draft_text": draft_text,
+            "model_factory": model_factory,
+            "invoke": invoke,
+            "policy_loader": policy_loader,
+            "env": env,
+            "critic_budget_remaining": critic_budget_remaining,
+        },
+    )
+
+
+async def run_before_compaction_gate(
+    *,
+    pre_compaction_text: str,
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> GateVerdict:
+    """PR-F-LIFE4a gate for ``before_compaction``.
+
+    Block verdict tells the compaction plugin to skip the tail-drop. The
+    surrounding plugin's ``try/except`` envelope still absorbs unexpected
+    failures so a malformed rule cannot wedge live compaction.
+    """
+    return await _gate_via_audit(
+        run_before_compaction_audit,
+        fires_at="before_compaction",
+        enabled_fn=lifecycle_extra_emitters_enabled,
+        policy_loader=policy_loader,
+        env=env,
+        allowed_actions=frozenset({"block"}),
+        fan_out_kwargs={
+            "pre_compaction_text": pre_compaction_text,
+            "model_factory": model_factory,
+            "invoke": invoke,
+            "policy_loader": policy_loader,
+            "env": env,
+        },
+    )
+
+
+async def run_on_task_checkpoint_gate(
+    *,
+    task_id: str,
+    checkpoint_kind: str,
+    summary_text: str = "",
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> GateVerdict:
+    """PR-F-LIFE4a gate for ``on_task_checkpoint``.
+
+    Block / ask verdict signals the work-queue driver to halt further state
+    advancement for this task. The audit fires post-transition today, so the
+    "block" here is enforced as "do not propagate the result downstream"
+    rather than rolling back the just-committed store transition (a true
+    pre-transition gate is a separate follow-up — see the design doc).
+    """
+    return await _gate_via_audit(
+        run_task_checkpoint_audit,
+        fires_at="on_task_checkpoint",
+        enabled_fn=lifecycle_extra_emitters_enabled,
+        policy_loader=policy_loader,
+        env=env,
+        allowed_actions=frozenset({"block", "ask_approval"}),
+        fan_out_kwargs={
+            "task_id": task_id,
+            "checkpoint_kind": checkpoint_kind,
+            "summary_text": summary_text,
+            "model_factory": model_factory,
+            "invoke": invoke,
+            "policy_loader": policy_loader,
+            "env": env,
+        },
+    )
+
+
+async def run_on_artifact_created_gate(
+    *,
+    artifact_ref: str,
+    artifact_excerpt: str = "",
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> GateVerdict:
+    """PR-F-LIFE4a gate for ``on_artifact_created``.
+
+    Only ``ask_approval`` is exposed (the artifact has already been written
+    by the time the audit fires — a true block is impossible without moving
+    the emit before ``write_artifact``). The caller augments the receipt
+    with ``requires_approval=true`` on ``"ask"`` so a follow-up approval
+    surface can hold delivery.
+    """
+    return await _gate_via_audit(
+        run_artifact_created_audit,
+        fires_at="on_artifact_created",
+        enabled_fn=lifecycle_extra_emitters_enabled,
+        policy_loader=policy_loader,
+        env=env,
+        allowed_actions=frozenset({"ask_approval"}),
+        fan_out_kwargs={
+            "artifact_ref": artifact_ref,
+            "artifact_excerpt": artifact_excerpt,
+            "model_factory": model_factory,
+            "invoke": invoke,
+            "policy_loader": policy_loader,
+            "env": env,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# PR-F-LIFE4b — task / session boundary audit + gate helpers
+# ---------------------------------------------------------------------------
+#
+# The three new slots ride on different runtime chokepoints than F-LIFE1/2/3
+# (governed_turn finally block, ADK before_model first-fire detection, and
+# the eventual transport session-end hook). Their fan-out shapes still match
+# the F-LIFE3 ``_run_extra_emitter_audit`` pattern: triple-gate → policy
+# load → per-rule criterion judge → audit record list. The gate helpers
+# inherit :func:`_gate_via_audit` so the worst-of-N reducer treats them
+# identically to the F-LIFE4a gates already in production.
+
+
+async def _run_session_task_audit(
+    *,
+    fires_at: str,
+    draft_text: str,
+    model_factory: Callable[[], Any] | None,
+    invoke: InvokeFn | None,
+    policy_loader: Callable[[], Any] | None,
+    env: dict[str, str] | None,
+) -> list[AuditRecord]:
+    """Shared body for the three PR-F-LIFE4b audit fan-out helpers.
+
+    Triple-gated on :func:`session_task_emitters_enabled`; fail-open at
+    every step. Mirror of :func:`_run_extra_emitter_audit` but keyed on
+    the F-LIFE4b master flag so the new slot family stages independently
+    of the F-LIFE3 four-emitter family.
+    """
+    if not session_task_emitters_enabled(env=env):
+        return []
+    try:
+        loader = policy_loader or _default_policy_loader
+        policy = loader()
+        rules = policy.enabled_llm_criterion_rules(fires_at=fires_at)
+    except Exception:
+        return []
+    if not rules:
+        return []
+    audits: list[AuditRecord] = []
+    for rule in rules:
+        audit = await _audit_one_rule(
+            rule,
+            draft_text=draft_text,
+            model_factory=model_factory,
+            invoke=invoke,
+        )
+        audits.append(audit)
+    return audits
+
+
+async def run_task_complete_audit(
+    *,
+    final_text: str,
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> list[AuditRecord]:
+    """PR-F-LIFE4b audit fan-out for ``firesAt == "on_task_complete"``.
+
+    Fires when the agent declares a multi-turn user task done. v1 signal
+    source (see :mod:`magi_agent.runtime.governed_turn`):
+
+    * The top-level turn's final assistant text contains an explicit
+      ``<task_done>`` marker on its own line (line-anchored regex; see
+      ``_TASK_DONE_MARKER_RE``). Operator must instruct the agent to emit
+      this marker as a control signal (via system prompt / recipe) for
+      the audit to fire.
+
+    Honest-degrade: if no marker is detected the emitter never fires
+    (the operator-authored rule stays inert — no false positives on
+    every-turn-end). Triple-gated + fail-open via
+    :func:`session_task_emitters_enabled`.
+
+    Future signal extensions (work-queue root task transitions, ADK
+    Terminal.completed + no follow-up heuristic) are NOT wired in v1.
+    """
+    return await _run_session_task_audit(
+        fires_at="on_task_complete",
+        draft_text=final_text,
+        model_factory=model_factory,
+        invoke=invoke,
+        policy_loader=policy_loader,
+        env=env,
+    )
+
+
+async def run_session_start_audit(
+    *,
+    prompt_text: str = "",
+    session_id: str = "",
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> list[AuditRecord]:
+    """PR-F-LIFE4b audit fan-out for ``firesAt == "on_session_start"``.
+
+    Fires once per session on the FIRST model call (subsequent model
+    calls within the same session do NOT re-fire). Wired by
+    :class:`magi_agent.adk_bridge.lifecycle_session_control
+    .LifecycleSessionControl` via a FIFO-bounded per-session "seen"
+    OrderedDict (cap 128).
+
+    ``prompt_text`` is the just-extracted user-role chunk from the
+    inbound ADK ``LlmRequest`` (the helper composes a small frame
+    including ``session_id`` so the critic sees both signals).
+    Triple-gated + fail-open via :func:`session_task_emitters_enabled`.
+    """
+    frame = (
+        f"session_id={session_id[:128]}\n"
+        f"first_prompt={(prompt_text or '')[:1024]}"
+    )
+    return await _run_session_task_audit(
+        fires_at="on_session_start",
+        draft_text=frame,
+        model_factory=model_factory,
+        invoke=invoke,
+        policy_loader=policy_loader,
+        env=env,
+    )
+
+
+async def run_session_end_audit(
+    *,
+    summary_text: str = "",
+    session_id: str = "",
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> list[AuditRecord]:
+    """PR-F-LIFE4b audit fan-out for ``firesAt == "on_session_end"``.
+
+    Fires when a session is gracefully closed or evicted (graceful CLI
+    shutdown, serve session-pool eviction, app lifespan drain).
+    Audit-only — the session has already ended by the time this fan-out
+    runs, so a block / ask verdict would have no honest runtime target
+    (the validator matrix accepts ``audit`` only).
+
+    v1 honest-degrade: this PR does NOT yet ship a transport-side emit
+    wire. The helper is exposed so an operator-authored rule round-
+    trips through the validator and the policy store; once the
+    transport wire lands (follow-up) the audit ledger will start
+    receiving entries. Triple-gated + fail-open via
+    :func:`session_task_emitters_enabled`.
+    """
+    frame = (
+        f"session_id={session_id[:128]}\n"
+        f"summary={(summary_text or '')[:1024]}"
+    )
+    return await _run_session_task_audit(
+        fires_at="on_session_end",
+        draft_text=frame,
+        model_factory=model_factory,
+        invoke=invoke,
+        policy_loader=policy_loader,
+        env=env,
+    )
+
+
+async def run_on_task_complete_gate(
+    *,
+    final_text: str,
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> GateVerdict:
+    """PR-F-LIFE4b gate for ``on_task_complete``.
+
+    Supports ``block`` and ``ask_approval``. Block verdict signals the
+    caller (the governed-turn finally block) that the agent's
+    claimed-done state failed the criterion — v1 records the audit
+    ledger entry but does NOT roll back the already-emitted final
+    turn (matches the ``on_subagent_stop`` honest-degrade pattern; a
+    true pre-emit gate is a follow-up). Fail-open at every layer —
+    never raises.
+    """
+    return await _gate_via_audit(
+        run_task_complete_audit,
+        fires_at="on_task_complete",
+        enabled_fn=session_task_emitters_enabled,
+        policy_loader=policy_loader,
+        env=env,
+        allowed_actions=frozenset({"block", "ask_approval"}),
+        fan_out_kwargs={
+            "final_text": final_text,
+            "model_factory": model_factory,
+            "invoke": invoke,
+            "policy_loader": policy_loader,
+            "env": env,
+        },
+    )
+
+
+async def run_on_session_start_gate(
+    *,
+    prompt_text: str = "",
+    session_id: str = "",
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> GateVerdict:
+    """PR-F-LIFE4b gate for ``on_session_start``.
+
+    Only ``block`` is exposed (the matrix accepts {audit, block}). Block
+    verdict signals the caller (the ADK before_model first-fire
+    detector inside :class:`LifecycleSessionControl`) to short-circuit
+    the model call by returning a synthetic policy-blocked response —
+    refuses the session. Fail-open at every layer — never raises.
+    """
+    return await _gate_via_audit(
+        run_session_start_audit,
+        fires_at="on_session_start",
+        enabled_fn=session_task_emitters_enabled,
+        policy_loader=policy_loader,
+        env=env,
+        allowed_actions=frozenset({"block"}),
+        fan_out_kwargs={
+            "prompt_text": prompt_text,
+            "session_id": session_id,
+            "model_factory": model_factory,
+            "invoke": invoke,
+            "policy_loader": policy_loader,
+            "env": env,
+        },
+    )
+
+
 __all__ = [
     "AuditRecord",
     "lifecycle_expansion_enabled",
     "lifecycle_turn_hooks_enabled",
     "llm_call_hooks_enabled",
     "lifecycle_extra_emitters_enabled",
+    "session_task_emitters_enabled",
     "run_user_prompt_submit_audit",
     "run_subagent_stop_audit",
     "run_before_turn_start_audit",
@@ -699,4 +1371,17 @@ __all__ = [
     "run_after_compaction_audit",
     "run_task_checkpoint_audit",
     "run_artifact_created_audit",
+    "run_task_complete_audit",
+    "run_session_start_audit",
+    "run_session_end_audit",
+    "run_user_prompt_submit_gate",
+    "run_before_turn_start_gate",
+    "run_before_llm_call_gate",
+    "run_after_llm_call_gate",
+    "run_before_compaction_gate",
+    "run_on_task_checkpoint_gate",
+    "run_on_artifact_created_gate",
+    "run_on_task_complete_gate",
+    "run_on_session_start_gate",
+    "derive_gate_verdict_from_audits",
 ]

@@ -33,6 +33,23 @@ class HookPoint(str, Enum):
     AFTER_COMPACTION = "afterCompaction"
     ON_RULE_VIOLATION = "onRuleViolation"
     ON_ARTIFACT_CREATED = "onArtifactCreated"
+    # PR-F-LIFE4b — task / session lifecycle boundaries.
+    # * ON_TASK_COMPLETE fires when the agent declares a multi-turn user task
+    #   done (signal sources: final assistant turn carries a ``<task_done>``
+    #   marker, or the work-queue root task transitions to ``completed``).
+    # * ON_SESSION_START fires once per session on the first model call
+    #   (first-fire-per-session detection via OrderedDict[session_id] seen set
+    #   bound to FIFO 128). Repurposes the previously unused
+    #   :data:`HookPoint.BEFORE_MESSAGE_SEND` semantics under a more honest
+    #   name.
+    # * ON_SESSION_END fires when a session is explicitly closed or evicted
+    #   (graceful CLI exit, serve session-pool eviction, app lifespan
+    #   drain). Honest-degrade: when no transport-side wire fires this
+    #   slot the runtime emitter simply never fires and the audit ledger
+    #   stays empty.
+    ON_TASK_COMPLETE = "onTaskComplete"
+    ON_SESSION_START = "onSessionStart"
+    ON_SESSION_END = "onSessionEnd"
 
 
 class HookManifest(BaseModel):

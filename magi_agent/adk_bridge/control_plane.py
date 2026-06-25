@@ -1729,6 +1729,33 @@ def build_lifecycle_llm_call_audit_controls(
     return [] if control is None else [control]
 
 
+def build_lifecycle_session_controls(
+    os_environ: dict[str, str] | None = None,
+) -> "list[LoopControl]":
+    """PR-F-LIFE4b session-start audit control,
+    ``MAGI_CUSTOMIZE_LIFECYCLE_SESSION_TASK_EMITTERS_ENABLED``, strict
+    default-OFF. Registers a single :class:`LifecycleSessionControl` that
+    wires :func:`magi_agent.customize.lifecycle_audit.run_session_start_audit`
+    to the ADK ``on_before_model`` boundary via a FIFO-bounded per-
+    session "seen" OrderedDict (cap 128) so subsequent model calls
+    within the same session do NOT re-fire.
+
+    The control covers ``on_session_start`` only — ``on_task_complete``
+    fires from the governed-turn finally block (no LoopControl needed)
+    and ``on_session_end`` is honest-degrade in v1 (no transport-side
+    emit wire ships in this PR).
+    """
+    env = os_environ if os_environ is not None else dict(os.environ)
+    # Lazy import to avoid pulling in the lifecycle_audit / customize
+    # surface for OFF callers (the file imports from this module).
+    from magi_agent.adk_bridge.lifecycle_session_control import (  # noqa: PLC0415
+        build_lifecycle_session_control,
+    )
+
+    control = build_lifecycle_session_control(env)
+    return [] if control is None else [control]
+
+
 def build_tool_synthesis_nudge_controls(
     os_environ: dict[str, str] | None = None,
     *,
@@ -1838,6 +1865,14 @@ def build_default_plane(
     # registration also short-circuits cleanly.
     for control in build_lifecycle_llm_call_audit_controls(env):
         plane.register(control)
+    # PR-F-LIFE4b session-start audit fan-out — registers when the master
+    # flag MAGI_CUSTOMIZE_LIFECYCLE_SESSION_TASK_EMITTERS_ENABLED is ON;
+    # returns [] (no registration) when OFF so the plane is byte-
+    # identical for default callers. The control's on_before_model still
+    # re-checks the flag inside the hot path so a runtime flip after
+    # registration also short-circuits cleanly.
+    for control in build_lifecycle_session_controls(env):
+        plane.register(control)
     for control in build_tool_synthesis_nudge_controls(
         env, tool_synthesis_model_label=tool_synthesis_model_label
     ):
@@ -1921,6 +1956,7 @@ __all__ = [
     "build_default_plugin",
     "build_facts_replan_controls",
     "build_lifecycle_llm_call_audit_controls",
+    "build_lifecycle_session_controls",
     "build_loop_resilience_controls",
     "build_tool_synthesis_nudge_controls",
 ]

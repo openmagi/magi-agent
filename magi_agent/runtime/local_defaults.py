@@ -228,6 +228,18 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     # end-to-end. Strict default-OFF in the registry so a fresh
     # install / hosted serve stay byte-identical.
     "MAGI_CUSTOMIZE_LIFECYCLE_EXTRA_EMITTERS_ENABLED",
+    # PR-F-LIFE4b Tier 2 lifecycle expansion (task / session boundary
+    # emitters): activate custom_rule gate sites at on_task_complete
+    # (wired in run_governed_turn's finally block, fires when the agent
+    # declares a multi-turn user task done), on_session_start (wired by
+    # LifecycleSessionControl via first-fire-per-session detection on
+    # the ADK before_model boundary), and on_session_end (honest-
+    # degrade in v1 — wizard exposes the slot, runtime emit wire ships
+    # in a follow-up). All three are no-ops without authored rules; lab
+    # opts in so dogfood turns can exercise the wizard's new lifecycle
+    # options end-to-end. Strict default-OFF in the registry so a
+    # fresh install / hosted serve stays byte-identical.
+    "MAGI_CUSTOMIZE_LIFECYCLE_SESSION_TASK_EMITTERS_ENABLED",
     # PR-F-MUT1 prompt_injection mutator: append to a tool's arguments before
     # dispatch OR append a new section to the assembled system prompt. Both
     # wires are no-ops without authored rules; lab opts in so dogfood turns

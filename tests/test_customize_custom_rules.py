@@ -622,3 +622,137 @@ def test_life3_firesat_slots_listed_in_FIRES_AT():
     assert "after_compaction" in FIRES_AT
     assert "on_task_checkpoint" in FIRES_AT
     assert "on_artifact_created" in FIRES_AT
+
+
+# ---------------------------------------------------------------------------
+# PR-F-LIFE4b — three NEW task / session boundary slots:
+# on_task_complete / on_session_start / on_session_end. All three accept
+# ``llm_criterion`` only (audit-only fan-out shape inherited from F-LIFE3).
+# Per honest runtime contract:
+#   * on_task_complete: {audit, block, ask_approval}. Block records the
+#     audit ledger entry but does not roll back the already-emitted final
+#     turn (matches on_subagent_stop honest-degrade).
+#   * on_session_start: {audit, block}. Block REPLACES the model output
+#     with a synthetic policy-blocked response via the ADK before_model
+#     boundary (refuses the session).
+#   * on_session_end: {audit} only. The session has already ended by
+#     the time the audit fires.
+# Wired by:
+#   * magi_agent/runtime/governed_turn.py (run_task_complete_audit at the
+#     finally block, gated by <task_done> marker presence in final text)
+#   * magi_agent/adk_bridge/lifecycle_session_control.py
+#     (run_session_start_audit at first-fire-per-session detection)
+#   * (on_session_end is honest-degrade in v1 — no transport-side wire)
+# All gated by MAGI_CUSTOMIZE_LIFECYCLE_SESSION_TASK_EMITTERS_ENABLED.
+# ---------------------------------------------------------------------------
+
+
+def test_llm_criterion_audit_at_on_task_complete_accepted():
+    rule = _llm(firesAt="on_task_complete", action="audit")
+    assert validate_custom_rule(rule) == []
+
+
+def test_llm_criterion_block_at_on_task_complete_accepted():
+    """PR-F-LIFE4b — ``on_task_complete`` accepts block (records the audit
+    ledger entry but does not roll back the already-emitted final turn,
+    matches the on_subagent_stop honest-degrade pattern)."""
+    rule = _llm(firesAt="on_task_complete", action="block")
+    assert validate_custom_rule(rule) == []
+
+
+def test_llm_criterion_ask_at_on_task_complete_accepted():
+    """PR-F-LIFE4b — ``ask_approval`` surfaces requires_approval=true."""
+    rule = _llm(firesAt="on_task_complete", action="ask_approval")
+    assert validate_custom_rule(rule) == []
+
+
+def test_llm_criterion_retry_at_on_task_complete_rejected():
+    """retry has no honest meaning at the task-complete boundary — the
+    final turn has already emitted by the time the audit fires."""
+    rule = _llm(firesAt="on_task_complete", action="retry")
+    errs = validate_custom_rule(rule)
+    assert any("on_task_complete" in e for e in errs), errs
+
+
+def test_llm_criterion_audit_at_on_session_start_accepted():
+    rule = _llm(firesAt="on_session_start", action="audit")
+    assert validate_custom_rule(rule) == []
+
+
+def test_llm_criterion_block_at_on_session_start_accepted():
+    """PR-F-LIFE4b — ``on_session_start`` accepts block (LifecycleSessionControl
+    short-circuits the model call with a synthetic policy-blocked response,
+    refusing the session)."""
+    rule = _llm(firesAt="on_session_start", action="block")
+    assert validate_custom_rule(rule) == []
+
+
+def test_llm_criterion_ask_at_on_session_start_rejected():
+    """ask_approval is NOT exposed at on_session_start in v1: the only
+    honest treatments are audit (record + proceed) and block (refuse the
+    session)."""
+    rule = _llm(firesAt="on_session_start", action="ask_approval")
+    errs = validate_custom_rule(rule)
+    assert any("on_session_start" in e for e in errs), errs
+
+
+def test_llm_criterion_audit_at_on_session_end_accepted():
+    rule = _llm(firesAt="on_session_end", action="audit")
+    assert validate_custom_rule(rule) == []
+
+
+def test_llm_criterion_block_at_on_session_end_rejected():
+    """Block at on_session_end is honestly impossible — the session has
+    already ended by the time this emit fires (mirrors after_turn_end /
+    after_compaction)."""
+    rule = _llm(firesAt="on_session_end", action="block")
+    errs = validate_custom_rule(rule)
+    assert any("on_session_end" in e for e in errs), errs
+
+
+def test_llm_criterion_ask_at_on_session_end_rejected():
+    """ask is also honestly impossible at on_session_end (the session is
+    over — no consumer to ask)."""
+    rule = _llm(firesAt="on_session_end", action="ask_approval")
+    errs = validate_custom_rule(rule)
+    assert any("on_session_end" in e for e in errs), errs
+
+
+def test_deterministic_ref_at_on_task_complete_rejected_no_runtime_fanout():
+    """deterministic_ref has no fan-out at the three new emitter slots —
+    the surrounding runtime sites only call the lifecycle_audit helpers
+    (which consume llm_criterion only)."""
+    rule = _det(firesAt="on_task_complete", action="audit")
+    errs = validate_custom_rule(rule)
+    assert any("on_task_complete" in e for e in errs), errs
+
+
+def test_deterministic_ref_at_on_session_start_rejected_no_runtime_fanout():
+    rule = _det(firesAt="on_session_start", action="audit")
+    errs = validate_custom_rule(rule)
+    assert any("on_session_start" in e for e in errs), errs
+
+
+def test_deterministic_ref_at_on_session_end_rejected_no_runtime_fanout():
+    rule = _det(firesAt="on_session_end", action="audit")
+    errs = validate_custom_rule(rule)
+    assert any("on_session_end" in e for e in errs), errs
+
+
+def test_tool_perm_at_on_task_complete_rejected():
+    """tool_perm has no honest mapping at the task-complete chokepoint
+    (no tool invocation is in flight)."""
+    rule = _tool(firesAt="on_task_complete", action="block")
+    errs = validate_custom_rule(rule)
+    assert any("on_task_complete" in e for e in errs), errs
+
+
+def test_life4b_firesat_slots_listed_in_FIRES_AT():
+    """Guard against drift — all three PR-F-LIFE4b boundary slots must
+    be members of FIRES_AT so the validator's ``firesAt must be one of
+    …`` check accepts them."""
+    from magi_agent.customize.custom_rules import FIRES_AT
+
+    assert "on_task_complete" in FIRES_AT
+    assert "on_session_start" in FIRES_AT
+    assert "on_session_end" in FIRES_AT

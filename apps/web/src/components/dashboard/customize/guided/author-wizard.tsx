@@ -141,7 +141,32 @@ type Lifecycle =
   | "before_compaction"
   | "after_compaction"
   | "on_task_checkpoint"
-  | "on_artifact_created";
+  | "on_artifact_created"
+  // PR-F-LIFE4b Tier 2 — task / session boundary slots that previously
+  // sat as Tier 3 file-hook-only. Fan-outs live in
+  // magi_agent.customize.lifecycle_audit (run_task_complete_audit /
+  // run_session_start_audit / run_session_end_audit) and are gated by
+  // MAGI_CUSTOMIZE_LIFECYCLE_SESSION_TASK_EMITTERS_ENABLED. All three
+  // are audit-only by default — the backend ``_LEGAL`` matrix
+  // additionally exposes block / ask per honest runtime contract at
+  // each chokepoint:
+  //   * on_task_complete — wired in run_governed_turn finally block.
+  //     Fires only when the agent's final assistant text declares the
+  //     user's multi-turn task done via a ``<task_done>`` marker (or
+  //     a follow-up adds a work-queue root-task signal). Honest-
+  //     degrade: no signal → no fire (operators authoring at this
+  //     slot get no false positives on every-turn-end).
+  //   * on_session_start — wired by LifecycleSessionControl (ADK
+  //     before_model adapter) via a FIFO-bounded per-session "seen"
+  //     OrderedDict (cap 128). Subsequent model calls within the same
+  //     session do NOT re-fire.
+  //   * on_session_end — wizard exposes the slot for operator
+  //     authoring. v1 honest-degrade: no transport-side emit wire
+  //     ships in this PR (graceful CLI shutdown / serve session-pool
+  //     eviction wire is a follow-up).
+  | "on_task_complete"
+  | "on_session_start"
+  | "on_session_end";
 type Scope = "always" | "coding" | "research" | "delivery" | "memory" | "task";
 // PR-F-MUT3 — "mutate" is a friendly grouping archetype that surfaces the
 // two mutator conditionKinds (prompt_injection + output_rewrite) as a
@@ -355,6 +380,16 @@ function stepPlan(lifecycle: Lifecycle): StepKey[] {
   ) {
     return ["trigger", "condition", "specifics", "action", "name", "review"];
   }
+  // PR-F-LIFE4b Tier 2 — task / session boundary slots all fire OUTSIDE
+  // the tool boundary so they share the same 6-step plan as the other
+  // Tier 2 audit-only slots.
+  if (
+    lifecycle === "on_task_complete"
+    || lifecycle === "on_session_start"
+    || lifecycle === "on_session_end"
+  ) {
+    return ["trigger", "condition", "specifics", "action", "name", "review"];
+  }
   // Tool-bearing lifecycles (before_tool_use / after_tool_use): tool target
   // sub-fieldset renders inside TriggerStep, not as a separate step.
   return ["trigger", "condition", "specifics", "action", "name", "review"];
@@ -423,6 +458,13 @@ export function AuthorWizard({
       || merged.lifecycle === "after_compaction"
       || merged.lifecycle === "on_task_checkpoint"
       || merged.lifecycle === "on_artifact_created"
+      // PR-F-LIFE4b — task / session boundary slots fire at runtime
+      // chokepoints outside any tool boundary. A stale ``specific``
+      // tool pick from a prior lifecycle must not bleed into Review
+      // summaries.
+      || merged.lifecycle === "on_task_complete"
+      || merged.lifecycle === "on_session_start"
+      || merged.lifecycle === "on_session_end"
     ) {
       merged.toolTarget = "any";
       merged.toolName = "";
@@ -747,23 +789,27 @@ const LIFECYCLE_OPTIONS: ReadonlyArray<LifecycleOption> = [
       "Fires immediately after a successful artifact write through the file-delivery boundary (ok-status branch only). Audit-only: inspects the artifact ref + a bounded excerpt without rewriting the written bytes.",
     tier: "tier2",
   },
+  // --- Tier 2 — wired in PR-F-LIFE4b -------------------------------------
+  {
+    id: "on_task_complete",
+    label: "When a multi-turn task completes",
+    description:
+      "Fires when the agent declares the user's multi-turn task done via a <task_done> marker in the final assistant text (honest-degrade: no marker → no fire — operators authoring at this slot get no false positives on every-turn-end). PR-F-LIFE4b: block records the audit ledger entry but does not roll back the already-emitted final turn (matches on_subagent_stop honest-degrade); ask surfaces requires_approval=true.",
+    tier: "tier2",
+  },
   {
     id: "on_session_start",
     label: "When a session starts",
     description:
-      "(file hook only — author via ~/.magi/settings.json) No runtime emitter; CC SessionStart hook fires from the loader.",
-    tier: "tier3",
-    disabledReason:
-      "No custom_rule gate yet — file hooks via ~/.magi/settings.json instead.",
+      "Fires on the FIRST model call per session — subsequent model calls within the same session do NOT re-fire (LifecycleSessionControl tracks a FIFO-bounded per-session 'seen' OrderedDict, cap 128). PR-F-LIFE4b: block REPLACES the model output with a synthetic policy-blocked response via the ADK before_model boundary (refuses the session).",
+    tier: "tier2",
   },
   {
-    id: "on_session_stop",
-    label: "When a session stops",
+    id: "on_session_end",
+    label: "When a session ends (audit-only)",
     description:
-      "(file hook only — author via ~/.magi/settings.json) No runtime emitter; CC Stop hook fires from the loader.",
-    tier: "tier3",
-    disabledReason:
-      "No custom_rule gate yet — file hooks via ~/.magi/settings.json instead.",
+      "Fires when a session is gracefully closed or evicted (graceful CLI shutdown, serve session-pool eviction). PR-F-LIFE4b v1 honest-degrade: the wizard exposes the slot so operators can author rules ahead of the transport wire, but the runtime emit wire ships in a follow-up — the audit ledger stays silent until then.",
+    tier: "tier2",
   },
 ];
 
@@ -989,6 +1035,21 @@ function availableConditionKinds(
     || lifecycle === "after_compaction"
     || lifecycle === "on_task_checkpoint"
     || lifecycle === "on_artifact_created"
+  ) {
+    return ["llm_criterion"];
+  }
+  // PR-F-LIFE4b Tier 2 — task / session boundary slots accept
+  // ``llm_criterion`` only. Honest-degrade matches the F-LIFE1/2/3
+  // pattern: deterministic_ref / tool_perm / mutator kinds have no
+  // runtime fan-out at the governed_turn finally block (on_task_complete),
+  // the LifecycleSessionControl plugin (on_session_start), or the
+  // transport session-end seam (on_session_end). Exposing them here
+  // would let the operator persist a rule the backend ``_LEGAL`` matrix
+  // rejects AND the runtime cannot honor.
+  if (
+    lifecycle === "on_task_complete"
+    || lifecycle === "on_session_start"
+    || lifecycle === "on_session_end"
   ) {
     return ["llm_criterion"];
   }
@@ -2178,6 +2239,27 @@ function availableArchetypes(lifecycle: Lifecycle): Archetype[] {
   ) {
     return ["audit"];
   }
+  // PR-F-LIFE4b — task / session boundary slots, lifted per the runtime
+  // contract each chokepoint honestly supports:
+  // * on_task_complete: {audit, block, ask} — block records the audit
+  //   ledger entry but does not roll back the already-emitted final
+  //   turn (matches on_subagent_stop honest-degrade); ask surfaces
+  //   requires_approval=true.
+  // * on_session_start: {audit, block} — block REPLACES the model
+  //   output with a synthetic policy-blocked response via the ADK
+  //   before_model boundary (refuses the session).
+  // * on_session_end: {audit} only — the session has already ended by
+  //   the time the audit fires, so block / ask have no honest runtime
+  //   target (mirrors after_turn_end / after_compaction).
+  if (lifecycle === "on_task_complete") {
+    return ["block", "ask", "audit"];
+  }
+  if (lifecycle === "on_session_start") {
+    return ["block", "audit"];
+  }
+  if (lifecycle === "on_session_end") {
+    return ["audit"];
+  }
   return ["block", "ask", "audit"];
 }
 
@@ -2336,6 +2418,16 @@ function targetEventPhrase(draft: Draft): string {
   if (draft.lifecycle === "on_artifact_created") {
     return "On a newly-created artifact";
   }
+  // PR-F-LIFE4b Tier 2 — task / session boundary lifecycle phrasings.
+  if (draft.lifecycle === "on_task_complete") {
+    return "When a multi-turn task completes";
+  }
+  if (draft.lifecycle === "on_session_start") {
+    return "When a session starts";
+  }
+  if (draft.lifecycle === "on_session_end") {
+    return "When a session ends";
+  }
   if (draft.lifecycle === "before_tool_use") {
     return draft.toolTarget === "specific"
       ? `Before "${draft.toolName || "…"}" runs`
@@ -2493,6 +2585,13 @@ function lifecycleSlug(lifecycle: Lifecycle): string {
       return "on-task-checkpoint";
     case "on_artifact_created":
       return "on-artifact";
+    // PR-F-LIFE4b — task / session boundary slugs.
+    case "on_task_complete":
+      return "on-task-complete";
+    case "on_session_start":
+      return "on-session-start";
+    case "on_session_end":
+      return "on-session-end";
   }
 }
 
@@ -2647,7 +2746,12 @@ function ReviewStep({
             && draft.lifecycle !== "before_compaction"
             && draft.lifecycle !== "after_compaction"
             && draft.lifecycle !== "on_task_checkpoint"
-            && draft.lifecycle !== "on_artifact_created" ? (
+            && draft.lifecycle !== "on_artifact_created"
+            // PR-F-LIFE4b — task / session boundary lifecycles fire at
+            // runtime chokepoints outside any tool boundary.
+            && draft.lifecycle !== "on_task_complete"
+            && draft.lifecycle !== "on_session_start"
+            && draft.lifecycle !== "on_session_end" ? (
             <>
               <dt className="text-secondary">Target</dt>
               <dd>{draft.toolTarget === "any" ? "any tool" : draft.toolName || "(unnamed tool)"}</dd>
@@ -2719,6 +2823,17 @@ function whenForLifecycle(draft: Draft): string {
   }
   if (draft.lifecycle === "on_artifact_created") {
     return "On a newly-created artifact";
+  }
+  // PR-F-LIFE4b Tier 2 — describe the three new task / session boundary
+  // lifecycle slots.
+  if (draft.lifecycle === "on_task_complete") {
+    return "When a multi-turn task completes";
+  }
+  if (draft.lifecycle === "on_session_start") {
+    return "When a session starts";
+  }
+  if (draft.lifecycle === "on_session_end") {
+    return "When a session ends";
   }
   if (draft.lifecycle === "before_tool_use") {
     return draft.toolTarget === "specific"

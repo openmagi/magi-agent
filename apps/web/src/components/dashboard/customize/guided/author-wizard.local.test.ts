@@ -867,27 +867,28 @@ describe("AuthorWizard — PR-F-UX1 lifecycle audit + Tier 2 expansion", () => {
     expect(src).toMatch(/type Lifecycle[\s\S]*?\| "on_subagent_stop"/);
   });
 
-  it("LIFECYCLE_OPTIONS lists Tier 1 (legacy 3) + Tier 2 (2 new) + Tier 3 (file-hook-only) entries", () => {
+  it("LIFECYCLE_OPTIONS lists Tier 1 (legacy 3) + Tier 2 (active wires) entries", () => {
     // Tier 1 — Tier markers must be present so renderers can distinguish
     // active-vs-disabled and downstream test assertions can read the tier.
     expect(src).toMatch(/id: "before_tool_use"[\s\S]*?tier: "tier1"/);
     expect(src).toMatch(/id: "after_tool_use"[\s\S]*?tier: "tier1"/);
     expect(src).toMatch(/id: "pre_final"[\s\S]*?tier: "tier1"/);
-    // Tier 2 — both new active slots
+    // Tier 2 — F-UX1 active slots
     expect(src).toMatch(/id: "on_user_prompt_submit"[\s\S]*?tier: "tier2"/);
     expect(src).toMatch(/id: "on_subagent_stop"[\s\S]*?tier: "tier2"/);
-    // Tier 3 — at least the four file-hook-only entries from the audit
-    expect(src).toMatch(/id: "before_llm_call"[\s\S]*?tier: "tier3"/);
-    expect(src).toMatch(/id: "after_llm_call"[\s\S]*?tier: "tier3"/);
-    expect(src).toMatch(/id: "on_session_start"[\s\S]*?tier: "tier3"/);
-    expect(src).toMatch(/id: "on_session_stop"[\s\S]*?tier: "tier3"/);
-  });
-
-  it("Tier 3 entries carry the honest 'file hook only' disabledReason tooltip", () => {
-    // The disabledReason becomes a native HTML tooltip so operators see WHY
-    // they cannot pick this option (Tier 3 = no custom_rule gate today).
-    expect(src).toContain("No custom_rule gate yet — file hooks via ~/.magi/settings.json instead.");
-    expect(src).toMatch(/disabledReason:\s*\n?\s*"No custom_rule gate yet/);
+    // Tier 2 — F-LIFE2 lifted the per-LLM-call slots from Tier 3 file-hook
+    // stubs to active wires (lifecycle_llm_call_control ADK plugin).
+    expect(src).toMatch(/id: "before_llm_call"[\s\S]*?tier: "tier2"/);
+    expect(src).toMatch(/id: "after_llm_call"[\s\S]*?tier: "tier2"/);
+    // Tier 2 — F-LIFE4b lifted the session-boundary slots from Tier 3
+    // file-hook stubs to active wires (LifecycleSessionControl /
+    // governed_turn finally block). on_session_stop was renamed to
+    // on_session_end as part of the F-LIFE4b lift so the slot name is
+    // honest about the runtime contract (the audit fires AFTER the
+    // session ends).
+    expect(src).toMatch(/id: "on_task_complete"[\s\S]*?tier: "tier2"/);
+    expect(src).toMatch(/id: "on_session_start"[\s\S]*?tier: "tier2"/);
+    expect(src).toMatch(/id: "on_session_end"[\s\S]*?tier: "tier2"/);
   });
 
   it("Tier 2 entries describe themselves as audit-only", () => {
@@ -1238,6 +1239,118 @@ describe("AuthorWizard — PR-F-LIFE3 four new emitter slots", () => {
     expect(src).toMatch(
       /draft\.lifecycle !== "before_compaction"[\s\S]*?draft\.lifecycle !== "after_compaction"[\s\S]*?draft\.lifecycle !== "on_task_checkpoint"[\s\S]*?draft\.lifecycle !== "on_artifact_created"/,
     );
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// PR-F-LIFE4b — three NEW task / session boundary slots: on_task_complete /
+// on_session_start / on_session_end. Backend matrix in
+// magi_agent/customize/custom_rules.py adds the three new firesAt slots
+// per honest runtime contract:
+//   * on_task_complete: {audit, block, ask_approval} (block records the
+//     audit ledger entry but does not roll back the already-emitted final
+//     turn — matches on_subagent_stop honest-degrade).
+//   * on_session_start: {audit, block} (block REPLACES the model output
+//     with a synthetic policy-blocked response via the ADK before_model
+//     boundary, refusing the session).
+//   * on_session_end: {audit} only (session has already ended).
+// Runtime sites: governed_turn finally block (_OnTaskCompleteCollector),
+// LifecycleSessionControl (first-fire-per-session detection), and
+// honest-degrade for on_session_end (no transport-side wire in this PR —
+// wizard exposes the slot ahead of the wire). All gated by
+// MAGI_CUSTOMIZE_LIFECYCLE_SESSION_TASK_EMITTERS_ENABLED.
+// ---------------------------------------------------------------------------
+
+
+describe("AuthorWizard — PR-F-LIFE4b task / session boundary emitter slots", () => {
+  it("Lifecycle union gains all three new task / session boundary slots", () => {
+    expect(src).toMatch(/type Lifecycle[\s\S]*?\| "on_task_complete"/);
+    expect(src).toMatch(/type Lifecycle[\s\S]*?\| "on_session_start"/);
+    expect(src).toMatch(/type Lifecycle[\s\S]*?\| "on_session_end"/);
+  });
+
+  it("LIFECYCLE_OPTIONS lists all three new slots as Tier 2 (lifted from Tier 3 file-hook stubs)", () => {
+    expect(src).toMatch(/id: "on_task_complete"[\s\S]*?tier: "tier2"/);
+    expect(src).toMatch(/id: "on_session_start"[\s\S]*?tier: "tier2"/);
+    expect(src).toMatch(/id: "on_session_end"[\s\S]*?tier: "tier2"/);
+  });
+
+  it("LIFECYCLE_OPTIONS F-LIFE4b slots telegraph their action contract honestly", () => {
+    // The wizard description should mention the <task_done> marker
+    // signal source on on_task_complete (honest-degrade) and the
+    // first-fire-per-session contract on on_session_start.
+    expect(src).toMatch(/id: "on_task_complete"[\s\S]*?<task_done>/);
+    expect(src).toMatch(/id: "on_session_start"[\s\S]*?FIRST model call/);
+    // on_session_end carries the honest-degrade tooltip so an operator
+    // authoring at this slot understands the runtime emit wire ships
+    // in a follow-up (the wizard exposes the slot ahead of the wire).
+    expect(src).toMatch(/id: "on_session_end"[\s\S]*?honest-degrade/);
+  });
+
+  it("stepPlan(F-LIFE4b slots) drops the target step (6-step plan)", () => {
+    // All three F-LIFE4b slots fire OUTSIDE the tool boundary — same step
+    // shape as pre_final / turn-boundary / per-LLM-call / F-LIFE3.
+    expect(src).toMatch(
+      /lifecycle === "on_task_complete"[\s\S]*?lifecycle === "on_session_start"[\s\S]*?lifecycle === "on_session_end"[\s\S]*?\["trigger", "condition", "specifics", "action", "name", "review"\]/,
+    );
+  });
+
+  it("availableConditionKinds(F-LIFE4b slots) returns ONLY llm_criterion", () => {
+    // Backend ``_LEGAL`` has fan-out only for llm_criterion at the three
+    // new emitter slots. deterministic_ref / tool_perm / mutator kinds
+    // are honest-degrade omitted (no runtime consumer).
+    expect(src).toMatch(
+      /lifecycle === "on_task_complete"[\s\S]*?lifecycle === "on_session_start"[\s\S]*?lifecycle === "on_session_end"[\s\S]*?return \["llm_criterion"\]/,
+    );
+  });
+
+  it("availableArchetypes(F-LIFE4b slots) — lifts per honest runtime contract", () => {
+    // PR-F-LIFE4b per-slot lift:
+    //   * on_task_complete → {audit, block, ask} (governed_turn finally
+    //     gate; honest-degrade: does not roll back already-emitted turn)
+    //   * on_session_start → {audit, block} (LifecycleSessionControl
+    //     refuses the session via synthetic policy-blocked response)
+    //   * on_session_end → {audit} (session already ended)
+    expect(src).toMatch(
+      /lifecycle === "on_task_complete"\)\s*\{\s*return \["block", "ask", "audit"\]/,
+    );
+    expect(src).toMatch(
+      /lifecycle === "on_session_start"\)\s*\{\s*return \["block", "audit"\]/,
+    );
+    expect(src).toMatch(
+      /lifecycle === "on_session_end"\)\s*\{\s*return \["audit"\]/,
+    );
+  });
+
+  it("reseedDownstream forces toolTarget=any for all three F-LIFE4b lifecycles", () => {
+    // F-LIFE4b slots have no tool layer; a stale "specific" pick must not
+    // bleed into payloads / Review summaries.
+    expect(src).toMatch(
+      /merged\.lifecycle === "on_task_complete"[\s\S]*?merged\.lifecycle === "on_session_start"[\s\S]*?merged\.lifecycle === "on_session_end"[\s\S]*?merged\.toolTarget = "any"/,
+    );
+  });
+
+  it("targetEventPhrase + whenForLifecycle describe all three F-LIFE4b slots in plain English", () => {
+    // The Review step's sentence and the ArchetypeStep header must stay
+    // honest when the operator picks an F-LIFE4b slot.
+    expect(src).toContain('"When a multi-turn task completes"');
+    expect(src).toContain('"When a session starts"');
+    expect(src).toContain('"When a session ends"');
+  });
+
+  it("ReviewStep target row is skipped for all three F-LIFE4b lifecycles", () => {
+    // The Review summary must not show a Target row for the new
+    // boundary slots — they have no tool axis.
+    expect(src).toMatch(
+      /draft\.lifecycle !== "on_task_complete"[\s\S]*?draft\.lifecycle !== "on_session_start"[\s\S]*?draft\.lifecycle !== "on_session_end"/,
+    );
+  });
+
+  it("lifecycleSlug emits stable kebab-case ids for the three new boundary slots", () => {
+    expect(src).toContain('return "on-task-complete";');
+    expect(src).toContain('return "on-session-start";');
+    expect(src).toContain('return "on-session-end";');
   });
 });
 

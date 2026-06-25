@@ -91,6 +91,39 @@ def provide_lifecycle_llm_call_audit_controls(
         context.register(control)
 
 
+def provide_lifecycle_session_task_controls(
+    context: ControlPlaneProvideContext,
+) -> None:
+    """``control_plane:lifecycle-session-task@1``: PR-F-LIFE4b session-start
+    audit fan-out, strict default-OFF
+    (``MAGI_CUSTOMIZE_LIFECYCLE_SESSION_TASK_EMITTERS_ENABLED``).
+
+    Production wiring keystone (same as F-LIFE2): ``build_default_plugin``
+    → ``build_control_plane_from_packs`` is the live runner path
+    (cli/real_runner + transport/gate5b_governance). Without this pack
+    entry the :class:`LifecycleSessionControl` would only register
+    through the legacy/compat ``build_default_plane`` composition
+    surface, so authored ``on_session_start`` rules would silently
+    never fire on operator-facing serve/REPL/child paths. Delegates to
+    the same single-source builder used by ``build_default_plane`` so
+    the control + env gates are byte-identical between both composition
+    paths.
+
+    Note: ``on_task_complete`` is wired directly in
+    :func:`magi_agent.runtime.governed_turn.run_governed_turn` (no
+    LoopControl needed — the signal source is the turn's terminal
+    EngineResult / final-text marker, both inside the funnel). The
+    ``on_session_end`` slot is honest-degrade in v1: the wizard exposes
+    it but no transport-side emit wire ships in this PR.
+    """
+    from magi_agent.adk_bridge.control_plane import (
+        build_lifecycle_session_controls,
+    )
+
+    for control in build_lifecycle_session_controls(dict(context.env)):
+        context.register(control)
+
+
 def provide_tool_synthesis_nudge_control(context: ControlPlaneProvideContext) -> None:
     """``control_plane:tool-synthesis-nudge@1``: Live-SWE tool-synthesis
     reflection nudge (#512), default-OFF + frontier-tier gated via the runner's
