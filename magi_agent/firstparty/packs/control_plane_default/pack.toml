@@ -70,6 +70,28 @@ priority = 25
 phase = "loop"
 gatePosition = "after"
 
+# PR-F-LIFE4b session-start audit fan-out:
+# MAGI_CUSTOMIZE_LIFECYCLE_SESSION_TASK_EMITTERS_ENABLED, strict default-OFF.
+# Registers LifecycleSessionControl which wires the customize
+# on_session_start rule fan-out to the ADK on_before_model boundary via a
+# FIFO-bounded per-session "seen" OrderedDict (cap 128) so subsequent model
+# calls within the same session do NOT re-fire. The control covers
+# ``on_session_start`` only — ``on_task_complete`` fires from the governed-
+# turn finally block (no LoopControl needed) and ``on_session_end`` is
+# honest-degrade in v1 (no transport-side emit wire ships in this PR).
+# Production wiring keystone (same as F-LIFE2): without this entry the
+# control would only register through the legacy/compat build_default_plane
+# surface, so authored on_session_start rules would silently never fire on
+# operator-facing serve/REPL/child paths. Priority sits between the
+# F-LIFE2 lifecycle-llm-call-audit (25) and the priority-LAST nudge (30).
+[[provides]]
+type = "control_plane"
+ref = "control_plane:lifecycle-session-task@1"
+impl = "magi_agent.firstparty.packs.control_plane_default.impl:provide_lifecycle_session_task_controls"
+priority = 27
+phase = "loop"
+gatePosition = "after"
+
 # Tool-synthesis reflection nudge (#512): MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED +
 # frontier-tier model label, default-OFF. Highest priority = registered LAST.
 [[provides]]

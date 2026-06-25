@@ -155,6 +155,39 @@ def lifecycle_extra_emitters_enabled(env: dict[str, str] | None = None) -> bool:
         return False
 
 
+def session_task_emitters_enabled(env: dict[str, str] | None = None) -> bool:
+    """PR-F-LIFE4b triple-gate check for the three task / session boundary
+    emitter slots.
+
+    Mirrors :func:`lifecycle_extra_emitters_enabled` but keys on the F-LIFE4b
+    master switch ``MAGI_CUSTOMIZE_LIFECYCLE_SESSION_TASK_EMITTERS_ENABLED``
+    so the three new slot families (on_task_complete / on_session_start /
+    on_session_end) can be staged independently of the F-LIFE3 four-emitter
+    family. Each emit site (governed_turn finally block / ADK
+    before_model first-fire detection / transport session-end hook when
+    wired) calls this helper FIRST so the OFF path is byte-identical (no
+    policy load, no critic factory build, no per-session OrderedDict
+    bookkeeping).
+
+    Fail-open: any import error returns ``False`` so the call site stays a
+    no-op when the flag layer cannot be read.
+    """
+    try:
+        from magi_agent.config.flags import flag_bool, flag_profile_bool  # noqa: PLC0415
+    except Exception:
+        return False
+    try:
+        return (
+            flag_bool(
+                "MAGI_CUSTOMIZE_LIFECYCLE_SESSION_TASK_EMITTERS_ENABLED", env=env
+            )
+            and flag_profile_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", env=env)
+            and flag_profile_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", env=env)
+        )
+    except Exception:
+        return False
+
+
 def _default_policy_loader() -> Any:
     from magi_agent.customize.store import load_overrides  # noqa: PLC0415
     from magi_agent.customize.verification_policy import (  # noqa: PLC0415
@@ -1089,6 +1122,238 @@ async def run_on_artifact_created_gate(
     )
 
 
+# ---------------------------------------------------------------------------
+# PR-F-LIFE4b — task / session boundary audit + gate helpers
+# ---------------------------------------------------------------------------
+#
+# The three new slots ride on different runtime chokepoints than F-LIFE1/2/3
+# (governed_turn finally block, ADK before_model first-fire detection, and
+# the eventual transport session-end hook). Their fan-out shapes still match
+# the F-LIFE3 ``_run_extra_emitter_audit`` pattern: triple-gate → policy
+# load → per-rule criterion judge → audit record list. The gate helpers
+# inherit :func:`_gate_via_audit` so the worst-of-N reducer treats them
+# identically to the F-LIFE4a gates already in production.
+
+
+async def _run_session_task_audit(
+    *,
+    fires_at: str,
+    draft_text: str,
+    model_factory: Callable[[], Any] | None,
+    invoke: InvokeFn | None,
+    policy_loader: Callable[[], Any] | None,
+    env: dict[str, str] | None,
+) -> list[AuditRecord]:
+    """Shared body for the three PR-F-LIFE4b audit fan-out helpers.
+
+    Triple-gated on :func:`session_task_emitters_enabled`; fail-open at
+    every step. Mirror of :func:`_run_extra_emitter_audit` but keyed on
+    the F-LIFE4b master flag so the new slot family stages independently
+    of the F-LIFE3 four-emitter family.
+    """
+    if not session_task_emitters_enabled(env=env):
+        return []
+    try:
+        loader = policy_loader or _default_policy_loader
+        policy = loader()
+        rules = policy.enabled_llm_criterion_rules(fires_at=fires_at)
+    except Exception:
+        return []
+    if not rules:
+        return []
+    audits: list[AuditRecord] = []
+    for rule in rules:
+        audit = await _audit_one_rule(
+            rule,
+            draft_text=draft_text,
+            model_factory=model_factory,
+            invoke=invoke,
+        )
+        audits.append(audit)
+    return audits
+
+
+async def run_task_complete_audit(
+    *,
+    final_text: str,
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> list[AuditRecord]:
+    """PR-F-LIFE4b audit fan-out for ``firesAt == "on_task_complete"``.
+
+    Fires when the agent declares a multi-turn user task done. v1 signal
+    source (see :mod:`magi_agent.runtime.governed_turn`):
+
+    * The top-level turn's final assistant text contains an explicit
+      ``<task_done>`` marker on its own line (line-anchored regex; see
+      ``_TASK_DONE_MARKER_RE``). Operator must instruct the agent to emit
+      this marker as a control signal (via system prompt / recipe) for
+      the audit to fire.
+
+    Honest-degrade: if no marker is detected the emitter never fires
+    (the operator-authored rule stays inert — no false positives on
+    every-turn-end). Triple-gated + fail-open via
+    :func:`session_task_emitters_enabled`.
+
+    Future signal extensions (work-queue root task transitions, ADK
+    Terminal.completed + no follow-up heuristic) are NOT wired in v1.
+    """
+    return await _run_session_task_audit(
+        fires_at="on_task_complete",
+        draft_text=final_text,
+        model_factory=model_factory,
+        invoke=invoke,
+        policy_loader=policy_loader,
+        env=env,
+    )
+
+
+async def run_session_start_audit(
+    *,
+    prompt_text: str = "",
+    session_id: str = "",
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> list[AuditRecord]:
+    """PR-F-LIFE4b audit fan-out for ``firesAt == "on_session_start"``.
+
+    Fires once per session on the FIRST model call (subsequent model
+    calls within the same session do NOT re-fire). Wired by
+    :class:`magi_agent.adk_bridge.lifecycle_session_control
+    .LifecycleSessionControl` via a FIFO-bounded per-session "seen"
+    OrderedDict (cap 128).
+
+    ``prompt_text`` is the just-extracted user-role chunk from the
+    inbound ADK ``LlmRequest`` (the helper composes a small frame
+    including ``session_id`` so the critic sees both signals).
+    Triple-gated + fail-open via :func:`session_task_emitters_enabled`.
+    """
+    frame = (
+        f"session_id={session_id[:128]}\n"
+        f"first_prompt={(prompt_text or '')[:1024]}"
+    )
+    return await _run_session_task_audit(
+        fires_at="on_session_start",
+        draft_text=frame,
+        model_factory=model_factory,
+        invoke=invoke,
+        policy_loader=policy_loader,
+        env=env,
+    )
+
+
+async def run_session_end_audit(
+    *,
+    summary_text: str = "",
+    session_id: str = "",
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> list[AuditRecord]:
+    """PR-F-LIFE4b audit fan-out for ``firesAt == "on_session_end"``.
+
+    Fires when a session is gracefully closed or evicted (graceful CLI
+    shutdown, serve session-pool eviction, app lifespan drain).
+    Audit-only — the session has already ended by the time this fan-out
+    runs, so a block / ask verdict would have no honest runtime target
+    (the validator matrix accepts ``audit`` only).
+
+    v1 honest-degrade: this PR does NOT yet ship a transport-side emit
+    wire. The helper is exposed so an operator-authored rule round-
+    trips through the validator and the policy store; once the
+    transport wire lands (follow-up) the audit ledger will start
+    receiving entries. Triple-gated + fail-open via
+    :func:`session_task_emitters_enabled`.
+    """
+    frame = (
+        f"session_id={session_id[:128]}\n"
+        f"summary={(summary_text or '')[:1024]}"
+    )
+    return await _run_session_task_audit(
+        fires_at="on_session_end",
+        draft_text=frame,
+        model_factory=model_factory,
+        invoke=invoke,
+        policy_loader=policy_loader,
+        env=env,
+    )
+
+
+async def run_on_task_complete_gate(
+    *,
+    final_text: str,
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> GateVerdict:
+    """PR-F-LIFE4b gate for ``on_task_complete``.
+
+    Supports ``block`` and ``ask_approval``. Block verdict signals the
+    caller (the governed-turn finally block) that the agent's
+    claimed-done state failed the criterion — v1 records the audit
+    ledger entry but does NOT roll back the already-emitted final
+    turn (matches the ``on_subagent_stop`` honest-degrade pattern; a
+    true pre-emit gate is a follow-up). Fail-open at every layer —
+    never raises.
+    """
+    return await _gate_via_audit(
+        run_task_complete_audit,
+        fires_at="on_task_complete",
+        enabled_fn=session_task_emitters_enabled,
+        policy_loader=policy_loader,
+        env=env,
+        allowed_actions=frozenset({"block", "ask_approval"}),
+        fan_out_kwargs={
+            "final_text": final_text,
+            "model_factory": model_factory,
+            "invoke": invoke,
+            "policy_loader": policy_loader,
+            "env": env,
+        },
+    )
+
+
+async def run_on_session_start_gate(
+    *,
+    prompt_text: str = "",
+    session_id: str = "",
+    model_factory: Callable[[], Any] | None = None,
+    invoke: InvokeFn | None = None,
+    policy_loader: Callable[[], Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> GateVerdict:
+    """PR-F-LIFE4b gate for ``on_session_start``.
+
+    Only ``block`` is exposed (the matrix accepts {audit, block}). Block
+    verdict signals the caller (the ADK before_model first-fire
+    detector inside :class:`LifecycleSessionControl`) to short-circuit
+    the model call by returning a synthetic policy-blocked response —
+    refuses the session. Fail-open at every layer — never raises.
+    """
+    return await _gate_via_audit(
+        run_session_start_audit,
+        fires_at="on_session_start",
+        enabled_fn=session_task_emitters_enabled,
+        policy_loader=policy_loader,
+        env=env,
+        allowed_actions=frozenset({"block"}),
+        fan_out_kwargs={
+            "prompt_text": prompt_text,
+            "session_id": session_id,
+            "model_factory": model_factory,
+            "invoke": invoke,
+            "policy_loader": policy_loader,
+            "env": env,
+        },
+    )
+
+
 __all__ = [
     "AuditRecord",
     "GateVerdict",
@@ -1096,6 +1361,7 @@ __all__ = [
     "lifecycle_turn_hooks_enabled",
     "llm_call_hooks_enabled",
     "lifecycle_extra_emitters_enabled",
+    "session_task_emitters_enabled",
     "run_user_prompt_submit_audit",
     "run_subagent_stop_audit",
     "run_before_turn_start_audit",
@@ -1106,6 +1372,9 @@ __all__ = [
     "run_after_compaction_audit",
     "run_task_checkpoint_audit",
     "run_artifact_created_audit",
+    "run_task_complete_audit",
+    "run_session_start_audit",
+    "run_session_end_audit",
     "run_user_prompt_submit_gate",
     "run_before_turn_start_gate",
     "run_before_llm_call_gate",
@@ -1113,5 +1382,7 @@ __all__ = [
     "run_before_compaction_gate",
     "run_on_task_checkpoint_gate",
     "run_on_artifact_created_gate",
+    "run_on_task_complete_gate",
+    "run_on_session_start_gate",
     "derive_gate_verdict_from_audits",
 ]

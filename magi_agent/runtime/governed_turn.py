@@ -9,6 +9,7 @@ turns without rebuilding it per call.  The serve path and child paths pass
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import AsyncGenerator
 
 from magi_agent.runtime.turn_context import TurnContext
@@ -108,6 +109,15 @@ async def run_governed_turn(
     # the same response_clear / text_delta aggregation pattern.
     turn_end_collector = _AfterTurnEndCollector.maybe_create(ctx)
 
+    # PR-F-LIFE4b: Tier 2 ``on_task_complete`` final-text collector.
+    # Distinct from _AfterTurnEndCollector (which fires every top-level
+    # turn boundary) — this collector ONLY fires the audit when the
+    # final assistant text carries a multi-turn-task-done signal
+    # (``<task_done>`` marker). Honest-degrade: if no signal is
+    # detectable, the emitter never fires (no false positives on every
+    # turn end).
+    task_complete_collector = _OnTaskCompleteCollector.maybe_create(ctx)
+
     try:
         async for item in stream:
             if bookend is not None:
@@ -116,6 +126,8 @@ async def run_governed_turn(
                 subagent_collector.observe(item)
             if turn_end_collector is not None:
                 turn_end_collector.observe(item)
+            if task_complete_collector is not None:
+                task_complete_collector.observe(item)
             yield item
     finally:
         if bookend is not None:
@@ -124,6 +136,8 @@ async def run_governed_turn(
             await subagent_collector.run_audit()
         if turn_end_collector is not None:
             await turn_end_collector.run_audit()
+        if task_complete_collector is not None:
+            await task_complete_collector.run_audit()
 
 
 class _BookendCollector:
@@ -533,6 +547,146 @@ class _AfterTurnEndCollector:
                 final_text=self._result_text,
                 model_factory=_build_lifecycle_critic_factory(),
             )
+        except Exception:
+            return
+
+
+#: PR-F-LIFE4b — substring marker the agent emits in its FINAL assistant
+#: text to declare a multi-turn user task done. Cheap detector: a plain
+#: regex matched against the aggregated turn text. PR-F-LIFE4b review
+#: pass: the marker is LINE-ANCHORED (must occupy a line on its own,
+#: trailing whitespace allowed) so prose mentioning the literal string
+#: (e.g. "ask me about the <task_done> marker", pasted docs, chat
+#: history) does not stale-fire the audit. The marker is opt-in for the
+#: agent — if the agent never emits it on its own line the
+#: on_task_complete slot never fires (honest-degrade: no false positives
+#: on every-turn-end).
+_TASK_DONE_MARKER_RE = re.compile(r"(?m)^\s*<task_done>\s*$")
+
+
+class _OnTaskCompleteCollector:
+    """PR-F-LIFE4b — accumulates the TOP-LEVEL turn's final assistant
+    text and fires the ``on_task_complete`` audit at turn end IFF the
+    text carries a multi-turn-task-done signal.
+
+    Signal sources (v1):
+    * The aggregated final assistant text contains the substring
+      :data:`_TASK_DONE_MARKER` (``<task_done>``). The agent emits this
+      marker explicitly when it judges the user's multi-turn task done.
+
+    Created ONLY for top-level turns (``ctx.depth == 0``) when the
+    F-LIFE4b master flag resolves ON, so child turns / OFF callers stay
+    byte-identical and zero-cost. Reuses the same text-aggregation
+    pattern as :class:`_BookendCollector` (``response_clear`` /
+    ``text_delta`` events).
+
+    Honest-degrade: when no signal is detectable in the aggregated text
+    the ``run_audit`` body short-circuits and the audit ledger stays
+    silent — operators authoring at this slot get no false positives
+    on every-turn-end.
+
+    Fully fail-open: any observation or audit error is swallowed so a
+    governed turn never breaks because of audit bookkeeping.
+    """
+
+    __slots__ = ("_ctx", "_result_text")
+
+    def __init__(self, ctx: TurnContext) -> None:
+        self._ctx = ctx
+        self._result_text = ""
+
+    @classmethod
+    def maybe_create(cls, ctx: TurnContext) -> "_OnTaskCompleteCollector | None":
+        # Only the TOP-LEVEL turn (depth == 0) emits on_task_complete.
+        # Child turns are covered by _SubagentStopCollector so the two
+        # slots stay disjoint.
+        if getattr(ctx, "depth", 0) > 0:
+            return None
+        try:
+            from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+                session_task_emitters_enabled,
+            )
+
+            if not session_task_emitters_enabled():
+                return None
+            return cls(ctx)
+        except Exception:
+            return None
+
+    def observe(self, item: object) -> None:
+        try:
+            payload = getattr(item, "payload", None)
+            if not isinstance(payload, dict):
+                return
+            kind = payload.get("type")
+            if kind == "response_clear":
+                self._result_text = ""
+            elif kind == "text_delta":
+                delta = payload.get("delta")
+                if isinstance(delta, str):
+                    self._result_text += delta
+        except Exception:
+            return
+
+    def _signal_present(self) -> bool:
+        """Return True iff the aggregated text declares task completion.
+
+        v1: line-anchored regex match on :data:`_TASK_DONE_MARKER_RE`.
+        The marker must occupy its own line (trailing whitespace allowed)
+        so prose mentioning the literal string does not stale-fire. The
+        marker is opt-in for the agent; absence is the honest "no signal,
+        no fire" branch — see the class docstring.
+        """
+        return bool(_TASK_DONE_MARKER_RE.search(self._result_text or ""))
+
+    async def run_audit(self) -> None:
+        try:
+            if not self._signal_present():
+                # Honest-degrade: no signal, no emit. Operators get
+                # audit-empty silence rather than false positives on
+                # every turn end.
+                return
+            from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+                derive_gate_verdict_from_audits,
+                run_task_complete_audit,
+                session_task_emitters_enabled,
+            )
+
+            audits = await run_task_complete_audit(
+                final_text=self._result_text,
+                model_factory=_build_lifecycle_critic_factory(),
+            )
+            # PR-F-LIFE4b review pass: _LEGAL exposes {audit, block,
+            # ask_approval} at on_task_complete. Without a gate consult
+            # the block / ask rules would silently behave like audit
+            # (false promise of authorability). Derive the verdict from
+            # the existing audits — no second criterion-judge call. ask
+            # is honest-degrade today (proceeds + records
+            # requires_approval=true in the audit ledger; approval
+            # surfacing follows). block at this slot has no
+            # post-emission revert wire yet, so the verdict is recorded
+            # but the turn is not rolled back — the rule's verdict is
+            # surfaced to the operator via the audit ledger.
+            try:
+                gate_verdict = derive_gate_verdict_from_audits(
+                    audits,
+                    fires_at="on_task_complete",
+                    allowed_actions=frozenset({"block", "ask_approval"}),
+                    enabled_fn=session_task_emitters_enabled,
+                )
+                if gate_verdict in {"block", "ask"}:
+                    # Annotate the ledger so the follow-up approval
+                    # surface (dashboard prompts, push notifications)
+                    # can find these entries. Today this is observability
+                    # only — no compensating-action wire ships in v1.
+                    for audit in audits:
+                        if isinstance(audit, dict):
+                            audit["requires_approval"] = (
+                                gate_verdict == "ask"
+                            )
+                            audit["gate_verdict"] = gate_verdict
+            except Exception:
+                pass
         except Exception:
             return
 

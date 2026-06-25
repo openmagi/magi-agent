@@ -120,6 +120,34 @@ FIRES_AT = frozenset(
         "after_compaction",
         "on_task_checkpoint",
         "on_artifact_created",
+        # PR-F-LIFE4b — task / session boundary slots. All three accept
+        # ``llm_criterion`` only (audit-fan-out shape inherited from F-LIFE3
+        # — there is no honest deterministic_ref / tool_perm / mutator
+        # consumer at these chokepoints in v1). Triple-gated by the new
+        # ``MAGI_CUSTOMIZE_LIFECYCLE_SESSION_TASK_EMITTERS_ENABLED`` master
+        # switch so OFF callers stay byte-identical.
+        # * ``on_task_complete`` — fires when the agent declares a
+        #   multi-turn user task done. v1 signal: top-level governed turn
+        #   finishes with a ``<task_done>`` marker on its own line in the
+        #   final assistant text. Operator must instruct the agent to emit
+        #   the marker as a control signal (via system prompt / recipe).
+        #   Honest-degrade: if no marker is detected the emitter never
+        #   fires (the operator-authored rule stays inert).
+        # * ``on_session_start`` — fires once per session on the FIRST
+        #   model call (subsequent calls within the same session do not
+        #   re-fire). Wired by :class:`magi_agent.adk_bridge
+        #   .lifecycle_session_control.LifecycleSessionControl` via a
+        #   FIFO-bounded per-session "seen" OrderedDict (mirror of the
+        #   F-LIFE2 per-turn budget bookkeeping shape).
+        # * ``on_session_end`` — fires when a session is explicitly closed
+        #   or its transport hosts the wire (graceful CLI shutdown, serve
+        #   session-pool eviction). v1 honest-degrade: no transport-side
+        #   emit wire ships in this PR — the wizard exposes the slot so
+        #   operators can author rules ahead of the wire, and the audit
+        #   ledger stays silent until a follow-up adds the emit.
+        "on_task_complete",
+        "on_session_start",
+        "on_session_end",
     }
 )
 
@@ -233,6 +261,28 @@ _LEGAL: dict[str, dict[str, frozenset[str]]] = {
         "after_compaction": frozenset({"audit"}),
         "on_task_checkpoint": frozenset({"audit", "block", "ask_approval"}),
         "on_artifact_created": frozenset({"audit", "ask_approval"}),
+        # PR-F-LIFE4b — task / session boundary slots. Action sets per
+        # honest runtime contract at each chokepoint:
+        # * ``on_task_complete``: {audit, block, ask_approval}. Block
+        #   semantically means "the agent claimed task done but the
+        #   criterion judges otherwise" — the gate caller (governed_turn
+        #   finally block) records the audit ledger entry; in v1 the
+        #   already-emitted final turn is not rolled back (honest-degrade,
+        #   matches the on_subagent_stop pattern). ``ask_approval``
+        #   surfaces a ``requires_approval=true`` directive for follow-up
+        #   review surfaces.
+        # * ``on_session_start``: {audit, block}. Block at the first
+        #   model call refuses the session (the
+        #   :class:`LifecycleSessionControl` short-circuits the model
+        #   call via the ADK before_model boundary by returning a
+        #   synthetic policy-blocked response).
+        # * ``on_session_end``: {audit} only. The session has already
+        #   ended by the time the emit fires, so block / ask have no
+        #   honest runtime target (mirrors ``after_turn_end`` /
+        #   ``after_compaction``).
+        "on_task_complete": frozenset({"audit", "block", "ask_approval"}),
+        "on_session_start": frozenset({"audit", "block"}),
+        "on_session_end": frozenset({"audit"}),
     },
     # audit/retry deferred: runtime always blocks on a failed shacl record regardless
     # of the stored action, so promising audit/retry here is a false contract.
