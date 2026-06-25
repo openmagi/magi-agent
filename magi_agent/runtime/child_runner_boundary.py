@@ -866,6 +866,15 @@ class LocalChildRunnerBoundary:
             )
         diagnostics["childAcceptanceAcceptedEvidenceCount"] = len(verdict.accepted_evidence_refs)
 
+        # PR-1: operator-opt-in pre-envelope trace
+        # (MAGI_CHILD_RUNNER_EMPTY_DEBUG=1). Sister of
+        # ``_maybe_log_trace_boundary_output`` above; emitted one beat closer
+        # to ``_envelope_from_output`` so the operator sees what the envelope
+        # builder is about to receive (status / first-80-of-summary /
+        # refs-count). The runtime-acceptance gate may have rejected /
+        # coerced data between the two stamps; comparing them isolates
+        # which side the silent rewrite came from.
+        _maybe_log_trace_envelope_pre(os.environ, output=output)
         return ChildRunnerResult(
             status="ok",
             taskId=request.task_id,
@@ -1392,6 +1401,39 @@ def _maybe_log_trace_boundary_output(
             f"status={data.get('status')!r} "
             f"summary_len={len(str(data.get('summary') or ''))} "
             f"evidence_refs={len(data.get('evidenceRefs') or ())}"
+        )
+    except Exception:  # noqa: BLE001 (logging must never break a turn).
+        return
+
+
+def _maybe_log_trace_envelope_pre(
+    env: Mapping[str, str],
+    *,
+    output: object,
+) -> None:
+    """PR-1: log the raw runner output the line BEFORE ``_envelope_from_output``
+    runs in ``_run_live_child``.
+
+    Sister helper to :func:`_maybe_log_trace_boundary_output`; they sit on
+    the SAME stretch of code separated by the runtime-acceptance gate. The
+    pre-stamp surfaces the status + first 80 chars of summary + evidence-ref
+    count so the operator can compare against the post-envelope log and the
+    governed-collector log in ``child_runner_live``. A status="ok" /
+    summary="" / refs=N (N == declared recipe ``evidenceRefs``) shape is the
+    exact silent-empty signature Kevin's 0.1.85 trace surfaced.
+    """
+    if not _trace_enabled(env):
+        return
+    try:
+        data = output if isinstance(output, Mapping) else {}
+        summary = str(data.get("summary") or "")
+        refs = data.get("evidenceRefs") or ()
+        refs_count = len(refs) if isinstance(refs, (list, tuple)) else 0
+        _emit_trace(
+            f"[boundary.trace] envelope_pre "
+            f"status={data.get('status')!r} "
+            f"summary_first80={summary[:80]!r} "
+            f"evidence_refs={refs_count}"
         )
     except Exception:  # noqa: BLE001 (logging must never break a turn).
         return
