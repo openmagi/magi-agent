@@ -19,10 +19,12 @@ import logging
 import os
 from collections.abc import Mapping
 
-# I-2 PR A: per-module ``_truthy`` removed in favour of the canonical leaf
-# so the truthy set lives in exactly one place.
-from magi_agent.config._truthy import is_true as _truthy
-from magi_agent.config.flags import flag_str as _flag_str  # I-4 alias
+# I-1: the three vault master switches now route through the typed flag
+# registry via ``flag_bool``; the URL string already routed through
+# ``flag_str`` (I-4). The per-module ``_truthy`` shim is gone — every
+# vault-env read sits on the typed-registry path.
+from magi_agent.config.flags import flag_bool as _flag_bool
+from magi_agent.config.flags import flag_str as _flag_str
 from magi_agent.credentials_admin.local_vault import LocalVault
 from magi_agent.storage.durable_store import DurableRecord
 
@@ -37,11 +39,11 @@ _REDACTED = "[redacted]"
 
 def vault_admin_enabled(env: Mapping[str, str] | None = None) -> bool:
     env = os.environ if env is None else env
-    return _truthy(env.get("MAGI_VAULT_ADMIN_ENABLED"))
+    return _flag_bool("MAGI_VAULT_ADMIN_ENABLED", env=env)
 
 
 def _external_vault_url(env: Mapping[str, str]) -> str:
-    return (env.get("MAGI_VAULT_ADMIN_URL") or "").strip()
+    return (_flag_str("MAGI_VAULT_ADMIN_URL", env=env) or "").strip()
 
 
 def local_vault_enabled(env: Mapping[str, str] | None = None) -> bool:
@@ -61,7 +63,7 @@ def local_vault_enabled(env: Mapping[str, str] | None = None) -> bool:
     env = os.environ if env is None else env
     if _external_vault_url(env):
         return False
-    return _truthy(env.get("MAGI_LOCAL_VAULT_ENABLED"))
+    return _flag_bool("MAGI_LOCAL_VAULT_ENABLED", env=env)
 
 
 def local_vault_proxy_enabled(env: Mapping[str, str] | None = None) -> bool:
@@ -79,7 +81,7 @@ def local_vault_proxy_enabled(env: Mapping[str, str] | None = None) -> bool:
         return False
     if not local_vault_enabled(env):
         return False
-    return _truthy(env.get("MAGI_LOCAL_VAULT_PROXY_ENABLED"))
+    return _flag_bool("MAGI_LOCAL_VAULT_PROXY_ENABLED", env=env)
 
 
 def _local_vault(env: Mapping[str, str] | None = None) -> LocalVault:
