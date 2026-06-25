@@ -484,6 +484,14 @@ FLAGS: tuple[FlagSpec, ...] = (
             "ref, a failing verdict blocks with its detail."
         ),
     ),
+    _b(
+        "MAGI_USER_EVIDENCE_PACKS_ENABLED",
+        summary=(
+            "Run user-authored evidence_producer pack runtime emitters at the "
+            "pre-final gate; an emitted record's public_ref counts as observed "
+            "so it can satisfy a required evidence ref."
+        ),
+    ),
     FlagSpec(
         name="MAGI_CODE_ACTION_TIMEOUT_MS",
         default=30_000,

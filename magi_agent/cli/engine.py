@@ -3896,6 +3896,87 @@ class MagiEngineDriver:
                 observed_public_refs.add(ref)
         return verdicts
 
+    def _run_user_evidence_producers(
+        self,
+        *,
+        required_evidence: tuple[str, ...],
+        observed_public_refs: set[str],
+        session_id: str,
+        turn_id: str,
+    ) -> list[dict[str, object]]:
+        """Run user EVIDENCE_PRODUCER pack runtime emitters at the gate (PR3).
+
+        Default OFF: returns ``[]`` and never imports the pack pipeline, so the
+        caller's gate payload is byte-identical to before. When ON, for each
+        required evidence ref that a loaded USER producer provides (keyed by its
+        ``ProducerSpec.public_ref``), build an ``EvidenceProducerCtx`` over the
+        live session, call the pack's optional ``emit_evidence`` runtime emitter,
+        and for every record it emits whose ``evidence_type`` matches the spec,
+        add the spec's ``public_ref`` to ``observed_public_refs`` (in place) so
+        ``required_evidence`` is satisfied for that ref.
+
+        Fail-safe: a producer whose emitter raises (or that ships no emitter, or
+        emits nothing) leaves the ref unobserved (the caller blocks) and never
+        crashes the turn. Returns the list of emitted-record dicts
+        (``ref``/``evidenceType``/``payload``) for surfacing on ``verifierBus``.
+        """
+        from magi_agent.config.env import user_evidence_packs_enabled  # noqa: PLC0415
+
+        if not user_evidence_packs_enabled():
+            return []
+        if not required_evidence:
+            return []
+        from magi_agent.packs.user_evidence import (  # noqa: PLC0415
+            loaded_user_evidence_producers,
+        )
+
+        producers = loaded_user_evidence_producers()
+        if not producers:
+            return []
+
+        from magi_agent.packs.context import (  # noqa: PLC0415
+            EvidenceProducerCtx,
+            SessionReadView,
+        )
+
+        session = SessionReadView(
+            invocation_id=session_id,
+            agent_name="magi",
+            turn_index=0,
+        )
+        emitted: list[dict[str, object]] = []
+        for ref in required_evidence:
+            producer = producers.get(ref)
+            if producer is None:
+                # A required evidence ref with no loaded USER producer (e.g. a
+                # first-party activity ref) is left for the existing emit paths.
+                continue
+            if producer.emitter is None:
+                # Declarative-only pack: no runtime code to run (pre-PR3 shape).
+                continue
+            ctx = EvidenceProducerCtx(session=session)
+            try:
+                producer.emitter(ctx)
+            except Exception as exc:  # noqa: BLE001 - a broken producer must not crash
+                logger.warning(
+                    "user evidence producer %s raised; emitting nothing: %s",
+                    producer.ref,
+                    exc,
+                )
+                continue
+            for record in ctx.emitted():
+                if record.get("evidence_type") != producer.spec.evidence_type:
+                    continue
+                observed_public_refs.add(producer.spec.public_ref)
+                emitted.append(
+                    {
+                        "ref": producer.spec.public_ref,
+                        "evidenceType": producer.spec.evidence_type,
+                        "payload": record.get("payload", {}),
+                    }
+                )
+        return emitted
+
     def _pre_final_gate_payload(
         self,
         *,
@@ -3965,6 +4046,19 @@ class MagiEngineDriver:
             session_id=session_id,
             turn_id=turn_id,
             final_text=final_text,
+        )
+        # PR3: run user-authored EVIDENCE_PRODUCER runtime emitters. Default OFF
+        # (and a no-op when no required evidence ref has a loaded USER producer),
+        # so when OFF the gate payload is byte-identical to before: a required but
+        # unemitted user evidence ref still blocks. When ON, a producer's emitter
+        # runs over the live session and each emitted record's public_ref is added
+        # to observed_public_refs BEFORE the verifier bus is computed below, so it
+        # is echoed into matchedRefs and satisfies required_evidence.
+        user_evidence_records = self._run_user_evidence_producers(
+            required_evidence=effective_required_evidence,
+            observed_public_refs=observed_public_refs,
+            session_id=session_id,
+            turn_id=turn_id,
         )
         evidence_records: tuple[object, ...] = ()
         verifier_bus: dict[str, object] | None = None
@@ -4138,6 +4232,10 @@ class MagiEngineDriver:
         # OFF path keeps the bus payload byte-identical).
         if user_validator_verdicts:
             verifier_bus["userValidatorVerdicts"] = user_validator_verdicts
+        # PR3: surface emitted user evidence records (empty list when none ran, so
+        # the OFF path keeps the bus payload byte-identical).
+        if user_evidence_records:
+            verifier_bus["userEvidenceRecords"] = user_evidence_records
         payload["verifierBus"] = verifier_bus
         if decision == "block" and effective_action == "repair_required":
             latest_test_evidence = (
