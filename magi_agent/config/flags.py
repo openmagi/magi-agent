@@ -468,6 +468,30 @@ FLAGS: tuple[FlagSpec, ...] = (
             "PersistentPython tool (CodeAct: persistent interpreter namespace)."
         ),
     ),
+    _b(
+        "MAGI_USER_TOOL_PACKS_ENABLED",
+        summary=(
+            "Discover + merge user-authored tool packs (~/.magi/packs, "
+            "<cwd>/.magi/packs) into the CLI tool runtime; never overrides core "
+            "tools."
+        ),
+    ),
+    _b(
+        "MAGI_USER_VALIDATOR_PACKS_ENABLED",
+        summary=(
+            "Execute user-authored validator pack impls at the pre-final "
+            "evidence gate; a passing verdict observes the required validator "
+            "ref, a failing verdict blocks with its detail."
+        ),
+    ),
+    _b(
+        "MAGI_USER_EVIDENCE_PACKS_ENABLED",
+        summary=(
+            "Run user-authored evidence_producer pack runtime emitters at the "
+            "pre-final gate; an emitted record's public_ref counts as observed "
+            "so it can satisfy a required evidence ref."
+        ),
+    ),
     FlagSpec(
         name="MAGI_CODE_ACTION_TIMEOUT_MS",
         default=30_000,

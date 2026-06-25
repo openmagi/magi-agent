@@ -3579,6 +3579,77 @@ def persistent_python_enabled(env: Mapping[str, str] | None = None) -> bool:
     return flag_bool(MAGI_PERSISTENT_PYTHON_ENABLED_ENV, env=source)
 
 
+MAGI_USER_TOOL_PACKS_ENABLED_ENV = "MAGI_USER_TOOL_PACKS_ENABLED"
+
+
+def user_tool_packs_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the user TOOL-pack CLI activation gate.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the CLI
+    tool runtime never discovers or loads user tool packs, so the assembled
+    registry is byte-identical to before (only first-party + optional first-party
+    sources). When ON, ``build_cli_tool_runtime`` discovers + loads user tool
+    packs from the pack search bases (``~/.magi/packs`` + ``<cwd>/.magi/packs``)
+    and merges each dispatchable user tool into the CLI registry (last-wins after
+    first-party, but never overriding an already-registered core tool). Like
+    ``persistent_python_enabled`` this is an additive, default-disabled seam and
+    deliberately does NOT follow the runtime-profile default-ON convention.
+    """
+    from .flags import flag_bool
+
+    source = os.environ if env is None else env
+    return flag_bool(MAGI_USER_TOOL_PACKS_ENABLED_ENV, env=source)
+
+
+MAGI_USER_VALIDATOR_PACKS_ENABLED_ENV = "MAGI_USER_VALIDATOR_PACKS_ENABLED"
+
+
+def user_validator_packs_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the user VALIDATOR-pack execution gate (PR2).
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the
+    pre-final evidence gate never loads or runs user validator impls, so the gate
+    payload is byte-identical to before: a required-but-unobserved user validator
+    ref still blocks (block-only, the pre-PR2 behavior). When ON, the engine
+    loads disk-discovered validator impls and runs each required user validator
+    over the produced artifact; a passing verdict makes the ref count as observed
+    (satisfies ``required_validators``) and a failing verdict blocks with the
+    verdict detail. Like ``user_tool_packs_enabled`` this is an additive,
+    default-disabled seam and deliberately does NOT follow the runtime-profile
+    default-ON convention.
+    """
+    from .flags import flag_bool
+
+    source = os.environ if env is None else env
+    return flag_bool(MAGI_USER_VALIDATOR_PACKS_ENABLED_ENV, env=source)
+
+
+MAGI_USER_EVIDENCE_PACKS_ENABLED_ENV = "MAGI_USER_EVIDENCE_PACKS_ENABLED"
+
+
+def user_evidence_packs_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the user EVIDENCE_PRODUCER runtime-emission gate (PR3).
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the
+    pre-final evidence gate never loads or runs user evidence-producer runtime
+    emitters, so the gate payload is byte-identical to before: a user
+    evidence_producer pack contributes only its STATIC manifest ref (read by
+    ``enabled_first_party_activity_refs``) and never emits, so a required-but-
+    unemitted user evidence ref stays unobserved (block-only). When ON, the
+    engine loads disk-discovered USER evidence_producer packs that expose a
+    runtime emitter (``emit_evidence(EvidenceProducerCtx) -> None``), runs each
+    over the live session, and adds the matching ``ProducerSpec.public_ref`` of
+    every emitted record to ``observed_public_refs`` (satisfies
+    ``required_evidence``). Like ``user_validator_packs_enabled`` this is an
+    additive, default-disabled seam and deliberately does NOT follow the
+    runtime-profile default-ON convention.
+    """
+    from .flags import flag_bool
+
+    source = os.environ if env is None else env
+    return flag_bool(MAGI_USER_EVIDENCE_PACKS_ENABLED_ENV, env=source)
+
+
 MAGI_PERMISSION_SCOPE_FROM_MODE_ENV = "MAGI_PERMISSION_SCOPE_FROM_MODE"
 MAGI_PERMISSION_SCOPE_LEGACY_FULL_TOOLHOST_ENV = (
     "MAGI_PERMISSION_SCOPE_LEGACY_FULL_TOOLHOST"
