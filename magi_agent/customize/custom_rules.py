@@ -42,6 +42,18 @@ KINDS = frozenset(
         # helpers, and magi_agent.facades.execute_tool_with_hooks for the
         # runtime wire (parallel to the F-MUT1 BEFORE_TOOL_USE consumer).
         "output_rewrite",
+        # F-EXEC1: shell_command — operator-authored subprocess action. The
+        # rule payload conforms to
+        # :class:`magi_agent.customize.shell_runner.ShellPayload` (inline /
+        # file source, timeout, env_vars whitelist, shell selector). The
+        # facades wire fires at ``before_tool_use`` (action=block honored
+        # when the script exits non-zero) and ``after_tool_use`` (audit-only
+        # — the dispatch already happened). Lifecycle_audit fan-outs cover
+        # 9 additional audit-only slots (pre_final + 8 Tier 2 emitters);
+        # per-turn cost is bounded by a shared per-(session, turn) budget
+        # enforced by the LifecycleShellCommandControl ADK plugin. Trust
+        # class: Operator-defined (F-EXEC3 ships the visual badge).
+        "shell_command",
     }
 )
 ACTIONS = frozenset({"block", "retry", "ask_approval", "audit", "override"})
@@ -290,6 +302,32 @@ _LEGAL: dict[str, dict[str, frozenset[str]]] = {
     "output_rewrite": {
         "after_tool_use": frozenset({"audit"}),
     },
+    # F-EXEC1: shell_command — operator-authored subprocess. v1 ships 11
+    # lifecycle slots; ``block`` is exposed at the two slots with an honest
+    # pre-execution gate target (``before_tool_use`` runs before dispatch;
+    # ``pre_final`` runs before the final answer commits). All other slots
+    # are audit-only because by the time the runtime sees them the action
+    # the rule could "block" has already occurred (after_tool_use →
+    # dispatcher already returned; on_user_prompt_submit → prompt already
+    # assembled by the time the audit fires; on_subagent_stop / after-turn
+    # / after-compaction / on_task_checkpoint / on_artifact_created →
+    # event already emitted). v1 explicitly excludes before_llm_call /
+    # after_llm_call (per-LLM-call hot path, even with a budget cap
+    # operator-shell on every model call is too costly) and ``spawn``
+    # (capability_scope owns the spawn-time gate).
+    "shell_command": {
+        "pre_final": frozenset({"block", "audit"}),
+        "before_tool_use": frozenset({"block", "audit"}),
+        "after_tool_use": frozenset({"audit"}),
+        "on_user_prompt_submit": frozenset({"audit"}),
+        "on_subagent_stop": frozenset({"audit"}),
+        "before_turn_start": frozenset({"audit"}),
+        "after_turn_end": frozenset({"audit"}),
+        "before_compaction": frozenset({"audit"}),
+        "after_compaction": frozenset({"audit"}),
+        "on_task_checkpoint": frozenset({"audit"}),
+        "on_artifact_created": frozenset({"audit"}),
+    },
 }
 
 
@@ -450,6 +488,20 @@ def validate_custom_rule(rule: Any) -> list[str]:
         )
 
         errors.extend(validate_output_rewrite_payload(payload, fires_at))
+    elif kind == "shell_command":
+        # F-EXEC1: operator-authored subprocess action. The payload is a
+        # ``ShellPayload`` dict (source=inline|file + inline?/path? +
+        # timeout_seconds + env_vars + shell). The shell_runner module
+        # ships the validator (F-EXEC-AUDIT baseline); we re-export it
+        # here so the rule round-trips through the standard
+        # custom_rules.validate_custom_rule entry-point. Lazy import keeps
+        # facades / store / etc. hot-path-light when the operator never
+        # authors a shell rule.
+        from magi_agent.customize.shell_runner import (  # noqa: PLC0415
+            validate_shell_payload,
+        )
+
+        errors.extend(validate_shell_payload(payload, fires_at))
 
     # (f) projection ⊆ whitelist (conversation rejected)
     projection = rule.get("projection")

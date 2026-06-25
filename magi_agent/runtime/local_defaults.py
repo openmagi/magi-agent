@@ -254,6 +254,14 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     # end-to-end. Strict default-OFF in the registry so a fresh install /
     # hosted serve stays byte-identical.
     "MAGI_CUSTOMIZE_OUTPUT_REWRITE_ENABLED",
+    # PR-F-EXEC1 shell_command action kind: operator-authored subprocess
+    # hooks at 11 lifecycle slots. Wires are no-ops without authored rules;
+    # lab opts in so dogfood turns can exercise the wizard's new action
+    # kind + per-turn budget cap (default 5 spawns / turn shared across
+    # all slots) end-to-end. Strict default-OFF in the registry so a fresh
+    # install / hosted serve stays byte-identical (hosted activation is
+    # explicitly deferred to v2 with a separate admin-tier flag).
+    "MAGI_CUSTOMIZE_SHELL_COMMAND_ENABLED",
     # PR-F-UX2 (F8 core) runtime-fields endpoint: backs the wizard's chip
     # picker shown above regex / contentMatch / llm_criterion / SHACL inputs.
     # Pure derivation (no I/O, no LLM), registration-time only, fail-open on

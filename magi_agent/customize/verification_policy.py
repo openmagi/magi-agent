@@ -289,6 +289,50 @@ class CustomizeVerificationPolicy:
             return candidates
         return [rule for rule in candidates if _rule_scope_matches(rule, current_scope)]
 
+    def enabled_shell_command_rules(
+        self, *, fires_at: str, current_scope: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Enabled ``shell_command`` custom rules for a fire-at point (F-EXEC1).
+
+        Mirrors :meth:`enabled_prompt_injection_rules` exactly: filter on
+        ``enabled`` + ``firesAt == fires_at`` + ``what.kind ==
+        "shell_command"``. When ``current_scope`` is supplied the result
+        is additionally narrowed by :func:`_rule_scope_matches`; otherwise
+        the scope-blind list is returned. Consumed by:
+
+        * :mod:`magi_agent.facades` — ``fires_at="before_tool_use"`` to
+          gather pre-dispatch shell hooks (block action honored) and
+          ``fires_at="after_tool_use"`` to gather audit-only post-dispatch
+          hooks.
+        * :mod:`magi_agent.customize.lifecycle_audit` — additional 9
+          slots (pre_final, on_user_prompt_submit, on_subagent_stop,
+          before_turn_start, after_turn_end, before_compaction,
+          after_compaction, on_task_checkpoint, on_artifact_created) via
+          their respective fan-out helpers. Each slot's gate/audit helper
+          loads the matching ``enabled_shell_command_rules`` list and
+          invokes :func:`magi_agent.customize.shell_command
+          .apply_shell_command_rule` per rule under a shared per-turn
+          budget cap (env ``MAGI_CUSTOMIZE_SHELL_AUDIT_BUDGET``, default
+          5) enforced by
+          :class:`magi_agent.adk_bridge.lifecycle_shell_command_control
+          .LifecycleShellCommandControl`.
+
+        The runtime apply helper (:func:`apply_shell_command_rule`) accepts
+        the raw rule dicts returned here and fail-open on any individual
+        malformed rule.
+        """
+        candidates = [
+            rule
+            for rule in self.custom_rules
+            if rule.get("enabled", False)
+            and rule.get("firesAt") == fires_at
+            and isinstance(rule.get("what"), dict)
+            and rule["what"].get("kind") == "shell_command"
+        ]
+        if current_scope is None:
+            return candidates
+        return [rule for rule in candidates if _rule_scope_matches(rule, current_scope)]
+
     def enabled_output_rewrite_rules(
         self, *, fires_at: str, current_scope: str | None = None
     ) -> list[dict[str, Any]]:

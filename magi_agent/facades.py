@@ -102,6 +102,18 @@ async def execute_tool_with_hooks(
         arguments=arguments, tool_name=tool_name
     )
 
+    # F-EXEC1 shell_command rule action at ``before_tool_use``. Triple-gated +
+    # fail-open. Runs AFTER the F-MUT1 prompt_injection mutator so the
+    # operator-authored shell hook sees the final dispatch arguments. A rule
+    # with ``action == "block"`` that exits with a non-zero exit code returns
+    # a blocked ToolResult immediately (no dispatch, no after-hook). Rules
+    # with ``action == "audit"`` always run to completion and never block.
+    blocked = await _maybe_apply_shell_command_before_tool(
+        tool_name=tool_name, arguments=arguments
+    )
+    if blocked is not None:
+        return blocked, before_result, None
+
     result = await dispatcher.dispatch(
         tool_name, arguments, context, mode=mode, exposed_tool_names=exposed_tool_names
     )
@@ -143,6 +155,15 @@ async def execute_tool_with_hooks(
     # rule-driven redact (the rule sees the hook's overlaid text and may
     # redact additional patterns from it).
     result = _maybe_apply_output_rewrite(result=result, tool_name=tool_name)
+
+    # F-EXEC1 shell_command rule action at ``after_tool_use``. Audit-only:
+    # the dispatch already returned, so a "block" action has no honest
+    # semantics here. Runs the operator-authored scripts (subject to the
+    # per-turn budget cap enforced by the LifecycleShellCommandControl
+    # plugin) and silently discards any verdict.
+    await _maybe_apply_shell_command_after_tool(
+        tool_name=tool_name, result_output=_result_output_text(result)
+    )
 
     return result, before_result, after_result
 
@@ -235,6 +256,159 @@ def _output_rewrite_enabled() -> bool:
     try:
         return (
             flag_bool("MAGI_CUSTOMIZE_OUTPUT_REWRITE_ENABLED")
+            and flag_profile_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED")
+            and flag_profile_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED")
+        )
+    except Exception:
+        return False
+
+
+def _result_output_text(result: ToolResult) -> str:
+    """Return ``result.output`` coerced to a string for shell stdin context."""
+    out = getattr(result, "output", None)
+    return out if isinstance(out, str) else ""
+
+
+async def _maybe_apply_shell_command_before_tool(
+    *, tool_name: str, arguments: dict[str, object]
+) -> ToolResult | None:
+    """F-EXEC1 facades helper: before-dispatch ``shell_command`` consumer.
+
+    Triple-gated by :func:`_shell_command_enabled`. Returns a blocked
+    :class:`ToolResult` when any enabled ``shell_command`` rule with
+    ``firesAt == "before_tool_use"`` AND ``action == "block"`` exits with a
+    non-zero code (first failing rule wins). Returns ``None`` otherwise —
+    audit-action rules run silently; ``proceed`` verdict means dispatch
+    continues normally. Fail-open: any unexpected exception returns ``None``
+    (no block).
+    """
+    try:
+        if not _shell_command_enabled():
+            return None
+        from magi_agent.customize.shell_command import (  # noqa: PLC0415
+            apply_shell_command_rule,
+        )
+        from magi_agent.customize.store import load_overrides  # noqa: PLC0415
+        from magi_agent.customize.verification_policy import (  # noqa: PLC0415
+            CustomizeVerificationPolicy,
+        )
+
+        policy = CustomizeVerificationPolicy.from_overrides(load_overrides())
+        rules = policy.enabled_shell_command_rules(fires_at="before_tool_use")
+        if not rules:
+            return None
+
+        stdin_json = {
+            "lifecycle": "before_tool_use",
+            "tool_name": tool_name,
+            "tool_args": _safe_json(arguments),
+        }
+
+        for rule in rules:
+            audit, verdict = await apply_shell_command_rule(
+                rule,
+                tool_name=tool_name,
+                stdin_json=stdin_json,
+                honor_block_action=True,
+            )
+            if verdict == "block":
+                return ToolResult(
+                    status="blocked",
+                    metadata={
+                        "blocked_by": "shell_command_rule",
+                        "rule_id": audit.get("rule_id"),
+                        "exit_code": audit.get("exit_code"),
+                    },
+                )
+        return None
+    except Exception:  # noqa: BLE001 — fail-open
+        return None
+
+
+async def _maybe_apply_shell_command_after_tool(
+    *, tool_name: str, result_output: str
+) -> None:
+    """F-EXEC1 facades helper: after-dispatch ``shell_command`` consumer.
+
+    Triple-gated by :func:`_shell_command_enabled`. Audit-only — the tool
+    has already returned by the time we observe it. Iterates every enabled
+    ``shell_command`` rule with ``firesAt == "after_tool_use"`` and invokes
+    the runner under the shared per-turn budget cap (the budget itself is
+    maintained by
+    :class:`magi_agent.adk_bridge.lifecycle_shell_command_control
+    .LifecycleShellCommandControl`; facades stays stateless). Fail-open on
+    any exception.
+    """
+    try:
+        if not _shell_command_enabled():
+            return
+        from magi_agent.customize.shell_command import (  # noqa: PLC0415
+            apply_shell_command_rule,
+        )
+        from magi_agent.customize.store import load_overrides  # noqa: PLC0415
+        from magi_agent.customize.verification_policy import (  # noqa: PLC0415
+            CustomizeVerificationPolicy,
+        )
+
+        policy = CustomizeVerificationPolicy.from_overrides(load_overrides())
+        rules = policy.enabled_shell_command_rules(fires_at="after_tool_use")
+        if not rules:
+            return
+
+        stdin_json = {
+            "lifecycle": "after_tool_use",
+            "tool_name": tool_name,
+            "tool_output": result_output[:4096],
+        }
+        for rule in rules:
+            await apply_shell_command_rule(
+                rule,
+                tool_name=tool_name,
+                stdin_json=stdin_json,
+                honor_block_action=False,
+            )
+    except Exception:  # noqa: BLE001 — fail-open
+        return
+
+
+def _safe_json(obj: object) -> object:
+    """Best-effort JSON-friendly snapshot of ``obj`` (cap dict / list depth)."""
+    try:
+        import json  # noqa: PLC0415
+
+        json.dumps(obj)
+        return obj
+    except Exception:
+        try:
+            return str(obj)[:1024]
+        except Exception:
+            return "<unserializable>"
+
+
+def _shell_command_enabled() -> bool:
+    """Triple-gate check used by the F-EXEC1 facades wire.
+
+    Returns ``True`` only when:
+
+    * ``MAGI_CUSTOMIZE_SHELL_COMMAND_ENABLED`` is strict-truthy ON,
+    * ``MAGI_CUSTOMIZE_VERIFICATION_ENABLED`` resolves ON via the profile-aware
+      reader (full / lab profile; OFF under safe/eval),
+    * ``MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED`` resolves ON via the profile-aware
+      reader.
+
+    Fail-open: any import error returns ``False`` so the call site stays a
+    no-op when the flag layer cannot be read.
+    """
+    try:
+        from magi_agent.config.flags import (  # noqa: PLC0415
+            flag_bool,
+            flag_profile_bool,
+        )
+    except Exception:
+        return False
+    try:
+        return (
+            flag_bool("MAGI_CUSTOMIZE_SHELL_COMMAND_ENABLED")
             and flag_profile_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED")
             and flag_profile_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED")
         )

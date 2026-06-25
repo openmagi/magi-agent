@@ -52,6 +52,14 @@ def _emit_task_checkpoint_sync(
     fresh asyncio loop. Fail-open at every step: any failure (import
     error, busy event loop, fan-out raise) leaves the dispatcher tick
     intact.
+
+    PR-F-EXEC1: this helper ALSO drives the sibling shell_command
+    fan-out at ``on_task_checkpoint`` so an operator-authored
+    ``shell_command`` rule with ``firesAt=on_task_checkpoint`` runs from
+    this single chokepoint at every task state transition. The shell
+    surface is gated independently by ``shell_command_enabled`` so the
+    OFF path for the shell flag is byte-identical even when the
+    llm_criterion path is ON.
     """
     try:
         from magi_agent.customize.lifecycle_audit import (
@@ -59,32 +67,85 @@ def _emit_task_checkpoint_sync(
             run_task_checkpoint_audit,
         )
 
-        if not lifecycle_extra_emitters_enabled():
-            return None
-        try:
-            from magi_agent.adk_bridge.lifecycle_llm_call_control import (
-                _build_critic_factory,
-            )
+        if lifecycle_extra_emitters_enabled():
+            try:
+                from magi_agent.adk_bridge.lifecycle_llm_call_control import (
+                    _build_critic_factory,
+                )
 
-            factory = _build_critic_factory()
-        except Exception:
-            factory = None
+                factory = _build_critic_factory()
+            except Exception:
+                factory = None
+            try:
+                asyncio.run(
+                    run_task_checkpoint_audit(
+                        task_id=task_id,
+                        checkpoint_kind=checkpoint_kind,
+                        summary_text=summary_text,
+                        model_factory=factory,
+                    )
+                )
+            except RuntimeError:
+                # An outer event loop is already running (unexpected on this
+                # sync path, but defensive): drop the emit rather than
+                # raising into the dispatcher.
+                pass
+
+        # PR-F-EXEC1 shell_command fan-out at on_task_checkpoint. Gated
+        # independently of lifecycle_extra_emitters so an operator can
+        # author a shell hook without enabling the llm_criterion path.
+        _emit_shell_command_task_checkpoint_sync(
+            task_id=task_id,
+            checkpoint_kind=checkpoint_kind,
+            summary_text=summary_text,
+        )
+    except Exception:
+        # Fail-open: never break dispatch.
+        return None
+    return None
+
+
+def _emit_shell_command_task_checkpoint_sync(
+    *, task_id: str, checkpoint_kind: str, summary_text: str
+) -> None:
+    """PR-F-EXEC1 sync helper: fire ``shell_command`` at ``on_task_checkpoint``.
+
+    Sibling of :func:`_emit_task_checkpoint_sync` — shares the same
+    asyncio.run boundary, the same fail-open contract, and is gated by
+    :func:`magi_agent.customize.lifecycle_audit.shell_command_enabled`
+    (master shell flag). Threads the shared per-(session, turn) budget
+    from the ``_ACTIVE_TURN_IDENTITY`` ContextVar published by
+    ``run_governed_turn`` — the work-queue dispatcher runs OUTSIDE a
+    governed turn so identity is typically unset and ``remaining_budget``
+    resolves to ``None`` (no cap). When the dispatcher is invoked from
+    inside a turn (e.g. by a tool that enqueues a task) the budget IS
+    shared with the surrounding turn.
+    """
+    try:
+        from magi_agent.adk_bridge.lifecycle_shell_command_control import (
+            shell_budget_for,
+        )
+        from magi_agent.customize.lifecycle_audit import (
+            run_shell_command_at_on_task_checkpoint,
+            shell_command_enabled,
+        )
+
+        if not shell_command_enabled():
+            return None
+        remaining, decrement_fn = shell_budget_for()
         try:
             asyncio.run(
-                run_task_checkpoint_audit(
+                run_shell_command_at_on_task_checkpoint(
                     task_id=task_id,
                     checkpoint_kind=checkpoint_kind,
                     summary_text=summary_text,
-                    model_factory=factory,
+                    remaining_budget=remaining,
+                    decrement_fn=decrement_fn,
                 )
             )
         except RuntimeError:
-            # An outer event loop is already running (unexpected on this
-            # sync path, but defensive): drop the emit rather than
-            # raising into the dispatcher.
             return None
     except Exception:
-        # Fail-open: never break dispatch.
         return None
     return None
 

@@ -338,7 +338,7 @@ graph LR
 | __init__.py | — | — | (root)/main.py, cli/tui/app.py |
 | __main__.py | — | main | — |
 | app.py | — | active_sessions, app_api, board_api, bootstrap, chat, config, control_requests, credentials, customize, debug_trace, health, integrations, learning_dashboard, observability, openmagi_runtime, packs_dashboard, plugins, shadow_invocations, streaming_chat_route, tools, web_dashboard | (root)/main.py |
-| facades.py | High-level entry-point facades that compose existing modules. | bus, context, dispatcher, flags, manifest, output_rewrite, prompt_injection, replace_payloads, resolved, result, store, verification_policy | — |
+| facades.py | High-level entry-point facades that compose existing modules. | bus, context, dispatcher, flags, manifest, output_rewrite, prompt_injection, replace_payloads, resolved, result, shell_command, store, verification_policy | — |
 | main.py | — | _truthy, app, chat, control_plane_overrides, env, flags, hosted_defaults, install_profile_bootstrap, local_defaults, local_proxy, local_vault, memory_bootstrap, models, observed_egress, openmagi_runtime, otel_noise, providers, store, vault_local, vault_server | (root)/__main__.py, cli/tests/test_app.py |
 
 ### adk_bridge/
@@ -349,8 +349,8 @@ graph LR
 | anthropic_cache_model.py | Cache-aware Anthropic (Claude) model for the ADK runner boundary — PR11. | env | cli/real_runner.py, prompt/injection.py, runtime/model_factory.py |
 | artifact_service.py | — | — | — |
 | callback_adapter.py | — | bus, context, manifest, resolved | — |
-| context_compaction.py | Live context-compaction wiring for the ADK Runner (PR13). | auto_compact, context, context_lifecycle, lifecycle_audit, manual_compaction_context, protected_tools, providers, query_state, readonly_classifier, session_service, token_estimation, token_tracker, transcript_render, usage_metadata, wiring | adk_bridge/control_plane.py |
-| control_plane.py | ADK loop control-plane abstraction (PR2, goose-parity). | _truthy, constraint_reinjection, context, context_compaction, edit_retry_reflection, env, facts_replan_control, flags, fork_runner, gemini_content_ordering, lifecycle_llm_call_control, lifecycle_session_control, manifest, registries, resilience_plugin, schema_feedback, self_review, tool_exception_reflection, tool_synthesis, tool_synthesis_nudge, turn_policy | adk_bridge/dashboard_producer_control.py, adk_bridge/facts_replan_control.py, adk_bridge/lifecycle_llm_call_control.py, adk_bridge/lifecycle_session_control.py, adk_bridge/local_runner.py, adk_bridge/schema_feedback.py, cli/real_runner.py, cli/tests/test_real_runner.py, customize/after_tool_gate.py, firstparty/packs/control_plane_default/impl.py, packs/context.py, packs/registries.py, transport/gate5b_governance.py |
+| context_compaction.py | Live context-compaction wiring for the ADK Runner (PR13). | auto_compact, context, context_lifecycle, lifecycle_audit, lifecycle_shell_command_control, manual_compaction_context, protected_tools, providers, query_state, readonly_classifier, session_service, token_estimation, token_tracker, transcript_render, usage_metadata, wiring | adk_bridge/control_plane.py |
+| control_plane.py | ADK loop control-plane abstraction (PR2, goose-parity). | _truthy, constraint_reinjection, context, context_compaction, edit_retry_reflection, env, facts_replan_control, flags, fork_runner, gemini_content_ordering, lifecycle_llm_call_control, lifecycle_session_control, lifecycle_shell_command_control, manifest, registries, resilience_plugin, schema_feedback, self_review, tool_exception_reflection, tool_synthesis, tool_synthesis_nudge, turn_policy | adk_bridge/dashboard_producer_control.py, adk_bridge/facts_replan_control.py, adk_bridge/lifecycle_llm_call_control.py, adk_bridge/lifecycle_session_control.py, adk_bridge/lifecycle_shell_command_control.py, adk_bridge/local_runner.py, adk_bridge/schema_feedback.py, cli/real_runner.py, cli/tests/test_real_runner.py, customize/after_tool_gate.py, firstparty/packs/control_plane_default/impl.py, packs/context.py, packs/registries.py, transport/gate5b_governance.py |
 | dashboard_producer_control.py | Deny-on-present after-tool producer for dashboard-authored custom checks. | control_plane, dashboard_authored, discovery, env, types | cli/real_runner.py |
 | edit_retry_reflection.py | Edit-failure reflection / retry wiring for the live ADK Runner. | context, retry_repair_policies, turn_utilities | adk_bridge/control_plane.py, adk_bridge/schema_feedback.py, adk_bridge/tool_exception_reflection.py |
 | event_adapter.py | — | events, flags, health, public_events, transcript, transport, wire_profile | cli/engine.py, runtime/child_runner_live.py, runtime/stream_withholding.py, shadow/fixture_runner.py, shadow/gate4c1_runner_shadow_invoker.py, transport/sse_buffer.py |
@@ -358,6 +358,7 @@ graph LR
 | gemini_content_ordering.py | Gemini content-ordering repair for the ADK before_model hook. | — | adk_bridge/control_plane.py |
 | lifecycle_llm_call_control.py | LifecycleLlmCallAuditControl — PR-F-LIFE2 per-LLM-call audit fan-out. | control_plane, lifecycle_audit, wiring | adk_bridge/control_plane.py, adk_bridge/lifecycle_session_control.py, artifacts/file_delivery.py, missions/work_queue/driver.py |
 | lifecycle_session_control.py | LifecycleSessionControl — PR-F-LIFE4b first-fire-per-session adapter. | control_plane, lifecycle_audit, lifecycle_llm_call_control, wiring | adk_bridge/control_plane.py |
+| lifecycle_shell_command_control.py | LifecycleShellCommandControl — PR-F-EXEC1 per-turn shell budget plugin. | control_plane, lifecycle_audit | adk_bridge/context_compaction.py, adk_bridge/control_plane.py, artifacts/file_delivery.py, missions/work_queue/driver.py, runtime/governed_turn.py |
 | local_runner.py | — | control_plane, live_gate, local_toolhost, session_service, task_completion | shadow/fixture_runner.py |
 | local_toolhost.py | — | — | adk_bridge/local_runner.py |
 | memory_service.py | — | — | — |
@@ -381,7 +382,7 @@ graph LR
 | _file_delivery_fakes.py | Shared local-fake provider implementations for the FileDelivery boundary. | contract | artifacts/file_delivery_live.py, plugins/native/documents.py |
 | delivery_boundary.py | — | authority, contract, file_delivery | artifacts/__init__.py |
 | delivery_receipts.py | — | authority, contract, durable_store, file_delivery, safety | — |
-| file_delivery.py | — | authority, contract, lifecycle_audit, lifecycle_llm_call_control, provider_receipts | artifacts/__init__.py, artifacts/delivery_boundary.py, artifacts/delivery_receipts.py, artifacts/file_delivery_live.py, plugins/native/documents.py |
+| file_delivery.py | — | authority, contract, lifecycle_audit, lifecycle_llm_call_control, lifecycle_shell_command_control, provider_receipts | artifacts/__init__.py, artifacts/delivery_boundary.py, artifacts/delivery_receipts.py, artifacts/file_delivery_live.py, plugins/native/documents.py |
 | file_delivery_live.py | Real filesystem-backed providers for the FileDelivery boundary. | _common, _file_delivery_fakes, contract, file_delivery | plugins/native/documents.py |
 | local_result_store.py | — | authority, output_budget, safety | tools/kernel.py |
 | output_registry_boundary.py | — | authority | artifacts/__init__.py |
@@ -792,9 +793,9 @@ graph LR
 | catalog.py | — | app_api, control_plane_overrides, preset_map, presets, what_menu | cli/real_runner.py, transport/customize.py |
 | control_plane_overrides.py | User-facing toggles for in-context control-plane *behaviors*. | _truthy | (root)/main.py, cli/app.py, customize/catalog.py, transport/customize.py |
 | criterion_engine.py | Generic LLM criterion-judgment engine (P3). | egress_gate | cli/engine.py, customize/after_tool_gate.py, customize/lifecycle_audit.py |
-| custom_rules.py | Custom verification-rule schema + validation (spec §9.1). | capability_scope, output_rewrite, prompt_injection, shacl_verifier, what_menu | customize/rule_compiler.py, transport/customize.py |
+| custom_rules.py | Custom verification-rule schema + validation (spec §9.1). | capability_scope, output_rewrite, prompt_injection, shacl_verifier, shell_runner, what_menu | customize/rule_compiler.py, transport/customize.py |
 | field_constraint_compiler.py | Deterministic SHACL-shape synthesizer for the ``field_constraint`` IR. | shacl_compiler, shacl_ontology, types | customize/rule_compiler.py, transport/customize.py |
-| lifecycle_audit.py | Customize Tier 2 lifecycle audit gates (PR-F-UX1). | criterion_engine, flags, store, verification_policy | adk_bridge/context_compaction.py, adk_bridge/lifecycle_llm_call_control.py, adk_bridge/lifecycle_session_control.py, artifacts/file_delivery.py, missions/work_queue/driver.py, runtime/governed_turn.py |
+| lifecycle_audit.py | Customize Tier 2 lifecycle audit gates (PR-F-UX1). | criterion_engine, flags, shell_command, store, verification_policy | adk_bridge/context_compaction.py, adk_bridge/lifecycle_llm_call_control.py, adk_bridge/lifecycle_session_control.py, adk_bridge/lifecycle_shell_command_control.py, artifacts/file_delivery.py, missions/work_queue/driver.py, runtime/governed_turn.py |
 | live_catalog.py | Live evidence-catalog view (PR-F2). | ledger_store, shacl_compiler, store, what_menu | transport/customize.py |
 | output_rewrite.py | F-MUT2 — ``output_rewrite`` custom_rule kind. | result | (root)/facades.py, customize/custom_rules.py |
 | preset_map.py | Canonical preset id → runtime-seam map for the Customize verification tab. | scope, seam_apply, seam_spec | cli/real_runner.py, customize/catalog.py, customize/seam_apply.py, customize/seam_compiler.py, customize/seam_spec.py |
@@ -807,7 +808,8 @@ graph LR
 | seam_compiler.py | NL → SeamSpec compiler — registration-time only, fail-open everywhere. | preset_map, seam_spec, shacl_compiler | transport/customize.py |
 | seam_spec.py | SeamSpec — declarative PresetSeam mutation IR for the NL rule builder. | preset_map | customize/preset_map.py, customize/rule_compiler.py, customize/seam_apply.py, customize/seam_compiler.py, transport/customize.py |
 | shacl_compiler.py | SHACL compiler module -- Tasks 3.1 + 3.2: pure helpers + NL-to-SHACL compiler. | builtin, providers, readonly_classifier, shacl_verifier, types | customize/field_constraint_compiler.py, customize/live_catalog.py, customize/rule_compiler.py, customize/runtime_fields.py, customize/seam_compiler.py, transport/customize.py |
-| shell_runner.py | F-EXEC-AUDIT — Subprocess runner foundation for operator-defined shell hooks. | — | — |
+| shell_command.py | F-EXEC1 — ``shell_command`` custom_rule kind apply helpers. | shell_runner | (root)/facades.py, customize/lifecycle_audit.py |
+| shell_runner.py | F-EXEC-AUDIT — Subprocess runner foundation for operator-defined shell hooks. | — | customize/custom_rules.py, customize/shell_command.py |
 | store.py | — | flags | (root)/facades.py, (root)/main.py, cli/app.py, cli/engine.py, cli/real_runner.py, cli/tests/test_document_coverage_seam_wiring.py, customize/__init__.py, customize/after_tool_gate.py, customize/lifecycle_audit.py, customize/live_catalog.py, customize/runtime_gate.py, customize/tool_perm.py, runtime/child_runner_live.py, runtime/governed_turn.py, runtime/message_builder.py, runtime/openmagi_runtime.py, transport/customize.py |
 | tool_perm.py | Custom tool-permission rule matching (P2). | flags, store, verification_policy | customize/runtime_fields.py, tools/permission.py |
 | verification_policy.py | — | scope | (root)/facades.py, cli/engine.py, cli/real_runner.py, customize/after_tool_gate.py, customize/apply.py, customize/budgets_apply.py, customize/lifecycle_audit.py, customize/runtime_gate.py, customize/tool_perm.py, runtime/child_runner_live.py, runtime/governed_turn.py, runtime/message_builder.py |
@@ -1275,7 +1277,7 @@ graph LR
 |---|---|---|---|
 | __init__.py | — | models | missions/work_queue/runner.py, transport/chat_routes.py |
 | board_api.py | Read-only FastAPI board router for the durable work-queue. | flags, store | (root)/app.py |
-| driver.py | WorkQueueDriver — the periodic dispatcher tick for the durable work-queue. | lifecycle_audit, lifecycle_llm_call_control, runner, store | gateway/watchers.py |
+| driver.py | WorkQueueDriver — the periodic dispatcher tick for the durable work-queue. | lifecycle_audit, lifecycle_llm_call_control, lifecycle_shell_command_control, runner, store | gateway/watchers.py |
 | inject_buffer.py | Per-session inject buffer shared by chat-routes and the background-task sink. | — | — |
 | models.py | — | — | missions/work_queue/__init__.py, missions/work_queue/runner.py, missions/work_queue/store.py, plugins/native/scheduled_work.py |
 | notifier.py | Work-queue terminal-event notifier — tail-from-now delivery via injected sink. | — | gateway/watchers.py |
@@ -1552,7 +1554,7 @@ graph LR
 | goal_loop_policy.py | Runtime ``GoalLoopPolicy`` — the per-turn shape PR-C's clean-break judge | — | runtime/goal_loop_judge.py, runtime/per_turn_goal_loop_context.py, transport/chat_routes.py |
 | goal_nudge.py | PR4 — Lightweight goal-nudge continuation primitive. | final_output_gate | cli/engine.py, cli/goal_nudge_wiring.py |
 | governed_projection.py | — | safety | — |
-| governed_turn.py | The single primitive every governed turn flows through. | budgets_apply, contracts, env, ledger_store, lifecycle_audit, run_bookend, store, turn_context, verification_policy, wiring | channels/turn_engine.py, cli/headless.py, runtime/child_runner_live.py, transport/chat_routes.py |
+| governed_turn.py | The single primitive every governed turn flows through. | budgets_apply, contracts, env, ledger_store, lifecycle_audit, lifecycle_shell_command_control, run_bookend, store, turn_context, verification_policy, wiring | channels/turn_engine.py, cli/headless.py, runtime/child_runner_live.py, transport/chat_routes.py |
 | heartbeat_boundary.py | — | heartbeat_contract, heartbeat_store | — |
 | heartbeat_contract.py | — | safety | runtime/events.py, runtime/heartbeat_boundary.py, runtime/heartbeat_store.py, runtime/resume_decision.py, runtime/stale_run_detector.py |
 | heartbeat_store.py | — | heartbeat_contract | runtime/heartbeat_boundary.py, runtime/stale_run_detector.py |

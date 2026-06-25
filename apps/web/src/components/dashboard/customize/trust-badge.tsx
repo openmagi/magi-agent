@@ -81,6 +81,11 @@ const PALETTE: Record<TrustClass, string> = {
   // operator hovering the badge sees the honest mutation warning before
   // activating the policy.
   mutator: "bg-yellow-400/15 text-yellow-900 ring-1 ring-inset ring-yellow-500/30",
+  // F-EXEC1 — fifth class placeholder palette. F-EXEC3 ships the dedicated
+  // amber-red (#dc8f3d) ramp + Terminal icon; until then we re-use the
+  // mutator amber palette so the badge renders honestly as "warm, not
+  // green" without crashing on the new variant.
+  operator_defined: "bg-orange-400/20 text-orange-900 ring-1 ring-inset ring-orange-500/40",
 };
 
 const DEFAULT_LABEL: Record<TrustClass, string> = {
@@ -89,6 +94,7 @@ const DEFAULT_LABEL: Record<TrustClass, string> = {
   hybrid: "Hybrid",
   preview: "Preview",
   mutator: "Mutator",
+  operator_defined: "Operator-defined",
 };
 
 
@@ -106,6 +112,10 @@ const DEFAULT_TOOLTIP: Record<TrustClass, string> = {
   preview: "",
   mutator:
     "Modifies inbound or outbound traffic. Verify the mutation does not break downstream tools or the model reasoning.",
+  // F-EXEC1 — explicit "magi does NOT verify the script" tooltip so the
+  // operator sees the honest trust framing before activating.
+  operator_defined:
+    "External script authored by the operator. magi does NOT verify the script. Confirm the command does what you expect before activating.",
 };
 
 export function TrustBadge({

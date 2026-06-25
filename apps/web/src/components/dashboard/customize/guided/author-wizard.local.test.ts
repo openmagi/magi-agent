@@ -126,9 +126,10 @@ describe("AuthorWizard — variable-length policy authoring (F1.5 + F-UX3)", () 
     // so per-tool rules can only fire unconditionally per call. PR-F-MUT1
     // adds ``prompt_injection`` here as a mutator (not a deny gate) — it
     // doesn't introduce an AND, the rule fires on every call to the
-    // chosen tool.
+    // chosen tool. PR-F-EXEC1 appends ``shell_command`` as a third option
+    // (operator-defined side-effect / gate script).
     expect(src).toMatch(
-      /toolTarget === "specific"[\s\S]*?return \["none", "prompt_injection"\]/,
+      /toolTarget === "specific"[\s\S]*?return \["none", "prompt_injection", "shell_command"\]/,
     );
   });
 
@@ -137,9 +138,11 @@ describe("AuthorWizard — variable-length policy authoring (F1.5 + F-UX3)", () 
     // honest backend mapping. The option is omitted instead of synthesised.
     // F6 expanded the matcher list to include path + path_allowlist (the
     // backend tool_perm matcher already supports both). PR-F-MUT1 appends
-    // ``prompt_injection`` — a mutator, not a deny gate.
+    // ``prompt_injection`` — a mutator, not a deny gate. PR-F-EXEC1 also
+    // appends ``shell_command`` so an operator can author a per-call
+    // shell gate for ALL tools.
     expect(src).toMatch(
-      /target=any: tool_perm has no wildcard[\s\S]*?return \["domain", "domain_allowlist", "path", "path_allowlist", "prompt_injection"\]/,
+      /target=any: tool_perm has no wildcard[\s\S]*?return \[\s*"domain",\s*"domain_allowlist",\s*"path",\s*"path_allowlist",\s*"prompt_injection",\s*"shell_command",?\s*\]/,
     );
   });
 
@@ -151,18 +154,21 @@ describe("AuthorWizard — variable-length policy authoring (F1.5 + F-UX3)", () 
     // so both axes expose llm_criterion identically at the picker level.
     // PR-F-MUT2 appends ``output_rewrite`` to the same list as a Mutator
     // entry; the picker still surfaces llm_criterion in both target modes.
+    // PR-F-EXEC1 appends ``shell_command`` as an audit-only side-effect
+    // shell hook (tool already returned).
     expect(src).toMatch(
       /PR-F-UX4 — liberalization: llm_criterion is now available under BOTH/,
     );
     expect(src).toMatch(
-      /toolTarget === "specific"\) \{[\s\S]*?return \["none", "regex", "llm_criterion", "output_rewrite"\]/,
+      /toolTarget === "specific"\) \{[\s\S]*?return \["none", "regex", "llm_criterion", "output_rewrite", "shell_command"\]/,
     );
   });
 
-  it("after_tool_use + target=any offers none / regex / llm_criterion / output_rewrite", () => {
+  it("after_tool_use + target=any offers none / regex / llm_criterion / output_rewrite / shell_command", () => {
     // PR-F-MUT2 — same list as target=specific; the toolMatch.include
     // filter rides on the payload, not the wizard's top-level Target step.
-    expect(src).toMatch(/return \["none", "regex", "llm_criterion", "output_rewrite"\]/);
+    // PR-F-EXEC1 appends shell_command on both target modes.
+    expect(src).toMatch(/return \["none", "regex", "llm_criterion", "output_rewrite", "shell_command"\]/);
   });
 
   it("pre_final ignores target and returns evidence_ref / verifier_passed / shacl / llm_criterion / field_constraint (PR-F-UX5)", () => {
@@ -170,8 +176,9 @@ describe("AuthorWizard — variable-length policy authoring (F1.5 + F-UX3)", () 
     // operator picks raw-evidence vs verdict-primitive distinctly. Both
     // compile to ``deterministic_ref`` on the backend (storage unchanged).
     // F3's ``field_constraint`` and the raw ``shacl`` escape hatch remain.
+    // PR-F-EXEC1 appends ``shell_command`` (block honored).
     expect(src).toMatch(
-      /pre_final[\s\S]*?return \["evidence_ref", "verifier_passed", "shacl", "llm_criterion", "field_constraint"\]/,
+      /pre_final[\s\S]*?return \[\s*"evidence_ref",\s*"verifier_passed",\s*"shacl",\s*"llm_criterion",\s*"field_constraint",\s*"shell_command",?\s*\]/,
     );
   });
 
@@ -389,9 +396,10 @@ describe("AuthorWizard — F6 path / path_allowlist condition kinds", () => {
     // can be authored under — per-tool match has no AND with path matchers
     // in the backend. PR-F-MUT1 appends ``prompt_injection`` to the same
     // branch (mutator surface, not a deny gate); the domain/path matchers
-    // remain unchanged.
+    // remain unchanged. PR-F-EXEC1 appends ``shell_command`` (operator-
+    // defined gate / side-effect script).
     expect(src).toMatch(
-      /return \["domain", "domain_allowlist", "path", "path_allowlist", "prompt_injection"\]/,
+      /return \[\s*"domain",\s*"domain_allowlist",\s*"path",\s*"path_allowlist",\s*"prompt_injection",\s*"shell_command",?\s*\]/,
     );
   });
 
@@ -1485,17 +1493,19 @@ describe("AuthorWizard — PR-F-UX4 condition matrix loosening + auto-derive", (
     // wizard auto-derives toolMatch from the Trigger step's tool pick so
     // the operator does not have to retype the tool name. PR-F-MUT2
     // appends ``output_rewrite`` to the same list as a Mutator entry.
+    // PR-F-EXEC1 appends ``shell_command`` (audit-only side-effect script).
     expect(src).toMatch(
-      /toolTarget === "specific"\) \{[\s\S]*?return \["none", "regex", "llm_criterion", "output_rewrite"\]/,
+      /toolTarget === "specific"\) \{[\s\S]*?return \["none", "regex", "llm_criterion", "output_rewrite", "shell_command"\]/,
     );
   });
 
-  it("after_tool_use + target=any keeps offering none / regex / llm_criterion / output_rewrite", () => {
+  it("after_tool_use + target=any keeps offering none / regex / llm_criterion / output_rewrite / shell_command", () => {
     // Symmetric matrix: both target axes expose the same condition list
     // for after_tool_use. The only difference is where the toolMatch list
     // comes from (auto-derived vs typed). PR-F-MUT2 appends
-    // ``output_rewrite`` to the same list as a Mutator entry.
-    expect(src).toMatch(/return \["none", "regex", "llm_criterion", "output_rewrite"\]/);
+    // ``output_rewrite`` to the same list as a Mutator entry. PR-F-EXEC1
+    // appends ``shell_command``.
+    expect(src).toMatch(/return \["none", "regex", "llm_criterion", "output_rewrite", "shell_command"\]/);
   });
 
   it("customRulePayload auto-derives toolMatch=[draft.toolName] when target=specific", () => {
@@ -1541,10 +1551,10 @@ describe("AuthorWizard — PR-F-UX4 condition matrix loosening + auto-derive", (
     // before_tool_use + target=specific + (domain|path) AND combo is still
     // refused because backend tool_perm.py honors a single matcher key per
     // rule — no honest mapping today. PR-F-MUT1 adds ``prompt_injection``
-    // alongside ``none`` (it's a mutator, not a deny gate), but the
-    // domain/path AND combo stays excluded.
+    // alongside ``none`` (it's a mutator, not a deny gate); PR-F-EXEC1
+    // appends ``shell_command``; the domain/path AND combo stays excluded.
     expect(src).toMatch(
-      /toolTarget === "specific"\) \{[\s\S]*?return \["none", "prompt_injection"\]/,
+      /toolTarget === "specific"\) \{[\s\S]*?return \["none", "prompt_injection", "shell_command"\]/,
     );
   });
 });
@@ -1690,28 +1700,31 @@ describe("AuthorWizard — F-MUT1 prompt_injection kind", () => {
   it("availableConditionKinds surfaces prompt_injection at on_user_prompt_submit", () => {
     // The on_user_prompt_submit branch now returns BOTH llm_criterion AND
     // prompt_injection so the operator can pick "append a section to the
-    // system prompt" without losing the audit-critic option.
+    // system prompt" without losing the audit-critic option. PR-F-EXEC1
+    // joins shell_command as a third option (audit-only at this slot).
     expect(src).toMatch(
-      /on_user_prompt_submit"\)[\s\S]*?return \["llm_criterion", "prompt_injection"\]/,
+      /on_user_prompt_submit"\)[\s\S]*?return \["llm_criterion", "prompt_injection", "shell_command"\]/,
     );
   });
 
-  it("availableConditionKinds keeps on_subagent_stop llm_criterion-only", () => {
+  it("availableConditionKinds keeps on_subagent_stop llm_criterion + shell_command", () => {
     // Mutation on a turn that already emitted has no honest target — the
-    // backend _LEGAL matrix leaves on_subagent_stop as llm_criterion-only.
+    // backend _LEGAL matrix leaves on_subagent_stop as llm_criterion-only
+    // for mutators. PR-F-EXEC1 joins shell_command (audit-only side-effect
+    // script) so an operator can notify-on-child-end.
     expect(src).toMatch(
-      /on_subagent_stop"\)[\s\S]*?return \["llm_criterion"\]/,
+      /on_subagent_stop"\)[\s\S]*?return \["llm_criterion", "shell_command"\]/,
     );
   });
 
   it("availableConditionKinds surfaces prompt_injection on before_tool_use (both target modes)", () => {
-    // target=specific: ["none", "prompt_injection"]
+    // target=specific: ["none", "prompt_injection", "shell_command"]
     expect(src).toMatch(
-      /toolTarget === "specific"\)[\s\S]*?return \["none", "prompt_injection"\]/,
+      /toolTarget === "specific"\)[\s\S]*?return \["none", "prompt_injection", "shell_command"\]/,
     );
-    // target=any: domain/path matchers + prompt_injection at the tail.
+    // target=any: domain/path matchers + prompt_injection + shell_command.
     expect(src).toMatch(
-      /return \["domain", "domain_allowlist", "path", "path_allowlist", "prompt_injection"\]/,
+      /return \[\s*"domain",\s*"domain_allowlist",\s*"path",\s*"path_allowlist",\s*"prompt_injection",\s*"shell_command",?\s*\]/,
     );
   });
 
@@ -1783,14 +1796,15 @@ describe("AuthorWizard — F-MUT2 output_rewrite kind", () => {
   });
 
   it("availableConditionKinds surfaces output_rewrite on after_tool_use (both target modes)", () => {
-    // target=specific: ["none", "regex", "llm_criterion", "output_rewrite"]
+    // target=specific: ["none", "regex", "llm_criterion", "output_rewrite", "shell_command"]
     expect(src).toMatch(
-      /toolTarget === "specific"\) \{[\s\S]*?return \["none", "regex", "llm_criterion", "output_rewrite"\]/,
+      /toolTarget === "specific"\) \{[\s\S]*?return \["none", "regex", "llm_criterion", "output_rewrite", "shell_command"\]/,
     );
     // target=any: same list (the toolMatch.include filter rides on the
-    // payload, not the wizard's top-level Target step).
+    // payload, not the wizard's top-level Target step). PR-F-EXEC1
+    // appends shell_command.
     expect(src).toMatch(
-      /return \["none", "regex", "llm_criterion", "output_rewrite"\]/,
+      /return \["none", "regex", "llm_criterion", "output_rewrite", "shell_command"\]/,
     );
   });
 
@@ -2451,6 +2465,142 @@ describe("AuthorWizard — PR-F-UX8 lifecycle picker COMMON / ADVANCED reorganiz
     );
     expect(src).toMatch(
       /function LifecycleRadioCard[\s\S]*?disabledReason=\{opt\.disabledReason\}/,
+    );
+  });
+});
+
+
+describe("AuthorWizard — PR-F-EXEC1 shell_command action kind", () => {
+  it("extends the ConditionKind union with 'shell_command'", () => {
+    // The shell_command kind is a fifth action shape (after evidence_ref,
+    // tool_perm, llm_criterion, shacl_constraint, capability_scope,
+    // prompt_injection, output_rewrite). Adding it to the union is the
+    // first step — the SpecificsStep, availableConditionKinds, and
+    // customRule* routers all key on this literal.
+    expect(src).toMatch(/type ConditionKind =[\s\S]*?\| "shell_command"/);
+  });
+
+  it("registers CONDITION_META entry with operator-defined warning copy", () => {
+    // The wizard surfaces an explicit "magi does not verify the script"
+    // warning subtext on the picker card so the operator never confuses
+    // shell_command with the deterministic / advisory kinds.
+    expect(src).toMatch(/shell_command: \{[\s\S]*?label: "Run a shell command"/);
+    expect(src).toMatch(/shell_command: \{[\s\S]*?magi does not verify the script/);
+  });
+
+  it("registers CONDITION_PREVIEW_CHIPS entry with runtime field tokens", () => {
+    expect(src).toMatch(
+      /shell_command: \[[\s\S]*?"tool"[\s\S]*?"tool_args"[\s\S]*?"tool_output"[\s\S]*?\]/,
+    );
+  });
+
+  it("exposes shell_command at pre_final (block honored)", () => {
+    // pre_final is one of two slots whose backend ``_LEGAL`` matrix
+    // accepts ``block``; the wizard MUST expose shell_command alongside
+    // the existing pre_final condition kinds so the operator can author
+    // a pre-final shell gate.
+    expect(src).toMatch(
+      /lifecycle === "pre_final"[\s\S]*?"shell_command"/,
+    );
+  });
+
+  it("exposes shell_command at before_tool_use (both tool target modes)", () => {
+    // Both target=specific (per-tool gate) AND target=any (cross-tool
+    // gate) should expose the shell_command kind. block action is
+    // honored at this slot per the backend ``_LEGAL`` matrix.
+    expect(src).toMatch(
+      /toolTarget === "specific"[\s\S]*?"prompt_injection",[\s\S]*?"shell_command"/,
+    );
+  });
+
+  it("exposes shell_command at after_tool_use (audit-only)", () => {
+    // after_tool_use is audit-only — the tool already returned by the
+    // time the rule fires. The wizard exposes the kind on both target
+    // modes so an operator can author a "notify-on-tool-finish" hook.
+    expect(src).toMatch(/"none", "regex", "llm_criterion", "output_rewrite", "shell_command"/);
+  });
+
+  it("EXCLUDES shell_command at before_llm_call / after_llm_call (hot path)", () => {
+    // Per F-EXEC1 spec the per-LLM-call slots are explicitly excluded
+    // even with the budget cap — operator-shell on every model call is
+    // too aggressive for v1. The wizard MUST honor the exclusion so the
+    // operator cannot persist a rule the backend ``_LEGAL`` matrix
+    // rejects.
+    expect(src).toMatch(
+      /lifecycle === "before_llm_call" \|\| lifecycle === "after_llm_call"[\s\S]*?return \["llm_criterion"\]/,
+    );
+  });
+
+  it("ShellCommandPicker component is defined and accepts draft + update", () => {
+    expect(src).toContain("function ShellCommandPicker(");
+    expect(src).toMatch(/ShellCommandPicker[\s\S]*?draft: Draft/);
+  });
+
+  it("ShellCommandPicker exposes source toggle (inline / file)", () => {
+    // The source axis maps to the backend ``ShellPayload.source`` literal
+    // (inline | file). The picker MUST render both options so an
+    // operator can either paste a script or pin a file path on the host.
+    expect(src).toMatch(/ShellCommandPicker[\s\S]*?value="inline"/);
+    expect(src).toMatch(/ShellCommandPicker[\s\S]*?value="file"/);
+  });
+
+  it("ShellCommandPicker renders timeout (number) + shell (select) controls", () => {
+    expect(src).toMatch(/ShellCommandPicker[\s\S]*?type="number"[\s\S]*?min=\{1\}[\s\S]*?max=\{600\}/);
+    expect(src).toMatch(/ShellCommandPicker[\s\S]*?<option value="bash"/);
+    expect(src).toMatch(/ShellCommandPicker[\s\S]*?<option value="sh"/);
+  });
+
+  it("ShellCommandPicker carries the operator-defined trust warning", () => {
+    // Honest trust framing — the operator must see the "magi does not
+    // verify the script" warning inline on the picker before authoring.
+    // Use a single regex spanning ShellCommandPicker → Operator-defined →
+    // verify the\\s+script (whitespace tolerant for the JSX newline break)
+    // so the assertion stays robust to formatting.
+    expect(src).toMatch(
+      /function ShellCommandPicker[\s\S]*?Operator-defined[\s\S]*?magi does not verify the\s+script/,
+    );
+  });
+
+  it("customRuleKind routes shell_command to its own backend kind", () => {
+    // EARLY-RETURN before the lifecycle-keyed fallback so the operator's
+    // shell pick lands on the right kind regardless of slot.
+    expect(src).toMatch(
+      /function customRuleKind[\s\S]*?conditionKind === "shell_command"[\s\S]*?return "shell_command"/,
+    );
+  });
+
+  it("customRuleAction maps shell_command archetype to block ONLY at eligible slots", () => {
+    // The backend ``_LEGAL`` matrix exposes ``block`` only at pre_final
+    // and before_tool_use; every other slot is audit-only. The wizard
+    // MUST force audit at the other slots even when the operator picked
+    // a "block" archetype upstream.
+    expect(src).toMatch(
+      /conditionKind === "shell_command"[\s\S]*?lifecycle === "pre_final" \|\| draft\.lifecycle === "before_tool_use"/,
+    );
+    expect(src).toMatch(
+      /conditionKind === "shell_command"[\s\S]*?archetype === "block"[\s\S]*?return "block"/,
+    );
+    expect(src).toMatch(
+      /conditionKind === "shell_command"[\s\S]*?return "audit"/,
+    );
+  });
+
+  it("customRulePayload compiles to the ShellPayload shape", () => {
+    // The persisted payload matches the backend ``ShellPayload`` (pydantic
+    // frozen model): source + inline?/path? + timeout_seconds + env_vars +
+    // shell. Defensive integer clamp keeps timeout in [1, 600] even if
+    // the operator typed something out of range in the number input.
+    expect(src).toMatch(
+      /conditionKind === "shell_command"[\s\S]*?source: draft\.shSource/,
+    );
+    expect(src).toMatch(
+      /conditionKind === "shell_command"[\s\S]*?timeout_seconds:/,
+    );
+    expect(src).toMatch(
+      /conditionKind === "shell_command"[\s\S]*?shell: draft\.shShell/,
+    );
+    expect(src).toMatch(
+      /conditionKind === "shell_command"[\s\S]*?env_vars:/,
     );
   });
 });

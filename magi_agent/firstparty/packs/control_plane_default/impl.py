@@ -124,6 +124,35 @@ def provide_lifecycle_session_task_controls(
         context.register(control)
 
 
+def provide_lifecycle_shell_command_controls(
+    context: ControlPlaneProvideContext,
+) -> None:
+    """``control_plane:lifecycle-shell-command@1``: PR-F-EXEC1 per-turn
+    shell command budget plugin, strict default-OFF
+    (``MAGI_CUSTOMIZE_SHELL_COMMAND_ENABLED``).
+
+    Production wiring keystone (same as F-LIFE2 / F-LIFE4b):
+    ``build_default_plugin`` → ``build_control_plane_from_packs`` is the
+    live runner path (cli/real_runner + transport/gate5b_governance).
+    Without this pack entry the
+    :class:`LifecycleShellCommandControl` would only register through the
+    legacy/compat ``build_default_plane`` composition surface, so
+    operator-authored ``shell_command`` rules with a per-turn budget cap
+    would silently lose the cap on operator-facing serve/REPL/child paths
+    (the lifecycle_audit fan-out helpers would still execute the runner,
+    just without the shared budget threading). Delegates to the same
+    single-source builder used by ``build_default_plane`` so the control
+    + env gates + per-turn budget defaults are byte-identical between
+    both composition paths.
+    """
+    from magi_agent.adk_bridge.control_plane import (
+        build_lifecycle_shell_command_controls,
+    )
+
+    for control in build_lifecycle_shell_command_controls(dict(context.env)):
+        context.register(control)
+
+
 def provide_tool_synthesis_nudge_control(context: ControlPlaneProvideContext) -> None:
     """``control_plane:tool-synthesis-nudge@1``: Live-SWE tool-synthesis
     reflection nudge (#512), default-OFF + frontier-tier gated via the runner's

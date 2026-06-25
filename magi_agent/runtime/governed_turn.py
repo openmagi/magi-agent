@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 
 from magi_agent.runtime.turn_context import TurnContext
 
@@ -48,6 +48,15 @@ async def run_governed_turn(
     # map can never break a turn — see budgets_apply.apply_budgets_if_enabled.
     _maybe_apply_customize_budgets()
 
+    # PR-F-EXEC1: publish the active (session, turn) identity for the
+    # shell-command per-turn budget. The 9 lifecycle_audit shell fan-out
+    # helpers consult this via :func:`shell_budget_for` so a single shared
+    # counter caps spawns across ALL slots in a turn (the 6th spawn
+    # short-circuits at the next slot, not the 6th spawn within one slot).
+    # Fail-open: import error leaves identity unset, fan-out helpers see
+    # ``remaining_budget=None`` (no cap) — byte-identical to today.
+    _shell_identity_token = _maybe_set_shell_budget_identity(ctx)
+
     # PR-F-LIFE1: Tier 2 ``before_turn_start`` audit-only fan-out. Wired at
     # the TOP of the canonical funnel, BEFORE the sibling F-UX1 fan-out so
     # the two slot families fire in lifecycle order (turn-start → prompt-
@@ -55,12 +64,46 @@ async def run_governed_turn(
     # byte-identical.
     await _maybe_run_before_turn_start_audit(ctx)
 
+    # PR-F-EXEC1: shell_command fan-out at ``before_turn_start``. Audit-only;
+    # threads the shared per-turn budget (cross-slot decrement). Triple-gated
+    # + fail-open via the helper; OFF path is byte-identical.
+    await _maybe_run_shell_command_at_before_turn_start(ctx)
+
+    # PR-F-LIFE4a: ``before_turn_start`` gate consult. Runs immediately
+    # AFTER the audit fan-out so the same criterion judge work covers both
+    # the audit ledger and the gate decision. On ``"block"`` the funnel
+    # short-circuits with a synthetic terminal EngineResult BEFORE the
+    # engine stream is started; ``"ask"`` is honest-degrade today (logged
+    # as requires_approval, turn still proceeds). Fail-open: any exception
+    # in the gate path returns ``"proceed"`` so a misbehaving rule cannot
+    # wedge a turn.
+    blocked = await _maybe_run_before_turn_start_gate(ctx)
+    if blocked is not None:
+        yield blocked
+        _maybe_reset_shell_budget_identity(_shell_identity_token)
+        return
+
     # PR-F-UX1: Tier 2 ``on_user_prompt_submit`` audit-only fan-out. Wired at
     # the TOP of the canonical CLI/serve/child funnel (BEFORE the engine
     # stream starts) so it runs on every real governed turn. Triple-gated +
     # fail-open: returns silently when the master flag is OFF, when no rules
     # are authored, or on any error path — never blocks turn execution.
     await _maybe_run_user_prompt_submit_audit(ctx)
+
+    # PR-F-EXEC1: shell_command fan-out at ``on_user_prompt_submit``. Audit-
+    # only; shares the per-turn budget with sibling shell fan-outs.
+    await _maybe_run_shell_command_at_on_user_prompt_submit(ctx)
+
+    # PR-F-LIFE4a: ``on_user_prompt_submit`` gate consult. Same short-
+    # circuit pattern as the sibling before_turn_start gate above. Both
+    # gates run BEFORE ``rt.engine.run_turn_stream`` is invoked so the
+    # block decision can avoid ALL engine-side cost (model call,
+    # tool dispatch, etc.) when the criterion fails.
+    blocked = await _maybe_run_user_prompt_submit_gate(ctx)
+    if blocked is not None:
+        yield blocked
+        _maybe_reset_shell_budget_identity(_shell_identity_token)
+        return
 
     rt = runtime if runtime is not None else _build_runtime(ctx)
     cancel = cancel if cancel is not None else asyncio.Event()
@@ -95,6 +138,18 @@ async def run_governed_turn(
     # turn end).
     task_complete_collector = _OnTaskCompleteCollector.maybe_create(ctx)
 
+    # PR-F-EXEC1: shell_command final-text collectors. Mirror the
+    # _SubagentStopCollector / _AfterTurnEndCollector axis so the shell
+    # ``on_subagent_stop`` (child turns) and ``after_turn_end`` (top-level
+    # turns) fan-outs see the aggregated final text via the same
+    # response_clear / text_delta event stream. The pre_final fan-out is
+    # also driven from this collector because it fires BEFORE the final
+    # text commits (caller short-circuits the next yielded EngineResult on
+    # ``"block"`` verdict). All triple-gated + fail-open in the helper.
+    shell_subagent_stop_collector = _ShellSubagentStopCollector.maybe_create(ctx)
+    shell_after_turn_end_collector = _ShellAfterTurnEndCollector.maybe_create(ctx)
+    shell_pre_final_collector = _ShellPreFinalCollector.maybe_create(ctx)
+
     try:
         async for item in stream:
             if bookend is not None:
@@ -105,7 +160,22 @@ async def run_governed_turn(
                 turn_end_collector.observe(item)
             if task_complete_collector is not None:
                 task_complete_collector.observe(item)
-            yield item
+            if shell_subagent_stop_collector is not None:
+                shell_subagent_stop_collector.observe(item)
+            if shell_after_turn_end_collector is not None:
+                shell_after_turn_end_collector.observe(item)
+            if shell_pre_final_collector is not None:
+                shell_pre_final_collector.observe(item)
+            # PR-F-EXEC1: pre_final shell gate. Fires on the FIRST sight of
+            # an EngineResult — the synthesis pass is about to commit. If
+            # the operator's pre_final shell rule with action=block exits
+            # non-zero, replace the item with a synthetic
+            # ``customize_policy_blocked`` terminal so downstream consumers
+            # (CLI REPL, serve transport, telemetry) see the block honestly.
+            replaced = None
+            if shell_pre_final_collector is not None:
+                replaced = await shell_pre_final_collector.maybe_replace(item, ctx)
+            yield replaced if replaced is not None else item
     finally:
         if bookend is not None:
             bookend.persist()
@@ -115,6 +185,11 @@ async def run_governed_turn(
             await turn_end_collector.run_audit()
         if task_complete_collector is not None:
             await task_complete_collector.run_audit()
+        if shell_subagent_stop_collector is not None:
+            await shell_subagent_stop_collector.run_audit()
+        if shell_after_turn_end_collector is not None:
+            await shell_after_turn_end_collector.run_audit()
+        _maybe_reset_shell_budget_identity(_shell_identity_token)
 
 
 class _BookendCollector:
@@ -666,6 +741,330 @@ class _OnTaskCompleteCollector:
                 pass
         except Exception:
             return
+
+
+# ---------------------------------------------------------------------------
+# PR-F-EXEC1: shell_command lifecycle fan-out helpers wired into run_governed_turn
+# ---------------------------------------------------------------------------
+
+
+def _maybe_set_shell_budget_identity(ctx: TurnContext) -> object | None:
+    """Publish ``(ctx.session_id, ctx.turn_id)`` for the shell budget ContextVar.
+
+    Returns the ContextVar reset token (or ``None`` on any import / set
+    failure) so the caller can pair this with :func:`_maybe_reset_shell_budget_identity`
+    in a finally block. Fail-open: never raises out of the governed-turn
+    entry path.
+    """
+    try:
+        from magi_agent.adk_bridge.lifecycle_shell_command_control import (  # noqa: PLC0415
+            set_active_turn_identity,
+        )
+
+        return set_active_turn_identity(
+            getattr(ctx, "session_id", None) or None,
+            getattr(ctx, "turn_id", None) or None,
+        )
+    except Exception:
+        return None
+
+
+def _maybe_reset_shell_budget_identity(token: object | None) -> None:
+    """Restore the shell budget identity ContextVar to its prior value."""
+    if token is None:
+        return
+    try:
+        from magi_agent.adk_bridge.lifecycle_shell_command_control import (  # noqa: PLC0415
+            reset_active_turn_identity,
+        )
+
+        reset_active_turn_identity(token)  # type: ignore[arg-type]
+    except Exception:
+        return
+
+
+def _resolve_shell_budget_for_ctx(
+    ctx: TurnContext,
+) -> tuple[int | None, "Callable[[], None]"]:
+    """Resolve ``(remaining, decrement_fn)`` for the active turn.
+
+    Returns ``(None, no_op)`` when the master flag is OFF or when identity
+    cannot be resolved — fan-out helpers treat ``None`` as "no cap"
+    (byte-identical to today). Fail-open: any exception returns the
+    no-op tuple so a misbehaving budget reader cannot wedge a turn.
+    """
+    try:
+        from magi_agent.adk_bridge.lifecycle_shell_command_control import (  # noqa: PLC0415
+            shell_budget_for,
+        )
+
+        return shell_budget_for(
+            getattr(ctx, "session_id", None) or None,
+            getattr(ctx, "turn_id", None) or None,
+        )
+    except Exception:
+        return (None, _shell_budget_noop)
+
+
+def _shell_budget_noop() -> None:
+    """No-op decrement used when the shell budget surface is unavailable."""
+    return None
+
+
+async def _maybe_run_shell_command_at_before_turn_start(ctx: TurnContext) -> None:
+    """Fan-out helper: ``firesAt == "before_turn_start"`` shell_command rules."""
+    try:
+        from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+            run_shell_command_at_before_turn_start,
+            shell_command_enabled,
+        )
+
+        if not shell_command_enabled():
+            return
+        remaining, decrement_fn = _resolve_shell_budget_for_ctx(ctx)
+        await run_shell_command_at_before_turn_start(
+            prompt_text=ctx.prompt or "",
+            remaining_budget=remaining,
+            decrement_fn=decrement_fn,
+        )
+    except Exception:
+        return
+
+
+async def _maybe_run_shell_command_at_on_user_prompt_submit(ctx: TurnContext) -> None:
+    """Fan-out helper: ``firesAt == "on_user_prompt_submit"`` shell_command rules."""
+    try:
+        from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+            run_shell_command_at_on_user_prompt_submit,
+            shell_command_enabled,
+        )
+
+        if not shell_command_enabled():
+            return
+        remaining, decrement_fn = _resolve_shell_budget_for_ctx(ctx)
+        await run_shell_command_at_on_user_prompt_submit(
+            prompt_text=ctx.prompt or "",
+            remaining_budget=remaining,
+            decrement_fn=decrement_fn,
+        )
+    except Exception:
+        return
+
+
+class _ShellAfterTurnEndCollector:
+    """Accumulates the TOP-LEVEL turn's final assistant text and fires the
+    ``after_turn_end`` shell_command fan-out at turn end.
+
+    Mirrors :class:`_AfterTurnEndCollector` exactly — top-level turns only
+    (``ctx.depth == 0``). Fully fail-open: any observation or fan-out error
+    is swallowed so a governed turn never breaks because of shell hook
+    bookkeeping.
+    """
+
+    __slots__ = ("_ctx", "_result_text")
+
+    def __init__(self, ctx: TurnContext) -> None:
+        self._ctx = ctx
+        self._result_text = ""
+
+    @classmethod
+    def maybe_create(cls, ctx: TurnContext) -> "_ShellAfterTurnEndCollector | None":
+        if getattr(ctx, "depth", 0) > 0:
+            return None
+        try:
+            from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+                shell_command_enabled,
+            )
+
+            if not shell_command_enabled():
+                return None
+            return cls(ctx)
+        except Exception:
+            return None
+
+    def observe(self, item: object) -> None:
+        try:
+            payload = getattr(item, "payload", None)
+            if not isinstance(payload, dict):
+                return
+            kind = payload.get("type")
+            if kind == "response_clear":
+                self._result_text = ""
+            elif kind == "text_delta":
+                delta = payload.get("delta")
+                if isinstance(delta, str):
+                    self._result_text += delta
+        except Exception:
+            return
+
+    async def run_audit(self) -> None:
+        try:
+            from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+                run_shell_command_at_after_turn_end,
+            )
+
+            remaining, decrement_fn = _resolve_shell_budget_for_ctx(self._ctx)
+            await run_shell_command_at_after_turn_end(
+                final_text=self._result_text,
+                remaining_budget=remaining,
+                decrement_fn=decrement_fn,
+            )
+        except Exception:
+            return
+
+
+class _ShellSubagentStopCollector:
+    """Accumulates the CHILD turn's final assistant text and fires the
+    ``on_subagent_stop`` shell_command fan-out at turn end.
+
+    Mirrors :class:`_SubagentStopCollector` exactly — child turns only
+    (``ctx.depth > 0``). The two collectors stay disjoint with
+    :class:`_ShellAfterTurnEndCollector` so a turn never double-fires both
+    slots.
+    """
+
+    __slots__ = ("_ctx", "_result_text")
+
+    def __init__(self, ctx: TurnContext) -> None:
+        self._ctx = ctx
+        self._result_text = ""
+
+    @classmethod
+    def maybe_create(cls, ctx: TurnContext) -> "_ShellSubagentStopCollector | None":
+        if getattr(ctx, "depth", 0) <= 0:
+            return None
+        try:
+            from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+                shell_command_enabled,
+            )
+
+            if not shell_command_enabled():
+                return None
+            return cls(ctx)
+        except Exception:
+            return None
+
+    def observe(self, item: object) -> None:
+        try:
+            payload = getattr(item, "payload", None)
+            if not isinstance(payload, dict):
+                return
+            kind = payload.get("type")
+            if kind == "response_clear":
+                self._result_text = ""
+            elif kind == "text_delta":
+                delta = payload.get("delta")
+                if isinstance(delta, str):
+                    self._result_text += delta
+        except Exception:
+            return
+
+    async def run_audit(self) -> None:
+        try:
+            from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+                run_shell_command_at_on_subagent_stop,
+            )
+
+            remaining, decrement_fn = _resolve_shell_budget_for_ctx(self._ctx)
+            await run_shell_command_at_on_subagent_stop(
+                final_text=self._result_text,
+                remaining_budget=remaining,
+                decrement_fn=decrement_fn,
+            )
+        except Exception:
+            return
+
+
+class _ShellPreFinalCollector:
+    """Accumulates the in-progress final text and fires the ``pre_final``
+    shell_command fan-out on the FIRST sight of an ``EngineResult`` so the
+    pre-synthesis gate decision arrives BEFORE the final answer commits.
+
+    Honors ``action == "block"``: when any pre_final rule with
+    ``action=block`` exits non-zero, :meth:`maybe_replace` returns a
+    synthetic ``customize_policy_blocked`` terminal that the caller yields
+    in place of the original EngineResult. Otherwise (proceed verdict)
+    returns ``None`` so the caller yields the original item verbatim.
+
+    The audit fan-out is one-shot: only the FIRST EngineResult triggers it
+    (subsequent results within the same turn fall through to the original
+    yield). Fully fail-open.
+    """
+
+    __slots__ = ("_ctx", "_result_text", "_fired")
+
+    def __init__(self, ctx: TurnContext) -> None:
+        self._ctx = ctx
+        self._result_text = ""
+        self._fired = False
+
+    @classmethod
+    def maybe_create(cls, ctx: TurnContext) -> "_ShellPreFinalCollector | None":
+        try:
+            from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+                shell_command_enabled,
+            )
+
+            if not shell_command_enabled():
+                return None
+            return cls(ctx)
+        except Exception:
+            return None
+
+    def observe(self, item: object) -> None:
+        try:
+            payload = getattr(item, "payload", None)
+            if not isinstance(payload, dict):
+                return
+            kind = payload.get("type")
+            if kind == "response_clear":
+                self._result_text = ""
+            elif kind == "text_delta":
+                delta = payload.get("delta")
+                if isinstance(delta, str):
+                    self._result_text += delta
+        except Exception:
+            return
+
+    async def maybe_replace(
+        self, item: object, ctx: TurnContext
+    ) -> object | None:
+        """If *item* is an EngineResult and pre_final shell verdict is
+        ``block``, return a synthetic policy-blocked terminal.
+
+        Otherwise return ``None`` (caller yields the original item).
+        """
+        if self._fired:
+            return None
+        try:
+            from magi_agent.cli.contracts import EngineResult  # noqa: PLC0415
+        except Exception:
+            return None
+        if not isinstance(item, EngineResult):
+            return None
+        # One-shot: even if the call below errors / proceeds, we don't
+        # re-fire on subsequent EngineResults this turn.
+        self._fired = True
+        try:
+            from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+                run_shell_command_at_pre_final,
+            )
+
+            remaining, decrement_fn = _resolve_shell_budget_for_ctx(ctx)
+            _, verdict = await run_shell_command_at_pre_final(
+                draft_text=self._result_text,
+                remaining_budget=remaining,
+                decrement_fn=decrement_fn,
+            )
+            if verdict == "block":
+                return _build_policy_blocked_terminal(
+                    ctx=ctx,
+                    slot="pre_final",
+                    reason="shell_command exit_code>0 with action=block",
+                )
+        except Exception:
+            return None
+        return None
 
 
 def _build_runtime(ctx: TurnContext) -> object:

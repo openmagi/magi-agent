@@ -1729,6 +1729,33 @@ def build_lifecycle_llm_call_audit_controls(
     return [] if control is None else [control]
 
 
+def build_lifecycle_shell_command_controls(
+    os_environ: dict[str, str] | None = None,
+) -> "list[LoopControl]":
+    """PR-F-EXEC1 per-turn shell command budget control,
+    ``MAGI_CUSTOMIZE_SHELL_COMMAND_ENABLED``, strict default-OFF. Registers
+    a single :class:`LifecycleShellCommandControl` that maintains the
+    per-(session, turn) shell-command spawn budget (env
+    ``MAGI_CUSTOMIZE_SHELL_AUDIT_BUDGET``, default 5) shared across all
+    11 lifecycle slots that expose the ``shell_command`` action kind.
+
+    The control's ``on_before_model`` warms up per-turn state on the first
+    model call; the per-slot fan-out helpers in
+    :mod:`magi_agent.customize.lifecycle_audit` thread the live remaining
+    budget into ``apply_shell_command_rule`` so a misbehaving rule cannot
+    spawn unbounded subprocesses across slots.
+    """
+    env = os_environ if os_environ is not None else dict(os.environ)
+    # Lazy import to avoid pulling in the lifecycle_audit / customize
+    # surface for OFF callers (the file imports from this module).
+    from magi_agent.adk_bridge.lifecycle_shell_command_control import (  # noqa: PLC0415
+        build_lifecycle_shell_command_control,
+    )
+
+    control = build_lifecycle_shell_command_control(env)
+    return [] if control is None else [control]
+
+
 def build_lifecycle_session_controls(
     os_environ: dict[str, str] | None = None,
 ) -> "list[LoopControl]":
@@ -1865,6 +1892,14 @@ def build_default_plane(
     # registration also short-circuits cleanly.
     for control in build_lifecycle_llm_call_audit_controls(env):
         plane.register(control)
+    # PR-F-EXEC1 per-turn shell command budget plugin — registers when the
+    # master flag MAGI_CUSTOMIZE_SHELL_COMMAND_ENABLED is ON; returns []
+    # (no registration) when OFF so the plane is byte-identical for default
+    # callers. Lifecycle_audit shell fan-out helpers consult the control's
+    # remaining_budget_for() accessor inside the hot path so a runtime flip
+    # after registration also short-circuits cleanly.
+    for control in build_lifecycle_shell_command_controls(env):
+        plane.register(control)
     # PR-F-LIFE4b session-start audit fan-out — registers when the master
     # flag MAGI_CUSTOMIZE_LIFECYCLE_SESSION_TASK_EMITTERS_ENABLED is ON;
     # returns [] (no registration) when OFF so the plane is byte-
@@ -1957,6 +1992,7 @@ __all__ = [
     "build_facts_replan_controls",
     "build_lifecycle_llm_call_audit_controls",
     "build_lifecycle_session_controls",
+    "build_lifecycle_shell_command_controls",
     "build_loop_resilience_controls",
     "build_tool_synthesis_nudge_controls",
 ]
