@@ -3543,6 +3543,86 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="int",
     ),
+    # the gate config builders. All ``scope="hosted", default=""``;
+    # missing falls through to the existing ``.strip()`` / ``_csv_values``
+    # defaults.
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE8_SELECTED_AUTHORITY_ENVIRONMENT",
+        default="",
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted gate8 selected-authority environment label. Default-"
+            "empty; hosted-only."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE8_SELECTED_AUTHORITY_ENV_ALLOWLIST",
+        default="",
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Comma-separated allowlist of environments gate8 will accept. "
+            "Default-empty disables the environment check; hosted-only."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_ENVIRONMENT",
+        default="",
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted gate5b user-visible canary environment label. "
+            "Default-empty; hosted-only."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_ENV_ALLOWLIST",
+        default="",
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Comma-separated allowlist of environments gate5b user-"
+            "visible canary will accept. Default-empty; hosted-only."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_ENV_ALLOWLIST",
+        default="",
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Comma-separated allowlist of environments the gate1a read-"
+            "only toolhost will accept. Default-empty; hosted-only."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_ENVIRONMENT",
+        default="",
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted gate2 sandbox-canary environment label. Default-"
+            "empty; hosted-only."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_ENV_ALLOWLIST",
+        default="",
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Comma-separated allowlist of environments gate2 sandbox-"
+            "canary will accept. Default-empty; hosted-only."
+        ),
+        kind="str",
+    ),
 )
 
 
