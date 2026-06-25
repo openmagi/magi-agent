@@ -5,13 +5,78 @@ import os
 import re
 import tempfile
 import uuid
+import zlib
 from collections.abc import Mapping
 from pathlib import Path
 
 from magi_agent.plugins.native._common import digest, ok_result
-from magi_agent.runtime.public_events import child_progress_event
+from magi_agent.runtime.public_events import child_progress_event, child_started_event
 from magi_agent.tools.context import ToolContext
 from magi_agent.tools.result import ToolResult, ToolStatus
+
+# Public-safe roster used as deterministic chip names for spawned subagents.
+# Mirrors ``apps/web/src/lib/chat/work-console.ts`` ``SUBAGENT_NAMES`` so the
+# UI's index-based fallback agrees with backend-supplied names when both fire.
+SUBAGENT_NAMES: tuple[str, ...] = (
+    "Halley",
+    "Meitner",
+    "Kant",
+    "Noether",
+    "Turing",
+    "Curie",
+    "Hopper",
+    "Lovelace",
+    "Feynman",
+    "Franklin",
+    "Shannon",
+    "Lamarr",
+)
+
+# Cap the chip label so a verbose LLM cannot push a 5KB string into every
+# public event.  The UI chip is single-line; 64 characters is comfortable.
+_TASK_TITLE_LIMIT = 64
+
+
+def _agent_name_for_task(task_id: str) -> str:
+    """Deterministic agent name from a task id.
+
+    Same ``task_id`` → same name across runs and processes.  Uses CRC32 (a
+    non-cryptographic 32-bit hash) so we get good distribution without pulling
+    a hashing dependency.  Empty/None falls back to the first roster name.
+    """
+    if not isinstance(task_id, str) or not task_id:
+        return SUBAGENT_NAMES[0]
+    index = zlib.crc32(task_id.encode("utf-8")) % len(SUBAGENT_NAMES)
+    return SUBAGENT_NAMES[index]
+
+
+def _model_label(provider: str | None, model: str | None) -> str | None:
+    """Format ``"<provider>:<model>"`` when both are present, else ``None``."""
+    if not isinstance(provider, str) or not provider.strip():
+        return None
+    if not isinstance(model, str) or not model.strip():
+        return None
+    return f"{provider.strip()}:{model.strip()}"
+
+
+def _sanitized_task_title(arguments: Mapping[str, object]) -> str | None:
+    """Extract an opt-in public-safe short label from SpawnAgent arguments.
+
+    The SpawnAgent tool description tells the LLM to pass ``taskTitle`` as a
+    SHORT human-readable brief (≤ 64 chars) that's safe to display in the
+    UI's per-agent chip.  This is NOT a fallback to ``prompt``/``task`` —
+    those carry the actual private prompt body and stay redacted to honour
+    the privacy contract enforced by gate5b sanitization tests.
+    """
+    raw = arguments.get("taskTitle")
+    if not isinstance(raw, str):
+        return None
+    text = raw.strip()
+    if not text:
+        return None
+    if len(text) > _TASK_TITLE_LIMIT:
+        text = text[:_TASK_TITLE_LIMIT].rstrip()
+    return text
 
 _LEGACY_RUNTIME_ENV_PREFIX = "CORE" + "_AGENT_"
 
@@ -66,17 +131,19 @@ async def _emit_child_started(
     task_id: str,
     parent_turn_id: str,
     child_receipt_ref: str,
+    agent_name: str | None = None,
+    model: str | None = None,
+    task_title: str | None = None,
 ) -> None:
-    await _emit_agent_event(
-        context,
-        {
-            "type": "child_started",
-            "taskId": task_id,
-            "parentTurnId": parent_turn_id,
-            "detail": "Delegated child started",
-            "childReceiptRef": child_receipt_ref,
-        },
+    event = child_started_event(
+        task_id=task_id,
+        parent_turn_id=parent_turn_id,
+        child_receipt_ref=child_receipt_ref,
+        agent_name=agent_name,
+        model=model,
+        task_title=task_title,
     )
+    await _emit_agent_event(context, event)
     await _emit_agent_event(
         context,
         {
@@ -480,6 +547,9 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
             task_id=task_id,
             parent_turn_id=turn_id,
             child_receipt_ref=child_receipt_ref,
+            agent_name=_agent_name_for_task(task_id),
+            model=_model_label(req_provider, req_model),
+            task_title=_sanitized_task_title(arguments),
         )
         result = await boundary.run(request)
 

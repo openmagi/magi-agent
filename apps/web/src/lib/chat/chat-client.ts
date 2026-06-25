@@ -1595,12 +1595,21 @@ export async function sendMessage(
     if (!value) return false;
     return /^iteration\s+\d+$/i.test(value.trim());
   }
+  function safeShortLabel(value: unknown, maxLength: number): string | undefined {
+    if (typeof value !== "string") return undefined;
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    return trimmed.length > maxLength ? trimmed.slice(0, maxLength) : trimmed;
+  }
   function noteSubagent(
     taskId: unknown,
     updates: {
       role?: unknown;
       status?: SubagentActivityStatus;
       detail?: unknown;
+      agentName?: unknown;
+      model?: unknown;
+      taskTitle?: unknown;
     },
   ): void {
     if (typeof taskId !== "string" || !taskId) return;
@@ -1612,6 +1621,9 @@ export async function sendMessage(
     const detail = incomingDetail && isLowSignalSubagentDetail(incomingDetail) && existing?.detail
       ? existing.detail
       : incomingDetail;
+    const incomingAgentName = safeShortLabel(updates.agentName, 64);
+    const incomingModel = safeShortLabel(updates.model, 96);
+    const incomingTaskTitle = safeShortLabel(updates.taskTitle, 64);
     const next: SubagentActivity = {
       taskId,
       role: safeSubagentRole(updates.role, existing?.role ?? "subagent"),
@@ -1622,6 +1634,21 @@ export async function sendMessage(
         ? { detail }
         : existing?.detail !== undefined
           ? { detail: existing.detail }
+          : {}),
+      ...(incomingAgentName !== undefined
+        ? { agentName: incomingAgentName }
+        : existing?.agentName !== undefined
+          ? { agentName: existing.agentName }
+          : {}),
+      ...(incomingModel !== undefined
+        ? { model: incomingModel }
+        : existing?.model !== undefined
+          ? { model: existing.model }
+          : {}),
+      ...(incomingTaskTitle !== undefined
+        ? { taskTitle: incomingTaskTitle }
+        : existing?.taskTitle !== undefined
+          ? { taskTitle: existing.taskTitle }
           : {}),
     };
     subagents.set(taskId, next);
@@ -2152,7 +2179,13 @@ export async function sendMessage(
         break;
       }
       case "child_started":
-        noteSubagent(ev.taskId, { status: "running", detail: ev.detail });
+        noteSubagent(ev.taskId, {
+          status: "running",
+          detail: ev.detail,
+          agentName: ev.agentName,
+          model: ev.model,
+          taskTitle: ev.taskTitle,
+        });
         noteChildProgress(ev.taskId, "Subagent running");
         break;
       case "child_progress":

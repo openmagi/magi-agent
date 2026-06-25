@@ -175,6 +175,16 @@ def _build_spawn_agent_input_schema(
                     "(validators, gates, and instructions scoped to this subtask)."
                 ),
             },
+            "taskTitle": {
+                "type": "string",
+                "description": (
+                    "Short PUBLIC-SAFE label (≤ 64 chars) shown to the user as "
+                    "this agent's chip in the dashboard (e.g. 'Cross-validate "
+                    "1+1 across 3 SOTA models'). Keep it descriptive but free "
+                    "of private prompt content — unlike `prompt`/`task`, this "
+                    "field is surfaced to the UI."
+                ),
+            },
         },
         "additionalProperties": True,
     }
