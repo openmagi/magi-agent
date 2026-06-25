@@ -154,7 +154,10 @@ def build_gate5b_user_visible_chat_route_config_from_env(
     env: Mapping[str, str],
     runtime_config: object,
 ) -> Gate5BUserVisibleChatRouteConfig:
-    if _is_true(env.get("CORE_AGENT_PYTHON_GATE8_SELECTED_AUTHORITY_ENABLED")):
+    # I-1: route through the typed flag registry.
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    if flag_bool("CORE_AGENT_PYTHON_GATE8_SELECTED_AUTHORITY_ENABLED", env=env):
         return Gate5BUserVisibleChatRouteConfig(
             enabled=True,
             killSwitchEnabled=_env_bool_default_true(
@@ -177,7 +180,7 @@ def build_gate5b_user_visible_chat_route_config_from_env(
             ),
         )
     return Gate5BUserVisibleChatRouteConfig(
-        enabled=_is_true(env.get("CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_ENABLED")),
+        enabled=flag_bool("CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_ENABLED", env=env),
         killSwitchEnabled=_is_true(
             env.get("CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_KILL_SWITCH")
         ),
@@ -199,6 +202,16 @@ def build_gate5b_user_visible_chat_route_config_from_env(
     )
 
 
+def _gate1a_readonly_tools_enabled(env: Mapping[str, str]) -> bool:
+    """I-1: typed-registry read for the gate1a read-only toolhost master
+    switch. The ``FlagSpec`` is registered default-OFF so the prior
+    ``_is_true(env.get(...))`` semantics survive byte-identically."""
+
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_ENABLED", env=env)
+
+
 def build_gate1a_readonly_tools_config_from_env(
     env: Mapping[str, str],
     runtime_config: object,
@@ -206,9 +219,8 @@ def build_gate1a_readonly_tools_config_from_env(
     del runtime_config
     return Gate1AReadOnlyToolConfig.model_validate(
         {
-            "enabled": _is_true(
-                env.get("CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_ENABLED")
-            ),
+            # I-1: route through the typed flag registry.
+            "enabled": _gate1a_readonly_tools_enabled(env),
             "killSwitchEnabled": _is_true(
                 env.get("CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_KILL_SWITCH", "1")
             ),
