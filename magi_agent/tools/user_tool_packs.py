@@ -10,25 +10,33 @@ each user ``ToolManifest`` in a :class:`~magi_agent.tools.registry.ToolRegistry`
 
 The CLI dispatch boundary (:class:`~magi_agent.tools.dispatcher.ToolDispatcher`)
 needs each registration to carry an executable
-``ToolHandler = (ToolArguments, ToolContext) -> ToolResult``. The only authoring
-seam a user tool pack has to ship an executable handler today is
-``register_workspace_handler(tool_name, handler)`` (the C1 gate5b seam), whose
-handler is ``(args, WorkspaceHostView) -> output``. So this module:
+``ToolHandler = (ToolArguments, ToolContext) -> ToolResult``. A user tool pack
+has two authoring seams to ship an executable handler:
+
+- ``register_handler(manifest, handler)`` (PR6): a PLAIN inline handler
+  ``(args: Mapping[str, object], tool_ctx: ToolCtx) -> output`` that needs no
+  WorkspaceHostView (a vanilla third-party tool: call an API, compute something).
+  This is the seam ``magi pack new tool`` scaffolds.
+- ``register_workspace_handler(tool_name, handler)`` (the C1 gate5b seam), whose
+  handler is ``(args, WorkspaceHostView) -> output`` and DOES want the kernel
+  workspace-file services (path safety, read ledger, bounded shell).
+
+So this module:
 
 1. discovers + loads user tool packs through the real pipeline;
-2. for every user tool manifest that also bound a workspace handler, wraps that
-   handler into a CLI ``ToolHandler`` over a lazily-built
+2. for every user tool manifest, PREFERS an inline handler if present — wraps it
+   into a CLI ``ToolHandler`` over a narrow :class:`~magi_agent.packs.context.ToolCtx`
+   — otherwise falls back to wrapping a workspace handler over a lazily-built
    :class:`~magi_agent.gates.gate5b_full_toolhost.Gate5BFullToolHost` (mirroring
-   ``CoreToolhostHandlerSet._host_for``) and registers + binds it onto the CLI
+   ``CoreToolhostHandlerSet._host_for``), then registers + binds it onto the CLI
    registry;
 3. SKIPS any user tool whose name collides with an already-registered tool (the
    core/first-party tools are merged first), so a user pack can never override an
    ungated core tool.
 
-A user tool manifest with NO workspace handler is manifest-only and cannot be
-dispatched on the CLI path, so it is skipped (it would otherwise dispatch to
-``tool_handler_missing``). This is the documented authoring-ABI shape; a future
-PR can widen the seam to carry an inline registry handler directly.
+A user tool manifest with NEITHER an inline nor a workspace handler is
+manifest-only and cannot be dispatched on the CLI path, so it is skipped (it
+would otherwise dispatch to ``tool_handler_missing``).
 """
 from __future__ import annotations
 
@@ -43,12 +51,15 @@ from .registry import ToolRegistry
 from .result import ToolResult
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from magi_agent.packs.context import WorkspaceHostView
+    from magi_agent.packs.context import ToolCtx, WorkspaceHostView
 
 _LOGGER = logging.getLogger(__name__)
 
 WorkspaceHandler = Callable[
     [Mapping[str, object], "WorkspaceHostView"], object
+]
+InlineHandler = Callable[
+    [Mapping[str, object], "ToolCtx"], object
 ]
 
 
@@ -121,6 +132,57 @@ class _UserToolWorkspaceHostSet:
         return handler
 
 
+def _inline_handler_for(
+    tool_name: str,
+    inline_handler: InlineHandler,
+) -> Callable[[dict[str, object], ToolContext], ToolResult]:
+    """Adapt a plain ``(args, ToolCtx) -> output`` handler to a CLI ToolHandler.
+
+    Builds a narrow :class:`~magi_agent.packs.context.ToolCtx` over the dispatch
+    :class:`ToolContext` (no WorkspaceHostView): ``tool_name``, read-only
+    ``tool_args``, a session read-view, and an optional progress sink wired to the
+    context's ``emit_progress``. Awaits a coroutine result, wraps the return into a
+    ``ToolResult`` (Mapping -> output as-is; scalar -> ``{"value": ...}``), and
+    NEVER raises (an impl exception collapses to a ``ToolResult`` error)."""
+
+    async def handler(
+        arguments: dict[str, object], context: ToolContext
+    ) -> ToolResult:
+        from magi_agent.packs.context import ToolCtx, SessionReadView  # noqa: PLC0415
+
+        try:
+            emit = context.emit_progress
+            tool_ctx = ToolCtx(
+                tool_name=tool_name,
+                tool_args=arguments,
+                session=SessionReadView(
+                    invocation_id=context.turn_id or context.session_id or "local-turn",
+                    agent_name=context.bot_id or "local",
+                    turn_index=0,
+                ),
+                emit_progress=(lambda msg: emit(msg)) if emit is not None else None,
+            )
+            output = inline_handler(arguments, tool_ctx)
+            from inspect import isawaitable  # noqa: PLC0415
+
+            if isawaitable(output):
+                output = await output
+        except Exception as exc:  # noqa: BLE001 - handlers must NEVER raise
+            return ToolResult(
+                status="error",
+                error_code="user_tool_pack_error",
+                error_message=str(exc),
+                metadata={"toolName": tool_name},
+            )
+        return ToolResult(
+            status="ok",
+            output=output if isinstance(output, Mapping) else {"value": output},
+            metadata={"toolName": tool_name},
+        )
+
+    return handler
+
+
 def merge_user_tool_packs(
     registry: ToolRegistry,
     *,
@@ -153,19 +215,21 @@ def merge_user_tool_packs(
     workspace_handler_names = set(
         pack_registries.workspace_tool_handlers.list_refs()
     )
-    # The exposed tool names the gate5b host advertises = the merged user tools
-    # that carry a workspace handler. Snapshot before binding so each host knows
-    # the full user-tool surface.
+    # The exposed tool names the gate5b host advertises = the mergeable user tools
+    # that fall back to a workspace handler (no inline handler). Snapshot before
+    # binding so each host knows the full user-tool surface.
+    inline_handler_names = set(
+        pack_registries.tool_inline_handlers.list_refs()
+    )
     exposed = tuple(
         sorted(
             manifest.name
             for manifest in manifests
             if manifest.name in workspace_handler_names
+            and manifest.name not in inline_handler_names
             and registry.resolve_registration(manifest.name) is None
         )
     )
-    if not exposed:
-        return ()
 
     host_set = _UserToolWorkspaceHostSet(exposed_tool_names=exposed)
     merged: list[str] = []
@@ -178,11 +242,23 @@ def merge_user_tool_packs(
                 name,
             )
             continue
+        # Prefer a plain inline handler (no WorkspaceHostView); fall back to a
+        # workspace handler when only that seam was authored.
+        inline_handler = pack_registries.tool_inline_handlers.resolve(name)
+        if inline_handler is not None:
+            registry.register(manifest)
+            registry.bind_handler(
+                name,
+                _inline_handler_for(name, inline_handler),
+                enabled_by_registry_policy=True,
+            )
+            merged.append(name)
+            continue
         workspace_handler = pack_registries.workspace_tool_handlers.resolve(name)
         if workspace_handler is None:
             # Manifest-only: cannot be dispatched on the CLI path.
             _LOGGER.info(
-                "user tool pack tool %r registered no workspace handler; skipping",
+                "user tool pack tool %r registered no handler; skipping",
                 name,
             )
             continue
