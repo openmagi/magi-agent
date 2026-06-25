@@ -1232,9 +1232,14 @@ def parse_python_memory_adapter_env(env: Mapping[str, str]) -> PythonMemoryAdapt
             "CORE_AGENT_PYTHON_MEMORY_ADAPTER_MODE must be disabled, readonly_fixture, or readonly_local"
         )
 
-    prompt_projection = _is_true(env.get("CORE_AGENT_PYTHON_MEMORY_PROMPT_PROJECTION"))
-    live_provider = _is_true(env.get("CORE_AGENT_PYTHON_MEMORY_LIVE_PROVIDER_CALLS"))
-    adk_attachment = _is_true(env.get("CORE_AGENT_PYTHON_MEMORY_ADK_SERVICE_ATTACHMENT"))
+    # I-1: route the three memory "not approved" guards through the
+    # typed flag registry. Byte-identical to ``_is_true`` because the
+    # ``FlagSpec``s are registered as strict default-OFF ``bool``.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    prompt_projection = flag_bool("CORE_AGENT_PYTHON_MEMORY_PROMPT_PROJECTION", env=env)
+    live_provider = flag_bool("CORE_AGENT_PYTHON_MEMORY_LIVE_PROVIDER_CALLS", env=env)
+    adk_attachment = flag_bool("CORE_AGENT_PYTHON_MEMORY_ADK_SERVICE_ATTACHMENT", env=env)
     if prompt_projection:
         raise RuntimeEnvError("CORE_AGENT_PYTHON_MEMORY_PROMPT_PROJECTION is not approved")
     if live_provider:
@@ -1262,12 +1267,19 @@ def parse_python_memory_adapter_env(env: Mapping[str, str]) -> PythonMemoryAdapt
 def parse_python_toolhost_attachment_env(
     env: Mapping[str, str],
 ) -> PythonToolHostAttachmentConfig:
-    attach_enabled = _is_true(env.get("CORE_AGENT_PYTHON_ADK_TOOLHOST_ATTACH"))
+    # I-1: route the two registered ENABLED/MUTATION guards through the
+    # typed flag registry. ``PRODUCTION_ATTACHMENT`` stays a raw
+    # ``_is_true`` read pending its own focused registration (the parser
+    # later raises on truthy values regardless, so byte-identity for the
+    # production-attachment "not approved" guard is preserved).
+    from .flags import flag_bool  # noqa: PLC0415
+
+    attach_enabled = flag_bool("CORE_AGENT_PYTHON_ADK_TOOLHOST_ATTACH", env=env)
     mode_raw = (env.get("CORE_AGENT_PYTHON_ADK_TOOLHOST_MODE") or "disabled").strip().lower()
     production_attachment = _is_true(
         env.get("CORE_AGENT_PYTHON_TOOLHOST_PRODUCTION_ATTACHMENT")
     )
-    live_mutation = _is_true(env.get("CORE_AGENT_PYTHON_TOOLHOST_LIVE_TOOL_MUTATION"))
+    live_mutation = flag_bool("CORE_AGENT_PYTHON_TOOLHOST_LIVE_TOOL_MUTATION", env=env)
 
     if production_attachment:
         raise RuntimeEnvError("CORE_AGENT_PYTHON_TOOLHOST_PRODUCTION_ATTACHMENT is not approved")
@@ -1303,7 +1315,10 @@ def parse_python_security_posture_env(
         if _is_true(env.get(name)):
             raise RuntimeEnvError(f"{name} is not approved")
 
-    preflight = _is_true(env.get("CORE_AGENT_PYTHON_SECURITY_POSTURE_PREFLIGHT"))
+    # I-1: route through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    preflight = flag_bool("CORE_AGENT_PYTHON_SECURITY_POSTURE_PREFLIGHT", env=env)
     return PythonSecurityPostureConfig(
         enabled=preflight,
         posturePreflightAttached=preflight,
@@ -1328,7 +1343,10 @@ def parse_python_context_continuity_env(
         if _is_true(env.get(name)):
             raise RuntimeEnvError(f"{name} is not approved")
 
-    enabled = _is_true(env.get("CORE_AGENT_PYTHON_CONTEXT_CONTINUITY_ENABLED"))
+    # I-1: route through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    enabled = flag_bool("CORE_AGENT_PYTHON_CONTEXT_CONTINUITY_ENABLED", env=env)
     mode = (
         env.get("CORE_AGENT_PYTHON_CONTEXT_CONTINUITY_MODE") or ""
     ).strip().lower()
@@ -1458,10 +1476,7 @@ def _build_context_continuity_local_canary_config() -> PythonContextContinuityCo
 
 
 def parse_python_gate2_readiness_env(env: Mapping[str, str]) -> PythonGate2ReadinessConfig:
-    # I-1: route through the typed flag registry.
-    from .flags import flag_bool  # noqa: PLC0415
-
-    enabled = flag_bool("CORE_AGENT_PYTHON_GATE2_READINESS_ENABLED", env=env)
+    enabled = _is_true(env.get("CORE_AGENT_PYTHON_GATE2_READINESS_ENABLED"))
     return PythonGate2ReadinessConfig(
         enabled=enabled,
         killSwitchEnabled=_env_bool_default_true(
@@ -1513,10 +1528,7 @@ def parse_python_gate2_readiness_env(env: Mapping[str, str]) -> PythonGate2Readi
 
 
 def parse_python_gate3_readiness_env(env: Mapping[str, str]) -> PythonGate3ReadinessConfig:
-    # I-1: route through the typed flag registry.
-    from .flags import flag_bool  # noqa: PLC0415
-
-    enabled = flag_bool("CORE_AGENT_PYTHON_GATE3_READINESS_ENABLED", env=env)
+    enabled = _is_true(env.get("CORE_AGENT_PYTHON_GATE3_READINESS_ENABLED"))
     return PythonGate3ReadinessConfig(
         enabled=enabled,
         killSwitchEnabled=_env_bool_default_true(
@@ -1561,10 +1573,7 @@ def parse_python_gate3_readiness_env(env: Mapping[str, str]) -> PythonGate3Readi
 
 
 def parse_python_gate4_readiness_env(env: Mapping[str, str]) -> PythonGate4ReadinessConfig:
-    # I-1: route through the typed flag registry.
-    from .flags import flag_bool  # noqa: PLC0415
-
-    enabled = flag_bool("CORE_AGENT_PYTHON_GATE4_READINESS_ENABLED", env=env)
+    enabled = _is_true(env.get("CORE_AGENT_PYTHON_GATE4_READINESS_ENABLED"))
     return PythonGate4ReadinessConfig(
         enabled=enabled,
         killSwitchEnabled=_env_bool_default_true(
@@ -1611,10 +1620,7 @@ def parse_python_gate4_readiness_env(env: Mapping[str, str]) -> PythonGate4Readi
 
 
 def parse_python_gate5_readiness_env(env: Mapping[str, str]) -> PythonGate5ReadinessConfig:
-    # I-1: route through the typed flag registry.
-    from .flags import flag_bool  # noqa: PLC0415
-
-    enabled = flag_bool("CORE_AGENT_PYTHON_GATE5_READINESS_ENABLED", env=env)
+    enabled = _is_true(env.get("CORE_AGENT_PYTHON_GATE5_READINESS_ENABLED"))
     return PythonGate5ReadinessConfig(
         enabled=enabled,
         killSwitchEnabled=_env_bool_default_true(
@@ -1664,10 +1670,7 @@ def parse_python_gate5_readiness_env(env: Mapping[str, str]) -> PythonGate5Readi
 
 
 def parse_python_gate7_readiness_env(env: Mapping[str, str]) -> PythonGate7ReadinessConfig:
-    # I-1: route through the typed flag registry.
-    from .flags import flag_bool  # noqa: PLC0415
-
-    enabled = flag_bool("CORE_AGENT_PYTHON_GATE7_READINESS_ENABLED", env=env)
+    enabled = _is_true(env.get("CORE_AGENT_PYTHON_GATE7_READINESS_ENABLED"))
     return PythonGate7ReadinessConfig(
         enabled=enabled,
         killSwitchEnabled=_env_bool_default_true(
@@ -1734,10 +1737,7 @@ def parse_python_gate7_readiness_env(env: Mapping[str, str]) -> PythonGate7Readi
 
 
 def parse_python_gate8_readiness_env(env: Mapping[str, str]) -> PythonGate8ReadinessConfig:
-    # I-1: route through the typed flag registry.
-    from .flags import flag_bool  # noqa: PLC0415
-
-    enabled = flag_bool("CORE_AGENT_PYTHON_GATE8_SELECTED_AUTHORITY_ENABLED", env=env)
+    enabled = _is_true(env.get("CORE_AGENT_PYTHON_GATE8_SELECTED_AUTHORITY_ENABLED"))
     return PythonGate8ReadinessConfig(
         enabled=enabled,
         killSwitchEnabled=_env_bool_default_true(
@@ -2779,7 +2779,10 @@ def is_format_on_write_enabled(env: Mapping[str, str]) -> bool:
 
 
 def parse_gate3a_recorded_replay_env(env: Mapping[str, str]) -> Gate3ARecordedReplayEnv:
-    enabled = _is_true(env.get("CORE_AGENT_PYTHON_GATE3A_RECORDED_REPLAY"))
+    # I-1: route through the typed flag registry.
+    from .flags import flag_bool  # noqa: PLC0415
+
+    enabled = flag_bool("CORE_AGENT_PYTHON_GATE3A_RECORDED_REPLAY", env=env)
     if not enabled:
         return Gate3ARecordedReplayEnv()
 
@@ -2788,7 +2791,8 @@ def parse_gate3a_recorded_replay_env(env: Mapping[str, str]) -> Gate3ARecordedRe
 
     from magi_agent.shadow.gate3a_replay import validate_gate3a_local_path
 
-    allow_model_calls = _is_true(env.get("CORE_AGENT_PYTHON_GATE3A_ALLOW_MODEL_CALLS"))
+    # I-1: route through the typed flag registry (imported above).
+    allow_model_calls = flag_bool("CORE_AGENT_PYTHON_GATE3A_ALLOW_MODEL_CALLS", env=env)
     max_bundles_raw = env.get("CORE_AGENT_PYTHON_GATE3A_MAX_BUNDLES") or "1"
     try:
         max_bundles = int(max_bundles_raw)
