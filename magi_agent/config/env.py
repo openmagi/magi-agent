@@ -1305,6 +1305,11 @@ def parse_python_toolhost_attachment_env(
 def parse_python_security_posture_env(
     env: Mapping[str, str],
 ) -> PythonSecurityPostureConfig:
+    # I-1: route through the typed flag registry (hoisted so the
+    # ``false_only_flags`` loop body shares the same reader as the
+    # ``preflight`` master switch below).
+    from .flags import flag_bool  # noqa: PLC0415
+
     false_only_flags = (
         "CORE_AGENT_PYTHON_SECURITY_EXTERNAL_SURFACE_DISPATCH",
         "CORE_AGENT_PYTHON_SECURITY_CREDENTIAL_BROKER_ATTACHMENT",
@@ -1312,11 +1317,8 @@ def parse_python_security_posture_env(
         "CORE_AGENT_PYTHON_SECURITY_SUPPLY_CHAIN_STARTUP_BANNER",
     )
     for name in false_only_flags:
-        if _is_true(env.get(name)):
+        if flag_bool(name, env=env):
             raise RuntimeEnvError(f"{name} is not approved")
-
-    # I-1: route through the typed flag registry.
-    from .flags import flag_bool  # noqa: PLC0415
 
     preflight = flag_bool("CORE_AGENT_PYTHON_SECURITY_POSTURE_PREFLIGHT", env=env)
     return PythonSecurityPostureConfig(
@@ -1332,6 +1334,11 @@ def parse_python_security_posture_env(
 def parse_python_context_continuity_env(
     env: Mapping[str, str],
 ) -> PythonContextContinuityConfig:
+    # I-1: route through the typed flag registry (hoisted so the
+    # ``false_only_flags`` loop body shares the same reader as the
+    # ``enabled`` master switch below).
+    from .flags import flag_bool  # noqa: PLC0415
+
     false_only_flags = (
         "CORE_AGENT_PYTHON_CONTEXT_CONTINUITY_PRODUCTION_AUTHORITY",
         "CORE_AGENT_PYTHON_CONTEXT_CONTINUITY_TRANSCRIPT_WRITE",
@@ -1340,11 +1347,8 @@ def parse_python_context_continuity_env(
         "CORE_AGENT_PYTHON_CONTEXT_CONTINUITY_CANARY_EVIDENCE_VERIFIED",
     )
     for name in false_only_flags:
-        if _is_true(env.get(name)):
+        if flag_bool(name, env=env):
             raise RuntimeEnvError(f"{name} is not approved")
-
-    # I-1: route through the typed flag registry.
-    from .flags import flag_bool  # noqa: PLC0415
 
     enabled = flag_bool("CORE_AGENT_PYTHON_CONTEXT_CONTINUITY_ENABLED", env=env)
     mode = (
