@@ -54,6 +54,21 @@ KINDS = frozenset(
         # enforced by the LifecycleShellCommandControl ADK plugin. Trust
         # class: Operator-defined (F-EXEC3 ships the visual badge).
         "shell_command",
+        # F-EXEC2: shell_check — operator-authored subprocess verifier. The
+        # rule payload conforms to the SAME
+        # :class:`magi_agent.customize.shell_runner.ShellPayload` as
+        # shell_command, but the runtime treats the result as a verdict
+        # source rather than an action: stdout is parsed as
+        # ``{passed: bool, reason?: str}`` JSON, with exit code 0 → passed
+        # as a deterministic fallback when stdout is not JSON. v1 wires
+        # two gate slots (``pre_final`` and ``before_tool_use``); other
+        # lifecycle slots are accepted by the validator but inert today
+        # (audit-only fan-out helpers fire alongside the llm_criterion
+        # audit but record no verdict gating). Per-turn cost is bounded
+        # by the SAME ``MAGI_CUSTOMIZE_SHELL_AUDIT_BUDGET`` counter
+        # shared with F-EXEC1 (single ceiling across both kinds). Trust
+        # class: Operator-defined (same as shell_command).
+        "shell_check",
     }
 )
 ACTIONS = frozenset({"block", "retry", "ask_approval", "audit", "override"})
@@ -328,6 +343,30 @@ _LEGAL: dict[str, dict[str, frozenset[str]]] = {
         "on_task_checkpoint": frozenset({"audit"}),
         "on_artifact_created": frozenset({"audit"}),
     },
+    # F-EXEC2: shell_check — operator-authored subprocess VERIFIER. Same
+    # action semantics as llm_criterion: the rule emits a verdict
+    # (passed/failed + reason) and the surrounding runtime treats that as
+    # a deterministic-shaped condition source. The two primary v1 wire
+    # slots are ``pre_final`` (block honored — non-zero exit / passed=false
+    # short-circuits final-answer commit) and ``before_tool_use`` (block
+    # honored — short-circuits dispatch). Other lifecycle slots are
+    # accepted by the validator (mirroring llm_criterion's matrix) for
+    # forward-compat authoring, but in v1 the runtime fan-out helpers fire
+    # them audit-only — the verifier records the per-rule verdict alongside
+    # the llm_criterion audit but does not gate the surrounding chokepoint.
+    "shell_check": {
+        "pre_final": frozenset({"block", "audit"}),
+        "before_tool_use": frozenset({"block", "audit"}),
+        "after_tool_use": frozenset({"audit"}),
+        "on_user_prompt_submit": frozenset({"audit", "block"}),
+        "on_subagent_stop": frozenset({"audit", "block", "ask_approval"}),
+        "before_turn_start": frozenset({"audit", "block", "ask_approval"}),
+        "after_turn_end": frozenset({"audit"}),
+        "before_compaction": frozenset({"audit", "block"}),
+        "after_compaction": frozenset({"audit"}),
+        "on_task_checkpoint": frozenset({"audit", "block", "ask_approval"}),
+        "on_artifact_created": frozenset({"audit", "ask_approval"}),
+    },
 }
 
 
@@ -497,6 +536,19 @@ def validate_custom_rule(rule: Any) -> list[str]:
         # custom_rules.validate_custom_rule entry-point. Lazy import keeps
         # facades / store / etc. hot-path-light when the operator never
         # authors a shell rule.
+        from magi_agent.customize.shell_runner import (  # noqa: PLC0415
+            validate_shell_payload,
+        )
+
+        errors.extend(validate_shell_payload(payload, fires_at))
+    elif kind == "shell_check":
+        # F-EXEC2: operator-authored subprocess VERIFIER. Same payload
+        # shape as shell_command (validated by the same shell_runner
+        # validator). The runtime apply helper
+        # :func:`magi_agent.customize.shell_check.apply_shell_check` parses
+        # stdout as ``{passed, reason?}`` JSON (with exit-code 0 ⇒ passed
+        # fallback when stdout is not parseable JSON). Lazy import for the
+        # same hot-path-light reason as shell_command.
         from magi_agent.customize.shell_runner import (  # noqa: PLC0415
             validate_shell_payload,
         )
