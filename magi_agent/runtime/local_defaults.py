@@ -247,6 +247,18 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     # default-OFF in the registry so a fresh install / hosted serve stays
     # byte-identical.
     "MAGI_CUSTOMIZE_PROMPT_INJECTION_ENABLED",
+    # PR-F-LIFE5 Self Improvement recipe enable: sibling gate to
+    # MAGI_LEARNING_ENABLED. When ON (alongside the master flag) the
+    # Customize dashboard's Self Improvement recipe maps to the real
+    # ``openmagi.self-improvement`` pack — disabling the recipe in the UI
+    # subtracts its evidence/validator refs from the assembled
+    # requirements. The two frozen safety policies
+    # (policy:self-improvement.eval-observation-required@1,
+    # policy:self-improvement.no-direct-mutation@1) remain enforced
+    # regardless. Strict default-OFF in the registry so a fresh install /
+    # hosted serve stay byte-identical; lab opts in so dogfood turns can
+    # exercise the toggle end-to-end.
+    "MAGI_CUSTOMIZE_SELF_IMPROVEMENT_ENABLED",
     # PR-F-MUT2 output_rewrite mutator: re.sub-based redact of a tool's
     # output text AFTER dispatch but BEFORE the model reads it. Same gating
     # shape as F-MUT1 — wire is a no-op without authored rules; lab opts in

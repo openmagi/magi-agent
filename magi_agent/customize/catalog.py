@@ -34,7 +34,13 @@ RECIPE_ID_TO_PACK_IDS: dict[str, tuple[str, ...]] = {
     "coding_mutation": ("openmagi.dev-coding",),
     "general_automation": ("openmagi.agent-methodology",),
     "memory_recall": ("openmagi.memory-agentmemory",),
-    # self_improvement has no live recipe pack today — leave unmapped (no-op).
+    # F-LIFE5 — Self Improvement now resolves to a real pack. The pack itself
+    # is default-off (RecipePackManifest.defaultEnabled=False) AND the live
+    # loop is additionally gated by the MAGI_LEARNING_ENABLED master flag (and
+    # the optional MAGI_CUSTOMIZE_SELF_IMPROVEMENT_ENABLED sibling). The two
+    # frozen policies (eval-observation-required, no-direct-mutation) remain
+    # in force regardless of this toggle.
+    "self_improvement": ("openmagi.self-improvement",),
 }
 
 

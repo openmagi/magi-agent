@@ -8,7 +8,6 @@
     "production_route_attached",
     "read_only_tool_dispatch_allowed",
     "route_attached",
-    "self_improvement_allowed",
     "sse_write_allowed",
     "tool_dispatch_allowed",
     "transcript_write_allowed",
