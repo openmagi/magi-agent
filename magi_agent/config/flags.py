@@ -531,9 +531,10 @@ FLAGS: tuple[FlagSpec, ...] = (
             "content digest (see magi_agent.packs.signing.compute_pack_digest) "
             "appears in the MAGI_TRUSTED_PACK_DIGESTS allowlist are loaded; an "
             "untrusted user/third-party pack is dropped before load. Bundled "
-            "first-party packs (pack_id prefix openmagi.) are exempt (trusted by "
-            "being bundled). Strict default-OFF: when unset NO digest is computed "
-            "and the discover->enabled pipeline is byte-identical to today."
+            "first-party packs (the first-party pack-id prefix) are exempt "
+            "(trusted by being bundled). Strict default-OFF: when unset NO digest "
+            "is computed and the discover->enabled pipeline is byte-identical to "
+            "today."
         ),
     ),
     FlagSpec(

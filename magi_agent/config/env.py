@@ -3765,6 +3765,43 @@ def trusted_pack_digests(env: Mapping[str, str] | None = None) -> frozenset[str]
     )
 
 
+MAGI_HOSTED_PACKS_ENABLED_ENV = "MAGI_HOSTED_PACKS_ENABLED"
+MAGI_HOSTED_PACKS_DIR_ENV = "MAGI_HOSTED_PACKS_DIR"
+
+
+def hosted_packs_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the hosted serving pack-loading gate.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the
+    hosted serving toolhost never discovers or loads packs, so the production
+    serving path is byte-identical (no pack discovery, no impl import). When ON
+    AND ``MAGI_HOSTED_PACKS_DIR`` is set, the gate5b toolhost bundle discovers +
+    loads + activates packs from THAT directory only (never ~/.magi or cwd),
+    applying the pack-signing trust gate. Additive + deliberately NOT
+    runtime-profile default-ON.
+    """
+    from .flags import flag_bool
+
+    source = os.environ if env is None else env
+    return flag_bool(MAGI_HOSTED_PACKS_ENABLED_ENV, env=source)
+
+
+def hosted_packs_dir(env: Mapping[str, str] | None = None) -> "Path | None":
+    """The per-tenant directory the hosted path discovers packs under.
+
+    Returns ``None`` when ``MAGI_HOSTED_PACKS_DIR`` is unset/empty (no hosted
+    packs are loaded even when :func:`hosted_packs_enabled` is on). Only
+    consulted on the hosted serving path.
+    """
+    from .flags import flag_str
+
+    source = os.environ if env is None else env
+    raw = flag_str(MAGI_HOSTED_PACKS_DIR_ENV, env=source)
+    if raw is None or not raw.strip():
+        return None
+    return Path(raw).expanduser()
+
+
 MAGI_PERMISSION_SCOPE_FROM_MODE_ENV = "MAGI_PERMISSION_SCOPE_FROM_MODE"
 MAGI_PERMISSION_SCOPE_LEGACY_FULL_TOOLHOST_ENV = (
     "MAGI_PERMISSION_SCOPE_LEGACY_FULL_TOOLHOST"
