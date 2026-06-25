@@ -1,5 +1,5 @@
 :HL["/_next/static/chunks/0vmgpyxapy0o-.css","style"]
-:HL["/_next/static/chunks/019lquh_i4pl3.css","style"]
+:HL["/_next/static/chunks/2_ur7k0yp8czv.css","style"]
 :HL["/_next/static/media/797e433ab948586e-s.p.0r6juujl39pe6.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
 :HL["/_next/static/media/fba5a26ea33df6a3-s.p.18rizl4rsrl42.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
 0:{"tree":{"name":"","param":null,"prefetchHints":16,"slots":{"children":{"name":"dashboard","param":null,"prefetchHints":0,"slots":{"children":{"name":"botId","param":{"type":"d","key":"local","siblings":null},"prefetchHints":0,"slots":{"children":{"name":"skills","param":null,"prefetchHints":0,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":0,"slots":null}}}}}}}}},"staleTime":300,"buildId":"magi-agent-local-dashboard"}
