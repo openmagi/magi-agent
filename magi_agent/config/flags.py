@@ -2711,6 +2711,113 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="bool",
     ),
+    # I-1: hosted memory adapter knobs. All strict default-OFF; each is
+    # currently a "not approved" guard — the parser raises when set
+    # truthy. Registering as ``_b`` (strict ``bool``) keeps the
+    # ``_is_true`` semantics byte-identical (missing/empty → False).
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_MEMORY_PROMPT_PROJECTION",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted memory adapter prompt-projection seam (NOT APPROVED — "
+            "parser raises when truthy). Default-OFF; hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_MEMORY_LIVE_PROVIDER_CALLS",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted memory adapter live provider calls seam (NOT APPROVED "
+            "— parser raises when truthy). Default-OFF; hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_MEMORY_ADK_SERVICE_ATTACHMENT",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted memory adapter ADK-service attachment seam (NOT "
+            "APPROVED — parser raises when truthy). Default-OFF; "
+            "hosted-only."
+        ),
+        kind="bool",
+    ),
+    # I-1: hosted toolhost attachment knobs.
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_ADK_TOOLHOST_ATTACH",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted ADK toolhost attachment master switch. Default-OFF; "
+            "hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_TOOLHOST_LIVE_TOOL_MUTATION",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted toolhost live-tool mutation seam. Default-OFF; "
+            "hosted-only."
+        ),
+        kind="bool",
+    ),
+    # I-1: hosted security-posture + context-continuity master switches.
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_SECURITY_POSTURE_PREFLIGHT",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted security-posture preflight check activation. "
+            "Default-OFF; hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_CONTEXT_CONTINUITY_ENABLED",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted context-continuity ladder activation. Default-OFF; "
+            "hosted-only."
+        ),
+        kind="bool",
+    ),
+    # I-1: hosted gate3a recorded-replay master switches.
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE3A_RECORDED_REPLAY",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted gate3a recorded-replay bundle ingestion. Default-OFF; "
+            "hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE3A_ALLOW_MODEL_CALLS",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted gate3a recorded-replay allow-model-calls seam. "
+            "Default-OFF; hosted-only."
+        ),
+        kind="bool",
+    ),
 )
 
 
