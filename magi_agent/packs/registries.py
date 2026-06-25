@@ -520,9 +520,15 @@ def build_tool_host_runtime_from_packs(
     )
     from magi_agent.packs.loader import RecordingSink, load_packs
 
+    from magi_agent.packs.signing import filter_trusted_packs
+
     search_bases = list(bases) if bases is not None else default_search_bases()
     discovered = discover_pack_files(search_bases)
     enabled = resolve_enabled_packs(discovered, load_packs_config())
+    # Curated-trust gate (model A): drop untrusted user packs before any impl is
+    # imported when MAGI_PACK_SIGNING_REQUIRED is ON (OFF returns ``enabled``
+    # unchanged, byte-identical). Bundled first-party packs are always kept.
+    enabled = filter_trusted_packs(enabled)
     relevant = [
         disc
         for disc in enabled
