@@ -61,6 +61,12 @@ class ProvidesEntry(_PackModel):
     ref: str
     impl: str | None = None
     spec: str | None = None
+    # Code-computed recipe-as-code (PR4): a spec-type entry may instead carry a
+    # callable ref ``"module.path:symbol"`` whose callable returns a manifest. The
+    # SHAPE is validated here always; ACTIVATION is gated at load time by the
+    # default-OFF ``MAGI_RECIPE_AS_CODE_ENABLED`` flag (see loader.load_packs), so
+    # an OFF run never imports or calls the callable (byte-identical discovery).
+    spec_callable: str | None = Field(default=None, alias="specCallable")
     priority: int | None = None
     phase: str | None = None
     gate_position: GatePosition | None = Field(default=None, alias="gatePosition")
@@ -72,11 +78,27 @@ class ProvidesEntry(_PackModel):
 
         is_spec_type = self.type in _SPEC_TYPES
         if is_spec_type:
-            if self.spec is None or self.impl is not None:
+            # Exactly ONE of {spec, spec_callable} declarative source, never impl.
+            declared = (self.spec is not None) + (self.spec_callable is not None)
+            if declared != 1 or self.impl is not None:
                 raise ValueError(
-                    f"provides type {self.type!r} must declare 'spec' and not 'impl'"
+                    f"provides type {self.type!r} must declare exactly one of "
+                    "'spec' or 'spec_callable' and not 'impl'"
                 )
+            if self.spec_callable is not None:
+                if (
+                    ":" not in self.spec_callable
+                    or self.spec_callable.startswith(":")
+                    or self.spec_callable.endswith(":")
+                ):
+                    raise ValueError(
+                        "spec_callable must be of the form 'module.path:symbol'"
+                    )
         else:
+            if self.spec_callable is not None:
+                raise ValueError(
+                    f"provides type {self.type!r} must not declare 'spec_callable'"
+                )
             if self.impl is None or self.spec is not None:
                 raise ValueError(
                     f"provides type {self.type!r} must declare 'impl' and not 'spec'"

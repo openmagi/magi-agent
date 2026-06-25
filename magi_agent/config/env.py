@@ -3670,6 +3670,64 @@ def user_evidence_packs_enabled(env: Mapping[str, str] | None = None) -> bool:
     return flag_bool(MAGI_USER_EVIDENCE_PACKS_ENABLED_ENV, env=source)
 
 
+MAGI_RECIPE_AS_CODE_ENABLED_ENV = "MAGI_RECIPE_AS_CODE_ENABLED"
+
+
+def recipe_as_code_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the code-computed recipe-pack ACTIVATION gate (PR4).
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). The manifest
+    schema accepts a ``spec_callable`` shape always (a malformed ref still errors
+    at parse), but ACTIVATION is gated here so OFF stays byte-identical to before
+    the feature existed: when OFF the loader drops every ``spec_callable`` recipe
+    entry at load time, so the publisher's callable is NEVER imported, no
+    LoadedPrimitive is created, and nothing reaches ``registries.recipes``. When
+    ON the loader lazily imports the callable into the LoadedPrimitive's ``impl``;
+    ``project_into_registries`` then invokes it ONCE at registration, accepts a
+    ``RecipePackManifest`` (or dict), runs the SAME ``validate_external_recipe_pack``
+    trust boundary used for declarative recipes, and registers the result.
+    Fail-closed: a callable that raises, returns the wrong type, or fails
+    validation drops the pack with a warning and never crashes the run. Like
+    ``user_evidence_packs_enabled`` this is additive, default-disabled, and
+    deliberately does NOT follow the runtime-profile default-ON convention.
+    """
+    from .flags import flag_bool
+
+    source = os.environ if env is None else env
+    return flag_bool(MAGI_RECIPE_AS_CODE_ENABLED_ENV, env=source)
+
+
+MAGI_PACK_CAPABILITY_ENFORCEMENT_ENABLED_ENV = (
+    "MAGI_PACK_CAPABILITY_ENFORCEMENT_ENABLED"
+)
+
+
+def pack_capability_enforcement_enabled(
+    env: Mapping[str, str] | None = None,
+) -> bool:
+    """Single source of truth for the pack capability-enforcement gate (2a).
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF, the
+    user-pack construction sites pass NO ``capabilities=`` to the typed contexts,
+    so each context carries its DEFAULT full set and every capability-bearing
+    method (decide/override/reinject/clear_tools/emit) is byte-identical to before
+    (never raises). When ON, those USER-pack construction sites pass the
+    RESTRICTED set from ``restricted_capabilities_for(<primitive_type>)`` so an
+    impl that reaches outside its declared role through the typed surface raises
+    ``CapabilityError`` (fail-closed via the callers' existing try/except).
+
+    DEFENSE-IN-DEPTH, NOT ISOLATION: enforcement only narrows the typed context
+    surface; a malicious impl can still ``import os`` etc. Real hosted isolation
+    needs process/container sandboxing (a separate effort). Like the other user-
+    pack gates this is additive and deliberately does NOT follow the runtime-
+    profile default-ON convention.
+    """
+    from .flags import flag_bool
+
+    source = os.environ if env is None else env
+    return flag_bool(MAGI_PACK_CAPABILITY_ENFORCEMENT_ENABLED_ENV, env=source)
+
+
 MAGI_PERMISSION_SCOPE_FROM_MODE_ENV = "MAGI_PERMISSION_SCOPE_FROM_MODE"
 MAGI_PERMISSION_SCOPE_LEGACY_FULL_TOOLHOST_ENV = (
     "MAGI_PERMISSION_SCOPE_LEGACY_FULL_TOOLHOST"

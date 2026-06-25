@@ -3854,6 +3854,24 @@ class MagiEngineDriver:
             ValidatorCtx,
         )
 
+        # Defense-in-depth (not isolation): when capability enforcement is ON,
+        # hand each USER validator impl the RESTRICTED capability set for its
+        # primitive type so a pack that reaches outside its declared role through
+        # the typed context surface raises CapabilityError (caught below as a
+        # failing verdict -> fail-closed). OFF: pass None (full set, byte-id).
+        from magi_agent.config.env import (  # noqa: PLC0415
+            pack_capability_enforcement_enabled,
+        )
+
+        restricted_caps = None
+        if pack_capability_enforcement_enabled():
+            from magi_agent.packs.context import (  # noqa: PLC0415
+                PrimitiveType,
+                restricted_capabilities_for,
+            )
+
+            restricted_caps = restricted_capabilities_for(PrimitiveType.VALIDATOR)
+
         artifact: dict[str, object] = {
             "finalText": final_text,
             "sessionId": session_id,
@@ -3871,7 +3889,8 @@ class MagiEngineDriver:
                 # A required validator with no loaded impl (e.g. a first-party
                 # recipe validator) is left for the existing observe paths.
                 continue
-            ctx = ValidatorCtx(ref=ref, artifact=artifact, session=session)
+            ctx = ValidatorCtx(ref=ref, artifact=artifact, session=session,
+                               capabilities=restricted_caps)
             try:
                 impl(ctx)
                 verdict = ctx.verdict()
@@ -3939,6 +3958,24 @@ class MagiEngineDriver:
             SessionReadView,
         )
 
+        # Defense-in-depth (not isolation): restrict USER evidence_producer impls
+        # to their primitive's capability set when enforcement is ON. OFF: None
+        # (full set, byte-identical). A raise is caught below as "emit nothing".
+        from magi_agent.config.env import (  # noqa: PLC0415
+            pack_capability_enforcement_enabled,
+        )
+
+        restricted_caps = None
+        if pack_capability_enforcement_enabled():
+            from magi_agent.packs.context import (  # noqa: PLC0415
+                PrimitiveType,
+                restricted_capabilities_for,
+            )
+
+            restricted_caps = restricted_capabilities_for(
+                PrimitiveType.EVIDENCE_PRODUCER
+            )
+
         session = SessionReadView(
             invocation_id=session_id,
             agent_name="magi",
@@ -3954,7 +3991,7 @@ class MagiEngineDriver:
             if producer.emitter is None:
                 # Declarative-only pack: no runtime code to run (pre-PR3 shape).
                 continue
-            ctx = EvidenceProducerCtx(session=session)
+            ctx = EvidenceProducerCtx(session=session, capabilities=restricted_caps)
             try:
                 producer.emitter(ctx)
             except Exception as exc:  # noqa: BLE001 - a broken producer must not crash

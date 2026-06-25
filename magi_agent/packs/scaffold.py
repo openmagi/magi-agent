@@ -100,35 +100,52 @@ def provide(ctx: ValidatorCtx) -> ValidatorVerdict | None:
     return ctx.verdict()
 ''',
     "tool": '''\
-"""User tool provider — registers a ToolManifest via the typed provide context."""
+"""User tool provider — registers a ToolManifest AND a runnable inline handler.
+
+The inline handler ``(args, ctx) -> output`` receives the narrow ToolCtx (read
+args + session + a progress sink); it needs NO WorkspaceHostView. Replace the
+body with your own logic (call an API, compute something) and return a dict.
+A tool that reads/writes workspace files instead can author the gate5b workspace
+seam via ``context.register_workspace_handler(name, handler)`` whose handler is
+``(args, WorkspaceHostView) -> output``.
+"""
 from __future__ import annotations
 
-from magi_agent.packs.context import ToolProvideContext
+from collections.abc import Mapping
+
+from magi_agent.packs.context import ToolCtx, ToolProvideContext
 from magi_agent.tools.catalog import CORE_TOOL_INPUT_SCHEMA
 from magi_agent.tools.manifest import Budget, ToolManifest, ToolSource
 
 
+def handler(args: Mapping[str, object], ctx: ToolCtx) -> dict[str, object]:
+    """Echo the ``text`` argument back. Replace with your own logic."""
+    return {"echoed": str(args.get("text", "")), "tool": ctx.tool_name}
+
+
 def provide(context: ToolProvideContext) -> None:
-    context.register(
-        ToolManifest(
-            name=__REF__,
-            description="Describe what this tool does.",
-            kind="external",
-            source=ToolSource(kind="external", package=__PACK_ID__),
-            permission="read",
-            input_schema=CORE_TOOL_INPUT_SCHEMA,
-            timeout_ms=30_000,
-            budget=Budget(max_calls_per_turn=10, max_parallel=1),
-            dangerous=False,
-            is_concurrency_safe=True,
-            mutates_workspace=False,
-            parallel_safety="readonly",
-            available_in_modes=("plan", "act"),
-            tags=("user",),
-            enabled_by_default=True,
-            opt_out=True,
-        )
+    manifest = ToolManifest(
+        name=__REF__,
+        description="Describe what this tool does.",
+        kind="external",
+        source=ToolSource(kind="external", package=__PACK_ID__),
+        permission="read",
+        input_schema=CORE_TOOL_INPUT_SCHEMA,
+        timeout_ms=30_000,
+        budget=Budget(max_calls_per_turn=10, max_parallel=1),
+        dangerous=False,
+        is_concurrency_safe=True,
+        mutates_workspace=False,
+        parallel_safety="readonly",
+        available_in_modes=("plan", "act"),
+        tags=("user",),
+        enabled_by_default=True,
+        opt_out=True,
     )
+    if context.register_handler is not None:
+        context.register_handler(manifest, handler)
+    else:  # pragma: no cover - projector predates the inline-handler seam
+        context.register(manifest)
 ''',
     "callback": '''\
 """User callback provider — registers a HookManifest + handler (non-blocking)."""
@@ -278,6 +295,34 @@ defaultEnabled = true
 toolRefs = ["FileRead"]
 '''
 
+# Code-computed recipe-as-code impl (PR4). The callable is invoked ONCE at
+# registration (NOT during a turn) and must be idempotent + side-effect free; it
+# returns a dict (or RecipePackManifest). An UNTRUSTED pack must use an ``ext.``
+# packId and must NOT set hardSafety/ownership/defaultEnabled (compose-only trust
+# boundary). Activation requires MAGI_RECIPE_AS_CODE_ENABLED (default-OFF).
+_RECIPE_CODE_TEMPLATE = '''\
+"""User code recipe — computes its RecipePackManifest with YOUR OWN code.
+
+``provide_recipe`` is invoked once at registration (never during a turn): keep it
+idempotent and side-effect free. Return a dict (or RecipePackManifest). Untrusted
+packs must use an ``ext.`` packId and stay non-hard-safety / non-default-enabled.
+"""
+from __future__ import annotations
+
+
+def provide_recipe() -> dict:
+    return {
+        "packId": __PACK_ID__,
+        "version": "1",
+        "displayName": __DISPLAY__,
+        "description": "User-authored code-computed recipe.",
+        # FileWrite is a canonical known-ref (CompileRecipePackCatalog.default), so
+        # this recipe passes R2 ref-closure. Untrusted recipes may only reference
+        # refs that exist in the trusted runtime (catalog + first-party recipes).
+        "toolRefs": ["FileWrite"],
+    }
+'''
+
 _SMOKE_HEADER = '''\
 """Smoke test scaffolded by `magi pack new` — verifies this pack loads through
 the REAL pack loader with zero sys.path setup. Run: pytest <this file>."""
@@ -336,13 +381,63 @@ def test_provider_registers_at_least_one_control() -> None:
     assert registered, "provider registered no LoopControl"
 '''
 
+_SMOKE_CODE_RECIPE = '''\
+"""Smoke test scaffolded by `magi pack new --code recipe`. A code recipe is
+activation-gated: the loader drops it (and never imports the callable) unless
+MAGI_RECIPE_AS_CODE_ENABLED is set. Run: pytest <this file>."""
+from __future__ import annotations
+
+from pathlib import Path
+
+from magi_agent.packs.loader import RecordingSink, load_from_bases
+from magi_agent.packs.registries import PackRegistries, project_into_registries
+
+PACKS_BASE = Path(__file__).resolve().parent.parent
+PTYPE = __PTYPE__
+REF = __REF__
+
+
+def test_code_recipe_off_is_dropped(monkeypatch) -> None:
+    monkeypatch.delenv("MAGI_RECIPE_AS_CODE_ENABLED", raising=False)
+    result, _catalog = load_from_bases([PACKS_BASE], RecordingSink())
+    assert (PTYPE, REF) not in {(p.type, p.ref) for p in result.primitives}
+
+
+def test_code_recipe_registers_when_flag_on(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_RECIPE_AS_CODE_ENABLED", "1")
+    result, _catalog = load_from_bases([PACKS_BASE], RecordingSink())
+    report = project_into_registries(result.primitives, PackRegistries())
+    assert REF in report.registered
+'''
+
+_SMOKE_TOOL_DISPATCH = '''\
+
+
+def test_tool_inline_handler_runs() -> None:
+    from magi_agent.packs.registries import PackRegistries, project_into_registries
+
+    result, _catalog = load_from_bases([PACKS_BASE], RecordingSink())
+    registries = PackRegistries()
+    project_into_registries(result.primitives, registries)
+    handler = registries.tool_inline_handlers.resolve(REF)
+    assert handler is not None, "scaffolded tool bound no inline handler"
+    output = handler({"text": "hi"}, _StubToolCtx())
+    assert isinstance(output, dict)
+
+
+class _StubToolCtx:
+    tool_name = REF
+'''
+
 # Types whose generated smoke test exercises project_into_registries.
 _PROJECTION_TYPES: frozenset[str] = frozenset(
     {"tool", "callback", "evidence_producer", "recipe", "connector", "harness"}
 )
 
 
-def _manifest_toml(ptype: str, ref: str, pack_id: str, display: str, mod: str) -> str:
+def _manifest_toml(
+    ptype: str, ref: str, pack_id: str, display: str, mod: str, *, code: bool = False
+) -> str:
     lines = [
         f'packId = "{pack_id}"',
         f'displayName = "{display}"',
@@ -354,7 +449,11 @@ def _manifest_toml(ptype: str, ref: str, pack_id: str, display: str, mod: str) -
         f'ref = "{ref}"',
     ]
     if ptype == "recipe":
-        lines.append('spec = "recipe.toml"')
+        # Code-computed recipe-as-code (PR4) vs declarative spec TOML.
+        if code:
+            lines.append(f'spec_callable = "{mod}.impl:provide_recipe"')
+        else:
+            lines.append('spec = "recipe.toml"')
     else:
         lines.append(f'impl = "{mod}.impl:provide"')
     if ptype == "control_plane":
@@ -371,29 +470,51 @@ def _render(template: str, **tokens: str) -> str:
     return out
 
 
-def scaffold_pack(ptype: str, name: str, dest_root: Path) -> ScaffoldResult:
-    """Write a loadable user pack for ``ptype`` under ``dest_root/<module_name>``."""
+def scaffold_pack(
+    ptype: str, name: str, dest_root: Path, *, code: bool = False
+) -> ScaffoldResult:
+    """Write a loadable user pack for ``ptype`` under ``dest_root/<module_name>``.
+
+    ``code`` (recipe only): emit a code-computed recipe-as-code variant (PR4) — a
+    ``provide_recipe()`` callable + ``spec_callable`` in pack.toml — instead of a
+    declarative ``recipe.toml`` spec. The scaffold uses an ``ext.`` packId so the
+    untrusted-pack trust boundary admits it; activation needs default-OFF
+    ``MAGI_RECIPE_AS_CODE_ENABLED``. Ignored for non-recipe types.
+    """
     if ptype not in PACK_TYPES:
         raise ValueError(
             f"unknown pack type {ptype!r}; expected one of: {', '.join(PACK_TYPES)}"
         )
+    if code and ptype != "recipe":
+        raise ValueError("code=True is only valid for the 'recipe' pack type")
     mod = _module_name(name)
     pack_dir = dest_root / mod
     if pack_dir.exists():
         raise ValueError(f"pack dir already exists: {pack_dir}")
     ref = default_ref(ptype, name)
-    pack_id = f"user.{mod.replace('_', '-')}"
+    # A code recipe registers through the external trust boundary, which requires
+    # an ``ext.`` namespace (R1); declarative + other types keep the user id.
+    pack_id = (
+        f"ext.user.{mod.replace('_', '-')}"
+        if code
+        else f"user.{mod.replace('_', '-')}"
+    )
     camel = _camel(name)
     pascal = camel[:1].upper() + camel[1:]
 
     pack_dir.mkdir(parents=True)
     (pack_dir / "__init__.py").write_text("")
     pack_toml = pack_dir / "pack.toml"
-    pack_toml.write_text(_manifest_toml(ptype, ref, pack_id, name, mod))
+    pack_toml.write_text(_manifest_toml(ptype, ref, pack_id, name, mod, code=code))
 
     impl_path: Path | None = None
     spec_path: Path | None = None
-    if ptype == "recipe":
+    if ptype == "recipe" and code:
+        impl_path = pack_dir / "impl.py"
+        impl_path.write_text(
+            _render(_RECIPE_CODE_TEMPLATE, PACK_ID=repr(pack_id), DISPLAY=repr(name))
+        )
+    elif ptype == "recipe":
         spec_path = pack_dir / "recipe.toml"
         spec_path.write_text(
             _render(_RECIPE_SPEC_TEMPLATE, PACK_ID=repr(pack_id), DISPLAY=repr(name))
@@ -412,13 +533,21 @@ def scaffold_pack(ptype: str, name: str, dest_root: Path) -> ScaffoldResult:
             )
         )
 
-    smoke = _render(_SMOKE_HEADER, PTYPE=repr(ptype), REF=repr(ref))
-    if ptype in _PROJECTION_TYPES:
-        smoke += _SMOKE_PROJECTION
-    elif ptype == "validator":
-        smoke += _SMOKE_VALIDATOR
-    elif ptype == "control_plane":
-        smoke += _SMOKE_CONTROL_PLANE
+    if ptype == "recipe" and code:
+        # A code recipe is activation-gated: the loader drops it when
+        # MAGI_RECIPE_AS_CODE_ENABLED is OFF, so the default load/projection smoke
+        # would (correctly) see nothing. Emit a flag-ON smoke test instead.
+        smoke = _render(_SMOKE_CODE_RECIPE, PTYPE=repr(ptype), REF=repr(ref))
+    else:
+        smoke = _render(_SMOKE_HEADER, PTYPE=repr(ptype), REF=repr(ref))
+        if ptype in _PROJECTION_TYPES:
+            smoke += _SMOKE_PROJECTION
+            if ptype == "tool":
+                smoke += _SMOKE_TOOL_DISPATCH
+        elif ptype == "validator":
+            smoke += _SMOKE_VALIDATOR
+        elif ptype == "control_plane":
+            smoke += _SMOKE_CONTROL_PLANE
     test_path = pack_dir / f"test_{mod}_pack.py"
     test_path.write_text(smoke)
 
