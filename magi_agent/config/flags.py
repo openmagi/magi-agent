@@ -3064,6 +3064,105 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="bool",
     ),
+    # I-1: hosted runtime-authority "false-only" guards. Each must
+    # remain unset/falsy or ``parse_python_runtime_authority_env``
+    # raises ``RuntimeEnvError("...is not approved")``. Strict
+    # default-OFF ``bool`` so ``flag_bool`` is byte-identical to the
+    # prior ``_is_true(env.get(name))`` loop body.
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_TRANSCRIPT_WRITE",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted runtime-authority transcript-write seam (NOT "
+            "APPROVED — parser raises when truthy). Default-OFF; "
+            "hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_SSE_WRITE",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted runtime-authority SSE-write seam (NOT APPROVED — "
+            "parser raises when truthy). Default-OFF; hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_CHANNEL_DELIVERY",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted runtime-authority channel-delivery seam (NOT "
+            "APPROVED — parser raises when truthy). Default-OFF; "
+            "hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_DB_WRITE",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted runtime-authority DB-write seam (NOT APPROVED — "
+            "parser raises when truthy). Default-OFF; hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_WORKSPACE_MUTATION",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted runtime-authority workspace-mutation seam (NOT "
+            "APPROVED — parser raises when truthy). Default-OFF; "
+            "hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_CHILD_EXECUTION",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted runtime-authority child-execution seam (NOT "
+            "APPROVED — parser raises when truthy). Default-OFF; "
+            "hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_MISSION_RUNTIME",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted runtime-authority mission-runtime seam (NOT "
+            "APPROVED — parser raises when truthy). Default-OFF; "
+            "hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_EVIDENCE_BLOCK_MODE",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted runtime-authority evidence block-mode seam (NOT "
+            "APPROVED — parser raises when truthy). Default-OFF; "
+            "hosted-only."
+        ),
+        kind="bool",
+    ),
 )
 
 

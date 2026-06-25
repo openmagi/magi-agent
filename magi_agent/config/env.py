@@ -1791,6 +1791,12 @@ def parse_python_gate8_readiness_env(env: Mapping[str, str]) -> PythonGate8Readi
 
 
 def parse_python_runtime_authority_env(env: Mapping[str, str]) -> PythonRuntimeAuthorityConfig:
+    # I-1: route the false-only-flag loop body through the typed flag
+    # registry (the request-signal reads further down already imported
+    # ``flag_bool`` in #1004; hoist that import above this loop so both
+    # share the same reader binding).
+    from .flags import flag_bool  # noqa: PLC0415
+
     false_only_flags = (
         "CORE_AGENT_PYTHON_TRANSCRIPT_WRITE",
         "CORE_AGENT_PYTHON_SSE_WRITE",
@@ -1802,7 +1808,7 @@ def parse_python_runtime_authority_env(env: Mapping[str, str]) -> PythonRuntimeA
         "CORE_AGENT_PYTHON_EVIDENCE_BLOCK_MODE",
     )
     for name in false_only_flags:
-        if _is_true(env.get(name)):
+        if flag_bool(name, env=env):
             raise RuntimeEnvError(f"{name} is not approved")
 
     output_mode = (env.get("CORE_AGENT_PYTHON_OUTPUT_MODE") or "diagnostic_only").strip().lower()
@@ -1817,10 +1823,8 @@ def parse_python_runtime_authority_env(env: Mapping[str, str]) -> PythonRuntimeA
         )
 
     # I-1: route the three runtime-authority signals through the typed
-    # flag registry. Byte-identical to ``_is_true`` because the
-    # ``FlagSpec``s are strict default-OFF ``bool``.
-    from .flags import flag_bool  # noqa: PLC0415
-
+    # flag registry (``flag_bool`` was hoisted above the false-only
+    # loop at the top of this function).
     user_visible_requested = flag_bool("CORE_AGENT_PYTHON_USER_VISIBLE_OUTPUT", env=env)
     canary_requested = flag_bool("CORE_AGENT_PYTHON_CANARY_ROUTING", env=env)
     if user_visible_requested or canary_requested:
@@ -1847,13 +1851,19 @@ def _validate_gate5b_user_visible_canary_authority(
     env: Mapping[str, str],
     output_mode: str,
 ) -> None:
+    # I-1: route through the typed flag registry. Every name in the
+    # tuple is registered (request signals + gate5b user-visible
+    # canary enable) as strict default-OFF, so ``flag_bool`` is
+    # byte-identical to the prior ``_is_true(env.get(name))`` form.
+    from .flags import flag_bool  # noqa: PLC0415
+
     required_true = (
         "CORE_AGENT_PYTHON_USER_VISIBLE_OUTPUT",
         "CORE_AGENT_PYTHON_CANARY_ROUTING",
         "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_ENABLED",
     )
     for name in required_true:
-        if not _is_true(env.get(name)):
+        if not flag_bool(name, env=env):
             raise RuntimeEnvError(f"{name} is required for Gate 5B user-visible canary authority")
     if output_mode != "user_visible_canary":
         raise RuntimeEnvError("CORE_AGENT_PYTHON_OUTPUT_MODE must be user_visible_canary")
@@ -1861,9 +1871,8 @@ def _validate_gate5b_user_visible_canary_authority(
         raise RuntimeEnvError("CORE_AGENT_PYTHON_CHAT_ROUTE must be on")
     # I-1: route the two gate5b kill switches through the typed flag
     # registry. Byte-identical to ``_is_true`` because both
-    # ``FlagSpec``s are strict default-OFF ``bool``.
-    from .flags import flag_bool  # noqa: PLC0415
-
+    # ``FlagSpec``s are strict default-OFF ``bool``. ``flag_bool`` is
+    # already in scope from the required-true loop above.
     if flag_bool("CORE_AGENT_PYTHON_GATE5B_KILL_SWITCH", env=env):
         raise RuntimeEnvError("Gate 5B global kill switch is active")
     if flag_bool("CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_KILL_SWITCH", env=env):
@@ -1900,13 +1909,18 @@ def _validate_gate8_selected_authority(
     env: Mapping[str, str],
     output_mode: str,
 ) -> None:
+    # I-1: route through the typed flag registry. All three flags are
+    # registered as strict default-OFF, so ``flag_bool`` is byte-
+    # identical to the prior ``_is_true(env.get(name))`` form.
+    from .flags import flag_bool  # noqa: PLC0415
+
     required_true = (
         "CORE_AGENT_PYTHON_USER_VISIBLE_OUTPUT",
         "CORE_AGENT_PYTHON_CANARY_ROUTING",
         "CORE_AGENT_PYTHON_GATE8_SELECTED_AUTHORITY_ENABLED",
     )
     for name in required_true:
-        if not _is_true(env.get(name)):
+        if not flag_bool(name, env=env):
             raise RuntimeEnvError(
                 f"{name} is required for Gate 8 selected Python authority"
             )
