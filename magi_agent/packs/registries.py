@@ -5,6 +5,7 @@ First-party and user impls register through the IDENTICAL path (§1 "no privileg
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from itertools import count
@@ -14,6 +15,8 @@ from magi_agent.packs.context import PrimitiveType
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from magi_agent.packs.loader import LoadedPrimitive
+
+logger = logging.getLogger(__name__)
 
 Origin = Literal["first_party", "user"]
 PrimitiveImpl = Callable[..., Any]
@@ -177,6 +180,9 @@ class PackRegistries:
         self.tools = ToolRegistry()
         self.hooks = HookRegistry()
         self.evidence_producers = KeyedRefRegistry()
+        # Validator impls (Callable[[ValidatorCtx], None]) keyed by validator ref.
+        # The engine's pre-final gate runs these to OBSERVE a passing ref (PR2).
+        self.validators = KeyedRefRegistry()
         self.recipes = KeyedRefRegistry()
         self.roles = KeyedRefRegistry()
         self.connectors = KeyedRefRegistry()
@@ -187,6 +193,9 @@ class PackRegistries:
         self.memory_strategies = KeyedRefRegistry()
         # C1: gate5b workspace tool handlers, keyed by TOOL NAME (not provides ref).
         self.workspace_tool_handlers = KeyedRefRegistry()
+        # PR6: plain inline tool handlers ``(args, ToolCtx) -> output``, keyed by
+        # TOOL NAME. These need no WorkspaceHostView (a vanilla third-party tool).
+        self.tool_inline_handlers = KeyedRefRegistry()
         self._hook_handlers: dict[str, Any] = {}
 
     @classmethod
@@ -216,6 +225,79 @@ def _provide_recipe(registries: PackRegistries) -> Callable[..., None]:
     def register(ref: str, manifest: Any) -> None:
         registries.recipes.replace(ref, manifest)
     return register
+
+
+def _register_code_recipe(
+    registries: PackRegistries, ref: str, callable_impl: Any, *, pack_id: str
+) -> bool:
+    """Invoke a code-recipe ``spec_callable`` ONCE and register its manifest (PR4).
+
+    Determinism contract: ``callable_impl`` is invoked exactly once here, at
+    registration time (never during a turn); it must be idempotent and side-effect
+    free. It returns a :class:`RecipePackManifest` or a dict (validated through
+    ``model_validate``). Untrusted (non first-party) packs additionally pass the
+    SAME compose-only external trust boundary as declarative recipe specs
+    (``validate_external_recipe_pack``: R1 ext-namespace / R4 no-hardSafety / R6
+    no-ownership / R7 no-defaultEnabled) AND the SAME R2 ref-closure: their refs
+    must resolve in the first-party recipe-pack ref universe, else the dangling
+    code recipe is dropped. Fail-closed: any failure drops the pack with a warning
+    and returns ``False`` (never raises). Returns ``True`` when the manifest
+    reached ``registries.recipes``.
+    """
+    from magi_agent.recipes.compiler import PackRegistry, RecipePackManifest
+    from magi_agent.recipes.kernel_recipe_packs import (
+        build_recipe_ref_universe,
+        recipe_pack_ref_closure_reason,
+        validate_external_recipe_pack,
+    )
+
+    try:
+        result = callable_impl()
+    except Exception:  # noqa: BLE001 - a broken publisher never crashes the run
+        logger.warning("code recipe %r dropped (spec_callable raised)", ref)
+        return False
+
+    if isinstance(result, RecipePackManifest):
+        manifest = result
+    elif isinstance(result, dict):
+        try:
+            manifest = RecipePackManifest.model_validate(result)
+        except Exception:  # noqa: BLE001 - malformed manifest drops, never raises
+            logger.warning("code recipe %r dropped (invalid manifest)", ref)
+            return False
+    else:
+        logger.warning(
+            "code recipe %r dropped (spec_callable returned %s, expected "
+            "RecipePackManifest or dict)",
+            ref,
+            type(result).__name__,
+        )
+        return False
+
+    # Trust by provenance, mirroring kernel_recipe_packs: bundled first-party
+    # packs register as-is; user/ext packs must pass the compose-only boundary.
+    trusted = pack_id.startswith(_FIRST_PARTY_PACK_ID_PREFIX)
+    if not trusted:
+        reason = validate_external_recipe_pack(manifest)
+        if reason:
+            logger.warning("code recipe %r dropped (%s)", ref, reason)
+            return False
+        # R2 ref-closure for code recipes: resolve against the trusted first-party
+        # recipe-pack universe ONLY (the candidate cannot contribute to its own
+        # universe; see _drop_unresolved_external_recipe_packs). Code recipes
+        # register one at a time into a keyed registry (no post-load pass like the
+        # declarative PackRegistry), so the universe is the stable first-party
+        # baseline.
+        universe = build_recipe_ref_universe(
+            PackRegistry.with_first_party_packs().values()
+        )
+        closure_reason = recipe_pack_ref_closure_reason(manifest, universe)
+        if closure_reason:
+            logger.warning("code recipe %r dropped (%s)", ref, closure_reason)
+            return False
+
+    registries.recipes.replace(ref, manifest)
+    return True
 
 
 def _provide_connector(registries: PackRegistries) -> Callable[..., None]:
@@ -249,6 +331,21 @@ def _provide_keyed(registry: KeyedRefRegistry) -> Callable[..., None]:
 def _provide_workspace_handler(registries: PackRegistries) -> Callable[[str, Any], None]:
     def register(tool_name: str, handler: Any) -> None:
         registries.workspace_tool_handlers.replace(tool_name, handler)
+    return register
+
+
+def _provide_tool_handler(registries: PackRegistries) -> Callable[[Any, Any], None]:
+    """PR6: register a manifest AND a plain inline handler in one call.
+
+    The handler ``(args: Mapping[str, object], tool_ctx: ToolCtx) -> output`` is
+    keyed by ``manifest.name`` so the CLI merge can bind it directly without a
+    WorkspaceHostView."""
+
+    register_manifest = _provide_tool(registries, ref="")
+
+    def register(manifest: Any, handler: Any) -> None:
+        register_manifest(manifest)
+        registries.tool_inline_handlers.replace(manifest.name, handler)
     return register
 
 
@@ -306,14 +403,30 @@ def project_into_registries(
             impl(_ctx.ToolProvideContext(
                 register=_provide_tool(registries, ref),
                 register_workspace_handler=_provide_workspace_handler(registries),
+                register_handler=_provide_tool_handler(registries),
             ))
             registered.append(ref)
         elif ptype == "evidence_producer":
             impl(_ctx.EvidenceProducerProvideContext(register=_provide_evidence(registries)))
             registered.append(ref)
-        elif ptype == "recipe":
-            impl(_ctx.RecipeProvideContext(register=_provide_recipe(registries)))
+        elif ptype == "validator":
+            # A ``validator`` primitive's ``impl`` IS the validator callable
+            # ``(ValidatorCtx) -> ValidatorVerdict | None`` (D5); there is no
+            # ``provide`` indirection (unlike tool/evidence_producer/...). Register
+            # the impl directly so the engine's pre-final gate can run it.
+            registries.validators.replace(ref, impl)
             registered.append(ref)
+        elif ptype == "recipe":
+            # Code-computed recipe-as-code (PR4): the loader imported the
+            # ``spec_callable`` into ``impl``. Invoke it ONCE here, at
+            # registration (NOT during a turn) — the callable must be idempotent
+            # and side-effect free (determinism contract). Fail-closed: a
+            # callable that raises, returns the wrong type, or fails the external
+            # trust boundary drops the pack with a warning and never crashes the
+            # run. Reaching this branch requires MAGI_RECIPE_AS_CODE_ENABLED (the
+            # loader skips spec_callable entries when OFF), so OFF never gets here.
+            if _register_code_recipe(registries, ref, impl, pack_id=primitive.pack_id):
+                registered.append(ref)
         elif ptype == "connector":
             impl(_ctx.ConnectorProvideContext(register=_provide_connector(registries)))
             registered.append(ref)

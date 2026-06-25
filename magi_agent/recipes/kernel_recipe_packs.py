@@ -16,7 +16,9 @@ Trust boundary (OSS local; the hosted floor is layered separately):
   legitimately use the first-party id namespace and ``defaultEnabled``). Packs
   from the USER dirs (``~/.magi/packs`` / ``<cwd>/.magi/packs``) are untrusted
   third-party content and must pass the **compose-only** checks below or they are
-  dropped. (Ref-closure R2 is intentionally deferred to a later PR.)
+  dropped. R2 ref-closure (a post-load pass, ``_drop_unresolved_external_recipe_packs``)
+  additionally drops any external pack whose declared refs do not resolve in the
+  admitted recipe-pack ref universe; first-party packs are never dropped.
 * **first-party-wins** — first-party packs register first; a kernel pack whose
   ``pack_id`` collides is dropped (``register`` raises), so it cannot shadow a
   first-party pack. The R1 ``ext.`` namespace check makes shadowing of
@@ -30,7 +32,7 @@ from __future__ import annotations
 
 import logging
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import Any
@@ -46,12 +48,39 @@ MAGI_KERNEL_RECIPE_ENTRY_POINTS_ENABLED_ENV = "MAGI_KERNEL_RECIPE_ENTRY_POINTS_E
 _EXTERNAL_RECIPE_NAMESPACE_PREFIX = "ext."
 RECIPE_ENTRY_POINT_GROUP = "magi.recipes"
 
+# R2 ref-closure families (PR5). Each entry is a ``RecipePackManifest`` ref field
+# whose values must close against the declared-ref universe of the admitted
+# recipe-pack set. Recipe-level refs (tool/validator/evidence/instruction/...) are
+# an authoring abstraction with NO concrete primitive-registry resolution source:
+# the first-party packs declare a namespace (``tool:file.read``,
+# ``validator:research:citation-support``, ``instruction:...``) that the
+# materializer passes through as opaque labels, never resolving them against the
+# loaded PrimitiveRegistry / CompileRecipePackCatalog. The honest closure universe
+# is therefore the union, per family, of every ref DECLARED by the admitted packs
+# (first-party packs define the universe and so always close; a publisher that
+# ships the matching primitive declares the ref in the same bundle and so closes).
+# ``depends_on_pack_ids`` is intentionally NOT here: it already closes against the
+# recipe registry at selection time (``_dependency_unavailable`` in compiler.py).
+_REF_CLOSURE_FAMILIES: tuple[str, ...] = (
+    "tool_refs",
+    "validator_refs",
+    "evidence_refs",
+    "instruction_refs",
+    "approval_gate_refs",
+    "callback_refs",
+    "checkpoint_refs",
+    "audit_refs",
+    "granted_tool_names",
+)
+
 __all__ = [
     "MAGI_KERNEL_RECIPE_ENTRY_POINTS_ENABLED_ENV",
     "MAGI_KERNEL_RECIPE_PACKS_ENABLED_ENV",
     "RECIPE_ENTRY_POINT_GROUP",
+    "build_recipe_ref_universe",
     "build_runtime_pack_registry",
     "parse_recipe_manifest",
+    "recipe_pack_ref_closure_reason",
     "validate_external_recipe_pack",
 ]
 
@@ -71,8 +100,10 @@ def validate_external_recipe_pack(manifest: RecipePackManifest) -> str:
     """Return ``""`` when an UNTRUSTED recipe pack is admissible, else a reason.
 
     Compose-only trust boundary for third-party (user-dir) recipe packs. Bundled
-    first-party packs bypass this (see module docstring). R2 ref-closure is
-    deferred to a later PR.
+    first-party packs bypass this (see module docstring). R2 ref-closure is a
+    separate post-load pass (``recipe_pack_ref_closure_reason`` /
+    ``_drop_unresolved_external_recipe_packs``) because it needs the full admitted
+    ref universe, which is not available until every pack is registered.
     """
 
     pack_id = manifest.pack_id
@@ -92,6 +123,64 @@ def validate_external_recipe_pack(manifest: RecipePackManifest) -> str:
     # only.
     if manifest.default_enabled:
         return "r7_default_enabled_blocked"
+    return ""
+
+
+# Catalog-default fields contribute their known refs to these recipe families.
+# ``CompileRecipePackCatalog.default()`` is the kernel-owned canonical known-ref
+# set (the live runtime validates primitive refs against the catalog), so its refs
+# are part of the closure universe alongside the first-party recipe-pack refs.
+_CATALOG_FIELD_TO_FAMILY: tuple[tuple[str, str], ...] = (
+    ("tool_refs", "tool_refs"),
+    ("validator_refs", "validator_refs"),
+    ("evidence_producer_refs", "evidence_refs"),
+    ("required_evidence_refs", "evidence_refs"),
+)
+
+
+def build_recipe_ref_universe(
+    packs: Iterable[RecipePackManifest],
+) -> dict[str, frozenset[str]]:
+    """Per-family known-ref universe for R2 closure: declared refs + catalog (R2).
+
+    The closure universe against which ``recipe_pack_ref_closure_reason`` resolves
+    an external pack's refs. It is the union, per family, of (a) every ref the
+    admitted recipe packs DECLARE and (b) the kernel-owned canonical known-ref set
+    ``CompileRecipePackCatalog.default()``. Built from the trusted pack set after
+    all packs are registered (load-order safe: a pack may reference a ref another
+    pack declares later). First-party packs are part of ``packs`` and contribute
+    every ref they declare, which is why first-party packs always close.
+    """
+
+    from magi_agent.packs.types import CompileRecipePackCatalog
+
+    universe: dict[str, set[str]] = {family: set() for family in _REF_CLOSURE_FAMILIES}
+    for pack in packs:
+        for family in _REF_CLOSURE_FAMILIES:
+            universe[family].update(getattr(pack, family))
+    catalog = CompileRecipePackCatalog.default()
+    for catalog_field, family in _CATALOG_FIELD_TO_FAMILY:
+        universe[family].update(getattr(catalog, catalog_field))
+    return {family: frozenset(refs) for family, refs in universe.items()}
+
+
+def recipe_pack_ref_closure_reason(
+    manifest: RecipePackManifest,
+    universe: Mapping[str, frozenset[str]],
+) -> str:
+    """Return ``""`` when every R2 ref of ``manifest`` resolves, else a reason.
+
+    A ref is resolved when it appears in the closure universe for its family. A
+    dangling ref (declared by no admitted pack) is unsafe: an external pack with a
+    dangling ref is dropped fail-closed by the caller; a first-party pack with a
+    dangling ref is only warned about (first-party behavior is never changed).
+    """
+
+    for family in _REF_CLOSURE_FAMILIES:
+        known = universe.get(family, frozenset())
+        for ref in getattr(manifest, family):
+            if ref not in known:
+                return "r2_unresolved_ref"
     return ""
 
 
@@ -167,7 +256,11 @@ def _entry_point_recipe_manifests(*, group: str) -> list[RecipePackManifest]:
 
 
 def _register_recipe_pack(
-    registry: PackRegistry, manifest: RecipePackManifest, *, trusted: bool
+    registry: PackRegistry,
+    manifest: RecipePackManifest,
+    *,
+    trusted: bool,
+    external_pack_ids: set[str] | None = None,
 ) -> None:
     if not trusted:
         reason = validate_external_recipe_pack(manifest)
@@ -185,6 +278,54 @@ def _register_recipe_pack(
             "kernel recipe pack %r dropped (pack_id collision with first-party)",
             manifest.pack_id,
         )
+        return
+    # R2 ref-closure (PR5) is enforced in a single post-load pass once every pack
+    # is registered (load-order safe), so remember which packs are external here.
+    if not trusted and external_pack_ids is not None:
+        external_pack_ids.add(manifest.pack_id)
+
+
+def _drop_unresolved_external_recipe_packs(
+    registry: PackRegistry, external_pack_ids: set[str]
+) -> PackRegistry:
+    """R2 ref-closure post-pass: drop external packs with a dangling ref (PR5).
+
+    Run AFTER all packs are registered. The closure universe is the union of every
+    ref declared by the TRUSTED packs only (first-party + bundled-trusted). It must
+    exclude the external candidates' own refs: a recipe manifest cannot distinguish
+    "a ref I provide" from "a ref I merely reference" (every field is a reference),
+    so letting an external pack contribute to the universe would let it self-bless
+    a dangling ref. An external pack therefore closes only by composing over refs
+    that genuinely exist in the trusted runtime. First-party / trusted packs are
+    never dropped (they DEFINE the universe and so always close); a (hypothetical)
+    trusted dangling ref is only warned about.
+    """
+
+    if not external_pack_ids:
+        return registry
+    trusted_universe = build_recipe_ref_universe(
+        pack for pack in registry.values() if pack.pack_id not in external_pack_ids
+    )
+    drop: set[str] = set()
+    for pack in registry.values():
+        reason = recipe_pack_ref_closure_reason(pack, trusted_universe)
+        if not reason:
+            continue
+        if pack.pack_id in external_pack_ids:
+            logger.warning("external recipe pack %r dropped (%s)", pack.pack_id, reason)
+            drop.add(pack.pack_id)
+        else:
+            # Trusted: surface the latent bug but never drop (no behavior change).
+            logger.warning(
+                "trusted recipe pack %r declares an unresolved ref (%s); kept",
+                pack.pack_id,
+                reason,
+            )
+    if not drop:
+        return registry
+    return PackRegistry(
+        pack for pack in registry.values() if pack.pack_id not in drop
+    )
 
 
 def build_runtime_pack_registry(env: Mapping[str, str] | None = None) -> PackRegistry:
@@ -193,12 +334,15 @@ def build_runtime_pack_registry(env: Mapping[str, str] | None = None) -> PackReg
     Returns ``PackRegistry.with_first_party_packs()`` unchanged when the flag is
     OFF (byte-identical baseline). When ON, kernel-discovered recipe packs are
     registered AFTER first-party (first-party-wins on a ``pack_id`` collision),
-    with the compose-only trust boundary applied to untrusted (user-dir) packs.
+    with the compose-only trust boundary applied to untrusted (user-dir) packs;
+    a final R2 ref-closure pass drops any external pack with a dangling ref.
     """
 
     registry = PackRegistry.with_first_party_packs()
     if not flag_bool(MAGI_KERNEL_RECIPE_PACKS_ENABLED_ENV, env=env):
         return registry
+
+    external_pack_ids: set[str] = set()
 
     try:
         from magi_agent.packs.discovery import (
@@ -229,7 +373,12 @@ def build_runtime_pack_registry(env: Mapping[str, str] | None = None) -> PackReg
                     manifest = parse_recipe_manifest((disc.pack_dir / entry.spec))
                     if manifest is None:
                         continue
-                    _register_recipe_pack(registry, manifest, trusted=trusted)
+                    _register_recipe_pack(
+                        registry,
+                        manifest,
+                        trusted=trusted,
+                        external_pack_ids=external_pack_ids,
+                    )
     except Exception:  # noqa: BLE001 - fail-closed: external packs never halt compile
         return PackRegistry.with_first_party_packs()
 
@@ -242,8 +391,15 @@ def build_runtime_pack_registry(env: Mapping[str, str] | None = None) -> PackReg
     if flag_bool(MAGI_KERNEL_RECIPE_ENTRY_POINTS_ENABLED_ENV, env=env):
         try:
             for manifest in _entry_point_recipe_manifests(group=RECIPE_ENTRY_POINT_GROUP):
-                _register_recipe_pack(registry, manifest, trusted=False)
+                _register_recipe_pack(
+                    registry,
+                    manifest,
+                    trusted=False,
+                    external_pack_ids=external_pack_ids,
+                )
         except Exception:  # noqa: BLE001 - fail-closed: entry_points never halt compile
             pass
 
-    return registry
+    # R2 ref-closure: drop external packs with a dangling ref (load-order safe,
+    # first-party packs are never dropped). See module docstring.
+    return _drop_unresolved_external_recipe_packs(registry, external_pack_ids)

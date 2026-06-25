@@ -57,6 +57,89 @@ class Capability(str, Enum):
         return frozenset(cls)
 
 
+class CapabilityError(PermissionError):
+    """A capability-bearing context method was called without its required token.
+
+    Raised by the gated methods below when ``self.capabilities`` is missing the
+    token that method needs. DEFENSE-IN-DEPTH, NOT ISOLATION: this is an
+    ABI-surface contract that narrows what a pack can do THROUGH the typed
+    context surface (decide/override/reinject/clear_tools/emit). It is NOT a true
+    isolation boundary -- a malicious impl can still ``import os``, touch the
+    filesystem, or reach the network directly. Real hosted isolation needs
+    process/container sandboxing (a separate effort). The check makes an
+    honest-but-overreaching pack fail closed instead of silently exceeding its
+    declared role.
+
+    Because the DEFAULT capability sets on each context already include that
+    context's own tokens, a context built with defaults NEVER raises -- the OFF
+    path (no ``capabilities=`` passed) stays byte-identical to before.
+    """
+
+
+# Per-primitive RESTRICTED capability policy (for untrusted/user packs). Each
+# entry grants ONLY the tokens that primitive type legitimately needs through the
+# typed surface; everything else is withheld so an overreaching pack fails closed.
+# (control_plane et al. get a conservative READ-only set; threading per-hook
+# control_plane restriction through ContextDispatcher is a follow-up -- see the
+# TODO at the dispatcher.)
+_RESTRICTED_CAPABILITIES: "dict[PrimitiveType, frozenset[Capability]]" = {
+    # a tool impl only reads session through ToolCtx (progress needs no token)
+    PrimitiveType.TOOL: frozenset({Capability.READ_SESSION}),
+    # a validator reads session + emits exactly one verdict
+    PrimitiveType.VALIDATOR: frozenset(
+        {Capability.READ_SESSION, Capability.EMIT_VALIDATION}
+    ),
+    # an evidence_producer reads session + emits evidence records
+    PrimitiveType.EVIDENCE_PRODUCER: frozenset(
+        {Capability.READ_SESSION, Capability.EMIT_EVIDENCE}
+    ),
+}
+
+# Conservative minimal set for primitive types without an explicit policy above
+# (e.g. control_plane / callback / harness): read-only, no decision/mutation.
+_RESTRICTED_DEFAULT: "frozenset[Capability]" = frozenset(
+    {Capability.READ_SESSION, Capability.READ_EVIDENCE}
+)
+
+
+def restricted_capabilities_for(
+    primitive_type: "str | PrimitiveType",
+) -> frozenset["Capability"]:
+    """Return the RESTRICTED capability set an untrusted/user pack should receive.
+
+    Policy (defense-in-depth, see :class:`CapabilityError`):
+
+    * ``tool`` -> ``{READ_SESSION}``
+    * ``validator`` -> ``{READ_SESSION, EMIT_VALIDATION}``
+    * ``evidence_producer`` -> ``{READ_SESSION, EMIT_EVIDENCE}``
+    * any other type (control_plane, callback, harness, ...) -> the conservative
+      read-only ``{READ_SESSION, READ_EVIDENCE}`` minimal set.
+
+    The returned set deliberately withholds cross-surface tokens (a validator
+    cannot ``EMIT_EVIDENCE``; a tool cannot ``DECIDE_TOOL``), so a pack that
+    reaches outside its declared role hits :class:`CapabilityError`.
+    """
+    ptype = (
+        primitive_type
+        if isinstance(primitive_type, PrimitiveType)
+        else PrimitiveType(primitive_type)
+    )
+    return _RESTRICTED_CAPABILITIES.get(ptype, _RESTRICTED_DEFAULT)
+
+
+def _require(capabilities: "frozenset[Capability]", token: "Capability") -> None:
+    """Raise :class:`CapabilityError` if ``token`` is absent from ``capabilities``.
+
+    Defense-in-depth gate (NOT isolation). A context built with the default full
+    set always carries the token, so this is a no-op on the OFF path.
+    """
+    if token not in capabilities:
+        raise CapabilityError(
+            f"capability {token.value!r} not granted to this context "
+            f"(granted: {sorted(c.value for c in capabilities)})"
+        )
+
+
 @dataclass(frozen=True)
 class SessionReadView:
     """Narrow, frozen projection of the ADK session for read-only impl access."""
@@ -131,6 +214,10 @@ class BeforeToolCtx:
                reason: str | None = None,
                deny_result: dict[str, Any] | None = None,
                updated_args: dict[str, Any] | None = None) -> None:
+        # Defense-in-depth (not isolation): gate the decision surface.
+        _require(self.capabilities, Capability.DECIDE_TOOL)
+        if action == "rewrite":
+            _require(self.capabilities, Capability.REWRITE_TOOL_ARGS)
         if action == "deny" and deny_result is None:
             deny_result = {"error": reason or "denied by control-plane impl"}
         self._decision = ToolDecision(
@@ -160,6 +247,8 @@ class AfterToolCtx:
         self._override: dict[str, Any] | None = None
 
     def override(self, result: dict[str, Any]) -> None:
+        # Defense-in-depth (not isolation): gate the result-override surface.
+        _require(self.capabilities, Capability.OVERRIDE_TOOL_RESULT)
         self._override = result
 
     def override_result(self) -> dict[str, Any] | None:
@@ -183,9 +272,13 @@ class BeforeModelCtx:
         self._clear_tools = False
 
     def reinject(self, *, role: str, text: str) -> None:
+        # Defense-in-depth (not isolation): gate the message-reinjection surface.
+        _require(self.capabilities, Capability.REINJECT_MESSAGE)
         self._reinjections.append((role, text))
 
     def clear_tools(self) -> None:
+        # Defense-in-depth (not isolation): gate the tool-clearing surface.
+        _require(self.capabilities, Capability.CLEAR_TOOLS)
         self._clear_tools = True
 
     def pending_reinjections(self) -> tuple[tuple[str, str], ...]:
@@ -257,6 +350,8 @@ class ValidatorCtx:
         self._verdict: ValidatorVerdict | None = None
 
     def emit(self, *, passed: bool, detail: str | None = None) -> None:
+        # Defense-in-depth (not isolation): gate the validation-emit surface.
+        _require(self.capabilities, Capability.EMIT_VALIDATION)
         self._verdict = ValidatorVerdict(ref=self.ref, passed=passed, detail=detail)
 
     def verdict(self) -> ValidatorVerdict | None:
@@ -278,6 +373,8 @@ class EvidenceProducerCtx:
         self._emitted: list[dict[str, Any]] = []
 
     def emit(self, *, evidence_type: str, payload: Mapping[str, Any]) -> None:
+        # Defense-in-depth (not isolation): gate the evidence-emit surface.
+        _require(self.capabilities, Capability.EMIT_EVIDENCE)
         self._emitted.append({"evidence_type": evidence_type, "payload": dict(payload)})
 
     def emitted(self) -> tuple[dict[str, Any], ...]:
@@ -318,11 +415,16 @@ class ToolProvideContext:
     ``register_workspace_handler`` (Pack C1) additionally lets a tool pack bind a
     WORKSPACE handler ``(args, WorkspaceHostView) -> output`` keyed by tool name —
     the gate5b toolhost executes it inside its unchanged dispatch envelope.
-    ``None`` when the projector predates C1 (backward compatible). No god-object,
-    no first-party-only kwarg."""
+    ``register_handler`` (PR6) lets a tool pack ship a PLAIN inline handler
+    ``(args: Mapping[str, object], tool_ctx: ToolCtx) -> output`` (sync or async)
+    that needs no WorkspaceHostView (path safety / read ledger / bounded shell are
+    workspace-file concerns); it registers the manifest AND the handler in one
+    call. ``None`` when the projector predates the matching seam (both backward
+    compatible). No god-object, no first-party-only kwarg."""
 
     register: Callable[[Any], None]
     register_workspace_handler: Callable[[str, Any], None] | None = None
+    register_handler: Callable[[Any, Any], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -665,6 +767,12 @@ class ContextDispatcher:
 
     def __init__(self, registry: Any) -> None:
         self._reg = registry
+        # TODO(2a follow-up): thread RegistryEntry.origin ("first_party"/"user")
+        # into the per-hook context construction below so a USER control_plane
+        # pack receives ``restricted_capabilities_for(...)`` when
+        # ``pack_capability_enforcement_enabled()`` is ON, mirroring the
+        # validator/evidence/tool construction sites. Out of scope for this PR
+        # (origin does not reach context construction here yet).
 
     def _control_entries(self) -> list[Any]:
         return self._reg.list(ptype=PrimitiveType.CONTROL_PLANE)
@@ -733,7 +841,8 @@ class ContextDispatcher:
 
 
 __all__ = [
-    "PrimitiveType", "Capability",
+    "PrimitiveType", "Capability", "CapabilityError",
+    "restricted_capabilities_for",
     "SessionReadView", "EvidenceReadView",
     "BeforeToolCtx", "AfterToolCtx", "BeforeModelCtx", "AfterAgentCtx",
     "ToolCtx", "ValidatorCtx", "ValidatorVerdict", "EvidenceProducerCtx",

@@ -137,6 +137,15 @@ def load_packs(
     recorded). All registrations are still forwarded to the sink in order so a
     Phase-2 registry can apply its own last-wins replacement.
     """
+    # PR4 default-OFF gate: code-computed recipe entries (spec_callable) are an
+    # ACTIVATION-time feature. When OFF we drop them here BEFORE importing the
+    # callable, so discovery is byte-identical to before the feature existed (no
+    # LoadedPrimitive, no import, nothing reaches the sink). Read lazily so the
+    # OFF path stays cheap and import-free.
+    from magi_agent.config.env import recipe_as_code_enabled
+
+    recipe_as_code_on = recipe_as_code_enabled()
+
     primitives: list[LoadedPrimitive] = []
     overridden: dict[tuple[str, str], tuple[str, str]] = {}
     winners: dict[tuple[str, str], str] = {}
@@ -144,12 +153,31 @@ def load_packs(
     for disc in discovered:
         pack_id = disc.manifest.pack_id
         for entry in disc.manifest.provides:
+            if entry.spec_callable is not None and not recipe_as_code_on:
+                # OFF: skip without claiming the (type, ref) key — byte-identical.
+                continue
+
             key = (entry.type, entry.ref)
             if key in winners and winners[key] != pack_id:
                 overridden[key] = (winners[key], pack_id)
             winners[key] = pack_id
 
-            if entry.spec is not None:
+            if entry.spec_callable is not None:
+                # ON: lazily import the callable into ``impl`` (analogous to code
+                # primitives). It is INVOKED later, once, at registration time
+                # (project_into_registries), never during a turn.
+                primitive = LoadedPrimitive(
+                    type=entry.type,
+                    ref=entry.ref,
+                    pack_id=pack_id,
+                    impl=lazy_import_symbol(
+                        entry.spec_callable, search_root=disc.pack_dir.parent
+                    ),
+                    priority=entry.priority,
+                    phase=entry.phase,
+                    gate_position=entry.gate_position,
+                )
+            elif entry.spec is not None:
                 primitive = LoadedPrimitive(
                     type=entry.type,
                     ref=entry.ref,

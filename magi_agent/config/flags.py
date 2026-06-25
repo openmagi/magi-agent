@@ -503,6 +503,26 @@ FLAGS: tuple[FlagSpec, ...] = (
             "so it can satisfy a required evidence ref."
         ),
     ),
+    _b(
+        "MAGI_RECIPE_AS_CODE_ENABLED",
+        summary=(
+            "Activate code-computed recipe packs: a recipe provides-entry may "
+            "carry spec_callable=\"module.path:provide_recipe\" whose callable "
+            "returns a RecipePackManifest (or dict). OFF drops such entries at "
+            "load time (callable never imported, discovery byte-identical). ON "
+            "imports + invokes the callable ONCE at registration, then applies "
+            "the SAME external trust validation as declarative recipe specs."
+        ),
+    ),
+    _b(
+        "MAGI_PACK_CAPABILITY_ENFORCEMENT_ENABLED",
+        summary=(
+            "Hand user/untrusted pack impls a RESTRICTED capability set per "
+            "primitive type so capability tokens are enforced through the typed "
+            "context surface (defense-in-depth, not isolation). OFF: full set, "
+            "byte-identical."
+        ),
+    ),
     FlagSpec(
         name="MAGI_CODE_ACTION_TIMEOUT_MS",
         default=30_000,

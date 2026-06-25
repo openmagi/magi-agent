@@ -45,3 +45,39 @@ def test_module_name_sanitization_and_validator_ref(tmp_path, monkeypatch) -> No
     meta = scaffold_pack("validator", "My Fancy-Check", tmp_path / "packs")
     assert meta.pack_dir.name == "my_fancy_check"
     assert meta.ref == "verifier:myFancyCheck@1"
+
+
+def test_scaffold_code_recipe_emits_callable_and_registers_when_flag_on(
+    tmp_path, monkeypatch
+) -> None:
+    """PR4: `--code` recipe scaffold emits a provide_recipe callable + spec_callable;
+    it loads + registers only under MAGI_RECIPE_AS_CODE_ENABLED, and uses an ext.
+    packId so the untrusted trust boundary admits it."""
+    from magi_agent.packs.manifest import load_manifest_from_toml
+    from magi_agent.packs.registries import PackRegistries, project_into_registries
+
+    monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.setattr(sys, "path", [*sys.path])
+    meta = scaffold_pack("recipe", "code-flow", tmp_path / "packs", code=True)
+
+    assert meta.impl_path is not None and meta.spec_path is None
+    manifest = load_manifest_from_toml(meta.pack_toml)
+    entry = manifest.provides[0]
+    assert entry.spec_callable == "code_flow.impl:provide_recipe"
+    assert manifest.pack_id.startswith("ext.")
+
+    # OFF: dropped at load time (callable never imported).
+    monkeypatch.delenv("MAGI_RECIPE_AS_CODE_ENABLED", raising=False)
+    off_result, _ = load_from_bases([tmp_path / "packs"], RecordingSink())
+    assert ("recipe", meta.ref) not in {(p.type, p.ref) for p in off_result.primitives}
+
+    # ON: loaded + projected into the live recipe registry.
+    monkeypatch.setenv("MAGI_RECIPE_AS_CODE_ENABLED", "1")
+    on_result, _ = load_from_bases([tmp_path / "packs"], RecordingSink())
+    report = project_into_registries(on_result.primitives, PackRegistries())
+    assert meta.ref in report.registered
+
+
+def test_scaffold_code_flag_rejected_for_non_recipe(tmp_path) -> None:
+    with pytest.raises(ValueError, match="only valid for the 'recipe'"):
+        scaffold_pack("tool", "x", tmp_path / "packs", code=True)

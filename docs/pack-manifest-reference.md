@@ -45,17 +45,19 @@ module lives there. Keep pack directory names unique across your pack roots.
 |---|---|---|
 | `type` | string | One of the 8 provides types: `tool`, `callback`, `validator`, `harness`, `control_plane`, `evidence_producer`, `recipe`, `connector`. |
 | `ref` | string | Non-empty public ref this entry contributes (e.g. `verifier:myCheck@1`). |
-| `impl` | string | `"module.path:symbol"` — required for every type except `recipe`; mutually exclusive with `spec`. |
-| `spec` | string | Relpath to a declarative spec file — required for `recipe`, forbidden elsewhere. |
+| `impl` | string | `"module.path:symbol"` — required for every type except `recipe`/`role`; mutually exclusive with `spec`/`specCallable`. |
+| `spec` | string | Relpath to a declarative spec file. A `recipe`/`role` entry declares exactly one of `spec` or `specCallable`; forbidden elsewhere. |
+| `specCallable` | string | `"module.path:symbol"` — recipe-as-code: a callable returning a `RecipePackManifest` (or dict), invoked once at registration. `recipe`/`role` only, mutually exclusive with `spec`/`impl`. ACTIVATION is gated by default-OFF `MAGI_RECIPE_AS_CODE_ENABLED` (OFF drops the entry at load time, callable never imported). |
 | `priority` | int | Ordered types only (`callback`, `control_plane`): ascending registration order. |
 | `phase` | string | Ordered types only: free-form phase label (e.g. `"loop"`, `"beforeTurnStart"`). |
 | `gatePosition` | `"before"` \| `"after"` | `control_plane` only; defaults to `"after"` the permission gate. A before_tool-deciding control MUST opt into `"before"` explicitly (the dispatcher raises `GatePositionViolation` otherwise). |
 
 Validation rules (enforced by the model validator):
 
-- `recipe` entries must declare `spec` and not `impl`; every other type must
-  declare `impl` and not `spec`.
-- `impl` must be of the form `module.path:symbol`.
+- `recipe`/`role` entries must declare exactly one of `spec` or `specCallable`
+  and not `impl`; every other type must declare `impl` and not `spec`/
+  `specCallable`.
+- `impl` and `specCallable` must be of the form `module.path:symbol`.
 - `priority`/`phase` are rejected on non-ordered types; `gatePosition` is
   rejected on non-`control_plane` types.
 

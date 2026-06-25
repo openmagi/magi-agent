@@ -552,13 +552,22 @@ def pack_new(
         "--dest",
         help="Packs root to scaffold into. Default: <cwd>/.magi/packs.",
     ),
+    code: bool = typer.Option(
+        False,
+        "--code",
+        help=(
+            "recipe only: emit a code-computed recipe-as-code variant (a "
+            "provide_recipe() callable + spec_callable) instead of a declarative "
+            "spec. Activation needs MAGI_RECIPE_AS_CODE_ENABLED (default-OFF)."
+        ),
+    ),
 ) -> None:
     """Scaffold a ready-to-load user pack (pack.toml + impl stub + smoke test)."""
     from magi_agent.packs.scaffold import scaffold_pack  # noqa: PLC0415
 
     dest_root = dest if dest is not None else Path.cwd() / ".magi" / "packs"
     try:
-        result = scaffold_pack(ptype, name, dest_root)
+        result = scaffold_pack(ptype, name, dest_root, code=code)
     except ValueError as exc:
         typer.echo(f"magi pack new: {exc}", err=True)
         raise typer.Exit(code=2)
