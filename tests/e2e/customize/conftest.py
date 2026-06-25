@@ -10,12 +10,25 @@ Provides:
   EXEC1/2 + egress (for the llm_criterion critic). The fixture restores
   the original env via ``monkeypatch`` so concurrent tests cannot leak
   state across rows.
+* :func:`patched_critic_factory` — monkeypatches the critic-model
+  factory builders so the lifecycle_audit fan-out has a non-None
+  ``model_factory`` to thread into ``_audit_one_rule`` even on a
+  key-less / fresh-install machine. Without this fixture every
+  ``llm_criterion`` block-action row short-circuits to
+  ``status="skipped"`` (``_audit_one_rule`` guards on
+  ``model_factory is None``), the gate verdict collapses to
+  ``"proceed"``, and the matrix asserter trips. Auto-included by
+  :func:`patched_judge` so every llm_criterion test row works without
+  opting in explicitly.
 * :func:`patched_judge` — monkeypatches the LLM criterion engine so
   llm_criterion tests do not require a real provider key. The pre-final
   / after-tool paths invoke the same ``evaluate_criterion`` entry point
   used in production; the fake records calls + returns a verdict the
   test selects per row (``passed`` ⇒ no block; ``failed`` ⇒ block +
-  reason).
+  reason). The fixture also pulls in :func:`patched_critic_factory`
+  so the gate fan-out actually reaches ``evaluate_criterion`` on a
+  key-less host (otherwise it short-circuits before the patched judge
+  ever runs).
 * :func:`provider_key_skip` — pytest-skip helper for tests that opt into
   a real LLM round-trip (none in F-QA1; F-QA3 will use it).
 * :func:`shell_budget_reset` — resets the per-turn shell budget map
@@ -154,8 +167,85 @@ class JudgePatcher:
         return self._verdict
 
 
+class _SentinelCriticFactory:
+    """Non-None sentinel returned by the patched critic-factory builders.
+
+    ``_audit_one_rule`` only needs ``model_factory`` to be non-None to
+    proceed past the ``"no critic model available"`` skip guard; the
+    actual call into ``evaluate_criterion`` is intercepted by
+    :class:`JudgePatcher`, so this sentinel is never actually invoked
+    by the patched code path. The presence of this object is what
+    flips the lifecycle gate verdict from ``"proceed"`` (skipped audit)
+    to whatever verdict the patched judge returns.
+    """
+
+    def __repr__(self) -> str:  # pragma: no cover — debug aid only
+        return "<_SentinelCriticFactory: fqa-test stub>"
+
+
 @pytest.fixture
-def patched_judge(monkeypatch: pytest.MonkeyPatch) -> JudgePatcher:
+def patched_critic_factory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> _SentinelCriticFactory:
+    """Force the lifecycle critic-model factory builders to return non-None.
+
+    ``magi_agent.runtime.governed_turn._build_lifecycle_critic_factory``
+    (and the per-LLM-call sibling in
+    ``magi_agent.adk_bridge.lifecycle_llm_call_control._build_critic_factory``)
+    delegate to ``magi_agent.cli.wiring._build_criterion_model_factory``,
+    which in turn calls ``_production_egress_critic_model_factory`` —
+    a path that requires either a provider API key in the env or a
+    provider entry in ``~/.magi/config.toml``. On a fresh-install / CI
+    host neither is present, so the chain returns ``None``, the
+    lifecycle ``_audit_one_rule`` short-circuits to
+    ``status="skipped"`` (see ``model_factory is None`` guard around
+    ``magi_agent/customize/lifecycle_audit.py:290``), and
+    ``_gate_decision_from_audits`` reduces the worst verdict to
+    ``"proceed"`` — collapsing every llm_criterion block-action row to
+    a false pass.
+
+    This fixture replaces the critic-factory builders with a constant
+    that returns a sentinel object. The sentinel is non-None so the
+    audit proceeds into ``evaluate_criterion``, which the sibling
+    :func:`patched_judge` fixture intercepts. NOTE: the gate is wired
+    such that ``model_factory`` MUST be non-None for it to fire —
+    patching only ``evaluate_criterion`` is insufficient because the
+    skip guard runs first.
+
+    All three callsites that compose a factory inside the lifecycle
+    audit fan-out are patched (governed_turn, lifecycle_llm_call_control,
+    and the cli.wiring root) so every emitter slot — turn-boundary,
+    user-prompt-submit, subagent-stop, and per-LLM-call — gets a
+    non-None factory threaded through.
+    """
+    sentinel = _SentinelCriticFactory()
+
+    def _stub_factory(*args: object, **kwargs: object) -> _SentinelCriticFactory:
+        return sentinel
+
+    # Root: the cli.wiring helper both lifecycle paths import.
+    monkeypatch.setattr(
+        "magi_agent.cli.wiring._build_criterion_model_factory",
+        _stub_factory,
+    )
+    # Turn-boundary + user-prompt-submit + subagent-stop fan-outs.
+    monkeypatch.setattr(
+        "magi_agent.runtime.governed_turn._build_lifecycle_critic_factory",
+        _stub_factory,
+    )
+    # Per-LLM-call (before_llm_call / after_llm_call) fan-out.
+    monkeypatch.setattr(
+        "magi_agent.adk_bridge.lifecycle_llm_call_control._build_critic_factory",
+        _stub_factory,
+    )
+    return sentinel
+
+
+@pytest.fixture
+def patched_judge(
+    monkeypatch: pytest.MonkeyPatch,
+    patched_critic_factory: _SentinelCriticFactory,
+) -> JudgePatcher:
     """Install a fake judge across the llm_criterion entry points.
 
     The same callable is patched in both the pre-final gate's import
@@ -164,6 +254,12 @@ def patched_judge(monkeypatch: pytest.MonkeyPatch) -> JudgePatcher:
     (``magi_agent.customize.after_tool_gate.evaluate_criterion``) so
     every llm_criterion code path resolves to the fake without a real
     provider round-trip.
+
+    Auto-includes :func:`patched_critic_factory` so the lifecycle
+    audit fan-out's ``model_factory is None`` skip guard does not
+    short-circuit before the patched judge ever runs. Without that
+    sibling fixture, every gate row on a key-less host would record
+    ``status="skipped"`` and collapse to verdict=``"proceed"``.
     """
     patcher = JudgePatcher()
     monkeypatch.setattr(

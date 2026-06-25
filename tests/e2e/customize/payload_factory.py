@@ -170,17 +170,31 @@ def build_payload(kind: str, slot: str, action: str) -> dict[str, Any]:
 
     if kind == "prompt_injection":
         # Mutator: validator forces action=audit at before_tool_use /
-        # on_user_prompt_submit. Match the existing F-MUT1 firing test
-        # shape (append " --dry-run" to the ``command`` arg).
-        base["what"] = {
-            "kind": "prompt_injection",
-            "payload": {
-                "mode": "append",
-                "target_arg_key": "command",
-                "value": " --dry-run",
-                "condition": {"tool": "shell_exec"},
-            },
-        }
+        # on_user_prompt_submit. The payload shape differs by slot:
+        # * before_tool_use: target_arg_key (no target); typical use
+        #   appends to a specific argument. Match the existing F-MUT1
+        #   firing test shape (append " --dry-run" to ``command``).
+        # * on_user_prompt_submit: target MUST equal "system_prompt"
+        #   (validator rejects target_arg_key at this slot).
+        if slot == "on_user_prompt_submit":
+            base["what"] = {
+                "kind": "prompt_injection",
+                "payload": {
+                    "mode": "append",
+                    "target": "system_prompt",
+                    "value": "\n\n[fqa2-test-injection]",
+                },
+            }
+        else:
+            base["what"] = {
+                "kind": "prompt_injection",
+                "payload": {
+                    "mode": "append",
+                    "target_arg_key": "command",
+                    "value": " --dry-run",
+                    "condition": {"tool": "shell_exec"},
+                },
+            }
         return base
 
     if kind == "output_rewrite":

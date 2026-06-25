@@ -24,6 +24,23 @@ F_QA1_SLOTS: frozenset[str] = frozenset(
     {"pre_final", "before_tool_use", "after_tool_use"}
 )
 
+# F-QA2 scope axis: turn-boundary slots driven through ``run_governed_turn``.
+# These four slots all funnel through the canonical CLI/serve/child
+# governed-turn entry point — ``before_turn_start`` / ``on_user_prompt_submit``
+# are GATE slots (block short-circuits the engine stream); ``after_turn_end``
+# fires in the finally block on TOP-LEVEL turns; ``on_subagent_stop`` fires
+# in the finally block on CHILD turns. F-LIFE1's authorability-lift makes
+# ``on_subagent_stop`` accept block/ask_approval at the validator even
+# though runtime parent-surfacing is not yet wired (TODO).
+F_QA2_SLOTS: frozenset[str] = frozenset(
+    {
+        "before_turn_start",
+        "after_turn_end",
+        "on_user_prompt_submit",
+        "on_subagent_stop",
+    }
+)
+
 
 def iter_legal_combinations() -> Iterable[tuple[str, str, str]]:
     """Yield every ``(kind, fires_at, action)`` tuple from the full ``_LEGAL`` matrix.

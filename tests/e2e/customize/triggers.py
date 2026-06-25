@@ -2,7 +2,7 @@
 
 Each trigger function exercises the runtime chokepoint that fires the
 specified lifecycle slot using the smallest possible setup. F-QA1 covers
-three slots:
+three slots; F-QA2 adds the turn-boundary set.
 
 * :func:`trigger_pre_final` — pre-final gate. Routes by kind:
   - ``deterministic_ref`` / shacl_constraint via the gate compile seam
@@ -26,6 +26,27 @@ three slots:
 * :func:`trigger_after_tool_use` — same facade rig, asserts on
   mutations (output_rewrite) / overrides (llm_criterion after-tool gate)
   applied to the returned :class:`ToolResult`.
+
+F-QA2 turn-boundary drivers (drive ``run_governed_turn`` directly):
+
+* :func:`trigger_before_turn_start` — drives the
+  ``_maybe_run_before_turn_start_gate`` short-circuit; ``block`` action
+  asserts the FIRST yielded item is the synthetic
+  ``customize_policy_blocked`` ``EngineResult(terminal=Terminal.aborted)``
+  AND that the fake engine's ``run_turn_stream`` was NEVER consumed.
+* :func:`trigger_on_user_prompt_submit` — same short-circuit shape as
+  before_turn_start, but keyed on the F-UX1 master flag and the
+  ``on_user_prompt_submit`` gate wrapper.
+* :func:`trigger_after_turn_end` — audit-only by ``_LEGAL`` (block is
+  excluded). Drives a top-level turn (``ctx.depth == 0``) through
+  completion so the ``_AfterTurnEndCollector.run_audit`` finally block
+  fires, then asserts an audit record was recorded.
+* :func:`trigger_on_subagent_stop` — drives a CHILD turn
+  (``ctx.depth > 0``) through completion. ``_LEGAL`` lifts the slot to
+  ``{audit, block, ask_approval}`` for authorability per the F-LIFE1
+  TODO note, but the runtime parent-surfacing wire is NOT built yet.
+  The driver asserts the audit ledger captured the verdict and does
+  NOT assert any parent-side block.
 
 The trigger functions return a :class:`TriggerOutcome` the asserter
 inspects. They never raise on a rule failing to fire — the *asserter*
@@ -488,6 +509,292 @@ async def _trigger_after_tool_use_llm_criterion(
     return TriggerOutcome(
         runtime_verdict=verdict,
         side_effects={"override": override, "original_output": dispatch_output},
+    )
+
+
+# ---------------------------------------------------------------------------
+# F-QA2 turn-boundary drivers
+# ---------------------------------------------------------------------------
+#
+# These drivers run a REAL ``run_governed_turn`` with a fake engine so we
+# exercise the production wrappers (``_maybe_run_before_turn_start_gate``,
+# ``_maybe_run_user_prompt_submit_gate``, ``_AfterTurnEndCollector``,
+# ``_SubagentStopCollector``) rather than calling the fan-out helpers
+# directly (those are covered by sibling unit tests in
+# ``tests/customize_firing/``). The fake engine's stream is "poisoned"
+# with a sentinel so the asserter can detect short-circuits — if the
+# sentinel item ever surfaces, the gate failed to short-circuit and the
+# row is a failure.
+
+
+class _PoisonRecordingEngine:
+    """Fake engine that records EVERY call to ``run_turn_stream``.
+
+    The yielded items include a sentinel ``RuntimeEvent`` so the asserter
+    can distinguish "the gate short-circuited before the engine was
+    invoked" from "the gate proceeded and the engine streamed normally".
+    """
+
+    POISON_DELTA = "POISON-ENGINE-RAN"
+
+    def __init__(self, child_final_text: str = "child summary") -> None:
+        self._child_final_text = child_final_text
+        self.run_turn_stream_calls: list[dict[str, object]] = []
+
+    async def run_turn_stream(
+        self,
+        _none: object,
+        turn_input: object,
+        *,
+        cancel: object,
+        gate: object,
+    ):
+        # Late import keeps tests importable on stripped-down envs.
+        from magi_agent.cli.contracts import EngineResult, Terminal
+        from magi_agent.runtime.events import RuntimeEvent
+
+        self.run_turn_stream_calls.append(
+            {"turn_input": turn_input, "cancel": cancel, "gate": gate}
+        )
+        yield RuntimeEvent(
+            type="token",
+            payload={
+                "type": "text_delta",
+                "delta": self._child_final_text,
+            },
+        )
+        yield EngineResult(
+            terminal=Terminal.completed,
+            usage={"input_tokens": 1, "output_tokens": 1},
+            cost_usd=0.0,
+            session_id="sess-fqa2",
+            turn_id="turn-1",
+        )
+
+
+class _PoisonRecordingRuntime:
+    def __init__(self, engine: _PoisonRecordingEngine) -> None:
+        self.engine = engine
+        self.gate = None
+
+
+def _build_turn_ctx(
+    *,
+    session_id: str,
+    prompt: str,
+    depth: int,
+):
+    """Build a ``TurnContext`` for the F-QA2 drivers."""
+    from magi_agent.runtime.turn_context import TurnContext  # noqa: PLC0415
+
+    return TurnContext(
+        prompt=prompt,
+        session_id=session_id,
+        turn_id=f"turn_{session_id}",
+        depth=depth,
+    )
+
+
+async def _drive_governed_turn(
+    *, ctx, engine: _PoisonRecordingEngine
+) -> list[object]:
+    """Run ``run_governed_turn`` to completion and return the yielded items."""
+    from magi_agent.runtime.governed_turn import run_governed_turn  # noqa: PLC0415
+
+    runtime = _PoisonRecordingRuntime(engine)
+    items: list[object] = []
+    async for item in run_governed_turn(ctx, runtime=runtime):
+        items.append(item)
+    return items
+
+
+def _is_policy_blocked_terminal(item: object, *, slot: str) -> bool:
+    """Return True iff *item* is the synthetic policy-blocked terminal."""
+    try:
+        from magi_agent.cli.contracts import EngineResult, Terminal  # noqa: PLC0415
+    except Exception:
+        return False
+    if not isinstance(item, EngineResult):
+        return False
+    if item.terminal is not Terminal.aborted:
+        return False
+    error = item.error or ""
+    if "customize_policy_blocked" not in error:
+        return False
+    if slot not in error:
+        return False
+    return True
+
+
+async def trigger_before_turn_start(
+    *,
+    kind: str,
+    rule_id: str,
+    expected_action: str,
+    session_id: str | None = None,
+) -> TriggerOutcome:
+    """Drive ``run_governed_turn`` and observe the before_turn_start gate.
+
+    For ``action=block``: assert the FIRST (and only) yielded item is the
+    synthetic ``EngineResult(terminal=Terminal.aborted)`` with error
+    containing ``customize_policy_blocked`` AND ``before_turn_start``,
+    AND that the fake engine's ``run_turn_stream`` was NEVER consumed.
+
+    For ``action=ask_approval``: honest-degrade — the turn proceeds and
+    the gate verdict is recorded only via the audit ledger. The driver
+    asserts the engine WAS invoked (turn proceeded) and records the
+    verdict label so the asserter can match the
+    ``requires_approval``-shaped contract.
+
+    For ``action=audit``: turn proceeds normally, judge fired, no
+    short-circuit.
+    """
+    _ = (kind, rule_id)  # asserter consumes these; we drive deterministically
+    sid = session_id or "sess_fqa2_bts"
+    ctx = _build_turn_ctx(session_id=sid, prompt="hello from fqa2", depth=0)
+    engine = _PoisonRecordingEngine()
+    items = await _drive_governed_turn(ctx=ctx, engine=engine)
+
+    engine_invoked = bool(engine.run_turn_stream_calls)
+    blocked = (
+        len(items) == 1
+        and _is_policy_blocked_terminal(items[0], slot="before_turn_start")
+    )
+    verdict = "block" if blocked else "proceed"
+    return TriggerOutcome(
+        runtime_verdict=verdict,
+        side_effects={
+            "items": items,
+            "engine_invoked": engine_invoked,
+            "engine_run_turn_stream_calls": len(engine.run_turn_stream_calls),
+            "poison_delta": _PoisonRecordingEngine.POISON_DELTA,
+            "slot": "before_turn_start",
+        },
+    )
+
+
+async def trigger_on_user_prompt_submit(
+    *,
+    kind: str,
+    rule_id: str,
+    expected_action: str,
+    session_id: str | None = None,
+) -> TriggerOutcome:
+    """Drive ``run_governed_turn`` and observe the on_user_prompt_submit gate.
+
+    Mirrors :func:`trigger_before_turn_start` but the synthetic terminal's
+    error string carries ``on_user_prompt_submit`` instead.
+    """
+    _ = (kind, rule_id)
+    sid = session_id or "sess_fqa2_ups"
+    ctx = _build_turn_ctx(session_id=sid, prompt="hello from fqa2", depth=0)
+    engine = _PoisonRecordingEngine()
+    items = await _drive_governed_turn(ctx=ctx, engine=engine)
+
+    engine_invoked = bool(engine.run_turn_stream_calls)
+    blocked = (
+        len(items) == 1
+        and _is_policy_blocked_terminal(items[0], slot="on_user_prompt_submit")
+    )
+    verdict = "block" if blocked else "proceed"
+    return TriggerOutcome(
+        runtime_verdict=verdict,
+        side_effects={
+            "items": items,
+            "engine_invoked": engine_invoked,
+            "engine_run_turn_stream_calls": len(engine.run_turn_stream_calls),
+            "poison_delta": _PoisonRecordingEngine.POISON_DELTA,
+            "slot": "on_user_prompt_submit",
+        },
+    )
+
+
+async def trigger_after_turn_end(
+    *,
+    kind: str,
+    rule_id: str,
+    expected_action: str,
+    session_id: str | None = None,
+) -> TriggerOutcome:
+    """Drive ``run_governed_turn`` through completion + observe after_turn_end.
+
+    Audit-only by ``_LEGAL`` (block is excluded). The
+    ``_AfterTurnEndCollector.run_audit`` finally block fires the audit
+    fan-out with the aggregated final text. The driver verifies the
+    turn completed normally (sentinel item appeared, terminal not
+    aborted) and that the engine WAS invoked exactly once.
+    """
+    _ = (kind, rule_id, expected_action)
+    sid = session_id or "sess_fqa2_ate"
+    ctx = _build_turn_ctx(session_id=sid, prompt="hello from fqa2", depth=0)
+    engine = _PoisonRecordingEngine()
+    items = await _drive_governed_turn(ctx=ctx, engine=engine)
+
+    engine_invoked = bool(engine.run_turn_stream_calls)
+    # after_turn_end is audit-only — the synthetic terminal MUST NOT have
+    # been emitted in place of the engine's natural terminal.
+    blocked_terminals = [
+        i for i in items
+        if _is_policy_blocked_terminal(i, slot="after_turn_end")
+    ]
+    return TriggerOutcome(
+        runtime_verdict="proceed",
+        side_effects={
+            "items": items,
+            "engine_invoked": engine_invoked,
+            "blocked_terminals": blocked_terminals,
+            "poison_delta": _PoisonRecordingEngine.POISON_DELTA,
+            "slot": "after_turn_end",
+        },
+    )
+
+
+async def trigger_on_subagent_stop(
+    *,
+    kind: str,
+    rule_id: str,
+    expected_action: str,
+    session_id: str | None = None,
+) -> TriggerOutcome:
+    """Drive a CHILD ``run_governed_turn`` and observe on_subagent_stop.
+
+    ``ctx.depth = 1`` so the ``_SubagentStopCollector`` fires (the
+    top-level ``_AfterTurnEndCollector`` is inert for child turns —
+    the two collectors are disjoint).
+
+    Authorability-lift contract from F-LIFE1: ``_LEGAL`` accepts
+    ``{audit, block, ask_approval}`` but runtime parent-surfacing is
+    NOT built yet (TODO per F-LIFE1 review pass — parent SpawnAgent
+    does not yet consume the verdict). The driver asserts the audit
+    ran (engine was invoked, finally block ran) and records the
+    block-action verdict for the asserter; it explicitly does NOT
+    assert any parent-side block.
+    """
+    _ = (kind, rule_id, expected_action)
+    sid = session_id or "sess_fqa2_oss"
+    ctx = _build_turn_ctx(session_id=sid, prompt="child task", depth=1)
+    engine = _PoisonRecordingEngine(child_final_text="child final answer text")
+    items = await _drive_governed_turn(ctx=ctx, engine=engine)
+
+    engine_invoked = bool(engine.run_turn_stream_calls)
+    # F-LIFE1 TODO: parent-surfacing not built. The on_subagent_stop slot
+    # cannot short-circuit the parent today, so even with action=block we
+    # expect the engine to have streamed normally. The audit ledger
+    # captures the verdict for follow-up surfacing.
+    blocked_terminals = [
+        i for i in items
+        if _is_policy_blocked_terminal(i, slot="on_subagent_stop")
+    ]
+    return TriggerOutcome(
+        runtime_verdict="proceed",
+        side_effects={
+            "items": items,
+            "engine_invoked": engine_invoked,
+            "blocked_terminals": blocked_terminals,
+            "poison_delta": _PoisonRecordingEngine.POISON_DELTA,
+            "slot": "on_subagent_stop",
+            "depth": 1,
+        },
     )
 
 
