@@ -2950,6 +2950,120 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="bool",
     ),
+    # I-1: hosted security-posture "false-only" guards. Each flag must
+    # remain unset/falsy or ``parse_python_security_posture_env`` raises
+    # ``RuntimeEnvError("...is not approved")``. Strict default-OFF
+    # ``bool`` so ``flag_bool`` is byte-identical to the prior
+    # ``_is_true(env.get(name))`` loop body.
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_SECURITY_EXTERNAL_SURFACE_DISPATCH",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted security-posture external-surface-dispatch seam (NOT "
+            "APPROVED — parser raises when truthy). Default-OFF; "
+            "hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_SECURITY_CREDENTIAL_BROKER_ATTACHMENT",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted security-posture credential-broker attachment seam "
+            "(NOT APPROVED — parser raises when truthy). Default-OFF; "
+            "hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_SECURITY_CONTEXT_GUARD_BLOCK_MODE",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted security-posture context-guard block-mode seam (NOT "
+            "APPROVED — parser raises when truthy). Default-OFF; "
+            "hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_SECURITY_SUPPLY_CHAIN_STARTUP_BANNER",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted security-posture supply-chain startup-banner seam "
+            "(NOT APPROVED — parser raises when truthy). Default-OFF; "
+            "hosted-only."
+        ),
+        kind="bool",
+    ),
+    # I-1: hosted context-continuity "false-only" guards. Same shape as
+    # the security-posture guards above — each must remain unset/falsy
+    # or ``parse_python_context_continuity_env`` raises.
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_CONTEXT_CONTINUITY_PRODUCTION_AUTHORITY",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted context-continuity production-authority seam (NOT "
+            "APPROVED — parser raises when truthy). Default-OFF; "
+            "hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_CONTEXT_CONTINUITY_TRANSCRIPT_WRITE",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted context-continuity transcript-write seam (NOT "
+            "APPROVED — parser raises when truthy). Default-OFF; "
+            "hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_CONTEXT_CONTINUITY_SSE_WRITE",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted context-continuity SSE-write seam (NOT APPROVED — "
+            "parser raises when truthy). Default-OFF; hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_CONTEXT_CONTINUITY_DB_WRITE",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted context-continuity DB-write seam (NOT APPROVED — "
+            "parser raises when truthy). Default-OFF; hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_CONTEXT_CONTINUITY_CANARY_EVIDENCE_VERIFIED",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted context-continuity canary-evidence-verified seam "
+            "(NOT APPROVED — parser raises when truthy). Default-OFF; "
+            "hosted-only."
+        ),
+        kind="bool",
+    ),
 )
 
 
