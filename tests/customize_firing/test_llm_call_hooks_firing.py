@@ -293,6 +293,95 @@ async def test_after_llm_call_budget_exhausted_emits_skip_record(
 
 
 # ---------------------------------------------------------------------------
+# F-QA3 carry-over: intra-call budget — the fan-out must STOP invoking the
+# critic the moment the remaining budget is consumed WITHIN a single call.
+# Before this guard the fan-out only checked budget once at entry, so 1
+# remaining + 3 enabled rules meant 3 critic invocations (the cap was
+# silently violated; the caller decremented 3 from the shared counter
+# afterward but the cost had already been paid).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_before_fan_out_intra_call_budget_caps_at_remaining(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """1 remaining + 3 enabled rules ⇒ exactly 1 critic invocation; the
+    remaining 2 must surface as ``budget_exhausted`` skip records."""
+    cfile = _flags_on(monkeypatch, tmp_path)
+    for i in range(3):
+        rule = _before_rule()
+        rule["id"] = f"cr_before_intra_{i}"
+        rule["what"]["payload"]["criterion"] = f"{_BEFORE_CRITERION} #{i}"
+        set_custom_rule(rule, path=cfile)
+
+    calls: list[dict] = []
+
+    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None):
+        calls.append({"criterion": criterion})
+        return (True, "ok")
+
+    monkeypatch.setattr(
+        "magi_agent.customize.criterion_engine.evaluate_criterion", fake_eval
+    )
+
+    audits = await run_before_llm_call_audit(
+        prompt_text="hello",
+        model_factory=lambda: object(),
+        critic_budget_remaining=1,
+    )
+
+    evaluated = [a for a in audits if a.get("status") == "evaluated"]
+    exhausted = [a for a in audits if a.get("status") == "budget_exhausted"]
+    assert len(calls) == 1, (
+        f"only 1 critic invocation allowed under budget=1; got {len(calls)}"
+    )
+    assert len(evaluated) == 1
+    assert len(exhausted) == 2, (
+        "the 2 over-budget rules must each surface as budget_exhausted skip "
+        "records so the ledger captures the cost-ceiling decision per rule"
+    )
+
+
+@pytest.mark.asyncio
+async def test_after_fan_out_intra_call_budget_caps_at_remaining(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Symmetric guard for ``after_llm_call``: 2 remaining + 4 rules ⇒
+    2 critic invocations, 2 ``budget_exhausted`` skips."""
+    cfile = _flags_on(monkeypatch, tmp_path)
+    for i in range(4):
+        rule = _after_rule()
+        rule["id"] = f"cr_after_intra_{i}"
+        rule["what"]["payload"]["criterion"] = f"{_AFTER_CRITERION} #{i}"
+        set_custom_rule(rule, path=cfile)
+
+    calls: list[dict] = []
+
+    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None):
+        calls.append({"criterion": criterion})
+        return (True, "ok")
+
+    monkeypatch.setattr(
+        "magi_agent.customize.criterion_engine.evaluate_criterion", fake_eval
+    )
+
+    audits = await run_after_llm_call_audit(
+        draft_text="model output",
+        model_factory=lambda: object(),
+        critic_budget_remaining=2,
+    )
+
+    evaluated = [a for a in audits if a.get("status") == "evaluated"]
+    exhausted = [a for a in audits if a.get("status") == "budget_exhausted"]
+    assert len(calls) == 2, (
+        f"only 2 critic invocations allowed under budget=2; got {len(calls)}"
+    )
+    assert len(evaluated) == 2
+    assert len(exhausted) == 2
+
+
+# ---------------------------------------------------------------------------
 # ADK plugin wire — LifecycleLlmCallAuditControl
 # ---------------------------------------------------------------------------
 

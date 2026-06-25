@@ -531,7 +531,24 @@ async def run_before_llm_call_audit(
             }
         ]
     audits: list[AuditRecord] = []
+    # Intra-call budget guard: the caller threads the remaining budget but
+    # decrements the SHARED counter only after the fan-out returns. Without
+    # this local tracker, N enabled rules at a single hook would all invoke
+    # the critic even when the cap allowed only 1, silently over-spending
+    # the per-turn budget. Mirrors the F-EXEC1 shell fan-out's local-budget
+    # pattern in :func:`_run_shell_fan_out`.
+    budget = critic_budget_remaining
     for rule in rules:
+        if budget <= 0:
+            audits.append(
+                {
+                    "rule_id": rule.get("id"),
+                    "passed": True,
+                    "reason": "per-turn critic budget exhausted",
+                    "status": "budget_exhausted",
+                }
+            )
+            continue
         audit = await _audit_one_rule(
             rule,
             draft_text=prompt_text,
@@ -539,6 +556,8 @@ async def run_before_llm_call_audit(
             invoke=invoke,
         )
         audits.append(audit)
+        if audit.get("status") in {"evaluated", "error"}:
+            budget -= 1
     return audits
 
 
@@ -584,7 +603,20 @@ async def run_after_llm_call_audit(
             }
         ]
     audits: list[AuditRecord] = []
+    # Intra-call budget guard — symmetric with :func:`run_before_llm_call_audit`.
+    # See that helper for the rationale.
+    budget = critic_budget_remaining
     for rule in rules:
+        if budget <= 0:
+            audits.append(
+                {
+                    "rule_id": rule.get("id"),
+                    "passed": True,
+                    "reason": "per-turn critic budget exhausted",
+                    "status": "budget_exhausted",
+                }
+            )
+            continue
         audit = await _audit_one_rule(
             rule,
             draft_text=draft_text,
@@ -592,6 +624,8 @@ async def run_after_llm_call_audit(
             invoke=invoke,
         )
         audits.append(audit)
+        if audit.get("status") in {"evaluated", "error"}:
+            budget -= 1
     return audits
 
 
