@@ -466,6 +466,38 @@ def is_rule_check_authority_field(key: object) -> bool:
     return key == _RULE_CHECK_AUTHORITY_FIELD
 
 
+def child_started_event(
+    *,
+    task_id: str,
+    parent_turn_id: str,
+    child_receipt_ref: str,
+    agent_name: str | None = None,
+    model: str | None = None,
+    task_title: str | None = None,
+    detail: str = "Delegated child started",
+    event_family: str = "child_spawn_background_supported_core",
+) -> PublicEvent:
+    """Build a sanitized ``child_started`` event.
+
+    The optional ``agent_name`` / ``model`` / ``task_title`` fields drive the
+    local-dashboard AGENTS chip label, model badge, and per-agent task hint
+    respectively.  ``task_title`` is a public-safe short brief the LLM provides
+    via SpawnAgent args — it is NOT the prompt body (privacy contract).
+    """
+    _require_event_family(event_family, {"child_spawn_background_supported_core"})
+    event: PublicEvent = {
+        "type": "child_started",
+        "taskId": _public_text(task_id, limit=_ID_LIMIT),
+        "parentTurnId": _public_text(parent_turn_id, limit=_ID_LIMIT),
+        "childReceiptRef": _public_text(child_receipt_ref, limit=_ID_LIMIT),
+        "detail": _public_text(detail),
+    }
+    _put_text(event, "agentName", agent_name)
+    _put_text(event, "model", model)
+    _put_text(event, "taskTitle", task_title)
+    return event
+
+
 def child_progress_event(
     *,
     task_id: str,
@@ -538,6 +570,7 @@ __all__ = [
     "copy_rule_check_authority",
     "is_rule_check_authority_field",
     "child_progress_event",
+    "child_started_event",
     "task_board_event",
     "PublicEvent",
     "PublicMetadata",

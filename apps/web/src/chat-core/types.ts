@@ -300,6 +300,9 @@ export interface SubagentActivity {
   role: string;
   status: SubagentActivityStatus;
   detail?: string;
+  agentName?: string;
+  model?: string;
+  taskTitle?: string;
   startedAt: number;
   updatedAt: number;
 }

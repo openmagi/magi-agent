@@ -451,10 +451,13 @@ function subagentRowLabel(
   index: number,
   role: string,
   language?: ChatResponseLanguage,
+  activity?: SubagentActivity,
 ): string {
   if (role === "bash" || role === "background") {
     return t(language, "Background task", "백그라운드 작업");
   }
+  const supplied = activity?.agentName?.trim();
+  if (supplied) return supplied;
   return subagentName(index);
 }
 
@@ -657,13 +660,18 @@ export function deriveWorkConsoleRows({
       ? formatSubagentElapsed(subagent.startedAt)
       : undefined;
     const role = normalizeRole(subagent.role);
+    const taskTitle = subagent.taskTitle?.trim() || undefined;
+    const detail = taskTitle ?? subagentDetail(subagent, language);
+    const meta = [role, subagent.model?.trim(), elapsed]
+      .filter(Boolean)
+      .join(" · ");
     rows.push({
       id: `subagent:${safeHelperTaskId(subagent.taskId, index)}`,
       group: "subagent",
-      label: subagentRowLabel(index, role, language),
-      detail: subagentDetail(subagent, language),
+      label: subagentRowLabel(index, role, language, subagent),
+      detail,
       status: statusFromSubagent(subagent),
-      meta: [role, elapsed].filter(Boolean).join(" · "),
+      meta,
     });
   }
 

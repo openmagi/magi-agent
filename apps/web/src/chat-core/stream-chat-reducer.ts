@@ -515,11 +515,17 @@ function noteSubagent(
   const previous = next.subagents.get(taskId);
   const now = Date.now();
   const role = str(payload.role) ?? str(payload.persona) ?? previous?.role ?? "subagent";
+  const agentName = str(payload.agentName) ?? previous?.agentName;
+  const model = str(payload.model) ?? previous?.model;
+  const taskTitle = str(payload.taskTitle) ?? previous?.taskTitle;
   next.subagents.set(taskId, {
     taskId,
     role,
     status,
     ...(detail ?? previous?.detail ? { detail: detail ?? previous?.detail } : {}),
+    ...(agentName ? { agentName } : {}),
+    ...(model ? { model } : {}),
+    ...(taskTitle ? { taskTitle } : {}),
     startedAt: previous?.startedAt ?? now,
     updatedAt: now,
   });

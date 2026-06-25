@@ -437,6 +437,48 @@ describe("stream-chat-reducer", () => {
     expect(state.streaming).toBe(true);
   });
 
+  it("folds child_started enriched fields (agentName, model, taskTitle) onto the subagent activity", () => {
+    const state = foldRuntimeEvents([
+      {
+        type: "child_started",
+        taskId: "child-7",
+        parentTurnId: "turn-1",
+        childReceiptRef: "receipt:sha256:abc",
+        agentName: "Halley",
+        model: "anthropic:claude-opus-4-8",
+        taskTitle: "Cross-validate 1+1 across 3 SOTA models",
+        detail: "Delegated child started",
+      },
+    ]);
+    expect(state.subagents.get("child-7")).toMatchObject({
+      taskId: "child-7",
+      status: "running",
+      agentName: "Halley",
+      model: "anthropic:claude-opus-4-8",
+      taskTitle: "Cross-validate 1+1 across 3 SOTA models",
+    });
+  });
+
+  it("preserves enriched subagent fields across subsequent child_progress events that omit them", () => {
+    const state = foldRuntimeEvents([
+      {
+        type: "child_started",
+        taskId: "child-7",
+        agentName: "Halley",
+        model: "anthropic:claude-opus-4-8",
+        taskTitle: "Cross-validate 1+1",
+        detail: "Delegated child started",
+      },
+      { type: "child_progress", taskId: "child-7", detail: "Running tool" },
+    ]);
+    expect(state.subagents.get("child-7")).toMatchObject({
+      agentName: "Halley",
+      model: "anthropic:claude-opus-4-8",
+      taskTitle: "Cross-validate 1+1",
+      detail: "Running tool",
+    });
+  });
+
   it("pushes unknown / low-priority events as activities", () => {
     const state = foldRuntimeEvents([
       { type: "browser_frame", url: "https://example.com" },
