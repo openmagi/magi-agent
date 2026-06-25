@@ -253,6 +253,92 @@ def _build_lifecycle_critic_factory() -> object | None:
         return None
 
 
+def _build_policy_blocked_terminal(*, ctx: TurnContext, slot: str, reason: str) -> object:
+    """PR-F-LIFE4a — synthesize a terminal ``EngineResult`` for a policy block.
+
+    Returns an ``EngineResult(terminal=Terminal.aborted)`` with an error
+    string identifying the blocking slot + reason so downstream consumers
+    (CLI REPL, serve transport, telemetry) can render the block honestly.
+    Mirrors the engine's own abort-path terminal shape so emit-side parsing
+    is unchanged.
+    """
+    from magi_agent.cli.contracts import EngineResult, Terminal  # noqa: PLC0415
+
+    return EngineResult(
+        terminal=Terminal.aborted,
+        usage={},
+        cost_usd=0.0,
+        error=f"customize_policy_blocked: slot={slot}; reason={reason}",
+        session_id=ctx.session_id,
+        turn_id=ctx.turn_id,
+    )
+
+
+async def _maybe_run_before_turn_start_gate(ctx: TurnContext) -> object | None:
+    """PR-F-LIFE4a Tier 2 ``before_turn_start`` gate consult.
+
+    Returns a synthetic terminal ``EngineResult`` to short-circuit the
+    funnel when any block-action criterion fails; otherwise returns ``None``
+    so the caller proceeds. Fail-open at every layer — never raises.
+    """
+    try:
+        from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+            lifecycle_turn_hooks_enabled,
+            run_before_turn_start_gate,
+        )
+
+        if not lifecycle_turn_hooks_enabled():
+            return None
+        verdict = await run_before_turn_start_gate(
+            prompt_text=ctx.prompt or "",
+            model_factory=_build_lifecycle_critic_factory(),
+        )
+        if verdict == "block":
+            return _build_policy_blocked_terminal(
+                ctx=ctx,
+                slot="before_turn_start",
+                reason="llm_criterion verdict=block",
+            )
+        # "ask" is honest-degrade in v1: the audit ledger captures the
+        # requires_approval flag (follow-up PR adds the surface); the turn
+        # still proceeds so authoring an ask rule does not silently brick
+        # the runtime.
+        return None
+    except Exception:
+        return None
+
+
+async def _maybe_run_user_prompt_submit_gate(ctx: TurnContext) -> object | None:
+    """PR-F-LIFE4a Tier 2 ``on_user_prompt_submit`` gate consult.
+
+    Mirrors :func:`_maybe_run_before_turn_start_gate` (same short-circuit
+    pattern, different fires-at slot). Triple-gated by
+    :func:`lifecycle_expansion_enabled` (the F-UX1 master flag covers both
+    the audit and the gate consult for this slot).
+    """
+    try:
+        from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
+            lifecycle_expansion_enabled,
+            run_user_prompt_submit_gate,
+        )
+
+        if not lifecycle_expansion_enabled():
+            return None
+        verdict = await run_user_prompt_submit_gate(
+            prompt_text=ctx.prompt or "",
+            model_factory=_build_lifecycle_critic_factory(),
+        )
+        if verdict == "block":
+            return _build_policy_blocked_terminal(
+                ctx=ctx,
+                slot="on_user_prompt_submit",
+                reason="llm_criterion verdict=block",
+            )
+        return None
+    except Exception:
+        return None
+
+
 async def _maybe_run_user_prompt_submit_audit(ctx: TurnContext) -> None:
     """PR-F-UX1 Tier 2 ``on_user_prompt_submit`` audit-only fan-out.
 
