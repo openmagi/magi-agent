@@ -1,12 +1,12 @@
 # Hook Points Reference
 
-Complete reference for all 17 HookPoint enum values, their camelCase keys, firing conditions, payloads, and blocking behavior.
+Complete reference for all 20 HookPoint enum values, their camelCase keys, firing conditions, payloads, and blocking behavior.
 
 Every HookPoint enum value with its key, when it fires, blocking behavior, and the ADK callback mapping table.
 
 ## HookPoint Enum Values
 
-HookPoint is a Python str Enum with 17 members. Each member has a camelCase value used as the wire key. Hooks registered at a given point fire when the runtime reaches that lifecycle moment.
+HookPoint is a Python str Enum with 20 members. Each member has a camelCase value used as the wire key. Hooks registered at a given point fire when the runtime reaches that lifecycle moment.
 
 > **Wiring state (default-OFF).** User hooks load and bind only when
 > `MAGI_USER_HOOKS_ENABLED` is set (default-OFF); the `http` and `llm` executors
