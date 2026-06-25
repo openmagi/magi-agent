@@ -58,10 +58,12 @@
 
 import {
   Ban,
+  CheckCircle,
   Filter,
   HelpCircle,
   ShieldOff,
   Terminal,
+  XCircle,
 } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
@@ -2145,6 +2147,27 @@ function SpecificsStep({
               placeholder="The answer cites at least one source."
               inputRef={criterionInputRef}
             />
+            {/* PR-F-UX11 — Binary verdict authoring guidance. The runtime
+                resolves an llm_criterion to a single pass/fail boolean
+                ({passed, reason?}); scaled prompts ("how well…") or
+                subjective adjectives ("is this good?") produce unstable
+                verdicts. Inline display-only card; no behavior. */}
+            <GuidanceHintCard
+              header="Write as a Yes/No question"
+              body="The critic produces a binary verdict (pass/fail). Phrase your criterion so it can be answered Yes or No."
+              goodLabel="Good examples"
+              good={[
+                "Does the answer cite at least one source for every factual claim?",
+                "Does the response include the requested file path?",
+                "Did the agent ask for clarification before making destructive changes?",
+              ]}
+              badLabel="Avoid"
+              bad={[
+                "How well does the answer address the question? (scaled answer, inconsistent verdict)",
+                "Is this a good response? (subjective adjective, no clear bar)",
+                "What's wrong with this output? (open-ended, not binary)",
+              ]}
+            />
           </div>
           {/* PR-F6.5 — deterministic contentMatch pre-filter on after-tool
               llm_criterion rules. The runtime gate only invokes the LLM
@@ -2507,6 +2530,81 @@ function OutputRewriteRedactPicker({
 
 
 // ---------------------------------------------------------------------------
+// PR-F-UX11 — Binary verdict authoring guidance
+// ---------------------------------------------------------------------------
+
+
+/**
+ * PR-F-UX11 — Display-only authoring hint surfaced next to the
+ * llm_criterion text input and the shell_check script body. Both
+ * surfaces produce a binary verdict (pass / fail); operators routinely
+ * phrase them as scaled or open-ended prompts that the runtime cannot
+ * honor as a verdict.
+ *
+ * Shape: header + body + ✅ good examples + ❌ avoid examples, with
+ * inline lucide CheckCircle / XCircle icons and a muted monospace
+ * background for the example text. The card is purely informational
+ * (no interactive behavior, no validation) — it sits adjacent to the
+ * existing F-EXEC1 "magi does not verify the script" disclaimer and
+ * does not replace it.
+ */
+function GuidanceHintCard({
+  header,
+  body,
+  goodLabel,
+  good,
+  badLabel,
+  bad,
+}: {
+  header: string;
+  body: string;
+  goodLabel: string;
+  good: ReadonlyArray<string>;
+  badLabel: string;
+  bad: ReadonlyArray<string>;
+}): React.ReactElement {
+  return (
+    <div className="rounded-xl border border-black/[0.08] bg-gray-50/60 px-3 py-2.5 text-xs leading-relaxed">
+      <p className="text-[12px] font-semibold text-foreground">{header}</p>
+      <p className="mt-1 text-[11px] text-secondary">{body}</p>
+      <div className="mt-2 space-y-1">
+        <p className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-700">
+          <CheckCircle aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+          <span>{goodLabel}</span>
+        </p>
+        <ul className="space-y-1 pl-5">
+          {good.map((line) => (
+            <li
+              key={line}
+              className="rounded-md bg-emerald-50/70 px-2 py-1 font-mono text-[11px] text-emerald-900"
+            >
+              {line}
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div className="mt-2 space-y-1">
+        <p className="flex items-center gap-1.5 text-[11px] font-medium text-red-700">
+          <XCircle aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+          <span>{badLabel}</span>
+        </p>
+        <ul className="space-y-1 pl-5">
+          {bad.map((line) => (
+            <li
+              key={line}
+              className="rounded-md bg-red-50/70 px-2 py-1 font-mono text-[11px] text-red-900"
+            >
+              {line}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
 // PR-F-EXEC1 — shell_command picker (operator-authored subprocess)
 // ---------------------------------------------------------------------------
 
@@ -2514,9 +2612,17 @@ function OutputRewriteRedactPicker({
 function ShellCommandPicker({
   draft,
   update,
+  mode = "command",
 }: {
   draft: Draft;
   update: (patch: Partial<Draft>) => void;
+  // PR-F-UX11 — ``check`` renders the additional binary-verdict guidance
+  // card under the source toggle so shell_check authors see the
+  // stdout-JSON-or-exit-code contract before they paste a script. The
+  // command-mode picker omits it (action-shaped slots do not consume a
+  // verdict). The F-EXEC1 "magi does not verify the script" disclaimer
+  // banner above the source toggle stays in both modes.
+  mode?: "command" | "check";
 }): React.ReactElement {
   return (
     <div className="space-y-3">
@@ -2558,6 +2664,30 @@ function ShellCommandPicker({
           </label>
         </div>
       </div>
+      {mode === "check" ? (
+        // PR-F-UX11 — Binary verdict authoring guidance for shell_check.
+        // The runtime parses the verdict in this order: (1) last-line JSON
+        // {passed, reason?} on stdout, (2) exit code (0 = pass). Scripts
+        // that print free-form prose fall through to exit code, which is
+        // usually 0 even when the operator meant "fail" — surface the
+        // contract here so the author picks one of the two shapes.
+        <GuidanceHintCard
+          header="Emit a binary verdict"
+          body="The runtime reads your verdict from stdout (preferred) or exit code (fallback). Pick one of:"
+          goodLabel="Preferred (stdout JSON one-liner) — or Fallback (exit code)"
+          good={[
+            "echo '{\"passed\":true}'   # or false",
+            "echo '{\"passed\":false,\"reason\":\"tests failed: 2 of 17\"}'",
+            "pytest --quiet   # exit 0 = passed, non-zero = failed",
+            "[ -s output.txt ]   # file non-empty",
+          ]}
+          badLabel="Avoid"
+          bad={[
+            "echo \"result: $RESULT\"   # no parseable verdict; falls through to exit code",
+            "Scripts that mix prose with verdict (parser tries last-line JSON salvage but ambiguous)",
+          ]}
+        />
+      ) : null}
       {draft.shSource === "inline" ? (
         <label className="block">
           <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
@@ -2660,7 +2790,12 @@ function ShellCheckPicker({
   draft: Draft;
   update: (patch: Partial<Draft>) => void;
 }): React.ReactElement {
-  return <ShellCommandPicker draft={draft} update={update} />;
+  // PR-F-UX11 — Pass ``mode="check"`` so ShellCommandPicker renders the
+  // binary-verdict GuidanceHintCard under the source toggle. The
+  // verifier kind is the one slot where the script's stdout / exit code
+  // drives a pass/fail verdict, so authors need the contract spelled out
+  // before they paste a script.
+  return <ShellCommandPicker draft={draft} update={update} mode="check" />;
 }
 
 
