@@ -69,17 +69,15 @@ TOOL_USAGE_GUIDANCE: dict[str, str] = {
         "to existing files — use FileEdit."
     ),
     "SpawnAgent": (
-        "Use when: an independent subtask benefits from a fresh context "
-        "(parallel research, isolated implementation). Give the child a "
-        "self-contained brief. To run the child on a specific model, pass BOTH "
-        "`provider` AND `model` exactly matching one of the routes listed below. "
+        "Use when an independent subtask benefits from a fresh context "
+        "(parallel research, isolated implementation); give the child a "
+        "self-contained brief. To run it on a specific model, pass BOTH "
+        "`provider` AND `model` matching one of the routes listed below. "
         "Do NOT invent model names or pass `model` without its matching "
         "`provider` (a mismatch is rejected as child_model_route_unknown), and "
-        "do NOT spawn for work you can finish directly in fewer steps. "
-        "Also pass `taskTitle` (a SHORT public-safe label, ≤ 64 chars, e.g. "
-        "'Cross-validate 1+1 across 3 SOTA models') — this is shown to the "
-        "user as the agent's chip label, so keep it descriptive but free of "
-        "private prompt content."
+        "do NOT spawn for work you can finish directly. Also pass `taskTitle` "
+        "(a SHORT public-safe label, <= 64 chars) shown as the agent chip "
+        "label, so keep it free of private prompt content."
     ),
     "AskUserQuestion": (
         "Use when: a genuine decision blocks progress and the answer is not "
