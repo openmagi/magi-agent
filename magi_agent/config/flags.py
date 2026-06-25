@@ -3463,6 +3463,61 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
+    # I-1: hosted gate1a egress-correlation knobs (``evidence/observed_egress``
+    # + ``evidence/gate1a_egress_correlation``). All ``scope="hosted"``;
+    # empty/unset falls through to the no-op
+    # ``NoObservedEgressEvidenceProvider``.
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE1A_EGRESS_PROXY_URL",
+        default="",
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Override the gate1a egress proxy URL. Falls back to "
+            "``HTTPS_PROXY`` / ``https_proxy`` when unset. Default-"
+            "empty; hosted-only."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE1A_EGRESS_EVIDENCE_SOURCE",
+        default="",
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Gate1a egress evidence source. Only "
+            "``egress_proxy_telemetry`` activates the live telemetry "
+            "provider; empty/unset/other values keep the no-op provider. "
+            "Hosted-only."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE1A_EGRESS_TELEMETRY_PATH",
+        default="",
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Path to the egress proxy telemetry artifact. Required when "
+            "``CORE_AGENT_PYTHON_GATE1A_EGRESS_EVIDENCE_SOURCE`` is "
+            "``egress_proxy_telemetry``; empty/unset short-circuits the "
+            "live provider to the no-op. Hosted-only."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE1A_EGRESS_CORRELATION_MODE",
+        default="",
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Gate1a egress correlation mode. Compared exactly against the "
+            "internal ``_LIVE_EGRESS_CORRELATION_MODE`` constant to flip "
+            "``correlation_source_configured`` on the live provider. "
+            "Hosted-only."
+        ),
+        kind="str",
+    ),
 )
 
 

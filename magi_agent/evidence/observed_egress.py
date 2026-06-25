@@ -407,16 +407,24 @@ class LiveEgressTelemetryEvidenceProvider:
 def build_gate1a_observed_egress_evidence_provider_from_env(
     env: Mapping[str, str],
 ) -> ObservedEgressEvidenceProvider:
-    source = str(env.get("CORE_AGENT_PYTHON_GATE1A_EGRESS_EVIDENCE_SOURCE") or "").strip()
+    # I-1: route the three gate1a egress-evidence knobs through the
+    # typed flag registry. ``flag_str`` returns "" for unset, byte-
+    # identical to the prior ``str(env.get(...) or "").strip()`` chain
+    # because ``"" or ""`` short-circuits to ``""`` either way.
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    source = str(
+        flag_str("CORE_AGENT_PYTHON_GATE1A_EGRESS_EVIDENCE_SOURCE", env=env) or ""
+    ).strip()
     if source != "egress_proxy_telemetry":
         return NoObservedEgressEvidenceProvider()
     telemetry_path = str(
-        env.get("CORE_AGENT_PYTHON_GATE1A_EGRESS_TELEMETRY_PATH") or ""
+        flag_str("CORE_AGENT_PYTHON_GATE1A_EGRESS_TELEMETRY_PATH", env=env) or ""
     ).strip()
     if not telemetry_path:
         return NoObservedEgressEvidenceProvider()
     correlation_mode = str(
-        env.get("CORE_AGENT_PYTHON_GATE1A_EGRESS_CORRELATION_MODE") or ""
+        flag_str("CORE_AGENT_PYTHON_GATE1A_EGRESS_CORRELATION_MODE", env=env) or ""
     ).strip()
     return LiveEgressTelemetryEvidenceProvider(
         telemetry_path,
