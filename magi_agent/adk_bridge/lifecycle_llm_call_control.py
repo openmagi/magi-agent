@@ -43,6 +43,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from google.adk.models import LlmResponse
+
 from magi_agent.adk_bridge.control_plane import (
     BaseLoopControl,
     _latest_event_invocation_id,
@@ -67,6 +69,22 @@ class _TurnBudgetState:
     """Mutable per-(session, turn) critic budget counter."""
 
     remaining: int
+
+
+def _build_policy_blocked_llm_response(*, reason: str) -> LlmResponse:
+    """Return a synthetic policy-blocked LlmResponse.
+
+    Used by lifecycle gates (e.g. F-LIFE4b on_session_start) to short-circuit
+    the LLM call when an llm_criterion verdict comes back as ``block``. The
+    response carries the block reason in ``custom_metadata`` so downstream
+    telemetry / audit can attribute the block; no model tokens are charged.
+    """
+    return LlmResponse(
+        custom_metadata={
+            "policy_blocked": True,
+            "reason": reason,
+        },
+    )
 
 
 def _parse_budget(env: Mapping[str, str] | None = None) -> int:

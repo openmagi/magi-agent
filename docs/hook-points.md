@@ -2,7 +2,7 @@
 
 Lifecycle hook points with HookRegistry registration and HookBus dispatch.
 
-The HookPoint enum defines 17 lifecycle points. Hooks are registered via HookManifest into the HookRegistry (hooks/registry.py), then dispatched by HookBus (hooks/bus.py) which filters by point + harness scope, executes each enabled hook, catches exceptions (fail_open: log, !fail_open + blocking: block turn), and returns a HookBusRunResult with final_action (continue/block/pending_control_request).
+The HookPoint enum defines 20 lifecycle points. Hooks are registered via HookManifest into the HookRegistry (hooks/registry.py), then dispatched by HookBus (hooks/bus.py) which filters by point + harness scope, executes each enabled hook, catches exceptions (fail_open: log, !fail_open + blocking: block turn), and returns a HookBusRunResult with final_action (continue/block/pending_control_request).
 
 > **Wiring state (default-OFF).** User hooks attached through this lifecycle do
 > nothing until you opt in. The command-executor bridge that binds `settings.json`
@@ -73,7 +73,7 @@ Hooks are registered into HookRegistry (hooks/registry.py) as HookRegistration r
 ```
 class HookManifest(BaseModel):
     name: str              # unique hook identifier
-    point: HookPoint       # lifecycle point (17 enum values)
+    point: HookPoint       # lifecycle point (20 enum values)
     description: str       # human-readable purpose
     source: ToolSource     # where the hook code lives
     priority: int = 100    # execution order (lower = first)
