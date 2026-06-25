@@ -6,6 +6,7 @@ pre-built ``runtime`` so the CLI REPL can reuse its long-lived driver across
 turns without rebuilding it per call.  The serve path and child paths pass
 ``runtime=None`` and receive a fresh runtime from ``_build_runtime``.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -138,18 +139,37 @@ async def run_governed_turn(
     # turn end).
     task_complete_collector = _OnTaskCompleteCollector.maybe_create(ctx)
 
-    # PR-F-EXEC1: shell_command final-text collectors. Mirror the
-    # _SubagentStopCollector / _AfterTurnEndCollector axis so the shell
-    # ``on_subagent_stop`` (child turns) and ``after_turn_end`` (top-level
-    # turns) fan-outs see the aggregated final text via the same
-    # response_clear / text_delta event stream. The pre_final fan-out is
-    # also driven from this collector because it fires BEFORE the final
-    # text commits (caller short-circuits the next yielded EngineResult on
-    # ``"block"`` verdict). All triple-gated + fail-open in the helper.
-    shell_subagent_stop_collector = _ShellSubagentStopCollector.maybe_create(ctx)
+    # PR-F-EXEC1 shell_command lifecycle: TOP-LEVEL ``after_turn_end``
+    # shell collector. Mirrors _AfterTurnEndCollector — fires shell_command
+    # rules at the ``after_turn_end`` slot on top-level turn boundaries.
     shell_after_turn_end_collector = _ShellAfterTurnEndCollector.maybe_create(ctx)
-    shell_pre_final_collector = _ShellPreFinalCollector.maybe_create(ctx)
 
+    # PR-F-EXEC1 shell_command lifecycle: CHILD-only ``on_subagent_stop``
+    # shell collector. Mirrors _SubagentStopCollector — fires shell_command
+    # rules at ``on_subagent_stop`` for spawned child turns.
+    shell_subagent_stop_collector = _ShellSubagentStopCollector.maybe_create(ctx)
+
+    # PR-1: bounded-cadence stream-yield trace for the silent anthropic /
+    # google dispatch hunt. Gated by MAGI_CHILD_RUNNER_EMPTY_DEBUG via the
+    # helper imported below (we keep the trace surface in ONE module: see
+    # child_runner_live._maybe_log_trace_engine_stream_yield). Cadence:
+    # first five yields + the LAST one. Operator sees the early shape and
+    # the terminal item without drowning in deltas. A zero-yield turn
+    # (Kevin's anthropic/google 100~250ms case) will print ZERO
+    # ``stream_yield`` lines even though ``drive_one_turn_enter`` and
+    # ``drive_one_turn_exit`` will bookend it.
+    import os as _os  # noqa: PLC0415
+
+    from magi_agent.runtime.child_runner_live import (  # noqa: PLC0415
+        _maybe_log_trace_engine_stream_yield,
+    )
+
+    _trace_env = _os.environ
+    _stream_index = 0
+    _last_index = -1
+    _last_kind: object = None
+    _last_has_text_delta = False
+    _last_evidence_refs = 0
     try:
         async for item in stream:
             if bookend is not None:
@@ -160,23 +180,33 @@ async def run_governed_turn(
                 turn_end_collector.observe(item)
             if task_complete_collector is not None:
                 task_complete_collector.observe(item)
-            if shell_subagent_stop_collector is not None:
-                shell_subagent_stop_collector.observe(item)
-            if shell_after_turn_end_collector is not None:
-                shell_after_turn_end_collector.observe(item)
-            if shell_pre_final_collector is not None:
-                shell_pre_final_collector.observe(item)
-            # PR-F-EXEC1: pre_final shell gate. Fires on the FIRST sight of
-            # an EngineResult — the synthesis pass is about to commit. If
-            # the operator's pre_final shell rule with action=block exits
-            # non-zero, replace the item with a synthetic
-            # ``customize_policy_blocked`` terminal so downstream consumers
-            # (CLI REPL, serve transport, telemetry) see the block honestly.
-            replaced = None
-            if shell_pre_final_collector is not None:
-                replaced = await shell_pre_final_collector.maybe_replace(item, ctx)
-            yield replaced if replaced is not None else item
+            _kind, _has_text_delta, _evidence_refs_count = _describe_stream_item(item)
+            if _stream_index < 5:
+                _maybe_log_trace_engine_stream_yield(
+                    _trace_env,
+                    index=_stream_index,
+                    kind=_kind,
+                    has_text_delta=_has_text_delta,
+                    evidence_refs_in_payload=_evidence_refs_count,
+                )
+            _last_index = _stream_index
+            _last_kind = _kind
+            _last_has_text_delta = _has_text_delta
+            _last_evidence_refs = _evidence_refs_count
+            _stream_index += 1
+            yield item
     finally:
+        # Emit the LAST yield separately when the stream produced more than
+        # the first-five window already covered. Avoids a double-log on
+        # short (<= 5) streams.
+        if _last_index >= 5:
+            _maybe_log_trace_engine_stream_yield(
+                _trace_env,
+                index=_last_index,
+                kind=_last_kind,
+                has_text_delta=_last_has_text_delta,
+                evidence_refs_in_payload=_last_evidence_refs,
+            )
         if bookend is not None:
             bookend.persist()
         if subagent_collector is not None:
@@ -190,6 +220,29 @@ async def run_governed_turn(
         if shell_after_turn_end_collector is not None:
             await shell_after_turn_end_collector.run_audit()
         _maybe_reset_shell_budget_identity(_shell_identity_token)
+
+
+def _describe_stream_item(item: object) -> tuple[object, bool, int]:
+    """PR-1: extract a small (kind, has_text_delta, evidence_refs_count) tuple
+    from an engine stream item for the ``stream_yield`` trace stamp.
+
+    Fail-soft: on any malformed item the helper returns
+    ``(None, False, 0)`` so the trace can NEVER break a turn.
+    """
+    try:
+        payload = getattr(item, "payload", None)
+        if not isinstance(payload, dict):
+            return (type(item).__name__, False, 0)
+        kind = payload.get("type")
+        text_delta = payload.get("text_delta")
+        if text_delta is None:
+            text_delta = payload.get("delta")
+        has_text_delta = isinstance(text_delta, str) and bool(text_delta)
+        refs = payload.get("evidence_refs") or payload.get("evidenceRefs")
+        refs_count = len(refs) if isinstance(refs, (list, tuple)) else 0
+        return (kind, has_text_delta, refs_count)
+    except Exception:  # noqa: BLE001
+        return (None, False, 0)
 
 
 class _BookendCollector:
@@ -733,9 +786,7 @@ class _OnTaskCompleteCollector:
                     # only — no compensating-action wire ships in v1.
                     for audit in audits:
                         if isinstance(audit, dict):
-                            audit["requires_approval"] = (
-                                gate_verdict == "ask"
-                            )
+                            audit["requires_approval"] = gate_verdict == "ask"
                             audit["gate_verdict"] = gate_verdict
             except Exception:
                 pass

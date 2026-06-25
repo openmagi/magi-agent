@@ -263,6 +263,68 @@ def _maybe_log_trace_degraded(
         return
 
 
+def _maybe_log_trace_drive_one_turn(
+    env: Mapping[str, str],
+    *,
+    phase: str,
+    provider: object,
+    model: object,
+    config_id: object,
+) -> None:
+    """PR-1: log ``_drive_one_turn`` enter/exit with the LIVE config's
+    provider / model / ``id(config)``.
+
+    The pre-existing ``_maybe_log_trace_turn_enter`` / ``_turn_exit`` pair
+    logs the ROUTE provider/model (what we asked for). This helper logs the
+    ACTUAL ``config`` argument the dispatch ran with, including
+    ``id(config)`` so two sibling spawns (anthropic vs google) can be
+    disambiguated even when the provider / model strings match. PR-1's
+    investigation hypothesis is that the silent-empty dispatches received a
+    config whose ``provider`` / ``model`` mismatches the route, which would
+    explain why ``self._provider_config`` (the init field) prints ``None``
+    while the route prints anthropic / google.
+    """
+    if not _empty_debug_enabled(env):
+        return
+    try:
+        _emit_trace(
+            f"[child_runner.trace] drive_one_turn_{phase} "
+            f"provider={provider!r} model={model!r} config_id={config_id}"
+        )
+    except Exception:  # noqa: BLE001
+        return
+
+
+def _maybe_log_trace_engine_stream_yield(
+    env: Mapping[str, str],
+    *,
+    index: int,
+    kind: object,
+    has_text_delta: bool,
+    evidence_refs_in_payload: int,
+) -> None:
+    """PR-1: log one event-stream yield in the governed-turn loop.
+
+    Imported by :mod:`magi_agent.runtime.governed_turn` so the trace surface
+    stays in ONE module (no parallel ``_emit_trace`` / env-gate copies). The
+    governed-turn caller decides cadence (first five + the last) so this
+    helper itself is cadence-agnostic. The operator's repro never drowns in
+    stream-yield lines but ALWAYS sees zero-yield divergence (i.e.
+    ``drive_one_turn_enter`` printed, ``stream_yield`` never did, and the
+    governed-empty-response guard tripped).
+    """
+    if not _empty_debug_enabled(env):
+        return
+    try:
+        _emit_trace(
+            f"[governed_turn.trace] stream_yield i={index} kind={kind} "
+            f"has_text_delta={has_text_delta} "
+            f"evidence_refs_in_payload={evidence_refs_in_payload}"
+        )
+    except Exception:  # noqa: BLE001
+        return
+
+
 # ---------------------------------------------------------------------------
 # Env-gate constants and helper (mirrors artifacts/file_delivery_live.py)
 # ---------------------------------------------------------------------------
@@ -671,12 +733,35 @@ class RealLocalChildRunner:
         default ceiling); on expiry ``asyncio.wait_for`` raises
         ``asyncio.TimeoutError`` which the caller maps to a degraded
         ``child_turn_timeout`` result. ``asyncio.CancelledError`` is NEVER
-        swallowed — it propagates.
+        swallowed; it propagates.
         """
-        return await asyncio.wait_for(
-            self._collect_turn_text(config, request),
-            timeout=self._turn_timeout_s(request),
+        # PR-1: operator-opt-in dispatch trace (MAGI_CHILD_RUNNER_EMPTY_DEBUG=1).
+        # The enter/exit pair surfaces the LIVE ``config`` the dispatch ran
+        # with, including ``id(config)`` so two sibling spawns can be
+        # disambiguated even when the provider/model strings match. Closes
+        # the gap between the route-resolved ``turn_enter`` and the
+        # collector-side observation that prints AFTER the engine stream
+        # completes.
+        _maybe_log_trace_drive_one_turn(
+            self._env,
+            phase="enter",
+            provider=getattr(config, "provider", None),
+            model=getattr(config, "model", None),
+            config_id=id(config),
         )
+        try:
+            return await asyncio.wait_for(
+                self._collect_turn_text(config, request),
+                timeout=self._turn_timeout_s(request),
+            )
+        finally:
+            _maybe_log_trace_drive_one_turn(
+                self._env,
+                phase="exit",
+                provider=getattr(config, "provider", None),
+                model=getattr(config, "model", None),
+                config_id=id(config),
+            )
 
     async def _collect_turn_text(
         self, config: object, request: object
@@ -797,10 +882,18 @@ class RealLocalChildRunner:
         # ``MAGI_CHILD_RUNNER_EMPTY_DEBUG=1`` the very next repro logs the
         # actual lengths + the first ref so the silent path is visible. No
         # behavior change when the flag is off.
+        # PR-1: the provider/model trace args MUST come from the live ``config``
+        # argument (the canonical, validated route handed to this method by
+        # ``_drive_one_turn``). The original wiring read ``self._provider_config``
+        # which is the constructor-time INIT field. On the live dispatch path
+        # it is ``None``, so the trace always printed ``provider=None
+        # model=None`` regardless of which route actually ran. That made the
+        # 0.1.85 SOTA-spawn trace useless for distinguishing anthropic / google
+        # / openai dispatches.
         _maybe_log_governed_collect_result(
             self._env,
-            provider=getattr(self._provider_config, "provider", None),
-            model=getattr(self._provider_config, "model", None),
+            provider=getattr(config, "provider", None),
+            model=getattr(config, "model", None),
             summary=summary,
             evidence_refs=evidence_refs,
             status=_status,
@@ -905,10 +998,14 @@ class RealLocalChildRunner:
         # legacy branch logs ``texts`` count + total length instead of joined
         # summary (which can be 0-length but the count tells us how many
         # chunks contributed).
+        # PR-1: see the matching comment in ``_collect_turn_text_governed``.
+        # Provider/model come from the live ``config`` argument, not
+        # ``self._provider_config`` (which is the constructor-time init field
+        # and is ``None`` on every live dispatch path).
         _maybe_log_legacy_collect_result(
             self._env,
-            provider=getattr(self._provider_config, "provider", None),
-            model=getattr(self._provider_config, "model", None),
+            provider=getattr(config, "provider", None),
+            model=getattr(config, "model", None),
             text_chunks=len(texts),
             text_total_len=sum(len(t) for t in texts),
             evidence_refs=evidence_refs,
