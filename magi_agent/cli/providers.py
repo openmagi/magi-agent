@@ -406,9 +406,16 @@ def resolve_provider_config(
     def model_for(provider: str) -> str:
         # Explicit overrides stay permissive — users can pin a new id before
         # the catalog learns about it (E-2). Built-in defaults are guarded.
+        # I-1: route ``MAGI_MODEL`` through the typed flag registry.
+        # ``flag_str`` returns "" for unset (matching the registered
+        # default); ``_clean_model("")`` returns None, byte-identical
+        # to the prior ``env.get("MAGI_MODEL")`` (None) → ``_clean_model``
+        # chain.
+        from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
         override = (
             _clean_model(effective_override_model)
-            or _clean_model(env.get("MAGI_MODEL"))
+            or _clean_model(flag_str("MAGI_MODEL", env=env))
             or _clean_model(model_section.get("model"))
         )
         if override is not None:
@@ -427,7 +434,10 @@ def resolve_provider_config(
             provider=slug_provider, model=model_for(slug_provider), api_key=api_key
         )
 
-    explicit = _clean(env.get("MAGI_PROVIDER")) or _clean(model_section.get("provider"))
+    # I-1: route ``MAGI_PROVIDER`` through the typed flag registry.
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    explicit = _clean(flag_str("MAGI_PROVIDER", env=env)) or _clean(model_section.get("provider"))
     if explicit:
         provider = explicit.lower()
         if provider not in SUPPORTED_PROVIDERS:
@@ -470,13 +480,17 @@ def resolve_vision_provider_config(
     try:
         env = os.environ if env is None else env
 
-        model = _clean_model(env.get("MAGI_VISION_MODEL"))
+        # I-1: route through the typed flag registry (vision sidecar
+        # was already registered as a public ``str`` FlagSpec).
+        from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+        model = _clean_model(flag_str("MAGI_VISION_MODEL", env=env))
         if model is None:
             return None
 
         config = _load_config_file() if config is None else config
 
-        vision_provider = _clean(env.get("MAGI_VISION_PROVIDER"))
+        vision_provider = _clean(flag_str("MAGI_VISION_PROVIDER", env=env))
         if vision_provider is not None:
             provider = vision_provider.lower()
             if provider not in SUPPORTED_PROVIDERS:
