@@ -3583,6 +3583,29 @@ def user_tool_packs_enabled(env: Mapping[str, str] | None = None) -> bool:
     return flag_bool(MAGI_USER_TOOL_PACKS_ENABLED_ENV, env=source)
 
 
+MAGI_USER_VALIDATOR_PACKS_ENABLED_ENV = "MAGI_USER_VALIDATOR_PACKS_ENABLED"
+
+
+def user_validator_packs_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the user VALIDATOR-pack execution gate (PR2).
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the
+    pre-final evidence gate never loads or runs user validator impls, so the gate
+    payload is byte-identical to before: a required-but-unobserved user validator
+    ref still blocks (block-only, the pre-PR2 behavior). When ON, the engine
+    loads disk-discovered validator impls and runs each required user validator
+    over the produced artifact; a passing verdict makes the ref count as observed
+    (satisfies ``required_validators``) and a failing verdict blocks with the
+    verdict detail. Like ``user_tool_packs_enabled`` this is an additive,
+    default-disabled seam and deliberately does NOT follow the runtime-profile
+    default-ON convention.
+    """
+    from .flags import flag_bool
+
+    source = os.environ if env is None else env
+    return flag_bool(MAGI_USER_VALIDATOR_PACKS_ENABLED_ENV, env=source)
+
+
 MAGI_PERMISSION_SCOPE_FROM_MODE_ENV = "MAGI_PERMISSION_SCOPE_FROM_MODE"
 MAGI_PERMISSION_SCOPE_LEGACY_FULL_TOOLHOST_ENV = (
     "MAGI_PERMISSION_SCOPE_LEGACY_FULL_TOOLHOST"

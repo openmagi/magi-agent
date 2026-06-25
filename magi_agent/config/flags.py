@@ -476,6 +476,14 @@ FLAGS: tuple[FlagSpec, ...] = (
             "tools."
         ),
     ),
+    _b(
+        "MAGI_USER_VALIDATOR_PACKS_ENABLED",
+        summary=(
+            "Execute user-authored validator pack impls at the pre-final "
+            "evidence gate; a passing verdict observes the required validator "
+            "ref, a failing verdict blocks with its detail."
+        ),
+    ),
     FlagSpec(
         name="MAGI_CODE_ACTION_TIMEOUT_MS",
         default=30_000,

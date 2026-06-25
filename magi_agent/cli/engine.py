@@ -3809,6 +3809,93 @@ class MagiEngineDriver:
             return ()
         return ()
 
+    def _run_user_validators(
+        self,
+        *,
+        required_validators: tuple[str, ...],
+        observed_public_refs: set[str],
+        session_id: str,
+        turn_id: str,
+        final_text: str,
+    ) -> list[dict[str, object]]:
+        """Execute user VALIDATOR pack impls over the produced artifact (PR2).
+
+        Default OFF: returns ``[]`` and never imports the pack pipeline, so the
+        caller's gate payload is byte-identical to before. When ON, for each
+        required validator ref whose impl is loaded, build a ``ValidatorCtx`` over
+        the produced artifact, call the impl, read its verdict, and:
+
+        * a PASSING verdict adds the ref to ``observed_public_refs`` (in place) so
+          ``required_validators`` is satisfied for that ref;
+        * a FAILING verdict leaves the ref missing (the caller blocks) and the
+          detail is returned for the bus payload.
+
+        Fail-closed: an impl that raises is treated as a failing verdict with an
+        error detail, so a broken user validator blocks rather than silently
+        passing. Returns the list of verdict dicts (``ref``/``passed``/``detail``)
+        for surfacing on ``verifierBus``.
+        """
+        from magi_agent.config.env import user_validator_packs_enabled  # noqa: PLC0415
+
+        if not user_validator_packs_enabled():
+            return []
+        if not required_validators:
+            return []
+        from magi_agent.packs.user_validators import (  # noqa: PLC0415
+            loaded_user_validator_impls,
+        )
+
+        impls = loaded_user_validator_impls()
+        if not impls:
+            return []
+
+        from magi_agent.packs.context import (  # noqa: PLC0415
+            SessionReadView,
+            ValidatorCtx,
+        )
+
+        artifact: dict[str, object] = {
+            "finalText": final_text,
+            "sessionId": session_id,
+            "turnId": turn_id,
+        }
+        session = SessionReadView(
+            invocation_id=session_id,
+            agent_name="magi",
+            turn_index=0,
+        )
+        verdicts: list[dict[str, object]] = []
+        for ref in required_validators:
+            impl = impls.get(ref)
+            if impl is None:
+                # A required validator with no loaded impl (e.g. a first-party
+                # recipe validator) is left for the existing observe paths.
+                continue
+            ctx = ValidatorCtx(ref=ref, artifact=artifact, session=session)
+            try:
+                impl(ctx)
+                verdict = ctx.verdict()
+            except Exception as exc:  # noqa: BLE001 - a broken validator blocks
+                verdicts.append(
+                    {"ref": ref, "passed": False,
+                     "detail": f"validator impl raised: {exc}"}
+                )
+                continue
+            if verdict is None:
+                # No emit() call ⇒ treat as a fail-closed block (the impl owed a
+                # verdict and produced none).
+                verdicts.append(
+                    {"ref": ref, "passed": False,
+                     "detail": "validator emitted no verdict"}
+                )
+                continue
+            verdicts.append(
+                {"ref": ref, "passed": verdict.passed, "detail": verdict.detail}
+            )
+            if verdict.passed:
+                observed_public_refs.add(ref)
+        return verdicts
+
     def _pre_final_gate_payload(
         self,
         *,
@@ -3864,6 +3951,20 @@ class MagiEngineDriver:
         )
         effective_required_evidence = tuple(
             dict.fromkeys((*assembly.evidence_requirements, *extra_evidence))
+        )
+        # PR2: run user-authored VALIDATOR impls over the produced artifact.
+        # Default OFF (and a no-op when no required validator has a loaded impl),
+        # so when OFF the gate payload is byte-identical to before: a required but
+        # unobserved user validator ref still blocks (the pre-PR2 block-only
+        # behavior). When ON, a passing verdict adds the ref to
+        # observed_public_refs (satisfies required_validators); a failing verdict
+        # leaves the ref missing (blocks) and its detail surfaces on the bus.
+        user_validator_verdicts = self._run_user_validators(
+            required_validators=effective_required_validators,
+            observed_public_refs=observed_public_refs,
+            session_id=session_id,
+            turn_id=turn_id,
+            final_text=final_text,
         )
         evidence_records: tuple[object, ...] = ()
         verifier_bus: dict[str, object] | None = None
@@ -4033,6 +4134,10 @@ class MagiEngineDriver:
             verifier_bus["missingValidators"] = missing_validators
             verifier_bus["failedDocumentCoverage"] = failed_document_coverage
             verifier_bus.setdefault("evidenceRecordCount", len(evidence_records))
+        # PR2: surface user validator verdicts (empty list when none ran, so the
+        # OFF path keeps the bus payload byte-identical).
+        if user_validator_verdicts:
+            verifier_bus["userValidatorVerdicts"] = user_validator_verdicts
         payload["verifierBus"] = verifier_bus
         if decision == "block" and effective_action == "repair_required":
             latest_test_evidence = (

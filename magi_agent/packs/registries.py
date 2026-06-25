@@ -177,6 +177,9 @@ class PackRegistries:
         self.tools = ToolRegistry()
         self.hooks = HookRegistry()
         self.evidence_producers = KeyedRefRegistry()
+        # Validator impls (Callable[[ValidatorCtx], None]) keyed by validator ref.
+        # The engine's pre-final gate runs these to OBSERVE a passing ref (PR2).
+        self.validators = KeyedRefRegistry()
         self.recipes = KeyedRefRegistry()
         self.roles = KeyedRefRegistry()
         self.connectors = KeyedRefRegistry()
@@ -310,6 +313,13 @@ def project_into_registries(
             registered.append(ref)
         elif ptype == "evidence_producer":
             impl(_ctx.EvidenceProducerProvideContext(register=_provide_evidence(registries)))
+            registered.append(ref)
+        elif ptype == "validator":
+            # A ``validator`` primitive's ``impl`` IS the validator callable
+            # ``(ValidatorCtx) -> ValidatorVerdict | None`` (D5); there is no
+            # ``provide`` indirection (unlike tool/evidence_producer/...). Register
+            # the impl directly so the engine's pre-final gate can run it.
+            registries.validators.replace(ref, impl)
             registered.append(ref)
         elif ptype == "recipe":
             impl(_ctx.RecipeProvideContext(register=_provide_recipe(registries)))
