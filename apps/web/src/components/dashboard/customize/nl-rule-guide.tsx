@@ -148,6 +148,21 @@ const EXAMPLES: ReadonlyArray<ExampleChip> = [
     label: "Run pytest before committing",
     text: "Before the final answer commits, verify via the shell script run-pytest.sh — the agent may finalize only when pytest exits 0.",
   },
+  // PR-F-UX11 — Binary-verdict-shaped phrasing examples. Both surfaces
+  // (llm_criterion and shell_check) produce a pass/fail verdict; these
+  // chips mirror the Guided wizard's GuidanceHintCard so an operator
+  // who arrives via the NL textarea sees the same "phrase as Yes/No"
+  // and "use exit code as the verdict" guidance the wizard surfaces.
+  {
+    archetype: "block",
+    label: "Block when sources are not cited (binary verdict)",
+    text: "block at pre_final when the response does not cite a source for every claim",
+  },
+  {
+    archetype: "shell",
+    label: "Run pytest; block on non-zero exit (binary verdict)",
+    text: "run shell pytest before committing; block if exit code is non-zero",
+  },
 ];
 
 

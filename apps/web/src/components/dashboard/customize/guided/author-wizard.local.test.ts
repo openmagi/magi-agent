@@ -2966,3 +2966,115 @@ describe("AuthorWizard — F-EXEC3 'Run shell script' archetype card", () => {
     );
   });
 });
+
+
+describe("AuthorWizard — F-UX11 binary verdict authoring guidance", () => {
+  it("defines a GuidanceHintCard component with header/body/good/bad slots and uses CheckCircle/XCircle icons", () => {
+    // The hint card is a small, display-only inline component
+    // surfaced under the llm_criterion text field and the shell_check
+    // script body. It must not introduce any interactive behavior — no
+    // onClick, no state, no validator hook.
+    expect(src).toContain("function GuidanceHintCard");
+    expect(src).toContain("header: string");
+    expect(src).toContain("body: string");
+    expect(src).toContain("goodLabel: string");
+    expect(src).toContain("badLabel: string");
+    expect(src).toMatch(/good: ReadonlyArray<string>/);
+    expect(src).toMatch(/bad: ReadonlyArray<string>/);
+    // ✅/❌ rendered as inline lucide icons rather than emoji glyphs so
+    // the icon set stays consistent with the rest of the wizard.
+    expect(src).toContain("CheckCircle");
+    expect(src).toContain("XCircle");
+    // lucide imports must include both new icons.
+    expect(src).toMatch(/import \{[\s\S]*?CheckCircle[\s\S]*?\} from "lucide-react"/);
+    expect(src).toMatch(/import \{[\s\S]*?XCircle[\s\S]*?\} from "lucide-react"/);
+  });
+
+  it("renders the binary-verdict GuidanceHintCard under the criterion input on the llm_criterion branch", () => {
+    // Site (A) — under the TextField that captures
+    // ``draft.criterion`` inside the ``draft.conditionKind === "llm_criterion"``
+    // branch of SpecificsStep. The card sits AFTER the TextField, not
+    // before, so the input stays the primary focus.
+    expect(src).toMatch(
+      /draft\.conditionKind === "llm_criterion"[\s\S]*?label="LLM criterion \(single sentence\)"[\s\S]*?<GuidanceHintCard[\s\S]*?header="Write as a Yes\/No question"/,
+    );
+    // Body must mention the binary/verdict contract verbatim.
+    expect(src).toContain(
+      'body="The critic produces a binary verdict (pass/fail). Phrase your criterion so it can be answered Yes or No."',
+    );
+    // Good examples — at least the three operator-facing Yes/No prompts.
+    expect(src).toContain(
+      '"Does the answer cite at least one source for every factual claim?"',
+    );
+    expect(src).toContain('"Does the response include the requested file path?"');
+    expect(src).toContain(
+      '"Did the agent ask for clarification before making destructive changes?"',
+    );
+    // Bad examples — scaled, subjective, open-ended foot-guns.
+    expect(src).toContain(
+      '"How well does the answer address the question? (scaled answer, inconsistent verdict)"',
+    );
+    expect(src).toContain(
+      '"Is this a good response? (subjective adjective, no clear bar)"',
+    );
+    expect(src).toContain(
+      '"What\'s wrong with this output? (open-ended, not binary)"',
+    );
+  });
+
+  it("renders the binary-verdict GuidanceHintCard inside ShellCommandPicker when mode='check'", () => {
+    // Site (B) — the ShellCheckPicker is a thin wrapper over
+    // ShellCommandPicker; F-UX11 adds a ``mode`` prop so the check
+    // branch gets the stdout JSON / exit code contract spelled out
+    // under the source toggle. The command branch (action-shaped
+    // slots) intentionally omits the card.
+    expect(src).toMatch(/mode\?:\s*"command"\s*\|\s*"check"/);
+    expect(src).toContain('mode = "command"');
+    // ShellCheckPicker must pass mode="check" to the shared picker.
+    expect(src).toMatch(
+      /function ShellCheckPicker[\s\S]*?<ShellCommandPicker[\s\S]*?mode="check"/,
+    );
+    // The check-only card lives inside the ``mode === "check"``
+    // conditional inside ShellCommandPicker.
+    expect(src).toMatch(
+      /mode === "check"[\s\S]*?<GuidanceHintCard[\s\S]*?header="Emit a binary verdict"/,
+    );
+    // Body must describe the verdict resolution order (stdout preferred,
+    // exit code fallback).
+    expect(src).toContain(
+      'body="The runtime reads your verdict from stdout (preferred) or exit code (fallback). Pick one of:"',
+    );
+    // Good examples — both stdout JSON one-liners and exit-code fallbacks.
+    expect(src).toMatch(/echo '\{\\"passed\\":true\\?\}'/);
+    expect(src).toMatch(
+      /echo '\{\\"passed\\":false,\\"reason\\":\\"tests failed: 2 of 17\\"\\?\}'/,
+    );
+    expect(src).toContain("pytest --quiet");
+    expect(src).toContain("[ -s output.txt ]");
+    // Bad examples — free-form prose / mixed shapes.
+    expect(src).toContain('echo \\"result: $RESULT\\"');
+    expect(src).toMatch(/mix prose with verdict/);
+  });
+
+  it("F-UX11 hint cards are display-only — F-EXEC1 disclaimer banner is preserved verbatim", () => {
+    // The F-EXEC1 "magi does not verify the script" amber-bordered
+    // disclaimer must still render above the source toggle in
+    // ShellCommandPicker; the F-UX11 card is ADDITIONAL guidance about
+    // verdict shape, not a replacement for the safety disclaimer.
+    expect(src).toContain(
+      "This command runs as you on the host. magi does not verify the",
+    );
+    // The hint card is purely informational — must not introduce any
+    // onClick / onChange / useState plumbing.
+    expect(src).toMatch(
+      /function GuidanceHintCard[\s\S]*?\}\s*\n\s*\n\s*\/\/ -+/,
+    );
+    const guidanceBlock = src.slice(
+      src.indexOf("function GuidanceHintCard"),
+      src.indexOf("function ShellCommandPicker"),
+    );
+    expect(guidanceBlock).not.toMatch(/onClick=/);
+    expect(guidanceBlock).not.toMatch(/onChange=/);
+    expect(guidanceBlock).not.toMatch(/useState\(/);
+  });
+});

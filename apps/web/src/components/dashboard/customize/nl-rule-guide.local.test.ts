@@ -96,3 +96,26 @@ describe("NlRuleGuide — F6.5 llm_criterion + contentMatch combo example", () =
     );
   });
 });
+
+
+describe("NlRuleGuide — F-UX11 binary-verdict phrasing examples", () => {
+  it("ships a pre_final binary-verdict block example mirroring the wizard GuidanceHintCard", () => {
+    // F-UX11 surfaces the same Yes/No verdict shape in the NL guide so
+    // an operator who arrives via the textarea sees the binary contract
+    // before drafting a vague llm_criterion. The chip text must arrive
+    // at the NL compiler verbatim via onPickExample.
+    expect(src).toContain(
+      "block at pre_final when the response does not cite a source for every claim",
+    );
+  });
+
+  it("ships a shell_check pytest binary-verdict example covering the exit-code fallback", () => {
+    // The shell_check verifier resolves the verdict from stdout JSON
+    // first, exit code second. This example chip primes the operator
+    // for the exit-code path (pytest exits non-zero on failure) which
+    // is the most common verdict shape for off-the-shelf test runners.
+    expect(src).toContain(
+      "run shell pytest before committing; block if exit code is non-zero",
+    );
+  });
+});
