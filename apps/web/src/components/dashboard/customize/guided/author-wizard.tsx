@@ -700,11 +700,58 @@ export function AuthorWizard({
 // they don't exist.
 type LifecycleTier = "tier1" | "tier2" | "tier3";
 
+// PR-F-UX8 — COMMON / ADVANCED partition + collapsible groups for the
+// Trigger step's lifecycle picker. The flat 16-card list buried the
+// four most-authored slots under long descriptive subtext for rarer
+// slots; F-UX8 splits the list along an operator-frequency axis so the
+// COMMON set stays at the top while the long tail collapses into a small
+// number of named groups.
+//
+// Group taxonomy mirrors docs/plans/2026-06-25-customize-fux7-flife4-
+// trigger-and-action-matrix-design.md §PR-F-UX8:
+//   * COMMON (sentinel "common")        — 4 most-authored slots
+//   * TURN LIFECYCLE  ("turn")          — turn-boundary + subagent stop
+//   * LLM CALL        ("llm_call")      — per-LLM-call audit emitters
+//   * CONTENT FLOW    ("content_flow")  — compaction boundary
+//   * TASK & SESSION  ("task_session")  — task/session boundary emitters
+//   * ARTIFACTS       ("artifacts")     — artifact-create boundary
+//   * CAPABILITY      ("capability")    — capability_scope-shaped slots
+//
+// CAPABILITY (spawn) is intentionally empty in v1: capability_scope rules
+// are authored via a different (non-lifecycle) path today, but the group
+// is reserved so a follow-up adding a spawn lifecycle slot doesn't need
+// to re-do the taxonomy. The group renders honest-degrade (count=0) and
+// LifecyclePickerAdvanced skips empty groups so it doesn't clutter the UI.
+//
+// Honest-degrade: when MAGI_CUSTOMIZE_LIFECYCLE_SESSION_TASK_EMITTERS_
+// ENABLED is OFF the three F-LIFE4b slots may be absent from
+// LIFECYCLE_OPTIONS (handled by the lifecycle source — see F-LIFE4b
+// tests). The TASK & SESSION group then renders with the remaining
+// member (on_task_checkpoint, count=1); when the flag flips the group
+// fills out without any UI change.
+type LifecycleGroupKey =
+  | "turn"
+  | "llm_call"
+  | "content_flow"
+  | "task_session"
+  | "artifacts"
+  | "capability";
+
 interface LifecycleOption {
   id: Lifecycle | string;
   label: string;
   description: string;
   tier: LifecycleTier;
+  // PR-F-UX8 — partition key. "common" places the slot in the top
+  // always-expanded section; any LifecycleGroupKey places it in the
+  // matching collapsible group inside the ADVANCED partition.
+  group: LifecycleGroupKey | "common";
+  // PR-F-UX8 — when set, the slot renders with a small green pill at
+  // the top of its rendered card. v1 hardcodes a single
+  // ``recommended`` slot (``before_tool_use``); v2 could derive from
+  // usage telemetry. Keys mirror the RadioCardProps.badge contract so
+  // styling stays in one place.
+  badge?: "recommended";
   disabledReason?: string;
 }
 
@@ -715,18 +762,25 @@ const LIFECYCLE_OPTIONS: ReadonlyArray<LifecycleOption> = [
     label: "Before a tool runs",
     description: "Fires at PreToolUse — before the agent invokes a tool.",
     tier: "tier1",
+    // PR-F-UX8 — most-authored slot across CC-equivalent operator
+    // surveys; pinned as the COMMON top entry and badged
+    // ``recommended`` so first-time authors land here by default.
+    group: "common",
+    badge: "recommended",
   },
   {
     id: "after_tool_use",
     label: "After a tool returns",
     description: "Fires at PostToolUse — before the agent reads the tool's output.",
     tier: "tier1",
+    group: "common",
   },
   {
     id: "pre_final",
     label: "Before the final answer commits",
     description: "Fires just before the runtime accepts the agent's final answer.",
     tier: "tier1",
+    group: "common",
   },
   // --- Tier 2 — wired in PR-F-UX1, audit-only ------------------------------
   {
@@ -735,6 +789,10 @@ const LIFECYCLE_OPTIONS: ReadonlyArray<LifecycleOption> = [
     description:
       "Fires at BEFORE_SYSTEM_PROMPT — adjacent to system-prompt assembly. Audit-only: records the criterion verdict without mutating the assembled prompt.",
     tier: "tier2",
+    // PR-F-UX8 — the fourth COMMON slot per the spec taxonomy.
+    // System-prompt-adjacent authoring lives next to the tool gates
+    // because operators reach for it just as often.
+    group: "common",
   },
   {
     id: "on_subagent_stop",
@@ -742,6 +800,7 @@ const LIFECYCLE_OPTIONS: ReadonlyArray<LifecycleOption> = [
     description:
       "Fires after a spawned child agent's turn completes. Audit-only by default; block / ask actions are now accepted so an operator can require the child to produce a summary the parent caller can act on.",
     tier: "tier2",
+    group: "turn",
   },
   // --- Tier 2 — wired in PR-F-LIFE1, audit-only ----------------------------
   {
@@ -750,6 +809,7 @@ const LIFECYCLE_OPTIONS: ReadonlyArray<LifecycleOption> = [
     description:
       "Fires once per top-level turn before the engine stream starts — use for session-level checks (rare). Audit-only: records the criterion verdict without mutating the inbound prompt or blocking the turn.",
     tier: "tier2",
+    group: "turn",
   },
   {
     id: "after_turn_end",
@@ -757,6 +817,7 @@ const LIFECYCLE_OPTIONS: ReadonlyArray<LifecycleOption> = [
     description:
       "Fires once per top-level turn after the engine stream completes — use for session-level checks (rare). Audit-only: the top-level emission has already completed, so blocks aren't honest at this slot.",
     tier: "tier2",
+    group: "turn",
   },
   // --- Tier 2 — wired in PR-F-LIFE2, audit-only with per-turn cost ceiling -
   {
@@ -765,6 +826,7 @@ const LIFECYCLE_OPTIONS: ReadonlyArray<LifecycleOption> = [
     description:
       "Fires once per LLM call within a turn — capped at 3 invocations per turn by default (env MAGI_CUSTOMIZE_LLM_CALL_AUDIT_BUDGET) to prevent runaway critic cost. Audit-only: records the criterion verdict without mutating the outbound prompt or blocking the call.",
     tier: "tier2",
+    group: "llm_call",
   },
   {
     id: "after_llm_call",
@@ -772,6 +834,7 @@ const LIFECYCLE_OPTIONS: ReadonlyArray<LifecycleOption> = [
     description:
       "Fires once per LLM call within a turn — capped at 3 invocations per turn by default (env MAGI_CUSTOMIZE_LLM_CALL_AUDIT_BUDGET) to prevent runaway critic cost. Audit-only: inspects the model's just-emitted text without rewriting it.",
     tier: "tier2",
+    group: "llm_call",
   },
   // --- Tier 2 — wired in PR-F-LIFE3, audit-only ----------------------------
   {
@@ -780,6 +843,7 @@ const LIFECYCLE_OPTIONS: ReadonlyArray<LifecycleOption> = [
     description:
       "Fires immediately before the context-compaction plugin trims the model request — covers both the automatic threshold/real-token decision path and the manual /compact force path. Audit-only: inspects the about-to-be-trimmed context size without altering the compaction decision.",
     tier: "tier2",
+    group: "content_flow",
   },
   {
     id: "after_compaction",
@@ -787,6 +851,7 @@ const LIFECYCLE_OPTIONS: ReadonlyArray<LifecycleOption> = [
     description:
       "Fires immediately after the context-compaction plugin completes a tail-drop or summary-head injection. Audit-only: inspects how much context was kept vs dropped (the compaction has already taken effect by this point).",
     tier: "tier2",
+    group: "content_flow",
   },
   {
     id: "on_task_checkpoint",
@@ -794,6 +859,7 @@ const LIFECYCLE_OPTIONS: ReadonlyArray<LifecycleOption> = [
     description:
       "Fires at each durable work-queue task status transition — claimed / completed / failed / short_circuited — inside the dispatcher tick. Audit-only: inspects per-task summaries / errors without interfering with dispatch.",
     tier: "tier2",
+    group: "task_session",
   },
   {
     id: "on_artifact_created",
@@ -801,6 +867,7 @@ const LIFECYCLE_OPTIONS: ReadonlyArray<LifecycleOption> = [
     description:
       "Fires immediately after a successful artifact write through the file-delivery boundary (ok-status branch only). Audit-only: inspects the artifact ref + a bounded excerpt without rewriting the written bytes.",
     tier: "tier2",
+    group: "artifacts",
   },
   // --- Tier 2 — wired in PR-F-LIFE4b -------------------------------------
   {
@@ -809,6 +876,7 @@ const LIFECYCLE_OPTIONS: ReadonlyArray<LifecycleOption> = [
     description:
       "Fires when the agent declares the user's multi-turn task done via a <task_done> marker in the final assistant text (honest-degrade: no marker → no fire — operators authoring at this slot get no false positives on every-turn-end). PR-F-LIFE4b: block records the audit ledger entry but does not roll back the already-emitted final turn (matches on_subagent_stop honest-degrade); ask surfaces requires_approval=true.",
     tier: "tier2",
+    group: "task_session",
   },
   {
     id: "on_session_start",
@@ -816,6 +884,7 @@ const LIFECYCLE_OPTIONS: ReadonlyArray<LifecycleOption> = [
     description:
       "Fires on the FIRST model call per session — subsequent model calls within the same session do NOT re-fire (LifecycleSessionControl tracks a FIFO-bounded per-session 'seen' OrderedDict, cap 128). PR-F-LIFE4b: block REPLACES the model output with a synthetic policy-blocked response via the ADK before_model boundary (refuses the session).",
     tier: "tier2",
+    group: "task_session",
   },
   {
     id: "on_session_end",
@@ -823,8 +892,107 @@ const LIFECYCLE_OPTIONS: ReadonlyArray<LifecycleOption> = [
     description:
       "Fires when a session is gracefully closed or evicted (graceful CLI shutdown, serve session-pool eviction). PR-F-LIFE4b v1 honest-degrade: the wizard exposes the slot so operators can author rules ahead of the transport wire, but the runtime emit wire ships in a follow-up — the audit ledger stays silent until then.",
     tier: "tier2",
+    group: "task_session",
   },
 ];
+
+
+// PR-F-UX8 — group meta drives the ADVANCED partition rendering. Order
+// mirrors the rendering order from top to bottom inside ADVANCED. Each
+// group declares a defaultExpanded flag: v1 leaves all groups collapsed
+// (defaultExpanded=false) so the partition stays compact; a follow-up
+// could derive the flag from telemetry of last-authored slot per group.
+//
+// description is the muted member-preview text rendered next to the
+// group title — it is NOT a docstring, so keep it to a single line of
+// representative slot names. The collapsible group card derives the
+// total event count by filtering LIFECYCLE_OPTIONS — adding / removing
+// a slot from the group list does not require touching the meta.
+const LIFECYCLE_GROUP_META: Record<
+  LifecycleGroupKey,
+  { title: string; description: string; defaultExpanded: boolean }
+> = {
+  turn: {
+    title: "TURN LIFECYCLE",
+    description: "before_turn_start, after_turn_end, on_subagent_stop",
+    defaultExpanded: false,
+  },
+  llm_call: {
+    title: "LLM CALL (audit-only)",
+    description: "before_llm_call, after_llm_call",
+    defaultExpanded: false,
+  },
+  content_flow: {
+    title: "CONTENT FLOW",
+    description: "before_compaction, after_compaction",
+    defaultExpanded: false,
+  },
+  task_session: {
+    title: "TASK & SESSION",
+    description: "on_task_checkpoint, on_task_complete, on_session_start, on_session_end",
+    defaultExpanded: false,
+  },
+  artifacts: {
+    title: "ARTIFACTS",
+    description: "on_artifact_created",
+    defaultExpanded: false,
+  },
+  capability: {
+    // Honest-degrade: capability_scope rules are authored via a separate
+    // (non-lifecycle) path in v1, so this group renders empty (count=0)
+    // and is skipped by LifecyclePickerAdvanced. The group is reserved
+    // so a follow-up adding a spawn lifecycle slot doesn't need to re-do
+    // the taxonomy.
+    title: "CAPABILITY",
+    description: "spawn (capability_scope authoring — author via Capabilities tab)",
+    defaultExpanded: false,
+  },
+};
+
+
+// PR-F-UX8 — declarative ordering of ADVANCED groups inside the picker.
+// Render-order is a single source of truth so tests and the renderer
+// agree without a stable Object.keys ordering assumption.
+const LIFECYCLE_ADVANCED_GROUP_ORDER: ReadonlyArray<LifecycleGroupKey> = [
+  "turn",
+  "llm_call",
+  "content_flow",
+  "task_session",
+  "artifacts",
+  "capability",
+];
+
+
+// PR-F-UX8 — helper for case-insensitive substring match over slot id,
+// label, and description. Used by LifecyclePickerSearch to filter the
+// flat list when the search query is non-empty. Lifted out of the
+// component body so tests can pin the matcher contract directly.
+//
+// Behavioural contract (true/false on representative inputs) lives in
+// ``author-wizard.lifecycle-matcher.local.test.ts``. The wizard module
+// transitively imports `@/lib/customize-api`, so the test mirrors the
+// matcher rather than importing it directly; the sibling
+// ``author-wizard.local.test.ts`` shape-pin (regex over this body)
+// guards drift between the mirror and the real implementation.
+function lifecycleOptionMatchesQuery(
+  opt: LifecycleOption,
+  query: string,
+): boolean {
+  const q = query.trim().toLowerCase();
+  if (q.length === 0) {
+    return true;
+  }
+  if (opt.id.toLowerCase().includes(q)) {
+    return true;
+  }
+  if (opt.label.toLowerCase().includes(q)) {
+    return true;
+  }
+  if (opt.description.toLowerCase().includes(q)) {
+    return true;
+  }
+  return false;
+}
 
 
 const SCOPE_OPTIONS: ReadonlyArray<{
@@ -849,6 +1017,224 @@ function lifecycleHasToolTarget(lifecycle: Lifecycle): boolean {
 }
 
 
+// PR-F-UX8 — render a single lifecycle option as a RadioCard. Factored
+// out of the fieldset body so COMMON, ADVANCED, and SEARCH renderers
+// share one definition (the alternative was three near-identical inline
+// JSX blocks). The card preserves the F-UX1 Tier 3 disabled contract.
+function LifecycleRadioCard({
+  opt,
+  draft,
+  update,
+}: {
+  opt: LifecycleOption;
+  draft: Draft;
+  update: (patch: Partial<Draft>) => void;
+}): React.ReactElement {
+  // Tier 3 entries render visible-but-disabled with an honest tooltip;
+  // the operator sees the option exists in the runtime but learns it
+  // needs a file hook authored via ~/.magi/settings.json instead.
+  const isDisabled = opt.tier === "tier3";
+  return (
+    <RadioCard
+      checked={draft.lifecycle === (opt.id as Lifecycle)}
+      onClick={() => update({ lifecycle: opt.id as Lifecycle })}
+      label={opt.label}
+      description={opt.description}
+      badge={opt.badge}
+      disabled={isDisabled}
+      disabledReason={opt.disabledReason}
+    />
+  );
+}
+
+
+// PR-F-UX8 — debounced search input. The 150ms debounce avoids re-
+// rendering every keystroke for the partition-bypassing flat list.
+// We hold the raw input value locally so the field stays controlled,
+// and surface the debounced query upward via onQueryChange. Empty
+// queries propagate immediately (no debounce on clear) so clearing
+// the input snaps the partition back without a perceived lag.
+function LifecyclePickerSearch({
+  onQueryChange,
+}: {
+  onQueryChange: (query: string) => void;
+}): React.ReactElement {
+  const [value, setValue] = useState<string>("");
+  useEffect(() => {
+    if (value.trim().length === 0) {
+      onQueryChange("");
+      return;
+    }
+    const handle = setTimeout(() => {
+      onQueryChange(value);
+    }, 150);
+    return () => {
+      clearTimeout(handle);
+    };
+  }, [value, onQueryChange]);
+  return (
+    <label className="block">
+      <span className="sr-only">Search lifecycle events</span>
+      <input
+        type="search"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="Search lifecycle events (e.g. tool, compaction, session)"
+        data-testid="lifecycle-picker-search"
+        className="w-full rounded-lg border border-black/[0.08] bg-white px-3 py-2 text-sm text-foreground placeholder:text-secondary/60 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+      />
+    </label>
+  );
+}
+
+
+// PR-F-UX8 — the always-expanded COMMON partition. Renders the 4 most-
+// authored slots in declared order (before_tool_use is pinned first
+// with the RECOMMENDED badge). When the source list does not contain
+// a given common slot (e.g. a future flag-flip removes one), the row
+// simply doesn't render — no honest-degrade banner needed.
+function LifecyclePickerCommon({
+  draft,
+  update,
+}: {
+  draft: Draft;
+  update: (patch: Partial<Draft>) => void;
+}): React.ReactElement {
+  const common = LIFECYCLE_OPTIONS.filter((opt) => opt.group === "common");
+  return (
+    <div className="space-y-2" data-testid="lifecycle-picker-common">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+        Common
+      </p>
+      {common.map((opt) => (
+        <LifecycleRadioCard
+          key={opt.id}
+          opt={opt}
+          draft={draft}
+          update={update}
+        />
+      ))}
+    </div>
+  );
+}
+
+
+// PR-F-UX8 — collapsible group card. Native <details>/<summary> for
+// zero-dep keyboard/a11y; the open state is controlled so that
+//   (a) selecting a slot inside the group forces it open (spec:
+//       "picked slot inside an ADVANCED group keeps the group expanded
+//        after selection"),
+//   (b) the parent can force-open all groups that contain a search
+//       match (search bypasses the partition so this is unused today,
+//       but keeping the prop controlled future-proofs the search-with-
+//       partition v2 path).
+function LifecycleGroupCard({
+  groupKey,
+  members,
+  draft,
+  update,
+  forceOpen,
+}: {
+  groupKey: LifecycleGroupKey;
+  members: ReadonlyArray<LifecycleOption>;
+  draft: Draft;
+  update: (patch: Partial<Draft>) => void;
+  forceOpen?: boolean;
+}): React.ReactElement | null {
+  const meta = LIFECYCLE_GROUP_META[groupKey];
+  // Group is empty (e.g. capability group in v1, or flag-degraded
+  // task_session group) → skip rendering entirely so we don't ship a
+  // dead row.
+  if (members.length === 0) {
+    return null;
+  }
+  // A selected slot inside this group should keep the card expanded
+  // even after the operator collapses it once — open is sticky once
+  // selection happens, matching the spec contract.
+  const selectedInGroup = members.some(
+    (opt) => draft.lifecycle === (opt.id as Lifecycle),
+  );
+  const [open, setOpen] = useState<boolean>(
+    Boolean(forceOpen) || meta.defaultExpanded || selectedInGroup,
+  );
+  useEffect(() => {
+    if (forceOpen || selectedInGroup) {
+      setOpen(true);
+    }
+  }, [forceOpen, selectedInGroup]);
+  return (
+    <details
+      open={open}
+      onToggle={(e) => {
+        setOpen((e.target as HTMLDetailsElement).open);
+      }}
+      className="rounded-xl border border-black/[0.06] bg-gray-50/60"
+      data-testid={`lifecycle-group-${groupKey}`}
+    >
+      <summary className="flex cursor-pointer items-center justify-between gap-3 px-4 py-3">
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-secondary/80">
+            {meta.title}
+          </p>
+          <p className="mt-0.5 truncate text-[11px] text-secondary/70">
+            {meta.description}
+          </p>
+        </div>
+        <span className="shrink-0 rounded-full bg-black/[0.05] px-2 py-0.5 text-[10px] font-semibold text-secondary">
+          {members.length} {members.length === 1 ? "event" : "events"}
+        </span>
+      </summary>
+      <div className="space-y-2 border-t border-black/[0.06] px-3 py-3">
+        {members.map((opt) => (
+          <LifecycleRadioCard
+            key={opt.id}
+            opt={opt}
+            draft={draft}
+            update={update}
+          />
+        ))}
+      </div>
+    </details>
+  );
+}
+
+
+// PR-F-UX8 — the collapsible ADVANCED partition. Renders one
+// LifecycleGroupCard per non-COMMON group in the declared render order.
+// Empty groups are pruned by LifecycleGroupCard itself so honest-degrade
+// (e.g. capability_scope authored elsewhere; F-LIFE4b flag-off) doesn't
+// leak a dead-zero row.
+function LifecyclePickerAdvanced({
+  draft,
+  update,
+}: {
+  draft: Draft;
+  update: (patch: Partial<Draft>) => void;
+}): React.ReactElement {
+  return (
+    <div className="space-y-2" data-testid="lifecycle-picker-advanced">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+        Advanced
+      </p>
+      {LIFECYCLE_ADVANCED_GROUP_ORDER.map((groupKey) => {
+        const members = LIFECYCLE_OPTIONS.filter(
+          (opt) => opt.group === groupKey,
+        );
+        return (
+          <LifecycleGroupCard
+            key={groupKey}
+            groupKey={groupKey}
+            members={members}
+            draft={draft}
+            update={update}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+
 function TriggerStep({
   draft,
   update,
@@ -859,6 +1245,19 @@ function TriggerStep({
   tools: ToolItem[];
 }): React.ReactElement {
   const showToolTarget = lifecycleHasToolTarget(draft.lifecycle);
+  // PR-F-UX8 — search query state lives in TriggerStep so the COMMON /
+  // ADVANCED partition can be bypassed when query is non-empty. The
+  // child input debounces 150ms before propagating.
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const searching = searchQuery.trim().length > 0;
+  const searchMatches = useMemo(() => {
+    if (!searching) {
+      return [] as ReadonlyArray<LifecycleOption>;
+    }
+    return LIFECYCLE_OPTIONS.filter((opt) =>
+      lifecycleOptionMatchesQuery(opt, searchQuery),
+    );
+  }, [searchQuery, searching]);
   return (
     <div className="space-y-5">
       <div className="space-y-2">
@@ -870,27 +1269,40 @@ function TriggerStep({
         </p>
       </div>
 
-      <fieldset className="space-y-2">
+      <fieldset className="space-y-3">
         <legend className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
           Lifecycle event
         </legend>
-        {LIFECYCLE_OPTIONS.map((opt) => {
-          // Tier 3 entries render visible-but-disabled with an honest tooltip;
-          // the operator sees the option exists in the runtime but learns it
-          // needs a file hook authored via ~/.magi/settings.json instead.
-          const isDisabled = opt.tier === "tier3";
-          return (
-            <RadioCard
-              key={opt.id}
-              checked={draft.lifecycle === (opt.id as Lifecycle)}
-              onClick={() => update({ lifecycle: opt.id as Lifecycle })}
-              label={opt.label}
-              description={opt.description}
-              disabled={isDisabled}
-              disabledReason={opt.disabledReason}
-            />
-          );
-        })}
+        <LifecyclePickerSearch onQueryChange={setSearchQuery} />
+        {searching ? (
+          searchMatches.length === 0 ? (
+            <p
+              className="rounded-lg border border-dashed border-black/[0.1] bg-gray-50/60 px-3 py-4 text-center text-xs text-secondary"
+              data-testid="lifecycle-picker-no-matches"
+            >
+              No matches. Try a different keyword.
+            </p>
+          ) : (
+            <div
+              className="space-y-2"
+              data-testid="lifecycle-picker-search-results"
+            >
+              {searchMatches.map((opt) => (
+                <LifecycleRadioCard
+                  key={opt.id}
+                  opt={opt}
+                  draft={draft}
+                  update={update}
+                />
+              ))}
+            </div>
+          )
+        ) : (
+          <>
+            <LifecyclePickerCommon draft={draft} update={update} />
+            <LifecyclePickerAdvanced draft={draft} update={update} />
+          </>
+        )}
       </fieldset>
 
       <fieldset className="space-y-2">

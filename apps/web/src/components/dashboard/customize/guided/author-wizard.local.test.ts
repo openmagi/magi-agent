@@ -2174,3 +2174,283 @@ describe("AuthorWizard — PR-F-UX7 tool name combobox", () => {
     expect(src).toContain('id={dangerousId}');
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// PR-F-UX8 — Lifecycle picker COMMON / ADVANCED reorganization.
+//
+// The flat 16-card list buried the four most-authored slots; F-UX8 splits
+// the picker into a COMMON section (always expanded, 4 cards) + ADVANCED
+// section (collapsible group cards) + a debounced search input that
+// bypasses the partition. The taxonomy lives in LIFECYCLE_OPTIONS.group
+// + LIFECYCLE_GROUP_META; the renderers live in three small helper
+// sub-components (LifecyclePickerSearch / LifecyclePickerCommon /
+// LifecyclePickerAdvanced) so the structure stays inspectable.
+// ---------------------------------------------------------------------------
+
+
+describe("AuthorWizard — PR-F-UX8 lifecycle picker COMMON / ADVANCED reorganization", () => {
+  it("LifecycleOption interface gains the `group` partition field (and optional `badge`)", () => {
+    // The partition contract is enforced at the type level so a missing
+    // group on a new lifecycle entry fails the typecheck rather than
+    // silently rendering nowhere.
+    expect(src).toMatch(
+      /interface LifecycleOption\s*\{[\s\S]*?group:\s*LifecycleGroupKey\s*\|\s*"common"/,
+    );
+    expect(src).toMatch(
+      /interface LifecycleOption\s*\{[\s\S]*?badge\?:\s*"recommended"/,
+    );
+  });
+
+  it("declares the 6 ADVANCED group keys plus the COMMON sentinel", () => {
+    // The taxonomy mirrors docs/plans/2026-06-25-customize-fux7-flife4-
+    // trigger-and-action-matrix-design.md §PR-F-UX8.
+    expect(src).toMatch(
+      /type LifecycleGroupKey =\s*\|\s*"turn"[\s\S]*?\|\s*"llm_call"[\s\S]*?\|\s*"content_flow"[\s\S]*?\|\s*"task_session"[\s\S]*?\|\s*"artifacts"[\s\S]*?\|\s*"capability"/,
+    );
+  });
+
+  it("the 4 COMMON slots are pinned to group:'common' in declared order", () => {
+    // COMMON contract from the spec:
+    //   before_tool_use, after_tool_use, pre_final, on_user_prompt_submit
+    expect(src).toMatch(
+      /id: "before_tool_use"[\s\S]*?group: "common"/,
+    );
+    expect(src).toMatch(
+      /id: "after_tool_use"[\s\S]*?group: "common"/,
+    );
+    expect(src).toMatch(
+      /id: "pre_final"[\s\S]*?group: "common"/,
+    );
+    expect(src).toMatch(
+      /id: "on_user_prompt_submit"[\s\S]*?group: "common"/,
+    );
+  });
+
+  it("before_tool_use carries the RECOMMENDED badge (v1 hardcoded top-of-COMMON)", () => {
+    // Spec: v1 hardcodes the recommendation to before_tool_use; v2 could
+    // derive from usage telemetry. The badge keys mirror RadioCardProps
+    // so the existing emerald-pill styling applies without new chrome.
+    expect(src).toMatch(
+      /id: "before_tool_use"[\s\S]*?badge: "recommended"/,
+    );
+  });
+
+  it("only ONE LIFECYCLE_OPTIONS entry carries badge:'recommended' (v1 single-pin)", () => {
+    // Multiple recommendations would defeat the purpose of "top slot per
+    // category". Pin the cardinality so a future per-group badge needs
+    // an explicit spec uplift first.
+    const matches = src.match(/badge: "recommended"/g) ?? [];
+    expect(matches.length).toBe(1);
+  });
+
+  it("TURN LIFECYCLE group pins its 3 members", () => {
+    // Spec: before_turn_start, after_turn_end, on_subagent_stop.
+    expect(src).toMatch(
+      /id: "before_turn_start"[\s\S]*?group: "turn"/,
+    );
+    expect(src).toMatch(
+      /id: "after_turn_end"[\s\S]*?group: "turn"/,
+    );
+    expect(src).toMatch(
+      /id: "on_subagent_stop"[\s\S]*?group: "turn"/,
+    );
+  });
+
+  it("LLM CALL group pins its 2 members", () => {
+    expect(src).toMatch(
+      /id: "before_llm_call"[\s\S]*?group: "llm_call"/,
+    );
+    expect(src).toMatch(
+      /id: "after_llm_call"[\s\S]*?group: "llm_call"/,
+    );
+  });
+
+  it("CONTENT FLOW group pins its 2 members", () => {
+    expect(src).toMatch(
+      /id: "before_compaction"[\s\S]*?group: "content_flow"/,
+    );
+    expect(src).toMatch(
+      /id: "after_compaction"[\s\S]*?group: "content_flow"/,
+    );
+  });
+
+  it("TASK & SESSION group pins all 4 members (post-F-LIFE4b)", () => {
+    expect(src).toMatch(
+      /id: "on_task_checkpoint"[\s\S]*?group: "task_session"/,
+    );
+    expect(src).toMatch(
+      /id: "on_task_complete"[\s\S]*?group: "task_session"/,
+    );
+    expect(src).toMatch(
+      /id: "on_session_start"[\s\S]*?group: "task_session"/,
+    );
+    expect(src).toMatch(
+      /id: "on_session_end"[\s\S]*?group: "task_session"/,
+    );
+  });
+
+  it("ARTIFACTS group pins its single member", () => {
+    expect(src).toMatch(
+      /id: "on_artifact_created"[\s\S]*?group: "artifacts"/,
+    );
+  });
+
+  it("LIFECYCLE_GROUP_META declares all 6 ADVANCED groups with title + description + defaultExpanded", () => {
+    // Meta-driven rendering: title is the bold caps caret line, description
+    // is the muted member-preview text. defaultExpanded:false keeps the
+    // partition compact (spec).
+    expect(src).toMatch(/LIFECYCLE_GROUP_META: Record<\s*LifecycleGroupKey/);
+    expect(src).toMatch(/turn:\s*\{[\s\S]*?title: "TURN LIFECYCLE"/);
+    expect(src).toMatch(/llm_call:\s*\{[\s\S]*?title: "LLM CALL \(audit-only\)"/);
+    expect(src).toMatch(/content_flow:\s*\{[\s\S]*?title: "CONTENT FLOW"/);
+    expect(src).toMatch(/task_session:\s*\{[\s\S]*?title: "TASK & SESSION"/);
+    expect(src).toMatch(/artifacts:\s*\{[\s\S]*?title: "ARTIFACTS"/);
+    expect(src).toMatch(/capability:\s*\{[\s\S]*?title: "CAPABILITY"/);
+    // defaultExpanded is honestly false for every group in v1 so the
+    // partition stays compact on first open.
+    expect(src).not.toMatch(
+      /LIFECYCLE_GROUP_META[\s\S]*?defaultExpanded:\s*true/,
+    );
+  });
+
+  it("LIFECYCLE_ADVANCED_GROUP_ORDER pins the render order of ADVANCED groups", () => {
+    // A single source of truth for render-order keeps tests and renderer
+    // honest without relying on Object.keys ordering.
+    expect(src).toMatch(
+      /LIFECYCLE_ADVANCED_GROUP_ORDER:\s*ReadonlyArray<LifecycleGroupKey>\s*=\s*\[\s*"turn",\s*"llm_call",\s*"content_flow",\s*"task_session",\s*"artifacts",\s*"capability",?\s*\]/,
+    );
+  });
+
+  it("TriggerStep mounts the three F-UX8 sub-components inside the Lifecycle fieldset", () => {
+    // Search + COMMON + ADVANCED are the three slots the partition uses
+    // when no search query is active. Search bypasses the partition.
+    expect(src).toContain("function LifecyclePickerSearch");
+    expect(src).toContain("function LifecyclePickerCommon");
+    expect(src).toContain("function LifecyclePickerAdvanced");
+    expect(src).toContain("function LifecycleGroupCard");
+    expect(src).toContain("<LifecyclePickerSearch");
+    expect(src).toContain("<LifecyclePickerCommon");
+    expect(src).toContain("<LifecyclePickerAdvanced");
+  });
+
+  it("LifecyclePickerSearch debounces 150ms via setTimeout in useEffect", () => {
+    // Spec: debounce ~150ms so a fast typer doesn't thrash the filter.
+    // Empty queries propagate immediately so clearing the input snaps
+    // back to the partition without a perceived lag.
+    expect(src).toMatch(
+      /function LifecyclePickerSearch[\s\S]*?setTimeout\([\s\S]*?,\s*150\s*\)/,
+    );
+    expect(src).toMatch(
+      /function LifecyclePickerSearch[\s\S]*?value\.trim\(\)\.length === 0[\s\S]*?onQueryChange\(""\)/,
+    );
+  });
+
+  it("LifecyclePickerSearch renders a <input type='search'> with a stable data-testid", () => {
+    // type=search gives the browser-native clear button + correct
+    // virtual keyboard hints; the testid is the stable hook for any
+    // future e2e selector.
+    expect(src).toMatch(
+      /function LifecyclePickerSearch[\s\S]*?type="search"[\s\S]*?data-testid="lifecycle-picker-search"/,
+    );
+  });
+
+  it("lifecycleOptionMatchesQuery matches across id, label, and description (case-insensitive)", () => {
+    // The matcher contract is pinned so a future ranking-rewrite doesn't
+    // silently drop one of the three searchable surfaces.
+    expect(src).toMatch(
+      /function lifecycleOptionMatchesQuery[\s\S]*?opt\.id\.toLowerCase\(\)\.includes\(q\)/,
+    );
+    expect(src).toMatch(
+      /function lifecycleOptionMatchesQuery[\s\S]*?opt\.label\.toLowerCase\(\)\.includes\(q\)/,
+    );
+    expect(src).toMatch(
+      /function lifecycleOptionMatchesQuery[\s\S]*?opt\.description\.toLowerCase\(\)\.includes\(q\)/,
+    );
+    // Empty query is a tautology — the matcher returns true so the
+    // partition is the only thing the renderer needs to switch on.
+    expect(src).toMatch(
+      /function lifecycleOptionMatchesQuery[\s\S]*?q\.length === 0[\s\S]*?return true/,
+    );
+  });
+
+  it("TriggerStep renders an empty-state row when search yields no matches", () => {
+    // Spec: empty match → "No matches. Try a different keyword." renders
+    // as a single muted row so the operator sees the filter took effect
+    // (rather than wondering if the list disappeared).
+    expect(src).toContain('No matches. Try a different keyword.');
+    expect(src).toContain('data-testid="lifecycle-picker-no-matches"');
+  });
+
+  it("TriggerStep search results bypass the COMMON / ADVANCED partition", () => {
+    // Search results render as a flat list of RadioCards (no grouping),
+    // matching the spec: "When search is active, partition + collapse
+    // state is bypassed; all matches render as flat RadioCards."
+    expect(src).toContain('data-testid="lifecycle-picker-search-results"');
+    expect(src).toMatch(/searching \?[\s\S]*?searchMatches\.length === 0[\s\S]*?LifecyclePickerCommon/);
+  });
+
+  it("LifecycleGroupCard uses native <details>/<summary> (zero-dep a11y)", () => {
+    // Reuses the existing customize/* native-details pattern (see
+    // verification-rule-modal.tsx). No new dependency.
+    expect(src).toMatch(
+      /function LifecycleGroupCard[\s\S]*?<details/,
+    );
+    expect(src).toMatch(
+      /function LifecycleGroupCard[\s\S]*?<summary/,
+    );
+  });
+
+  it("LifecycleGroupCard skips empty groups (honest-degrade for capability + flag-off TASK & SESSION)", () => {
+    // Spec honest-degrade: when F-LIFE4b is OFF the 3 task/session slots
+    // are absent → TASK & SESSION group still renders (count=1). The
+    // capability group is empty in v1 → it must not render a dead row.
+    expect(src).toMatch(
+      /function LifecycleGroupCard[\s\S]*?members\.length === 0[\s\S]*?return null/,
+    );
+  });
+
+  it("LifecycleGroupCard keeps a selected slot's group expanded after collapse (sticky-open)", () => {
+    // Spec: "Picked slot inside an ADVANCED group keeps the group expanded
+    // after selection (so context stays visible)." Implemented as a
+    // useEffect that snaps open back to true whenever the selection
+    // moves into the group's member list.
+    expect(src).toMatch(
+      /function LifecycleGroupCard[\s\S]*?selectedInGroup = members\.some/,
+    );
+    expect(src).toMatch(
+      /function LifecycleGroupCard[\s\S]*?useEffect\([\s\S]*?selectedInGroup[\s\S]*?setOpen\(true\)/,
+    );
+  });
+
+  it("LifecycleGroupCard renders a count pill (`N events` / `1 event`)", () => {
+    // The pill is a tiny right-aligned chip on the summary row; the
+    // singular/plural toggle keeps copy honest at count=1.
+    expect(src).toMatch(
+      /function LifecycleGroupCard[\s\S]*?members\.length === 1 \? "event" : "events"/,
+    );
+  });
+
+  it("LifecycleRadioCard forwards the optional `badge` (so RECOMMENDED pill renders inside groups too)", () => {
+    // The shared card renderer is used by COMMON, ADVANCED, and SEARCH.
+    // Forwarding `badge` keeps the RECOMMENDED pill honest no matter
+    // which renderer path is mounted.
+    expect(src).toMatch(
+      /function LifecycleRadioCard[\s\S]*?badge=\{opt\.badge\}/,
+    );
+  });
+
+  it("LifecycleRadioCard preserves the F-UX1 Tier 3 disabled contract", () => {
+    // Disabled / disabledReason wiring still rides through the shared
+    // card renderer so the existing F-UX1 honesty doesn't regress.
+    expect(src).toMatch(
+      /function LifecycleRadioCard[\s\S]*?const isDisabled = opt\.tier === "tier3"/,
+    );
+    expect(src).toMatch(
+      /function LifecycleRadioCard[\s\S]*?disabled=\{isDisabled\}/,
+    );
+    expect(src).toMatch(
+      /function LifecycleRadioCard[\s\S]*?disabledReason=\{opt\.disabledReason\}/,
+    );
+  });
+});
