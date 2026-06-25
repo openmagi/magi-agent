@@ -9,23 +9,25 @@ single misbehaving rule cannot multiply critic cost without bound.
 
 Two regression tests:
 
-* :func:`test_per_turn_budget_caps_critic_invocations` — author N+1
-  rules at ``before_llm_call`` and call ``on_before_model`` exactly
-  once. The fan-out evaluates rules one-by-one and decrements the
-  budget after each successful audit; the (N+1)-th rule observes
-  ``critic_budget_remaining <= 0`` and short-circuits to a
-  ``status="budget_exhausted"`` skip record without invoking the
-  judge. The patched judge's recorded call count caps at N.
+* :func:`test_per_turn_budget_caps_critic_invocations`. Author N+1
+  rules at ``before_llm_call`` and call ``on_before_model`` N+1
+  times. The cap holds at TWO layers (per the post-#1045
+  :func:`run_before_llm_call_audit` intra-call guard):
 
-  NOTE: ``run_before_llm_call_audit`` threads ``critic_budget_remaining``
-  through ONCE per call — it does NOT decrement intra-call. So a
-  single ``on_before_model`` invocation with N+1 matching rules will
-  invoke the judge N+1 times when ``remaining=N`` is passed in. The
-  budget-exhaustion behaviour materializes ACROSS calls (the plugin
-  decrements after the call returns). This test pins the cross-call
-  contract: call once with remaining=N, then call again — the second
-  call's budget is depleted and we get a single budget_exhausted
-  record without invoking the judge.
+  1. Intra-call. Within ONE plugin invocation the fan-out
+     decrements a local budget per ``status in {evaluated, error}``
+     audit. Authoring N+1 rules with ``remaining=N`` produces N
+     ``evaluated`` records plus 1 ``budget_exhausted`` record; the
+     judge runs N times in that single call (not N+1).
+  2. Cross-call. The plugin decrements the shared
+     ``state.remaining`` per ``evaluated`` audit returned by the
+     fan-out, so once intra-call drained the cap the subsequent N
+     ``on_before_model`` invocations each emit ONE
+     ``budget_exhausted`` record at the fan-out's entry guard without
+     touching the judge.
+
+  Total judge invocations across the (N+1) plugin calls equal N
+  (all from the first call).
 
 * :func:`test_budget_shared_across_before_after` — author rules at
   BOTH ``before_llm_call`` AND ``after_llm_call``; the per-turn cap
@@ -105,25 +107,28 @@ async def test_per_turn_budget_caps_critic_invocations(
     flags_on: None,
     patched_judge: Any,
 ) -> None:
-    """Budget=3 ⇒ critic fires AT MOST 3 times per (session, turn).
+    """Budget=N ⇒ critic fires AT MOST N times per (session, turn).
 
     Scenario: author N+1 (N=3 default) llm_criterion rules at
     ``before_llm_call``. Use a single (session_id, turn_id). Call
-    ``plugin.on_before_model`` repeatedly; the plugin decrements the
-    shared budget after each call so the 4th invocation observes
-    ``remaining <= 0`` and short-circuits to a
-    ``status="budget_exhausted"`` record without invoking the judge.
+    ``plugin.on_before_model`` (N+1) times.
 
-    The patched judge records every invocation that reached
-    ``evaluate_criterion``; we assert exactly ``N`` invocations across
-    the 4 calls.
+    Two layers of cap (see module docstring):
 
-    NOTE: the rule count (N+1) is incidental — the budget is per
-    plugin call, not per matching rule. We author N+1 rules so the
-    final-call dispatch surface mirrors the multi-rule case the
-    description envelopes; what matters for the cap assertion is the
-    number of ``on_before_model`` invocations within a single
-    (session, turn).
+    * Intra-call. The first plugin call's fan-out evaluates rules
+      one-by-one and decrements a local budget per
+      ``status in {evaluated, error}`` audit. With ``remaining=N``
+      and N+1 rules authored, the judge fires exactly N times in this
+      single call; the (N+1)-th rule observes ``budget <= 0`` and
+      surfaces a ``status="budget_exhausted"`` skip record.
+    * Cross-call. The plugin decrements the shared
+      ``state.remaining`` per ``evaluated`` audit, so once the cap is
+      drained the subsequent N plugin calls each emit ONE
+      ``budget_exhausted`` record from the fan-out's entry guard
+      WITHOUT touching the judge.
+
+    Total recorded judge invocations across the (N+1) plugin calls
+    equal N.
     """
     # Reset env so we use the default budget (3); _parse_budget snaps
     # malformed/missing to the default.
@@ -154,23 +159,21 @@ async def test_per_turn_budget_caps_critic_invocations(
         )
 
     judge_calls = len(patched_judge.calls)
-    # The 1st call: budget=3, rule count=4, judge invoked 4 times,
-    # state decrements to remaining=0 (capped at 0).
-    # 2nd / 3rd / 4th calls: budget=0, single budget_exhausted record,
-    # judge NOT invoked.
-    # So total judge invocations = 4 (from the first call).
-    #
-    # NOTE: the test description says "N+1 rules at one call ⇒ judge
-    # runs N times" but the audit helper threads remaining ONCE and
-    # iterates rules without decrementing intra-call. The HONEST cap
-    # is "cross-call N+1 invocations cap the judge at one call's
-    # worth of rules + zero further invocations once the budget is
-    # exhausted". We pin that contract here.
-    assert judge_calls == (n + 1), (
-        f"first on_before_model call (budget={n}) authored {n+1} rules "
-        f"⇒ judge invoked {n+1} times (one per rule); subsequent calls "
-        f"(budget exhausted) MUST NOT invoke the judge. "
-        f"got total judge_calls={judge_calls}"
+    # 1st call: budget=N, N+1 rules authored. The fan-out's
+    # intra-call guard decrements after each evaluated audit; the
+    # (N+1)-th rule observes budget==0 and emits a budget_exhausted
+    # skip record without invoking the judge. So the first call
+    # contributes EXACTLY N judge invocations (not N+1).
+    # 2nd .. (N+1)-th calls: budget=0 at the fan-out's entry guard;
+    # each emits ONE budget_exhausted record, judge NOT invoked.
+    # Total judge invocations across the N+1 plugin calls = N.
+    assert judge_calls == n, (
+        f"cap held at TWO layers. intra-call: budget={n} plus {n+1} "
+        f"rules yields {n} evaluated plus 1 budget_exhausted on the "
+        f"first plugin call. cross-call: subsequent {n} calls (budget "
+        f"exhausted) emit one budget_exhausted record each WITHOUT "
+        f"invoking the judge. expected total judge_calls=={n}; "
+        f"got {judge_calls}"
     )
 
     # Probe the per-turn state to confirm the budget hit zero (any
