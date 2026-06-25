@@ -5,10 +5,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
-# I-2 PR A: the per-module ``_truthy`` is removed in favour of the canonical
-# leaf so the truthy set lives in exactly one place. Use :func:`is_true`
-# directly at call sites.
-from magi_agent.config._truthy import is_true as _truthy
 
 
 def _validate_proxy_origin(value: str) -> str:
@@ -34,12 +30,21 @@ class EgressProxyConfig:
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "EgressProxyConfig":
+        # I-1: route the four egress-proxy operator knobs through the
+        # typed flag registry. ``flag_bool`` mirrors the prior
+        # ``_truthy(env.get(...))`` semantics (missing/empty → False)
+        # byte-identically; ``flag_str`` mirrors the prior
+        # ``(env.get(...) or "")`` shape — its registered default is
+        # ``""``, so missing values still produce the empty string the
+        # ``or None`` collapse depends on.
+        from magi_agent.config.flags import flag_bool, flag_str  # noqa: PLC0415
+
         env = os.environ if env is None else env
         return cls(
-            enabled=_truthy(env.get("MAGI_EGRESS_PROXY_ENABLED")),
-            proxy_url=(env.get("MAGI_EGRESS_PROXY_URL") or "").strip() or None,
-            proxy_auth=(env.get("MAGI_EGRESS_PROXY_AUTH") or "").strip() or None,
-            ca_cert_path=(env.get("MAGI_EGRESS_PROXY_CA_CERT_PATH") or "").strip() or None,
+            enabled=flag_bool("MAGI_EGRESS_PROXY_ENABLED", env=env),
+            proxy_url=(flag_str("MAGI_EGRESS_PROXY_URL", env=env) or "").strip() or None,
+            proxy_auth=(flag_str("MAGI_EGRESS_PROXY_AUTH", env=env) or "").strip() or None,
+            ca_cert_path=(flag_str("MAGI_EGRESS_PROXY_CA_CERT_PATH", env=env) or "").strip() or None,
         )
 
     def validate(self) -> None:
