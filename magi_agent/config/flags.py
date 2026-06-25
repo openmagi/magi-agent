@@ -3352,6 +3352,35 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
+    # I-1: CLI provider-selection knobs. Both operator-visible — the
+    # env-reference generator should list them so users discover the
+    # ``MAGI_MODEL`` / ``MAGI_PROVIDER`` overrides without grepping
+    # ``cli/providers``.
+    FlagSpec(
+        name="MAGI_MODEL",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Bare provider-native model id override (e.g. ``claude-opus-4-8`` "
+            "or ``gpt-5.5``). When set, overrides every provider's catalog "
+            "default; empty/unset keeps each provider's built-in default."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_PROVIDER",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Provider override (e.g. ``anthropic`` / ``openai`` / ``google`` / "
+            "``fireworks`` / ``openrouter``). When set, picks the named "
+            "provider's key + model; empty/unset auto-detects from available "
+            "provider keys. Unknown provider raises ``UnknownProviderError``."
+        ),
+        kind="str",
+    ),
 )
 
 
