@@ -100,48 +100,6 @@ F_QA4_SLOTS: frozenset[str] = frozenset(
     }
 )
 
-# F-QA5 scope axis: the full lifecycle slot set across which the
-# ``shell_command`` and ``shell_check`` kinds are legal in
-# :data:`magi_agent.customize.custom_rules._LEGAL`. Authoring these as a
-# single set lets the F-QA5 matrix iterate every per-slot fan-out helper
-# (11 ``shell_command`` slots × 2 ``shell_check`` primary slots, with
-# overlap on ``pre_final`` / ``before_tool_use`` / ``after_tool_use`` /
-# ``on_user_prompt_submit`` / ``on_subagent_stop`` / ``before_turn_start``
-# / ``after_turn_end`` / ``before_compaction`` / ``after_compaction`` /
-# ``on_task_checkpoint`` / ``on_artifact_created``) without re-deriving
-# the per-kind slot list at every test site. The matrix's
-# ``iter_legal_combinations_for_slots`` projector filters the full
-# ``_LEGAL`` rows to this slot set; ``test_matrix_shell.py`` further
-# narrows to ``{shell_command, shell_check}`` kinds so the F-QA5 slice
-# does not double-count rows already covered by F-QA1 / F-QA2 / F-QA4
-# under other kinds (``llm_criterion`` etc.).
-#
-# The union mirrors the 9 ``run_shell_command_at_*`` helpers exported
-# from :mod:`magi_agent.customize.lifecycle_audit` plus the 2
-# ``run_shell_check_at_*`` helpers — those are the only fan-out
-# functions the runtime exposes today; any future helper addition lifts
-# the matrix automatically once the corresponding ``_LEGAL`` row is
-# added.
-F_QA5_SHELL_SLOTS: frozenset[str] = frozenset(
-    {
-        # shell_command + shell_check overlap (gate-honored on both)
-        "pre_final",
-        "before_tool_use",
-        # shell_command-only or audit-only on shell_check
-        "after_tool_use",
-        # turn-boundary + subagent stop
-        "on_user_prompt_submit",
-        "on_subagent_stop",
-        "before_turn_start",
-        "after_turn_end",
-        # compaction + work-queue + artifact
-        "before_compaction",
-        "after_compaction",
-        "on_task_checkpoint",
-        "on_artifact_created",
-    }
-)
-
 
 def iter_legal_combinations() -> Iterable[tuple[str, str, str]]:
     """Yield every ``(kind, fires_at, action)`` tuple from the full ``_LEGAL`` matrix.

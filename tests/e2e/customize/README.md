@@ -1,4 +1,4 @@
-# Customize matrix end-to-end harness (PR-F-QA1 + F-QA2 + F-QA3 + F-QA4 + F-QA5)
+# Customize matrix end-to-end harness (PR-F-QA1 + F-QA2 + F-QA3 + F-QA4)
 
 End-to-end coverage for the `_LEGAL` matrix in
 `magi_agent/customize/custom_rules.py`. Iterates every legal
@@ -7,7 +7,7 @@ storage API, drives a synthetic trigger at the matching runtime
 chokepoint, asserts the verdict matches the matrix-declared action,
 cleans up.
 
-## What's covered (F-QA1 + F-QA2 + F-QA3 + F-QA4 + F-QA5)
+## What's covered (F-QA1 + F-QA2 + F-QA3 + F-QA4)
 
 ### F-QA1 — tool-use slots (3)
 
@@ -134,97 +134,6 @@ slot stays in the wizard so operators can author rules ahead of the
 wire — the audit ledger remains silent until a follow-up adds the
 emit.
 
-### F-QA5 — shell kinds matrix + cross-kind budget (~22 combos + 3 budget tests)
-
-F-QA5 completes the F-QA series by pinning **shell kind fan-out
-helpers directly end-to-end** including real subprocess spawn. The
-earlier matrices exercise shell rules through the facade
-(`before_tool_use` / `after_tool_use`) and the governed-turn wrapper
-(`on_user_prompt_submit` / `after_turn_end` / etc.); F-QA5 drives
-the 9 `run_shell_command_at_<slot>` + 2 `run_shell_check_at_<slot>`
-helpers from `magi_agent.customize.lifecycle_audit` per-slot,
-asserting the audit ledger + derived gate verdict against the
-matrix-declared action contract.
-
-Two scope axes:
-
-* **Matrix** (`test_matrix_shell.py`) — `(kind, slot, action)` rows
-  filtered to `kind in {shell_command, shell_check}` and `slot in
-  F_QA5_SHELL_SLOTS` (the union of the 11 v1 shell lifecycle
-  slots). Each row authors a real `ShellPayload`, persists the rule,
-  invokes the matching helper, asserts via
-  `assert_shell_action_honored`.
-* **Cross-kind budget** (`test_shell_cross_kind_budget.py`) —
-  shared `MAGI_CUSTOMIZE_SHELL_AUDIT_BUDGET` counter contract
-  across `shell_command` + `shell_check` kinds.
-
-Per-test contracts (cross-kind budget):
-
-1. `test_cross_kind_budget_shares_counter` — author 1
-   `shell_command` rule + 1 `shell_check` rule (both at `pre_final`).
-   Set `MAGI_CUSTOMIZE_SHELL_AUDIT_BUDGET=1`. Drive both helpers
-   sequentially: assert the FIRST one spawns a subprocess (audit
-   record with `status="executed"`) and the SECOND one returns a
-   `budget_exhausted` audit record without invoking the runner.
-   This is the canonical "the budget is shared across kinds" pin.
-2. `test_budget_works_with_only_shell_command_enabled` — flip
-   `MAGI_CUSTOMIZE_SHELL_COMMAND_ENABLED=1` /
-   `MAGI_CUSTOMIZE_SHELL_CHECK_ENABLED=0`. Verify the budget
-   initializes via the F-EXEC2 review fix's union-gate
-   (`shell_command_enabled OR shell_check_enabled`) — without the
-   fix the budget would honest-degrade to `None` (no cap) in this
-   asymmetric flag state.
-3. `test_budget_works_with_only_shell_check_enabled` — mirror of
-   (2). Same union-gate contract from the converse direction.
-
-Cross-kind budget contract diagram:
-
-```
-                  shell_budget_for(session_id, turn_id)
-                 ───────────────────────────────────────
-                              │
-                              ▼
-              ┌──────────────────────────────────┐
-              │  _SHARED_BUDGET[(sid, tid)]      │
-              │  ─ FIFO-bounded; initialises     │
-              │    from MAGI_CUSTOMIZE_SHELL_    │
-              │    AUDIT_BUDGET env knob         │
-              └──────────────────────────────────┘
-                              │
-            ┌─────────────────┴─────────────────┐
-            ▼                                   ▼
-  shell_command helper                  shell_check helper
-  (apply_shell_command_rule)            (apply_shell_check_rule)
-            │                                   │
-            ▼                                   ▼
-  decrements shared counter ────►◄──── decrements shared counter
-            │                                   │
-            └────────► budget=0 → both kinds short-circuit
-                       with status="budget_exhausted"
-```
-
-| Kind            | shell slots (F-QA5 enumerated)                                                                                                         |
-|-----------------|----------------------------------------------------------------------------------------------------------------------------------------|
-| `shell_command` | pre_final / before_tool_use / after_tool_use / on_user_prompt_submit / on_subagent_stop / before_turn_start / after_turn_end / before_compaction / after_compaction / on_task_checkpoint / on_artifact_created |
-| `shell_check`   | pre_final / before_tool_use / after_tool_use / on_user_prompt_submit / on_subagent_stop / before_turn_start / after_turn_end / before_compaction / after_compaction / on_task_checkpoint / on_artifact_created |
-
-Shell-script safety guarantee: **only** the following inline
-scripts are ever authored / spawned by F-QA5:
-
-| Script                          | Used by                                |
-|---------------------------------|----------------------------------------|
-| `exit 0`                        | shell_command audit / ask_approval rows |
-| `exit 1`                        | shell_command + shell_check block rows  |
-| `echo '{"passed": true}'`       | shell_check audit / ask_approval rows   |
-
-Each spawn is a fresh `bash -c '<script>'` via
-`asyncio.subprocess.create_subprocess_exec`. The runner's whitelist
-restricts the inherited env to a safe minimum (no secrets leak); no
-filesystem writes; <50ms wall time per spawn. The F-QA5 matrix +
-budget tests are therefore **safe to run on any host** with `bash`
-on `PATH` — the same constraint already enforced by
-`tests/customize_firing/test_shell_command_cross_slot_budget.py`.
-
 ## How to run
 
 ```bash
@@ -234,8 +143,6 @@ pytest tests/e2e/customize/test_matrix_turn_boundary.py -v
 pytest tests/e2e/customize/test_matrix_llm_call.py -v
 pytest tests/e2e/customize/test_llm_call_budget_exhaustion.py -v
 pytest tests/e2e/customize/test_matrix_late_lifecycle.py -v
-pytest tests/e2e/customize/test_matrix_shell.py -v
-pytest tests/e2e/customize/test_shell_cross_kind_budget.py -v
 # Or all at once
 pytest tests/e2e/customize/ -v
 
@@ -336,18 +243,6 @@ full F-QA4 slice. Cost only materializes when live LLM critic rows
 are opted in — the F-QA4 slots reuse the same per-turn budget cap as
 F-QA3 so a misbehaving rule cannot blow past the ceiling.
 
-F-QA5 shell kinds matrix + cross-kind budget: **$0** in API calls
-(no LLM round trip — both kinds are deterministic shell helpers).
-Subprocess cost = **~$0** at the host level: every spawn is a
-trivial `bash -c 'exit 0'` / `bash -c 'exit 1'` / `bash -c 'echo
-"{...}"'` with the runner's whitelisted env. Wall-clock budget:
-~22 matrix combos × ~30ms per spawn ≈ **~1 second of subprocess
-work**, plus pytest collection + fixture cascade overhead. The
-3 cross-kind budget tests add 1-2 spawns each. Total F-QA5
-runtime: **~5-15 seconds**. No live LLM cost path — F-QA5 is the
-only F-QA slice with zero opt-in cost dependencies (no
-`require_provider_key` skip gate; no `patched_judge` fixture).
-
 ## Runtime
 
 F-QA1 full matrix run: ~30-90 seconds (22 combos, each authoring a
@@ -408,8 +303,6 @@ round trip — so the F-QA3 slice runs in ~5-10 seconds.
 | `test_matrix_llm_call.py`       | F-QA3 parametrized matrix (2 LLM-call slots) |
 | `test_llm_call_budget_exhaustion.py` | F-QA3 per-turn critic budget regression |
 | `test_matrix_late_lifecycle.py` | F-QA4 parametrized matrix (6 driven slots + 1 SKIP for `on_session_end`) |
-| `test_matrix_shell.py`          | F-QA5 parametrized matrix (shell_command + shell_check kinds, all 11 slots) |
-| `test_shell_cross_kind_budget.py` | F-QA5 cross-kind shared budget contract (3 tests) |
 | `README.md`                     | This file                                  |
 
 ## Adding a new kind / slot / action
@@ -432,5 +325,4 @@ each test run.
 | F-QA2     | turn-boundary slots (before/after_turn_start/end, prompt_submit, subagent_stop) — shipped |
 | F-QA3     | LLM_CALL slots + per-turn critic budget regression — shipped |
 | F-QA4     | compaction / task_checkpoint / artifact / task_complete / session_start / spawn slots — shipped (`on_session_end` SKIP placeholder; transport-side emit wire follow-up) |
-| F-QA5     | shell_command + shell_check kinds matrix + cross-kind shared-budget contract — **shipped** (F-QA series **COMPLETE**) |
-| (future)  | (optional) Playwright wizard UI smoke                       |
+| F-QA5     | (optional) Playwright wizard UI smoke                       |
