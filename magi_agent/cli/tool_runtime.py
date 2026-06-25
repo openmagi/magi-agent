@@ -182,6 +182,24 @@ def build_cli_tool_runtime(
     if register_direct_web_tools(registry):
         bind_direct_web_handlers(registry)
 
+    # Optional user-authored tool packs (MAGI_USER_TOOL_PACKS_ENABLED=true).
+    # Strict opt-in default-OFF: when unset the merge module is never imported and
+    # the registry is byte-identical to before. When ON, user tool packs from the
+    # pack search bases (~/.magi/packs + <cwd>/.magi/packs) are discovered and
+    # their dispatchable tools merged into ``registry`` LAST (last-wins after
+    # first-party), but the merge skips any name colliding with an
+    # already-registered core/first-party tool so a user pack can never override
+    # an ungated core tool. Done before the dispatcher is built so the merged
+    # tools are part of the dispatch surface and the parent-tool-names snapshot.
+    from magi_agent.config.env import user_tool_packs_enabled  # noqa: PLC0415
+
+    if user_tool_packs_enabled():
+        from magi_agent.tools.user_tool_packs import (  # noqa: PLC0415
+            merge_user_tool_packs,
+        )
+
+        merge_user_tool_packs(registry)
+
     receipt_store = general_automation_receipts or GeneralAutomationReceiptLedgerStore()
     # First-party activity capture: pass the bundled producer pack's static refs
     # (computed ONCE here at construction, never per-dispatch) plus the runtime's

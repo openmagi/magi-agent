@@ -468,6 +468,14 @@ FLAGS: tuple[FlagSpec, ...] = (
             "PersistentPython tool (CodeAct: persistent interpreter namespace)."
         ),
     ),
+    _b(
+        "MAGI_USER_TOOL_PACKS_ENABLED",
+        summary=(
+            "Discover + merge user-authored tool packs (~/.magi/packs, "
+            "<cwd>/.magi/packs) into the CLI tool runtime; never overrides core "
+            "tools."
+        ),
+    ),
     FlagSpec(
         name="MAGI_CODE_ACTION_TIMEOUT_MS",
         default=30_000,

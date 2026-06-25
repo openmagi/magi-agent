@@ -3561,6 +3561,28 @@ def persistent_python_enabled(env: Mapping[str, str] | None = None) -> bool:
     return flag_bool(MAGI_PERSISTENT_PYTHON_ENABLED_ENV, env=source)
 
 
+MAGI_USER_TOOL_PACKS_ENABLED_ENV = "MAGI_USER_TOOL_PACKS_ENABLED"
+
+
+def user_tool_packs_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the user TOOL-pack CLI activation gate.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the CLI
+    tool runtime never discovers or loads user tool packs, so the assembled
+    registry is byte-identical to before (only first-party + optional first-party
+    sources). When ON, ``build_cli_tool_runtime`` discovers + loads user tool
+    packs from the pack search bases (``~/.magi/packs`` + ``<cwd>/.magi/packs``)
+    and merges each dispatchable user tool into the CLI registry (last-wins after
+    first-party, but never overriding an already-registered core tool). Like
+    ``persistent_python_enabled`` this is an additive, default-disabled seam and
+    deliberately does NOT follow the runtime-profile default-ON convention.
+    """
+    from .flags import flag_bool
+
+    source = os.environ if env is None else env
+    return flag_bool(MAGI_USER_TOOL_PACKS_ENABLED_ENV, env=source)
+
+
 MAGI_PERMISSION_SCOPE_FROM_MODE_ENV = "MAGI_PERMISSION_SCOPE_FROM_MODE"
 MAGI_PERMISSION_SCOPE_LEGACY_FULL_TOOLHOST_ENV = (
     "MAGI_PERMISSION_SCOPE_LEGACY_FULL_TOOLHOST"
