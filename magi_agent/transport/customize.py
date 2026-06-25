@@ -397,6 +397,24 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             return JSONResponse(status_code=400, content={"error": "invalid_json"})
         if not isinstance(body, dict) or not isinstance(body.get("enabled"), bool):
             return JSONResponse(status_code=400, content={"error": "enabled_bool_required"})
+        # F-UX10 (2026-06-24): when targeting a recipe, validate the id against
+        # the curated ``RECIPES`` catalog so a typo cannot silently land in
+        # ``verification.recipes[]`` and confuse the allowlist filter. Unknown
+        # recipe ids return 404 and nothing is persisted. ``harness_presets``
+        # and ``hooks`` retain their permissive write contract because their
+        # ids are validated elsewhere (preset_map / file-authored hooks).
+        if kind == "recipes":
+            from magi_agent.customize.catalog import RECIPES  # noqa: PLC0415
+
+            known_recipe_ids = {r["id"] for r in RECIPES if isinstance(r.get("id"), str)}
+            if item_id not in known_recipe_ids:
+                return JSONResponse(
+                    status_code=404,
+                    content={
+                        "error": "not_found",
+                        "message": f'recipe "{item_id}" not found',
+                    },
+                )
         mode = body["mode"] if isinstance(body.get("mode"), str) else None
         overrides = set_verification_override(kind, item_id, body["enabled"], mode=mode)
         apply_verification_overrides(runtime, overrides)

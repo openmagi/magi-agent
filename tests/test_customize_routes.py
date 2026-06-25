@@ -155,6 +155,97 @@ def test_patch_verification_bad_body(tmp_path, monkeypatch):
     assert resp.status_code == 400
 
 
+# ---------------------------------------------------------------------------
+# F-UX10 (2026-06-24) — Recipes write surface: per-recipe toggle on/off
+# ---------------------------------------------------------------------------
+
+
+def test_patch_recipe_enable_appends_to_allowlist(tmp_path, monkeypatch):
+    """Enabling a real recipe id appends it to ``verification.recipes[]``."""
+    cfile = tmp_path / "customize.json"
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
+    client = _client(tmp_path)
+    client.headers.update({"x-gateway-token": _TOKEN})
+    resp = client.patch(
+        "/v1/app/customize/verification/recipes/coding_evidence_gate",
+        json={"enabled": True},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "coding_evidence_gate" in body["overrides"]["verification"]["recipes"]
+    import json
+
+    persisted = json.loads(cfile.read_text())
+    assert "coding_evidence_gate" in persisted["verification"]["recipes"]
+
+
+def test_patch_recipe_disable_removes_from_allowlist(tmp_path, monkeypatch):
+    """Disabling a previously-enabled recipe id removes it from the list."""
+    cfile = tmp_path / "customize.json"
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
+    client = _client(tmp_path)
+    client.headers.update({"x-gateway-token": _TOKEN})
+    # Seed: enable two recipes so the disable below has something to remove
+    # without leaving the list empty (empty == legacy no-op, indistinguishable
+    # from "never wrote").
+    client.patch(
+        "/v1/app/customize/verification/recipes/coding_evidence_gate",
+        json={"enabled": True},
+    )
+    client.patch(
+        "/v1/app/customize/verification/recipes/research",
+        json={"enabled": True},
+    )
+    resp = client.patch(
+        "/v1/app/customize/verification/recipes/coding_evidence_gate",
+        json={"enabled": False},
+    )
+    assert resp.status_code == 200
+    recipes = resp.json()["overrides"]["verification"]["recipes"]
+    assert "coding_evidence_gate" not in recipes
+    assert "research" in recipes
+
+
+def test_patch_recipe_unknown_id_returns_404(tmp_path, monkeypatch):
+    """A typo cannot silently land in the allowlist — unknown id ⇒ 404."""
+    cfile = tmp_path / "customize.json"
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
+    client = _client(tmp_path)
+    client.headers.update({"x-gateway-token": _TOKEN})
+    resp = client.patch(
+        "/v1/app/customize/verification/recipes/__definitely_not_a_recipe__",
+        json={"enabled": True},
+    )
+    assert resp.status_code == 404
+    # Nothing persisted — the recipes list stays empty (or the file unwritten).
+    if cfile.exists():
+        import json
+
+        persisted = json.loads(cfile.read_text())
+        assert "__definitely_not_a_recipe__" not in persisted["verification"]["recipes"]
+
+
+def test_patch_recipe_bad_body_returns_400(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
+    client = _client(tmp_path)
+    client.headers.update({"x-gateway-token": _TOKEN})
+    resp = client.patch(
+        "/v1/app/customize/verification/recipes/coding_evidence_gate",
+        json={"nope": 1},
+    )
+    assert resp.status_code == 400
+
+
+def test_patch_recipe_requires_auth(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
+    client = _client(tmp_path)  # no token header
+    resp = client.patch(
+        "/v1/app/customize/verification/recipes/coding_evidence_gate",
+        json={"enabled": True},
+    )
+    assert resp.status_code == 401
+
+
 def test_put_rules_persists(tmp_path, monkeypatch):
     cfile = tmp_path / "customize.json"
     monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))

@@ -303,6 +303,28 @@ export async function patchVerificationOverride(
 }
 
 /**
+ * F-UX10 (2026-06-24): convenience wrapper around `patchVerificationOverride`
+ * targeting the recipes allowlist. Identical wire shape — exists so the
+ * Recipes tab handler does not hardcode the `"recipes"` kind string at every
+ * callsite (and so tests can spy on a single named export).
+ *
+ * Allowlist semantics: an empty `verification.recipes[]` means "no user
+ * override" (all recipes effectively enabled, byte-identical to legacy).
+ * A non-empty list is an explicit allowlist — recipe ids NOT in the list have
+ * their mapped pack's evidence/validator refs filtered out at assembly time.
+ *
+ * The backend 404s on unknown recipe ids so a typo cannot silently land in
+ * the persisted list.
+ */
+export async function patchRecipeOverride(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  recipeId: string,
+  enabled: boolean,
+): Promise<CustomizeOverrides> {
+  return patchVerificationOverride(fetch, "recipes", recipeId, enabled);
+}
+
+/**
  * Persists the USER-RULES.md body via `PUT /v1/app/customize/rules`.
  * Returns the updated overrides. Throws on non-2xx.
  */
