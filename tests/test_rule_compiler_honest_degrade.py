@@ -206,16 +206,17 @@ async def test_field_constraint_against_empty_field_catalog_returns_clarifying()
     ``available_fields`` entry is ``[]`` (producer unverified), the compiler
     must NOT silently emit a vacuous shape: it must return
     ``clarifyingQuestions`` so the user picks a verified type or field."""
-    # GitDiff is audited (2026-06-23) to have `fields=[]` in the field hints —
+    # FileDeliver has `fields=[]` in the field hints (no located producer) —
     # see magi_agent/customize/shacl_compiler.py::_BUILTIN_FIELD_HINTS.
+    # (GitDiff is no longer empty — it is now a live producer.)
     payload = {
-        "evidenceType": "GitDiff",
+        "evidenceType": "FileDeliver",
         "field": "anyKey",
         "operator": "exists",
         "value": None,
     }
     out = await compile_with_review(
-        "every GitDiff has anyKey",
+        "every FileDeliver has anyKey",
         compiler_model_factory=_factory_for(
             _field_constraint_compile_response(payload)
         ),

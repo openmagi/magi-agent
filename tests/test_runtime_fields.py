@@ -158,8 +158,12 @@ def test_pre_final_evidence_chips_include_unverified_type_markers() -> None:
     """
     out = fields_for_context("pre_final", "evidence_ref")
     names = _names(out)
-    # GitDiff is listed in _BUILTIN_FIELD_HINTS with [] (empty by design).
-    assert "evidence:GitDiff.fields.*" in names
+    # FileDeliver is listed in _BUILTIN_FIELD_HINTS with [] (empty by design).
+    assert "evidence:FileDeliver.fields.*" in names
+    # GitDiff now has a confident producer, so it surfaces concrete field chips
+    # (not the unverified ``.fields.*`` marker).
+    assert "evidence:GitDiff.fields.changedFiles" in names
+    assert "evidence:GitDiff.fields.*" not in names
 
 
 # ---------------------------------------------------------------------------

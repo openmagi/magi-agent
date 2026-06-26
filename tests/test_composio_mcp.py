@@ -48,6 +48,88 @@ def _erroring_toolset(message: str) -> type:
     return ErroringToolset
 
 
+def test_platform_source_builds_broker_mcp_toolset_without_composio_client() -> None:
+    from magi_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.mcp import build_composio_toolset_bundle
+
+    def _factory(_api_key: str) -> FakeComposioClient:
+        raise AssertionError("platform mode must not create a local Composio client")
+
+    cfg = resolve_composio_config(
+        {
+            "MAGI_PLATFORM_API_KEY": "magi_tok_123",
+            "USER_ID": "user-1",
+            "BOT_ID": "bot-2",
+            "MAGI_COMPOSIO_TOOLKITS": "gmail,googledrive",
+        },
+        package_available=False,
+    )
+    bundle = build_composio_toolset_bundle(
+        cfg,
+        composio_client_factory=_factory,
+        toolset_cls=FakeToolset,
+        connection_params_cls=FakeConnectionParams,
+    )
+
+    assert bundle.active is True
+    assert bundle.status == "ready"
+    assert len(bundle.toolsets) == 1
+    params = bundle.toolsets[0].kwargs["connection_params"]
+    assert (
+        params.kwargs["url"]
+        == "https://api.openmagi.ai/v1/integrations/composio/mcp"
+    )
+    headers = params.kwargs["headers"]
+    assert headers["Authorization"] == "Bearer magi_tok_123"
+    assert headers["X-Magi-Composio-Entity"] == "openmagi:user:user-1:bot:bot-2"
+    assert headers["X-Magi-Composio-Toolkits"] == "gmail,googledrive"
+    assert bundle.toolsets[0].kwargs["tool_name_prefix"] == "composio"
+
+
+def test_platform_source_honors_custom_broker_url() -> None:
+    from magi_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.mcp import build_composio_toolset_bundle
+
+    cfg = resolve_composio_config(
+        {
+            "MAGI_COMPOSIO_CREDENTIAL_SOURCE": "platform",
+            "MAGI_PLATFORM_BASE_URL": "https://broker.example.com/",
+            "MAGI_PLATFORM_API_KEY": "magi_tok_123",
+        },
+        package_available=False,
+    )
+    bundle = build_composio_toolset_bundle(
+        cfg,
+        toolset_cls=FakeToolset,
+        connection_params_cls=FakeConnectionParams,
+    )
+
+    params = bundle.toolsets[0].kwargs["connection_params"]
+    assert (
+        params.kwargs["url"]
+        == "https://broker.example.com/v1/integrations/composio/mcp"
+    )
+
+
+def test_platform_source_toolset_build_error_redacts_token() -> None:
+    from magi_agent.composio.config import resolve_composio_config
+    from magi_agent.composio.mcp import build_composio_toolset_bundle
+
+    cfg = resolve_composio_config(
+        {"MAGI_PLATFORM_API_KEY": "magi_tok_supersecret"},
+        package_available=False,
+    )
+    bundle = build_composio_toolset_bundle(
+        cfg,
+        toolset_cls=_erroring_toolset("boom magi_tok_supersecret leaked"),
+        connection_params_cls=FakeConnectionParams,
+    )
+
+    assert bundle.active is False
+    assert bundle.status == "error"
+    assert "magi_tok_supersecret" not in (bundle.last_error_preview or "")
+
+
 def test_inactive_config_builds_no_toolsets() -> None:
     from magi_agent.composio.config import resolve_composio_config
     from magi_agent.composio.mcp import build_composio_toolset_bundle

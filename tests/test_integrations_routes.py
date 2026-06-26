@@ -52,11 +52,42 @@ class _FakeComposioClient:
     connected_accounts = _FakeConnectedAccounts()
 
 
+class _FakeBroker:
+    """Stand-in for :class:`ComposioBrokerClient` (platform credential mode)."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    def initiate(self, toolkit: str) -> dict[str, object]:
+        self.calls.append(("initiate", toolkit))
+        return {
+            "id": "conn_broker",
+            "status": "INITIATED",
+            "redirect_url": "https://broker/auth",
+        }
+
+    def status(self, connection_id: str) -> dict[str, object]:
+        self.calls.append(("status", connection_id))
+        return {"id": connection_id, "status": "ACTIVE"}
+
+    def list(self) -> list[dict[str, object]]:
+        self.calls.append(("list",))
+        return [{"id": "conn_broker", "toolkit": "gmail", "status": "ACTIVE"}]
+
+    def delete(self, connection_id: str) -> None:
+        self.calls.append(("delete", connection_id))
+
+    def catalog(self, *, category, cursor, managed_only) -> dict[str, object]:
+        self.calls.append(("catalog", category, cursor, managed_only))
+        return {"items": [{"slug": "gmail", "name": "Gmail"}], "next_cursor": None}
+
+
 def _client(
     monkeypatch,
     tmp_path,
     *,
     composio_client_provider=None,
+    composio_broker_provider=None,
     telegram_fetch_json=None,
     vault: bool = True,
 ) -> TestClient:
@@ -74,6 +105,7 @@ def _client(
         app,
         _runtime(),
         composio_client_provider=composio_client_provider,
+        composio_broker_provider=composio_broker_provider,
         telegram_fetch_json=telegram_fetch_json,
     )
     return TestClient(app)
@@ -223,3 +255,86 @@ def test_key_store_503_when_vault_off(monkeypatch, tmp_path) -> None:
         json={"api_key": "x"},
     )
     assert resp.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# Platform (broker) credential mode: connect/catalog routes proxy through the
+# openmagi broker instead of a local Composio client (no Composio key needed).
+# ---------------------------------------------------------------------------
+
+
+def test_platform_broker_connect_routes_through_broker(monkeypatch, tmp_path) -> None:
+    broker = _FakeBroker()
+    # No local Composio client/key configured: the local path would 409, but the
+    # broker provider being present makes connect succeed via the broker.
+    client = _client(
+        monkeypatch,
+        tmp_path,
+        composio_broker_provider=lambda: broker,
+    )
+    resp = client.post(
+        "/v1/admin/integrations/composio/connect",
+        headers=HEADERS,
+        json={"toolkit": "gmail"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["redirect_url"] == "https://broker/auth"
+    assert ("initiate", "gmail") in broker.calls
+
+
+def test_platform_broker_catalog_routes_through_broker(monkeypatch, tmp_path) -> None:
+    broker = _FakeBroker()
+    client = _client(monkeypatch, tmp_path, composio_broker_provider=lambda: broker)
+    resp = client.get(
+        "/v1/admin/integrations/composio/catalog?category=productivity",
+        headers=HEADERS,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["items"][0]["slug"] == "gmail"
+    assert broker.calls == [("catalog", "productivity", None, True)]
+
+
+def test_platform_broker_status_and_list_route_through_broker(monkeypatch, tmp_path) -> None:
+    broker = _FakeBroker()
+    client = _client(monkeypatch, tmp_path, composio_broker_provider=lambda: broker)
+    status = client.get(
+        "/v1/admin/integrations/composio/connect/conn_broker/status", headers=HEADERS
+    )
+    assert status.status_code == 200
+    assert status.json()["status"] == "ACTIVE"
+    listing = client.get(
+        "/v1/admin/integrations/composio/connections", headers=HEADERS
+    )
+    assert listing.status_code == 200
+    assert listing.json()["connections"][0]["id"] == "conn_broker"
+    assert ("status", "conn_broker") in broker.calls
+    assert ("list",) in broker.calls
+
+
+def test_platform_broker_disconnect_routes_through_broker(monkeypatch, tmp_path) -> None:
+    broker = _FakeBroker()
+    client = _client(monkeypatch, tmp_path, composio_broker_provider=lambda: broker)
+    resp = client.delete(
+        "/v1/admin/integrations/composio/connection/conn_broker", headers=HEADERS
+    )
+    assert resp.status_code == 200
+    assert resp.json()["disconnected"] == "conn_broker"
+    assert ("delete", "conn_broker") in broker.calls
+
+
+def test_no_broker_provider_keeps_local_client_path(monkeypatch, tmp_path) -> None:
+    # Broker provider returns None (non-platform mode): the local Composio
+    # client path is used unchanged. With a fake local client, connect works.
+    client = _client(
+        monkeypatch,
+        tmp_path,
+        composio_client_provider=lambda: _FakeComposioClient(),
+        composio_broker_provider=lambda: None,
+    )
+    resp = client.post(
+        "/v1/admin/integrations/composio/connect",
+        headers=HEADERS,
+        json={"toolkit": "gmail"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "INITIATED"

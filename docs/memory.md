@@ -42,24 +42,31 @@ Memory search has two backends behind one selector:
   (BM25, no model load).
 
 qmd is **not** a hard dependency — a fresh install searches memory fine without
-it. To opt in, run the one-time setup:
+it (the built-in BM25 backend). The qmd binary is also not installed for you; run
+the one-time setup to enable the qmd index:
 
 ```
-magi memory init            # install qmd (brew or npm) + index this workspace
-magi memory init --vector   # also generate embeddings for semantic search
+magi memory init              # install qmd + index this workspace (+embed by default)
+magi memory init --no-vector  # keyword-only: install + index, skip the ~2GB embed
 ```
 
-`init` installs the binary if missing, registers this workspace's `memory/` tree
-as a private qmd collection (so search is not silently empty), and writes the
-opt-ins to `~/.magi/config.toml`. `magi doctor` shows whether qmd is present.
+`init` installs the binary if missing (Homebrew, then `npm install -g
+@tobilu/qmd`), registers this workspace's `memory/` tree as a private qmd
+collection (so search is not silently empty), and writes the opt-ins to
+`~/.magi/config.toml`. `magi doctor` shows whether qmd is present.
 
-**Vector search is explicit-only.** `--vector` runs `qmd embed` (first run
-downloads an embedding model, ~2GB) and sets `[memory] vector_search = true`.
-Even then, semantic `qmd vsearch` runs **only** on the explicit, latency-tolerant
-surfaces — `magi memory search --vector` and the dashboard
-`/v1/app/memory/search?vector=1` endpoint — because each vsearch invocation
-cold-loads the embedding model (~10-40s). The **per-turn recall hot path always
-stays on BM25** regardless of `vector_search`, so turn latency is never affected.
+**Vector search defaults ON in config, but is explicit-only at runtime.** A
+normal local install has `vector_search = true` (a "config-default-ON even if the
+binary is OFF" setting). It only *arms* the capability: it does not install qmd
+and does not run any embed by itself. Because the resolved default is ON,
+`magi memory init` runs `qmd embed` (first run downloads an embedding model,
+~2GB) unless you pass `--no-vector`; an explicit `[memory] vector_search = false`
+(or `--no-vector`) opts out of the download. Even when on, semantic `qmd vsearch`
+runs **only** on the explicit, latency-tolerant surfaces — `magi memory search
+--vector` and the dashboard `/v1/app/memory/search?vector=1` endpoint — because
+each vsearch invocation cold-loads the embedding model (~10-40s). The **per-turn
+recall hot path always stays on BM25** regardless of `vector_search`, so turn
+latency is never affected.
 
 Search memory directly:
 

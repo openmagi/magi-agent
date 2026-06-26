@@ -469,7 +469,42 @@ def _coding_evidence_declarations(outcome) -> list[dict[str, object]]:
                 "source": {"kind": "tool_trace", "toolName": tool_name},
             }
         )
+    if tool_name == "GitDiff":
+        git_diff = _git_diff_evidence_declaration(outcome.output_preview)
+        if git_diff is not None:
+            declarations.append(git_diff)
     return declarations
+
+
+def _git_diff_evidence_declaration(output_preview: object) -> dict[str, object] | None:
+    """Promote a live GitDiff handler result into a typed evidence declaration.
+
+    The gate5b GitDiff handler returns ``{isGitRepo, status, numstat}``; derive
+    the ``changedFiles`` the coding evidence-gate's ``EvidenceRequirement``
+    matches against. Returns ``None`` (no evidence) when the result is not a git
+    repo or the output was degraded to a digest — honest-degrade, never fabricate.
+    """
+    if not isinstance(output_preview, Mapping):
+        return None
+    if not output_preview.get("isGitRepo"):
+        return None
+    numstat = output_preview.get("numstat")
+    if not isinstance(numstat, (list, tuple)):
+        return None
+    changed_files = tuple(
+        str(entry.get("path"))
+        for entry in numstat
+        if isinstance(entry, Mapping) and entry.get("path")
+    )
+    return {
+        "type": "GitDiff",
+        "fields": {
+            "changedFiles": changed_files,
+            "fileCount": len(changed_files),
+            "digest": _digest(output_preview),
+        },
+        "source": {"kind": "tool_trace", "toolName": "GitDiff"},
+    }
 
 
 def _tool_result_from_outcome(outcome) -> ToolResult:

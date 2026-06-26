@@ -278,7 +278,7 @@ def build_cli_model_runner(
         # unless the customize custom-rules flags are on; registers after the
         # bundled controls so it only rides on results no other control replaced.
         extra_controls=[
-            *_build_customize_after_tool_controls(),
+            *_build_customize_after_tool_controls(tool_evidence_collector),
             *_build_dashboard_producer_controls(tool_evidence_collector),
         ],
     )
@@ -952,13 +952,18 @@ def _apply_customize_evidence_overrides(required_evidence: list[str]) -> list[st
         return required_evidence
 
 
-def _build_customize_after_tool_controls() -> list:
+def _build_customize_after_tool_controls(collector: object | None = None) -> list:
     """After-tool ingestion-gate control for enabled customize ``after_tool_use``
     rules (P4). Returns an EMPTY list (byte-identical control plane) unless
     ``MAGI_CUSTOMIZE_VERIFICATION_ENABLED`` + ``MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED``
     are both set. The LLM sub-mode reuses the P3 criterion model factory (which is
     ``None`` while ``MAGI_EGRESS_GATE_ENABLED`` is off, so ``criterion`` rules stay
     deterministic-only/inert). Fail-soft to ``[]``.
+
+    ``collector`` (the live ``LocalToolEvidenceCollector``) is threaded in so an
+    ``action="audit"`` rule emits a ``custom:CustomizeAudit`` record (WS-B). When
+    ``None`` (or omitted), audit rules are a safe no-op — override rules are
+    unaffected.
     """
     from magi_agent.config.flags import flag_profile_bool  # noqa: PLC0415
 
@@ -974,7 +979,10 @@ def _build_customize_after_tool_controls() -> list:
         )
 
         return [
-            CustomizeAfterToolControl(model_factory=_build_criterion_model_factory())
+            CustomizeAfterToolControl(
+                model_factory=_build_criterion_model_factory(),
+                collector=collector,
+            )
         ]
     except Exception:
         return []

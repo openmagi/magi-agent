@@ -363,6 +363,26 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_WORK_QUEUE_EXECUTOR_ENABLED",
         summary="Enable the durable work-queue dispatcher tick loop.",
     ),
+    # --- WS1 durable crash-resume substrate (default-OFF) -------------------
+    _b(
+        "MAGI_DURABLE_LOCAL_WRITES_ENABLED",
+        summary=(
+            "Master gate for the WS1 durable substrate: create/write the local "
+            "durable_checkpoints + plan_ledger tables in the work-queue sqlite. "
+            "Local sqlite only; never the hosted DB. OFF is byte-identical."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_DURABLE_MAX_RESUME_ATTEMPTS",
+        default=2,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Bound on automatic crash-resume re-entries per (run_id, turn_id) "
+            "before the startup sweep gives up and starts fresh (E11/R6)."
+        ),
+        kind="int",
+    ),
     _b(
         "MAGI_WORK_QUEUE_BOARD_API_ENABLED",
         summary="Mount the read-only work-queue board HTTP API.",
@@ -3544,9 +3564,14 @@ FLAGS: tuple[FlagSpec, ...] = (
         scope="public",
         stage="stage1",
         summary=(
-            "Composio credential source (``env`` / ``hosted``). Default ``env`` "
-            "uses the operator's own ``COMPOSIO_API_KEY``; ``hosted`` brokers "
-            "credentials through the platform master key (Open Magi Pro+)."
+            "Composio credential source (``env`` / ``hosted`` / ``platform``). "
+            "Default auto-selects: a local ``COMPOSIO_API_KEY`` uses ``env`` "
+            "(operator's own key); otherwise a free platform token "
+            "(``MAGI_PLATFORM_API_KEY``) opts into ``platform`` mode, which "
+            "brokers tool calls through the platform broker (``MAGI_PLATFORM_"
+            "BASE_URL``, master key held server-side) so no Composio key is "
+            "needed. ``hosted`` brokers through an in-process platform master "
+            "key (Open Magi Pro+ pods)."
         ),
         kind="str",
     ),
@@ -3931,6 +3956,36 @@ FLAGS: tuple[FlagSpec, ...] = (
             "Hosted gate2 sandbox-canary root path. Default-empty "
             "collapses to ``None`` at both consumers (the dataclass and "
             "the durable-evidence helper). Hosted-only."
+        ),
+        kind="str",
+    ),
+    # I-1 batch 27: file-delivery workspace subdir overrides. Both
+    # default-empty; the consumer collapses ``""`` to a built-in
+    # ``.magi/deliveries/{artifacts,outbox}`` default via the local
+    # ``if not artifact_subdir:`` / ``if not outbox_subdir:`` guards,
+    # so a typed FlagSpec default cannot just pin the const directly
+    # without churning the existing guard.
+    FlagSpec(
+        name="MAGI_FILE_DELIVERY_ARTIFACT_DIR",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Override for the file-delivery artifact subdirectory "
+            "(within the resolved workspace). Default-empty; consumer "
+            "falls back to ``.magi/deliveries/artifacts``."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_FILE_DELIVERY_OUTBOX_DIR",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Override for the file-delivery outbox subdirectory "
+            "(within the resolved workspace). Default-empty; consumer "
+            "falls back to ``.magi/deliveries/outbox``."
         ),
         kind="str",
     ),

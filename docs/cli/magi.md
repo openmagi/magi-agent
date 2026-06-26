@@ -347,22 +347,25 @@ works out of the box on a built-in pure-Python BM25 index; `qmd` is an opt-in
 upgrade and is never a hard dependency.
 
 ```bash
-magi memory init               # install qmd (brew/npm) + index this workspace
-magi memory init --vector      # also generate embeddings for semantic search
+magi memory init               # install qmd (brew/npm) + index + embed (default)
+magi memory init --no-vector   # keyword-only: install + index, skip the ~2GB embed
 magi memory search "<query>"   # BM25 keyword search over memory/
-magi memory search "<query>" --vector   # semantic search (needs init --vector)
+magi memory search "<query>" --vector   # semantic search (needs the embed)
 ```
 
 `init` installs the `qmd` binary if missing (Homebrew first, then
 `npm install -g @tobilu/qmd`), registers this workspace's `memory/` tree as a
-private collection, and writes the opt-ins to `~/.magi/config.toml`. `--vector`
-additionally runs `qmd embed` (first run downloads an embedding model, ~2GB) and
-enables semantic search.
+private collection, and writes the opt-ins to `~/.magi/config.toml`. The
+`--vector/--no-vector` flag defaults to the resolved `vector_search` config
+(ON for a normal install), so `init` runs `qmd embed` (first run downloads an
+embedding model, ~2GB) unless you pass `--no-vector` or set
+`[memory] vector_search = false`.
 
-Vector search is **explicit-only**: `magi memory search --vector` and the
-dashboard `/v1/app/memory/search?vector=1` endpoint use it, but the per-turn
-recall hot path always stays on fast BM25 (a `qmd vsearch` cold-loads the
-embedding model, ~10-40s). See [Memory](/docs/memory) for the full model.
+Vector search defaults ON in config but is **explicit-only at runtime**:
+`magi memory search --vector` and the dashboard `/v1/app/memory/search?vector=1`
+endpoint use it, but the per-turn recall hot path always stays on fast BM25 (a
+`qmd vsearch` cold-loads the embedding model, ~10-40s). See
+[Memory](/docs/memory) for the full model.
 
 ## `magi doctor`
 

@@ -300,7 +300,8 @@ def test_types_without_confident_producer_have_empty_field_hints() -> None:
     # These types have no confirmed EvidenceRecord producer in the codebase.
     # Verified by audit — no public_projection() / fields= dict found for these.
     types_without_confident_producer = {
-        "GitDiff",        # gate produces tool output not EvidenceRecord.fields
+        # GitDiff removed: the live gate5b GitDiff handler now emits a typed
+        # EvidenceRecord (changedFiles/fileCount/digest) via core_toolhost.
         "FileDeliver",    # delivery metadata lives in ToolResult, not EvidenceRecord.fields
         "ArtifactVerify", # no EvidenceRecord field producer found
         "PlanVerifier",   # catalog type only; no concrete EvidenceRecord producer

@@ -61,10 +61,14 @@ def test_build_web_tools_platform_boundary_exception_falls_back_to_composio(
         "magi_agent.web_acquisition.research_tools.build_live_research_boundary",
         _raises,
     )
-    # Composio is disabled → result should be [].
+    # Composio is explicitly disabled → result should be []. (A platform token
+    # now ALSO activates brokered Composio via the ``platform`` credential
+    # source, so we pin ``MAGI_COMPOSIO_ENABLED=off`` to isolate the
+    # platform-boundary fallback this test actually exercises.)
     env = {
         "MAGI_PLATFORM_BASE_URL": "https://platform.example.com",
         "MAGI_PLATFORM_API_KEY": "test-key",
+        "MAGI_COMPOSIO_ENABLED": "off",
     }
     result = _mod.build_web_tools(env=env)
     assert result == []
