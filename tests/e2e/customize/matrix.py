@@ -187,3 +187,24 @@ def count_legal_combos(slots: Iterable[str] | None = None) -> int:
     if slots is None:
         return sum(1 for _ in iter_legal_combinations())
     return sum(1 for _ in iter_legal_combinations_for_slots(slots))
+
+F_QA5_SHELL_SLOTS: frozenset[str] = frozenset(
+    {
+        # shell_command + shell_check overlap (gate-honored on both)
+        "pre_final",
+        "before_tool_use",
+        # shell_command-only or audit-only on shell_check
+        "after_tool_use",
+        # turn-boundary + subagent stop
+        "on_user_prompt_submit",
+        "on_subagent_stop",
+        "before_turn_start",
+        "after_turn_end",
+        # compaction + work-queue + artifact
+        "before_compaction",
+        "after_compaction",
+        "on_task_checkpoint",
+        "on_artifact_created",
+    }
+)
+

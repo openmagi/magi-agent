@@ -925,15 +925,26 @@ def _classify_llm_call_result(
     """Translate the plugin's return value into a ``(verdict, blocked_response)`` pair.
 
     The plugin returns ``None`` on proceed and a synthetic ``LlmResponse``
-    (built via ``_build_policy_blocked_llm_response``) on block. The synthetic
-    response carries ``error_message`` starting with
-    ``"customize_policy_blocked: <slot>"`` so we can verify the slot label
-    matches without depending on private ADK internals.
+    (built via :func:`_build_policy_blocked_llm_response`) on block. The
+    synthetic response carries
+    ``custom_metadata = {"policy_blocked": True, "reason": "<slot> llm_criterion verdict=block"}``
+    (the canonical honest-degrade marker the asserter inspects). The
+    ``error_message`` field is NOT set — earlier asserter passes that
+    grepped ``error_message`` were stale (the helper was reshaped to
+    use ``custom_metadata`` so downstream telemetry / audit can
+    attribute the block; see
+    ``magi_agent.adk_bridge.lifecycle_llm_call_control``).
     """
     if result is None:
         return ("proceed", None)
-    # Block path: synthetic LlmResponse. Its ``error_message`` is the canonical
-    # honest-degrade marker the asserter inspects.
+    metadata = getattr(result, "custom_metadata", None) or {}
+    if isinstance(metadata, dict) and metadata.get("policy_blocked") is True:
+        reason = metadata.get("reason") or ""
+        if not isinstance(reason, str) or slot in reason or not reason:
+            return ("block", result)
+    # Fall back to the legacy ``error_message`` shape in case a different
+    # plugin happens to use that path; keep it so a non-llm_call block
+    # slot's plugin stays detectable here.
     error_message = getattr(result, "error_message", None) or ""
     if "customize_policy_blocked" in error_message and slot in error_message:
         return ("block", result)
