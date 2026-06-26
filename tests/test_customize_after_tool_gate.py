@@ -176,3 +176,203 @@ def test_dict_result_is_matched_serialized():
         policy_loader=lambda: _policy(_rule(contentMatch={"pattern": "secret"}))
     )
     assert _run(ctrl, result={"data": "a secret value"}) is not None
+
+
+# --- WS-B: action="audit" emits a typed record instead of blocking ---
+
+
+class _FakeCollector:
+    """Minimal collector capturing audit emits (mirrors the real signature)."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def record_audit_evidence_for_turn(
+        self, *, session_id, turn_id, tool_name, record, tool_call_id=None
+    ) -> None:
+        self.calls.append(
+            {
+                "session_id": session_id,
+                "turn_id": turn_id,
+                "tool_name": tool_name,
+                "record": record,
+                "tool_call_id": tool_call_id,
+            }
+        )
+
+
+class _Ctx:
+    class _Session:
+        id = "sess-1"
+
+    invocation_id = "turn-1"
+    session = _Session()
+
+
+def _run_ctx(control, *, tool="web_search", result="some result text", ctx=None):
+    return asyncio.run(
+        control.on_after_tool(
+            tool=_Tool(tool), args={}, tool_context=ctx or _Ctx(), result=result
+        )
+    )
+
+
+def _audit_rule(*, enabled=True, **payload_over):
+    payload = {"toolMatch": ["web_search"]}
+    payload.update(payload_over)
+    return {
+        "id": "cr_audit",
+        "scope": "research",
+        "enabled": enabled,
+        "firesAt": "after_tool_use",
+        "action": "audit",
+        "what": {"kind": "llm_criterion", "payload": payload},
+    }
+
+
+def test_audit_content_match_emits_record_and_does_not_block():
+    collector = _FakeCollector()
+    ctrl = CustomizeAfterToolControl(
+        collector=collector,
+        policy_loader=lambda: _policy(_audit_rule(contentMatch={"pattern": "ssn"})),
+    )
+    out = _run_ctx(ctrl, result="leaked ssn 123-45-6789")
+    # audit never blocks
+    assert out is None
+    # exactly one record emitted
+    assert len(collector.calls) == 1
+    call = collector.calls[0]
+    assert call["session_id"] == "sess-1"
+    assert call["turn_id"] == "turn-1"
+    record = call["record"]
+    assert record.type == "custom:CustomizeAudit"
+    assert record.status == "ok"
+    assert record.fields["ruleId"] == "cr_audit"
+    assert record.fields["action"] == "audit"
+    assert record.fields["matched"] is True
+
+
+def test_audit_no_match_emits_nothing():
+    collector = _FakeCollector()
+    ctrl = CustomizeAfterToolControl(
+        collector=collector,
+        policy_loader=lambda: _policy(_audit_rule(contentMatch={"pattern": "ssn"})),
+    )
+    assert _run_ctx(ctrl, result="clean text") is None
+    assert collector.calls == []
+
+
+def test_audit_llm_criterion_fail_emits_record():
+    async def fake_invoke(_model, _prompt):
+        return '{"pass": false, "reason": "non-10K content"}'
+
+    collector = _FakeCollector()
+    ctrl = CustomizeAfterToolControl(
+        collector=collector,
+        model_factory=lambda: object(),
+        invoke=fake_invoke,
+        policy_loader=lambda: _policy(_audit_rule(criterion="only 10-K filings allowed")),
+    )
+    out = _run_ctx(ctrl, result="some filing")
+    assert out is None
+    assert len(collector.calls) == 1
+    assert collector.calls[0]["record"].fields["reason"] == "non-10K content"
+
+
+def test_audit_llm_criterion_pass_emits_nothing():
+    async def fake_invoke(_model, _prompt):
+        return '{"pass": true, "reason": "ok"}'
+
+    collector = _FakeCollector()
+    ctrl = CustomizeAfterToolControl(
+        collector=collector,
+        model_factory=lambda: object(),
+        invoke=fake_invoke,
+        policy_loader=lambda: _policy(_audit_rule(criterion="only 10-K filings allowed")),
+    )
+    assert _run_ctx(ctrl, result="10-K") is None
+    assert collector.calls == []
+
+
+def test_audit_flags_off_emits_nothing(monkeypatch):
+    monkeypatch.setenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", "0")
+    collector = _FakeCollector()
+    ctrl = CustomizeAfterToolControl(
+        collector=collector,
+        policy_loader=lambda: _policy(_audit_rule(contentMatch={"pattern": "ssn"})),
+    )
+    assert _run_ctx(ctrl, result="leaked ssn") is None
+    assert collector.calls == []
+
+
+def test_audit_without_collector_is_safe_noop():
+    # No collector injected (e.g. egress build path): audit rule must not block
+    # and must not raise.
+    ctrl = CustomizeAfterToolControl(
+        policy_loader=lambda: _policy(_audit_rule(contentMatch={"pattern": "ssn"})),
+    )
+    assert _run_ctx(ctrl, result="leaked ssn") is None
+
+
+def test_override_rule_still_blocks_with_collector():
+    # An override rule keeps blocking; nothing is emitted to the collector.
+    collector = _FakeCollector()
+    ctrl = CustomizeAfterToolControl(
+        collector=collector,
+        policy_loader=lambda: _policy(_rule(contentMatch={"pattern": "ssn"})),
+    )
+    out = _run_ctx(ctrl, result="leaked ssn")
+    assert out is not None
+    assert out["response_type"] == CUSTOMIZE_AFTER_TOOL_BLOCK_TYPE
+    assert collector.calls == []
+
+
+def test_audit_record_persisted_to_durable_ledger(tmp_path, monkeypatch):
+    # WS-B acceptance: a fired audit rule writes exactly one typed record to the
+    # durable JSONL ledger (the "trace" leg of rule/policy/trace).
+    import json
+
+    from magi_agent.evidence.local_tool_collector import LocalToolEvidenceCollector
+
+    monkeypatch.setenv("MAGI_EVIDENCE_LEDGER_DIR", str(tmp_path))
+    collector = LocalToolEvidenceCollector()
+    ctrl = CustomizeAfterToolControl(
+        collector=collector,
+        policy_loader=lambda: _policy(_audit_rule(contentMatch={"pattern": "ssn"})),
+    )
+    out = _run_ctx(ctrl, result="leaked ssn 123-45-6789")
+    assert out is None  # never blocks
+
+    ledger = tmp_path / "sess-1.jsonl"
+    assert ledger.exists()
+    lines = [json.loads(ln) for ln in ledger.read_text().splitlines() if ln.strip()]
+    audit_lines = [
+        ln for ln in lines if ln.get("record", {}).get("type") == "custom:CustomizeAudit"
+    ]
+    assert len(audit_lines) == 1
+    rec = audit_lines[0]["record"]
+    assert rec["status"] == "ok"
+    assert rec["fields"]["ruleId"] == "cr_audit"
+    # live view (pre-final gate) also sees it
+    assert any(
+        getattr(r, "type", None) == "custom:CustomizeAudit"
+        for r in collector.collect_for_turn("turn-1")
+    )
+
+
+def test_audit_reason_is_redacted():
+    # A model-supplied reason that echoes a secret-shaped token is scrubbed
+    # before it reaches the durable record.
+    async def fake_invoke(_model, _prompt):
+        return '{"pass": false, "reason": "found AKIAIOSFODNN7EXAMPLE in result"}'
+
+    collector = _FakeCollector()
+    ctrl = CustomizeAfterToolControl(
+        collector=collector,
+        model_factory=lambda: object(),
+        invoke=fake_invoke,
+        policy_loader=lambda: _policy(_audit_rule(criterion="x")),
+    )
+    _run_ctx(ctrl, result="some filing")
+    reason = collector.calls[0]["record"].fields["reason"]
+    assert "AKIAIOSFODNN7EXAMPLE" not in reason

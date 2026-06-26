@@ -104,6 +104,7 @@ graph LR
     customize --> harness
     customize --> introspection
     customize --> packs
+    customize --> runtime
     customize --> tools
     customize --> transport
     discovery --> cli
@@ -789,7 +790,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | apply, store | — |
-| after_tool_gate.py | Customize after-tool-use ingestion gate (P4). | control_plane, criterion_engine, flags, store, verification_policy | cli/real_runner.py |
+| after_tool_gate.py | Customize after-tool-use ingestion gate (P4). | control_plane, criterion_engine, flags, receipt_redaction, store, types, verification_policy | cli/real_runner.py |
 | apply.py | — | flags, verification_policy | customize/__init__.py, runtime/openmagi_runtime.py, transport/customize.py |
 | budgets_apply.py | F7 — Customize budgets applier. | flags, verification_policy | runtime/governed_turn.py, transport/customize.py |
 | capability_scope.py | Capability-scope custom rule (F4). | local_readonly, permissions | customize/custom_rules.py, runtime/child_runner_live.py |
@@ -888,7 +889,7 @@ graph LR
 | source_ledger.py | — | authority, reports, types | browser/source_tools.py, cli/tests/test_source_grounded_recipe_gate_integration.py, evidence/citation_audit.py, evidence/event_projection.py, evidence/local_tool_collector.py, evidence/research_final_gate.py, knowledge/source_tools.py, research/research_first_canary.py, tools/document_tools.py, tools/local_readonly.py, web_acquisition/repo_research_tools.py, web_acquisition/research_tools.py |
 | subagent.py | — | authority, contracts, reports, runtime_issuance, types | evidence/child_runtime_envelope.py, recipes/opencode_child_lifecycle.py, runtime/child_runner_boundary.py |
 | tool_boundary.py | — | tool_preview | tools/event_projection.py, tools/kernel.py |
-| types.py | — | authority | adk_bridge/dashboard_producer_control.py, customize/field_constraint_compiler.py, customize/shacl_compiler.py, evidence/__init__.py, evidence/builtin.py, evidence/child_runtime_envelope.py, evidence/citation_audit.py, evidence/coding_verification.py, evidence/contracts.py, evidence/document_coverage.py, evidence/event_projection.py, evidence/extraction.py, evidence/extractors.py, evidence/first_party_activity.py, evidence/ledger.py, evidence/local_tool_collector.py, evidence/reports.py, evidence/research_final_gate.py, evidence/rollout.py, evidence/shacl_ontology.py, evidence/shacl_verifier.py, evidence/source_ledger.py, evidence/subagent.py, harness/goal_judge.py, harness/goal_loop_control.py, harness/resolved.py, harness/scheduler_delivery.py, harness/scheduler_job_execution.py, harness/self_review.py, harness/self_review_pipeline.py, harness/skill_curator.py, harness/verifier_bus.py, recipes/coding_evidence_gate.py, shadow/audit_reporter.py, tools/manifest.py, transport/customize.py |
+| types.py | — | authority | adk_bridge/dashboard_producer_control.py, customize/after_tool_gate.py, customize/field_constraint_compiler.py, customize/shacl_compiler.py, evidence/__init__.py, evidence/builtin.py, evidence/child_runtime_envelope.py, evidence/citation_audit.py, evidence/coding_verification.py, evidence/contracts.py, evidence/document_coverage.py, evidence/event_projection.py, evidence/extraction.py, evidence/extractors.py, evidence/first_party_activity.py, evidence/ledger.py, evidence/local_tool_collector.py, evidence/reports.py, evidence/research_final_gate.py, evidence/rollout.py, evidence/shacl_ontology.py, evidence/shacl_verifier.py, evidence/source_ledger.py, evidence/subagent.py, harness/goal_judge.py, harness/goal_loop_control.py, harness/resolved.py, harness/scheduler_delivery.py, harness/scheduler_job_execution.py, harness/self_review.py, harness/self_review_pipeline.py, harness/skill_curator.py, harness/verifier_bus.py, recipes/coding_evidence_gate.py, shadow/audit_reporter.py, tools/manifest.py, transport/customize.py |
 | validator_taxonomy.py | — | — | cli/engine.py |
 
 ### firstparty/
@@ -1606,7 +1607,7 @@ graph LR
 | public_events.py | — | — | adk_bridge/event_adapter.py, adk_bridge/wire_profile.py, evidence/event_projection.py, gates/gate5b_full_toolhost.py, harness/cross_review.py, harness/workflow_executor.py, meta_orchestration/event_projection.py, plugins/native/subagents.py, research/event_projection.py, research/research_first_canary.py, runtime/events.py, runtime/work_console_snapshot.py, shadow/gate5b4c3_live_runner_boundary.py, tools/event_projection.py, transport/chat.py, transport/chat_routes.py, transport/sse.py, transport/streaming_chat_route.py, transport/streaming_driver.py |
 | query_state.py | — | — | adk_bridge/context_compaction.py, runtime/cache_safe_params.py, runtime/content_replacement.py, runtime/context_lifecycle.py |
 | readiness.py | — | — | transport/health.py |
-| receipt_redaction.py | Single secret-scrubbing kernel for public receipt sanitization. | — | missions/receipts.py, runtime/receipt_utils.py |
+| receipt_redaction.py | Single secret-scrubbing kernel for public receipt sanitization. | — | customize/after_tool_gate.py, missions/receipts.py, runtime/receipt_utils.py |
 | receipt_utils.py | — | receipt_redaction, runtime | missions/background_tasks.py, runtime/long_running_activity.py |
 | reliability_budget.py | — | model_tiers | recipes/materializer.py, runtime/phase_routing.py |
 | request_ledger.py | — | — | runtime/approval_resume.py, tools/kernel.py, tools/scheduler.py |

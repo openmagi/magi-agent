@@ -87,10 +87,16 @@ class CustomizeAfterToolControl(BaseLoopControl):
         model_factory: Callable[[], Any] | None = None,
         policy_loader: Callable[[], Any] | None = None,
         invoke: InvokeFn | None = None,
+        collector: Any | None = None,
     ) -> None:
         self._model_factory = model_factory
         self._policy_loader = policy_loader or _default_policy_loader
         self._invoke = invoke
+        # Optional LocalToolEvidenceCollector — when present, an ``action="audit"``
+        # rule that fires emits a ``custom:CustomizeAudit`` record instead of
+        # overriding (WS-B). ``None`` (e.g. the egress build path) → audit rules
+        # are a safe no-op (never block, never raise).
+        self._collector = collector
 
     async def on_after_tool(
         self,
@@ -100,7 +106,9 @@ class CustomizeAfterToolControl(BaseLoopControl):
         tool_context: Any,
         result: Any,
     ) -> dict[str, Any] | None:
-        return await self._decide(tool=tool, result=result)
+        return await self._decide(
+            tool=tool, result=result, tool_context=tool_context
+        )
 
     async def apply_after_tool(
         self,
@@ -112,10 +120,14 @@ class CustomizeAfterToolControl(BaseLoopControl):
         result: Any,
     ) -> dict[str, Any] | None:
         """Typed-context entry point (stateless — ``ctx`` unused)."""
-        _ = (ctx, args, tool_context)
-        return await self._decide(tool=tool, result=result)
+        _ = (ctx, args)
+        return await self._decide(
+            tool=tool, result=result, tool_context=tool_context
+        )
 
-    async def _decide(self, *, tool: Any, result: Any) -> dict[str, Any] | None:
+    async def _decide(
+        self, *, tool: Any, result: Any, tool_context: Any = None
+    ) -> dict[str, Any] | None:
         try:
             from magi_agent.config.flags import flag_profile_bool
 
@@ -130,10 +142,22 @@ class CustomizeAfterToolControl(BaseLoopControl):
                 return None
             tool_name = _tool_name(tool)
             result_text = _result_text(result)
+            turn_id = getattr(tool_context, "invocation_id", None) or "local-turn"
+            session_id = (
+                getattr(getattr(tool_context, "session", None), "id", None)
+                or "cli-session"
+            )
             for rule in rules:
                 override = await self._eval_rule(
-                    rule, tool_name=tool_name, result_text=result_text
+                    rule,
+                    tool_name=tool_name,
+                    result_text=result_text,
+                    session_id=session_id,
+                    turn_id=turn_id,
                 )
+                # ``override`` is non-None only for blocking (``override``)
+                # rules; an ``audit`` rule that fires emits and returns None so
+                # the loop continues (audit never short-circuits ingestion).
                 if override is not None:
                     return override
             return None
@@ -141,7 +165,13 @@ class CustomizeAfterToolControl(BaseLoopControl):
             return None
 
     async def _eval_rule(
-        self, rule: dict[str, Any], *, tool_name: str, result_text: str
+        self,
+        rule: dict[str, Any],
+        *,
+        tool_name: str,
+        result_text: str,
+        session_id: str,
+        turn_id: str,
     ) -> dict[str, Any] | None:
         payload = rule.get("what", {}).get("payload", {})
         if not isinstance(payload, dict):
@@ -168,12 +198,98 @@ class CustomizeAfterToolControl(BaseLoopControl):
             )
             if passed:
                 return None
-            return self._override(rule, reason)
+            return self._fire(
+                rule, reason, tool_name=tool_name, session_id=session_id, turn_id=turn_id
+            )
 
         # Pure-deterministic mode: contentMatch alone fired.
         if has_content:
-            return self._override(rule, "content-match")
+            return self._fire(
+                rule,
+                "content-match",
+                tool_name=tool_name,
+                session_id=session_id,
+                turn_id=turn_id,
+            )
         return None
+
+    def _fire(
+        self,
+        rule: dict[str, Any],
+        reason: str,
+        *,
+        tool_name: str,
+        session_id: str,
+        turn_id: str,
+    ) -> dict[str, Any] | None:
+        """Dispatch a fired rule by action.
+
+        ``audit`` → emit a typed ``custom:CustomizeAudit`` record (non-blocking,
+        returns None). Any other action (``override``) → return the block
+        override (byte-identical to the prior behavior).
+        """
+        if rule.get("action") == "audit":
+            self._emit_audit(
+                rule,
+                reason,
+                tool_name=tool_name,
+                session_id=session_id,
+                turn_id=turn_id,
+            )
+            return None
+        return self._override(rule, reason)
+
+    def _emit_audit(
+        self,
+        rule: dict[str, Any],
+        reason: str,
+        *,
+        tool_name: str,
+        session_id: str,
+        turn_id: str,
+    ) -> None:
+        """Emit one ``custom:CustomizeAudit`` EvidenceRecord for a fired audit rule.
+
+        Carries only rule metadata + a redacted reason — never raw tool output or
+        conversation (least privilege). Fail-soft: a missing collector or any
+        error is a silent no-op so an audit rule can never wedge tool ingestion.
+        """
+        collector = self._collector
+        if collector is None:
+            return
+        try:
+            import time
+
+            from magi_agent.evidence.types import EvidenceRecord
+            from magi_agent.runtime.receipt_redaction import sanitize_public_text
+
+            rule_id = rule.get("id")
+            record = EvidenceRecord.model_validate(
+                {
+                    "type": "custom:CustomizeAudit",
+                    "status": "ok",
+                    "observedAt": int(time.time() * 1000),
+                    "source": {"kind": "tool_trace", "toolName": tool_name},
+                    "fields": {
+                        "evidenceRef": f"evidence:customize-audit:{rule_id}",
+                        "ruleId": rule_id,
+                        "kind": "llm_criterion",
+                        "firesAt": "after_tool_use",
+                        "action": "audit",
+                        "matched": True,
+                        "reason": sanitize_public_text(str(reason)),
+                    },
+                }
+            )
+            collector.record_audit_evidence_for_turn(
+                session_id=session_id,
+                turn_id=turn_id,
+                tool_name=tool_name,
+                record=record,
+                tool_call_id=f"customize-audit:{rule_id}",
+            )
+        except Exception:
+            return
 
     @staticmethod
     def _override(rule: dict[str, Any], reason: str) -> dict[str, Any]:

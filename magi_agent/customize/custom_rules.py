@@ -222,7 +222,14 @@ _LEGAL: dict[str, dict[str, frozenset[str]]] = {
     "tool_perm": {"before_tool_use": frozenset({"block", "ask_approval"})},
     "llm_criterion": {
         "pre_final": frozenset({"block", "retry", "audit"}),
-        "after_tool_use": frozenset({"override"}),
+        # WS-B — ``after_tool_use`` adds ``audit`` alongside ``override``. The
+        # CustomizeAfterToolControl after-tool ingestion gate consumes both: an
+        # ``override`` rule strips the tool result (block), while an ``audit``
+        # rule leaves the result untouched and instead emits a typed
+        # ``custom:CustomizeAudit`` EvidenceRecord to the durable ledger (the
+        # "trace" leg of rule/policy/trace). ``block`` stays illegal — the gate
+        # cannot retroactively block an already-dispatched tool result.
+        "after_tool_use": frozenset({"override", "audit"}),
         # PR-F-UX1 Tier 2 — audit-only at the two new bus-emitted gates.
         # ``block`` would require a runtime contract change at message_builder
         # (would mutate the byte-identical prompt assembly invariant) and

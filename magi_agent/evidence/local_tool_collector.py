@@ -505,6 +505,42 @@ class LocalToolEvidenceCollector:
         """
         self._records.setdefault((session_id, turn_id), []).append(record)
 
+    def record_audit_evidence_for_turn(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        tool_name: str,
+        record: object,
+        tool_call_id: str | None = None,
+    ) -> None:
+        """Append a pre-built audit ``EvidenceRecord`` AND durably persist it.
+
+        Mirrors :meth:`append_evidence_record_for_turn` (records land in the
+        ``_records`` corpus the pre-final gate reads) but ALSO routes the record
+        through the durable JSONL sink (:meth:`_maybe_persist_records`) so an
+        ``action="audit"`` customize rule leaves a durable trace — the "trace"
+        leg of rule/policy/trace. Single-writer invariant preserved: the durable
+        write still goes through ``_maybe_persist_records`` →
+        ``ledger_store.write_evidence_records``.
+
+        Fail-soft: a persistence error never breaks the tool path; the live-view
+        append always happens so the gate still sees the record.
+        """
+        self._records.setdefault((session_id, turn_id), []).append(record)
+        try:
+            status = str(getattr(record, "status", "ok"))
+            self._maybe_persist_records(
+                session_id=session_id,
+                turn_id=turn_id,
+                tool_call_id=tool_call_id or "customize-audit",
+                tool_name=tool_name,
+                status=status,
+                records=[record],
+            )
+        except Exception:
+            return
+
     def collect_for_turn(self, turn_id: str) -> tuple[object, ...]:
         local = tuple(
             record

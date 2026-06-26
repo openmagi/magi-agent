@@ -173,10 +173,20 @@ def test_llm_after_tool_without_toolmatch_rejected():
     assert any("toolMatch" in e for e in errs)
 
 
-def test_llm_after_tool_must_override():
+def test_llm_after_tool_block_still_illegal():
+    # ``block`` remains illegal at after_tool_use (the override gate cannot
+    # retroactively block an already-dispatched tool result).
     rule = _llm(firesAt="after_tool_use", action="block",
                 what={"kind": "llm_criterion", "payload": {"criterion": "x", "toolMatch": ["web_search"]}})
     assert validate_custom_rule(rule)
+
+
+def test_llm_after_tool_audit_is_legal():
+    # WS-B: ``audit`` is a legal action at after_tool_use — the criterion judge
+    # runs and the verdict is recorded to the evidence ledger WITHOUT blocking.
+    rule = _llm(firesAt="after_tool_use", action="audit",
+                what={"kind": "llm_criterion", "payload": {"criterion": "x", "toolMatch": ["web_search"]}})
+    assert validate_custom_rule(rule) == []
 
 
 def test_projection_rejects_conversation():
