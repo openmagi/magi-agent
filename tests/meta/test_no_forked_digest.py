@@ -71,8 +71,6 @@ _DIGEST_FORK_ALLOWLIST: frozenset[str] = frozenset(
         # _digest_payload omits default=str + allow_nan; needs per-site parity proof
         "meta_orchestration/projection.py",
         "missions/lifecycle.py",
-        # public re-export shim: canonical_digest -> ops.safety (follow-up)
-        "missions/receipts.py",
         # _digest_payload kept (de-facto fine), but ops/job_queue also has _digest_text;
         # the allow_nan fix already landed in #695. Migration is a follow-up batch.
         "ops/job_queue.py",
@@ -98,8 +96,10 @@ _DIGEST_FORK_ALLOWLIST: frozenset[str] = frozenset(
         "runtime/policy_snapshot.py",
         "runtime/prompt_snapshot.py",
         "runtime/provider_receipts.py",
-        # public re-export shim: canonical_digest -> ops.safety (follow-up)
-        "runtime/receipt_utils.py",
+        # S-03: single receipt secret/digest kernel; runtime/receipt_utils.py and
+        # missions/receipts.py now delegate here (2 forks -> 1). Routes to
+        # ops.safety in the C-5 follow-up batch.
+        "runtime/receipt_redaction.py",
         "runtime/request_shape.py",
         "runtime/resume_decision.py",
         "runtime/session_continuity_proof.py",
@@ -293,9 +293,9 @@ def test_frozen_base_allowlist_is_shrinking() -> None:
 
 
 def test_no_second_module_level_canonical_digest_def() -> None:
-    """Only the kernel + the two documented re-export shims may define a
+    """Only the kernel + the receipt secret/digest kernel (S-03) may define a
     module-level `def canonical_digest`."""
-    shims = {"missions/receipts.py", "runtime/receipt_utils.py"}
+    shims = {"runtime/receipt_redaction.py"}
     offenders: list[str] = []
     for path in _iter_modules():
         rel = path.relative_to(_MAGI_ROOT).as_posix()

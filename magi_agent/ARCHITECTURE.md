@@ -1269,7 +1269,7 @@ graph LR
 | cron_policy.py | — | receipts | missions/schedule_grammar.py, missions/scheduler_adapter.py |
 | events.py | — | receipts | transport/sse.py |
 | lifecycle.py | — | receipts | missions/__init__.py |
-| receipts.py | — | — | missions/__init__.py, missions/cron_policy.py, missions/events.py, missions/lifecycle.py |
+| receipts.py | — | receipt_redaction, runtime | missions/__init__.py, missions/cron_policy.py, missions/events.py, missions/lifecycle.py |
 | schedule_grammar.py | A1 — ScheduleSpec: once / interval / cron grammar (preview-only). | cron_policy | harness/scheduler_executor.py |
 | scheduler_adapter.py | — | cron_policy | — |
 
@@ -1518,7 +1518,7 @@ graph LR
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
-| __init__.py | — | — | cli/real_runner.py, cli/tests/test_anthropic_cache_selection.py, harness/workflow_executor.py, recipes/coding_subagents.py, recipes/cross_verify.py, recipes/research_child_runner.py |
+| __init__.py | — | — | cli/real_runner.py, cli/tests/test_anthropic_cache_selection.py, harness/workflow_executor.py, missions/receipts.py, recipes/coding_subagents.py, recipes/cross_verify.py, recipes/research_child_runner.py, runtime/receipt_utils.py |
 | active_sessions.py | In-process active-session transcript buffer for serve session-end extraction. | session_extract_runtime | (root)/app.py, transport/chat_routes.py |
 | active_turn_registry.py | Single-flight registry for active turns, keyed by session. | — | cli/engine.py |
 | activity_boundary.py | — | — | — |
@@ -1591,7 +1591,8 @@ graph LR
 | public_events.py | — | — | adk_bridge/event_adapter.py, adk_bridge/wire_profile.py, evidence/event_projection.py, gates/gate5b_full_toolhost.py, harness/cross_review.py, harness/workflow_executor.py, meta_orchestration/event_projection.py, plugins/native/subagents.py, research/event_projection.py, research/research_first_canary.py, runtime/events.py, runtime/work_console_snapshot.py, shadow/gate5b4c3_live_runner_boundary.py, tools/event_projection.py, transport/chat.py, transport/chat_routes.py, transport/sse.py, transport/streaming_chat_route.py, transport/streaming_driver.py |
 | query_state.py | — | — | adk_bridge/context_compaction.py, runtime/cache_safe_params.py, runtime/content_replacement.py, runtime/context_lifecycle.py |
 | readiness.py | — | — | transport/health.py |
-| receipt_utils.py | — | — | missions/background_tasks.py, runtime/long_running_activity.py |
+| receipt_redaction.py | Single secret-scrubbing kernel for public receipt sanitization. | — | missions/receipts.py, runtime/receipt_utils.py |
+| receipt_utils.py | — | receipt_redaction, runtime | missions/background_tasks.py, runtime/long_running_activity.py |
 | reliability_budget.py | — | model_tiers | recipes/materializer.py, runtime/phase_routing.py |
 | request_ledger.py | — | — | runtime/approval_resume.py, tools/kernel.py, tools/scheduler.py |
 | request_shape.py | — | model_tiers | harness/long_context_eval.py, runtime/adk_turn_runner.py |
