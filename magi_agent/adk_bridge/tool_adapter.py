@@ -23,7 +23,7 @@ AdkLocalTool = FunctionTool | LongRunningFunctionTool
 
 #: Tool names kept registered (and therefore dispatchable) for backward
 #: compatibility, but NOT advertised to the model in the registry-wide toolset.
-#: ``openmagi.web`` ships three names for the same web-search surface
+#: The bundled web plugin ships three names for the same web-search surface
 #: (``WebSearch``, ``web_search``, ``web-search``). The kebab-case ``web-search``
 #: is a vestigial alias with no distinct wiring role. Unlike ``web_search``,
 #: which is also the canonical evidence source-kind and the name the direct
