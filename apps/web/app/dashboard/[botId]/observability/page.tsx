@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Activity, ClipboardList, HeartPulse, RefreshCw, Rows3, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/ui/glass-card";
@@ -9,6 +10,8 @@ import {
   buildActivityQuery,
   CATEGORY_KINDS,
   NOISE_KINDS,
+  parseFiltersFromParams,
+  filtersToParams,
   type ActivityFilters,
 } from "./observability-query";
 
@@ -113,15 +116,13 @@ function StatCard({
 }
 
 /** Filter bar above the Activity Feed. State is lifted to the page component. */
-function FilterBar({
-  filters,
-  onFiltersChange,
-  sessions,
-}: {
+interface FilterBarProps {
   filters: ActivityFilters;
   onFiltersChange: (next: ActivityFilters) => void;
   sessions: SessionRecord[];
-}) {
+}
+
+function FilterBar({ filters, onFiltersChange, sessions }: FilterBarProps) {
   const hasActiveFilters =
     !filters.hideNoise ||
     filters.selectedKinds.length > 0 ||
@@ -227,7 +228,13 @@ function FilterBar({
   );
 }
 
-export default function ObservabilityPage() {
+/**
+ * Inner page body. Requires a Suspense boundary in the parent because it calls
+ * useSearchParams() — Next.js App Router requirement for static-safe rendering.
+ */
+function ObservabilityPageInner() {
+  const router = useRouter();
+  const sp = useSearchParams();
   const agentFetch = useAgentFetch();
   const [meta, setMeta] = useState<ObservabilityMeta | null>(null);
   const [events, setEvents] = useState<ActivityEventRecord[]>([]);
@@ -237,10 +244,20 @@ export default function ObservabilityPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filter state (local state — URL param sync left for a future PR when
-  // Next.js useSearchParams is available outside Suspense boundaries; local
-  // state is sufficient for the audit use-case and avoids a Suspense wrapper).
-  const [filters, setFilters] = useState<ActivityFilters>(DEFAULT_FILTERS);
+  // Filter state backed by URL query params so audit views are shareable.
+  // Initial state is read from the URL on mount; changes are written back via
+  // router.replace (no history push — avoids polluting back-stack).
+  const [filters, setFilters] = useState<ActivityFilters>(() =>
+    parseFiltersFromParams(sp),
+  );
+
+  /** Centralized filter apply: updates state + syncs URL (replace, not push). */
+  function applyFilters(next: ActivityFilters) {
+    setFilters(next);
+    const params = filtersToParams(next);
+    const qs = params.toString();
+    router.replace(qs ? `?${qs}` : "?", { scroll: false });
+  }
 
   const activityUrl = useMemo(
     () => OBSERVABILITY_ENDPOINTS.activity + buildActivityQuery(filters),
@@ -300,12 +317,12 @@ export default function ObservabilityPage() {
     return "not ready";
   }, [health]);
 
-  /** Handle clicking a session card — sets sessionId filter and re-fetches. */
+  /** Handle clicking a session card — toggles sessionId filter and re-fetches. */
   function handleSessionClick(sessionId: string) {
-    setFilters((prev) => ({
-      ...prev,
-      sessionId: prev.sessionId === sessionId ? null : sessionId,
-    }));
+    applyFilters({
+      ...filters,
+      sessionId: filters.sessionId === sessionId ? null : sessionId,
+    });
   }
 
   return (
@@ -370,7 +387,7 @@ export default function ObservabilityPage() {
           <div className="mb-4">
             <FilterBar
               filters={filters}
-              onFiltersChange={setFilters}
+              onFiltersChange={applyFilters}
               sessions={sessions}
             />
           </div>
@@ -464,5 +481,18 @@ export default function ObservabilityPage() {
         </GlassCard>
       </div>
     </div>
+  );
+}
+
+/**
+ * Default export wraps the inner component in a Suspense boundary.
+ * Required because ObservabilityPageInner calls useSearchParams(), which
+ * Next.js App Router requires to be inside Suspense for static-safe rendering.
+ */
+export default function ObservabilityPage() {
+  return (
+    <Suspense fallback={null}>
+      <ObservabilityPageInner />
+    </Suspense>
   );
 }

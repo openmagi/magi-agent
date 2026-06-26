@@ -72,3 +72,43 @@ export function buildActivityQuery(filters: ActivityFilters): string {
 
   return `?${params.toString()}`;
 }
+
+/**
+ * Parse ActivityFilters from URL search params (for URL-backed filter state).
+ *
+ * Param names used in the shareable URL:
+ *   hideNoise=0   → hideNoise false  (absent or any other value → true, matching DEFAULT_FILTERS)
+ *   kind=a,b      → selectedKinds
+ *   session_id=x  → sessionId
+ *
+ * The `exclude_kind` expansion is intentionally kept out of the URL to avoid
+ * duplicating the NOISE_KINDS literal; `hideNoise=0` is the canonical signal.
+ */
+export function parseFiltersFromParams(sp: URLSearchParams): ActivityFilters {
+  const noiseParam = sp.get("hideNoise");
+  return {
+    hideNoise: noiseParam === null || noiseParam !== "0",
+    selectedKinds: sp.get("kind")?.split(",").filter(Boolean) ?? [],
+    sessionId: sp.get("session_id") ?? null,
+  };
+}
+
+/**
+ * Serialize ActivityFilters to URL search params for `router.replace`.
+ * Only non-default values are written so the URL stays minimal.
+ *   hideNoise true (default) → param omitted
+ *   hideNoise false          → hideNoise=0
+ */
+export function filtersToParams(filters: ActivityFilters): URLSearchParams {
+  const p = new URLSearchParams();
+  if (!filters.hideNoise) {
+    p.set("hideNoise", "0");
+  }
+  if (filters.selectedKinds.length > 0) {
+    p.set("kind", filters.selectedKinds.join(","));
+  }
+  if (filters.sessionId) {
+    p.set("session_id", filters.sessionId);
+  }
+  return p;
+}

@@ -3,6 +3,8 @@ import {
   buildActivityQuery,
   CATEGORY_KINDS,
   NOISE_KINDS,
+  parseFiltersFromParams,
+  filtersToParams,
   type ActivityFilters,
 } from "./observability-query";
 
@@ -47,11 +49,11 @@ describe("buildActivityQuery", () => {
   it("adds kind param when selectedKinds is non-empty", () => {
     const filters: ActivityFilters = {
       hideNoise: false,
-      selectedKinds: ["tool_call", "tool_result"],
+      selectedKinds: ["tool_start", "rule_check"],
       sessionId: null,
     };
     const qs = buildActivityQuery(filters);
-    expect(qs).toContain("kind=tool_call%2Ctool_result");
+    expect(qs).toContain("kind=tool_start%2Crule_check");
   });
 
   it("adds session_id when session is selected", () => {
@@ -67,12 +69,12 @@ describe("buildActivityQuery", () => {
   it("combines hideNoise + kind + session_id correctly", () => {
     const filters: ActivityFilters = {
       hideNoise: true,
-      selectedKinds: ["tool_call"],
+      selectedKinds: ["tool_start"],
       sessionId: "sess-xyz",
     };
     const qs = buildActivityQuery(filters);
     expect(qs).toContain("exclude_kind=");
-    expect(qs).toContain("kind=tool_call");
+    expect(qs).toContain("kind=tool_start");
     expect(qs).toContain("session_id=sess-xyz");
     expect(qs).toContain("limit=100");
   });
@@ -114,14 +116,119 @@ describe("buildActivityQuery", () => {
   it("produces a valid URL query string (parseable)", () => {
     const filters: ActivityFilters = {
       hideNoise: true,
-      selectedKinds: ["tool_call"],
+      selectedKinds: ["tool_start"],
       sessionId: "s1",
     };
     const qs = buildActivityQuery(filters);
     const parsed = new URLSearchParams(qs.replace(/^\?/, ""));
     expect(parsed.get("limit")).toBe("100");
     expect(parsed.get("session_id")).toBe("s1");
-    expect(parsed.get("kind")).toBe("tool_call");
+    expect(parsed.get("kind")).toBe("tool_start");
     expect(parsed.get("exclude_kind")).toBeTruthy();
+  });
+});
+
+describe("parseFiltersFromParams", () => {
+  it("returns default filters when params are empty", () => {
+    const filters = parseFiltersFromParams(new URLSearchParams());
+    expect(filters.hideNoise).toBe(true);
+    expect(filters.selectedKinds).toEqual([]);
+    expect(filters.sessionId).toBeNull();
+  });
+
+  it("reads hideNoise=0 as false", () => {
+    const filters = parseFiltersFromParams(new URLSearchParams("hideNoise=0"));
+    expect(filters.hideNoise).toBe(false);
+  });
+
+  it("treats any non-zero hideNoise value as true", () => {
+    const filters = parseFiltersFromParams(new URLSearchParams("hideNoise=1"));
+    expect(filters.hideNoise).toBe(true);
+  });
+
+  it("reads kind param as selectedKinds array", () => {
+    const filters = parseFiltersFromParams(
+      new URLSearchParams("kind=tool_start%2Crule_check"),
+    );
+    expect(filters.selectedKinds).toEqual(["tool_start", "rule_check"]);
+  });
+
+  it("reads session_id as sessionId", () => {
+    const filters = parseFiltersFromParams(
+      new URLSearchParams("session_id=sess-abc-123"),
+    );
+    expect(filters.sessionId).toBe("sess-abc-123");
+  });
+});
+
+describe("filtersToParams", () => {
+  it("omits hideNoise param when true (matches default — minimal URL)", () => {
+    const p = filtersToParams({ hideNoise: true, selectedKinds: [], sessionId: null });
+    expect(p.get("hideNoise")).toBeNull();
+  });
+
+  it("writes hideNoise=0 when false", () => {
+    const p = filtersToParams({ hideNoise: false, selectedKinds: [], sessionId: null });
+    expect(p.get("hideNoise")).toBe("0");
+  });
+
+  it("serializes selectedKinds as comma-joined kind param", () => {
+    const p = filtersToParams({
+      hideNoise: true,
+      selectedKinds: ["tool_start", "rule_check"],
+      sessionId: null,
+    });
+    expect(p.get("kind")).toBe("tool_start,rule_check");
+  });
+
+  it("omits kind param when selectedKinds is empty", () => {
+    const p = filtersToParams({ hideNoise: true, selectedKinds: [], sessionId: null });
+    expect(p.get("kind")).toBeNull();
+  });
+
+  it("serializes sessionId as session_id param", () => {
+    const p = filtersToParams({
+      hideNoise: true,
+      selectedKinds: [],
+      sessionId: "sess-abc",
+    });
+    expect(p.get("session_id")).toBe("sess-abc");
+  });
+
+  it("omits session_id when sessionId is null", () => {
+    const p = filtersToParams({ hideNoise: true, selectedKinds: [], sessionId: null });
+    expect(p.get("session_id")).toBeNull();
+  });
+});
+
+describe("parseFiltersFromParams / filtersToParams round-trip", () => {
+  it("round-trips full non-default filter set symmetrically", () => {
+    const original: ActivityFilters = {
+      hideNoise: false,
+      selectedKinds: ["tool_start", "rule_check"],
+      sessionId: "sess-xyz",
+    };
+    const parsed = parseFiltersFromParams(filtersToParams(original));
+    expect(parsed).toEqual(original);
+  });
+
+  it("round-trips default filters — empty params produce all defaults", () => {
+    const original: ActivityFilters = {
+      hideNoise: true,
+      selectedKinds: [],
+      sessionId: null,
+    };
+    const parsed = parseFiltersFromParams(filtersToParams(original));
+    expect(parsed).toEqual(original);
+  });
+
+  it("round-trips partial filter (only session set)", () => {
+    const original: ActivityFilters = {
+      hideNoise: true,
+      selectedKinds: [],
+      sessionId: "only-session",
+    };
+    const parsed = parseFiltersFromParams(filtersToParams(original));
+    expect(parsed).toEqual(original);
   });
 });

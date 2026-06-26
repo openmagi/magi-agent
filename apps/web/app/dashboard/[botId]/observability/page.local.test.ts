@@ -49,4 +49,31 @@ describe("local OSS observability dashboard", () => {
   it("marks the Task 9 seam for sourcing categories from /meta", () => {
     expect(source).toContain("TODO(Task 9)");
   });
+
+  it("backs filter state with URL query params via useSearchParams and useRouter", () => {
+    expect(source).toContain("useSearchParams");
+    expect(source).toContain("useRouter");
+    // Writes back to URL via router.replace (not push — avoids polluting history)
+    expect(source).toContain("router.replace");
+    // Uses the pure serializer pair from observability-query
+    expect(source).toContain("parseFiltersFromParams");
+    expect(source).toContain("filtersToParams");
+  });
+
+  it("wraps the inner page component in a Suspense boundary (required for useSearchParams)", () => {
+    expect(source).toContain("Suspense");
+    expect(source).toContain("ObservabilityPageInner");
+    expect(source).toContain("<Suspense fallback={null}>");
+  });
+
+  it("uses a named FilterBarProps interface (code-style: [Component]Props)", () => {
+    expect(source).toContain("interface FilterBarProps");
+    expect(source).toContain("FilterBarProps");
+  });
+
+  it("routes all filter mutations through a single applyFilters function", () => {
+    expect(source).toContain("applyFilters");
+    // applyFilters must call setFilters and router.replace
+    expect(source).toContain("setFilters(next)");
+  });
 });
