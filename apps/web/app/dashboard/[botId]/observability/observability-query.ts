@@ -155,6 +155,37 @@ export function parseFiltersFromParams(sp: URLSearchParams): ActivityFilters {
   };
 }
 
+/** Input shape for formatSessionBreakdown. All fields are optional for back-compat. */
+export interface SessionBreakdownInput {
+  tool_count?: number;
+  rule_check_count?: number;
+  error_count?: number;
+}
+
+/**
+ * Format a compact one-line breakdown string for a session card.
+ *
+ * Format: "N tool[s] [· N rule[s]] [· N error[s]]"
+ *
+ * tools — always shown (even 0), since it is the primary activity metric.
+ * rules — shown only when > 0 to avoid zero-noise clutter in rule-free sessions.
+ * errors — shown only when > 0 so the absence of the indicator means "clean session".
+ *
+ * Missing / undefined fields are treated as 0 for back-compat with older payloads
+ * (e.g. a backend that has not yet deployed the Task 5 enrichment).
+ */
+export function formatSessionBreakdown(session: SessionBreakdownInput): string {
+  const tools = Math.max(0, session.tool_count ?? 0);
+  const rules = Math.max(0, session.rule_check_count ?? 0);
+  const errors = Math.max(0, session.error_count ?? 0);
+
+  const parts: string[] = [`${tools} ${tools === 1 ? "tool" : "tools"}`];
+  if (rules > 0) parts.push(`${rules} ${rules === 1 ? "rule" : "rules"}`);
+  if (errors > 0) parts.push(`${errors} ${errors === 1 ? "error" : "errors"}`);
+
+  return parts.join(" · ");
+}
+
 /**
  * Serialize ActivityFilters to URL search params for `router.replace`.
  * Only non-default values are written so the URL stays minimal.

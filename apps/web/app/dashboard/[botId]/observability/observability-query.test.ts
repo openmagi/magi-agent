@@ -7,6 +7,7 @@ import {
   NOISE_KINDS,
   parseFiltersFromParams,
   filtersToParams,
+  formatSessionBreakdown,
   type ActivityFilters,
 } from "./observability-query";
 
@@ -327,6 +328,70 @@ describe("buildActivityPageQuery", () => {
     expect(parsed.get("kind")).toBe("tool_start");
     expect(parsed.get("before_id")).toBe("77");
     expect(parsed.get("since_id")).toBeNull();
+  });
+});
+
+describe("formatSessionBreakdown", () => {
+  it("returns '0 tools' when all fields are absent (back-compat with older payloads)", () => {
+    expect(formatSessionBreakdown({})).toBe("0 tools");
+  });
+
+  it("returns '0 tools' when all counts are zero", () => {
+    expect(formatSessionBreakdown({ tool_count: 0, rule_check_count: 0, error_count: 0 })).toBe(
+      "0 tools",
+    );
+  });
+
+  it("shows singular 'tool' when tool_count is 1", () => {
+    expect(formatSessionBreakdown({ tool_count: 1 })).toBe("1 tool");
+  });
+
+  it("shows plural 'tools' when tool_count is > 1", () => {
+    expect(formatSessionBreakdown({ tool_count: 3 })).toBe("3 tools");
+  });
+
+  it("shows rule count when rule_check_count is non-zero", () => {
+    expect(formatSessionBreakdown({ tool_count: 3, rule_check_count: 2 })).toBe(
+      "3 tools · 2 rules",
+    );
+  });
+
+  it("shows singular 'rule' when rule_check_count is 1", () => {
+    expect(formatSessionBreakdown({ tool_count: 0, rule_check_count: 1 })).toBe(
+      "0 tools · 1 rule",
+    );
+  });
+
+  it("shows error count when error_count is non-zero", () => {
+    expect(formatSessionBreakdown({ tool_count: 3, error_count: 2 })).toBe("3 tools · 2 errors");
+  });
+
+  it("shows singular 'error' when error_count is 1", () => {
+    expect(formatSessionBreakdown({ tool_count: 5, error_count: 1 })).toBe("5 tools · 1 error");
+  });
+
+  it("shows all three parts when all counts are non-zero", () => {
+    expect(
+      formatSessionBreakdown({ tool_count: 5, rule_check_count: 2, error_count: 3 }),
+    ).toBe("5 tools · 2 rules · 3 errors");
+  });
+
+  it("hides rules when rule_check_count is zero", () => {
+    expect(
+      formatSessionBreakdown({ tool_count: 5, rule_check_count: 0, error_count: 2 }),
+    ).toBe("5 tools · 2 errors");
+  });
+
+  it("hides errors when error_count is zero", () => {
+    expect(
+      formatSessionBreakdown({ tool_count: 5, rule_check_count: 2, error_count: 0 }),
+    ).toBe("5 tools · 2 rules");
+  });
+
+  it("treats undefined fields as 0 (back-compat)", () => {
+    expect(
+      formatSessionBreakdown({ tool_count: undefined, rule_check_count: undefined, error_count: undefined }),
+    ).toBe("0 tools");
   });
 });
 

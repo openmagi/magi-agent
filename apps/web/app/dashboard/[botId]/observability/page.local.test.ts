@@ -93,4 +93,19 @@ describe("local OSS observability dashboard", () => {
   it("has a Load newer button for forward pagination", () => {
     expect(source).toContain("Load newer");
   });
+
+  it("imports and uses formatSessionBreakdown from observability-query", () => {
+    expect(source).toContain("formatSessionBreakdown");
+    // Must be imported from the query helper, not defined inline
+    expect(source).toContain("./observability-query");
+  });
+
+  it("session card renders session.label prominently with fallback to id", () => {
+    // Label is shown; when absent, falls back to session.id
+    expect(source).toContain("session.label");
+  });
+
+  it("session card uses formatSessionBreakdown for the breakdown line", () => {
+    expect(source).toContain("formatSessionBreakdown(session)");
+  });
 });

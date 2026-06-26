@@ -14,6 +14,7 @@ import {
   NOISE_KINDS,
   parseFiltersFromParams,
   filtersToParams,
+  formatSessionBreakdown,
   type ActivityFilters,
 } from "./observability-query";
 
@@ -43,7 +44,21 @@ interface SessionRecord extends JsonRecord {
   id?: string;
   event_count?: number;
   tool_count?: number;
+  /** ISO timestamp of the most recent event in this session (Task 5 field name). */
+  last_active?: string;
+  /**
+   * @deprecated Backend now uses last_active. Kept here so older payloads that
+   * still carry last_event_at render gracefully without a runtime crash.
+   */
   last_event_at?: string;
+  /** Deterministic human-readable session summary derived by the backend (Task 5). */
+  label?: string;
+  /** Per-kind event counts for this session (Task 5). */
+  kind_breakdown?: Record<string, number>;
+  /** Count of error/aborted lifecycle events (Task 5). */
+  error_count?: number;
+  /** Count of rule_check events (Task 5). */
+  rule_check_count?: number;
 }
 
 interface SessionsResponse {
@@ -174,8 +189,8 @@ function FilterBar({ filters, onFiltersChange, sessions }: FilterBarProps) {
         >
           <option value="">All sessions</option>
           {sessions.map((s) => (
-            <option key={s.id ?? String(s.last_event_at)} value={s.id ?? ""}>
-              {s.id ?? "session"}
+            <option key={s.id ?? String(s.last_active ?? s.last_event_at)} value={s.id ?? ""}>
+              {s.label ?? s.id ?? "session"}
             </option>
           ))}
         </select>
@@ -534,7 +549,7 @@ function ObservabilityPageInner() {
                 const isActive = filters.sessionId === session.id;
                 return (
                   <div
-                    key={session.id ?? String(session.last_event_at)}
+                    key={session.id ?? String(session.last_active ?? session.last_event_at)}
                     onClick={() => session.id && handleSessionClick(session.id)}
                     className={`cursor-pointer rounded-xl border p-3 transition-colors ${
                       isActive
@@ -543,13 +558,15 @@ function ObservabilityPageInner() {
                     }`}
                   >
                     <div className="flex items-start justify-between gap-3">
-                      <p className="min-w-0 truncate text-sm font-semibold text-foreground">{session.id ?? "session"}</p>
+                      <p className="min-w-0 truncate text-sm font-semibold text-foreground">
+                        {session.label ?? session.id ?? "session"}
+                      </p>
                       <span className="shrink-0 rounded-full border border-black/10 bg-black/[0.035] px-2 py-0.5 text-xs text-secondary">
                         {numberLabel(session.event_count)} events
                       </span>
                     </div>
                     <p className="mt-1 text-xs text-secondary">
-                      {numberLabel(session.tool_count)} tool events · {eventTime(session.last_event_at)}
+                      {formatSessionBreakdown(session)} · {eventTime(session.last_active ?? session.last_event_at)}
                     </p>
                   </div>
                 );
