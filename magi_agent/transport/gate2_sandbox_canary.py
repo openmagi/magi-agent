@@ -379,7 +379,13 @@ def build_gate2_sandbox_workspace_canary_config_from_env(
             )
             or ""
         ),
-        sandboxRoot=env.get("CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_ROOT"),
+        # I-1: route through the typed flag registry. ``flag_str``
+        # returns ``""`` for unset, which the dataclass's
+        # ``Path(root) if root else None`` guard collapses identically
+        # to the prior ``env.get`` returning ``None``.
+        sandboxRoot=flag_str(
+            "CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_ROOT", env=env
+        ),
         selectedMutationProviderEnabled=flag_bool(
             "CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_SELECTED_PROVIDER_ENABLED", env=env
         ),
@@ -392,11 +398,11 @@ def _build_gate2_durable_evidence_store(
 ) -> Gate2DurableEvidenceStore | None:
     """Create a durable evidence store when Gate 2 selected provider is enabled."""
     # I-1: route through the typed flag registry.
-    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+    from magi_agent.config.flags import flag_bool, flag_str  # noqa: PLC0415
 
     if not flag_bool("CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_SELECTED_PROVIDER_ENABLED", env=env):
         return None
-    sandbox_root = env.get("CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_ROOT")
+    sandbox_root = flag_str("CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_ROOT", env=env)
     if not sandbox_root:
         return None
     evidence_path = Path(sandbox_root) / ".gate2-evidence" / "durable-evidence.json"

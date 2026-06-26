@@ -3812,6 +3812,87 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="bool",
     ),
+    # I-1 batch 20: gate1a + gate5b full-toolhost integer caps + gate2
+    # sandbox-canary root path. Defaults match the prior inline fallback
+    # constants in ``chat_shared`` / ``gate2_sandbox_canary``.
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_MAX_CALLS_PER_TURN",
+        default=8,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Gate1a read-only toolhost per-turn tool-call cap. Hosted-"
+            "only; default 8."
+        ),
+        kind="int",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_MAX_PER_TOOL_BYTES",
+        default=4096,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Gate1a read-only toolhost per-tool output byte cap. Hosted-"
+            "only; default 4096."
+        ),
+        kind="int",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_MAX_AGGREGATE_BYTES",
+        default=16384,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Gate1a read-only toolhost aggregate-output byte cap across "
+            "the turn. Hosted-only; default 16384."
+        ),
+        kind="int",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_MAX_CALLS_PER_TURN",
+        default=16,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Gate5b full-toolhost per-turn tool-call cap. Hosted-only; "
+            "default 16."
+        ),
+        kind="int",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_MAX_PER_TOOL_BYTES",
+        default=8192,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Gate5b full-toolhost per-tool output byte cap. Hosted-only; "
+            "default 8192."
+        ),
+        kind="int",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_COMMAND_TIMEOUT_MS",
+        default=5000,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Gate5b full-toolhost shell-command timeout (milliseconds). "
+            "Hosted-only; default 5000."
+        ),
+        kind="int",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_ROOT",
+        default="",
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted gate2 sandbox-canary root path. Default-empty "
+            "collapses to ``None`` at both consumers (the dataclass and "
+            "the durable-evidence helper). Hosted-only."
+        ),
+        kind="str",
+    ),
 )
 
 
