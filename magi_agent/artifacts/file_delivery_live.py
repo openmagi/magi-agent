@@ -391,11 +391,21 @@ def build_file_delivery_providers(
     # LIVE path: resolve workspace dirs, construct filesystem providers.      #
     # ---------------------------------------------------------------------- #
     try:
-        artifact_subdir = resolved_env.get(MAGI_FILE_DELIVERY_ARTIFACT_DIR_ENV, "").strip()
+        # I-1: route the workspace-subdir overrides through the typed
+        # flag registry. ``flag_str`` returns ``""`` on unset (the
+        # registered default), which the existing ``if not ...:`` guards
+        # collapse identically to the prior ``env.get(NAME, "").strip()``.
+        from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+        artifact_subdir = (
+            flag_str(MAGI_FILE_DELIVERY_ARTIFACT_DIR_ENV, env=resolved_env) or ""
+        ).strip()
         if not artifact_subdir:
             artifact_subdir = _DEFAULT_ARTIFACT_SUBDIR
 
-        outbox_subdir = resolved_env.get(MAGI_FILE_DELIVERY_OUTBOX_DIR_ENV, "").strip()
+        outbox_subdir = (
+            flag_str(MAGI_FILE_DELIVERY_OUTBOX_DIR_ENV, env=resolved_env) or ""
+        ).strip()
         if not outbox_subdir:
             outbox_subdir = _DEFAULT_OUTBOX_SUBDIR
 
