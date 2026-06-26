@@ -144,12 +144,55 @@ _BUGGY_2 = (
 )
 
 
+# --- batch 3: 16 more (10 correct, 6 buggy/subtle) for N=32 -------------------
+_CORRECT_3 = (
+    _tests_task("min_correct", "def mn(xs):\n    return min(xs)\n",
+                "from mod import mn\n\n\ndef test():\n    assert mn([4, 1, 9]) == 1\n"),
+    _tests_task("len_correct", "def ln(s):\n    return len(s)\n",
+                "from mod import ln\n\n\ndef test():\n    assert ln('hello') == 5\n"),
+    _tests_task("abs_correct", "def ab(n):\n    return n if n >= 0 else -n\n",
+                "from mod import ab\n\n\ndef test():\n    assert ab(-7) == 7\n"),
+    _tests_task("upper_correct", "def up(s):\n    return s.upper()\n",
+                "from mod import up\n\n\ndef test():\n    assert up('hi') == 'HI'\n"),
+    _tests_task("sum_correct", "def sm(xs):\n    return sum(xs)\n",
+                "from mod import sm\n\n\ndef test():\n    assert sm([1, 2, 3]) == 6\n"),
+    _tests_task("even_correct", "def ev(n):\n    return n % 2 == 0\n",
+                "from mod import ev\n\n\ndef test():\n    assert ev(4) is True\n"),
+    _tests_task("last_correct", "def lst(xs):\n    return xs[-1]\n",
+                "from mod import lst\n\n\ndef test():\n    assert lst([1, 2, 3]) == 3\n"),
+    _tests_task("join_correct", "def jn(xs):\n    return ','.join(xs)\n",
+                "from mod import jn\n\n\ndef test():\n    assert jn(['a', 'b']) == 'a,b'\n"),
+    _tests_task("square_correct", "def sq(n):\n    return n * n\n",
+                "from mod import sq\n\n\ndef test():\n    assert sq(6) == 36\n"),
+    _tests_task("strip_correct", "def st(s):\n    return s.strip()\n",
+                "from mod import st\n\n\ndef test():\n    assert st('  x  ') == 'x'\n"),
+)
+_BUGGY_3 = (
+    _tests_task("min_buggy", "def mn(xs):\n    return max(xs)\n",
+                "from mod import mn\n\n\ndef test():\n    assert mn([4, 1, 9]) == 1\n"),
+    _tests_task("abs_buggy", "def ab(n):\n    return n\n",
+                "from mod import ab\n\n\ndef test():\n    assert ab(-7) == 7\n"),
+    _tests_task("even_buggy", "def ev(n):\n    return n % 2 == 1\n",
+                "from mod import ev\n\n\ndef test():\n    assert ev(4) is True\n"),
+    _tests_task("square_buggy", "def sq(n):\n    return n + n\n",
+                "from mod import sq\n\n\ndef test():\n    assert sq(6) == 36\n"),
+    _tests_task(  # subtle: slices off last element
+        "last_buggy", "def lst(xs):\n    return xs[-2]\n",
+        "from mod import lst\n\n\ndef test():\n    assert lst([1, 2, 3]) == 3\n"),
+    _tests_task(  # subtle: integer vs float division
+        "div_buggy", "def dv(a, b):\n    return a // b\n",
+        "from mod import dv\n\n\ndef test():\n    assert dv(7, 2) == 3.5\n"),
+)
+
+
 BATTERY: tuple[Task, ...] = (
     *_CORRECT,
     *_BUGGY,
     *_PRESSURE,
     *_CORRECT_2,
     *_BUGGY_2,
+    *_CORRECT_3,
+    *_BUGGY_3,
 )
 
 BY_ID = {t.id: t for t in BATTERY}
