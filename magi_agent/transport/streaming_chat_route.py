@@ -289,38 +289,62 @@ def _body_string(body: object, key: str, default: str) -> str:
 
 
 def _extract_prompt_text(body: object) -> str:
-    """Join all user-text content from ``body["messages"]``.
+    """Extract the LATEST user-text content from ``body["messages"]``.
 
-    Mirrors the logic of ``_local_chat_prompt_text`` in ``chat.py`` (string
-    ``content``, or text blocks in a list ``content``), but lives entirely in
-    this module so there is no import coupling.
+    The dashboard sends the full OpenAI-compat conversation history each turn
+    (``messages = [user_1, assistant_1, user_2, assistant_2, ..., user_N]``).
+    The new-turn prompt must be ONLY ``user_N``. Prior turns already live as
+    ADK session events, so joining every prior user message into the prompt
+    duplicates context AND lets a long prior request drown out a short new one.
+
+    Queue masquerade 2nd-pass (PR-I, after #686). Pre-fix this function joined
+    EVERY user-authored block across the whole history with newlines. When the
+    prior turn aborted with text (e.g. ``missing_runtime_receipt`` after a
+    long Tesla 10-K request) and the user typed a short fresh message ("hi"),
+    the prompt became ``"<long Tesla 10-K request>\\nhi"`` and the runtime
+    kept executing the prior task instead of greeting back. Walking from the
+    end of ``messages`` and returning the first user message preserves the
+    OpenAI-compat surface contract while killing the cross-turn join.
+
+    Within the single latest user message, multimodal text blocks
+    (``content`` is a list of ``{"type": "text", "text": ...}`` blocks) still
+    concatenate with newlines. That path is the per-turn multimodal contract
+    and was never the bug. A message without a role is still treated as user
+    (bare ``{"content": "..."}`` payload compat).
     """
     if not isinstance(body, Mapping):
         return ""
     messages = body.get("messages")
     if not isinstance(messages, Sequence) or isinstance(messages, (str, bytes)):
         return ""
-    text_parts: list[str] = []
-    for message in messages:
+    # Walk newest-first; return the first user-authored message's content.
+    # Assistant / system entries (and the bot's own "코드 작성/편집" self-intro)
+    # stay excluded for the same coding-evidence-gate reason as the legacy
+    # filter (the assistant-text exclusion is preserved).
+    for message in reversed(list(messages)):
         if not isinstance(message, Mapping):
             continue
-        # Only user-authored text. Joining assistant/system text used to let the
-        # bot's own "코드 작성/편집" self-introduction trip the coding-evidence
-        # gate's prompt classifier on every later turn of the session. A message
-        # without a role is treated as user for bare {content} payload compat.
         role = message.get("role")
         if role is not None and role != "user":
             continue
         content = message.get("content")
         if isinstance(content, str):
-            text_parts.append(content)
-        elif isinstance(content, Sequence) and not isinstance(content, (str, bytes)):
+            stripped = content.strip()
+            if stripped:
+                return stripped
+            continue
+        if isinstance(content, Sequence) and not isinstance(content, (str, bytes)):
+            block_parts: list[str] = []
             for block in content:
                 if isinstance(block, Mapping):
                     text = block.get("text")
                     if isinstance(text, str):
-                        text_parts.append(text)
-    return "\n".join(part.strip() for part in text_parts if part.strip())
+                        block_parts.append(text)
+            joined = "\n".join(part.strip() for part in block_parts if part.strip())
+            if joined:
+                return joined
+            continue
+    return ""
 
 
 def _python_chat_route_on() -> bool:
