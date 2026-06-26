@@ -3694,7 +3694,84 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
-
+    # I-1 batch 21: gate kill-switch / route-attachment / FULL_TOOLHOST
+    # master switch FlagSpecs. Default-TRUE switches are deliberate —
+    # the prior raw shape ``_is_true(env.get(NAME, "1"))`` (and the
+    # ``_env_bool_default_true(env.get(NAME))`` shape for the gate8
+    # selected-authority path) both resolve to True when unset. Migrating
+    # them with ``default=True`` keeps ``flag_bool(..., env=env)`` byte-
+    # identical: ``None`` returns ``spec.default`` (True), every set
+    # value goes through ``_is_true``.
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE8_SELECTED_AUTHORITY_KILL_SWITCH",
+        default=True,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted gate8 selected-authority kill switch. Default-TRUE; "
+            "operators flip OFF to disable the authority check. Hosted-"
+            "only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_KILL_SWITCH",
+        default=True,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted gate1a read-only toolhost kill switch. Default-TRUE; "
+            "operators flip OFF to disable the kill-switch gate. Hosted-"
+            "only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_ROUTE_ATTACHMENT",
+        default=True,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted gate1a read-only toolhost route attachment. Default-"
+            "TRUE; operators flip OFF to detach the route. Hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_ENABLED",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted gate5b full-toolhost master switch. Default-OFF; "
+            "operators flip ON to expose the gate5b full toolhost route. "
+            "Hosted-only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_KILL_SWITCH",
+        default=True,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted gate5b full-toolhost kill switch. Default-TRUE; "
+            "operators flip OFF to disable the kill-switch gate. Hosted-"
+            "only."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_ROUTE_ATTACHMENT",
+        default=True,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Hosted gate5b full-toolhost route attachment. Default-TRUE; "
+            "operators flip OFF to detach the route. Hosted-only."
+        ),
+        kind="bool",
+    ),
 )
 
 
