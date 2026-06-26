@@ -255,7 +255,7 @@ export function RadioCard({
               <span
                 key={chip}
                 title={chip}
-                className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+                className="rounded border border-secondary/15 bg-secondary/[0.04] px-1.5 py-0.5 font-mono text-[10px] text-secondary/75"
               >
                 {chip}
               </span>

@@ -1436,30 +1436,29 @@ function TriggerStep({
 }
 
 
-// PR-F-UX7 — native combobox for the tool-target sub-fieldset. F-UX3
-// introduced a catalog-backed <select> to replace the F1.5 freeform
-// TextField (eliminating typo-induced no-match rules); F-UX7 evolves
-// that into a native HTML combobox (<input list="..."> + <datalist>) so
-// the operator can EITHER pick a known runtime tool from the suggestion
-// list OR type a free-text fallback (e.g. a dynamically-registered tool
-// that is not yet in the catalog snapshot). The stored value is still
-// the bare tool name (matches the backend tool_perm match.tool exact-
-// string compare). The previous F-UX3 "{value} (not in catalog)"
-// synthetic option is no longer needed: the input itself surfaces the
-// raw value, and the operator can edit it directly.
+// PR-F-UX7 → polish: replace the native <datalist> with a controlled
+// type-ahead combobox. The datalist version dumped the full catalog
+// (200+ tools) as a wall of options the moment the operator focused
+// the input — Firefox/Safari render every entry before any keystroke,
+// which made the picker unusable on first open. The replacement:
 //
-// Implementation notes:
-//   - <datalist> is browser-native, free a11y, and degrades gracefully
-//     (renders as a plain text input on browsers that ignore it). We
-//     deliberately avoid a custom Popover/Headless-UI combobox to keep
-//     parity with how the rest of this wizard uses unwrapped native
-//     form controls.
-//   - The validator on Next-step click (stepIsComplete("trigger"))
-//     already only requires draft.toolName.trim().length > 0 when
-//     toolTarget === "specific", so free-text is accepted as-is.
-//   - We keep the function name `ToolNameSelect` to minimise call-site
-//     churn (the F-UX3 callsite in TriggerStep still imports it by
-//     name); the rendered element is now a combobox-pattern <input>.
+//   * Same value-out contract: a bare tool name string. Free-text
+//     fallback is preserved — anything the operator types is accepted
+//     verbatim if they click "Use as-is" or press Enter on no match.
+//   * Suggestion list appears only when the input has focus AND there
+//     is at least one match for the current query.
+//   * Dropdown is scrollable (max-h-64 overflow-auto) so a 200-tool
+//     catalog filters down to a quiet, navigable list as soon as the
+//     operator types one character.
+//   * Catalog ordering: dangerous tools are de-prioritised in
+//     suggestion order so the operator does not accidentally click
+//     one near the top. A "⚠" prefix marker keeps the dangerous
+//     signal visible inline (Chrome/Edge ignore <option label>; this
+//     is the portable equivalent).
+//
+// We deliberately avoid a third-party combobox library — controlled
+// input + click-outside listener + filtered list is small enough to
+// keep inline and free of dependency risk.
 function ToolNameSelect({
   value,
   onChange,
@@ -1469,67 +1468,166 @@ function ToolNameSelect({
   onChange: (v: string) => void;
   tools: ToolItem[];
 }): React.ReactElement {
-  // Sort by name so the suggestion list is stable across renders; the
-  // catalog is already deduped by the customize-api fetcher.
-  const sorted = [...tools].sort((a, b) => a.name.localeCompare(b.name));
-  // Whether the current value matches a catalog entry. Used to surface
-  // an honest "(not in catalog)" hint beneath the input when the
-  // operator typed (or round-tripped) a name the runtime does not know
-  // about, so the F-UX3 round-trip safety property is preserved without
-  // the synthetic <option>.
+  // Sort by name so the suggestion list is stable; dangerous tools
+  // sink to the bottom so they aren't the first thing the operator
+  // sees on an empty query.
+  const sorted = React.useMemo(
+    () =>
+      [...tools].sort((a, b) => {
+        if (a.dangerous !== b.dangerous) return a.dangerous ? 1 : -1;
+        return a.name.localeCompare(b.name);
+      }),
+    [tools],
+  );
+  const [isOpen, setIsOpen] = React.useState(false);
+  const [activeIdx, setActiveIdx] = React.useState(-1);
+  const wrapperRef = React.useRef<HTMLDivElement | null>(null);
+
+  // Click-outside closes the dropdown so the operator can dismiss it
+  // without committing the highlighted suggestion.
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const onClick = (e: MouseEvent): void => {
+      if (
+        wrapperRef.current
+        && e.target instanceof Node
+        && !wrapperRef.current.contains(e.target)
+      ) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [isOpen]);
+
+  // Filter on substring match (case-insensitive). Empty query shows
+  // the top of the sorted catalog so a freshly-focused input still
+  // gives the operator something to pick from.
+  const query = value.trim().toLowerCase();
+  const matches = React.useMemo(() => {
+    if (!query) return sorted.slice(0, 50);
+    return sorted
+      .filter((t) => t.name.toLowerCase().includes(query))
+      .slice(0, 50);
+  }, [sorted, query]);
+
   const valueInCatalog = sorted.some((t) => t.name === value);
-  // Whether the typed/selected name resolves to a dangerous catalog
-  // entry. Used to surface a visible warning chip — <option label=...>
-  // is unreliable as a dangerous-tool signal: Chrome/Edge ignore it
-  // entirely (suggestion list only shows `value`), Safari shows it
-  // inline, Firefox shows it as a secondary line. A sibling warning
-  // chip is the only browser-portable way to keep the F-UX3 dangerous
-  // visibility property.
   const matchedDangerous = sorted.some(
     (t) => t.name === value && t.dangerous,
   );
-  // Stable id so the <datalist> can be referenced by `list="..."` —
-  // matches the spec PR-F-UX7 ("data-testid=tool-name-combobox").
-  const listId = "tool-name-options";
-  // Stable hint ids for `aria-describedby` so screen readers surface
-  // the "(not in catalog)" / "dangerous" warnings alongside the input
-  // label rather than dropping them on the floor.
+
   const notInCatalogId = "tool-name-not-in-catalog";
   const dangerousId = "tool-name-dangerous";
+  const listboxId = "tool-name-listbox";
   const describedBy = [
     !valueInCatalog && value.trim().length > 0 ? notInCatalogId : null,
     matchedDangerous ? dangerousId : null,
   ]
     .filter((s): s is string => s !== null)
     .join(" ") || undefined;
+
+  const commit = (name: string): void => {
+    onChange(name);
+    setIsOpen(false);
+    setActiveIdx(-1);
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setIsOpen(true);
+      setActiveIdx((i) => Math.min(matches.length - 1, i + 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIdx((i) => Math.max(-1, i - 1));
+    } else if (e.key === "Enter") {
+      if (activeIdx >= 0 && activeIdx < matches.length) {
+        e.preventDefault();
+        commit(matches[activeIdx].name);
+      }
+    } else if (e.key === "Escape") {
+      setIsOpen(false);
+      setActiveIdx(-1);
+    }
+  };
+
   return (
     <label className="block">
       <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
         Tool name
       </span>
-      <input
-        type="text"
-        list={listId}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        aria-label="Tool name"
-        aria-describedby={describedBy}
-        data-testid="tool-name-combobox"
-        placeholder="Pick from the list or type a tool name…"
-        autoComplete="off"
-        spellCheck={false}
-        className="mt-1 w-full rounded-lg border border-primary/30 bg-white px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-      />
-      <datalist id={listId}>
-        {sorted.map((t) => (
-          // The stored value stays a clean bare tool name so the
-          // backend tool_perm match.tool comparison does not see any
-          // suffix. <option label="dangerous"> is intentionally NOT
-          // used here (Chrome/Edge ignore it); the dangerous signal
-          // surfaces via the sibling warning chip below instead.
-          <option key={t.name} value={t.name} />
-        ))}
-      </datalist>
+      <div ref={wrapperRef} className="relative">
+        <input
+          type="text"
+          role="combobox"
+          aria-controls={listboxId}
+          aria-expanded={isOpen}
+          aria-autocomplete="list"
+          aria-activedescendant={
+            activeIdx >= 0 && activeIdx < matches.length
+              ? `tool-name-opt-${activeIdx}`
+              : undefined
+          }
+          value={value}
+          onChange={(e) => {
+            onChange(e.target.value);
+            setIsOpen(true);
+            setActiveIdx(-1);
+          }}
+          onFocus={() => setIsOpen(true)}
+          onKeyDown={onKeyDown}
+          aria-label="Tool name"
+          aria-describedby={describedBy}
+          data-testid="tool-name-combobox"
+          placeholder="Type to filter the tool catalog…"
+          autoComplete="off"
+          spellCheck={false}
+          className="mt-1 w-full rounded-lg border border-primary/30 bg-white px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+        />
+        {isOpen && matches.length > 0 ? (
+          <ul
+            id={listboxId}
+            role="listbox"
+            data-testid="tool-name-listbox"
+            className="absolute z-10 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-secondary/20 bg-white py-1 shadow-lg"
+          >
+            {matches.map((t, idx) => {
+              const active = idx === activeIdx;
+              return (
+                <li
+                  key={t.name}
+                  id={`tool-name-opt-${idx}`}
+                  role="option"
+                  aria-selected={active}
+                  onMouseDown={(e) => {
+                    // mousedown (not click) so we commit before the
+                    // input's blur closes the dropdown.
+                    e.preventDefault();
+                    commit(t.name);
+                  }}
+                  onMouseEnter={() => setActiveIdx(idx)}
+                  className={`flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm ${
+                    active
+                      ? "bg-primary/10 text-foreground"
+                      : "text-foreground hover:bg-secondary/[0.05]"
+                  }`}
+                >
+                  {t.dangerous ? (
+                    <span
+                      title="Dangerous tool"
+                      className="text-destructive"
+                      aria-hidden="true"
+                    >
+                      ⚠
+                    </span>
+                  ) : null}
+                  <span className="truncate">{t.name}</span>
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
+      </div>
       {!valueInCatalog && value.trim().length > 0 ? (
         <span
           id={notInCatalogId}
