@@ -157,7 +157,6 @@ _ALLOWLIST_BATCHED: tuple[str, ...] = (
     "knowledge/provider_boundary.py",
     "memory/projection.py",
     "meta_orchestration/task_plan.py",
-    "missions/receipts.py",
     "plugins/extension_boundary.py",
     "plugins/shell_testrun_safe_subset.py",
     "recipes/coding_evidence_gate.py",
@@ -178,7 +177,9 @@ _ALLOWLIST_BATCHED: tuple[str, ...] = (
     "runtime/child_runner_boundary.py",
     "runtime/no_agent_watchdog.py",
     "runtime/provider_receipts.py",
-    "runtime/receipt_utils.py",
+    # S-03: single receipt secret denylist; receipt_utils.py + missions/receipts.py
+    # now import from here (2 forks -> 1). Routes to ops/safety in C-1 follow-up.
+    "runtime/receipt_redaction.py",
     "runtime/request_shape.py",
     "runtime/slash_control_boundary.py",
     "runtime/streaming.py",
