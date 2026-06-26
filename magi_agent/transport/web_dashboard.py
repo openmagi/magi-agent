@@ -107,12 +107,23 @@ def local_dashboard_bootstrap(runtime: OpenMagiRuntime) -> dict[str, object]:
     provider already set up, or with the flag OFF, ``setup.needed`` is false so
     the bootstrap is behaviorally unchanged and existing consumers ignore it.
     """
-    from magi_agent.cli.providers import SUPPORTED_PROVIDERS, configured_providers
+    from magi_agent.cli import providers
+    from magi_agent.cli.providers import SUPPORTED_PROVIDERS
     from magi_agent.config.flags import flag_bool
 
     token = runtime.config.gateway_token
     expose = token == _LOCAL_DEV_TOKEN
-    has_provider = bool(configured_providers())
+    # Use the SAME canonical resolver the chat path uses so the onboarding
+    # signal matches reality across every key location ([model].api_key,
+    # [providers.*].api_key, env). ``configured_providers()`` reads only the
+    # latter two, which let the wizard re-pop forever after it saves to
+    # [model].api_key via PUT /v1/app/config. Resolution can raise (e.g.
+    # UnknownModelError on catalog drift); treat any failure as "no provider
+    # resolved", mirroring app_api._config_snapshot.
+    try:
+        has_provider = providers.resolve_provider_config() is not None
+    except Exception:  # noqa: BLE001 - bad config must not break the bootstrap
+        has_provider = False
     wizard_enabled = flag_bool("MAGI_ONBOARDING_WIZARD_ENABLED")
     return {
         "ok": True,

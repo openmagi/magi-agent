@@ -145,6 +145,80 @@ def test_bootstrap_setup_not_needed_when_flag_off(monkeypatch) -> None:
     assert off_explicit["setup"]["needed"] is False
 
 
+# ---------------------------------------------------------------------------
+# Onboarding round-trip integration: the wizard's PUT /v1/app/config save path
+# (_write_config -> [model].api_key) must clear setup.needed on the next
+# bootstrap. This crosses the _write_config -> bootstrap seam that previously
+# hid the infinite-onboarding-loop bug (bootstrap read only [providers.*]/env
+# via configured_providers, never [model].api_key where the wizard saves).
+# ---------------------------------------------------------------------------
+def _hermetic_onboarding_env(monkeypatch, config_path) -> None:
+    for name in (
+        "MAGI_ONBOARDING_WIZARD_ENABLED",
+        "MAGI_PROVIDER",
+        "MAGI_MODEL",
+        "MAGI_CONFIG",
+        "MAGI_LLM_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "FIREWORKS_API_KEY",
+        "OPENROUTER_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("MAGI_CONFIG", str(config_path))
+    monkeypatch.setenv("MAGI_ONBOARDING_WIZARD_ENABLED", "1")
+
+
+def test_wizard_save_via_write_config_clears_setup_needed(monkeypatch, tmp_path) -> None:
+    # Isolate the config path to a real (initially absent) temp file so the
+    # real ~/.magi/config.toml is never read or written.
+    from magi_agent.transport import app_api
+    from magi_agent.transport import web_dashboard as wd
+
+    config_path = tmp_path / "config.toml"
+    _hermetic_onboarding_env(monkeypatch, config_path)
+    runtime = _runtime()
+
+    # RED precondition: flag ON, no env key, no config -> onboarding needed.
+    before = wd.local_dashboard_bootstrap(runtime)
+    assert before["setup"]["needed"] is True
+    assert before["setup"]["hasProvider"] is False
+    assert not config_path.exists()
+
+    # Exactly what the wizard's PUT /v1/app/config performs: write the api_key
+    # to the [model] table (provider/model/api_key), NOT [providers.*].
+    app_api._write_config(
+        {
+            "llm": {
+                "provider": "anthropic",
+                "model": "claude-sonnet-4-6",
+                "apiKey": "sk-ant-test",
+            }
+        }
+    )
+    assert config_path.exists()
+
+    # GREEN: a fresh bootstrap must now see the provider and stop re-popping.
+    after = wd.local_dashboard_bootstrap(runtime)
+    assert after["setup"]["hasProvider"] is True
+    assert after["setup"]["needed"] is False
+
+
+def test_bootstrap_has_provider_true_for_env_key_roundtrip(monkeypatch, tmp_path) -> None:
+    # The env-var-key case must still resolve hasProvider True (no regression).
+    from magi_agent.transport import web_dashboard as wd
+
+    config_path = tmp_path / "config.toml"
+    _hermetic_onboarding_env(monkeypatch, config_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-env")
+
+    payload = wd.local_dashboard_bootstrap(_runtime())
+    assert payload["setup"]["hasProvider"] is True
+    assert payload["setup"]["needed"] is False
+
+
 def test_dashboard_deep_link_prerendered_route() -> None:
     response = _client().get("/dashboard/local/chat/general")
     assert response.status_code == 200
