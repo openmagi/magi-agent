@@ -11,16 +11,30 @@ export interface LocalUser {
   id: string;
 }
 
-interface LocalBootstrap {
+/**
+ * First-run setup signal emitted by the backend at `/app/bootstrap.json`.
+ *
+ * Additive (PR1.1): older runtimes omit it, in which case the onboarding wizard
+ * treats setup as not needed. `needed` is true only when the wizard flag is ON
+ * and no provider is configured.
+ */
+export interface LocalBootstrapSetup {
+  needed: boolean;
+  hasProvider: boolean;
+  providers: string[];
+}
+
+export interface LocalBootstrap {
   ok?: boolean;
   agentUrl?: string;
   tokenRequired?: boolean;
   token?: string;
+  setup?: LocalBootstrapSetup;
 }
 
 let bootstrapPromise: Promise<LocalBootstrap | null> | null = null;
 
-async function loadLocalBootstrap(): Promise<LocalBootstrap | null> {
+export async function loadLocalBootstrap(): Promise<LocalBootstrap | null> {
   if (!bootstrapPromise) {
     bootstrapPromise = fetch("/app/bootstrap.json", { cache: "no-store" })
       .then(async (res) => {

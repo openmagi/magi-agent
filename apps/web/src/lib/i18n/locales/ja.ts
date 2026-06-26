@@ -994,6 +994,27 @@ const ja: LocaleMessages = {
     workAssistantHighlights: "",
     minimaxM2_5: "MiniMax M2.7",
     minimaxM2_5Desc: "MiniMaxのフラッグシップモデル。米国データセンター(Fireworks AI)でホスティング。",
+
+    localSetupTitle: "ローカルエージェントをセットアップ",
+    localSetupSubtitle:
+      "モデルプロバイダーを選び、API キーを貼り付けると Magi Agent が動作します。キーはローカル設定に保存され、ブラウザーに送信されることはありません。",
+    localSetupStep: "ステップ {current} / {total}",
+    localSetupProviderLabel: "プロバイダー",
+    localSetupApiKeyLabel: "API キー",
+    localSetupModelLabel: "モデル",
+    localSetupCustomModelLabel: "カスタムモデル ID",
+    localSetupCustomModelOption: "カスタム…(モデル ID を入力)",
+    localSetupIntegrationsCopy:
+      "任意:ツール(Gmail、GitHub、Slack など)を接続すると、エージェントがそれらを操作できます。後から「連携」ページでいつでも設定できます。",
+    localSetupConnectTools: "ツールを接続",
+    localSetupFinish: "完了",
+    localSetupSaving: "保存中…",
+    localSetupNext: "次へ",
+    localSetupBack: "戻る",
+    localSetupSkip: "スキップ。環境変数で設定します。",
+    localSetupNoProviders:
+      "対応するプロバイダーが報告されませんでした。環境変数でプロバイダーを設定してから再読み込みしてください。",
+    localSetupSaveError: "設定の保存に失敗しました",
   },
 
   // Dashboard

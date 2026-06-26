@@ -1,0 +1,6 @@
+(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,59438,e=>{"use strict";var r=e.i(18050);e.s(["GlassCard",0,function({children:e,className:s="",hover:t=!1,glow:n=!1,onClick:c}){return(0,r.jsx)("div",{onClick:c,className:`
+        glass rounded-2xl p-5
+        ${t?"transition-all duration-200 hover:border-[var(--color-accent)]/20 cursor-pointer":""}
+        ${n?"glow-sm":""}
+        ${s}
+      `,children:e})}])},60119,e=>{"use strict";var r=e.i(18050),s=e.i(59438),t=e.i(19455);e.s(["default",0,function({error:e,reset:n}){return(0,r.jsx)("div",{className:"flex items-center justify-center min-h-[60vh]",children:(0,r.jsxs)(s.GlassCard,{className:"max-w-md text-center",children:[(0,r.jsx)("h2",{className:"text-xl font-bold text-foreground mb-4",children:"Something went wrong"}),(0,r.jsx)("p",{className:"text-secondary mb-6",children:e.message||"An unexpected error occurred."}),(0,r.jsx)(t.Button,{variant:"cta",size:"md",onClick:n,children:"Try again"})]})})}])}]);

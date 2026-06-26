@@ -997,6 +997,27 @@ const es: LocaleMessages = {
     workAssistantHighlights: "",
     minimaxM2_5: "MiniMax M2.7",
     minimaxM2_5Desc: "Modelo insignia de MiniMax. Alojado en centros de datos de EE.UU. vía Fireworks AI.",
+
+    localSetupTitle: "Configura tu agente local",
+    localSetupSubtitle:
+      "Elige un proveedor de modelos y pega una clave de API para que Magi Agent pueda ejecutarse. Las claves se quedan en tu configuración local y nunca llegan al navegador.",
+    localSetupStep: "Paso {current} de {total}",
+    localSetupProviderLabel: "Proveedor",
+    localSetupApiKeyLabel: "Clave de API",
+    localSetupModelLabel: "Modelo",
+    localSetupCustomModelLabel: "ID de modelo personalizado",
+    localSetupCustomModelOption: "Personalizado… (introduce el ID del modelo)",
+    localSetupIntegrationsCopy:
+      "Opcional: conecta herramientas (Gmail, GitHub, Slack y más) para que tu agente pueda actuar sobre ellas. Siempre puedes hacerlo después desde la página de Integraciones.",
+    localSetupConnectTools: "Conectar herramientas",
+    localSetupFinish: "Finalizar",
+    localSetupSaving: "Guardando…",
+    localSetupNext: "Siguiente",
+    localSetupBack: "Atrás",
+    localSetupSkip: "Omitir. Lo configuraré con variables de entorno.",
+    localSetupNoProviders:
+      "No se informó de ningún proveedor compatible. Configura un proveedor mediante variables de entorno y vuelve a cargar.",
+    localSetupSaveError: "No se pudo guardar la configuración",
   },
 
   // Dashboard

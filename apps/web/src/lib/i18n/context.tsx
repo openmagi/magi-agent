@@ -156,3 +156,14 @@ export function useI18n(): I18nContextValue {
 export function useMessages(): Messages {
   return useI18n().messages;
 }
+
+/**
+ * Like `useMessages`, but falls back to the English catalog when no
+ * `I18nProvider` is mounted (e.g. server string-snapshot tests via
+ * `react-dom/server`). Lets a component consume keyed copy without forcing every
+ * render path to wrap in the provider.
+ */
+export function useOptionalMessages(): Messages {
+  const ctx = useContext(I18nContext);
+  return ctx?.messages ?? (en as Messages);
+}
