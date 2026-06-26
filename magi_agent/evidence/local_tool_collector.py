@@ -4,7 +4,7 @@ import re
 import time
 from collections.abc import Mapping
 
-from magi_agent.evidence.extraction import evidence_from_tool_result
+from magi_agent.evidence.extraction import evidence_records_from_tool_result
 from magi_agent.evidence.ledger import EvidenceLedger
 from magi_agent.evidence.types import EvidenceRecord
 from magi_agent.tools.result import ToolResult
@@ -100,13 +100,15 @@ class LocalToolEvidenceCollector:
         )
         records: list[object] = []
 
-        explicit = evidence_from_tool_result(
+        # One tool call may declare several evidence records (e.g. an edit that
+        # produces BOTH an EditMatch and a CodeDiagnostics receipt), so lift the
+        # full list rather than a single declaration.
+        explicit_records = evidence_records_from_tool_result(
             tool_result,
             tool_call_id=tool_call_id,
             tool_name=tool_name,
         )
-        if explicit is not None:
-            records.append(explicit)
+        records.extend(explicit_records)
 
         # Source-ledger projection (default-OFF
         # MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED). A read-only source tool
@@ -136,7 +138,7 @@ class LocalToolEvidenceCollector:
                 tool_name=tool_name,
                 result=tool_result,
                 arguments=arguments or {},
-                synthesize_execution_receipt=explicit is None,
+                synthesize_execution_receipt=not explicit_records,
             )
         if receipt is not None:
             records.append(receipt)

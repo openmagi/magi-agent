@@ -442,6 +442,36 @@ def _synthesized_source_projection(outcome) -> dict[str, object] | None:
         return None
 
 
+def _coding_evidence_declarations(outcome) -> list[dict[str, object]]:
+    """Build typed evidence declarations from the outcome's coding receipts.
+
+    Each receipt's ``public_projection()`` becomes the ``fields`` of a typed
+    declaration the declaration-lift path promotes to an ``EvidenceRecord``.
+    Returns ``[]`` when no coding receipt is present (byte-identical metadata).
+    """
+    tool_name = outcome.receipt.tool_name
+    declarations: list[dict[str, object]] = []
+    edit_match = getattr(outcome, "edit_match_receipt", None)
+    if edit_match is not None:
+        declarations.append(
+            {
+                "type": "EditMatch",
+                "fields": edit_match.public_projection(),
+                "source": {"kind": "tool_trace", "toolName": tool_name},
+            }
+        )
+    diagnostics = getattr(outcome, "code_diagnostics_receipt", None)
+    if diagnostics is not None:
+        declarations.append(
+            {
+                "type": "CodeDiagnostics",
+                "fields": diagnostics.public_projection(),
+                "source": {"kind": "tool_trace", "toolName": tool_name},
+            }
+        )
+    return declarations
+
+
 def _tool_result_from_outcome(outcome) -> ToolResult:
     receipt = outcome.receipt.model_dump(by_alias=True, mode="json", warnings=False)
     metadata: dict[str, object] = {
@@ -456,6 +486,14 @@ def _tool_result_from_outcome(outcome) -> ToolResult:
         metadata["codingMutationReceipt"] = outcome.coding_mutation_receipt.public_projection()
     if outcome.code_diagnostics_receipt is not None:
         metadata["codeDiagnosticsReceipt"] = outcome.code_diagnostics_receipt.public_projection()
+    # Promote the already-built coding receipts into typed evidence declarations
+    # so the declaration-lift path (record_tool_result -> extraction) records
+    # real EditMatch / CodeDiagnostics EvidenceRecords in the durable ledger.
+    # A single edit can produce BOTH, so this is a list (lifted via the list-form
+    # metadata["evidence"]). Receipts stay as their own metadata keys too.
+    evidence_declarations = _coding_evidence_declarations(outcome)
+    if evidence_declarations:
+        metadata["evidence"] = evidence_declarations
     if outcome.status == "ok":
         return ToolResult(
             status="ok",

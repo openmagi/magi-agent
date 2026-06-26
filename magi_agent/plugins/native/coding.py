@@ -119,7 +119,19 @@ def commit_checkpoint(arguments: dict[str, object], context: ToolContext) -> Too
     }
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
-    return ok_result("CommitCheckpoint", {"checkpointDigest": digest(record), "pathRef": ".magi/commit-checkpoints.jsonl"})
+    output = {
+        "checkpointDigest": digest(record),
+        "pathRef": ".magi/commit-checkpoints.jsonl",
+    }
+    return ok_result(
+        "CommitCheckpoint",
+        output,
+        evidence_declaration={
+            "type": "CommitCheckpoint",
+            "fields": output,
+            "source": {"kind": "tool_trace", "toolName": "CommitCheckpoint"},
+        },
+    )
 
 
 def package_dependency_resolve(arguments: dict[str, object], context: ToolContext) -> ToolResult:

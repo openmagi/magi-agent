@@ -87,29 +87,57 @@ def evidence_from_transcript_tool_result(entry: ToolResultEntry) -> EvidenceReco
     )
 
 
+def evidence_records_from_tool_result(
+    result: ToolResult,
+    *,
+    tool_call_id: str | None = None,
+    tool_name: str | None = None,
+) -> list[EvidenceRecord]:
+    """Lift one OR many evidence declarations from a tool result.
+
+    ``metadata["evidence"]`` may be a single declaration ``Mapping`` (the
+    historical shape) OR a list of declaration Mappings, so a single tool call
+    can emit several typed records (e.g. an edit producing both an ``EditMatch``
+    and a ``CodeDiagnostics`` receipt). ``external_ack`` declarations are
+    skipped, preserving the prior single-record behavior.
+    """
+    declarations = _explicit_evidence_declarations(result.metadata)
+    records: list[EvidenceRecord] = []
+    for declaration in declarations:
+        if _declares_source_kind(declaration, "external_ack"):
+            continue
+        records.append(
+            _record_from_declaration(
+                declaration,
+                observed_at=_observed_at(declaration),
+                status=_status_from_tool_status(result.status),
+                preview=_preview_from_tool_result(result),
+                default_source_kind="tool_trace",
+                source_overrides={
+                    "toolCallId": tool_call_id
+                    or _string_value(result.metadata.get("toolCallId")),
+                    "toolName": tool_name
+                    or _string_value(result.metadata.get("toolName")),
+                },
+                boundary_metadata=_boundary_metadata_from(result.metadata),
+            )
+        )
+    return records
+
+
 def evidence_from_tool_result(
     result: ToolResult,
     *,
     tool_call_id: str | None = None,
     tool_name: str | None = None,
 ) -> EvidenceRecord | None:
-    declaration = _explicit_evidence_declaration(result.metadata)
-    if declaration is None:
-        return None
-    if _declares_source_kind(declaration, "external_ack"):
-        return None
-    return _record_from_declaration(
-        declaration,
-        observed_at=_observed_at(declaration),
-        status=_status_from_tool_status(result.status),
-        preview=_preview_from_tool_result(result),
-        default_source_kind="tool_trace",
-        source_overrides={
-            "toolCallId": tool_call_id or _string_value(result.metadata.get("toolCallId")),
-            "toolName": tool_name or _string_value(result.metadata.get("toolName")),
-        },
-        boundary_metadata=_boundary_metadata_from(result.metadata),
+    """Single-record back-compat wrapper over
+    :func:`evidence_records_from_tool_result` — returns the first lifted record
+    (or ``None``)."""
+    records = evidence_records_from_tool_result(
+        result, tool_call_id=tool_call_id, tool_name=tool_name
     )
+    return records[0] if records else None
 
 
 def evidence_from_artifact_metadata(metadata: Mapping[str, object]) -> EvidenceRecord | None:
@@ -158,13 +186,28 @@ def _record_from_declaration(
 
 
 def _explicit_evidence_declaration(source: Mapping[str, object]) -> Mapping[str, object] | None:
+    declarations = _explicit_evidence_declarations(source)
+    return declarations[0] if declarations else None
+
+
+def _explicit_evidence_declarations(
+    source: Mapping[str, object],
+) -> list[Mapping[str, object]]:
+    """Return all explicit evidence declarations on a metadata mapping.
+
+    ``metadata["evidence"]`` is either a single declaration Mapping or a list of
+    them. The legacy ``evidenceType`` top-level shape (whole mapping IS the
+    declaration) is still supported and yields a single declaration.
+    """
     nested = source.get(_EVIDENCE_KEY)
     if isinstance(nested, Mapping):
-        return nested
+        return [nested]
+    if isinstance(nested, (list, tuple)):
+        return [item for item in nested if isinstance(item, Mapping)]
     evidence_type = source.get("evidenceType")
     if isinstance(evidence_type, str):
-        return source
-    return None
+        return [source]
+    return []
 
 
 def _declares_source_kind(declaration: Mapping[str, object], kind: str) -> bool:
@@ -306,4 +349,5 @@ __all__ = [
     "evidence_from_projected_event",
     "evidence_from_tool_result",
     "evidence_from_transcript_tool_result",
+    "evidence_records_from_tool_result",
 ]
