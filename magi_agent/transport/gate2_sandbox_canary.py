@@ -348,10 +348,11 @@ def build_gate2_sandbox_workspace_canary_config_from_env(
     runtime_config: object,
 ) -> Gate2SandboxWorkspaceCanaryConfig:
     del runtime_config
-    # I-1: route the two ENABLED master switches through the typed flag
-    # registry. Byte-identical to ``_is_true`` because both ``FlagSpec``s
-    # are strict default-OFF ``bool``.
-    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+    # I-1: route the ENABLED master switches + the environment / env-
+    # allowlist knobs through the typed flag registry. Recovers PR #1047
+    # transport-side migrations that were dropped during squash-merge
+    # ([[stacked-pr-rebase-silent-revert]]).
+    from magi_agent.config.flags import flag_bool, flag_str  # noqa: PLC0415
 
     return Gate2SandboxWorkspaceCanaryConfig(
         enabled=flag_bool("CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_ENABLED", env=env),
@@ -366,9 +367,17 @@ def build_gate2_sandbox_workspace_canary_config_from_env(
             "CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_TRUSTED_OWNER_USER_ID_DIGEST",
             "",
         ).strip(),
-        environment=env.get("CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_ENVIRONMENT", "").strip(),
+        environment=(
+            flag_str(
+                "CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_ENVIRONMENT", env=env
+            )
+            or ""
+        ).strip(),
         environmentAllowlist=_csv_values(
-            env.get("CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_ENV_ALLOWLIST", "")
+            flag_str(
+                "CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_ENV_ALLOWLIST", env=env
+            )
+            or ""
         ),
         sandboxRoot=env.get("CORE_AGENT_PYTHON_GATE2_SANDBOX_CANARY_ROOT"),
         selectedMutationProviderEnabled=flag_bool(
