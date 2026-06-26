@@ -21,6 +21,18 @@ if TYPE_CHECKING:
 ToolContextFactory = Callable[[object], ToolContext]
 AdkLocalTool = FunctionTool | LongRunningFunctionTool
 
+#: Tool names kept registered (and therefore dispatchable) for backward
+#: compatibility, but NOT advertised to the model in the registry-wide toolset.
+#: ``openmagi.web`` ships three names for the same web-search surface
+#: (``WebSearch``, ``web_search``, ``web-search``). The kebab-case ``web-search``
+#: is a vestigial alias with no distinct wiring role. Unlike ``web_search``,
+#: which is also the canonical evidence source-kind and the name the direct
+#: Brave/SerpAPI fast path rebinds onto. Hiding only the kebab alias trims the
+#: model's tool catalog (fewer near-duplicate entries to choose between) while
+#: leaving every name resolvable via ``ToolDispatcher.dispatch`` for any legacy
+#: caller that still emits it.
+_HIDDEN_MODEL_ALIAS_TOOL_NAMES: frozenset[str] = frozenset({"web-search"})
+
 
 def _build_openmagi_tool_callable(
     manifest: ToolManifest,
@@ -333,6 +345,13 @@ def build_adk_function_tools_for_registry(
     if exclude_names is not None:
         excluded = set(exclude_names)
         available = [manifest for manifest in available if manifest.name not in excluded]
+    # Drop backward-compat aliases from the advertised set. They stay registered
+    # and dispatchable; they are simply not surfaced to the model here.
+    available = [
+        manifest
+        for manifest in available
+        if manifest.name not in _HIDDEN_MODEL_ALIAS_TOOL_NAMES
+    ]
     return [
         build_adk_tool_for_manifest(
             manifest,
