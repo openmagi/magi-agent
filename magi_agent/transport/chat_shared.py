@@ -262,6 +262,27 @@ def _gate1a_env_allowlist(env: Mapping[str, str]) -> str:
     )
 
 
+def _flag_int_with_fallback(name: str, *, env: Mapping[str, str], fallback: int) -> int:
+    """I-1: typed-registry int read with a hand-pinned fallback.
+
+    ``flag_int`` returns the ``FlagSpec``'s registered default for
+    unset / malformed values; this thin wrapper additionally pins the
+    construction-site fallback so a future ``FlagSpec`` default
+    change cannot silently shift a gate's effective cap. Byte-
+    identical to the prior ``_int_env(env.get(NAME), fallback=N)``
+    shape because (a) ``flag_int`` returns the registered default
+    on unset and on malformed values (catches ``ValueError``), (b)
+    every batch-20 ``FlagSpec`` default matches the construction-
+    site ``fallback``, and (c) the ``or fallback`` collapse is a
+    defence-in-depth guard against a future ``FlagSpec`` default
+    change.
+    """
+
+    from magi_agent.config.flags import flag_int  # noqa: PLC0415
+
+    return flag_int(name, env=env) or fallback
+
+
 def build_gate1a_readonly_tools_config_from_env(
     env: Mapping[str, str],
     runtime_config: object,
@@ -307,16 +328,20 @@ def build_gate1a_readonly_tools_config_from_env(
                     ",".join(GATE1A_READONLY_TOOL_NAMES),
                 )
             ),
-            "maxToolCallsPerTurn": _int_env(
-                env.get("CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_MAX_CALLS_PER_TURN"),
+            # I-1: route through the typed flag registry.
+            "maxToolCallsPerTurn": _flag_int_with_fallback(
+                "CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_MAX_CALLS_PER_TURN",
+                env=env,
                 fallback=8,
             ),
-            "maxPerToolOutputBytes": _int_env(
-                env.get("CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_MAX_PER_TOOL_BYTES"),
+            "maxPerToolOutputBytes": _flag_int_with_fallback(
+                "CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_MAX_PER_TOOL_BYTES",
+                env=env,
                 fallback=4096,
             ),
-            "maxAggregateOutputBytes": _int_env(
-                env.get("CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_MAX_AGGREGATE_BYTES"),
+            "maxAggregateOutputBytes": _flag_int_with_fallback(
+                "CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_MAX_AGGREGATE_BYTES",
+                env=env,
                 fallback=16384,
             ),
         }
@@ -477,16 +502,20 @@ def build_gate5b_full_toolhost_config_from_env(
                     ",".join(GATE5B_FULL_TOOLHOST_TOOL_NAMES),
                 )
             ),
-            "maxToolCallsPerTurn": _int_env(
-                env.get("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_MAX_CALLS_PER_TURN"),
+            # I-1: route through the typed flag registry.
+            "maxToolCallsPerTurn": _flag_int_with_fallback(
+                "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_MAX_CALLS_PER_TURN",
+                env=env,
                 fallback=16,
             ),
-            "maxPerToolOutputBytes": _int_env(
-                env.get("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_MAX_PER_TOOL_BYTES"),
+            "maxPerToolOutputBytes": _flag_int_with_fallback(
+                "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_MAX_PER_TOOL_BYTES",
+                env=env,
                 fallback=8192,
             ),
-            "commandTimeoutMs": _int_env(
-                env.get("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_COMMAND_TIMEOUT_MS"),
+            "commandTimeoutMs": _flag_int_with_fallback(
+                "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_COMMAND_TIMEOUT_MS",
+                env=env,
                 fallback=5000,
             ),
             "formatOnWriteEnabled": is_format_on_write_enabled(env),
