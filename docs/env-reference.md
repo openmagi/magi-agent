@@ -147,6 +147,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_MAX_STEPS_BRAKE_ENABLED` (default off) — Register the MaxStepsBrakeControl wrap-up brake on the control plane (the seam is wired with ``max_iterations=0``; H-9 audit may delete the seam entirely). Strict default-OFF.
 - `MAGI_MEMORY_COMPACTION_ENABLED` (default off) — Enable the 5-level compaction tree builder for stored memory.
 - `MAGI_MEMORY_ENABLED` (default off) — Master switch for the agent memory subsystem (3-tier + compaction).
+- `MAGI_MEMORY_LOCAL_DEV` (default off) — Local single-user dev short-circuit for the memory-write readiness gate. Default-OFF; opt-in only with the readiness + write env gates ON and the kill-switch INACTIVE.
 - `MAGI_MEMORY_MODE_ROUTING_ENABLED` (default off) — Honour the per-channel memory mode header (normal/read-only/incognito).
 - `MAGI_MEMORY_PROJECTION_ENABLED` (default off) — Project a lean memory view into the serve prompt block.
 - `MAGI_MEMORY_QMD_LIVE_ENABLED` (default off) — Use the live qmd search backend for memory recall.
