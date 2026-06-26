@@ -3,6 +3,7 @@ ERROR: env-reference document missing markers '<!-- BEGIN GENERATED FLAGS (scrip
 
 Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/generate_env_reference.py`. Do not edit this section by hand; register the flag in the registry and regenerate.
 
+- `CORE_AGENT_HOST` (default `0.0.0.0`) — Server bootstrap bind host. Defaults to ``0.0.0.0`` (all interfaces) so hosted infra is byte-identical; the ``--host`` flag still wins when explicitly passed. The desktop shell passes ``127.0.0.1`` to bind loopback only.
 - `CORE_AGENT_PORT` (default `8080`) — Server bootstrap port. Hosted infra sets this; the ``--port`` flag still wins when explicitly passed.
 - `CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_LABEL` (no default) — Hosted gate5b shadow-generation provider label override (e.g. ``anthropic``, ``openai``). Empty falls back to the model-derived family. Hosted-only (excluded from the public env-reference).
 - `MAGI_ADK_STREAMING` (no default) — ADK streaming mode. Default-ON; explicit ``0``/``false``/``no``/``off`` disables. Unset / blank → ON. ``str`` kind because the deny-set is wider than ``flag_bool``'s strict truthy convention.

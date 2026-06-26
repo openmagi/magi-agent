@@ -3845,6 +3845,19 @@ FLAGS: tuple[FlagSpec, ...] = (
         kind="int",
     ),
     FlagSpec(
+        name="CORE_AGENT_HOST",
+        default="0.0.0.0",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Server bootstrap bind host. Defaults to ``0.0.0.0`` "
+            "(all interfaces) so hosted infra is byte-identical; the "
+            "``--host`` flag still wins when explicitly passed. The "
+            "desktop shell passes ``127.0.0.1`` to bind loopback only."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
         name="MAGI_AGENT_REQUIRE_ENV",
         default=False,
         scope="public",

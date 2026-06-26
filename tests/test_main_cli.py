@@ -9,7 +9,7 @@ import pytest
 import magi_agent
 from magi_agent import main as main_module
 from magi_agent.config.env import RuntimeEnvError
-from magi_agent.main import resolve_server_port
+from magi_agent.main import resolve_server_host, resolve_server_port
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -123,6 +123,89 @@ def test_resolve_server_port_supports_direct_port_option() -> None:
 def test_resolve_server_port_rejects_unknown_commands() -> None:
     with pytest.raises(SystemExit):
         resolve_server_port(["run"], environ={})
+
+
+def test_resolve_server_host_defaults_to_all_interfaces() -> None:
+    # Default must remain 0.0.0.0 so hosted/existing behaviour is unchanged.
+    assert resolve_server_host([], environ={}) == "0.0.0.0"
+
+
+def test_resolve_server_host_honours_core_agent_host_env() -> None:
+    assert (
+        resolve_server_host([], environ={"CORE_AGENT_HOST": "127.0.0.1"})
+        == "127.0.0.1"
+    )
+
+
+def test_resolve_server_host_supports_serve_host_flag() -> None:
+    assert (
+        resolve_server_host(["serve", "--host", "127.0.0.1"], environ={})
+        == "127.0.0.1"
+    )
+
+
+def test_resolve_server_host_supports_direct_host_flag() -> None:
+    assert resolve_server_host(["--host", "127.0.0.1"], environ={}) == "127.0.0.1"
+
+
+def test_resolve_server_host_flag_wins_over_env() -> None:
+    assert (
+        resolve_server_host(
+            ["serve", "--host", "127.0.0.1"],
+            environ={"CORE_AGENT_HOST": "0.0.0.0"},
+        )
+        == "127.0.0.1"
+    )
+
+
+def test_resolve_server_host_ignores_unrelated_port_flag() -> None:
+    # The host resolver must compose with --port without erroring.
+    assert (
+        resolve_server_host(["serve", "--port", "9099", "--host", "127.0.0.1"], environ={})
+        == "127.0.0.1"
+    )
+
+
+def test_resolve_server_host_rejects_unknown_commands() -> None:
+    with pytest.raises(SystemExit):
+        resolve_server_host(["run"], environ={})
+
+
+def test_main_threads_host_flag_to_uvicorn(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    # --host 127.0.0.1 reaches the uvicorn.run call (loopback bind path).
+    captured: dict[str, object] = {}
+
+    for key in EXPECTED_LOCAL_FULL_RUNTIME_DEFAULTS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.delenv("CORE_AGENT_HOST", raising=False)
+    monkeypatch.delenv(main_module.LOCAL_FULL_RUNTIME_DEFAULTS_ENABLED_ENV, raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(main_module.uvicorn, "run", lambda app, **kwargs: captured.update(kwargs))
+    main_module.main(["serve", "--port", "9094", "--host", "127.0.0.1"])
+
+    assert captured["host"] == "127.0.0.1"
+    assert captured["port"] == 9094
+
+
+def test_main_threads_core_agent_host_env_to_uvicorn(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    # CORE_AGENT_HOST env (no flag) reaches the uvicorn.run call.
+    captured: dict[str, object] = {}
+
+    for key in EXPECTED_LOCAL_FULL_RUNTIME_DEFAULTS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.delenv(main_module.LOCAL_FULL_RUNTIME_DEFAULTS_ENABLED_ENV, raising=False)
+    monkeypatch.setenv("CORE_AGENT_HOST", "127.0.0.1")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(main_module.uvicorn, "run", lambda app, **kwargs: captured.update(kwargs))
+    main_module.main(["serve", "--port", "9095"])
+
+    assert captured["host"] == "127.0.0.1"
 
 
 def test_main_help_does_not_require_runtime_environment(capsys: pytest.CaptureFixture[str]) -> None:

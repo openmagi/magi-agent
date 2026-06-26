@@ -55,7 +55,41 @@ def resolve_server_port(
     elif raw_args and not raw_args[0].startswith("-"):
         parser.error(f"unknown command: {raw_args[0]}")
 
-    return int(parser.parse_args(raw_args).port)
+    # Ignore unrelated flags (e.g. ``--host``) so the two resolvers compose.
+    return int(parser.parse_known_args(raw_args)[0].port)
+
+
+def resolve_server_host(
+    argv: Sequence[str] | None = None,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> str:
+    """Resolve the uvicorn bind host for ``serve``.
+
+    Mirrors :func:`resolve_server_port`: an optional ``--host`` CLI flag wins,
+    otherwise the typed ``CORE_AGENT_HOST`` flag (env) is read, which defaults
+    to ``0.0.0.0``. Hosted behaviour is byte-identical to the historical
+    hard-coded ``host="0.0.0.0"``; the desktop shell passes ``--host
+    127.0.0.1`` so the local runtime binds loopback only.
+    """
+    env = os.environ if environ is None else environ
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    # ``flag_str`` returns the registry default ("0.0.0.0") when unset.
+    default_host = flag_str("CORE_AGENT_HOST", env=env) or "0.0.0.0"
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+
+    parser = argparse.ArgumentParser(prog="magi-agent")
+    parser.add_argument("--host", type=str, default=default_host)
+
+    if raw_args and raw_args[0] == "serve":
+        raw_args = raw_args[1:]
+    elif raw_args and not raw_args[0].startswith("-"):
+        parser.error(f"unknown command: {raw_args[0]}")
+
+    # Ignore unrelated flags (e.g. ``--port``) so the two resolvers compose.
+    host = parser.parse_known_args(raw_args)[0].host
+    return str(host)
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -97,6 +131,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
         apply_memory_config_bootstrap(os.environ)
     port = resolve_server_port(argv)
+    host = resolve_server_host(argv)
     config = _parse_runtime_config(os.environ)
     if _local_runtime_defaults_active(config):
         # ``MAGI_RUNTIME_PROFILE=lab`` is local-full plus the experimental
@@ -143,7 +178,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         build_gate1a_observed_egress_evidence_provider_from_env(os.environ)
     )
     app = create_app(runtime)
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host=host, port=port)
 
 
 def _parse_runtime_config(environ: Mapping[str, str]):
