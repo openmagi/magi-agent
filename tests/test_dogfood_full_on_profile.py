@@ -387,6 +387,7 @@ _INTENTIONALLY_NOT_IN_FULL_PROFILE: dict[str, str] = {
     "MAGI_TUI_LEGACY_RICHLOG": "forces the legacy TUI widget; the new renderer is the capable path",
     "MAGI_CHILD_RUNNER_EMPTY_DEBUG": "diagnostic-only debug flag",
     "MAGI_SCHEDULER_KILL_SWITCH_ENABLED": "kill switch; ON disables the scheduler",
+    "MAGI_AGENT_REQUIRE_ENV": "would BLOCK local serve when hosted env partial; reduces convenience for local dev",
 }
 
 
