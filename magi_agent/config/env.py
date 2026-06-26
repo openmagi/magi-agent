@@ -3088,9 +3088,10 @@ def cli_session_log_enabled(env: Mapping[str, str] | None = None) -> bool:
 
     Stage-1 default-OFF: unlike most runtime feature flags this is **strict**
     default-OFF (only an explicit truthy value enables it) — it is NOT tied to
-    the runtime profile, so a local-full install does not silently start writing
-    raw transcripts to disk until the value is flipped on. The local-full / eval
-    profiles register the flag at ``"0"`` so a later release can stage it ON.
+    the runtime profile, so the registry/helper default stays OFF for imports and
+    tests unless an explicit truthy value is set. The local-full profile stages it
+    ON (WS1 PR1e: it is the Envelope-log replay source for durable resume); the
+    eval and safe profiles keep it at ``"0"``.
     """
 
     import os as _os

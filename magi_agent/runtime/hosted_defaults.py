@@ -73,6 +73,24 @@ _C3_RESILIENCE_OVERLAY: Mapping[str, str] = {
     "MAGI_MAX_STEPS_BRAKE_ENABLED": "1",
 }
 
+# WS1 PR1e durable crash-resume controls (resilience stage and above). The boot
+# sweep + headless-tap checkpoint emission are operationally-safe resilience
+# machinery, so they wire at ``resilience``. The master sqlite-write gate
+# (MAGI_DURABLE_LOCAL_WRITES_ENABLED) is shipped OFF on hosted pending the
+# section-9 gate-1 sign-off (per-pod PVC-backed sqlite + a pod-restart drill is a
+# K8s/deployment-semantics change on the parent plan's open-questions list), so
+# the substrate is inert on hosted until that sign-off: checkpoints/recovery
+# read/write nothing while the master gate is OFF. The OPTIONAL foreground
+# continuation (MAGI_DURABLE_FOREGROUND_CONTINUATION_ENABLED) also stays OFF on
+# every hosted stage. setdefault semantics mean an operator can still flip the
+# master gate on explicitly once gate-1 is signed off.
+_DURABLE_RESILIENCE_OVERLAY: Mapping[str, str] = {
+    "MAGI_DURABLE_CHECKPOINTS_ENABLED": "1",
+    "MAGI_DURABLE_STARTUP_RECOVERY_ENABLED": "1",
+    # OFF pending section-9 gate-1 (hosted PVC durable persistence sign-off).
+    "MAGI_DURABLE_LOCAL_WRITES_ENABLED": "0",
+}
+
 # C3 ``full`` additions (PR2): context-compaction + self-review. self-review is
 # shadow-first on hosted — enabled, but ``MAGI_SELF_REVIEW_SHADOW`` stays "1" so
 # it only observes (no live candidate generation) until ``hardgate``.
@@ -132,7 +150,7 @@ def _compose(*fragments: Mapping[str, str]) -> Mapping[str, str]:
 # Stage -> env overlay. Stages are additive: each higher stage layers its own
 # fragment on top of the lower stage's overlay. Stage ``off`` is empty (no-op),
 # keeping the hosted runtime byte-identical to today.
-_RESILIENCE_OVERLAY = _compose(_C3_RESILIENCE_OVERLAY)
+_RESILIENCE_OVERLAY = _compose(_C3_RESILIENCE_OVERLAY, _DURABLE_RESILIENCE_OVERLAY)
 _FULL_OVERLAY = _compose(
     _RESILIENCE_OVERLAY,
     _OBSERVABILITY_OVERLAY,
