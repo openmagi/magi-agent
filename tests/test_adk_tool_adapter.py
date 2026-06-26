@@ -305,6 +305,38 @@ def test_registry_helper_includes_enabled_long_running_tool_and_excludes_disable
     assert isinstance(tools[0], LongRunningFunctionTool)
 
 
+def test_registry_helper_hides_kebab_web_search_alias_but_keeps_it_dispatchable() -> None:
+    """``web-search`` stays registered/dispatchable but is not advertised.
+
+    The kebab-case alias is a backward-compat name for the same web-search
+    surface as ``WebSearch``/``web_search``; the model should only see the two
+    non-vestigial names, while any legacy caller emitting ``web-search`` still
+    resolves through the registry.
+    """
+    registry = ToolRegistry()
+    for name in ("WebSearch", "web_search", "web-search"):
+        registry.register(
+            make_manifest(name, permission="net"),
+            handler=lambda _arguments, _context: ToolResult(status="ok"),
+        )
+    dispatcher = ToolDispatcher(registry)
+
+    tools = build_adk_function_tools_for_registry(
+        registry,
+        dispatcher,
+        mode="act",
+        tool_context_factory=make_context_factory(),
+        attach_enabled=True,
+    )
+
+    advertised = {tool.name for tool in tools}
+    assert "WebSearch" in advertised
+    assert "web_search" in advertised
+    assert "web-search" not in advertised
+    # Still registered → still dispatchable for legacy callers.
+    assert registry.resolve_enabled("web-search") is not None
+
+
 def test_enabled_shell_tool_without_handler_returns_missing_handler() -> None:
     registry = ToolRegistry()
     register_core_tool_manifests(registry)
