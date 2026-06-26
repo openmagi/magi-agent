@@ -146,7 +146,7 @@ openmagi	magi_agent/plugins/mcp_adapter.py	5
 openmagi	magi_agent/plugins/native/browser.py	1
 openmagi	magi_agent/plugins/native/knowledge.py	1
 openmagi	magi_agent/plugins/native/web.py	3
-openmagi	magi_agent/plugins/native_catalog.py	51
+openmagi	magi_agent/plugins/native_catalog.py	54
 openmagi	magi_agent/plugins/shell_testrun_safe_subset.py	1
 openmagi	magi_agent/plugins/tool_projection.py	22
 openmagi	magi_agent/recipes/coding_evidence_gate.py	1

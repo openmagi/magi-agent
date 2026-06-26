@@ -83,6 +83,8 @@ def test_native_state_projection_returns_expected_native_tool_names_in_resolved_
         "knowledge-search",
         "KnowledgeWrite",
         "knowledge-write",
+        "OkfLookup",
+        "okf-lookup",
         "MissionLedger",
         "CronCreate",
         "CronList",
