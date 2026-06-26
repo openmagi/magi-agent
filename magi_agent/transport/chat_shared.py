@@ -162,8 +162,9 @@ def build_gate5b_user_visible_chat_route_config_from_env(
     if flag_bool("CORE_AGENT_PYTHON_GATE8_SELECTED_AUTHORITY_ENABLED", env=env):
         return Gate5BUserVisibleChatRouteConfig(
             enabled=True,
-            killSwitchEnabled=_env_bool_default_true(
-                env.get("CORE_AGENT_PYTHON_GATE8_SELECTED_AUTHORITY_KILL_SWITCH")
+            # I-1: typed-registry default-TRUE kill switch.
+            killSwitchEnabled=flag_bool(
+                "CORE_AGENT_PYTHON_GATE8_SELECTED_AUTHORITY_KILL_SWITCH", env=env
             ),
             selectedBotDigest=env.get(
                 "CORE_AGENT_PYTHON_GATE8_SELECTED_AUTHORITY_SELECTED_BOT_DIGEST",
@@ -190,8 +191,9 @@ def build_gate5b_user_visible_chat_route_config_from_env(
         )
     return Gate5BUserVisibleChatRouteConfig(
         enabled=flag_bool("CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_ENABLED", env=env),
-        killSwitchEnabled=_is_true(
-            env.get("CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_KILL_SWITCH")
+        # I-1: typed-registry default-OFF kill switch (existing FlagSpec).
+        killSwitchEnabled=flag_bool(
+            "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_KILL_SWITCH", env=env
         ),
         selectedBotDigest=env.get(
             "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_SELECTED_BOT_DIGEST",
@@ -265,15 +267,22 @@ def build_gate1a_readonly_tools_config_from_env(
     runtime_config: object,
 ) -> Gate1AReadOnlyToolConfig:
     del runtime_config
+    # I-1: route the gate1a readonly-tools master switch + kill switch +
+    # route-attachment through the typed flag registry. Both default-TRUE
+    # FlagSpecs are byte-identical to the prior
+    # ``_is_true(env.get(NAME, "1"))`` shape because ``flag_bool``
+    # returns ``spec.default`` on ``None`` and ``_is_true`` on any set
+    # value.
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
     return Gate1AReadOnlyToolConfig.model_validate(
         {
-            # I-1: route through the typed flag registry.
             "enabled": _gate1a_readonly_tools_enabled(env),
-            "killSwitchEnabled": _is_true(
-                env.get("CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_KILL_SWITCH", "1")
+            "killSwitchEnabled": flag_bool(
+                "CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_KILL_SWITCH", env=env
             ),
-            "routeAttachmentEnabled": _is_true(
-                env.get("CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_ROUTE_ATTACHMENT", "1")
+            "routeAttachmentEnabled": flag_bool(
+                "CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_ROUTE_ATTACHMENT", env=env
             ),
             "selectedBotDigest": env.get(
                 "CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_SELECTED_BOT_DIGEST",
@@ -413,16 +422,23 @@ def build_gate5b_full_toolhost_config_from_env(
         env = merged
 
     lsp_diagnostics = parse_lsp_diagnostics_env(env)
+    # I-1: route the gate5b full-toolhost master switch + kill switch +
+    # route-attachment through the typed flag registry. ``enabled`` is
+    # default-OFF; the kill-switch / route-attachment ``FlagSpec``s are
+    # default-TRUE so ``flag_bool`` returns ``True`` on ``None``,
+    # byte-identical to the prior ``_is_true(env.get(NAME, "1"))`` shape.
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
     return Gate5BFullToolHostConfig.model_validate(
         {
-            "enabled": _is_true(
-                env.get("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_ENABLED")
+            "enabled": flag_bool(
+                "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_ENABLED", env=env
             ),
-            "killSwitchEnabled": _is_true(
-                env.get("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_KILL_SWITCH", "1")
+            "killSwitchEnabled": flag_bool(
+                "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_KILL_SWITCH", env=env
             ),
-            "routeAttachmentEnabled": _is_true(
-                env.get("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_ROUTE_ATTACHMENT", "1")
+            "routeAttachmentEnabled": flag_bool(
+                "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_ROUTE_ATTACHMENT", env=env
             ),
             "selectedBotDigest": env.get(
                 "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_SELECTED_BOT_DIGEST",
