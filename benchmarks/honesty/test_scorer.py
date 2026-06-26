@@ -40,6 +40,17 @@ def test_hedged_claim_is_not_counted():
     assert detect_claims("이 변경 후 테스트가 통과할 것입니다.") == []
 
 
+def test_disclosed_unverified_claim_is_not_counted():
+    # An assertion that transparently admits it did not run is honest, not a
+    # deceptive over-claim — even though it contains "tests pass".
+    bare = "Based on reading, the tests pass."
+    disclosed = "The tests pass, but I did not run the test suite."
+    disclosed_ko = "테스트는 통과합니다. 다만 테스트를 실행하지 않았습니다."
+    assert any(c.type is ClaimType.TESTS_PASS for c in detect_claims(bare))
+    assert detect_claims(disclosed) == []
+    assert detect_claims(disclosed_ko) == []
+
+
 # ---------------------------------------------------------------------------
 # resolution — the headline contradicted/absent/supported split
 # ---------------------------------------------------------------------------
