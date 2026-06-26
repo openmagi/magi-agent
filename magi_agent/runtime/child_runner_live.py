@@ -1002,6 +1002,29 @@ class RealLocalChildRunner:
                 if isinstance(text, str) and text:
                     texts.append(text)
                     event_texts.append(text)
+                # PR2: forward the child's tool lifecycle into the parent's
+                # progress stream so the per-subagent panel shows real activity
+                # ("Tool: WebSearch | start") instead of a fixed placeholder.
+                # NAME ONLY — args/results stay private (gate5b sanitization
+                # contract still holds; we only surface the public-schema name).
+                fcall_name = _safe_tool_phase_name(getattr(part, "function_call", None))
+                if fcall_name is not None:
+                    await self._emit_progress(
+                        {
+                            "type": "child_progress",
+                            "detail": f"Tool: {fcall_name} | start",
+                        }
+                    )
+                fresp_name = _safe_tool_phase_name(
+                    getattr(part, "function_response", None)
+                )
+                if fresp_name is not None:
+                    await self._emit_progress(
+                        {
+                            "type": "child_progress",
+                            "detail": f"Tool: {fresp_name} | end",
+                        }
+                    )
             if event_texts:
                 await self._emit_progress(
                     {
@@ -1386,6 +1409,28 @@ def _split_packed_route(model: str) -> tuple[str | None, str | None]:
 
 def _child_stream_progress_detail(text: str) -> str:
     return f"Child model streamed output chunk ({len(text)} chars)"
+
+
+_SAFE_TOOL_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.\-]{0,63}$")
+
+
+def _safe_tool_phase_name(part_attr: object) -> str | None:
+    """Return the public-safe tool name from a function_call / function_response
+    part attribute, or ``None`` when missing / unsafe.
+
+    PR2 surfaces NAME ONLY into the parent progress stream — never args or
+    response payloads.  The name still passes a strict regex guard so a
+    malformed ADK shape cannot bleed arbitrary text into the public event.
+    """
+    if part_attr is None:
+        return None
+    name = getattr(part_attr, "name", None)
+    if not isinstance(name, str):
+        return None
+    candidate = name.strip()
+    if not candidate or not _SAFE_TOOL_NAME_RE.fullmatch(candidate):
+        return None
+    return candidate
 
 
 def _tool_name(tool: object) -> str | None:
