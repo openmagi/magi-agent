@@ -353,6 +353,72 @@ def test_memory_archive_is_read_only_delete_skipped(tmp_path, monkeypatch) -> No
     assert target.exists()
 
 
+def test_memory_lists_identity_files_project_and_global(tmp_path, monkeypatch) -> None:
+    # Global self-identity lives in ~/.magi; project override in <workspace>/.magi.
+    # The Memory dashboard must surface BOTH so what feeds the system prompt
+    # (magi_agent.cli.identity.load_identity) is visible.
+    home = tmp_path / "home"
+    (home / ".magi").mkdir(parents=True)
+    (home / ".magi" / "USER.md").write_text("kevin facts", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+
+    workspace = tmp_path / "ws"
+    (workspace / ".magi").mkdir(parents=True)
+    (workspace / ".magi" / "IDENTITY.md").write_text("who the agent is", encoding="utf-8")
+    monkeypatch.chdir(workspace)
+    monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))
+    for name in (*_WORKSPACE_ENV_VARS, *_PROVIDER_KEY_ENV_VARS):
+        monkeypatch.delenv(name, raising=False)
+    client = TestClient(create_app(_runtime()))
+    client.headers.update({"x-gateway-token": _TOKEN})
+
+    paths = {f["path"] for f in client.get("/v1/app/memory").json()["files"]}
+    assert ".magi/IDENTITY.md" in paths
+    assert "~/.magi/USER.md" in paths
+
+    proj = client.get("/v1/app/memory/file", params={"path": ".magi/IDENTITY.md"})
+    assert proj.json()["content"] == "who the agent is"
+    glob = client.get("/v1/app/memory/file", params={"path": "~/.magi/USER.md"})
+    assert glob.json()["content"] == "kevin facts"
+
+
+def test_memory_identity_sealed_agents_md_not_listed(tmp_path, monkeypatch) -> None:
+    # AGENTS.md is a sealed basename (cross-tool convention file); it must NOT be
+    # surfaced via the Memory listing even when present in the .magi namespace.
+    workspace = tmp_path / "ws"
+    (workspace / ".magi").mkdir(parents=True)
+    (workspace / ".magi" / "AGENTS.md").write_text("roster", encoding="utf-8")
+    monkeypatch.chdir(workspace)
+    monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))
+    for name in (*_WORKSPACE_ENV_VARS, *_PROVIDER_KEY_ENV_VARS):
+        monkeypatch.delenv(name, raising=False)
+    client = TestClient(create_app(_runtime()))
+    client.headers.update({"x-gateway-token": _TOKEN})
+
+    paths = {f["path"] for f in client.get("/v1/app/memory").json()["files"]}
+    assert ".magi/AGENTS.md" not in paths
+
+
+def test_memory_identity_file_not_deletable(tmp_path, monkeypatch) -> None:
+    workspace = tmp_path / "ws"
+    (workspace / ".magi").mkdir(parents=True)
+    target = workspace / ".magi" / "IDENTITY.md"
+    target.write_text("keep me", encoding="utf-8")
+    monkeypatch.chdir(workspace)
+    monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))
+    for name in (*_WORKSPACE_ENV_VARS, *_PROVIDER_KEY_ENV_VARS):
+        monkeypatch.delenv(name, raising=False)
+    client = TestClient(create_app(_runtime()))
+    client.headers.update({"x-gateway-token": _TOKEN})
+
+    res = client.request(
+        "DELETE", "/v1/app/memory/files", json={"paths": [".magi/IDENTITY.md"]}
+    )
+    assert res.status_code == 200
+    assert res.json()["deleted"] == []
+    assert target.exists()
+
+
 def test_app_api_uses_hosted_workspace_env_for_skills_and_memory(
     tmp_path, monkeypatch
 ) -> None:

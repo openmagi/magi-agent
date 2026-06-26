@@ -52,6 +52,17 @@ _SECRET_NAME_RE = re.compile(
     r"(^\.env)|secret|credential|password|api[_-]?key|token", re.IGNORECASE
 )
 
+# Self-identity files read into the system prompt by
+# ``magi_agent.cli.identity.load_identity`` from the ``.magi`` namespace
+# (``~/.magi`` global + ``<workspace>/.magi`` project override). Surfaced
+# read-only in the Memory dashboard so what feeds the prompt is visible.
+# ``AGENTS.md`` is deliberately excluded: it is a sealed cross-tool convention
+# file (see ``_SEALED_BASENAMES``) and stays hidden here.
+_IDENTITY_BASENAMES = ("IDENTITY.md", "USER.md", "BOOTSTRAP.md", "LEARNING.md")
+# Synthetic path prefix used in API responses for files in the global ``~/.magi``
+# namespace (which lives outside any workspace root).
+_GLOBAL_IDENTITY_PREFIX = "~/.magi/"
+
 # The runtime's fixed skill-hook points (see plugins/native/skills.py).
 _RUNTIME_HOOK_POINTS = ("beforeModelCall", "afterToolCall", "beforeCommit", "afterTurnEnd")
 
@@ -219,6 +230,71 @@ def _is_archive_memory(path: Path | None) -> bool:
         if rel == "memory/archive" or rel.startswith("memory/archive/"):
             return True
     return False
+
+
+def _global_magi_dir() -> Path:
+    """The global ``~/.magi`` namespace (mirrors ``cli.identity.load_identity``)."""
+    return Path(os.path.expanduser("~")) / ".magi"
+
+
+def _list_identity_files() -> list[dict[str, Any]]:
+    """List the self-identity files from the ``.magi`` namespace.
+
+    Surfaces the global ``~/.magi`` files (path ``~/.magi/<name>``) and any
+    per-workspace ``<root>/.magi`` overrides (path ``.magi/<name>``). Mirrors
+    the resolution order of ``cli.identity.load_identity`` so the Memory
+    dashboard shows exactly what feeds the system prompt. Sealed/secret-shaped
+    basenames are skipped via ``_is_protected``.
+    """
+    out: list[dict[str, Any]] = []
+    seen_api: set[str] = set()
+    seen_fs: set[Path] = set()
+
+    def add(api_path: str, fs_path: Path) -> None:
+        if api_path in seen_api or not fs_path.is_file() or _is_protected(fs_path):
+            return
+        try:
+            resolved = fs_path.resolve()
+        except OSError:
+            return
+        if resolved in seen_fs:
+            return
+        seen_api.add(api_path)
+        seen_fs.add(resolved)
+        out.append({"path": api_path, **_file_stat(fs_path)})
+
+    global_dir = _global_magi_dir()
+    for name in _IDENTITY_BASENAMES:
+        add(f"{_GLOBAL_IDENTITY_PREFIX}{name}", global_dir / name)
+    for root in _workspace_roots():
+        for name in _IDENTITY_BASENAMES:
+            add(f".magi/{name}", root / ".magi" / name)
+    return out
+
+
+def _resolve_identity_file(api_path: str) -> Path | None:
+    """Resolve a global ``~/.magi/<name>`` identity path to a filesystem path.
+
+    Project-scoped ``.magi/<name>`` paths live inside the workspace and are
+    resolved by ``_resolve_in_workspace``; this handler covers only the global
+    namespace, restricted to the known identity basenames.
+    """
+    if not api_path.startswith(_GLOBAL_IDENTITY_PREFIX):
+        return None
+    name = api_path[len(_GLOBAL_IDENTITY_PREFIX) :]
+    if name not in _IDENTITY_BASENAMES:
+        return None
+    candidate = _global_magi_dir() / name
+    if _is_protected(candidate):
+        return None
+    return candidate
+
+
+def _is_identity_file(path: Path | None) -> bool:
+    """Self-identity files are surfaced read-only: never deleted from here."""
+    if path is None:
+        return False
+    return path.name in _IDENTITY_BASENAMES and path.parent.name == ".magi"
 
 
 def _file_stat(path: Path) -> dict[str, Any]:
@@ -655,7 +731,8 @@ def _search_files(files: list[dict[str, Any]], query: str, limit: int) -> list[d
     if not needle:
         return results
     for entry in files:
-        path = _resolve_in_workspace(str(entry["path"]))
+        rel = str(entry["path"])
+        path = _resolve_identity_file(rel) or _resolve_in_workspace(rel)
         if path is None:
             continue
         text = _read_text(path, limit=_MAX_SEARCH_BYTES)
@@ -810,6 +887,7 @@ def register_app_api_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         if denied is not None:
             return denied
         files = _list_markdown(["memory", ".magi/memory"], ["MEMORY.md", "USER.md"])
+        files = _list_identity_files() + files
         return JSONResponse(content={"files": files})
 
     @app.get("/v1/app/memory/file")
@@ -817,7 +895,7 @@ def register_app_api_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         denied = guard(request)
         if denied is not None:
             return denied
-        target = _resolve_in_workspace(path)
+        target = _resolve_identity_file(path) or _resolve_in_workspace(path)
         if target is None or _is_protected(target):
             return JSONResponse(status_code=403, content={"error": "forbidden_path"})
         content = _read_text(target)
@@ -846,6 +924,7 @@ def register_app_api_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
                 target is None
                 or _is_protected(target)
                 or _is_archive_memory(target)
+                or _is_identity_file(target)
                 or not target.is_file()
             ):
                 continue
@@ -862,6 +941,7 @@ def register_app_api_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         if denied is not None:
             return denied
         files = _list_markdown(["memory", ".magi/memory"], ["MEMORY.md", "USER.md"])
+        files = _list_identity_files() + files
         return JSONResponse(content={"results": _search_files(files, q, limit)})
 
     # ---- workspace file write ------------------------------------------ #

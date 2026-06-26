@@ -20,7 +20,7 @@ interface MemoryEditorProps {
 interface MemoryFile {
   name: string;
   path: string;
-  tier: "root" | "daily" | "weekly" | "monthly" | "archive" | "system";
+  tier: "identity" | "root" | "daily" | "weekly" | "monthly" | "archive" | "system";
   sizeBytes?: number;
   mtimeMs?: number;
 }
@@ -34,6 +34,7 @@ interface SearchResult {
 type SearchMode = "filename" | "content";
 
 const TIERS: Array<{ key: MemoryFile["tier"]; label: string }> = [
+  { key: "identity", label: "Identity" },
   { key: "root", label: "Root" },
   { key: "daily", label: "Daily" },
   { key: "weekly", label: "Weekly" },
@@ -45,9 +46,24 @@ const TIERS: Array<{ key: MemoryFile["tier"]; label: string }> = [
 // Tiers that are surfaced read-only: their files can be viewed but not edited or
 // deleted from the dashboard. ``memory/archive/`` holds pre-compaction snapshots
 // (the tree's audit trail); the backend also refuses writes/deletes there.
-const READ_ONLY_TIERS: ReadonlySet<MemoryFile["tier"]> = new Set(["archive"]);
+// ``identity`` files (the ``.magi`` self-identity namespace) feed the system
+// prompt and are surfaced for inspection only; the backend refuses deletes too.
+const READ_ONLY_TIERS: ReadonlySet<MemoryFile["tier"]> = new Set(["archive", "identity"]);
+
+// Self-identity files read into the system prompt from the ``.magi`` namespace
+// (global ``~/.magi`` + per-project ``.magi``). Matched as a basename directly
+// under ``.magi/`` so the ``.magi/memory/`` tree is never mistaken for identity.
+const IDENTITY_BASENAMES: ReadonlySet<string> = new Set([
+  "IDENTITY.md",
+  "USER.md",
+  "BOOTSTRAP.md",
+  "LEARNING.md",
+]);
+const IDENTITY_PATH_RE = /^(?:~\/)?\.magi\/([^/]+)$/;
 
 function memoryTier(path: string): MemoryFile["tier"] {
+  const identityMatch = path.match(IDENTITY_PATH_RE);
+  if (identityMatch && IDENTITY_BASENAMES.has(identityMatch[1])) return "identity";
   if (path === "MEMORY.md" || path === "memory/ROOT.md") return "root";
   if (path.startsWith("memory/archive/")) return "archive";
   if (path.startsWith("memory/daily/") || /^memory\/\d{4}-\d{2}-\d{2}\.md$/.test(path)) return "daily";
@@ -128,7 +144,7 @@ async function searchMemory(query: string, limit = 15): Promise<SearchResult[]> 
 export function MemoryEditor({ botName, botOnline }: MemoryEditorProps) {
   const { locale } = useI18n();
   const [tree, setTree] = useState<Record<string, MemoryFile[]>>({});
-  const [expandedTiers, setExpandedTiers] = useState<Set<string>>(new Set(["root", "system", "daily"]));
+  const [expandedTiers, setExpandedTiers] = useState<Set<string>>(new Set(["identity", "root", "system", "daily"]));
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string>("");
   const [editContent, setEditContent] = useState<string>("");
