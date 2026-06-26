@@ -465,6 +465,118 @@ export async function compileCustomRule(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Conversational compile — POST /v1/app/customize/custom-rules/compile-interactive
+// ---------------------------------------------------------------------------
+
+
+/** One question the assistant surfaces to the operator on a turn. */
+export interface InteractiveQuestionOption {
+  value: string;
+  label: string;
+  hint?: string;
+}
+
+
+export interface InteractiveQuestion {
+  id: string;
+  prompt: string;
+  kind: "single_select" | "multi_select" | "text";
+  targets_field: string;
+  options: InteractiveQuestionOption[] | null;
+}
+
+
+/** One assistant or user turn the wire carries. Local-only `questions`
+ *  metadata stays on the client and is stripped before the next POST. */
+export interface InteractiveHistoryTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+
+/** Body sent on every conversational turn. */
+export interface InteractiveCompileRequest {
+  history: InteractiveHistoryTurn[];
+  draft_so_far: Record<string, unknown> | null;
+  answers: Record<string, string> | null;
+}
+
+
+/** Response mirrored verbatim from
+ *  ``nl_compiler_interactive.InteractiveTurnResult.to_dict``. */
+export interface InteractiveCompileResponse {
+  /** Plain-English status line; always present on a 200 envelope. */
+  assistant_message?: string;
+  /** Server-side IR snapshot — the dashboard's live draft pane reads
+   *  this directly to fill the right-hand summary. */
+  draft?: Record<string, unknown> | null;
+  /** Canonical field-name list the state machine still needs to fill. */
+  missing_fields?: string[];
+  /** 0..2 clarifying questions the operator picks/answers next turn. */
+  questions?: InteractiveQuestion[];
+  /** True iff the validator does NOT accept the draft yet. */
+  needs_more?: boolean;
+  /** True iff the runtime validator accepts the draft as-is. Save CTA
+   *  on the dashboard's draft pane is gated on this flag. */
+  ready_to_save?: boolean;
+  /** Validator complaints surfaced for the Save CTA tooltip; plain-
+   *  language scrubbed. */
+  schema_issues?: string[];
+  /** Disabled-feature envelope shape (mirrors the one-shot compile route)
+   *  so the dashboard can render a fallback banner without branching on
+   *  HTTP status. */
+  ok?: boolean;
+  error?: string;
+}
+
+
+/**
+ * Sends one conversational turn to the magi-agent runtime. Mirrors the
+ * fetch + error-handling pattern of ``compileCustomRule`` (one-shot):
+ *
+ * - HTTP 200: returns the wire envelope verbatim (caller renders).
+ * - HTTP 4xx/5xx: returns ``{ok:false, error}`` synthesized from the
+ *   upstream body — does NOT throw.
+ * - Network failure: same envelope shape with a synthetic error string.
+ *
+ * The conversational state machine is server-driven; the client is
+ * a thin shell that forwards ``(history, draft_so_far, answers)`` and
+ * mirrors the response into local React state.
+ */
+export async function compileCustomRuleInteractive(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  body: InteractiveCompileRequest,
+): Promise<InteractiveCompileResponse> {
+  try {
+    const res = await fetch(
+      `/v1/app/customize/custom-rules/compile-interactive`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
+    if (!res.ok) {
+      let backendError = `Compile-interactive failed (${res.status})`;
+      try {
+        const errBody = (await res.json()) as { error?: string };
+        if (typeof errBody.error === "string" && errBody.error.length > 0) {
+          backendError = errBody.error;
+        }
+      } catch {
+        /* ignore JSON parse failure on error body */
+      }
+      return { ok: false, error: backendError };
+    }
+    return (await res.json()) as InteractiveCompileResponse;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Network error";
+    return { ok: false, error: message };
+  }
+}
+
+
 /** Deletes a custom rule by id via `DELETE /v1/app/customize/custom-rules/{id}`. */
 export async function deleteCustomRule(
   fetch: (path: string, init?: RequestInit) => Promise<Response>,
