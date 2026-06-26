@@ -76,4 +76,21 @@ describe("local OSS observability dashboard", () => {
     // applyFilters must call setFilters and router.replace
     expect(source).toContain("setFilters(next)");
   });
+
+  it("imports and uses buildActivityPageQuery for paginated requests", () => {
+    expect(source).toContain("buildActivityPageQuery");
+    expect(source).toContain("./observability-query");
+  });
+
+  it("imports and uses mergeEventsById for merge/dedupe", () => {
+    expect(source).toContain("mergeEventsById");
+  });
+
+  it("has a Load older button for backward pagination", () => {
+    expect(source).toContain("Load older");
+  });
+
+  it("has a Load newer button for forward pagination", () => {
+    expect(source).toContain("Load newer");
+  });
 });

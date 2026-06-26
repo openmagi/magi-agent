@@ -8,6 +8,8 @@ import { GlassCard } from "@/components/ui/glass-card";
 import { useAgentFetch } from "@/lib/local-api";
 import {
   buildActivityQuery,
+  buildActivityPageQuery,
+  mergeEventsById,
   CATEGORY_KINDS,
   NOISE_KINDS,
   parseFiltersFromParams,
@@ -243,6 +245,8 @@ function ObservabilityPageInner() {
   const [board, setBoard] = useState<JsonRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /** Tracks in-flight pagination direction; null when no page load is active. */
+  const [paginatingDir, setPaginatingDir] = useState<"older" | "newer" | null>(null);
 
   // Filter state backed by URL query params so audit views are shareable.
   // Initial state is read from the URL on mount; changes are written back via
@@ -264,8 +268,26 @@ function ObservabilityPageInner() {
     [filters],
   );
 
+  /**
+   * Cursor ids derived from the currently loaded events (id ASC ordering).
+   * Used to build `before_id`/`since_id` params for paginated fetches.
+   * Both are null when no events with a numeric id are loaded.
+   */
+  const { oldestId, newestId } = useMemo(() => {
+    let oldest: number | null = null;
+    let newest: number | null = null;
+    for (const e of events) {
+      if (e.id != null) {
+        if (oldest === null) oldest = e.id;
+        newest = e.id;
+      }
+    }
+    return { oldestId: oldest, newestId: newest };
+  }, [events]);
+
   const loadObservability = useCallback(async () => {
     setLoading(true);
+    setPaginatingDir(null);
     setError(null);
     try {
       const [metaResponse, activityResponse, sessionsResponse, healthResponse, boardResponse] =
@@ -305,6 +327,51 @@ function ObservabilityPageInner() {
       setLoading(false);
     }
   }, [agentFetch, activityUrl]);
+
+  /**
+   * Fetch the page of events older than the current oldest loaded event.
+   * Uses `before_id=<oldestId>` so the API returns events with `id < oldestId`.
+   * Preserves all active filters; prepends results to the existing list.
+   * Filter changes reset pagination via `loadObservability` (full reload).
+   */
+  const loadOlderPage = useCallback(async () => {
+    if (oldestId == null || paginatingDir != null) return;
+    setPaginatingDir("older");
+    try {
+      const url =
+        OBSERVABILITY_ENDPOINTS.activity +
+        buildActivityPageQuery(filters, { beforeId: oldestId });
+      const response = await agentFetch(url);
+      if (!response.ok) return;
+      const activity = await readJson<ActivityResponse>(response, { events: [] });
+      const incoming = Array.isArray(activity.events) ? activity.events : [];
+      setEvents((prev) => mergeEventsById(incoming, prev));
+    } finally {
+      setPaginatingDir(null);
+    }
+  }, [agentFetch, filters, oldestId, paginatingDir]);
+
+  /**
+   * Fetch the page of events newer than the current newest loaded event.
+   * Uses `since_id=<newestId>` so the API returns events with `id > newestId`.
+   * Preserves all active filters; appends results after the existing list.
+   */
+  const loadNewerPage = useCallback(async () => {
+    if (newestId == null || paginatingDir != null) return;
+    setPaginatingDir("newer");
+    try {
+      const url =
+        OBSERVABILITY_ENDPOINTS.activity +
+        buildActivityPageQuery(filters, { sinceId: newestId });
+      const response = await agentFetch(url);
+      if (!response.ok) return;
+      const activity = await readJson<ActivityResponse>(response, { events: [] });
+      const incoming = Array.isArray(activity.events) ? activity.events : [];
+      setEvents((prev) => mergeEventsById(prev, incoming));
+    } finally {
+      setPaginatingDir(null);
+    }
+  }, [agentFetch, filters, newestId, paginatingDir]);
 
   useEffect(() => {
     void loadObservability();
@@ -401,24 +468,50 @@ function ObservabilityPageInner() {
           ) : events.length === 0 ? (
             <p className="text-sm text-secondary">No activity events are recorded yet.</p>
           ) : (
-            <div className="overflow-x-auto">
-              <div className="min-w-[760px] space-y-2">
-                {events.map((event, index) => (
-                  <div
-                    key={`${event.id ?? index}-${event.kind ?? "event"}`}
-                    className="grid grid-cols-[130px_150px_160px_120px_minmax(0,1fr)] items-start gap-3 rounded-xl border border-black/[0.06] bg-white/70 px-3 py-2 text-xs"
-                  >
-                    <span className="font-mono text-muted">{eventTime(event.created_at)}</span>
-                    <span className="truncate font-semibold text-foreground">{stringValue(event.kind, "event")}</span>
-                    <span className="truncate text-primary-light">{stringValue(event.session_id, "session")}</span>
-                    <span className="truncate text-secondary">{stringValue(event.status, "-")}</span>
-                    <span className="truncate text-secondary">
-                      {stringValue(event.summary) || stringValue(event.tool_name) || prettyJson(event).slice(0, 120)}
-                    </span>
-                  </div>
-                ))}
+            <>
+              {/* Load older button — fetch events with id < oldestId */}
+              <div className="mb-3 flex justify-center">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={loadOlderPage}
+                  disabled={paginatingDir === "older" || oldestId == null}
+                >
+                  {paginatingDir === "older" ? "Loading..." : "Load older"}
+                </Button>
               </div>
-            </div>
+
+              <div className="overflow-x-auto">
+                <div className="min-w-[760px] space-y-2">
+                  {events.map((event, index) => (
+                    <div
+                      key={`${event.id ?? index}-${event.kind ?? "event"}`}
+                      className="grid grid-cols-[130px_150px_160px_120px_minmax(0,1fr)] items-start gap-3 rounded-xl border border-black/[0.06] bg-white/70 px-3 py-2 text-xs"
+                    >
+                      <span className="font-mono text-muted">{eventTime(event.created_at)}</span>
+                      <span className="truncate font-semibold text-foreground">{stringValue(event.kind, "event")}</span>
+                      <span className="truncate text-primary-light">{stringValue(event.session_id, "session")}</span>
+                      <span className="truncate text-secondary">{stringValue(event.status, "-")}</span>
+                      <span className="truncate text-secondary">
+                        {stringValue(event.summary) || stringValue(event.tool_name) || prettyJson(event).slice(0, 120)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Load newer button — fetch events with id > newestId */}
+              <div className="mt-3 flex justify-center">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={loadNewerPage}
+                  disabled={paginatingDir === "newer" || newestId == null}
+                >
+                  {paginatingDir === "newer" ? "Loading..." : "Load newer"}
+                </Button>
+              </div>
+            </>
           )}
         </GlassCard>
 

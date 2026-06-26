@@ -49,12 +49,31 @@ export interface ActivityFilters {
   sessionId: string | null;
 }
 
+/** Optional pagination cursors for `buildActivityPageQuery`. */
+export interface PaginationParams {
+  /** Fetch events with `id > sinceId` ("load newer"). */
+  sinceId?: number | null;
+  /** Fetch events with `id < beforeId` ("load older"). */
+  beforeId?: number | null;
+}
+
 /**
- * Build the query string for /api/observability/v1/activity from the current
- * filter state. Always includes limit=100. Returns a string beginning with "?"
- * (or just "?limit=100" when no filters are active).
+ * Build the query string for a paginated activity request, composing filter
+ * params with optional `since_id`/`before_id` pagination cursors.
+ *
+ * Pass an empty `pagination` object (or omit it) to get the same result as
+ * `buildActivityQuery`. Always includes `limit=100`. Returns a string
+ * beginning with "?".
+ *
+ * Usage patterns:
+ *   Initial/filter-changed load: `buildActivityPageQuery(filters)` (no cursor)
+ *   Load older page:             `buildActivityPageQuery(filters, { beforeId: oldestId })`
+ *   Load newer page:             `buildActivityPageQuery(filters, { sinceId: newestId })`
  */
-export function buildActivityQuery(filters: ActivityFilters): string {
+export function buildActivityPageQuery(
+  filters: ActivityFilters,
+  pagination: PaginationParams = {}
+): string {
   const params = new URLSearchParams();
   params.set("limit", "100");
 
@@ -70,7 +89,50 @@ export function buildActivityQuery(filters: ActivityFilters): string {
     params.set("exclude_kind", NOISE_KINDS.join(","));
   }
 
+  if (pagination.sinceId != null) {
+    params.set("since_id", String(pagination.sinceId));
+  }
+
+  if (pagination.beforeId != null) {
+    params.set("before_id", String(pagination.beforeId));
+  }
+
   return `?${params.toString()}`;
+}
+
+/**
+ * Build the query string for /api/observability/v1/activity from the current
+ * filter state. Always includes limit=100. Returns a string beginning with "?"
+ * (or just "?limit=100" when no filters are active).
+ *
+ * Delegates to `buildActivityPageQuery` with no pagination cursor.
+ */
+export function buildActivityQuery(filters: ActivityFilters): string {
+  return buildActivityPageQuery(filters);
+}
+
+/**
+ * Merge two arrays of events, deduplicating by numeric `id`.
+ *
+ * Result order is `[...a, ...b]` — events in `b` whose `id` already appears
+ * in `a` are dropped. Events without an `id` field are never deduplicated
+ * (both copies are kept).
+ *
+ * Usage patterns:
+ *   Load older:  `mergeEventsById(olderPage, existing)` — older events first.
+ *   Load newer:  `mergeEventsById(existing, newerPage)` — newer events last.
+ *
+ * Neither input array is mutated.
+ */
+export function mergeEventsById<T extends { id?: number }>(
+  a: T[],
+  b: T[]
+): T[] {
+  const seenIds = new Set<number>(
+    a.flatMap((e) => (e.id != null ? [e.id] : []))
+  );
+  const filtered = b.filter((e) => e.id == null || !seenIds.has(e.id));
+  return [...a, ...filtered];
 }
 
 /**

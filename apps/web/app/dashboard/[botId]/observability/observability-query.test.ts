@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildActivityQuery,
+  buildActivityPageQuery,
+  mergeEventsById,
   CATEGORY_KINDS,
   NOISE_KINDS,
   parseFiltersFromParams,
@@ -230,5 +232,162 @@ describe("parseFiltersFromParams / filtersToParams round-trip", () => {
     };
     const parsed = parseFiltersFromParams(filtersToParams(original));
     expect(parsed).toEqual(original);
+  });
+});
+
+describe("buildActivityPageQuery", () => {
+  it("with no pagination produces same output as buildActivityQuery", () => {
+    const filters: ActivityFilters = {
+      hideNoise: true,
+      selectedKinds: ["tool_start"],
+      sessionId: "sess-abc",
+    };
+    expect(buildActivityPageQuery(filters)).toBe(buildActivityQuery(filters));
+  });
+
+  it("with empty pagination object produces same output as buildActivityQuery", () => {
+    const filters: ActivityFilters = {
+      hideNoise: false,
+      selectedKinds: ["rule_check"],
+      sessionId: null,
+    };
+    expect(buildActivityPageQuery(filters, {})).toBe(buildActivityQuery(filters));
+  });
+
+  it("adds before_id param when beforeId is provided", () => {
+    const filters: ActivityFilters = { hideNoise: false, selectedKinds: [], sessionId: null };
+    const qs = buildActivityPageQuery(filters, { beforeId: 42 });
+    expect(qs).toContain("before_id=42");
+    expect(qs).toContain("limit=100");
+  });
+
+  it("adds since_id param when sinceId is provided", () => {
+    const filters: ActivityFilters = { hideNoise: false, selectedKinds: [], sessionId: null };
+    const qs = buildActivityPageQuery(filters, { sinceId: 99 });
+    expect(qs).toContain("since_id=99");
+    expect(qs).toContain("limit=100");
+  });
+
+  it("preserves all active filters alongside before_id", () => {
+    const filters: ActivityFilters = {
+      hideNoise: true,
+      selectedKinds: ["tool_start", "tool_end"],
+      sessionId: "sess-xyz",
+    };
+    const qs = buildActivityPageQuery(filters, { beforeId: 500 });
+    const parsed = new URLSearchParams(qs.replace(/^\?/, ""));
+    expect(parsed.get("before_id")).toBe("500");
+    expect(parsed.get("session_id")).toBe("sess-xyz");
+    expect(parsed.get("kind")).toBe("tool_start,tool_end");
+    expect(parsed.get("exclude_kind")).toBeTruthy();
+    expect(parsed.get("limit")).toBe("100");
+    expect(parsed.get("since_id")).toBeNull();
+  });
+
+  it("preserves all active filters alongside since_id", () => {
+    const filters: ActivityFilters = {
+      hideNoise: true,
+      selectedKinds: ["rule_check"],
+      sessionId: "sess-abc",
+    };
+    const qs = buildActivityPageQuery(filters, { sinceId: 1000 });
+    const parsed = new URLSearchParams(qs.replace(/^\?/, ""));
+    expect(parsed.get("since_id")).toBe("1000");
+    expect(parsed.get("session_id")).toBe("sess-abc");
+    expect(parsed.get("kind")).toBe("rule_check");
+    expect(parsed.get("exclude_kind")).toBeTruthy();
+    expect(parsed.get("limit")).toBe("100");
+    expect(parsed.get("before_id")).toBeNull();
+  });
+
+  it("omits both pagination params when neither is provided", () => {
+    const filters: ActivityFilters = { hideNoise: false, selectedKinds: [], sessionId: null };
+    const qs = buildActivityPageQuery(filters, {});
+    expect(qs).not.toContain("before_id");
+    expect(qs).not.toContain("since_id");
+  });
+
+  it("omits both pagination params when values are null", () => {
+    const filters: ActivityFilters = { hideNoise: false, selectedKinds: [], sessionId: null };
+    const qs = buildActivityPageQuery(filters, { sinceId: null, beforeId: null });
+    expect(qs).not.toContain("before_id");
+    expect(qs).not.toContain("since_id");
+  });
+
+  it("produces a valid URL query string with pagination (parseable)", () => {
+    const filters: ActivityFilters = {
+      hideNoise: true,
+      selectedKinds: ["tool_start"],
+      sessionId: "s1",
+    };
+    const qs = buildActivityPageQuery(filters, { beforeId: 77 });
+    const parsed = new URLSearchParams(qs.replace(/^\?/, ""));
+    expect(parsed.get("limit")).toBe("100");
+    expect(parsed.get("session_id")).toBe("s1");
+    expect(parsed.get("kind")).toBe("tool_start");
+    expect(parsed.get("before_id")).toBe("77");
+    expect(parsed.get("since_id")).toBeNull();
+  });
+});
+
+describe("mergeEventsById", () => {
+  it("returns existing unchanged when incoming is empty", () => {
+    const existing = [{ id: 1, kind: "turn_start" }, { id: 2, kind: "turn_end" }];
+    expect(mergeEventsById(existing, [])).toEqual(existing);
+  });
+
+  it("returns incoming unchanged when existing is empty", () => {
+    const incoming = [{ id: 3 }, { id: 4 }];
+    expect(mergeEventsById([], incoming)).toEqual(incoming);
+  });
+
+  it("appends incoming events not already in existing", () => {
+    const existing = [{ id: 1 }, { id: 2 }];
+    const incoming = [{ id: 3 }, { id: 4 }];
+    const merged = mergeEventsById(existing, incoming);
+    expect(merged.map((e) => e.id)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("deduplicates by id — drops incoming events whose id appears in existing", () => {
+    const existing = [{ id: 1 }, { id: 2 }, { id: 3 }];
+    const incoming = [{ id: 2 }, { id: 3 }, { id: 4 }];
+    const merged = mergeEventsById(existing, incoming);
+    expect(merged.map((e) => e.id)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("simulates load-older — calling mergeEventsById(olderPage, existing) prepends", () => {
+    const existing = [{ id: 5 }, { id: 6 }];
+    const olderPage = [{ id: 3 }, { id: 4 }];
+    const merged = mergeEventsById(olderPage, existing);
+    expect(merged.map((e) => e.id)).toEqual([3, 4, 5, 6]);
+  });
+
+  it("simulates load-newer — calling mergeEventsById(existing, newerPage) appends", () => {
+    const existing = [{ id: 5 }, { id: 6 }];
+    const newerPage = [{ id: 7 }, { id: 8 }];
+    const merged = mergeEventsById(existing, newerPage);
+    expect(merged.map((e) => e.id)).toEqual([5, 6, 7, 8]);
+  });
+
+  it("handles events without id — keeps them, never deduplicates on undefined", () => {
+    const existing = [{ id: 1 }, { kind: "no-id" }];
+    const incoming = [{ id: 2 }, { kind: "also-no-id" }];
+    const merged = mergeEventsById(existing, incoming);
+    expect(merged.length).toBe(4);
+  });
+
+  it("preserves order of both arrays", () => {
+    const a = [{ id: 10 }, { id: 20 }];
+    const b = [{ id: 30 }, { id: 40 }];
+    expect(mergeEventsById(a, b).map((e) => e.id)).toEqual([10, 20, 30, 40]);
+  });
+
+  it("does not mutate input arrays", () => {
+    const a = [{ id: 1 }];
+    const b = [{ id: 2 }];
+    const merged = mergeEventsById(a, b);
+    expect(a).toEqual([{ id: 1 }]);
+    expect(b).toEqual([{ id: 2 }]);
+    expect(merged).toEqual([{ id: 1 }, { id: 2 }]);
   });
 });
