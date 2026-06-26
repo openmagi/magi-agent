@@ -26,3 +26,14 @@ def test_control_registered_when_flags_on(monkeypatch):
     assert len(controls) == 1
     assert isinstance(controls[0], CustomizeAfterToolControl)
     assert controls[0]._model_factory is None
+
+
+def test_collector_threaded_into_control(monkeypatch):
+    # WS-B: the live collector is injected so an audit rule can emit a record.
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", "1")
+    monkeypatch.delenv("MAGI_EGRESS_GATE_ENABLED", raising=False)
+    sentinel = object()
+    controls = _build_customize_after_tool_controls(sentinel)
+    assert len(controls) == 1
+    assert controls[0]._collector is sentinel
