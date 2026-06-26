@@ -3,6 +3,7 @@
 import { useRef, useEffect, useLayoutEffect, useMemo, useImperativeHandle, forwardRef, useState, useCallback } from "react";
 import { MessageBubble } from "./message-bubble";
 import { TypingIndicator } from "./typing-indicator";
+import { LiveActivityIndicator } from "./live-activity-indicator";
 import { ControlRequestCard } from "./control-request";
 import { compareChatMessages } from "@/chat-core/message-order";
 import { shouldPreferServerAssistantMessage } from "@/chat-core";
@@ -1016,7 +1017,10 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
 
         {!loading && showTyping && !channelState.fileProcessing && (
           <div className="chat-msg-in">
-            <TypingIndicator />
+            <LiveActivityIndicator
+              activeTools={channelState.activeTools}
+              language={language}
+            />
           </div>
         )}
 
