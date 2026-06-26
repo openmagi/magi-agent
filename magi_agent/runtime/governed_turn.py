@@ -169,6 +169,7 @@ async def run_governed_turn(
 
     from magi_agent.runtime.child_runner_live import (  # noqa: PLC0415
         _maybe_log_trace_engine_stream_yield,
+        _maybe_log_trace_governed_yield_loop_exit,
     )
 
     _trace_env = _os.environ
@@ -177,6 +178,11 @@ async def run_governed_turn(
     _last_kind: object = None
     _last_has_text_delta = False
     _last_evidence_refs = 0
+    # PR-H: track loop exit reason ("normal" vs "exception") and the
+    # number of items yielded so the operator can distinguish
+    # "stream ended cleanly but no terminal" from "loop raised mid-flight".
+    _yield_loop_exit_reason = "normal"
+    _items_yielded = 0
     try:
         async for item in stream:
             if bookend is not None:
@@ -211,7 +217,15 @@ async def run_governed_turn(
                 replaced = await shell_check_pre_final_collector.maybe_replace(
                     item, ctx
                 )
+            _items_yielded += 1
             yield replaced if replaced is not None else item
+    except BaseException:
+        # PR-H: any non-normal exit (Exception OR CancelledError /
+        # GeneratorExit) is recorded as "exception" for the finalize
+        # trace. The re-raise preserves prior behavior; this branch only
+        # flips the trace reason.
+        _yield_loop_exit_reason = "exception"
+        raise
     finally:
         # Emit the LAST yield separately when the stream produced more than
         # the first-five window already covered. Avoids a double-log on
@@ -224,6 +238,14 @@ async def run_governed_turn(
                 has_text_delta=_last_has_text_delta,
                 evidence_refs_in_payload=_last_evidence_refs,
             )
+        # PR-H: stamp the run_governed_turn finally so the operator can
+        # see whether the yield loop completed normally or raised, and
+        # how many items it forwarded before exiting. Default-OFF.
+        _maybe_log_trace_governed_yield_loop_exit(
+            _trace_env,
+            reason=_yield_loop_exit_reason,
+            items_yielded=_items_yielded,
+        )
         if bookend is not None:
             bookend.persist()
         if subagent_collector is not None:
@@ -660,6 +682,26 @@ class _AfterTurnEndCollector:
             return
 
     async def run_audit(self) -> None:
+        # PR-H: stamp the after_turn_end audit fan-out. Confirms the
+        # collector actually ran (vs being skipped at maybe_create time)
+        # AND surfaces the accumulated result_text length so the operator
+        # can see whether the top-level turn produced any final text at
+        # all. Logged BEFORE the audit call so the line lands even if
+        # the audit fan-out raises. Default-OFF.
+        try:
+            import os as _os  # noqa: PLC0415
+
+            from magi_agent.runtime.child_runner_live import (  # noqa: PLC0415
+                _maybe_log_trace_governed_turn_end_audit_fired,
+            )
+
+            _maybe_log_trace_governed_turn_end_audit_fired(
+                _os.environ,
+                session_id=getattr(self._ctx, "session_id", None),
+                result_text_len=len(self._result_text),
+            )
+        except Exception:  # noqa: BLE001 - trace logging never breaks a turn.
+            pass
         try:
             from magi_agent.customize.lifecycle_audit import (  # noqa: PLC0415
                 run_after_turn_end_audit,

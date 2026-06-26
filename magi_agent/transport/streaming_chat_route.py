@@ -74,6 +74,15 @@ from magi_agent.transport.streaming_chat import frame_for_event, frame_for_termi
 from magi_agent.transport.streaming_driver import drive_streaming_chat
 from magi_agent.transport.streaming_sink import build_streaming_prompt_sink
 from magi_agent.runtime.public_events import turn_phase_event
+# PR-H: main-turn finalize-path TRACE helpers (gated on the existing
+# MAGI_CHILD_RUNNER_EMPTY_DEBUG env; default-OFF; helpers swallow their own
+# faults so logging can never break a turn). The two helpers below stamp
+# handler entry and the END of the streaming response body so the operator
+# can see WHICH layer's finalize ate the result on a silent-empty turn.
+from magi_agent.runtime.child_runner_live import (
+    _maybe_log_trace_chat_turn_handler_exit,
+    _maybe_log_trace_chat_turn_start,
+)
 
 __all__ = [
     "register_streaming_chat_routes",
@@ -93,6 +102,44 @@ _SSE_HEADERS = {
     "X-Accel-Buffering": "no",
     "Connection": "keep-alive",
 }
+
+
+async def _wrap_handler_exit_trace(
+    inner: AsyncIterator[bytes],
+    *,
+    session_id: str,
+    turn_id: str,
+) -> AsyncIterator[bytes]:
+    """PR-H: emit a ``[chat_routes.trace] turn_handler_exit`` line when the
+    streaming body finishes (normal exhaustion OR exception propagation).
+
+    The route handler returns a :class:`StreamingResponse` immediately; the
+    real "did the handler finalize cleanly?" moment is when the SSE body
+    iterator stops. This wrapper sits over that iterator so the exit stamp
+    fires at the actual finish, with ``final_text_len`` set to the total
+    bytes streamed to the client. Default-OFF gating lives inside the trace
+    helper; the wrapper itself is byte-identical when the flag is unset.
+    """
+    final_text_len = 0
+    exception_cls: type | None = None
+    try:
+        async for chunk in inner:
+            try:
+                final_text_len += len(chunk)
+            except Exception:  # noqa: BLE001 - never let counting break the stream.
+                pass
+            yield chunk
+    except Exception as exc:  # noqa: BLE001 - re-raised below, captured for trace.
+        exception_cls = exc.__class__
+        raise
+    finally:
+        _maybe_log_trace_chat_turn_handler_exit(
+            os.environ,
+            session_id=session_id,
+            turn_id=turn_id,
+            final_text_len=final_text_len,
+            exception=exception_cls,
+        )
 
 
 def _streaming_response(content: AsyncIterator[bytes]) -> StreamingResponse:
@@ -877,6 +924,12 @@ def register_streaming_chat_routes(
         if not session_id:
             session_id = uuid.uuid4().hex
         turn_id = _body_string(body, "turnId", f"{session_id}:turn")
+        # PR-H: stamp handler entry. Pairs with the exit stamp wrapped
+        # around the streaming body below. Default-OFF (no-op unless
+        # MAGI_CHILD_RUNNER_EMPTY_DEBUG is truthy).
+        _maybe_log_trace_chat_turn_start(
+            os.environ, session_id=session_id, turn_id=turn_id
+        )
         prompt = _extract_prompt_text(body)
         # J-1: the dashboard sends the selected model in the body. Thread it into
         # the local headless builder as an override-with-fallback. The web client
@@ -895,10 +948,14 @@ def register_streaming_chat_routes(
             if refusal is not None:
                 return refusal
             return _streaming_response(
-                _drive_selected_gate5b_stream(
-                    runtime,
-                    body,
-                    request,
+                _wrap_handler_exit_trace(
+                    _drive_selected_gate5b_stream(
+                        runtime,
+                        body,
+                        request,
+                        session_id=session_id,
+                        turn_id=turn_id,
+                    ),
                     session_id=session_id,
                     turn_id=turn_id,
                 )
@@ -906,10 +963,14 @@ def register_streaming_chat_routes(
 
         if _selected_gate5b_stream_active(runtime):
             return _streaming_response(
-                _drive_selected_gate5b_stream(
-                    runtime,
-                    body,
-                    request,
+                _wrap_handler_exit_trace(
+                    _drive_selected_gate5b_stream(
+                        runtime,
+                        body,
+                        request,
+                        session_id=session_id,
+                        turn_id=turn_id,
+                    ),
                     session_id=session_id,
                     turn_id=turn_id,
                 )
@@ -932,17 +993,21 @@ def register_streaming_chat_routes(
             _persist_local_turn_usage(runtime, session_id, terminal)
 
         return _streaming_response(
-            drive_streaming_chat(
-                engine,
-                gate,
-                {"prompt": prompt, "session_id": session_id, "turn_id": turn_id},
-                cancel=cancel,
-                queue=queue,
-                sink=sink,
-                registry=ACTIVE_TURNS,
+            _wrap_handler_exit_trace(
+                drive_streaming_chat(
+                    engine,
+                    gate,
+                    {"prompt": prompt, "session_id": session_id, "turn_id": turn_id},
+                    cancel=cancel,
+                    queue=queue,
+                    sink=sink,
+                    registry=ACTIVE_TURNS,
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    usage_recorder=_usage_recorder,
+                ),
                 session_id=session_id,
                 turn_id=turn_id,
-                usage_recorder=_usage_recorder,
             )
         )
 

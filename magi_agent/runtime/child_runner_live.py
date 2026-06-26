@@ -326,6 +326,177 @@ def _maybe_log_trace_engine_stream_yield(
 
 
 # ---------------------------------------------------------------------------
+# PR-H: main-turn FINALIZE-path TRACE helpers (gated on the SAME empty-debug
+# env). Kevin's 0.1.86 Tesla 10-K capture produced 39 ``tool_end`` SQLite
+# rows for the main turn but ZERO ``turn_end`` events. The dashboard then
+# rendered "Work started, but no final answer text arrived. Please try
+# again." -- yet no layer in the finalize path logged WHICH stage swallowed
+# the result. The helpers below stamp every step of that path:
+#
+# * ``chat_routes.trace turn_start`` / ``turn_handler_exit`` (transport)
+# * ``turn_engine.trace stream_consumed`` (channels run_channel_turn_async)
+# * ``governed_turn.trace yield_loop_exit`` (run_governed_turn finally)
+# * ``governed_turn.trace turn_end_audit_fired`` (_AfterTurnEndCollector)
+# * ``engine.trace run_turn_stream_finalize`` (MagiEngineDriver.run_turn_
+#   stream finally)
+#
+# All default-OFF (silent unless ``MAGI_CHILD_RUNNER_EMPTY_DEBUG`` is
+# truthy). All wrap their own emit in try/except so trace logging can
+# never break a turn. Exception fields log only ``exc.__class__.__name__``
+# (the message can carry user data).
+# ---------------------------------------------------------------------------
+
+
+def _maybe_log_trace_chat_turn_start(
+    env: Mapping[str, str],
+    *,
+    session_id: object,
+    turn_id: object,
+) -> None:
+    """Log on ``POST /v1/chat/stream`` handler entry (after id resolution).
+
+    Lets the operator see whether the request even reached the handler
+    before a downstream finalize layer ate the turn. Pairs with
+    :func:`_maybe_log_trace_chat_turn_handler_exit`.
+    """
+    if not _empty_debug_enabled(env):
+        return
+    try:
+        _emit_trace(f"[chat_routes.trace] turn_start session_id={session_id!r} turn_id={turn_id!r}")
+    except Exception:  # noqa: BLE001 (logging must never break a turn).
+        return
+
+
+def _maybe_log_trace_chat_turn_handler_exit(
+    env: Mapping[str, str],
+    *,
+    session_id: object,
+    turn_id: object,
+    final_text_len: int,
+    exception: type | None,
+) -> None:
+    """Log on ``POST /v1/chat/stream`` handler exit (both normal AND raise).
+
+    ``final_text_len`` is bytes streamed to the client when the wrapper
+    sits over the SSE body (0 for early-return paths). ``exception`` is the
+    raising class (or ``None`` on normal exit); the message is intentionally
+    NOT logged because it can echo user prompt data.
+    """
+    if not _empty_debug_enabled(env):
+        return
+    try:
+        exc_name = exception.__name__ if exception is not None else None
+        _emit_trace(
+            f"[chat_routes.trace] turn_handler_exit "
+            f"session_id={session_id!r} turn_id={turn_id!r} "
+            f"final_text_len={final_text_len} exception={exc_name}"
+        )
+    except Exception:  # noqa: BLE001
+        return
+
+
+def _maybe_log_trace_turn_engine_stream_consumed(
+    env: Mapping[str, str],
+    *,
+    turn_id: object,
+    items: int,
+    terminal_kind: object,
+) -> None:
+    """Log at the end of the channel turn-engine stream-consumption loop.
+
+    ``items`` counts non-terminal events drained from the stream;
+    ``terminal_kind`` is the class name of the terminal envelope (or
+    ``None`` when the consumer returned without seeing one).
+    """
+    if not _empty_debug_enabled(env):
+        return
+    try:
+        _emit_trace(
+            f"[turn_engine.trace] stream_consumed "
+            f"turn_id={turn_id!r} items={items} "
+            f"terminal_kind={terminal_kind!r}"
+        )
+    except Exception:  # noqa: BLE001
+        return
+
+
+def _maybe_log_trace_governed_yield_loop_exit(
+    env: Mapping[str, str],
+    *,
+    reason: object,
+    items_yielded: int,
+) -> None:
+    """Log in the ``run_governed_turn`` finally block.
+
+    ``reason`` is ``"normal"`` (the ``async for`` completed) or
+    ``"exception"`` (the loop raised). ``items_yielded`` counts the events
+    the loop forwarded BEFORE exiting. The pair narrows the finalize
+    failure to either "stream ended cleanly with no terminal" vs "stream
+    raised mid-loop".
+    """
+    if not _empty_debug_enabled(env):
+        return
+    try:
+        _emit_trace(
+            f"[governed_turn.trace] yield_loop_exit reason={reason!r} items_yielded={items_yielded}"
+        )
+    except Exception:  # noqa: BLE001
+        return
+
+
+def _maybe_log_trace_governed_turn_end_audit_fired(
+    env: Mapping[str, str],
+    *,
+    session_id: object,
+    result_text_len: int,
+) -> None:
+    """Log inside ``_AfterTurnEndCollector.run_audit`` after it ran.
+
+    Confirms the ``after_turn_end`` lifecycle audit fan-out actually fired
+    for the top-level turn (depth==0). A 0.1.86-shaped capture where this
+    line never prints means the collector itself was skipped (lifecycle
+    hooks disabled / collector not created).
+    """
+    if not _empty_debug_enabled(env):
+        return
+    try:
+        _emit_trace(
+            f"[governed_turn.trace] turn_end_audit_fired "
+            f"session_id={session_id!r} result_text_len={result_text_len}"
+        )
+    except Exception:  # noqa: BLE001
+        return
+
+
+def _maybe_log_trace_engine_run_turn_stream_finalize(
+    env: Mapping[str, str],
+    *,
+    turn_id: object,
+    terminal: object,
+    text_len: int,
+    exception: type | None,
+) -> None:
+    """Log in :py:meth:`MagiEngineDriver.run_turn_stream` finally.
+
+    The canonical "did the engine finalize?" stamp. ``terminal`` is the
+    class name of the last terminal observed (or ``None`` if the stream
+    ended without one). ``exception`` is the raising class (or ``None``).
+    Message bodies are NEVER logged.
+    """
+    if not _empty_debug_enabled(env):
+        return
+    try:
+        exc_name = exception.__name__ if exception is not None else None
+        _emit_trace(
+            f"[engine.trace] run_turn_stream_finalize "
+            f"turn_id={turn_id!r} terminal={terminal!r} "
+            f"text_len={text_len} exception={exc_name}"
+        )
+    except Exception:  # noqa: BLE001
+        return
+
+
+# ---------------------------------------------------------------------------
 # Env-gate constants and helper (mirrors artifacts/file_delivery_live.py)
 # ---------------------------------------------------------------------------
 
