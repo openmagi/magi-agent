@@ -104,16 +104,27 @@ _FQA1_MASTER_FLAGS: tuple[str, ...] = (
     # expansion — slot fan-out helpers consult these.
     "MAGI_CUSTOMIZE_LIFECYCLE_EXPANSION_ENABLED",
     "MAGI_CUSTOMIZE_LIFECYCLE_TURN_HOOKS_ENABLED",
-    # F-LIFE2 master switch — the actual env name has NO `LIFECYCLE_`
-    # infix (see magi_agent/customize/lifecycle_audit.py:121
-    # `llm_call_hooks_enabled` reads `MAGI_CUSTOMIZE_LLM_CALL_HOOKS_ENABLED`).
-    # Pre-fix this entry was `MAGI_CUSTOMIZE_LIFECYCLE_LLM_CALL_HOOKS_ENABLED`
-    # — a non-existent flag — leaving the per-LLM-call fan-out gated OFF
-    # for every test and collapsing the matrix's llm_call rows to
-    # "judge never fires" (real wire regression masked as a test bug).
+    # F-QA3 LLM-call slot master flag. NOTE: the historical
+    # ``MAGI_CUSTOMIZE_LIFECYCLE_LLM_CALL_HOOKS_ENABLED`` name was a
+    # typo — the actual env var consulted by
+    # :func:`magi_agent.customize.lifecycle_audit.llm_call_hooks_enabled`
+    # is ``MAGI_CUSTOMIZE_LLM_CALL_HOOKS_ENABLED`` (no LIFECYCLE_
+    # prefix). The typo'd entry is kept for byte-identical OFF-path
+    # parity with the prior conftest until a separate cleanup PR
+    # retires it.
+    "MAGI_CUSTOMIZE_LIFECYCLE_LLM_CALL_HOOKS_ENABLED",
     "MAGI_CUSTOMIZE_LLM_CALL_HOOKS_ENABLED",
     "MAGI_CUSTOMIZE_LIFECYCLE_EXTRA_EMITTERS_ENABLED",
     "MAGI_CUSTOMIZE_SESSION_TASK_EMITTERS_ENABLED",
+    # F-QA4 / F-LIFE4b — the production helper consults
+    # ``MAGI_CUSTOMIZE_LIFECYCLE_SESSION_TASK_EMITTERS_ENABLED`` (the
+    # LIFECYCLE_-prefixed canonical name). The non-prefixed entry
+    # above is kept for byte-identical OFF-path parity per the
+    # F-QA3 conftest NOTE; both are flipped ON so the F-QA4
+    # ``on_task_complete`` / ``on_session_start`` rows fire.
+    "MAGI_CUSTOMIZE_LIFECYCLE_SESSION_TASK_EMITTERS_ENABLED",
+    # F-QA4 / F4 — capability_scope spawn-time subtraction master flag.
+    "MAGI_CUSTOMIZE_CAPABILITY_SCOPE_ENABLED",
     # F-EXEC1 / F-EXEC2 — operator shell rules.
     "MAGI_CUSTOMIZE_SHELL_COMMAND_ENABLED",
     "MAGI_CUSTOMIZE_SHELL_CHECK_ENABLED",

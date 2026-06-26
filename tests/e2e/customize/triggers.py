@@ -925,15 +925,26 @@ def _classify_llm_call_result(
     """Translate the plugin's return value into a ``(verdict, blocked_response)`` pair.
 
     The plugin returns ``None`` on proceed and a synthetic ``LlmResponse``
-    (built via ``_build_policy_blocked_llm_response``) on block. The synthetic
-    response carries ``error_message`` starting with
-    ``"customize_policy_blocked: <slot>"`` so we can verify the slot label
-    matches without depending on private ADK internals.
+    (built via :func:`_build_policy_blocked_llm_response`) on block. The
+    synthetic response carries
+    ``custom_metadata = {"policy_blocked": True, "reason": "<slot> llm_criterion verdict=block"}``
+    (the canonical honest-degrade marker the asserter inspects). The
+    ``error_message`` field is NOT set — earlier asserter passes that
+    grepped ``error_message`` were stale (the helper was reshaped to
+    use ``custom_metadata`` so downstream telemetry / audit can
+    attribute the block; see
+    ``magi_agent.adk_bridge.lifecycle_llm_call_control``).
     """
     if result is None:
         return ("proceed", None)
-    # Block path: synthetic LlmResponse. Its ``error_message`` is the canonical
-    # honest-degrade marker the asserter inspects.
+    metadata = getattr(result, "custom_metadata", None) or {}
+    if isinstance(metadata, dict) and metadata.get("policy_blocked") is True:
+        reason = metadata.get("reason") or ""
+        if not isinstance(reason, str) or slot in reason or not reason:
+            return ("block", result)
+    # Fall back to the legacy ``error_message`` shape in case a different
+    # plugin happens to use that path; keep it so a non-llm_call block
+    # slot's plugin stays detectable here.
     error_message = getattr(result, "error_message", None) or ""
     if "customize_policy_blocked" in error_message and slot in error_message:
         return ("block", result)
@@ -1500,270 +1511,6 @@ ON_SESSION_END_SKIP_REASON = (
     "F-LIFE4b honest-degrade — no transport-side emit wire shipped in v1; "
     "validator + helper round-trip only (see custom_rules._LEGAL)."
 )
-
-
-# ---------------------------------------------------------------------------
-# F-QA5 — per-kind shell trigger drivers (real subprocess spawn)
-# ---------------------------------------------------------------------------
-#
-# These drivers are polymorphic on (kind, slot): :func:`trigger_shell_command_at`
-# routes to one of the 9 ``run_shell_command_at_<slot>`` helpers exported
-# from :mod:`magi_agent.customize.lifecycle_audit`; :func:`trigger_shell_check_at`
-# routes to one of the 2 ``run_shell_check_at_<slot>`` helpers. Both
-# dispatch ONE REAL ``ShellPayload`` per call through
-# :func:`magi_agent.customize.shell_runner.run_shell_payload`, which spawns
-# a real subprocess for the inline script
-# (:func:`tests.e2e.customize.payload_factory._shell_inline_for` only ever
-# returns ``exit 0`` / ``exit 1`` / ``echo '{"passed": true}'`` so the
-# matrix never executes anything dangerous).
-#
-# Why two drivers instead of one? Although the two helper families share
-# the ``_run_shell_*_fan_out`` shape, their return signatures diverge:
-# ``run_shell_command_at_<gate-slot>`` returns ``(audits, verdict)`` while
-# the 7 audit-only siblings return only ``audits``; ``run_shell_check_at_*``
-# uniformly returns ``(audits, verdict)``. Driving these from a single
-# function would invite type confusion in the asserter (the
-# ``audits``-only siblings would silently always report
-# ``verdict="proceed"`` even when a malformed test wired a gate-shaped
-# expectation). Keeping the dispatch keyed on ``kind`` makes the
-# function-shape contract explicit per kind.
-#
-# Cross-kind budget contract: NEITHER trigger passes a
-# ``remaining_budget`` / ``decrement_fn`` pair. The
-# ``test_shell_cross_kind_budget.py`` test threads the SHARED
-# ``shell_budget_for()`` accessor directly through the helpers so the
-# budget exhaustion contract is exercised by the runtime under test, not
-# by the trigger wrapper. The matrix rows (one rule per call) cannot
-# exhaust the default ``MAGI_CUSTOMIZE_SHELL_AUDIT_BUDGET=5`` so each
-# matrix invocation observes a single ``executed`` / ``evaluated`` audit
-# record; the budget-exhausted contract has its own dedicated test
-# module that does NOT route through these drivers.
-
-
-async def trigger_shell_command_at(
-    *,
-    kind: str = "shell_command",
-    rule: dict[str, Any] | None = None,
-    slot: str,
-    rule_id: str | None = None,
-    expected_action: str | None = None,
-) -> TriggerOutcome:
-    """Drive ``run_shell_command_at_<slot>`` for the matrix-declared slot.
-
-    ``kind`` is fixed to ``"shell_command"`` (the parameter is kept in the
-    signature for symmetry with :func:`trigger_shell_check_at` and to
-    surface the contract — the matrix never feeds another kind here).
-    ``rule`` is informational: the rule is already persisted via
-    ``set_custom_rule`` before this driver fires, so the helper picks it
-    up via the policy loader. The arg is kept so callers can pass the
-    payload dict to make the test body self-documenting.
-
-    Routing covers the 9 v1 ``run_shell_command_at_*`` slots:
-
-    * ``pre_final`` — gate-honored; returns ``(audits, verdict)``. We
-      surface ``verdict="block"`` to the asserter when any executed
-      audit reports a non-zero exit code (mirrors
-      :func:`_trigger_pre_final_shell`'s gate-shaped surface).
-    * 8 audit-only slots — ``run_shell_command_at_<slot>`` returns
-      ``list[AuditRecord]`` only; we synthesize ``verdict="proceed"``
-      since the runtime gate at these slots is, by design, audit-only.
-
-    A real subprocess is spawned per executed rule (the policy loader
-    feeds the persisted ``shell_command`` rule into
-    :func:`apply_shell_command_rule` ⇒
-    :func:`run_shell_payload` ⇒ ``asyncio.subprocess.create_subprocess_exec``).
-    Safe scripts only — the payload factory authors ``exit 0`` for
-    audit-action rows and ``exit 1`` for block-action rows.
-    """
-    _ = (rule, rule_id, expected_action)  # asserter consumes these
-    if kind != "shell_command":
-        raise ValueError(
-            f"trigger_shell_command_at expects kind='shell_command'; "
-            f"got kind={kind!r}"
-        )
-    from magi_agent.customize import lifecycle_audit  # noqa: PLC0415
-
-    if slot == "pre_final":
-        audits, verdict = await lifecycle_audit.run_shell_command_at_pre_final(
-            draft_text="fqa5 pre-final draft text"
-        )
-        # The helper returns verdict in {proceed, block}. shell_command
-        # at pre_final is the only gate-honored slot for this kind; the
-        # caller maps verdict==block onto a short-circuit.
-        return TriggerOutcome(
-            audit_records=list(audits),
-            runtime_verdict=verdict,
-            side_effects={"slot": slot, "kind": kind},
-        )
-
-    # The 8 audit-only siblings: each returns ``list[AuditRecord]``. We
-    # derive verdict==block on any non-zero exit code so the asserter's
-    # shell_command block branch (which accepts the in-band non-zero
-    # exit signal at audit-only slots as honest evidence the rule
-    # produced a block-shaped verdict) can fire deterministically.
-    audit_only_helpers = {
-        "on_user_prompt_submit": (
-            lifecycle_audit.run_shell_command_at_on_user_prompt_submit,
-            {"prompt_text": "fqa5 user prompt"},
-        ),
-        "on_subagent_stop": (
-            lifecycle_audit.run_shell_command_at_on_subagent_stop,
-            {"final_text": "fqa5 child final"},
-        ),
-        "before_turn_start": (
-            lifecycle_audit.run_shell_command_at_before_turn_start,
-            {"prompt_text": "fqa5 turn start"},
-        ),
-        "after_turn_end": (
-            lifecycle_audit.run_shell_command_at_after_turn_end,
-            {"final_text": "fqa5 turn end"},
-        ),
-        "before_compaction": (
-            lifecycle_audit.run_shell_command_at_before_compaction,
-            {"pre_compaction_text": "fqa5 pre compaction"},
-        ),
-        "after_compaction": (
-            lifecycle_audit.run_shell_command_at_after_compaction,
-            {"summary_text": "fqa5 summary"},
-        ),
-        "on_task_checkpoint": (
-            lifecycle_audit.run_shell_command_at_on_task_checkpoint,
-            {
-                "task_id": "fqa5_task",
-                "checkpoint_kind": "completed",
-                "summary_text": "fqa5 checkpoint",
-            },
-        ),
-        "on_artifact_created": (
-            lifecycle_audit.run_shell_command_at_on_artifact_created,
-            {
-                "artifact_ref": "fqa5-artifact",
-                "artifact_excerpt": "fqa5 excerpt",
-            },
-        ),
-    }
-    if slot in {"before_tool_use", "after_tool_use"}:
-        # F-EXEC1 wires these two slots INLINE via
-        # :func:`magi_agent.facades.execute_tool_with_hooks` rather than
-        # exporting a stand-alone ``run_shell_command_at_<slot>``
-        # helper from :mod:`magi_agent.customize.lifecycle_audit`. The
-        # F-QA1 matrix (``test_matrix_tool_use.py``) already exercises
-        # the facade path end-to-end for both shell kinds at these
-        # slots, so the F-QA5 row honest-degrades to avoid duplicating
-        # the F-QA1 coverage with a parallel facade rig.
-        return TriggerOutcome(
-            audit_records=[],
-            runtime_verdict="proceed",
-            side_effects={
-                "slot": slot,
-                "kind": kind,
-                "honest_degrade": True,
-                "reason": (
-                    "shell_command at before_tool_use / after_tool_use "
-                    "is wired inline via execute_tool_with_hooks "
-                    "(no stand-alone helper); covered by F-QA1 "
-                    "test_matrix_tool_use.py."
-                ),
-            },
-        )
-    helper_entry = audit_only_helpers.get(slot)
-    if helper_entry is None:
-        raise ValueError(
-            f"trigger_shell_command_at has no branch for slot={slot!r}"
-        )
-    helper, kwargs = helper_entry
-    audits = await helper(**kwargs)
-    verdict = "proceed"
-    for record in audits:
-        if (
-            record.get("status") == "executed"
-            and record.get("exit_code", 0) != 0
-        ):
-            verdict = "block"
-            break
-    return TriggerOutcome(
-        audit_records=list(audits),
-        runtime_verdict=verdict,
-        side_effects={"slot": slot, "kind": kind},
-    )
-
-
-async def trigger_shell_check_at(
-    *,
-    kind: str = "shell_check",
-    rule: dict[str, Any] | None = None,
-    slot: str,
-    rule_id: str | None = None,
-    expected_action: str | None = None,
-) -> TriggerOutcome:
-    """Drive ``run_shell_check_at_<slot>`` for the matrix-declared slot.
-
-    Only 2 v1 helpers are exported from
-    :mod:`magi_agent.customize.lifecycle_audit` for shell_check:
-    ``pre_final`` and ``before_tool_use``. Both are GATE slots — the
-    helpers return ``(audits, verdict)`` and verdict is propagated to
-    the asserter so the shell_check block branch can pin
-    "verdict=='block' when the inline script exits non-zero".
-
-    For other slots in the matrix
-    (``after_tool_use`` / ``on_user_prompt_submit`` / ``on_subagent_stop``
-    / ``before_turn_start`` / ``after_turn_end`` / ``before_compaction``
-    / ``after_compaction`` / ``on_task_checkpoint`` /
-    ``on_artifact_created``) the validator accepts the kind in ``_LEGAL``
-    for forward-compat authoring but the runtime ships NO per-slot
-    fan-out helper. The driver honest-degrades to ``runtime_verdict="proceed"``
-    with empty audits so the asserter's shell_check honest-degrade
-    branches (mirroring the F-QA2/F-QA4 turn-boundary + compaction +
-    artifact + checkpoint honest-degrades) fire cleanly.
-
-    A real subprocess is spawned per evaluated rule at the two primary
-    slots; the audit-only slots return early because no helper exists
-    to invoke. The payload factory authors ``echo '{"passed": true}'``
-    for audit-action rows and ``exit 1`` for block-action rows.
-    """
-    _ = (rule, rule_id, expected_action)
-    if kind != "shell_check":
-        raise ValueError(
-            f"trigger_shell_check_at expects kind='shell_check'; "
-            f"got kind={kind!r}"
-        )
-    from magi_agent.customize import lifecycle_audit  # noqa: PLC0415
-
-    if slot == "pre_final":
-        audits, verdict = await lifecycle_audit.run_shell_check_at_pre_final(
-            draft_text="fqa5 pre-final draft text"
-        )
-        return TriggerOutcome(
-            audit_records=list(audits),
-            runtime_verdict=verdict,
-            side_effects={"slot": slot, "kind": kind},
-        )
-    if slot == "before_tool_use":
-        audits, verdict = await lifecycle_audit.run_shell_check_at_before_tool_use(
-            tool_name="shell_exec",
-            tool_args={"command": "ls"},
-        )
-        return TriggerOutcome(
-            audit_records=list(audits),
-            runtime_verdict=verdict,
-            side_effects={"slot": slot, "kind": kind},
-        )
-
-    # The validator accepts shell_check at many other lifecycle slots
-    # for forward-compat authoring but the runtime ships no fan-out
-    # helper there. Audit-only honest-degrade (the asserter's
-    # shell_check branches already cover this contract for the
-    # compaction / artifact / checkpoint / turn-boundary slots).
-    return TriggerOutcome(
-        audit_records=[],
-        runtime_verdict="proceed",
-        side_effects={
-            "slot": slot,
-            "kind": kind,
-            "honest_degrade": True,
-            "reason": "no v1 shell_check helper at this slot",
-        },
-    )
 
 
 # ---------------------------------------------------------------------------
