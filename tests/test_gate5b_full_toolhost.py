@@ -377,8 +377,15 @@ async def test_selected_registry_spawn_agent_emits_live_child_events(
         str(event["childReceiptRef"]).startswith("receipt:sha256:")
         for event in child_events
     )
+    # Privacy contract: PROMPT body never leaks. The child SUMMARY preview
+    # (the same string the parent LLM already consumes via the tool result) IS
+    # surfaced on ``child_completed`` so the UI chip can hint at what the
+    # agent came back with — see ``child_completed_event`` builder.
     assert "assign a helper" not in json.dumps(child_events, sort_keys=True)
-    assert "Delegated child completed" not in json.dumps(child_events, sort_keys=True)
+    completed = next(
+        event for event in child_events if event.get("type") == "child_completed"
+    )
+    assert completed.get("summary") == "Delegated child completed."
 
 
 @pytest.mark.asyncio

@@ -2046,21 +2046,47 @@ def _sanitize_child_event(event: Mapping[str, object]) -> dict[str, object] | No
         detail = event.get("detail")
         if isinstance(detail, str):
             sanitized["detail"] = _sanitize_public_text(detail)
+        # The AGENTS chip relies on these fields for a meaningful label /
+        # model badge / task hint.  Without passing them through this
+        # sanitizer the streaming chat route silently drops them and the
+        # chip falls back to the index-based "Halley" placeholder.
+        agent_name = _sanitize_optional_public_string(event.get("agentName"), limit=64)
+        if agent_name is not None:
+            sanitized["agentName"] = agent_name
+        model = _sanitize_optional_public_string(event.get("model"), limit=96)
+        if model is not None:
+            sanitized["model"] = model
+        task_title = _sanitize_optional_public_string(event.get("taskTitle"), limit=64)
+        if task_title is not None:
+            sanitized["taskTitle"] = task_title
     elif event_type == "child_progress":
         detail = _sanitize_optional_public_string(event.get("detail"))
         if detail is None:
             return None
         sanitized["detail"] = detail
+    elif event_type == "child_completed":
+        # Forward the truncated + redacted child summary so the chip detail
+        # can hint at what the agent CAME BACK WITH instead of resetting to
+        # a placeholder on completion.
+        summary = _sanitize_optional_public_string(event.get("summary"))
+        if summary is not None:
+            sanitized["summary"] = summary
     elif event_type == "child_cancelled":
         reason = _sanitize_optional_public_string(event.get("reason"))
         if reason is None:
             return None
         sanitized["reason"] = reason
+        summary = _sanitize_optional_public_string(event.get("summary"))
+        if summary is not None:
+            sanitized["summary"] = summary
     if event_type == "child_failed":
         error_message = event.get("errorMessage", event.get("error"))
         if not isinstance(error_message, str):
             return None
         sanitized["errorMessage"] = _sanitize_public_text(error_message)
+        summary = _sanitize_optional_public_string(event.get("summary"))
+        if summary is not None:
+            sanitized["summary"] = summary
     return sanitized
 
 

@@ -981,9 +981,16 @@ def test_selected_full_toolhost_stream_emits_live_child_events_before_final(
     )
     assert event_types.index("child_started") < event_types.index("text_delta")
     assert event_types.index("child_completed") < event_types.index("turn_result")
+    # Privacy contract: PROMPT body never leaks. The child SUMMARY preview IS
+    # surfaced on ``child_completed`` (same string the parent LLM already
+    # consumes via the tool result) so the UI chip can hint at what the agent
+    # came back with.
     serialized = json.dumps(child_events, sort_keys=True)
     assert "assign helper" not in serialized
-    assert "Delegated child completed" not in serialized
+    completed = next(
+        event for event in child_events if event.get("type") == "child_completed"
+    )
+    assert completed.get("summary") == "Delegated child completed."
     assert payloads[-1]["type"] == "turn_result"
     assert payloads[-1]["terminal"] == "completed"
 
