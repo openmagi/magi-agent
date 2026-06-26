@@ -3694,6 +3694,14 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
+<<<<<<< HEAD
+
+=======
+            "first-party packs (the first-party pack-id prefix) are exempt "
+            "(trusted by being bundled). Strict default-OFF: when unset NO digest "
+            "is computed and the discover->enabled pipeline is byte-identical to "
+            "today."
+>>>>>>> 6ea9183 (refactor(transport): 6 gate int-limit + 2 sandbox-root reads through flag registry (I-1 batch 20))
 )
 
 
