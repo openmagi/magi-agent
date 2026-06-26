@@ -289,17 +289,25 @@ def _print_local_startup_notice(port: int) -> None:
     ]
     if provider is not None:
         lines.append(
-            f"  Model provider: {provider.provider} ({provider.model}) — chat is ready."
+            f"  Model provider: {provider.provider} ({provider.model}). Chat is ready."
         )
     else:
+        from .config.flags import flag_bool  # noqa: PLC0415
+
         lines.append(
-            "  Model provider: none configured — the dashboard loads but chat "
+            "  Model provider: none configured. The dashboard loads but chat "
             "replies need an API key."
         )
-        lines.append(
-            "  Set one of ANTHROPIC_API_KEY / OPENAI_API_KEY / "
-            "GEMINI_API_KEY (or GOOGLE_API_KEY) / FIREWORKS_API_KEY (or add a "
-            "[model] section to ~/.magi/config.toml), then restart serve."
-        )
+        if flag_bool("MAGI_ONBOARDING_WIZARD_ENABLED"):
+            lines.append(
+                f"  Finish setup in the dashboard: http://localhost:{port}/dashboard "
+                "(enter an API key, no restart needed)."
+            )
+        else:
+            lines.append(
+                "  Set one of ANTHROPIC_API_KEY / OPENAI_API_KEY / "
+                "GEMINI_API_KEY (or GOOGLE_API_KEY) / FIREWORKS_API_KEY (or add a "
+                "[model] section to ~/.magi/config.toml), then restart serve."
+            )
     lines.append("")
     print("\n".join(lines), file=sys.stderr, flush=True)
