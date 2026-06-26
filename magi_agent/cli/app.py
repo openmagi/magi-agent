@@ -640,21 +640,28 @@ def memory_root(ctx: typer.Context) -> None:
 
 @memory_app.command("init")
 def memory_init(
-    vector: bool = typer.Option(
-        False,
-        "--vector",
+    vector: Optional[bool] = typer.Option(
+        None,
+        "--vector/--no-vector",
         help=(
-            "Also generate vector embeddings (`qmd embed`, first run downloads "
-            "~2GB) and enable semantic search on the explicit search surfaces. "
-            "OFF by default — the per-turn recall path always stays on fast BM25."
+            "Generate vector embeddings (`qmd embed`, first run downloads ~2GB) "
+            "and enable semantic search on the explicit search surfaces. Defaults "
+            "to the resolved `vector_search` config (ON for a normal install; the "
+            "per-turn recall path always stays on fast BM25 regardless). Use "
+            "--no-vector to install qmd for keyword-only search without the embed."
         ),
     ),
 ) -> None:
     """Install qmd (if missing), register this workspace's memory/ collection,
-    and persist the opt-ins. With --vector also embeds for semantic search."""
+    and persist the opt-ins. Embeds for semantic search unless --no-vector."""
     from magi_agent.cli import memory_cli  # noqa: PLC0415
+    from magi_agent.memory.config import resolve_memory_config  # noqa: PLC0415
 
-    report = memory_cli.init_memory(root=Path.cwd(), vector=vector)
+    # Tri-state: an explicit flag wins; otherwise follow the resolved config so a
+    # default-ON install embeds by default and an operator who turned vector off
+    # is not surprised by a 2GB download.
+    use_vector = vector if vector is not None else resolve_memory_config().vector_search
+    report = memory_cli.init_memory(root=Path.cwd(), vector=use_vector)
     for line in report.lines:
         typer.echo(line, err=False)
 
