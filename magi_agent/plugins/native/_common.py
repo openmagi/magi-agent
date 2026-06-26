@@ -109,8 +109,23 @@ def digest(value: object) -> str:
     return "sha256:" + hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
-def ok_result(tool_name: str, output: Mapping[str, object]) -> ToolResult:
+def ok_result(
+    tool_name: str,
+    output: Mapping[str, object],
+    *,
+    evidence_declaration: Mapping[str, object] | None = None,
+) -> ToolResult:
     safe_output = dict(output)
+    metadata: dict[str, object] = {
+        "toolName": tool_name,
+        "handler": "first_party_native_local",
+        "outputDigest": digest(safe_output),
+    }
+    # Optional typed-evidence declaration lifted by the declaration-lift path
+    # (record_tool_result -> extraction) into an EvidenceRecord. Omitted ->
+    # byte-identical metadata for every existing caller.
+    if evidence_declaration is not None:
+        metadata["evidence"] = dict(evidence_declaration)
     return ToolResult(
         status="ok",
         output=safe_output,
@@ -119,11 +134,7 @@ def ok_result(tool_name: str, output: Mapping[str, object]) -> ToolResult:
             "toolName": tool_name,
             "outputDigest": digest(safe_output),
         },
-        metadata={
-            "toolName": tool_name,
-            "handler": "first_party_native_local",
-            "outputDigest": digest(safe_output),
-        },
+        metadata=metadata,
     )
 
 
