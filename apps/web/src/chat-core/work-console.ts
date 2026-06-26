@@ -661,7 +661,12 @@ export function deriveWorkConsoleRows({
       : undefined;
     const role = normalizeRole(subagent.role);
     const taskTitle = subagent.taskTitle?.trim() || undefined;
-    const detail = taskTitle ?? subagentDetail(subagent, language);
+    const summary = subagent.summary?.trim() || undefined;
+    // After the child completes, prefer the summary preview so the chip hints
+    // at what the agent CAME BACK WITH (not just what we asked it to do).
+    // Running/waiting chips keep showing taskTitle since no summary exists yet.
+    const detail =
+      summary ?? taskTitle ?? subagentDetail(subagent, language);
     const meta = [role, subagent.model?.trim(), elapsed]
       .filter(Boolean)
       .join(" · ");

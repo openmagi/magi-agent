@@ -303,6 +303,7 @@ export interface SubagentActivity {
   agentName?: string;
   model?: string;
   taskTitle?: string;
+  summary?: string;
   startedAt: number;
   updatedAt: number;
 }

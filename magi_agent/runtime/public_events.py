@@ -512,6 +512,69 @@ def child_progress_event(
     }
 
 
+def child_completed_event(
+    *,
+    task_id: str,
+    child_receipt_ref: str,
+    summary: str | None = None,
+    event_family: str = "child_spawn_background_supported_core",
+) -> PublicEvent:
+    """Build a sanitized ``child_completed`` event.
+
+    ``summary`` is the truncated + redacted preview of the child's final
+    answer.  This is the SAME string the parent LLM consumes via the tool
+    result (``envelope.summary``); surfacing a preview here lets the UI hint
+    what the child actually came back with — instead of resetting the chip
+    detail to nothing once the child finishes.
+    """
+    _require_event_family(event_family, {"child_spawn_background_supported_core"})
+    event: PublicEvent = {
+        "type": "child_completed",
+        "taskId": _public_text(task_id, limit=_ID_LIMIT),
+        "childReceiptRef": _public_text(child_receipt_ref, limit=_ID_LIMIT),
+    }
+    _put_text(event, "summary", summary)
+    return event
+
+
+def child_failed_event(
+    *,
+    task_id: str,
+    child_receipt_ref: str,
+    error_message: str,
+    summary: str | None = None,
+    event_family: str = "child_spawn_background_supported_core",
+) -> PublicEvent:
+    _require_event_family(event_family, {"child_spawn_background_supported_core"})
+    event: PublicEvent = {
+        "type": "child_failed",
+        "taskId": _public_text(task_id, limit=_ID_LIMIT),
+        "childReceiptRef": _public_text(child_receipt_ref, limit=_ID_LIMIT),
+        "errorMessage": _public_text(error_message),
+    }
+    _put_text(event, "summary", summary)
+    return event
+
+
+def child_cancelled_event(
+    *,
+    task_id: str,
+    child_receipt_ref: str,
+    reason: str,
+    summary: str | None = None,
+    event_family: str = "child_spawn_background_supported_core",
+) -> PublicEvent:
+    _require_event_family(event_family, {"child_spawn_background_supported_core"})
+    event: PublicEvent = {
+        "type": "child_cancelled",
+        "taskId": _public_text(task_id, limit=_ID_LIMIT),
+        "childReceiptRef": _public_text(child_receipt_ref, limit=_ID_LIMIT),
+        "reason": _public_text(reason),
+    }
+    _put_text(event, "summary", summary)
+    return event
+
+
 def task_board_event(
     *,
     tasks: Sequence[PublicTask],
@@ -571,6 +634,9 @@ __all__ = [
     "is_rule_check_authority_field",
     "child_progress_event",
     "child_started_event",
+    "child_completed_event",
+    "child_failed_event",
+    "child_cancelled_event",
     "task_board_event",
     "PublicEvent",
     "PublicMetadata",

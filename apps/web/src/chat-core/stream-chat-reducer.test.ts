@@ -479,6 +479,32 @@ describe("stream-chat-reducer", () => {
     });
   });
 
+  it("folds child_completed summary preview onto the subagent activity", () => {
+    const state = foldRuntimeEvents([
+      {
+        type: "child_started",
+        taskId: "child-9",
+        agentName: "Curie",
+        model: "openai:gpt-5.5",
+        taskTitle: "Bullish-case research",
+        detail: "Delegated child started",
+      },
+      {
+        type: "child_completed",
+        taskId: "child-9",
+        childReceiptRef: "receipt:sha256:abc",
+        summary: "Bull case: 3 catalysts identified; sentiment trending up.",
+      },
+    ]);
+    expect(state.subagents.get("child-9")).toMatchObject({
+      status: "done",
+      agentName: "Curie",
+      model: "openai:gpt-5.5",
+      taskTitle: "Bullish-case research",
+      summary: "Bull case: 3 catalysts identified; sentiment trending up.",
+    });
+  });
+
   it("pushes unknown / low-priority events as activities", () => {
     const state = foldRuntimeEvents([
       { type: "browser_frame", url: "https://example.com" },

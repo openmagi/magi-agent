@@ -1610,6 +1610,7 @@ export async function sendMessage(
       agentName?: unknown;
       model?: unknown;
       taskTitle?: unknown;
+      summary?: unknown;
     },
   ): void {
     if (typeof taskId !== "string" || !taskId) return;
@@ -1624,6 +1625,10 @@ export async function sendMessage(
     const incomingAgentName = safeShortLabel(updates.agentName, 64);
     const incomingModel = safeShortLabel(updates.model, 96);
     const incomingTaskTitle = safeShortLabel(updates.taskTitle, 64);
+    const incomingSummary = safeActivityDetail(
+      typeof updates.summary === "string" ? updates.summary : undefined,
+      200,
+    );
     const next: SubagentActivity = {
       taskId,
       role: safeSubagentRole(updates.role, existing?.role ?? "subagent"),
@@ -1649,6 +1654,11 @@ export async function sendMessage(
         ? { taskTitle: incomingTaskTitle }
         : existing?.taskTitle !== undefined
           ? { taskTitle: existing.taskTitle }
+          : {}),
+      ...(incomingSummary !== undefined
+        ? { summary: incomingSummary }
+        : existing?.summary !== undefined
+          ? { summary: existing.summary }
           : {}),
     };
     subagents.set(taskId, next);
@@ -2201,15 +2211,23 @@ export async function sendMessage(
         noteChildProgress(ev.taskId, "Subagent tool decision", ev.decision);
         break;
       case "child_completed":
-        noteSubagent(ev.taskId, { status: "done" });
+        noteSubagent(ev.taskId, { status: "done", summary: ev.summary });
         noteChildDone(ev.taskId, "done");
         break;
       case "child_cancelled":
-        noteSubagent(ev.taskId, { status: "cancelled", detail: ev.reason });
+        noteSubagent(ev.taskId, {
+          status: "cancelled",
+          detail: ev.reason,
+          summary: ev.summary,
+        });
         noteChildDone(ev.taskId, "error", ev.reason);
         break;
       case "child_failed":
-        noteSubagent(ev.taskId, { status: "error", detail: ev.errorMessage });
+        noteSubagent(ev.taskId, {
+          status: "error",
+          detail: ev.errorMessage,
+          summary: ev.summary,
+        });
         noteChildDone(ev.taskId, "error", ev.errorMessage);
         break;
       case "error":

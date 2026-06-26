@@ -10,7 +10,13 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from magi_agent.plugins.native._common import digest, ok_result
-from magi_agent.runtime.public_events import child_progress_event, child_started_event
+from magi_agent.runtime.public_events import (
+    child_cancelled_event,
+    child_completed_event,
+    child_failed_event,
+    child_progress_event,
+    child_started_event,
+)
 from magi_agent.tools.context import ToolContext
 from magi_agent.tools.result import ToolResult, ToolStatus
 
@@ -162,36 +168,37 @@ async def _emit_child_finished(
     child_receipt_ref: str,
     status: ToolStatus,
     error_code: str | None,
+    summary: str | None = None,
 ) -> None:
     if status == "ok":
         await _emit_agent_event(
             context,
-            {
-                "type": "child_completed",
-                "taskId": task_id,
-                "childReceiptRef": child_receipt_ref,
-            },
+            child_completed_event(
+                task_id=task_id,
+                child_receipt_ref=child_receipt_ref,
+                summary=summary,
+            ),
         )
         return
     if status == "error":
         await _emit_agent_event(
             context,
-            {
-                "type": "child_failed",
-                "taskId": task_id,
-                "errorMessage": error_code or "child_runner_error",
-                "childReceiptRef": child_receipt_ref,
-            },
+            child_failed_event(
+                task_id=task_id,
+                child_receipt_ref=child_receipt_ref,
+                error_message=error_code or "child_runner_error",
+                summary=summary,
+            ),
         )
         return
     await _emit_agent_event(
         context,
-        {
-            "type": "child_cancelled",
-            "taskId": task_id,
-            "reason": error_code or "child_runner_blocked",
-            "childReceiptRef": child_receipt_ref,
-        },
+        child_cancelled_event(
+            task_id=task_id,
+            child_receipt_ref=child_receipt_ref,
+            reason=error_code or "child_runner_blocked",
+            summary=summary,
+        ),
     )
 
 
@@ -563,6 +570,7 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
             child_receipt_ref=child_receipt_ref,
             status=tool_status,
             error_code=error_code,
+            summary=summary if isinstance(summary, str) and summary.strip() else None,
         )
 
         output = {
