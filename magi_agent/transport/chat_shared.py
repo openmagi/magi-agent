@@ -154,8 +154,10 @@ def build_gate5b_user_visible_chat_route_config_from_env(
     env: Mapping[str, str],
     runtime_config: object,
 ) -> Gate5BUserVisibleChatRouteConfig:
-    # I-1: route through the typed flag registry.
-    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+    # I-1: route through the typed flag registry. Recovers PR #1047's
+    # transport-side env/allowlist migrations that were dropped during
+    # squash-merge ([[stacked-pr-rebase-silent-revert]]).
+    from magi_agent.config.flags import flag_bool, flag_str  # noqa: PLC0415
 
     if flag_bool("CORE_AGENT_PYTHON_GATE8_SELECTED_AUTHORITY_ENABLED", env=env):
         return Gate5BUserVisibleChatRouteConfig(
@@ -171,12 +173,19 @@ def build_gate5b_user_visible_chat_route_config_from_env(
                 "CORE_AGENT_PYTHON_GATE8_SELECTED_AUTHORITY_TRUSTED_OWNER_USER_ID_DIGEST",
                 "",
             ).strip(),
-            environment=env.get(
-                "CORE_AGENT_PYTHON_GATE8_SELECTED_AUTHORITY_ENVIRONMENT",
-                "",
+            environment=(
+                flag_str(
+                    "CORE_AGENT_PYTHON_GATE8_SELECTED_AUTHORITY_ENVIRONMENT",
+                    env=env,
+                )
+                or ""
             ).strip(),
             environmentAllowlist=_csv_values(
-                env.get("CORE_AGENT_PYTHON_GATE8_SELECTED_AUTHORITY_ENV_ALLOWLIST", "")
+                flag_str(
+                    "CORE_AGENT_PYTHON_GATE8_SELECTED_AUTHORITY_ENV_ALLOWLIST",
+                    env=env,
+                )
+                or ""
             ),
         )
     return Gate5BUserVisibleChatRouteConfig(
@@ -192,12 +201,18 @@ def build_gate5b_user_visible_chat_route_config_from_env(
             "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_TRUSTED_OWNER_USER_ID_DIGEST",
             "",
         ).strip(),
-        environment=env.get(
-            "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_ENVIRONMENT",
-            "",
+        environment=(
+            flag_str(
+                "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_ENVIRONMENT", env=env
+            )
+            or ""
         ).strip(),
         environmentAllowlist=_csv_values(
-            env.get("CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_ENV_ALLOWLIST", "")
+            flag_str(
+                "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_ENV_ALLOWLIST",
+                env=env,
+            )
+            or ""
         ),
     )
 
@@ -224,6 +239,25 @@ def _gate1a_readonly_tools_enabled(env: Mapping[str, str]) -> bool:
     from magi_agent.config.flags import flag_bool  # noqa: PLC0415
 
     return flag_bool("CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_ENABLED", env=env)
+
+
+def _gate1a_env_allowlist(env: Mapping[str, str]) -> str:
+    """I-1: typed-registry read for the gate1a env-allowlist CSV.
+
+    Recovers PR #1047's intent — the helper was added to keep the
+    ``build_gate1a_readonly_tools_config_from_env`` construction-dict
+    legible (the inline ``flag_str(...)`` shape didn't host an
+    ``from .. import`` cleanly). ``flag_str`` returns ``""`` for
+    unset, byte-identical to the prior ``env.get(NAME, "")`` chain
+    that ``_csv_values`` consumed.
+    """
+
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    return (
+        flag_str("CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_ENV_ALLOWLIST", env=env)
+        or ""
+    )
 
 
 def build_gate1a_readonly_tools_config_from_env(
@@ -254,8 +288,9 @@ def build_gate1a_readonly_tools_config_from_env(
                 "local",
             ).strip()
             or "local",
+            # I-1: route through the typed flag registry (recovers #1047).
             "environmentAllowlist": _csv_values(
-                env.get("CORE_AGENT_PYTHON_GATE1A_READONLY_TOOLS_ENV_ALLOWLIST", "")
+                _gate1a_env_allowlist(env)
             ),
             "allowedToolNames": _csv_values(
                 env.get(
@@ -328,8 +363,14 @@ def _live_subagents_full_toolhost_overlay(
 
     bot_id = str(getattr(runtime_config, "bot_id", "") or "")
     user_id = str(getattr(runtime_config, "user_id", "") or "")
+    # I-1: route through the typed flag registry (recovers #1047).
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
     environment = (
-        env.get("CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_ENVIRONMENT") or ""
+        flag_str(
+            "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_ENVIRONMENT", env=env
+        )
+        or ""
     ).strip() or "local"
     return {
         "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_ENABLED": "1",
