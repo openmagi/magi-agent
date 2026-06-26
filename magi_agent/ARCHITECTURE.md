@@ -1187,6 +1187,15 @@ graph LR
 | provider_boundary.py | — | — | knowledge/__init__.py, knowledge/source_tools.py, plugins/native/knowledge.py |
 | source_tools.py | — | policy, provider_boundary, result, source_ledger | plugins/native/knowledge.py |
 
+### knowledge/okf/
+
+| Module | Purpose | Depends On | Depended By |
+|---|---|---|---|
+| __init__.py | OKF (Open Knowledge Format) knowledge-bundle adapter — PR1 (pure, unwired). | bundle_loader, config, matcher | — |
+| bundle_loader.py | OKF bundle loader (PR1, pure + unwired). | config, matcher | knowledge/okf/__init__.py |
+| config.py | Single source of truth for OKF knowledge-bundle activation (PR1). | — | knowledge/okf/__init__.py, knowledge/okf/bundle_loader.py |
+| matcher.py | Local lexical matcher for OKF search (v1). | — | knowledge/okf/__init__.py, knowledge/okf/bundle_loader.py |
+
 ### learning/
 
 | Module | Purpose | Depends On | Depended By |
