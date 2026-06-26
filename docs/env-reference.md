@@ -109,7 +109,9 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_FACTS_REPLAN_INTERVAL` (default `4`) — Working steps between facts surveys (>= 1; a non-positive value disables the control).
 - `MAGI_FACTS_REPLAN_MAX_PER_TURN` (default `5`) — Hard cap on facts surveys injected per (session, turn) (>= 1; a non-positive value disables the control).
 - `MAGI_FACT_GROUNDING_VERIFICATION_ENABLED` (default off) — Run semantic grounding verification on the live evidence gate: a research answer asserting a specific numeric/identifier value not present in the opened-source corpus stays ungrounded and blocks. Strict default-OFF and inert unless explicitly set.
+- `MAGI_FILE_DELIVERY_ARTIFACT_DIR` (no default) — Override for the file-delivery artifact subdirectory (within the resolved workspace). Default-empty; consumer falls back to ``.magi/deliveries/artifacts``.
 - `MAGI_FILE_DELIVERY_LIVE_ENABLED` (default off) — Enable the live file-delivery tool (vs receipt-only).
+- `MAGI_FILE_DELIVERY_OUTBOX_DIR` (no default) — Override for the file-delivery outbox subdirectory (within the resolved workspace). Default-empty; consumer falls back to ``.magi/deliveries/outbox``.
 - `MAGI_FIRST_PARTY_TOOLS_ENABLED` (default on) — Mount the first-party Magi tool pack on the CLI runner; flat default-ON. Set ``=0`` to fall back to ADK-native tools only.
 - `MAGI_FORCE_RECIPE` (no default) — Pin a recipe pack id for every CLI turn — reuses the compiler's ``explicitRecipeSelection`` path. Unset / blank keeps automatic selection (byte-identical to today).
 - `MAGI_FORK_CACHE_ENABLED` (default off) — Enable the per-child fork-runner output cache (skips re-computation when an identical child invocation already produced a result this run). Default-OFF.

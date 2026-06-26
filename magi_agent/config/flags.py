@@ -3918,6 +3918,36 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
+    # I-1 batch 27: file-delivery workspace subdir overrides. Both
+    # default-empty; the consumer collapses ``""`` to a built-in
+    # ``.magi/deliveries/{artifacts,outbox}`` default via the local
+    # ``if not artifact_subdir:`` / ``if not outbox_subdir:`` guards,
+    # so a typed FlagSpec default cannot just pin the const directly
+    # without churning the existing guard.
+    FlagSpec(
+        name="MAGI_FILE_DELIVERY_ARTIFACT_DIR",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Override for the file-delivery artifact subdirectory "
+            "(within the resolved workspace). Default-empty; consumer "
+            "falls back to ``.magi/deliveries/artifacts``."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_FILE_DELIVERY_OUTBOX_DIR",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Override for the file-delivery outbox subdirectory "
+            "(within the resolved workspace). Default-empty; consumer "
+            "falls back to ``.magi/deliveries/outbox``."
+        ),
+        kind="str",
+    ),
 )
 
 
