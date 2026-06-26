@@ -39,6 +39,26 @@ CLAIM_TTL_SECONDS = 15 * 60
 CLAIM_HEARTBEAT_MAX_STALE_SECONDS = 60 * 60
 DEFAULT_FAILURE_LIMIT = 2
 
+
+def _default_pid_alive(pid: object) -> bool:
+    """OS-kill(0) liveness probe used by ``reclaim_running_for_dead_pids``.
+
+    ``release_stale_claims`` keeps its own behaviorally identical inline copy so
+    that this PR stays strictly additive (its body is untouched); this module
+    helper is the default probe for the new boot-reclaim path and the shape both
+    paths should converge on if ``release_stale_claims`` is later refactored.
+
+    Returns True iff ``pid`` is a live process the caller may signal. A
+    ``None``/non-int pid or a missing process returns False (treated as dead).
+    """
+    import os
+
+    try:
+        os.kill(pid, 0)  # type: ignore[arg-type]
+        return True
+    except (OSError, TypeError):
+        return False
+
 _COLUMNS = (
     "id",
     "title",
@@ -137,6 +157,24 @@ class WorkQueueStore(Protocol):
         """Release expired claims whose workers are no longer alive.
 
         Returns the number of tasks reclaimed to ``ready``.
+        """
+        ...
+
+    def reclaim_running_for_dead_pids(
+        self,
+        *,
+        now: int | None = None,
+        pid_alive: object = None,
+    ) -> int:
+        """Reclaim ``running`` tasks whose owning worker pid is dead, IGNORING
+        ``claim_expires``.
+
+        Unlike :meth:`release_stale_claims` (which only selects rows whose lease
+        has already elapsed), this method selects every ``running`` row and
+        reclaims any whose ``worker_pid`` is no longer alive (or whose heartbeat
+        is stale beyond ``CLAIM_HEARTBEAT_MAX_STALE_SECONDS``). This delivers
+        IMMEDIATE boot reclaim of a freshly-crashed task whose ~15-minute lease
+        is still valid. Returns the number of tasks reclaimed to ``ready``.
         """
         ...
 
@@ -361,6 +399,40 @@ class InMemoryWorkQueueStore:
             )
             if alive:
                 self._update(task_id, claim_expires=now + CLAIM_TTL_SECONDS, last_heartbeat_at=now)
+                continue
+            self._update(
+                task_id,
+                status="ready",
+                claim_lock=None,
+                claim_expires=None,
+                worker_pid=None,
+                current_run_id=None,
+            )
+            reclaimed += 1
+        return reclaimed
+
+    def reclaim_running_for_dead_pids(
+        self,
+        *,
+        now: int | None = None,
+        pid_alive: object = None,
+    ) -> int:
+        now = int(time.time()) if now is None else now
+        probe = _default_pid_alive if pid_alive is None else pid_alive
+        reclaimed = 0
+        for task_id, task in list(self._tasks.items()):
+            # Select EVERY running row, IGNORING claim_expires (the boot-reclaim
+            # distinction from release_stale_claims).
+            if task.status != "running":
+                continue
+            hb = task.last_heartbeat_at
+            hb_stale = hb is not None and (now - int(hb)) > CLAIM_HEARTBEAT_MAX_STALE_SECONDS
+            alive = (
+                task.worker_pid is not None
+                and probe(task.worker_pid)  # type: ignore[operator]
+                and not hb_stale
+            )
+            if alive:
                 continue
             self._update(
                 task_id,
@@ -689,6 +761,44 @@ class SqliteWorkQueueStore:
                 )
                 self._append_event(conn, r["id"], "claim_extended", None)
                 continue
+            conn.execute(
+                "UPDATE work_queue_task_runs SET status='released', outcome='reclaimed', ended_at=? "
+                "WHERE task_id=? AND ended_at IS NULL",
+                (now, r["id"]),
+            )
+            conn.execute(
+                "UPDATE work_queue_tasks "
+                "SET status='ready', claim_lock=NULL, claim_expires=NULL, worker_pid=NULL, current_run_id=NULL "
+                "WHERE id=? AND status='running'",
+                (r["id"],),
+            )
+            self._append_event(conn, r["id"], "reclaimed", None)
+            reclaimed += 1
+        conn.commit()
+        return reclaimed
+
+    def reclaim_running_for_dead_pids(self, *, now=None, pid_alive=None) -> int:
+        now = int(time.time()) if now is None else now
+        probe = _default_pid_alive if pid_alive is None else pid_alive
+        conn = self._get_conn()
+        # SELECT every running row, IGNORING the ``claim_expires < ?`` predicate
+        # release_stale_claims uses. This is the boot-reclaim distinction: a
+        # freshly-crashed task's lease is still valid for ~15 min, so it would
+        # never be selected by release_stale_claims.
+        rows = conn.execute(
+            "SELECT id, claim_lock, worker_pid, last_heartbeat_at "
+            "FROM work_queue_tasks WHERE status='running'",
+        ).fetchall()
+        reclaimed = 0
+        for r in rows:
+            # Same dead-pid + heartbeat-staleness check used in release_stale_claims.
+            hb = r["last_heartbeat_at"]
+            hb_stale = hb is not None and (now - int(hb)) > CLAIM_HEARTBEAT_MAX_STALE_SECONDS
+            alive = r["worker_pid"] is not None and probe(r["worker_pid"]) and not hb_stale
+            if alive:
+                continue
+            # Same reclaim UPDATE used in release_stale_claims. CAS-guarded
+            # WHERE status='running' so a concurrent claim cannot be clobbered.
             conn.execute(
                 "UPDATE work_queue_task_runs SET status='released', outcome='reclaimed', ended_at=? "
                 "WHERE task_id=? AND ended_at IS NULL",

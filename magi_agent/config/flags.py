@@ -384,6 +384,16 @@ FLAGS: tuple[FlagSpec, ...] = (
         kind="int",
     ),
     _b(
+        "MAGI_DURABLE_STARTUP_RECOVERY_ENABLED",
+        summary=(
+            "Run the WS1 StartupRecoverySweep at boot: immediately reclaim "
+            "background tasks whose owning worker pid is dead (ignoring the "
+            "still-valid lease) and dispatch one tick. The guarantee is "
+            "AT-LEAST-ONCE; exactly-once for partially-executed side-effecting "
+            "tasks needs WS7-outbox. OFF is byte-identical (boot sweep is a no-op)."
+        ),
+    ),
+    _b(
         "MAGI_WORK_QUEUE_BOARD_API_ENABLED",
         summary="Mount the read-only work-queue board HTTP API.",
     ),
