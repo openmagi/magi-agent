@@ -516,3 +516,34 @@ def test_list_sessions_zero_error_and_rule_check_when_none(tmp_path):
     assert s["error_count"] == 0
     assert s["rule_check_count"] == 0
     store.close()
+
+
+def test_list_sessions_tier1_tiebreak_lowest_id_wins(tmp_path):
+    """Tier-1 tie-break: two turn_start events with identical ts -> lower-id row's
+    summary wins (deterministic, not last-write-wins nondeterminism)."""
+    import time as _t
+    store = ActivityStore(tmp_path / "obs.db")
+    shared_ts = _t.time()
+    # Insert low-id first, then high-id — both share the same ts.
+    id_low = store.record_event(ActivityEvent(
+        kind="turn_start", session_id="s1",
+        summary="first goal (low id)", ts=shared_ts,
+    ))
+    id_high = store.record_event(ActivityEvent(
+        kind="turn_start", session_id="s1",
+        summary="second goal (high id)", ts=shared_ts,
+    ))
+    # Sanity: insert order respected by SQLite autoincrement.
+    assert id_low < id_high
+
+    rows = store.list_sessions()
+    s = next(r for r in rows if r["id"] == "s1")
+    # The lower-id row is the stable, deterministic winner.
+    assert s["label"] == "first goal (low id)"
+
+    # Calling again must return the same label (no nondeterminism across calls).
+    rows2 = store.list_sessions()
+    s2 = next(r for r in rows2 if r["id"] == "s1")
+    assert s2["label"] == s["label"]
+
+    store.close()

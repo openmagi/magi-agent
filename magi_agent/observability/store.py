@@ -253,6 +253,9 @@ class ActivityStore:
 
         # Query 3: summary of the FIRST turn_start event per session (by MIN ts).
         # Uses a derived-table join — no correlated subquery; one pass.
+        # ORDER BY ae.id ASC ensures that when two turn_start events share the
+        # exact same ts, the row with the lower id (earlier insert) wins — this
+        # makes the tie-break fully deterministic.
         sql_first_turn = (
             "SELECT ae.session_id, ae.summary "
             "FROM activity_events ae "
@@ -262,7 +265,8 @@ class ActivityStore:
             "  WHERE kind='turn_start' AND session_id IS NOT NULL "
             "  GROUP BY session_id"
             ") AS ft ON ae.session_id = ft.session_id AND ae.ts = ft.min_ts "
-            "WHERE ae.kind = 'turn_start'"
+            "WHERE ae.kind = 'turn_start' "
+            "ORDER BY ae.id ASC"
         )
 
         # Query 4: distinct tool_names per session ordered by first use.
@@ -289,9 +293,13 @@ class ActivityStore:
         for r in breakdown_rows:
             breakdown.setdefault(r["session_id"], {})[r["kind"]] = r["cnt"]
 
-        first_turn_summary: dict[str, str | None] = {
-            r["session_id"]: r["summary"] for r in first_turn_rows
-        }
+        # First-write-wins: rows are ordered by ae.id ASC (see sql_first_turn),
+        # so the first row seen for each session_id is always the lowest-id
+        # (most deterministic) winner when multiple rows share the same MIN ts.
+        first_turn_summary: dict[str, str | None] = {}
+        for r in first_turn_rows:
+            if r["session_id"] not in first_turn_summary:
+                first_turn_summary[r["session_id"]] = r["summary"]
 
         tool_names_by_session: dict[str, list[str]] = {}
         for r in tool_rows:
