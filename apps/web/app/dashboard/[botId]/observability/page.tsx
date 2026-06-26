@@ -1,10 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, ClipboardList, HeartPulse, RefreshCw, Rows3 } from "lucide-react";
+import { Activity, ClipboardList, HeartPulse, RefreshCw, Rows3, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/ui/glass-card";
 import { useAgentFetch } from "@/lib/local-api";
+import {
+  buildActivityQuery,
+  CATEGORY_KINDS,
+  NOISE_KINDS,
+  type ActivityFilters,
+} from "./observability-query";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -45,11 +51,17 @@ interface BoardResponse {
 
 const OBSERVABILITY_ENDPOINTS = {
   meta: "/api/observability/v1/meta",
-  activity: "/api/observability/v1/activity?limit=100",
+  activity: "/api/observability/v1/activity",
   sessions: "/api/observability/v1/sessions?limit=50",
   health: "/api/observability/v1/health/live",
   board: "/api/observability/v1/board",
 } as const;
+
+const DEFAULT_FILTERS: ActivityFilters = {
+  hideNoise: true,
+  selectedKinds: [],
+  sessionId: null,
+};
 
 function numberLabel(value: number | undefined): string {
   return Math.max(0, value ?? 0).toLocaleString();
@@ -100,6 +112,121 @@ function StatCard({
   );
 }
 
+/** Filter bar above the Activity Feed. State is lifted to the page component. */
+function FilterBar({
+  filters,
+  onFiltersChange,
+  sessions,
+}: {
+  filters: ActivityFilters;
+  onFiltersChange: (next: ActivityFilters) => void;
+  sessions: SessionRecord[];
+}) {
+  const hasActiveFilters =
+    !filters.hideNoise ||
+    filters.selectedKinds.length > 0 ||
+    filters.sessionId !== null;
+
+  function toggleKind(kind: string) {
+    const next = filters.selectedKinds.includes(kind)
+      ? filters.selectedKinds.filter((k) => k !== kind)
+      : [...filters.selectedKinds, kind];
+    onFiltersChange({ ...filters, selectedKinds: next });
+  }
+
+  function reset() {
+    onFiltersChange(DEFAULT_FILTERS);
+  }
+
+  return (
+    <div className="flex flex-wrap items-start gap-3 rounded-xl border border-black/[0.06] bg-white/50 px-4 py-3">
+      {/* Hide noise toggle */}
+      <label className="flex cursor-pointer items-center gap-2 select-none">
+        <input
+          type="checkbox"
+          className="h-4 w-4 rounded"
+          checked={filters.hideNoise}
+          onChange={(e) =>
+            onFiltersChange({ ...filters, hideNoise: e.target.checked })
+          }
+        />
+        <span className="text-xs font-medium text-foreground">Hide noise</span>
+        <span className="text-xs text-muted">({NOISE_KINDS.join(", ")})</span>
+      </label>
+
+      <div className="mx-1 h-4 w-px self-center bg-black/10" />
+
+      {/* Session selector */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-medium text-secondary">Session</span>
+        <select
+          className="rounded-lg border border-black/10 bg-white px-2 py-1 text-xs text-foreground"
+          value={filters.sessionId ?? ""}
+          onChange={(e) =>
+            onFiltersChange({
+              ...filters,
+              sessionId: e.target.value || null,
+            })
+          }
+        >
+          <option value="">All sessions</option>
+          {sessions.map((s) => (
+            <option key={s.id ?? String(s.last_event_at)} value={s.id ?? ""}>
+              {s.id ?? "session"}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="mx-1 h-4 w-px self-center bg-black/10" />
+
+      {/* Kind multi-select grouped by category */}
+      {/* TODO(Task 9): source categories from /meta kind_categories instead of CATEGORY_KINDS constant. */}
+      <div className="flex flex-wrap items-center gap-2">
+        {Object.entries(CATEGORY_KINDS).map(([category, kinds]) => (
+          <div key={category} className="flex flex-wrap items-center gap-1">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">
+              {category}
+            </span>
+            {kinds.map((kind) => {
+              const active = filters.selectedKinds.includes(kind);
+              return (
+                <button
+                  key={kind}
+                  type="button"
+                  onClick={() => toggleKind(kind)}
+                  className={`rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                    active
+                      ? "border-primary-light/40 bg-primary-light/10 text-primary-light"
+                      : "border-black/10 bg-black/[0.03] text-secondary hover:bg-black/[0.06]"
+                  }`}
+                >
+                  {kind}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+
+      {/* Reset */}
+      {hasActiveFilters ? (
+        <>
+          <div className="mx-1 h-4 w-px self-center bg-black/10" />
+          <button
+            type="button"
+            onClick={reset}
+            className="flex items-center gap-1 rounded-full border border-black/10 bg-black/[0.03] px-2 py-0.5 text-[10px] font-medium text-secondary hover:bg-black/[0.06]"
+          >
+            <X className="h-3 w-3" />
+            Reset
+          </button>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 export default function ObservabilityPage() {
   const agentFetch = useAgentFetch();
   const [meta, setMeta] = useState<ObservabilityMeta | null>(null);
@@ -110,6 +237,16 @@ export default function ObservabilityPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Filter state (local state — URL param sync left for a future PR when
+  // Next.js useSearchParams is available outside Suspense boundaries; local
+  // state is sufficient for the audit use-case and avoids a Suspense wrapper).
+  const [filters, setFilters] = useState<ActivityFilters>(DEFAULT_FILTERS);
+
+  const activityUrl = useMemo(
+    () => OBSERVABILITY_ENDPOINTS.activity + buildActivityQuery(filters),
+    [filters],
+  );
+
   const loadObservability = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -117,7 +254,7 @@ export default function ObservabilityPage() {
       const [metaResponse, activityResponse, sessionsResponse, healthResponse, boardResponse] =
         await Promise.all([
           agentFetch(OBSERVABILITY_ENDPOINTS.meta),
-          agentFetch(OBSERVABILITY_ENDPOINTS.activity),
+          agentFetch(activityUrl),
           agentFetch(OBSERVABILITY_ENDPOINTS.sessions),
           agentFetch(OBSERVABILITY_ENDPOINTS.health),
           agentFetch(OBSERVABILITY_ENDPOINTS.board),
@@ -150,7 +287,7 @@ export default function ObservabilityPage() {
     } finally {
       setLoading(false);
     }
-  }, [agentFetch]);
+  }, [agentFetch, activityUrl]);
 
   useEffect(() => {
     void loadObservability();
@@ -162,6 +299,14 @@ export default function ObservabilityPage() {
     if (typeof health.status === "string") return health.status;
     return "not ready";
   }, [health]);
+
+  /** Handle clicking a session card — sets sessionId filter and re-fetches. */
+  function handleSessionClick(sessionId: string) {
+    setFilters((prev) => ({
+      ...prev,
+      sessionId: prev.sessionId === sessionId ? null : sessionId,
+    }));
+  }
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -220,6 +365,16 @@ export default function ObservabilityPage() {
             <h2 className="text-sm font-semibold text-foreground">Activity Feed</h2>
             <span className="text-xs text-muted">{numberLabel(events.length)} events</span>
           </div>
+
+          {/* Filter bar */}
+          <div className="mb-4">
+            <FilterBar
+              filters={filters}
+              onFiltersChange={setFilters}
+              sessions={sessions}
+            />
+          </div>
+
           {loading && events.length === 0 ? (
             <div className="space-y-3">
               <div className="skeleton h-16" />
@@ -265,19 +420,30 @@ export default function ObservabilityPage() {
             <p className="text-sm text-secondary">No sessions have emitted observability events.</p>
           ) : (
             <div className="space-y-2">
-              {sessions.map((session) => (
-                <div key={session.id ?? String(session.last_event_at)} className="rounded-xl border border-black/[0.06] bg-white/70 p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="min-w-0 truncate text-sm font-semibold text-foreground">{session.id ?? "session"}</p>
-                    <span className="shrink-0 rounded-full border border-black/10 bg-black/[0.035] px-2 py-0.5 text-xs text-secondary">
-                      {numberLabel(session.event_count)} events
-                    </span>
+              {sessions.map((session) => {
+                const isActive = filters.sessionId === session.id;
+                return (
+                  <div
+                    key={session.id ?? String(session.last_event_at)}
+                    onClick={() => session.id && handleSessionClick(session.id)}
+                    className={`cursor-pointer rounded-xl border p-3 transition-colors ${
+                      isActive
+                        ? "border-primary-light/40 bg-primary-light/10"
+                        : "border-black/[0.06] bg-white/70 hover:bg-white/90"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="min-w-0 truncate text-sm font-semibold text-foreground">{session.id ?? "session"}</p>
+                      <span className="shrink-0 rounded-full border border-black/10 bg-black/[0.035] px-2 py-0.5 text-xs text-secondary">
+                        {numberLabel(session.event_count)} events
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-secondary">
+                      {numberLabel(session.tool_count)} tool events · {eventTime(session.last_event_at)}
+                    </p>
                   </div>
-                  <p className="mt-1 text-xs text-secondary">
-                    {numberLabel(session.tool_count)} tool events · {eventTime(session.last_event_at)}
-                  </p>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </GlassCard>

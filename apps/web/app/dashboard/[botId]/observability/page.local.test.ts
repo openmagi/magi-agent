@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const source = readFileSync(
-  "apps/web/app/dashboard/[botId]/observability/page.tsx",
+  new URL("./page.tsx", import.meta.url),
   "utf8",
 );
 
@@ -17,5 +17,36 @@ describe("local OSS observability dashboard", () => {
     expect(source).not.toContain("/api/bots/");
     expect(source).not.toContain("Supabase");
     expect(source).not.toContain("Privy");
+  });
+
+  it("imports and uses the buildActivityQuery helper from observability-query", () => {
+    expect(source).toContain("buildActivityQuery");
+    expect(source).toContain("./observability-query");
+    // The activity URL must be built via the helper, not a hardcoded query string
+    expect(source).toContain("buildActivityQuery(filters)");
+  });
+
+  it("defines and uses the NOISE_KINDS constant from observability-query", () => {
+    expect(source).toContain("NOISE_KINDS");
+  });
+
+  it("has a filter bar with hideNoise toggle (default ON)", () => {
+    expect(source).toContain("hideNoise");
+    expect(source).toContain("Hide noise");
+    expect(source).toContain("DEFAULT_FILTERS");
+  });
+
+  it("has kind multi-select from CATEGORY_KINDS", () => {
+    expect(source).toContain("CATEGORY_KINDS");
+    expect(source).toContain("selectedKinds");
+  });
+
+  it("allows selecting a session to scope the feed", () => {
+    expect(source).toContain("sessionId");
+    expect(source).toContain("handleSessionClick");
+  });
+
+  it("marks the Task 9 seam for sourcing categories from /meta", () => {
+    expect(source).toContain("TODO(Task 9)");
   });
 });
