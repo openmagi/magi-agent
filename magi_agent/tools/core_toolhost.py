@@ -473,6 +473,10 @@ def _coding_evidence_declarations(outcome) -> list[dict[str, object]]:
         git_diff = _git_diff_evidence_declaration(outcome.output_preview)
         if git_diff is not None:
             declarations.append(git_diff)
+    # Pre-built declarations supplied by the dispatch site (e.g. TestRun, whose
+    # `command` is only available in `args` at dispatch, not in output_preview).
+    extra = getattr(outcome, "extra_evidence_declarations", ()) or ()
+    declarations.extend(dict(decl) for decl in extra if isinstance(decl, Mapping))
     return declarations
 
 

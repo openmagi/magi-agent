@@ -138,6 +138,7 @@ class _FakeOutcome:
         edit_match_receipt=None,
         code_diagnostics_receipt=None,
         coding_mutation_receipt=None,
+        extra_evidence_declarations: tuple = (),
     ) -> None:
         self.receipt = _FakeReceipt(tool_name)
         self.status = status
@@ -146,6 +147,7 @@ class _FakeOutcome:
         self.edit_match_receipt = edit_match_receipt
         self.code_diagnostics_receipt = code_diagnostics_receipt
         self.coding_mutation_receipt = coding_mutation_receipt
+        self.extra_evidence_declarations = extra_evidence_declarations
 
 
 def _evidence(metadata) -> list:
@@ -277,6 +279,93 @@ def test_git_diff_reaches_durable_ledger(tmp_path, monkeypatch):
         if isinstance(rec, dict):
             types.add(rec.get("type"))
     assert "GitDiff" in types
+
+
+# --- Part B3: TestRun live producer (command threaded from gate5b dispatch) -
+
+
+def test_extra_evidence_declarations_appended_to_metadata():
+    from magi_agent.tools.core_toolhost import _tool_result_from_outcome
+
+    decl = {
+        "type": "TestRun",
+        "fields": {"command": "pytest -q", "exitCode": 0},
+        "source": {"kind": "tool_trace", "toolName": "TestRun"},
+    }
+    outcome = _FakeOutcome(tool_name="TestRun", extra_evidence_declarations=(decl,))
+    tr = _tool_result_from_outcome(outcome)
+    decls = _evidence(tr.metadata)
+    test_run = [d for d in decls if d["type"] == "TestRun"]
+    assert len(test_run) == 1
+    assert test_run[0]["fields"]["command"] == "pytest -q"
+    assert test_run[0]["fields"]["exitCode"] == 0
+
+
+def test_test_run_evidence_declaration_builds_redacted_command():
+    from magi_agent.gates.gate5b_full_toolhost import (
+        _test_run_evidence_declarations,
+    )
+
+    decls = _test_run_evidence_declarations(
+        "TestRun",
+        {"command": "pytest -q --token=AKIAIOSFODNN7EXAMPLE"},
+        {"exitCode": 0, "stdout": "ok"},
+    )
+    assert len(decls) == 1
+    fields = decls[0]["fields"]
+    assert fields["exitCode"] == 0
+    assert "AKIAIOSFODNN7EXAMPLE" not in fields["command"]
+
+
+def test_test_run_evidence_declaration_carries_nonzero_exit():
+    from magi_agent.gates.gate5b_full_toolhost import (
+        _test_run_evidence_declarations,
+    )
+
+    decls = _test_run_evidence_declarations(
+        "TestRun", {"command": "pytest"}, {"exitCode": 1}
+    )
+    assert decls[0]["fields"]["exitCode"] == 1
+
+
+def test_test_run_evidence_declaration_skips_non_testrun():
+    from magi_agent.gates.gate5b_full_toolhost import (
+        _test_run_evidence_declarations,
+    )
+
+    assert _test_run_evidence_declarations("Bash", {"command": "ls"}, {"exitCode": 0}) == ()
+
+
+def test_test_run_reaches_durable_ledger(tmp_path, monkeypatch):
+    from magi_agent.evidence.local_tool_collector import LocalToolEvidenceCollector
+    from magi_agent.tools.core_toolhost import _tool_result_from_outcome
+
+    monkeypatch.setenv("MAGI_EVIDENCE_LEDGER_DIR", str(tmp_path))
+    decl = {
+        "type": "TestRun",
+        "fields": {"command": "pytest -q", "exitCode": 0},
+        "source": {"kind": "tool_trace", "toolName": "TestRun"},
+    }
+    outcome = _FakeOutcome(tool_name="TestRun", extra_evidence_declarations=(decl,))
+    tr = _tool_result_from_outcome(outcome)
+    collector = LocalToolEvidenceCollector()
+    collector.record_tool_result(
+        session_id="sess-t",
+        turn_id="turn-t",
+        tool_call_id="call-t",
+        tool_name="TestRun",
+        result=tr,
+    )
+    ledger = tmp_path / "sess-t.jsonl"
+    assert ledger.exists()
+    types = set()
+    for ln in ledger.read_text().splitlines():
+        if not ln.strip():
+            continue
+        rec = json.loads(ln).get("record")
+        if isinstance(rec, dict):
+            types.add(rec.get("type"))
+    assert "TestRun" in types
 
 
 # --- Part C: CommitCheckpoint native plugin ---------------------------------
