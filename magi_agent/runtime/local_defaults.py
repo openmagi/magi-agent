@@ -68,10 +68,32 @@ LOCAL_FULL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     "MAGI_OBSERVABILITY_ENABLED": "1",
     "MAGI_OBS_HOME": ".openmagi",
     "MAGI_SESSION_PERSISTENCE_ENABLED": "1",
-    # PR-04-PR1: CLI transcript write path. Registered here but stage-1 OFF
-    # ("0") so the disk-write + sanitization behavior can be validated before a
-    # later release flips it on.
-    "MAGI_CLI_SESSION_LOG_ENABLED": "0",
+    # WS1 PR1e: the CLI Envelope-log TEXT write path, flipped ON for the full
+    # local profile. This is the v3 replay source the context-only durable
+    # foreground resume reads (replay_messages_up_to), NOT the obs
+    # MAGI_SESSION_TRANSCRIPT_ENABLED. It stages ON together with the durable
+    # substrate below so a crashed local turn has an Envelope log to replay. The
+    # safe / eval / off profiles keep it OFF (the eval overlay registers it at
+    # "0"); the helper default (cli_session_log_enabled) stays strict default-OFF.
+    "MAGI_CLI_SESSION_LOG_ENABLED": "1",
+    # WS1 PR1e: durable crash-resume substrate, activated for the full local
+    # (self-host) profile. The master sqlite-write gate
+    # (MAGI_DURABLE_LOCAL_WRITES_ENABLED) creates/writes the local
+    # durable_checkpoints + plan_ledger tables in ~/.magi/work_queue.db (local
+    # sqlite only, never the hosted DB); MAGI_DURABLE_CHECKPOINTS_ENABLED emits a
+    # checkpoint from the headless tap after each persisted tool_end + at the
+    # terminal; MAGI_DURABLE_STARTUP_RECOVERY_ENABLED runs the boot sweep that
+    # reclaims dead-pid background tasks (at-least-once) on the next CLI boot.
+    # MAGI_DURABLE_FOREGROUND_CONTINUATION_ENABLED is deliberately NOT set: the
+    # OPTIONAL context-only foreground continuation is opt-in only, so the v1
+    # full profile delivers the PRIMARY T1 background reclaim and never auto-runs
+    # the foreground re-entry. Safe / eval / off profiles keep all of these OFF;
+    # the registry defaults stay default-OFF so a fresh import is byte-identical.
+    "MAGI_DURABLE_LOCAL_WRITES_ENABLED": "1",
+    "MAGI_DURABLE_CHECKPOINTS_ENABLED": "1",
+    "MAGI_DURABLE_STARTUP_RECOVERY_ENABLED": "1",
+    # The durable work-queue dispatcher tick loop that re-runs reclaimed tasks.
+    "MAGI_WORK_QUEUE_EXECUTOR_ENABLED": "1",
     # PR-04-PR2: --resume/--continue rehydration. Stage-1 OFF ("0") safety net;
     # depends on the session-log write path above, so a later release stages both
     # on together.
