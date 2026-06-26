@@ -139,6 +139,7 @@ from magi_agent.evidence.types import EvidenceRecord
 _BUILTIN_FIELD_HINTS: dict[str, list[str]] = {
     # Verified against real producers — keys are actually emitted.
     "TestRun":                     ["command", "exitCode"],
+    "GitDiff":                     ["changedFiles", "fileCount", "digest"],  # live gate5b GitDiff -> core_toolhost evidence declaration
     "CodeDiagnostics":             ["checker", "errorCount", "fileDigest", "diagnosticsDigest"],
     "CommitCheckpoint":            ["checkpointDigest", "pathRef"],
     "DeterministicEvidenceVerifier": [
@@ -160,7 +161,6 @@ _BUILTIN_FIELD_HINTS: dict[str, list[str]] = {
     # nor sets ``ToolResult.metadata["evidence"]["fields"] = {...}``.  Adding a
     # guessed key here corrupts NL→SHACL compilation (silent non-firing shapes).
     # See tests/test_builtin_field_hints_match_producer.py for the policy lock.
-    "GitDiff":                     [],  # tool handlers return raw dict; no metadata["evidence"] declaration
     "FileDeliver":                 [],  # file_deliver sets toolName/handler/digests but no "evidence" key
     "ArtifactVerify":              [],  # no producer construction site located in magi_agent/
     "PlanVerifier":                [],  # only catalog + verifier-bus refs; no concrete producer

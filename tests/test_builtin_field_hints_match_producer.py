@@ -26,7 +26,7 @@ silently never fire, defeating determinism.
 WHAT THIS TEST VERIFIES
 =======================
 
-1. The 7 "no producer located" types stay empty.  This is the F2-task lock:
+1. The 6 "no producer located" types stay empty.  This is the F2-task lock:
    independent producer-source review (recorded in the source comments
    above ``_BUILTIN_FIELD_HINTS``) found no concrete ``EvidenceRecord``
    field emission for these types.  If a future PR adds a producer, the
@@ -54,12 +54,13 @@ from magi_agent.evidence.builtin import builtin_evidence_catalog
 
 
 # ---------------------------------------------------------------------------
-# Block 1: the 7 honest-empty types.  Verified producer-absent at F2 time.
+# Block 1: the 6 honest-empty types.  Verified producer-absent at F2 time.
 # Producer-source notes live in shacl_compiler.py above _BUILTIN_FIELD_HINTS.
 # ---------------------------------------------------------------------------
 
 _EMPTY_HINT_TYPES_LOCK: tuple[str, ...] = (
-    "GitDiff",              # tool handlers return raw dict; no evidence declaration
+    # GitDiff removed: the live gate5b GitDiff handler now emits a typed
+    # EvidenceRecord (changedFiles/fileCount/digest) via core_toolhost.
     "FileDeliver",          # documents.file_deliver sets metadata sans 'evidence' key
     "ArtifactVerify",       # no producer construction site located anywhere
     "PlanVerifier",         # only catalog/verifier-bus refs; no producer site
@@ -71,7 +72,7 @@ _EMPTY_HINT_TYPES_LOCK: tuple[str, ...] = (
 
 @pytest.mark.parametrize("evidence_type", _EMPTY_HINT_TYPES_LOCK)
 def test_empty_hint_types_remain_empty(evidence_type: str) -> None:
-    """Lock the honest-empty hint policy for the 7 producer-absent types.
+    """Lock the honest-empty hint policy for the 6 producer-absent types.
 
     Adding a non-empty hint here without first wiring a real producer would
     silently corrupt the NL→SHACL compiler.  If you have a real producer,
