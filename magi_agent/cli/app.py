@@ -285,7 +285,15 @@ def agent(
     # when no explicit subcommand is given). ``ctx`` is used for
     # get_parameter_source in both the headless and TUI branches below.
 
-    runtime_profile = _normalize_runtime_profile(os.environ.get("MAGI_RUNTIME_PROFILE"))
+    # I-1: route the runtime-profile selector through the typed flag
+    # registry. ``MAGI_RUNTIME_PROFILE`` is already registered as a
+    # ``str`` FlagSpec (default ``""``). ``flag_str`` returns ``""``
+    # for unset; ``_normalize_runtime_profile`` collapses both ``None``
+    # and ``""`` to ``""`` via ``(value or "").strip().lower()``, so
+    # this is byte-identical to the prior ``os.environ.get`` shape.
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    runtime_profile = _normalize_runtime_profile(flag_str("MAGI_RUNTIME_PROFILE"))
     if runtime_profile == "eval":
         from magi_agent.runtime.local_defaults import apply_local_eval_runtime_defaults  # noqa: PLC0415
 
