@@ -1309,7 +1309,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | config, core, integration, models, transcript | (root)/app.py |
-| api.py | — | bus, health, store | observability/core.py |
+| api.py | — | bus, health, store, taxonomy | observability/core.py |
 | bus.py | — | — | observability/api.py, observability/core.py |
 | config.py | — | _truthy, flags | observability/__init__.py, observability/core.py, observability/integration.py |
 | core.py | — | api, bus, config, projector, store | observability/__init__.py, observability/integration.py |
@@ -1319,6 +1319,7 @@ graph LR
 | projector.py | — | models | observability/core.py |
 | runtime_sink.py | Process-global event-sink registry. | — | cli/wiring.py, observability/integration.py |
 | store.py | — | models | observability/api.py, observability/core.py |
+| taxonomy.py | Single source of truth for the observability event taxonomy. | — | observability/api.py |
 | transcript.py | Per-session JSONL transcript writer + process-global sink registry. | flags, integration | cli/wiring.py, observability/__init__.py, shadow/gate5b4c3_live_runner_boundary.py |
 
 ### ops/

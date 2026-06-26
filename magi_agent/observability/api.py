@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from magi_agent.observability.bus import ActivityBus
 from magi_agent.observability.store import ActivityStore
+from magi_agent.observability.taxonomy import get_meta_taxonomy
 
 logger = logging.getLogger(__name__)
 
@@ -43,18 +44,37 @@ def build_api_router(store: ActivityStore, bus: ActivityBus, runtime: Any) -> AP
 
     @router.get("/meta")
     async def meta(_: str = Depends(auth)) -> dict:
-        return {"version": "v1", "bot_id": bot_id, "events": store.count_events()}
+        return {
+            "version": "v1",
+            "bot_id": bot_id,
+            "events": store.count_events(),
+            "kind_breakdown": store.kind_breakdown(),
+            "categories": get_meta_taxonomy(),
+        }
 
     @router.get("/activity")
     async def activity(
         _: str = Depends(auth),
         session_id: str | None = Query(default=None),
         kind: str | None = Query(default=None),
+        exclude_kind: str | None = Query(default=None),
+        status: str | None = Query(default=None),
+        q: str | None = Query(default=None),
         since_id: int | None = Query(default=None),
+        before_id: int | None = Query(default=None),
         limit: int = Query(default=200, ge=1, le=1000),
+        has_evidence: bool = Query(default=False),
     ) -> dict:
         events = store.list_events(
-            session_id=session_id, kind=kind, since_id=since_id, limit=limit
+            session_id=session_id,
+            kind=kind,
+            exclude_kind=exclude_kind,
+            status=status,
+            q=q,
+            since_id=since_id,
+            before_id=before_id,
+            limit=limit,
+            has_evidence=has_evidence,
         )
         return {"events": events}
 

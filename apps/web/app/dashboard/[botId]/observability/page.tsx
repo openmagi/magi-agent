@@ -1,10 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, ClipboardList, HeartPulse, RefreshCw, Rows3 } from "lucide-react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Activity, ClipboardList, HeartPulse, RefreshCw, Rows3, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/ui/glass-card";
 import { useAgentFetch } from "@/lib/local-api";
+import {
+  buildActivityQuery,
+  buildActivityPageQuery,
+  mergeEventsById,
+  CATEGORY_KINDS,
+  NOISE_KINDS,
+  parseFiltersFromParams,
+  filtersToParams,
+  formatSessionBreakdown,
+  extractVerdict,
+  resolveKindCategories,
+  type ActivityFilters,
+} from "./observability-query";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -12,6 +26,8 @@ interface ObservabilityMeta {
   version?: string;
   bot_id?: string;
   events?: number;
+  /** /meta categories payload from get_meta_taxonomy() — sourced in Task 9. */
+  categories?: unknown;
 }
 
 interface ActivityEventRecord extends JsonRecord {
@@ -32,7 +48,21 @@ interface SessionRecord extends JsonRecord {
   id?: string;
   event_count?: number;
   tool_count?: number;
+  /** ISO timestamp of the most recent event in this session (Task 5 field name). */
+  last_active?: string;
+  /**
+   * @deprecated Backend now uses last_active. Kept here so older payloads that
+   * still carry last_event_at render gracefully without a runtime crash.
+   */
   last_event_at?: string;
+  /** Deterministic human-readable session summary derived by the backend (Task 5). */
+  label?: string;
+  /** Per-kind event counts for this session (Task 5). */
+  kind_breakdown?: Record<string, number>;
+  /** Count of error/aborted lifecycle events (Task 5). */
+  error_count?: number;
+  /** Count of rule_check events (Task 5). */
+  rule_check_count?: number;
 }
 
 interface SessionsResponse {
@@ -45,11 +75,20 @@ interface BoardResponse {
 
 const OBSERVABILITY_ENDPOINTS = {
   meta: "/api/observability/v1/meta",
-  activity: "/api/observability/v1/activity?limit=100",
+  activity: "/api/observability/v1/activity",
   sessions: "/api/observability/v1/sessions?limit=50",
   health: "/api/observability/v1/health/live",
   board: "/api/observability/v1/board",
 } as const;
+
+const DEFAULT_FILTERS: ActivityFilters = {
+  hideNoise: true,
+  selectedKinds: [],
+  sessionId: null,
+  policyEvidenceOnly: false,
+  evidenceOnly: false,
+  errorsOnly: false,
+};
 
 function numberLabel(value: number | undefined): string {
   return Math.max(0, value ?? 0).toLocaleString();
@@ -100,7 +139,187 @@ function StatCard({
   );
 }
 
-export default function ObservabilityPage() {
+/** Filter bar above the Activity Feed. State is lifted to the page component. */
+interface FilterBarProps {
+  filters: ActivityFilters;
+  onFiltersChange: (next: ActivityFilters) => void;
+  sessions: SessionRecord[];
+  /** /meta categories payload — used to drive kind groups and noise set; falls back to FE constants. */
+  metaCategories?: unknown;
+}
+
+function FilterBar({ filters, onFiltersChange, sessions, metaCategories }: FilterBarProps) {
+  // Source kind categories from /meta when available; fall back to the FE constant
+  // for older runtimes that do not yet return the categories field.
+  const { categories: kindCategories, noiseKinds: activeNoiseKinds } =
+    resolveKindCategories(metaCategories);
+
+  const hasActiveFilters =
+    !filters.hideNoise ||
+    filters.selectedKinds.length > 0 ||
+    filters.sessionId !== null ||
+    !!filters.policyEvidenceOnly ||
+    !!filters.evidenceOnly ||
+    !!filters.errorsOnly;
+
+  function toggleKind(kind: string) {
+    const next = filters.selectedKinds.includes(kind)
+      ? filters.selectedKinds.filter((k) => k !== kind)
+      : [...filters.selectedKinds, kind];
+    onFiltersChange({ ...filters, selectedKinds: next });
+  }
+
+  function reset() {
+    onFiltersChange(DEFAULT_FILTERS);
+  }
+
+  return (
+    <div className="flex flex-wrap items-start gap-3 rounded-xl border border-black/[0.06] bg-white/50 px-4 py-3">
+      {/* Hide noise toggle */}
+      <label className="flex cursor-pointer items-center gap-2 select-none">
+        <input
+          type="checkbox"
+          className="h-4 w-4 rounded"
+          checked={filters.hideNoise}
+          onChange={(e) =>
+            onFiltersChange({ ...filters, hideNoise: e.target.checked })
+          }
+        />
+        <span className="text-xs font-medium text-foreground">Hide noise</span>
+        <span className="text-xs text-muted">({activeNoiseKinds.join(", ")})</span>
+      </label>
+
+      <div className="mx-1 h-4 w-px self-center bg-black/10" />
+
+      {/* Quick toggles: Policy & Evidence / Errors only */}
+      <div className="flex flex-wrap items-center gap-2">
+        {/* Policy & Evidence only */}
+        <label className="flex cursor-pointer items-center gap-1.5 select-none">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded"
+            checked={!!filters.policyEvidenceOnly}
+            onChange={(e) =>
+              onFiltersChange({
+                ...filters,
+                policyEvidenceOnly: e.target.checked,
+                // clear evidenceOnly when turning off the parent toggle
+                evidenceOnly: e.target.checked ? filters.evidenceOnly : false,
+              })
+            }
+          />
+          <span className="text-xs font-medium text-foreground">Policy &amp; Evidence only</span>
+        </label>
+        {/* Evidence fired only — sub-toggle, visible when policyEvidenceOnly is active */}
+        {filters.policyEvidenceOnly ? (
+          <label className="ml-4 flex cursor-pointer items-center gap-1.5 select-none">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded"
+              checked={!!filters.evidenceOnly}
+              onChange={(e) =>
+                onFiltersChange({ ...filters, evidenceOnly: e.target.checked })
+              }
+            />
+            <span className="text-xs text-secondary">Evidence fired only</span>
+          </label>
+        ) : null}
+
+        {/* Errors only */}
+        <label className="flex cursor-pointer items-center gap-1.5 select-none">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded"
+            checked={!!filters.errorsOnly}
+            onChange={(e) =>
+              onFiltersChange({ ...filters, errorsOnly: e.target.checked })
+            }
+          />
+          <span className="text-xs font-medium text-foreground">Errors only</span>
+        </label>
+      </div>
+
+      <div className="mx-1 h-4 w-px self-center bg-black/10" />
+
+      {/* Session selector */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-medium text-secondary">Session</span>
+        <select
+          className="rounded-lg border border-black/10 bg-white px-2 py-1 text-xs text-foreground"
+          value={filters.sessionId ?? ""}
+          onChange={(e) =>
+            onFiltersChange({
+              ...filters,
+              sessionId: e.target.value || null,
+            })
+          }
+        >
+          <option value="">All sessions</option>
+          {sessions.map((s) => (
+            <option key={s.id ?? String(s.last_active ?? s.last_event_at)} value={s.id ?? ""}>
+              {s.label ?? s.id ?? "session"}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="mx-1 h-4 w-px self-center bg-black/10" />
+
+      {/* Kind multi-select grouped by category.
+          Categories sourced from /meta via resolveKindCategories(); falls back to
+          the CATEGORY_KINDS constant for older runtimes without the taxonomy field. */}
+      <div className="flex flex-wrap items-center gap-2">
+        {Object.entries(kindCategories).map(([category, kinds]) => (
+          <div key={category} className="flex flex-wrap items-center gap-1">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">
+              {category}
+            </span>
+            {(kinds as readonly string[]).map((kind) => {
+              const active = filters.selectedKinds.includes(kind);
+              return (
+                <button
+                  key={kind}
+                  type="button"
+                  onClick={() => toggleKind(kind)}
+                  className={`rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                    active
+                      ? "border-primary-light/40 bg-primary-light/10 text-primary-light"
+                      : "border-black/10 bg-black/[0.03] text-secondary hover:bg-black/[0.06]"
+                  }`}
+                >
+                  {kind}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+
+      {/* Reset */}
+      {hasActiveFilters ? (
+        <>
+          <div className="mx-1 h-4 w-px self-center bg-black/10" />
+          <button
+            type="button"
+            onClick={reset}
+            className="flex items-center gap-1 rounded-full border border-black/10 bg-black/[0.03] px-2 py-0.5 text-[10px] font-medium text-secondary hover:bg-black/[0.06]"
+          >
+            <X className="h-3 w-3" />
+            Reset
+          </button>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Inner page body. Requires a Suspense boundary in the parent because it calls
+ * useSearchParams() — Next.js App Router requirement for static-safe rendering.
+ */
+function ObservabilityPageInner() {
+  const router = useRouter();
+  const sp = useSearchParams();
   const agentFetch = useAgentFetch();
   const [meta, setMeta] = useState<ObservabilityMeta | null>(null);
   const [events, setEvents] = useState<ActivityEventRecord[]>([]);
@@ -109,15 +328,95 @@ export default function ObservabilityPage() {
   const [board, setBoard] = useState<JsonRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /** Tracks in-flight pagination direction; null when no page load is active. */
+  const [paginatingDir, setPaginatingDir] = useState<"older" | "newer" | null>(null);
+
+  // Filter state backed by URL query params so audit views are shareable.
+  // Initial state is read from the URL on mount; changes are written back via
+  // router.replace (no history push — avoids polluting back-stack).
+  const [filters, setFilters] = useState<ActivityFilters>(() =>
+    parseFiltersFromParams(sp),
+  );
+
+  /**
+   * Centralized filter apply: updates state + syncs URL (replace, not push).
+   *
+   * F2: wrapped in useCallback so identity is stable across renders, preventing
+   * unnecessary FilterBar re-renders and avoiding stale-closure bugs.
+   * Deps are [router] only — setFilters is stable, and `next` is passed in
+   * directly (no capture of the `filters` state variable needed).
+   */
+  const applyFilters = useCallback((next: ActivityFilters) => {
+    setFilters(next);
+    const params = filtersToParams(next);
+    const qs = params.toString();
+    router.replace(qs ? `?${qs}` : "?", { scroll: false });
+  }, [router]);
+
+  // Resolve the server's noise kinds from /meta when available. Used for the
+  // exclude_kind API param so the actual request matches the server's live taxonomy
+  // rather than the hardcoded FE constant. Falls back to NOISE_KINDS when /meta
+  // is unavailable or older runtimes don't return the categories field.
+  const { noiseKinds: activeNoiseKinds } = useMemo(
+    () => resolveKindCategories(meta?.categories),
+    [meta],
+  );
+
+  const activityUrl = useMemo(
+    () => OBSERVABILITY_ENDPOINTS.activity + buildActivityQuery(filters, activeNoiseKinds),
+    [filters, activeNoiseKinds],
+  );
+
+  /**
+   * F3 — double-fetch guard.
+   *
+   * The flow: loadObservability (deps include activityUrl) -> on success setMeta
+   * -> activeNoiseKinds memo recomputes from server noise_kinds -> if the
+   * resulting activityUrl string changes, loadObservability's identity changes
+   * -> the effect refires -> second full reload of all 5 endpoints.
+   *
+   * Guard: track the last URL that was actually fetched. When loadObservability
+   * fires again and the URL equals the last-fetched URL, skip the reload.
+   * This is purely a noise-URL dedup — filter changes and pagination cursors
+   * always produce a different URL so they are never suppressed.
+   *
+   * After B1, the server and FE noise sets are identical so this rarely triggers
+   * in practice, but the structural race is closed regardless.
+   */
+  const lastFetchedUrlRef = useRef<string | null>(null);
+
+  /**
+   * Cursor ids derived from the currently loaded events (id ASC ordering).
+   * Used to build `before_id`/`since_id` params for paginated fetches.
+   * Both are null when no events with a numeric id are loaded.
+   */
+  const { oldestId, newestId } = useMemo(() => {
+    let oldest: number | null = null;
+    let newest: number | null = null;
+    for (const e of events) {
+      if (e.id != null) {
+        if (oldest === null) oldest = e.id;
+        newest = e.id;
+      }
+    }
+    return { oldestId: oldest, newestId: newest };
+  }, [events]);
 
   const loadObservability = useCallback(async () => {
+    // F3: skip reload if the activity URL hasn't changed since the last fetch.
+    // This prevents the structural double-fetch caused by /meta returning a
+    // noise_kinds list that produces an identical activityUrl after B1.
+    if (lastFetchedUrlRef.current === activityUrl) return;
+    lastFetchedUrlRef.current = activityUrl;
+
     setLoading(true);
+    setPaginatingDir(null);
     setError(null);
     try {
       const [metaResponse, activityResponse, sessionsResponse, healthResponse, boardResponse] =
         await Promise.all([
           agentFetch(OBSERVABILITY_ENDPOINTS.meta),
-          agentFetch(OBSERVABILITY_ENDPOINTS.activity),
+          agentFetch(activityUrl),
           agentFetch(OBSERVABILITY_ENDPOINTS.sessions),
           agentFetch(OBSERVABILITY_ENDPOINTS.health),
           agentFetch(OBSERVABILITY_ENDPOINTS.board),
@@ -150,7 +449,52 @@ export default function ObservabilityPage() {
     } finally {
       setLoading(false);
     }
-  }, [agentFetch]);
+  }, [agentFetch, activityUrl]);
+
+  /**
+   * Fetch the page of events older than the current oldest loaded event.
+   * Uses `before_id=<oldestId>` so the API returns events with `id < oldestId`.
+   * Preserves all active filters; prepends results to the existing list.
+   * Filter changes reset pagination via `loadObservability` (full reload).
+   */
+  const loadOlderPage = useCallback(async () => {
+    if (oldestId == null || paginatingDir != null) return;
+    setPaginatingDir("older");
+    try {
+      const url =
+        OBSERVABILITY_ENDPOINTS.activity +
+        buildActivityPageQuery(filters, { beforeId: oldestId, noiseKinds: activeNoiseKinds });
+      const response = await agentFetch(url);
+      if (!response.ok) return;
+      const activity = await readJson<ActivityResponse>(response, { events: [] });
+      const incoming = Array.isArray(activity.events) ? activity.events : [];
+      setEvents((prev) => mergeEventsById(incoming, prev));
+    } finally {
+      setPaginatingDir(null);
+    }
+  }, [agentFetch, activeNoiseKinds, filters, oldestId, paginatingDir]);
+
+  /**
+   * Fetch the page of events newer than the current newest loaded event.
+   * Uses `since_id=<newestId>` so the API returns events with `id > newestId`.
+   * Preserves all active filters; appends results after the existing list.
+   */
+  const loadNewerPage = useCallback(async () => {
+    if (newestId == null || paginatingDir != null) return;
+    setPaginatingDir("newer");
+    try {
+      const url =
+        OBSERVABILITY_ENDPOINTS.activity +
+        buildActivityPageQuery(filters, { sinceId: newestId, noiseKinds: activeNoiseKinds });
+      const response = await agentFetch(url);
+      if (!response.ok) return;
+      const activity = await readJson<ActivityResponse>(response, { events: [] });
+      const incoming = Array.isArray(activity.events) ? activity.events : [];
+      setEvents((prev) => mergeEventsById(prev, incoming));
+    } finally {
+      setPaginatingDir(null);
+    }
+  }, [agentFetch, activeNoiseKinds, filters, newestId, paginatingDir]);
 
   useEffect(() => {
     void loadObservability();
@@ -162,6 +506,28 @@ export default function ObservabilityPage() {
     if (typeof health.status === "string") return health.status;
     return "not ready";
   }, [health]);
+
+  /**
+   * Handle clicking a session card — toggles sessionId filter and re-fetches.
+   *
+   * F2: wrapped in useCallback to stabilize identity. Uses the functional form
+   * of setFilters so it never captures stale `filters` state — the toggle
+   * decision (deselect if already active, else select) is computed from `prev`
+   * inside the updater. The URL is synced via a derived value produced inline.
+   */
+  const handleSessionClick = useCallback((sessionId: string) => {
+    setFilters((prev) => {
+      const next: ActivityFilters = {
+        ...prev,
+        sessionId: prev.sessionId === sessionId ? null : sessionId,
+      };
+      // Sync URL alongside state using the same derived `next` value.
+      const params = filtersToParams(next);
+      const qs = params.toString();
+      router.replace(qs ? `?${qs}` : "?", { scroll: false });
+      return next;
+    });
+  }, [router]);
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -220,6 +586,17 @@ export default function ObservabilityPage() {
             <h2 className="text-sm font-semibold text-foreground">Activity Feed</h2>
             <span className="text-xs text-muted">{numberLabel(events.length)} events</span>
           </div>
+
+          {/* Filter bar */}
+          <div className="mb-4">
+            <FilterBar
+              filters={filters}
+              onFiltersChange={applyFilters}
+              sessions={sessions}
+              metaCategories={meta?.categories}
+            />
+          </div>
+
           {loading && events.length === 0 ? (
             <div className="space-y-3">
               <div className="skeleton h-16" />
@@ -229,24 +606,81 @@ export default function ObservabilityPage() {
           ) : events.length === 0 ? (
             <p className="text-sm text-secondary">No activity events are recorded yet.</p>
           ) : (
-            <div className="overflow-x-auto">
-              <div className="min-w-[760px] space-y-2">
-                {events.map((event, index) => (
-                  <div
-                    key={`${event.id ?? index}-${event.kind ?? "event"}`}
-                    className="grid grid-cols-[130px_150px_160px_120px_minmax(0,1fr)] items-start gap-3 rounded-xl border border-black/[0.06] bg-white/70 px-3 py-2 text-xs"
-                  >
-                    <span className="font-mono text-muted">{eventTime(event.created_at)}</span>
-                    <span className="truncate font-semibold text-foreground">{stringValue(event.kind, "event")}</span>
-                    <span className="truncate text-primary-light">{stringValue(event.session_id, "session")}</span>
-                    <span className="truncate text-secondary">{stringValue(event.status, "-")}</span>
-                    <span className="truncate text-secondary">
-                      {stringValue(event.summary) || stringValue(event.tool_name) || prettyJson(event).slice(0, 120)}
-                    </span>
-                  </div>
-                ))}
+            <>
+              {/* Load older button — fetch events with id < oldestId */}
+              <div className="mb-3 flex justify-center">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={loadOlderPage}
+                  disabled={paginatingDir === "older" || oldestId == null}
+                >
+                  {paginatingDir === "older" ? "Loading..." : "Load older"}
+                </Button>
               </div>
-            </div>
+
+              <div className="overflow-x-auto">
+                <div className="min-w-[760px] space-y-2">
+                  {events.map((event, index) => {
+                    const ruleVerdict = extractVerdict(event);
+                    return (
+                      <div
+                        key={`${event.id ?? index}-${event.kind ?? "event"}`}
+                        className={`grid grid-cols-[130px_150px_160px_120px_minmax(0,1fr)] items-start gap-3 rounded-xl border px-3 py-2 text-xs ${
+                          ruleVerdict
+                            ? "border-amber-300/40 bg-amber-50/70"
+                            : "border-black/[0.06] bg-white/70"
+                        }`}
+                      >
+                        <span className="font-mono text-muted">{eventTime(event.created_at)}</span>
+                        <span className="truncate font-semibold text-foreground">{stringValue(event.kind, "event")}</span>
+                        <span className="truncate text-primary-light">{stringValue(event.session_id, "session")}</span>
+                        {/* Status column: show verdict badge for rule_check events */}
+                        {ruleVerdict ? (
+                          <span
+                            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                              ruleVerdict.verdict === "ok"
+                                ? "border-green-300/60 bg-green-50 text-green-700"
+                                : ruleVerdict.verdict === "violation"
+                                  ? "border-red-300/60 bg-red-50 text-red-700"
+                                  : "border-yellow-300/60 bg-yellow-50 text-yellow-700"
+                            }`}
+                          >
+                            {ruleVerdict.verdict}
+                          </span>
+                        ) : (
+                          <span className="truncate text-secondary">{stringValue(event.status, "-")}</span>
+                        )}
+                        {/* Detail column: for rule_check show evidenceRef + detail; else summary/tool_name */}
+                        {ruleVerdict ? (
+                          <span className="truncate text-secondary">
+                            {ruleVerdict.evidenceRef
+                              ? `evidence: ${ruleVerdict.evidenceRef}${ruleVerdict.detail ? ` · ${ruleVerdict.detail}` : ""}`
+                              : ruleVerdict.detail ?? "-"}
+                          </span>
+                        ) : (
+                          <span className="truncate text-secondary">
+                            {stringValue(event.summary) || stringValue(event.tool_name) || prettyJson(event).slice(0, 120)}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Load newer button — fetch events with id > newestId */}
+              <div className="mt-3 flex justify-center">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={loadNewerPage}
+                  disabled={paginatingDir === "newer" || newestId == null}
+                >
+                  {paginatingDir === "newer" ? "Loading..." : "Load newer"}
+                </Button>
+              </div>
+            </>
           )}
         </GlassCard>
 
@@ -265,19 +699,36 @@ export default function ObservabilityPage() {
             <p className="text-sm text-secondary">No sessions have emitted observability events.</p>
           ) : (
             <div className="space-y-2">
-              {sessions.map((session) => (
-                <div key={session.id ?? String(session.last_event_at)} className="rounded-xl border border-black/[0.06] bg-white/70 p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="min-w-0 truncate text-sm font-semibold text-foreground">{session.id ?? "session"}</p>
-                    <span className="shrink-0 rounded-full border border-black/10 bg-black/[0.035] px-2 py-0.5 text-xs text-secondary">
-                      {numberLabel(session.event_count)} events
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-secondary">
-                    {numberLabel(session.tool_count)} tool events · {eventTime(session.last_event_at)}
-                  </p>
-                </div>
-              ))}
+              {sessions.map((session) => {
+                const isActive = filters.sessionId === session.id;
+                return (
+                  /* F1: session cards are interactive — use <button> so they are
+                     keyboard-reachable (Enter/Space) and properly announced by
+                     screen readers. text-left + w-full preserve card layout. */
+                  <button
+                    type="button"
+                    key={session.id ?? String(session.last_active ?? session.last_event_at)}
+                    onClick={() => session.id && handleSessionClick(session.id)}
+                    className={`w-full cursor-pointer rounded-xl border p-3 text-left transition-colors ${
+                      isActive
+                        ? "border-primary-light/40 bg-primary-light/10"
+                        : "border-black/[0.06] bg-white/70 hover:bg-white/90"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="min-w-0 truncate text-sm font-semibold text-foreground">
+                        {session.label ?? session.id ?? "session"}
+                      </p>
+                      <span className="shrink-0 rounded-full border border-black/10 bg-black/[0.035] px-2 py-0.5 text-xs text-secondary">
+                        {numberLabel(session.event_count)} events
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-secondary">
+                      {formatSessionBreakdown(session)} · {eventTime(session.last_active ?? session.last_event_at)}
+                    </p>
+                  </button>
+                );
+              })}
             </div>
           )}
         </GlassCard>
@@ -298,5 +749,18 @@ export default function ObservabilityPage() {
         </GlassCard>
       </div>
     </div>
+  );
+}
+
+/**
+ * Default export wraps the inner component in a Suspense boundary.
+ * Required because ObservabilityPageInner calls useSearchParams(), which
+ * Next.js App Router requires to be inside Suspense for static-safe rendering.
+ */
+export default function ObservabilityPage() {
+  return (
+    <Suspense fallback={null}>
+      <ObservabilityPageInner />
+    </Suspense>
   );
 }
