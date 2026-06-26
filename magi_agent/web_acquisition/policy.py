@@ -7,6 +7,9 @@ from datetime import datetime, timezone
 from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from magi_agent.evidence.run_redaction import (
+    redact_public_text as _redact_public_share_text,
+)
 from magi_agent.ops.safety import public_diagnostic_metadata
 from magi_agent.security.ssrf import (
     METADATA_HOSTS as _SSRF_METADATA_HOSTS,
@@ -238,6 +241,22 @@ def content_digest(text: str) -> str:
 
 
 def redact_public_text(text: str, *, max_chars: int = 2_048) -> str:
+    """Scrub fetched/acquired free text for a PUBLIC web-acquisition surface.
+
+    Web-specific structural redactions run first (drop whole lines carrying
+    agent-internal markers, redact storage/signed URLs), then the canonical
+    public-share kernel
+    (:func:`magi_agent.evidence.run_redaction.redact_public_text`, built on
+    ``ops.safety``) closes the gaps this module used to leak: basic-auth URL
+    userinfo, quoted credential values, internal cluster hostnames, RFC1918 IPs,
+    emails, and the full provider-token denylist. The local ``_SECRET_TEXT_RE`` /
+    ``_PRIVATE_PATH_RE`` remain as a defense-in-depth backstop for generic
+    ``KEY=VALUE`` / workspace-path shapes the shared kernel intentionally scopes
+    out. Coverage is a strict superset of the previous fork; the result is clipped
+    to ``max_chars``.
+    """
+    if not isinstance(text, str):
+        return ""
     public_lines = [
         line for line in text.splitlines() if not _RAW_PRIVATE_LINE_RE.search(line)
     ]
@@ -245,6 +264,11 @@ def redact_public_text(text: str, *, max_chars: int = 2_048) -> str:
     redacted = _SENSITIVE_URL_RE.sub("[redacted-url]", redacted)
     redacted = _SECRET_TEXT_RE.sub("[redacted]", redacted)
     redacted = _PRIVATE_PATH_RE.sub("[redacted-path]", redacted)
+    # Canonical public-share kernel runs LAST as the additive superset: it closes
+    # the gap (basic-auth userinfo, quoted credentials, cluster hostnames, RFC1918
+    # IPs, emails, full provider denylist) without relabelling what the
+    # web-specific passes above already redacted.
+    redacted = _redact_public_share_text(redacted, max_chars=None)
     return redacted[:max_chars]
 
 
