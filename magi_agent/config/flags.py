@@ -363,6 +363,26 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_WORK_QUEUE_EXECUTOR_ENABLED",
         summary="Enable the durable work-queue dispatcher tick loop.",
     ),
+    # --- WS1 durable crash-resume substrate (default-OFF) -------------------
+    _b(
+        "MAGI_DURABLE_LOCAL_WRITES_ENABLED",
+        summary=(
+            "Master gate for the WS1 durable substrate: create/write the local "
+            "durable_checkpoints + plan_ledger tables in the work-queue sqlite. "
+            "Local sqlite only; never the hosted DB. OFF is byte-identical."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_DURABLE_MAX_RESUME_ATTEMPTS",
+        default=2,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Bound on automatic crash-resume re-entries per (run_id, turn_id) "
+            "before the startup sweep gives up and starts fresh (E11/R6)."
+        ),
+        kind="int",
+    ),
     _b(
         "MAGI_WORK_QUEUE_BOARD_API_ENABLED",
         summary="Mount the read-only work-queue board HTTP API.",
