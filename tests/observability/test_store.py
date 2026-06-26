@@ -746,3 +746,86 @@ def test_has_evidence_no_false_positive_for_evidenceref_in_string_value(tmp_path
     rows = store.list_events(has_evidence=True)
     assert rows == []
     store.close()
+
+
+# ---------------------------------------------------------------------------
+# Task-8 review fixes
+# ---------------------------------------------------------------------------
+
+from magi_agent.observability.store import _payload_has_evidence
+
+
+# Finding 1 — SQL LIMIT before Python post-filter
+def test_has_evidence_limit_counts_evidence_rows_not_total_rule_check_rows(tmp_path):
+    """SQL LIMIT must NOT gate the Python evidence post-filter.
+
+    Seed 8 rule_check rows: the first 4 have no evidence, rows 5-8 have
+    evidenceRef.  With limit=2, has_evidence=True should return exactly 2
+    evidence rows (rows 5 and 6 by insertion order) — not 0 (which the old
+    code would produce by limiting to the first 4 non-evidence rows before
+    post-filtering).
+    """
+    store = ActivityStore(tmp_path / "obs.db")
+    # 4 non-evidence rule_check rows come first
+    for i in range(4):
+        store.record_event(ActivityEvent(
+            kind="rule_check",
+            payload={"ruleId": f"r{i}", "evidenceRef": ""},
+        ))
+    # 4 evidence-bearing rule_check rows follow
+    evidence_ids = []
+    for i in range(4):
+        eid = store.record_event(ActivityEvent(
+            kind="rule_check",
+            payload={"ruleId": f"ev{i}", "evidenceRef": _sha256_ref()},
+        ))
+        evidence_ids.append(eid)
+
+    rows = store.list_events(has_evidence=True, limit=2)
+    # Must get exactly 2 evidence rows (not 0 or 1)
+    assert len(rows) == 2
+    # Both returned rows must be evidence-bearing
+    assert all(r["payload"].get("evidenceRef") == _sha256_ref() for r in rows)
+    # Order is ASC by id: the two EARLIEST evidence rows (ev0 and ev1)
+    assert rows[0]["id"] == evidence_ids[0]
+    assert rows[1]["id"] == evidence_ids[1]
+    store.close()
+
+
+# Finding 2 — non-numeric matched_evidence must not raise
+def test_payload_has_evidence_non_numeric_matched_evidence_returns_false():
+    """dict detail with non-numeric matched_evidence must not raise; returns False."""
+    # String "n/a" should not raise ValueError
+    assert _payload_has_evidence({"detail": {"matched_evidence": "n/a"}}) is False
+    # Nested object should not raise
+    assert _payload_has_evidence({"detail": {"matched_evidence": {"count": 3}}}) is False
+    # None value should not raise
+    assert _payload_has_evidence({"detail": {"matched_evidence": None}}) is False
+
+
+def test_payload_has_evidence_numeric_matched_evidence_still_works():
+    """Numeric matched_evidence path remains correct after isinstance guard."""
+    assert _payload_has_evidence({"detail": {"matched_evidence": 3}}) is True
+    assert _payload_has_evidence({"detail": {"matched_evidence": 0}}) is False
+    assert _payload_has_evidence({"detail": {"matched_evidence": 1.5}}) is True
+
+
+# Finding 3 — empty-payload guard
+def test_payload_has_evidence_empty_dict_returns_false():
+    """_payload_has_evidence({}) is self-contained and returns False."""
+    assert _payload_has_evidence({}) is False
+
+
+def test_payload_has_evidence_none_returns_false():
+    """_payload_has_evidence(None) returns False (explicit guard at top)."""
+    # type: ignore[arg-type]
+    assert _payload_has_evidence(None) is False  # type: ignore[arg-type]
+
+
+def test_has_evidence_no_payload_row_excluded_via_store(tmp_path):
+    """rule_check with no payload (stored as None) -> excluded (confirming store path)."""
+    store = ActivityStore(tmp_path / "obs.db")
+    store.record_event(ActivityEvent(kind="rule_check"))  # no payload
+    rows = store.list_events(has_evidence=True)
+    assert rows == []
+    store.close()

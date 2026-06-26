@@ -39,14 +39,20 @@ def _payload_has_evidence(payload: dict) -> bool:
     evidence-bearing.  This is the key reason a pure SQL LIKE filter is
     insufficient (LIKE ``'%evidenceRef%'`` would match even empty-value rows).
     """
+    # Guard: empty or non-dict payload has no evidence signals.
+    if not payload:
+        return False
     # Path 1: top-level evidenceRef string (verifier result rule events).
     evidence_ref = payload.get("evidenceRef")
     if isinstance(evidence_ref, str) and evidence_ref:
         return True
     # Path 2: detail.matched_evidence in dict form (brief-specified; future-proof).
+    # Use isinstance guard instead of int() cast: a non-numeric matched_evidence
+    # (e.g. "n/a", a nested object) must not raise — treat as no-evidence (False).
     detail = payload.get("detail")
     if isinstance(detail, dict):
-        return int(detail.get("matched_evidence") or 0) > 0
+        val = detail.get("matched_evidence")
+        return isinstance(val, (int, float)) and val > 0
     # Path 3: matched=N embedded in detail string (current evidence verdict format).
     if isinstance(detail, str):
         m = _MATCHED_COUNT_RE.search(detail)
@@ -250,14 +256,26 @@ class ActivityStore:
             args.append("rule_check")
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         limit = max(1, min(int(limit), 1000))
-        sql = f"SELECT * FROM activity_events{where} ORDER BY id ASC LIMIT ?"
-        args.append(limit)
-        with self._lock:
-            rows = self._conn.execute(sql, args).fetchall()
-        result = [_row_to_dict(r) for r in rows]
         if has_evidence:
+            # Limit must move to Python for the has_evidence path.
+            # Applying SQL LIMIT before _payload_has_evidence post-filtering would
+            # truncate to the first N rule_check rows and then drop non-evidence
+            # ones — returning FEWER than `limit` rows even when more evidence-
+            # bearing rows exist deeper.  rule_check is a sparse kind so fetching
+            # all of them is bounded in practice; the Python slice below enforces
+            # the same max-1000 cap as the normal path.
+            sql = f"SELECT * FROM activity_events{where} ORDER BY id ASC"
+            with self._lock:
+                rows = self._conn.execute(sql, args).fetchall()
+            result = [_row_to_dict(r) for r in rows]
             result = [r for r in result if _payload_has_evidence(r["payload"])]
-        return result
+            return result[:limit]
+        else:
+            sql = f"SELECT * FROM activity_events{where} ORDER BY id ASC LIMIT ?"
+            args.append(limit)
+            with self._lock:
+                rows = self._conn.execute(sql, args).fetchall()
+            return [_row_to_dict(r) for r in rows]
 
     def count_events(self) -> int:
         if self._closed:
