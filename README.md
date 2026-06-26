@@ -118,8 +118,12 @@ constraints were met, and here is the proof."
 # 1. Install (Homebrew)
 brew install --force-bottle openmagi/tap/magi-agent
 
-# 2. Set ONE provider key (auto-detected)
-export ANTHROPIC_API_KEY=...   # or OPENAI_API_KEY / GEMINI_API_KEY / GOOGLE_API_KEY / FIREWORKS_API_KEY / OPENROUTER_API_KEY
+# 2. Set whichever provider key you have (auto-detected, just one is enough)
+export ANTHROPIC_API_KEY=...     # Claude
+export OPENAI_API_KEY=...        # GPT
+export GEMINI_API_KEY=...        # Gemini (or GOOGLE_API_KEY)
+export FIREWORKS_API_KEY=...     # Fireworks
+export OPENROUTER_API_KEY=...    # OpenRouter
 
 # 3. Run the CLI, or serve the local dashboard
 magi -p "Inspect this repository and summarize the runnable surfaces"
