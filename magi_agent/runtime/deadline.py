@@ -41,7 +41,13 @@ def deadline_note(
     been crossed since the last call.
     """
     source = os.environ if env is None else env
-    raw = (source.get("MAGI_EVAL_DEADLINE_SECONDS") or "").strip()
+    # I-1: route the deadline knob through the typed flag registry.
+    # ``flag_str`` returns the registered default (``""``) for unset;
+    # the surrounding ``(value or "").strip()`` collapses both ``None``
+    # and ``""`` to ``""``, so the strict opt-in shape is preserved.
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    raw = (flag_str("MAGI_EVAL_DEADLINE_SECONDS", env=source) or "").strip()
     if not raw:
         return None
     try:
