@@ -756,6 +756,57 @@ def _search_files(files: list[dict[str, Any]], query: str, limit: int) -> list[d
     return results
 
 
+def _vector_memory_search(query: str, limit: int) -> list[dict[str, Any]] | None:
+    """Semantic search over the workspace ``memory/`` tree via qmd vsearch.
+
+    Returns ``None`` when vector search is not usable (operator opt-in OFF, qmd
+    binary absent, or the per-workspace collection has not been embedded yet) so
+    the caller can fall back to the substring matcher.  Returns a (possibly
+    empty) list of result dicts — same shape as :func:`_search_files` — when the
+    vector backend ran.
+
+    This is an EXPLICIT, latency-tolerant surface: ``qmd vsearch`` cold-loads the
+    embedding model (~10-40s), which is why it is gated to this dashboard endpoint
+    and never the per-turn recall hot path.  Fail-soft: any error → ``None``.
+    """
+    if not query.strip():
+        return None
+    try:
+        from magi_agent.memory.config import resolve_memory_config
+        from magi_agent.memory.search import select_search_backend
+
+        config = resolve_memory_config()
+        if not config.vector_search:
+            return None
+        backend = select_search_backend(config, vector=True)
+        if not backend.capabilities.supports_vector:
+            # qmd absent (fell back to PyBM25, no vector) -> let caller use substring.
+            return None
+        root = _workspace_root()
+        backend.reindex(root)
+        hits = backend.search(query, k=max(int(limit), 1))
+    except Exception:  # noqa: BLE001 - never break the endpoint on a search error
+        return None
+    results: list[dict[str, Any]] = []
+    for hit in hits:
+        path = getattr(hit, "path", None)
+        content = getattr(hit, "content", None)
+        score = getattr(hit, "score", None)
+        if not isinstance(path, str) or not isinstance(content, str):
+            continue
+        if isinstance(score, bool) or not isinstance(score, (int, float)):
+            continue
+        results.append(
+            {
+                "path": path,
+                "score": float(score),
+                "context": content[:_PREVIEW_CHARS],
+                "contentPreview": content[:_PREVIEW_CHARS],
+            }
+        )
+    return results
+
+
 # --------------------------------------------------------------------------- #
 # Route registration
 # --------------------------------------------------------------------------- #
@@ -936,13 +987,26 @@ def register_app_api_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         return JSONResponse(content={"deleted": deleted})
 
     @app.get("/v1/app/memory/search")
-    def app_memory_search(request: Request, q: str = "", limit: int = 15) -> JSONResponse:
+    def app_memory_search(
+        request: Request, q: str = "", limit: int = 15, vector: int = 0
+    ) -> JSONResponse:
         denied = guard(request)
         if denied is not None:
             return denied
+        # Opt-in semantic search (qmd vsearch over the memory/ tree). Falls back to
+        # the substring matcher when vector is off/unavailable so the endpoint's
+        # contract is unchanged for existing callers.
+        if vector:
+            vector_results = _vector_memory_search(q, limit)
+            if vector_results is not None:
+                return JSONResponse(
+                    content={"results": vector_results, "mode": "vector"}
+                )
         files = _list_markdown(["memory", ".magi/memory"], ["MEMORY.md", "USER.md"])
         files = _list_identity_files() + files
-        return JSONResponse(content={"results": _search_files(files, q, limit)})
+        return JSONResponse(
+            content={"results": _search_files(files, q, limit), "mode": "substring"}
+        )
 
     # ---- workspace file write ------------------------------------------ #
     @app.put("/v1/app/workspace/file")

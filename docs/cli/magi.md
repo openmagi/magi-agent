@@ -340,6 +340,30 @@ pytest .magi/packs/my_check/test_my_check_pack.py
 Exit code 2 on an unknown type or an already-existing pack directory. See the
 Write Your First Pack guide for the full authoring path.
 
+## `magi memory`
+
+Manages the **optional** `qmd` search index for Hipocampus memory. Memory search
+works out of the box on a built-in pure-Python BM25 index; `qmd` is an opt-in
+upgrade and is never a hard dependency.
+
+```bash
+magi memory init               # install qmd (brew/npm) + index this workspace
+magi memory init --vector      # also generate embeddings for semantic search
+magi memory search "<query>"   # BM25 keyword search over memory/
+magi memory search "<query>" --vector   # semantic search (needs init --vector)
+```
+
+`init` installs the `qmd` binary if missing (Homebrew first, then
+`npm install -g @tobilu/qmd`), registers this workspace's `memory/` tree as a
+private collection, and writes the opt-ins to `~/.magi/config.toml`. `--vector`
+additionally runs `qmd embed` (first run downloads an embedding model, ~2GB) and
+enables semantic search.
+
+Vector search is **explicit-only**: `magi memory search --vector` and the
+dashboard `/v1/app/memory/search?vector=1` endpoint use it, but the per-turn
+recall hot path always stays on fast BM25 (a `qmd vsearch` cold-loads the
+embedding model, ~10-40s). See [Memory](/docs/memory) for the full model.
+
 ## `magi doctor`
 
 `magi doctor` runs local environment diagnostics so a first-time user can see
@@ -355,6 +379,9 @@ what is and is not configured before running a turn. It checks:
 - **Config path readable** — whether the resolved config file path can be read.
 - **Working directory writable** — whether the current working directory can be
   written to.
+- **qmd index (optional)** — whether the optional `qmd` search binary is on
+  `PATH`. Memory search falls back to the built-in BM25 backend when it is
+  absent; run `magi memory init` to enable the qmd index.
 
 ```sh
 magi doctor

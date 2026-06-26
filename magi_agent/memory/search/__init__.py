@@ -24,7 +24,9 @@ from .bm25 import PyBM25Backend
 from .qmd import QmdBackend
 
 
-def select_search_backend(config: MemoryRuntimeConfig) -> SearchBackend:
+def select_search_backend(
+    config: MemoryRuntimeConfig, *, vector: bool = False
+) -> SearchBackend:
     """Choose the search backend for a resolved memory config.
 
     Returns :class:`QmdBackend` when the operator prefers qmd AND the binary is
@@ -34,8 +36,14 @@ def select_search_backend(config: MemoryRuntimeConfig) -> SearchBackend:
     The ``qmd``-availability probe is delegated to :attr:`QmdBackend.available`
     so ``subprocess``/``shutil`` stay confined to :mod:`qmd` within this package.
 
-    Vector search is out of scope for PR2 — ``config.vector_search`` does not
-    change the selection here; both backends report ``supports_vector=False``.
+    Vector search is engaged ONLY when the caller is an EXPLICIT, latency-tolerant
+    search surface (``vector=True``) AND the operator opted into
+    ``config.vector_search``.  The per-turn recall callers pass the default
+    ``vector=False`` so their backend stays on BM25 (``qmd search`` / PyBM25,
+    sub-second).  A vsearch invocation cold-loads the embedding model (~10-40s),
+    which is unacceptable on the hot path — see :mod:`magi_agent.memory.search.qmd`.
+    ``PyBM25Backend`` has no vector mode, so when qmd is absent an explicit
+    ``vector=True`` request still degrades to BM25 rather than failing.
 
     The qmd backend is constructed with the resolved
     ``config.prefer_qmd_auto_register`` opt-in (default False) so that a uniform
@@ -43,7 +51,10 @@ def select_search_backend(config: MemoryRuntimeConfig) -> SearchBackend:
     unless the operator explicitly opted in (multi-tenant safety).
     """
     if config.prefer_qmd:
-        backend = QmdBackend(auto_register=config.prefer_qmd_auto_register)
+        backend = QmdBackend(
+            auto_register=config.prefer_qmd_auto_register,
+            vector=vector and config.vector_search,
+        )
         if backend.available:
             return backend
     return PyBM25Backend()

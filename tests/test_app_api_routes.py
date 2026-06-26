@@ -301,6 +301,84 @@ def test_memory_list_read_search(tmp_path, monkeypatch) -> None:
 
     search = client.get("/v1/app/memory/search", params={"q": "bravo"})
     assert any(r["path"] == "MEMORY.md" for r in search.json()["results"])
+    # Default (no vector param) uses the substring matcher.
+    assert search.json()["mode"] == "substring"
+
+
+def test_memory_search_vector_opt_in_uses_vector_backend(tmp_path, monkeypatch) -> None:
+    from magi_agent.transport import app_api
+
+    (tmp_path / "MEMORY.md").write_text("alpha bravo charlie", encoding="utf-8")
+    client = _client(tmp_path, monkeypatch)
+
+    captured: dict[str, object] = {}
+
+    def fake_vector(query: str, limit: int):
+        captured["query"] = query
+        captured["limit"] = limit
+        return [{"path": "memory/daily/x.md", "score": 0.91, "context": "semantic hit",
+                 "contentPreview": "semantic hit"}]
+
+    monkeypatch.setattr(app_api, "_vector_memory_search", fake_vector)
+
+    resp = client.get("/v1/app/memory/search", params={"q": "meaning", "vector": 1})
+    body = resp.json()
+    assert body["mode"] == "vector"
+    assert body["results"][0]["path"] == "memory/daily/x.md"
+    assert captured["query"] == "meaning"
+
+
+def test_memory_search_vector_falls_back_when_unavailable(tmp_path, monkeypatch) -> None:
+    """vector=1 but the vector backend is unusable (returns None) -> substring."""
+    from magi_agent.transport import app_api
+
+    (tmp_path / "MEMORY.md").write_text("alpha bravo charlie", encoding="utf-8")
+    client = _client(tmp_path, monkeypatch)
+    monkeypatch.setattr(app_api, "_vector_memory_search", lambda q, limit: None)
+
+    resp = client.get("/v1/app/memory/search", params={"q": "bravo", "vector": 1})
+    body = resp.json()
+    assert body["mode"] == "substring"
+    assert any(r["path"] == "MEMORY.md" for r in body["results"])
+
+
+def test_vector_memory_search_helper_maps_hits_when_opted_in(tmp_path, monkeypatch) -> None:
+    from magi_agent.memory.search.base import SearchCapabilities, SearchHit
+    from magi_agent.transport import app_api
+
+    monkeypatch.chdir(tmp_path)
+    for name in app_api._WORKSPACE_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("MAGI_MEMORY_VECTOR_SEARCH", "1")
+
+    class _FakeVectorBackend:
+        capabilities = SearchCapabilities(name="qmd", supports_vector=True)
+
+        def reindex(self, root):
+            return None
+
+        def search(self, query, *, k):
+            return [SearchHit(path="memory/daily/a.md", content="semantic body", score=0.8)]
+
+    monkeypatch.setattr(
+        "magi_agent.memory.search.select_search_backend",
+        lambda config, *, vector=False: _FakeVectorBackend(),
+    )
+
+    out = app_api._vector_memory_search("anything", 5)
+    assert out == [
+        {"path": "memory/daily/a.md", "score": 0.8,
+         "context": "semantic body", "contentPreview": "semantic body"}
+    ]
+
+
+def test_vector_memory_search_helper_returns_none_without_opt_in(tmp_path, monkeypatch) -> None:
+    from magi_agent.transport import app_api
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("MAGI_MEMORY_VECTOR_SEARCH", raising=False)
+    # Opt-in OFF -> helper returns None so the caller uses substring search.
+    assert app_api._vector_memory_search("anything", 5) is None
 
 
 def test_memory_archive_is_listed_and_readable(tmp_path, monkeypatch) -> None:

@@ -12,16 +12,27 @@ directory under a **deterministic per-workspace collection name**
 (``magi-mem-<sha1(abspath)[:12]>``) and **client-side filters** search results to
 that collection's ``qmd://<name>/`` prefix.
 
-Verified ``qmd`` contract (probed against qmd 0.x on this platform):
+Verified ``qmd`` contract (probed against qmd 2.x on this platform):
   * ``qmd collection add <path> --name <name>`` registers + BM25-indexes immediately
     ("Indexed: N new"). Vector embeddings are a *separate* ``qmd embed`` step, so
-    BM25 search needs only ``add`` — we never call ``embed``.
+    BM25 search needs only ``add`` — we never call ``embed`` from this backend
+    (the install-time ``magi memory init --vector`` step owns embedding generation).
   * ``qmd update [<name>]`` refreshes an existing collection (slow — it touches
     embeddings); used only as a best-effort refresh when the collection already
     exists, never on the hot search path.
   * ``qmd collection list`` prints ``<name> (qmd://<name>/)`` lines.
   * ``qmd search "<q>" --json`` → ``[{"docid","score","file","title","snippet"}]``
-    spanning every collection; we keep only rows under our prefix.
+    spanning every collection; we keep only rows under our prefix. BM25 keyword,
+    no model load (~1s) — the default for the per-turn recall hot path.
+  * ``qmd vsearch "<q>" --json`` → SAME JSON shape, but pure vector similarity.
+    Requires the collection to have been embedded (``qmd embed``). Each invocation
+    cold-loads the embedding model (~10-40s), so this is OPT-IN and reserved for
+    EXPLICIT, latency-tolerant search surfaces — never the per-turn hot path.
+
+Vector mode (``vector=True``) is selected only by the explicit-search seam
+(``select_search_backend(config, vector=True)`` with ``config.vector_search`` ON);
+the per-turn recall callers construct this backend with ``vector=False`` so they
+keep BM25's sub-second latency.
 
 Degrade-gracefully contract: this backend must NEVER crash the caller. Missing
 binary, non-zero exit, timeout, or unparseable output → ``[]`` (search) / no-op
@@ -43,6 +54,11 @@ _QMD_BINARY = "qmd"
 
 #: Hard cap so a hung/huge index operation can't wedge the caller.
 _TIMEOUT_SECONDS = 30
+
+#: Vector search cold-loads the embedding model per invocation (~10-40s on a
+#: warm disk, more on first run). Give the subprocess generous headroom so a
+#: legitimate (slow) vector query is not killed by the BM25-tuned cap above.
+_VECTOR_TIMEOUT_SECONDS = 90
 
 #: Per-workspace collection name prefix.
 _COLLECTION_PREFIX = "magi-mem-"
@@ -79,11 +95,20 @@ class QmdBackend:
         self,
         *,
         binary: str = _QMD_BINARY,
-        timeout: int = _TIMEOUT_SECONDS,
+        timeout: int | None = None,
         auto_register: bool = False,
+        vector: bool = False,
     ) -> None:
         self._binary = binary
-        self._timeout = timeout
+        #: When ``vector`` is on, :meth:`search` runs ``qmd vsearch`` (pure vector
+        #: similarity) instead of ``qmd search`` (BM25). It cold-loads the
+        #: embedding model, so the timeout defaults higher unless overridden.
+        self._vector = vector
+        self._timeout = (
+            timeout
+            if timeout is not None
+            else (_VECTOR_TIMEOUT_SECONDS if vector else _TIMEOUT_SECONDS)
+        )
         #: Instance default for :meth:`reindex`'s ``allow_auto_register`` — set by
         #: ``select_search_backend`` from ``config.prefer_qmd_auto_register`` so
         #: callers can invoke the uniform ``reindex(root)`` protocol method and
@@ -94,7 +119,7 @@ class QmdBackend:
 
     @property
     def capabilities(self) -> SearchCapabilities:
-        return SearchCapabilities(name="qmd", supports_vector=False)
+        return SearchCapabilities(name="qmd", supports_vector=self._vector)
 
     @property
     def available(self) -> bool:
@@ -157,7 +182,11 @@ class QmdBackend:
     def search(self, query: str, *, k: int) -> list[SearchHit]:
         if k <= 0 or not query.strip() or self._collection is None:
             return []
-        completed = self._run([self._binary, "search", query, "--json"])
+        # ``vsearch`` = pure vector similarity (opt-in, slow, needs embeddings);
+        # ``search`` = BM25 keyword (default, fast). Both emit the same JSON shape
+        # spanning all collections, so ``_parse_hits`` scopes to ours either way.
+        command = "vsearch" if self._vector else "search"
+        completed = self._run([self._binary, command, query, "--json"])
         if completed is None or completed.returncode != 0:
             return []
         return self._parse_hits(completed.stdout, collection=self._collection, k=k)
