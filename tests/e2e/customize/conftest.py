@@ -104,7 +104,14 @@ _FQA1_MASTER_FLAGS: tuple[str, ...] = (
     # expansion — slot fan-out helpers consult these.
     "MAGI_CUSTOMIZE_LIFECYCLE_EXPANSION_ENABLED",
     "MAGI_CUSTOMIZE_LIFECYCLE_TURN_HOOKS_ENABLED",
-    "MAGI_CUSTOMIZE_LIFECYCLE_LLM_CALL_HOOKS_ENABLED",
+    # F-LIFE2 master switch — the actual env name has NO `LIFECYCLE_`
+    # infix (see magi_agent/customize/lifecycle_audit.py:121
+    # `llm_call_hooks_enabled` reads `MAGI_CUSTOMIZE_LLM_CALL_HOOKS_ENABLED`).
+    # Pre-fix this entry was `MAGI_CUSTOMIZE_LIFECYCLE_LLM_CALL_HOOKS_ENABLED`
+    # — a non-existent flag — leaving the per-LLM-call fan-out gated OFF
+    # for every test and collapsing the matrix's llm_call rows to
+    # "judge never fires" (real wire regression masked as a test bug).
+    "MAGI_CUSTOMIZE_LLM_CALL_HOOKS_ENABLED",
     "MAGI_CUSTOMIZE_LIFECYCLE_EXTRA_EMITTERS_ENABLED",
     "MAGI_CUSTOMIZE_SESSION_TASK_EMITTERS_ENABLED",
     # F-EXEC1 / F-EXEC2 — operator shell rules.
