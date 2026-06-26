@@ -39,7 +39,12 @@ def resolve_server_port(
     environ: Mapping[str, str] | None = None,
 ) -> int:
     env = os.environ if environ is None else environ
-    default_port = int(env.get("CORE_AGENT_PORT", "8080"))
+    # I-1: route the bootstrap port through the typed flag registry.
+    # ``flag_int`` returns ``spec.default`` (8080) for unset / malformed,
+    # byte-identical to the prior ``int(env.get(NAME, "8080"))`` shape.
+    from magi_agent.config.flags import flag_int  # noqa: PLC0415
+
+    default_port = flag_int("CORE_AGENT_PORT", env=env)
     raw_args = list(sys.argv[1:] if argv is None else argv)
 
     parser = argparse.ArgumentParser(prog="magi-agent")
@@ -145,7 +150,14 @@ def _parse_runtime_config(environ: Mapping[str, str]):
     try:
         return parse_runtime_env(environ)
     except RuntimeEnvError:
-        if _env_enabled(environ.get("MAGI_AGENT_REQUIRE_ENV")):
+        # I-1: route the require-env toggle through the typed flag
+        # registry. Byte-identical: ``flag_bool`` returns ``False`` on
+        # ``None``/unset (matches ``_env_enabled(None) -> False``) and
+        # delegates every set value to ``is_true`` (matches
+        # ``_env_enabled`` which itself wraps ``is_true``).
+        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+        if flag_bool("MAGI_AGENT_REQUIRE_ENV", env=environ):
             raise
         local_env = {
             "BOT_ID": "local-bot",
