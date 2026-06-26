@@ -58,6 +58,8 @@ EXPECTED_NATIVE_TOOL_NAMES = {
     "knowledge-search",
     "KnowledgeWrite",
     "knowledge-write",
+    "OkfLookup",
+    "okf-lookup",
     "MemoryRedact",
     "MemoryWrite",
     "MissionLedger",

@@ -438,6 +438,61 @@ _NATIVE_PLUGIN_DATA: tuple[Mapping[str, object], ...] = (
         ),
     },
     {
+        "id": "openmagi.knowledge-okf",
+        "name": "OpenMagi Knowledge (OKF)",
+        "kind": "native",
+        "version": "0.1.0-adk-scaffold",
+        "description": (
+            "Redaction-free lookup over trusted Open Knowledge Format (OKF) "
+            "bundles. The OkfLookup tool returns curated doc paths/body/"
+            "frontmatter VERBATIM (it does NOT route through the fake-provider "
+            "KnowledgeBoundary). Read-only and runtime default-OFF: inert until "
+            "MAGI_KNOWLEDGE_OKF_ENABLED + MAGI_KNOWLEDGE_OKF_LOOKUP_ENABLED are "
+            "set (the env switch is the real activation gate; the tool returns "
+            "okf_disabled otherwise)."
+        ),
+        "publisher": "openmagi",
+        "defaultInstalled": True,
+        "defaultEnabled": True,
+        "optOutAllowed": True,
+        "securityCritical": False,
+        "audit_required": True,
+        "runtime": {
+            "minCoreVersion": "0.1.0-adk-scaffold",
+            "adkCompatibility": "ADK tool/plugin attachment point",
+        },
+        "permissions": ("read",),
+        "services": (),
+        "tools": (
+            {
+                "name": "OkfLookup",
+                "entrypoint": "magi_agent.plugins.native.okf:okf_lookup",
+            },
+            {
+                "name": "okf-lookup",
+                "entrypoint": "magi_agent.plugins.native.okf:okf_lookup",
+            },
+        ),
+        "configSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "bundlePaths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "lookupEnabled": {
+                    "type": "boolean",
+                    "default": False,
+                },
+            },
+        },
+        "capabilities": (
+            {"type": "tool", "name": "OkfLookup"},
+            {"type": "tool", "name": "okf-lookup"},
+        ),
+    },
+    {
         "id": "openmagi.missions",
         "name": "OpenMagi Missions",
         "kind": "native",

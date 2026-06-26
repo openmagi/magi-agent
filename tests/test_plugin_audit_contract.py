@@ -24,6 +24,7 @@ EXPECTED_NATIVE_PLUGIN_IDS = (
     "openmagi.coding",
     "openmagi.documents",
     "openmagi.knowledge",
+    "openmagi.knowledge-okf",
     "openmagi.missions",
     "openmagi.scheduled-work",
     "openmagi.security-posture",

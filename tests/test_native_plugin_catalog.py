@@ -21,6 +21,7 @@ EXPECTED_NATIVE_PLUGIN_IDS = (
     "openmagi.coding",
     "openmagi.documents",
     "openmagi.knowledge",
+    "openmagi.knowledge-okf",
     "openmagi.missions",
     "openmagi.scheduled-work",
     "openmagi.security-posture",
@@ -458,6 +459,7 @@ def test_native_catalog_resolves_to_enabled_metadata_only_state_and_opt_out_remo
         "MemoryRedact",
         "MissionLedger",
         "NotifyUser",
+        "OkfLookup",
         "PackageDependencyResolve",
         "ProjectVerificationPlanner",
         "RepoMap",
@@ -484,6 +486,7 @@ def test_native_catalog_resolves_to_enabled_metadata_only_state_and_opt_out_remo
         "apify_search_actors",
         "knowledge-search",
         "knowledge-write",
+        "okf-lookup",
         "web-search",
         "web_search",
     )
