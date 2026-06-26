@@ -31,6 +31,56 @@ CREATE INDEX IF NOT EXISTS idx_ae_kind ON activity_events(kind, ts);
 """
 
 
+def _label_from_session_id(session_id: str) -> str:
+    """Tier-3 fallback: parse a human-readable label from a session_id string.
+
+    Examples:
+      "agent:main:app:demo:32"  ->  "demo #32"   (last segment numeric)
+      "session:work"            ->  "session:work"
+      "s1"                      ->  "s1"
+    """
+    parts = session_id.split(":")
+    if len(parts) >= 2:
+        last = parts[-1]
+        if last.isdigit():
+            return f"{parts[-2]} #{last}"
+        return ":".join(parts[-2:])
+    return session_id
+
+
+_MAX_LABEL_SUMMARY_CHARS = 120
+_MAX_LABEL_TOOLS = 5
+
+
+def _derive_session_label(
+    session_id: str,
+    first_turn_summary: str | None,
+    tool_names: list[str],
+) -> str:
+    """Deterministic 3-tier label derivation — no LLM.
+
+    Tier 1: non-empty stripped summary from the session's first turn_start event.
+    Tier 2: distinct tool names joined by ", " (capped at _MAX_LABEL_TOOLS).
+    Tier 3: parsed from session_id via _label_from_session_id.
+    """
+    # Tier 1
+    if first_turn_summary is not None:
+        stripped = first_turn_summary.strip()
+        if stripped:
+            return stripped[:_MAX_LABEL_SUMMARY_CHARS]
+
+    # Tier 2
+    if tool_names:
+        if len(tool_names) <= _MAX_LABEL_TOOLS:
+            return ", ".join(tool_names)
+        shown = ", ".join(tool_names[:_MAX_LABEL_TOOLS])
+        extra = len(tool_names) - _MAX_LABEL_TOOLS
+        return f"{shown} +{extra} more"
+
+    # Tier 3
+    return _label_from_session_id(session_id)
+
+
 def _row_to_dict(row: sqlite3.Row) -> dict:
     payload = row["payload_json"]
     return {
@@ -179,20 +229,86 @@ class ActivityStore:
         if self._closed:
             return []
         limit = max(1, min(int(limit), 1000))
-        sql = (
+
+        # Query 1: main aggregation (existing fields + error/rule_check counts).
+        # error_count: events with kind='error' or kind='aborted' — these are the
+        # dedicated lifecycle error kinds emitted by the projector (onError/onAbort
+        # hooks), distinct from tool_end events that may carry status='error'.
+        sql_main = (
             "SELECT session_id AS id, COUNT(*) AS event_count, "
             "MIN(ts) AS started_at, MAX(ts) AS last_active, "
-            "SUM(CASE WHEN kind='tool_start' THEN 1 ELSE 0 END) AS tool_count "
+            "SUM(CASE WHEN kind='tool_start' THEN 1 ELSE 0 END) AS tool_count, "
+            "SUM(CASE WHEN kind IN ('error','aborted') THEN 1 ELSE 0 END) AS error_count, "
+            "SUM(CASE WHEN kind='rule_check' THEN 1 ELSE 0 END) AS rule_check_count "
             "FROM activity_events WHERE session_id IS NOT NULL "
             "GROUP BY session_id ORDER BY last_active DESC LIMIT ?"
         )
+
+        # Query 2: per-session per-kind counts for kind_breakdown.
+        sql_breakdown = (
+            "SELECT session_id, kind, COUNT(*) AS cnt "
+            "FROM activity_events WHERE session_id IS NOT NULL "
+            "GROUP BY session_id, kind"
+        )
+
+        # Query 3: summary of the FIRST turn_start event per session (by MIN ts).
+        # Uses a derived-table join — no correlated subquery; one pass.
+        sql_first_turn = (
+            "SELECT ae.session_id, ae.summary "
+            "FROM activity_events ae "
+            "JOIN ("
+            "  SELECT session_id, MIN(ts) AS min_ts "
+            "  FROM activity_events "
+            "  WHERE kind='turn_start' AND session_id IS NOT NULL "
+            "  GROUP BY session_id"
+            ") AS ft ON ae.session_id = ft.session_id AND ae.ts = ft.min_ts "
+            "WHERE ae.kind = 'turn_start'"
+        )
+
+        # Query 4: distinct tool_names per session ordered by first use.
+        sql_tools = (
+            "SELECT session_id, tool_name "
+            "FROM activity_events "
+            "WHERE tool_name IS NOT NULL AND session_id IS NOT NULL "
+            "GROUP BY session_id, tool_name "
+            "ORDER BY session_id, MIN(ts) ASC"
+        )
+
         try:
             with self._lock:
-                rows = self._conn.execute(sql, (limit,)).fetchall()
-            return [dict(r) for r in rows]
+                main_rows = self._conn.execute(sql_main, (limit,)).fetchall()
+                breakdown_rows = self._conn.execute(sql_breakdown).fetchall()
+                first_turn_rows = self._conn.execute(sql_first_turn).fetchall()
+                tool_rows = self._conn.execute(sql_tools).fetchall()
         except Exception:
             logger.debug("activity store list_sessions failed", exc_info=True)
             return []
+
+        # Build lookup structures.
+        breakdown: dict[str, dict[str, int]] = {}
+        for r in breakdown_rows:
+            breakdown.setdefault(r["session_id"], {})[r["kind"]] = r["cnt"]
+
+        first_turn_summary: dict[str, str | None] = {
+            r["session_id"]: r["summary"] for r in first_turn_rows
+        }
+
+        tool_names_by_session: dict[str, list[str]] = {}
+        for r in tool_rows:
+            tool_names_by_session.setdefault(r["session_id"], []).append(r["tool_name"])
+
+        result: list[dict] = []
+        for row in main_rows:
+            sid = row["id"]
+            session = dict(row)
+            session["kind_breakdown"] = breakdown.get(sid, {})
+            session["label"] = _derive_session_label(
+                sid,
+                first_turn_summary.get(sid),
+                tool_names_by_session.get(sid, []),
+            )
+            result.append(session)
+        return result
 
     def latest_event_with_kind_like(self, needle: str) -> dict | None:
         if self._closed:

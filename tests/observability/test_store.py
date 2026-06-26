@@ -289,3 +289,230 @@ def test_combined_exclude_kind_and_before_id(tmp_path):
     expected = [r for r in all_rows if r["id"] < pivot and r["kind"] != "message"]
     assert [r["id"] for r in rows] == [r["id"] for r in expected]
     store.close()
+
+
+# ---------------------------------------------------------------------------
+# list_sessions — new enrichment fields (Task 5)
+# ---------------------------------------------------------------------------
+
+from magi_agent.observability.store import _derive_session_label, _label_from_session_id
+
+
+# --- pure helper: _label_from_session_id ---
+
+def test_label_from_session_id_numeric_suffix():
+    """last segment numeric -> '{name} #{n}'"""
+    assert _label_from_session_id("agent:main:app:demo:32") == "demo #32"
+
+
+def test_label_from_session_id_two_segments():
+    assert _label_from_session_id("session:work") == "session:work"
+
+
+def test_label_from_session_id_single_segment():
+    assert _label_from_session_id("s1") == "s1"
+
+
+def test_label_from_session_id_numeric_only():
+    assert _label_from_session_id("42") == "42"
+
+
+# --- pure helper: _derive_session_label tier priority ---
+
+def test_derive_label_tier1_prefers_summary():
+    label = _derive_session_label("sid", "Fix the login bug", ["Read", "Bash"])
+    assert label == "Fix the login bug"
+
+
+def test_derive_label_tier1_whitespace_stripped():
+    label = _derive_session_label("sid", "  trimmed  ", [])
+    assert label == "trimmed"
+
+
+def test_derive_label_tier1_empty_summary_falls_to_tier2():
+    label = _derive_session_label("sid", "   ", ["Read", "Bash"])
+    assert label == "Read, Bash"
+
+
+def test_derive_label_tier1_none_summary_falls_to_tier2():
+    label = _derive_session_label("sid", None, ["EditFile"])
+    assert label == "EditFile"
+
+
+def test_derive_label_tier2_tools_joined():
+    label = _derive_session_label("sid", None, ["Read", "Bash", "Edit"])
+    assert label == "Read, Bash, Edit"
+
+
+def test_derive_label_tier2_caps_at_5_with_more_indicator():
+    tools = ["T1", "T2", "T3", "T4", "T5", "T6", "T7"]
+    label = _derive_session_label("sid", None, tools)
+    assert "T1" in label
+    assert "+2 more" in label
+    assert "T6" not in label
+
+
+def test_derive_label_tier2_no_tools_falls_to_tier3():
+    label = _derive_session_label("agent:work:task:42", None, [])
+    assert label == "task #42"
+
+
+def test_derive_label_tier3_id_parse():
+    label = _derive_session_label("agent:main:app:demo:32", None, [])
+    assert label == "demo #32"
+
+
+# --- list_sessions integration: new fields present ---
+
+def test_list_sessions_new_fields_present(tmp_path):
+    """All new fields are present on every row."""
+    import time as _t
+    store = ActivityStore(tmp_path / "obs.db")
+    store.record_event(ActivityEvent(kind="turn_start", session_id="s1",
+                                     summary="hello", ts=_t.time()))
+    rows = store.list_sessions()
+    assert len(rows) == 1
+    row = rows[0]
+    assert "label" in row
+    assert "kind_breakdown" in row
+    assert "error_count" in row
+    assert "rule_check_count" in row
+    store.close()
+
+
+def test_list_sessions_existing_fields_unchanged(tmp_path):
+    """Existing fields (id, event_count, tool_count, started_at, last_active) are present and correct."""
+    import time as _t
+    store = ActivityStore(tmp_path / "obs.db")
+    t0 = _t.time()
+    store.record_event(ActivityEvent(kind="tool_start", session_id="s1", ts=t0))
+    store.record_event(ActivityEvent(kind="tool_end",   session_id="s1", ts=t0 + 1))
+    rows = store.list_sessions()
+    assert len(rows) == 1
+    s = rows[0]
+    assert s["id"] == "s1"
+    assert s["event_count"] == 2
+    assert s["tool_count"] == 1
+    assert abs(s["started_at"] - t0) < 0.01
+    assert abs(s["last_active"] - (t0 + 1)) < 0.01
+    store.close()
+
+
+def test_list_sessions_label_tier1(tmp_path):
+    """Tier-1: label = first turn_start summary (non-empty)."""
+    import time as _t
+    store = ActivityStore(tmp_path / "obs.db")
+    t0 = _t.time()
+    store.record_event(ActivityEvent(kind="turn_start", session_id="s1",
+                                     summary="Fix the login bug", ts=t0))
+    store.record_event(ActivityEvent(kind="tool_start", session_id="s1",
+                                     tool_name="Read", ts=t0 + 1))
+    rows = store.list_sessions()
+    s = next(r for r in rows if r["id"] == "s1")
+    assert s["label"] == "Fix the login bug"
+    store.close()
+
+
+def test_list_sessions_label_tier1_uses_first_turn_start(tmp_path):
+    """Tier-1: when multiple turn_start events exist, uses the EARLIEST one."""
+    import time as _t
+    store = ActivityStore(tmp_path / "obs.db")
+    t0 = _t.time()
+    store.record_event(ActivityEvent(kind="turn_start", session_id="s1",
+                                     summary="First goal", ts=t0))
+    store.record_event(ActivityEvent(kind="turn_start", session_id="s1",
+                                     summary="Second goal", ts=t0 + 5))
+    rows = store.list_sessions()
+    s = next(r for r in rows if r["id"] == "s1")
+    assert s["label"] == "First goal"
+    store.close()
+
+
+def test_list_sessions_label_tier2_tool_names(tmp_path):
+    """Tier-2: no turn_start summary -> label = distinct tool names by first use."""
+    import time as _t
+    store = ActivityStore(tmp_path / "obs.db")
+    t0 = _t.time()
+    # turn_start with empty summary -> falls to tier2
+    store.record_event(ActivityEvent(kind="turn_start", session_id="s1",
+                                     summary="  ", ts=t0))
+    store.record_event(ActivityEvent(kind="tool_start", session_id="s1",
+                                     tool_name="Read", ts=t0 + 1))
+    store.record_event(ActivityEvent(kind="tool_start", session_id="s1",
+                                     tool_name="Bash", ts=t0 + 2))
+    store.record_event(ActivityEvent(kind="tool_start", session_id="s1",
+                                     tool_name="Read", ts=t0 + 3))  # duplicate, not added
+    rows = store.list_sessions()
+    s = next(r for r in rows if r["id"] == "s1")
+    assert s["label"] == "Read, Bash"
+    store.close()
+
+
+def test_list_sessions_label_tier3_session_id_parse(tmp_path):
+    """Tier-3: no summary, no tools -> label parsed from session_id."""
+    import time as _t
+    store = ActivityStore(tmp_path / "obs.db")
+    store.record_event(ActivityEvent(kind="message", session_id="agent:main:app:demo:32",
+                                     ts=_t.time()))
+    rows = store.list_sessions()
+    s = rows[0]
+    assert s["label"] == "demo #32"
+    store.close()
+
+
+def test_list_sessions_kind_breakdown(tmp_path):
+    """kind_breakdown is a dict mapping kind -> count for the session."""
+    import time as _t
+    store = ActivityStore(tmp_path / "obs.db")
+    t0 = _t.time()
+    store.record_event(ActivityEvent(kind="tool_start", session_id="s1", ts=t0))
+    store.record_event(ActivityEvent(kind="tool_start", session_id="s1", ts=t0 + 1))
+    store.record_event(ActivityEvent(kind="tool_end",   session_id="s1", ts=t0 + 2))
+    store.record_event(ActivityEvent(kind="message",    session_id="s2", ts=t0 + 3))
+    rows = store.list_sessions()
+    s1 = next(r for r in rows if r["id"] == "s1")
+    s2 = next(r for r in rows if r["id"] == "s2")
+    assert s1["kind_breakdown"] == {"tool_start": 2, "tool_end": 1}
+    assert s2["kind_breakdown"] == {"message": 1}
+    store.close()
+
+
+def test_list_sessions_error_count(tmp_path):
+    """error_count = events with kind='error' or kind='aborted'."""
+    import time as _t
+    store = ActivityStore(tmp_path / "obs.db")
+    t0 = _t.time()
+    store.record_event(ActivityEvent(kind="error",      session_id="s1", ts=t0))
+    store.record_event(ActivityEvent(kind="aborted",    session_id="s1", ts=t0 + 1))
+    store.record_event(ActivityEvent(kind="tool_start", status="error", session_id="s1", ts=t0 + 2))
+    rows = store.list_sessions()
+    s = rows[0]
+    # Only kind='error'/'aborted' counted; tool_start with status='error' excluded
+    assert s["error_count"] == 2
+    store.close()
+
+
+def test_list_sessions_rule_check_count(tmp_path):
+    """rule_check_count = events with kind='rule_check'."""
+    import time as _t
+    store = ActivityStore(tmp_path / "obs.db")
+    t0 = _t.time()
+    store.record_event(ActivityEvent(kind="rule_check", session_id="s1", ts=t0))
+    store.record_event(ActivityEvent(kind="rule_check", session_id="s1", ts=t0 + 1))
+    store.record_event(ActivityEvent(kind="tool_start", session_id="s1", ts=t0 + 2))
+    rows = store.list_sessions()
+    s = rows[0]
+    assert s["rule_check_count"] == 2
+    store.close()
+
+
+def test_list_sessions_zero_error_and_rule_check_when_none(tmp_path):
+    """Sessions with no error/rule_check events show 0 for those counts."""
+    import time as _t
+    store = ActivityStore(tmp_path / "obs.db")
+    store.record_event(ActivityEvent(kind="tool_start", session_id="s1", ts=_t.time()))
+    rows = store.list_sessions()
+    s = rows[0]
+    assert s["error_count"] == 0
+    assert s["rule_check_count"] == 0
+    store.close()
