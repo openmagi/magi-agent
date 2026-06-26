@@ -118,6 +118,28 @@ describe("buildActivityQuery", () => {
     expect(allKinds).not.toContain("agent_result");
   });
 
+  it("CATEGORY_KINDS does NOT have a 'Noise' group — noise kinds belong in NOISE_KINDS only", () => {
+    // The server taxonomy has lifecycle/tools/policy/errors/other + noise_kinds array.
+    // Noise kinds are exposed via the Hide-noise toggle (NOISE_KINDS), not the kind
+    // multi-select. The FE fallback must match this grouping.
+    expect(Object.keys(CATEGORY_KINDS)).not.toContain("Noise");
+    // Noise kind values must not appear in CATEGORY_KINDS either
+    const allKinds = Object.values(CATEGORY_KINDS).flat();
+    for (const noiseKind of NOISE_KINDS) {
+      expect(allKinds).not.toContain(noiseKind);
+    }
+  });
+
+  it("CATEGORY_KINDS groups match the server's canonical category names (case-insensitive)", () => {
+    // Server taxonomy groups: lifecycle, tools, policy, errors, other
+    const keys = Object.keys(CATEGORY_KINDS).map((k) => k.toLowerCase());
+    expect(keys).toContain("lifecycle");
+    expect(keys).toContain("tools");
+    expect(keys).toContain("policy");
+    expect(keys).toContain("errors");
+    expect(keys).toContain("other");
+  });
+
   it("produces a valid URL query string (parseable)", () => {
     const filters: ActivityFilters = {
       hideNoise: true,
@@ -130,6 +152,24 @@ describe("buildActivityQuery", () => {
     expect(parsed.get("session_id")).toBe("s1");
     expect(parsed.get("kind")).toBe("tool_start");
     expect(parsed.get("exclude_kind")).toBeTruthy();
+  });
+
+  // noiseKinds arg on buildActivityQuery — Finding 1 review fix
+  it("uses server noiseKinds for exclude_kind when passed as second arg", () => {
+    const serverNoise = ["text_delta", "heartbeat", "server_added_noise"];
+    const filters: ActivityFilters = { hideNoise: true, selectedKinds: [], sessionId: null };
+    const parsed = new URLSearchParams(
+      buildActivityQuery(filters, serverNoise).replace(/^\?/, "")
+    );
+    expect(parsed.get("exclude_kind")).toBe(serverNoise.join(","));
+  });
+
+  it("falls back to NOISE_KINDS when noiseKinds arg is omitted", () => {
+    const filters: ActivityFilters = { hideNoise: true, selectedKinds: [], sessionId: null };
+    const parsed = new URLSearchParams(
+      buildActivityQuery(filters).replace(/^\?/, "")
+    );
+    expect(parsed.get("exclude_kind")).toBe(NOISE_KINDS.join(","));
   });
 });
 
@@ -330,6 +370,54 @@ describe("buildActivityPageQuery", () => {
     expect(parsed.get("kind")).toBe("tool_start");
     expect(parsed.get("before_id")).toBe("77");
     expect(parsed.get("since_id")).toBeNull();
+  });
+
+  // noiseKinds threading — Finding 1 review fix
+  it("uses NOISE_KINDS constant for exclude_kind when noiseKinds is absent", () => {
+    const filters: ActivityFilters = { hideNoise: true, selectedKinds: [], sessionId: null };
+    const parsed = new URLSearchParams(
+      buildActivityPageQuery(filters, {}).replace(/^\?/, "")
+    );
+    expect(parsed.get("exclude_kind")).toBe(NOISE_KINDS.join(","));
+  });
+
+  it("uses custom noiseKinds for exclude_kind when provided and non-empty", () => {
+    const customNoise = ["text_delta", "heartbeat", "new_noise_kind"];
+    const filters: ActivityFilters = { hideNoise: true, selectedKinds: [], sessionId: null };
+    const parsed = new URLSearchParams(
+      buildActivityPageQuery(filters, { noiseKinds: customNoise }).replace(/^\?/, "")
+    );
+    expect(parsed.get("exclude_kind")).toBe(customNoise.join(","));
+    // Must NOT fall back to constant when custom list is provided
+    expect(parsed.get("exclude_kind")).not.toBe(NOISE_KINDS.join(","));
+  });
+
+  it("falls back to NOISE_KINDS constant when noiseKinds is an empty array", () => {
+    const filters: ActivityFilters = { hideNoise: true, selectedKinds: [], sessionId: null };
+    const parsed = new URLSearchParams(
+      buildActivityPageQuery(filters, { noiseKinds: [] }).replace(/^\?/, "")
+    );
+    // Empty noiseKinds = treat as absent → use constant
+    expect(parsed.get("exclude_kind")).toBe(NOISE_KINDS.join(","));
+  });
+
+  it("noiseKinds does not affect exclude_kind when hideNoise is OFF", () => {
+    const customNoise = ["text_delta", "heartbeat"];
+    const filters: ActivityFilters = { hideNoise: false, selectedKinds: [], sessionId: null };
+    const qs = buildActivityPageQuery(filters, { noiseKinds: customNoise });
+    expect(qs).not.toContain("exclude_kind");
+  });
+
+  it("custom noiseKinds composes correctly with pagination cursor", () => {
+    const customNoise = ["text_delta", "new_runtime_noise"];
+    const filters: ActivityFilters = { hideNoise: true, selectedKinds: ["tool_start"], sessionId: "s1" };
+    const parsed = new URLSearchParams(
+      buildActivityPageQuery(filters, { beforeId: 42, noiseKinds: customNoise }).replace(/^\?/, "")
+    );
+    expect(parsed.get("exclude_kind")).toBe(customNoise.join(","));
+    expect(parsed.get("before_id")).toBe("42");
+    expect(parsed.get("kind")).toBe("tool_start");
+    expect(parsed.get("session_id")).toBe("s1");
   });
 });
 

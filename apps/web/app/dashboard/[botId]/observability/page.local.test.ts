@@ -22,8 +22,9 @@ describe("local OSS observability dashboard", () => {
   it("imports and uses the buildActivityQuery helper from observability-query", () => {
     expect(source).toContain("buildActivityQuery");
     expect(source).toContain("./observability-query");
-    // The activity URL must be built via the helper, not a hardcoded query string
-    expect(source).toContain("buildActivityQuery(filters)");
+    // The activity URL must be built via the helper, not a hardcoded query string.
+    // Since Finding 1 fix: passes activeNoiseKinds as second arg.
+    expect(source).toContain("buildActivityQuery(filters, activeNoiseKinds)");
   });
 
   it("defines and uses the NOISE_KINDS constant from observability-query", () => {
@@ -147,5 +148,20 @@ describe("local OSS observability dashboard", () => {
     expect(source).toContain("policyEvidenceOnly");
     // The filter reset reflects the new toggles
     expect(source).toContain("policyEvidenceOnly: false");
+  });
+
+  it("includes evidenceOnly in hasActiveFilters so Reset button shows on ?evidence=1", () => {
+    // evidenceOnly must participate in the hasActiveFilters expression so that a URL
+    // with ?evidence=1 (without ?policy=1) shows the Reset button (Finding 2 fix).
+    expect(source).toContain("filters.evidenceOnly");
+  });
+
+  it("passes activeNoiseKinds to buildActivityQuery and buildActivityPageQuery (Finding 1 fix)", () => {
+    // The noise toggle must use the server noise_kinds when available, not always the
+    // hardcoded constant. Page derives activeNoiseKinds from resolveKindCategories and
+    // passes it through to the query builders.
+    expect(source).toContain("activeNoiseKinds");
+    expect(source).toContain("buildActivityQuery(filters, activeNoiseKinds)");
+    expect(source).toContain("noiseKinds: activeNoiseKinds");
   });
 });

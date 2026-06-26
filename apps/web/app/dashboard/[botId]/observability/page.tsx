@@ -159,6 +159,7 @@ function FilterBar({ filters, onFiltersChange, sessions, metaCategories }: Filte
     filters.selectedKinds.length > 0 ||
     filters.sessionId !== null ||
     !!filters.policyEvidenceOnly ||
+    !!filters.evidenceOnly ||
     !!filters.errorsOnly;
 
   function toggleKind(kind: string) {
@@ -345,9 +346,18 @@ function ObservabilityPageInner() {
     router.replace(qs ? `?${qs}` : "?", { scroll: false });
   }
 
+  // Resolve the server's noise kinds from /meta when available. Used for the
+  // exclude_kind API param so the actual request matches the server's live taxonomy
+  // rather than the hardcoded FE constant. Falls back to NOISE_KINDS when /meta
+  // is unavailable or older runtimes don't return the categories field.
+  const { noiseKinds: activeNoiseKinds } = useMemo(
+    () => resolveKindCategories(meta?.categories),
+    [meta],
+  );
+
   const activityUrl = useMemo(
-    () => OBSERVABILITY_ENDPOINTS.activity + buildActivityQuery(filters),
-    [filters],
+    () => OBSERVABILITY_ENDPOINTS.activity + buildActivityQuery(filters, activeNoiseKinds),
+    [filters, activeNoiseKinds],
   );
 
   /**
@@ -422,7 +432,7 @@ function ObservabilityPageInner() {
     try {
       const url =
         OBSERVABILITY_ENDPOINTS.activity +
-        buildActivityPageQuery(filters, { beforeId: oldestId });
+        buildActivityPageQuery(filters, { beforeId: oldestId, noiseKinds: activeNoiseKinds });
       const response = await agentFetch(url);
       if (!response.ok) return;
       const activity = await readJson<ActivityResponse>(response, { events: [] });
@@ -431,7 +441,7 @@ function ObservabilityPageInner() {
     } finally {
       setPaginatingDir(null);
     }
-  }, [agentFetch, filters, oldestId, paginatingDir]);
+  }, [agentFetch, activeNoiseKinds, filters, oldestId, paginatingDir]);
 
   /**
    * Fetch the page of events newer than the current newest loaded event.
@@ -444,7 +454,7 @@ function ObservabilityPageInner() {
     try {
       const url =
         OBSERVABILITY_ENDPOINTS.activity +
-        buildActivityPageQuery(filters, { sinceId: newestId });
+        buildActivityPageQuery(filters, { sinceId: newestId, noiseKinds: activeNoiseKinds });
       const response = await agentFetch(url);
       if (!response.ok) return;
       const activity = await readJson<ActivityResponse>(response, { events: [] });
@@ -453,7 +463,7 @@ function ObservabilityPageInner() {
     } finally {
       setPaginatingDir(null);
     }
-  }, [agentFetch, filters, newestId, paginatingDir]);
+  }, [agentFetch, activeNoiseKinds, filters, newestId, paginatingDir]);
 
   useEffect(() => {
     void loadObservability();

@@ -33,9 +33,14 @@ export const NOISE_KINDS: readonly string[] = [
  * NOTE: `aborted` appears in both Lifecycle and Errors in the canonical server
  * taxonomy; it is placed only under Errors here to avoid double-listing in the
  * kind multi-select UI.
+ *
+ * NOTE: Noise kinds (text_delta, heartbeat, etc.) are intentionally absent from
+ * this map. They are available via NOISE_KINDS for the Hide-noise toggle only,
+ * matching the server taxonomy which places them in `noise_kinds` (not in the
+ * `categories` groups). This ensures the FE fallback matches the server's
+ * grouping so the kind multi-select is consistent across runtime versions.
  */
 export const CATEGORY_KINDS: Record<string, readonly string[]> = {
-  Noise: ["text_delta", "heartbeat", "turn_phase", "runtime_trace", "tool_progress"],
   Lifecycle: ["turn_start", "turn_end", "checkpoint", "compaction_start", "compaction_end"],
   Tools: ["tool_start", "tool_end", "source_inspected"],
   Policy: ["rule_check", "rule_violation"],
@@ -70,12 +75,20 @@ export interface ActivityFilters {
   errorsOnly?: boolean;
 }
 
-/** Optional pagination cursors for `buildActivityPageQuery`. */
+/** Optional pagination cursors and query options for `buildActivityPageQuery`. */
 export interface PaginationParams {
   /** Fetch events with `id > sinceId` ("load newer"). */
   sinceId?: number | null;
   /** Fetch events with `id < beforeId` ("load older"). */
   beforeId?: number | null;
+  /**
+   * Server-resolved noise kinds to use for `exclude_kind` when hideNoise is ON.
+   * When provided and non-empty, uses this set instead of the hardcoded NOISE_KINDS
+   * constant. This ensures the API param matches the server's live noise taxonomy
+   * (sourced from /meta via resolveKindCategories) rather than the FE constant.
+   * Falls back to NOISE_KINDS when absent or empty (backward compat for older runtimes).
+   */
+  noiseKinds?: readonly string[];
 }
 
 /**
@@ -118,7 +131,13 @@ export function buildActivityPageQuery(
   }
 
   if (filters.hideNoise) {
-    params.set("exclude_kind", NOISE_KINDS.join(","));
+    // Use server-resolved noise kinds when provided and non-empty; else fall back
+    // to the hardcoded constant (backward compat for older runtimes without /meta).
+    const effectiveNoiseKinds =
+      pagination.noiseKinds != null && pagination.noiseKinds.length > 0
+        ? pagination.noiseKinds
+        : NOISE_KINDS;
+    params.set("exclude_kind", effectiveNoiseKinds.join(","));
   }
 
   if (pagination.sinceId != null) {
@@ -138,9 +157,15 @@ export function buildActivityPageQuery(
  * (or just "?limit=100" when no filters are active).
  *
  * Delegates to `buildActivityPageQuery` with no pagination cursor.
+ *
+ * @param noiseKinds Optional server-resolved noise kinds (from resolveKindCategories).
+ *   When provided and non-empty, used for the exclude_kind param instead of NOISE_KINDS.
  */
-export function buildActivityQuery(filters: ActivityFilters): string {
-  return buildActivityPageQuery(filters);
+export function buildActivityQuery(
+  filters: ActivityFilters,
+  noiseKinds?: readonly string[]
+): string {
+  return buildActivityPageQuery(filters, { noiseKinds });
 }
 
 /**
