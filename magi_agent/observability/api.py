@@ -50,11 +50,22 @@ def build_api_router(store: ActivityStore, bus: ActivityBus, runtime: Any) -> AP
         _: str = Depends(auth),
         session_id: str | None = Query(default=None),
         kind: str | None = Query(default=None),
+        exclude_kind: str | None = Query(default=None),
+        status: str | None = Query(default=None),
+        q: str | None = Query(default=None),
         since_id: int | None = Query(default=None),
+        before_id: int | None = Query(default=None),
         limit: int = Query(default=200, ge=1, le=1000),
     ) -> dict:
         events = store.list_events(
-            session_id=session_id, kind=kind, since_id=since_id, limit=limit
+            session_id=session_id,
+            kind=kind,
+            exclude_kind=exclude_kind,
+            status=status,
+            q=q,
+            since_id=since_id,
+            before_id=before_id,
+            limit=limit,
         )
         return {"events": events}
 

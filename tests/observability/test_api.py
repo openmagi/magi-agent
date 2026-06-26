@@ -150,6 +150,101 @@ def test_missions_requires_auth(tmp_path):
     assert client.get("/api/observability/v1/missions").status_code == 401
 
 
+# ---------------------------------------------------------------------------
+# Task-2: new /activity query params
+# ---------------------------------------------------------------------------
+
+def _auth_get(client, path):
+    return client.get(path, headers={"Authorization": "Bearer local-dev-token"})
+
+
+def test_activity_default_shape_unchanged(tmp_path):
+    """No new params -> response is still {"events": [...]}."""
+    client, store, _ = _client(tmp_path)
+    store.record_event(ActivityEvent(kind="tool_start", session_id="s1"))
+    r = _auth_get(client, "/api/observability/v1/activity")
+    assert r.status_code == 200
+    body = r.json()
+    assert "events" in body
+    assert len(body["events"]) == 1
+
+
+def test_activity_exclude_kind(tmp_path):
+    """exclude_kind must reach list_events and filter out the specified kind."""
+    client, store, _ = _client(tmp_path)
+    store.record_event(ActivityEvent(kind="tool_start", session_id="s1"))
+    store.record_event(ActivityEvent(kind="tool_end", session_id="s1"))
+    r = _auth_get(client, "/api/observability/v1/activity?exclude_kind=tool_start")
+    assert r.status_code == 200
+    kinds = [e["kind"] for e in r.json()["events"]]
+    assert kinds == ["tool_end"]
+
+
+def test_activity_exclude_kind_comma(tmp_path):
+    """exclude_kind with comma list excludes multiple kinds."""
+    client, store, _ = _client(tmp_path)
+    store.record_event(ActivityEvent(kind="tool_start", session_id="s1"))
+    store.record_event(ActivityEvent(kind="tool_end", session_id="s1"))
+    store.record_event(ActivityEvent(kind="message", session_id="s1"))
+    r = _auth_get(client, "/api/observability/v1/activity?exclude_kind=tool_start,tool_end")
+    assert r.status_code == 200
+    kinds = [e["kind"] for e in r.json()["events"]]
+    assert kinds == ["message"]
+
+
+def test_activity_status_filter(tmp_path):
+    """status param must reach list_events and filter by event status field."""
+    client, store, _ = _client(tmp_path)
+    store.record_event(ActivityEvent(kind="tool_end", status="ok"))
+    store.record_event(ActivityEvent(kind="tool_end", status="error"))
+    r = _auth_get(client, "/api/observability/v1/activity?status=ok")
+    assert r.status_code == 200
+    statuses = [e["status"] for e in r.json()["events"]]
+    assert statuses == ["ok"]
+
+
+def test_activity_q_filter(tmp_path):
+    """q param must reach list_events and filter by summary substring."""
+    client, store, _ = _client(tmp_path)
+    store.record_event(ActivityEvent(kind="message", summary="hello world"))
+    store.record_event(ActivityEvent(kind="message", summary="goodbye world"))
+    r = _auth_get(client, "/api/observability/v1/activity?q=hello")
+    assert r.status_code == 200
+    summaries = [e["summary"] for e in r.json()["events"]]
+    assert summaries == ["hello world"]
+
+
+def test_activity_before_id(tmp_path):
+    """before_id must reach list_events and return only events with id < before_id."""
+    client, store, _ = _client(tmp_path)
+    id1 = store.record_event(ActivityEvent(kind="tool_start"))
+    id2 = store.record_event(ActivityEvent(kind="tool_end"))
+    store.record_event(ActivityEvent(kind="message"))
+    r = _auth_get(client, f"/api/observability/v1/activity?before_id={id2}")
+    assert r.status_code == 200
+    ids = [e["id"] for e in r.json()["events"]]
+    assert ids == [id1]
+
+
+def test_activity_kind_comma(tmp_path):
+    """kind accepts a comma-separated string and returns events matching any of the kinds."""
+    client, store, _ = _client(tmp_path)
+    store.record_event(ActivityEvent(kind="tool_start"))
+    store.record_event(ActivityEvent(kind="tool_end"))
+    store.record_event(ActivityEvent(kind="message"))
+    r = _auth_get(client, "/api/observability/v1/activity?kind=tool_start,tool_end")
+    assert r.status_code == 200
+    kinds = sorted(e["kind"] for e in r.json()["events"])
+    assert kinds == ["tool_end", "tool_start"]
+
+
+def test_activity_before_id_invalid(tmp_path):
+    """Non-integer before_id must return 422 (same validation style as since_id/limit)."""
+    client, _, _ = _client(tmp_path)
+    r = _auth_get(client, "/api/observability/v1/activity?before_id=notanint")
+    assert r.status_code == 422
+
+
 def test_activity_stream_sentinel_and_no_subscriber_leak(tmp_path):
     client, _store, bus = _client(tmp_path)
     with client.stream(
