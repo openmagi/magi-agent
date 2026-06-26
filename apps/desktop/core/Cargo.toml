@@ -1,0 +1,16 @@
+[package]
+name = "magi_desktop_core"
+version = "0.1.0"
+edition = "2021"
+description = "Pure, GUI-free logic for the Open Magi desktop shell (url policy, serve helpers, lifecycle state machine). Contains no tauri or webview dependency so it is fully cargo-testable on any host."
+license = "Apache-2.0"
+
+# Intentionally dependency-free. The bootstrap readiness check parses a tiny
+# fixed JSON shape with a tolerant hand-rolled scan rather than pulling serde,
+# so this crate always compiles and `cargo test` runs it without any network
+# fetch or system webview toolchain.
+[dependencies]
+
+[lib]
+name = "magi_desktop_core"
+path = "src/lib.rs"

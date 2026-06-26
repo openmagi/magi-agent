@@ -1,0 +1,49 @@
+[workspace]
+members = ["core"]
+resolver = "2"
+
+[package]
+name = "magi-desktop"
+version = "0.1.0"
+edition = "2021"
+description = "Open Magi desktop shell. Launches a local `magi serve` and loads its dashboard in a hardened Tauri v2 webview."
+license = "Apache-2.0"
+default-run = "magi-desktop"
+
+[lib]
+name = "magi_desktop_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "magi-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Pure, GUI-free logic. Cargo-testable on its own (see core/).
+magi_desktop_core = { path = "core" }
+
+# Tauri v2 GUI stack. These pull a system webview (WKWebView/WebView2/WebKitGTK)
+# and may not fetch or link in a headless CI box. The pure logic above does not
+# depend on any of this, so `cargo test -p magi_desktop_core` always runs.
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+# `custom-protocol` is the Tauri release convention (assets served from the
+# bundle rather than a dev server). Enabled automatically by `tauri build`.
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+# Smaller, faster-to-ship desktop binaries.
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
