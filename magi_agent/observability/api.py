@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from magi_agent.observability.bus import ActivityBus
 from magi_agent.observability.store import ActivityStore
+from magi_agent.observability.taxonomy import get_meta_taxonomy
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,13 @@ def build_api_router(store: ActivityStore, bus: ActivityBus, runtime: Any) -> AP
 
     @router.get("/meta")
     async def meta(_: str = Depends(auth)) -> dict:
-        return {"version": "v1", "bot_id": bot_id, "events": store.count_events()}
+        return {
+            "version": "v1",
+            "bot_id": bot_id,
+            "events": store.count_events(),
+            "kind_breakdown": store.kind_breakdown(),
+            "categories": get_meta_taxonomy(),
+        }
 
     @router.get("/activity")
     async def activity(

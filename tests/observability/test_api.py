@@ -260,3 +260,114 @@ def test_activity_stream_sentinel_and_no_subscriber_leak(tmp_path):
     assert "stream_open" in chunks
     assert chunks.endswith("\n\n")
     assert len(bus._subscribers) == 0
+
+
+# ---------------------------------------------------------------------------
+# Task-7: /meta — kind_breakdown and categories extensions
+# ---------------------------------------------------------------------------
+
+def test_meta_existing_fields_unchanged(tmp_path):
+    """/meta still returns version, bot_id, and events (backward compat)."""
+    client, store, _ = _client(tmp_path)
+    store.record_event(ActivityEvent(kind="tool_start", session_id="s1"))
+    r = client.get("/api/observability/v1/meta",
+                   headers={"Authorization": "Bearer local-dev-token"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["version"] == "v1"
+    assert body["bot_id"] == "bot-x"
+    assert body["events"] == 1
+
+
+def test_meta_includes_kind_breakdown_empty(tmp_path):
+    """/meta kind_breakdown is {} when no events exist."""
+    client, _, _ = _client(tmp_path)
+    r = client.get("/api/observability/v1/meta",
+                   headers={"Authorization": "Bearer local-dev-token"})
+    assert r.status_code == 200
+    body = r.json()
+    assert "kind_breakdown" in body
+    assert body["kind_breakdown"] == {}
+
+
+def test_meta_includes_kind_breakdown_with_events(tmp_path):
+    """/meta kind_breakdown reflects accurate per-kind global counts."""
+    client, store, _ = _client(tmp_path)
+    store.record_event(ActivityEvent(kind="tool_start", session_id="s1"))
+    store.record_event(ActivityEvent(kind="tool_start", session_id="s1"))
+    store.record_event(ActivityEvent(kind="rule_check", session_id="s1"))
+    r = client.get("/api/observability/v1/meta",
+                   headers={"Authorization": "Bearer local-dev-token"})
+    assert r.status_code == 200
+    bd = r.json()["kind_breakdown"]
+    assert bd["tool_start"] == 2
+    assert bd["rule_check"] == 1
+    assert "tool_end" not in bd
+
+
+def test_meta_includes_categories(tmp_path):
+    """/meta includes a 'categories' key with taxonomy payload."""
+    client, _, _ = _client(tmp_path)
+    r = client.get("/api/observability/v1/meta",
+                   headers={"Authorization": "Bearer local-dev-token"})
+    assert r.status_code == 200
+    body = r.json()
+    assert "categories" in body
+
+
+def test_meta_categories_shape(tmp_path):
+    """categories payload has 'categories' dict and 'noise_kinds' list."""
+    client, _, _ = _client(tmp_path)
+    r = client.get("/api/observability/v1/meta",
+                   headers={"Authorization": "Bearer local-dev-token"})
+    cats = r.json()["categories"]
+    assert isinstance(cats, dict)
+    assert "categories" in cats
+    assert "noise_kinds" in cats
+    assert isinstance(cats["categories"], dict)
+    assert isinstance(cats["noise_kinds"], list)
+
+
+def test_meta_categories_contains_real_kinds(tmp_path):
+    """categories dict contains real emitted kinds, not fictional ones."""
+    client, _, _ = _client(tmp_path)
+    r = client.get("/api/observability/v1/meta",
+                   headers={"Authorization": "Bearer local-dev-token"})
+    cats = r.json()["categories"]["categories"]
+    # Flatten all kinds across all categories
+    all_kinds = {k for kinds in cats.values() for k in kinds}
+    # Real emitted kinds must be present
+    assert "tool_start" in all_kinds
+    assert "tool_end" in all_kinds
+    assert "rule_check" in all_kinds
+    assert "turn_start" in all_kinds
+    assert "error" in all_kinds
+    # No fictional kinds
+    assert "my_fake_kind" not in all_kinds
+    assert "message" not in all_kinds  # 'message' is not a real runtime kind
+
+
+def test_meta_categories_noise_identifiable(tmp_path):
+    """noise_kinds list identifies the default-hidden noise set."""
+    client, _, _ = _client(tmp_path)
+    r = client.get("/api/observability/v1/meta",
+                   headers={"Authorization": "Bearer local-dev-token"})
+    noise = r.json()["categories"]["noise_kinds"]
+    assert "text_delta" in noise
+    assert "heartbeat" in noise
+    assert "turn_phase" in noise
+    assert "runtime_trace" in noise
+    assert "tool_progress" in noise
+
+
+def test_meta_categories_named_category_keys(tmp_path):
+    """categories dict has the expected category names."""
+    client, _, _ = _client(tmp_path)
+    r = client.get("/api/observability/v1/meta",
+                   headers={"Authorization": "Bearer local-dev-token"})
+    cats = r.json()["categories"]["categories"]
+    assert "lifecycle" in cats
+    assert "tools" in cats
+    assert "policy" in cats
+    assert "errors" in cats
+    assert "other" in cats

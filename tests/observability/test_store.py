@@ -547,3 +547,39 @@ def test_list_sessions_tier1_tiebreak_lowest_id_wins(tmp_path):
     assert s2["label"] == s["label"]
 
     store.close()
+
+
+# ---------------------------------------------------------------------------
+# Task-7: kind_breakdown() — global GROUP BY kind counts
+# ---------------------------------------------------------------------------
+
+def test_kind_breakdown_empty(tmp_path):
+    """kind_breakdown on an empty store returns {}."""
+    store = ActivityStore(tmp_path / "obs.db")
+    assert store.kind_breakdown() == {}
+    store.close()
+
+
+def test_kind_breakdown_counts_by_kind(tmp_path):
+    """kind_breakdown returns correct per-kind counts across all sessions."""
+    store = ActivityStore(tmp_path / "obs.db")
+    store.record_event(ActivityEvent(kind="tool_start", session_id="s1"))
+    store.record_event(ActivityEvent(kind="tool_start", session_id="s1"))
+    store.record_event(ActivityEvent(kind="tool_end",   session_id="s1"))
+    store.record_event(ActivityEvent(kind="rule_check", session_id="s2"))
+    store.record_event(ActivityEvent(kind="error",      session_id="s2"))
+    breakdown = store.kind_breakdown()
+    assert breakdown["tool_start"] == 2
+    assert breakdown["tool_end"] == 1
+    assert breakdown["rule_check"] == 1
+    assert breakdown["error"] == 1
+    assert set(breakdown.keys()) == {"tool_start", "tool_end", "rule_check", "error"}
+    store.close()
+
+
+def test_kind_breakdown_closed_returns_empty(tmp_path):
+    """kind_breakdown on a closed store returns {} (fail-open)."""
+    store = ActivityStore(tmp_path / "obs.db")
+    store.record_event(ActivityEvent(kind="tool_start"))
+    store.close()
+    assert store.kind_breakdown() == {}

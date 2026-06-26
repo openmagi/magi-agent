@@ -203,6 +203,24 @@ class ActivityStore:
             logger.debug("activity store count_events failed", exc_info=True)
             return 0
 
+    def kind_breakdown(self) -> dict[str, int]:
+        """Return {kind: count} across all events, grouped by kind.
+
+        Read-only; deterministic; no side effects.  Returns {} when the store
+        is closed or when no events have been recorded yet.
+        """
+        if self._closed:
+            return {}
+        try:
+            with self._lock:
+                rows = self._conn.execute(
+                    "SELECT kind, COUNT(*) AS cnt FROM activity_events GROUP BY kind"
+                ).fetchall()
+            return {r["kind"]: r["cnt"] for r in rows}
+        except Exception:
+            logger.debug("activity store kind_breakdown failed", exc_info=True)
+            return {}
+
     def prune(self, *, max_events: int | None = None, retention_days: int | None = None) -> int:
         if self._closed:
             return 0
