@@ -15,6 +15,8 @@ import {
   parseFiltersFromParams,
   filtersToParams,
   formatSessionBreakdown,
+  extractVerdict,
+  resolveKindCategories,
   type ActivityFilters,
 } from "./observability-query";
 
@@ -24,6 +26,8 @@ interface ObservabilityMeta {
   version?: string;
   bot_id?: string;
   events?: number;
+  /** /meta categories payload from get_meta_taxonomy() — sourced in Task 9. */
+  categories?: unknown;
 }
 
 interface ActivityEventRecord extends JsonRecord {
@@ -81,6 +85,9 @@ const DEFAULT_FILTERS: ActivityFilters = {
   hideNoise: true,
   selectedKinds: [],
   sessionId: null,
+  policyEvidenceOnly: false,
+  evidenceOnly: false,
+  errorsOnly: false,
 };
 
 function numberLabel(value: number | undefined): string {
@@ -137,13 +144,22 @@ interface FilterBarProps {
   filters: ActivityFilters;
   onFiltersChange: (next: ActivityFilters) => void;
   sessions: SessionRecord[];
+  /** /meta categories payload — used to drive kind groups and noise set; falls back to FE constants. */
+  metaCategories?: unknown;
 }
 
-function FilterBar({ filters, onFiltersChange, sessions }: FilterBarProps) {
+function FilterBar({ filters, onFiltersChange, sessions, metaCategories }: FilterBarProps) {
+  // Source kind categories from /meta when available; fall back to the FE constant
+  // for older runtimes that do not yet return the categories field.
+  const { categories: kindCategories, noiseKinds: activeNoiseKinds } =
+    resolveKindCategories(metaCategories);
+
   const hasActiveFilters =
     !filters.hideNoise ||
     filters.selectedKinds.length > 0 ||
-    filters.sessionId !== null;
+    filters.sessionId !== null ||
+    !!filters.policyEvidenceOnly ||
+    !!filters.errorsOnly;
 
   function toggleKind(kind: string) {
     const next = filters.selectedKinds.includes(kind)
@@ -169,8 +185,58 @@ function FilterBar({ filters, onFiltersChange, sessions }: FilterBarProps) {
           }
         />
         <span className="text-xs font-medium text-foreground">Hide noise</span>
-        <span className="text-xs text-muted">({NOISE_KINDS.join(", ")})</span>
+        <span className="text-xs text-muted">({activeNoiseKinds.join(", ")})</span>
       </label>
+
+      <div className="mx-1 h-4 w-px self-center bg-black/10" />
+
+      {/* Quick toggles: Policy & Evidence / Errors only */}
+      <div className="flex flex-wrap items-center gap-2">
+        {/* Policy & Evidence only */}
+        <label className="flex cursor-pointer items-center gap-1.5 select-none">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded"
+            checked={!!filters.policyEvidenceOnly}
+            onChange={(e) =>
+              onFiltersChange({
+                ...filters,
+                policyEvidenceOnly: e.target.checked,
+                // clear evidenceOnly when turning off the parent toggle
+                evidenceOnly: e.target.checked ? filters.evidenceOnly : false,
+              })
+            }
+          />
+          <span className="text-xs font-medium text-foreground">Policy &amp; Evidence only</span>
+        </label>
+        {/* Evidence fired only — sub-toggle, visible when policyEvidenceOnly is active */}
+        {filters.policyEvidenceOnly ? (
+          <label className="ml-4 flex cursor-pointer items-center gap-1.5 select-none">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded"
+              checked={!!filters.evidenceOnly}
+              onChange={(e) =>
+                onFiltersChange({ ...filters, evidenceOnly: e.target.checked })
+              }
+            />
+            <span className="text-xs text-secondary">Evidence fired only</span>
+          </label>
+        ) : null}
+
+        {/* Errors only */}
+        <label className="flex cursor-pointer items-center gap-1.5 select-none">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded"
+            checked={!!filters.errorsOnly}
+            onChange={(e) =>
+              onFiltersChange({ ...filters, errorsOnly: e.target.checked })
+            }
+          />
+          <span className="text-xs font-medium text-foreground">Errors only</span>
+        </label>
+      </div>
 
       <div className="mx-1 h-4 w-px self-center bg-black/10" />
 
@@ -198,15 +264,16 @@ function FilterBar({ filters, onFiltersChange, sessions }: FilterBarProps) {
 
       <div className="mx-1 h-4 w-px self-center bg-black/10" />
 
-      {/* Kind multi-select grouped by category */}
-      {/* TODO(Task 9): source categories from /meta kind_categories instead of CATEGORY_KINDS constant. */}
+      {/* Kind multi-select grouped by category.
+          Categories sourced from /meta via resolveKindCategories(); falls back to
+          the CATEGORY_KINDS constant for older runtimes without the taxonomy field. */}
       <div className="flex flex-wrap items-center gap-2">
-        {Object.entries(CATEGORY_KINDS).map(([category, kinds]) => (
+        {Object.entries(kindCategories).map(([category, kinds]) => (
           <div key={category} className="flex flex-wrap items-center gap-1">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">
               {category}
             </span>
-            {kinds.map((kind) => {
+            {(kinds as readonly string[]).map((kind) => {
               const active = filters.selectedKinds.includes(kind);
               return (
                 <button
@@ -471,6 +538,7 @@ function ObservabilityPageInner() {
               filters={filters}
               onFiltersChange={applyFilters}
               sessions={sessions}
+              metaCategories={meta?.categories}
             />
           </div>
 
@@ -498,20 +566,51 @@ function ObservabilityPageInner() {
 
               <div className="overflow-x-auto">
                 <div className="min-w-[760px] space-y-2">
-                  {events.map((event, index) => (
-                    <div
-                      key={`${event.id ?? index}-${event.kind ?? "event"}`}
-                      className="grid grid-cols-[130px_150px_160px_120px_minmax(0,1fr)] items-start gap-3 rounded-xl border border-black/[0.06] bg-white/70 px-3 py-2 text-xs"
-                    >
-                      <span className="font-mono text-muted">{eventTime(event.created_at)}</span>
-                      <span className="truncate font-semibold text-foreground">{stringValue(event.kind, "event")}</span>
-                      <span className="truncate text-primary-light">{stringValue(event.session_id, "session")}</span>
-                      <span className="truncate text-secondary">{stringValue(event.status, "-")}</span>
-                      <span className="truncate text-secondary">
-                        {stringValue(event.summary) || stringValue(event.tool_name) || prettyJson(event).slice(0, 120)}
-                      </span>
-                    </div>
-                  ))}
+                  {events.map((event, index) => {
+                    const ruleVerdict = extractVerdict(event);
+                    return (
+                      <div
+                        key={`${event.id ?? index}-${event.kind ?? "event"}`}
+                        className={`grid grid-cols-[130px_150px_160px_120px_minmax(0,1fr)] items-start gap-3 rounded-xl border px-3 py-2 text-xs ${
+                          ruleVerdict
+                            ? "border-amber-300/40 bg-amber-50/70"
+                            : "border-black/[0.06] bg-white/70"
+                        }`}
+                      >
+                        <span className="font-mono text-muted">{eventTime(event.created_at)}</span>
+                        <span className="truncate font-semibold text-foreground">{stringValue(event.kind, "event")}</span>
+                        <span className="truncate text-primary-light">{stringValue(event.session_id, "session")}</span>
+                        {/* Status column: show verdict badge for rule_check events */}
+                        {ruleVerdict ? (
+                          <span
+                            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                              ruleVerdict.verdict === "ok"
+                                ? "border-green-300/60 bg-green-50 text-green-700"
+                                : ruleVerdict.verdict === "violation"
+                                  ? "border-red-300/60 bg-red-50 text-red-700"
+                                  : "border-yellow-300/60 bg-yellow-50 text-yellow-700"
+                            }`}
+                          >
+                            {ruleVerdict.verdict}
+                          </span>
+                        ) : (
+                          <span className="truncate text-secondary">{stringValue(event.status, "-")}</span>
+                        )}
+                        {/* Detail column: for rule_check show evidenceRef + detail; else summary/tool_name */}
+                        {ruleVerdict ? (
+                          <span className="truncate text-secondary">
+                            {ruleVerdict.evidenceRef
+                              ? `evidence: ${ruleVerdict.evidenceRef}${ruleVerdict.detail ? ` · ${ruleVerdict.detail}` : ""}`
+                              : ruleVerdict.detail ?? "-"}
+                          </span>
+                        ) : (
+                          <span className="truncate text-secondary">
+                            {stringValue(event.summary) || stringValue(event.tool_name) || prettyJson(event).slice(0, 120)}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 

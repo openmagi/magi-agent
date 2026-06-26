@@ -46,8 +46,14 @@ describe("local OSS observability dashboard", () => {
     expect(source).toContain("handleSessionClick");
   });
 
-  it("marks the Task 9 seam for sourcing categories from /meta", () => {
-    expect(source).toContain("TODO(Task 9)");
+  it("sources kind categories from /meta response when available (Task 9 seam closed)", () => {
+    // resolveKindCategories wires /meta taxonomy; CATEGORY_KINDS is the fallback
+    expect(source).toContain("resolveKindCategories");
+    expect(source).toContain("meta?.categories");
+  });
+
+  it("retains CATEGORY_KINDS as fallback for older runtimes", () => {
+    expect(source).toContain("CATEGORY_KINDS");
   });
 
   it("backs filter state with URL query params via useSearchParams and useRouter", () => {
@@ -107,5 +113,39 @@ describe("local OSS observability dashboard", () => {
 
   it("session card uses formatSessionBreakdown for the breakdown line", () => {
     expect(source).toContain("formatSessionBreakdown(session)");
+  });
+
+  // --- Task 9 additions ---
+
+  it("has Policy & Evidence only quick toggle (policyEvidenceOnly)", () => {
+    expect(source).toContain("policyEvidenceOnly");
+    expect(source).toContain("Policy");
+  });
+
+  it("has Evidence fired only sub-toggle (evidenceOnly)", () => {
+    expect(source).toContain("evidenceOnly");
+    expect(source).toContain("Evidence fired only");
+  });
+
+  it("has Errors only quick toggle (errorsOnly)", () => {
+    expect(source).toContain("errorsOnly");
+    expect(source).toContain("Errors only");
+  });
+
+  it("renders rule_check verdict using extractVerdict helper", () => {
+    expect(source).toContain("extractVerdict");
+    expect(source).toContain("verdict");
+  });
+
+  it("imports extractVerdict and resolveKindCategories from observability-query", () => {
+    expect(source).toContain("extractVerdict");
+    expect(source).toContain("resolveKindCategories");
+    expect(source).toContain("./observability-query");
+  });
+
+  it("adds policyEvidenceOnly and errorsOnly to hasActiveFilters check", () => {
+    expect(source).toContain("policyEvidenceOnly");
+    // The filter reset reflects the new toggles
+    expect(source).toContain("policyEvidenceOnly: false");
   });
 });

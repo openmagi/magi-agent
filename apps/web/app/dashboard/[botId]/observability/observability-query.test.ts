@@ -8,6 +8,8 @@ import {
   parseFiltersFromParams,
   filtersToParams,
   formatSessionBreakdown,
+  extractVerdict,
+  resolveKindCategories,
   type ActivityFilters,
 } from "./observability-query";
 
@@ -454,5 +456,424 @@ describe("mergeEventsById", () => {
     expect(a).toEqual([{ id: 1 }]);
     expect(b).toEqual([{ id: 2 }]);
     expect(merged).toEqual([{ id: 1 }, { id: 2 }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 9: new filter axes — policyEvidenceOnly, evidenceOnly, errorsOnly
+// ---------------------------------------------------------------------------
+
+describe("buildActivityQuery — Task 9 quick-toggle filter axes", () => {
+  it("policyEvidenceOnly forces kind=rule_check,rule_violation regardless of selectedKinds", () => {
+    const filters: ActivityFilters = {
+      hideNoise: false,
+      selectedKinds: ["tool_start"],
+      sessionId: null,
+      policyEvidenceOnly: true,
+    };
+    const parsed = new URLSearchParams(buildActivityQuery(filters).replace(/^\?/, ""));
+    expect(parsed.get("kind")).toBe("rule_check,rule_violation");
+  });
+
+  it("policyEvidenceOnly with empty selectedKinds sets kind=rule_check,rule_violation", () => {
+    const filters: ActivityFilters = {
+      hideNoise: false,
+      selectedKinds: [],
+      sessionId: null,
+      policyEvidenceOnly: true,
+    };
+    const parsed = new URLSearchParams(buildActivityQuery(filters).replace(/^\?/, ""));
+    expect(parsed.get("kind")).toBe("rule_check,rule_violation");
+  });
+
+  it("evidenceOnly adds has_evidence=true", () => {
+    const filters: ActivityFilters = {
+      hideNoise: false,
+      selectedKinds: [],
+      sessionId: null,
+      evidenceOnly: true,
+    };
+    const parsed = new URLSearchParams(buildActivityQuery(filters).replace(/^\?/, ""));
+    expect(parsed.get("has_evidence")).toBe("true");
+  });
+
+  it("evidenceOnly with policyEvidenceOnly sets both kind and has_evidence", () => {
+    const filters: ActivityFilters = {
+      hideNoise: false,
+      selectedKinds: [],
+      sessionId: null,
+      policyEvidenceOnly: true,
+      evidenceOnly: true,
+    };
+    const parsed = new URLSearchParams(buildActivityQuery(filters).replace(/^\?/, ""));
+    expect(parsed.get("kind")).toBe("rule_check,rule_violation");
+    expect(parsed.get("has_evidence")).toBe("true");
+  });
+
+  it("errorsOnly adds status=error,blocked", () => {
+    const filters: ActivityFilters = {
+      hideNoise: false,
+      selectedKinds: [],
+      sessionId: null,
+      errorsOnly: true,
+    };
+    const parsed = new URLSearchParams(buildActivityQuery(filters).replace(/^\?/, ""));
+    expect(parsed.get("status")).toBe("error,blocked");
+  });
+
+  it("omits has_evidence when evidenceOnly is absent", () => {
+    const filters: ActivityFilters = {
+      hideNoise: false,
+      selectedKinds: [],
+      sessionId: null,
+    };
+    const qs = buildActivityQuery(filters);
+    expect(qs).not.toContain("has_evidence");
+  });
+
+  it("omits status when errorsOnly is absent", () => {
+    const filters: ActivityFilters = {
+      hideNoise: false,
+      selectedKinds: [],
+      sessionId: null,
+    };
+    const qs = buildActivityQuery(filters);
+    expect(qs).not.toContain("status");
+  });
+});
+
+describe("parseFiltersFromParams — Task 9 new axes", () => {
+  it("parses policy=1 as policyEvidenceOnly=true", () => {
+    const filters = parseFiltersFromParams(new URLSearchParams("policy=1"));
+    expect(filters.policyEvidenceOnly).toBe(true);
+  });
+
+  it("omits policyEvidenceOnly when policy param is absent", () => {
+    const filters = parseFiltersFromParams(new URLSearchParams());
+    expect(filters.policyEvidenceOnly).toBeUndefined();
+  });
+
+  it("parses evidence=1 as evidenceOnly=true", () => {
+    const filters = parseFiltersFromParams(new URLSearchParams("evidence=1"));
+    expect(filters.evidenceOnly).toBe(true);
+  });
+
+  it("omits evidenceOnly when evidence param is absent", () => {
+    const filters = parseFiltersFromParams(new URLSearchParams());
+    expect(filters.evidenceOnly).toBeUndefined();
+  });
+
+  it("parses errors=1 as errorsOnly=true", () => {
+    const filters = parseFiltersFromParams(new URLSearchParams("errors=1"));
+    expect(filters.errorsOnly).toBe(true);
+  });
+
+  it("omits errorsOnly when errors param is absent", () => {
+    const filters = parseFiltersFromParams(new URLSearchParams());
+    expect(filters.errorsOnly).toBeUndefined();
+  });
+});
+
+describe("filtersToParams — Task 9 new axes", () => {
+  it("serializes policyEvidenceOnly=true as policy=1", () => {
+    const p = filtersToParams({
+      hideNoise: true,
+      selectedKinds: [],
+      sessionId: null,
+      policyEvidenceOnly: true,
+    });
+    expect(p.get("policy")).toBe("1");
+  });
+
+  it("omits policy param when policyEvidenceOnly is false/absent", () => {
+    const p = filtersToParams({ hideNoise: true, selectedKinds: [], sessionId: null });
+    expect(p.get("policy")).toBeNull();
+  });
+
+  it("serializes evidenceOnly=true as evidence=1", () => {
+    const p = filtersToParams({
+      hideNoise: true,
+      selectedKinds: [],
+      sessionId: null,
+      evidenceOnly: true,
+    });
+    expect(p.get("evidence")).toBe("1");
+  });
+
+  it("omits evidence param when evidenceOnly is false/absent", () => {
+    const p = filtersToParams({ hideNoise: true, selectedKinds: [], sessionId: null });
+    expect(p.get("evidence")).toBeNull();
+  });
+
+  it("serializes errorsOnly=true as errors=1", () => {
+    const p = filtersToParams({
+      hideNoise: true,
+      selectedKinds: [],
+      sessionId: null,
+      errorsOnly: true,
+    });
+    expect(p.get("errors")).toBe("1");
+  });
+
+  it("omits errors param when errorsOnly is false/absent", () => {
+    const p = filtersToParams({ hideNoise: true, selectedKinds: [], sessionId: null });
+    expect(p.get("errors")).toBeNull();
+  });
+});
+
+describe("parseFiltersFromParams / filtersToParams round-trip — Task 9 new axes", () => {
+  it("round-trips policyEvidenceOnly=true", () => {
+    const filters = parseFiltersFromParams(
+      filtersToParams({ hideNoise: true, selectedKinds: [], sessionId: null, policyEvidenceOnly: true })
+    );
+    expect(filters.policyEvidenceOnly).toBe(true);
+    expect(filters.evidenceOnly).toBeUndefined();
+    expect(filters.errorsOnly).toBeUndefined();
+  });
+
+  it("round-trips evidenceOnly=true", () => {
+    const filters = parseFiltersFromParams(
+      filtersToParams({ hideNoise: true, selectedKinds: [], sessionId: null, evidenceOnly: true })
+    );
+    expect(filters.evidenceOnly).toBe(true);
+    expect(filters.policyEvidenceOnly).toBeUndefined();
+  });
+
+  it("round-trips errorsOnly=true", () => {
+    const filters = parseFiltersFromParams(
+      filtersToParams({ hideNoise: true, selectedKinds: [], sessionId: null, errorsOnly: true })
+    );
+    expect(filters.errorsOnly).toBe(true);
+    expect(filters.policyEvidenceOnly).toBeUndefined();
+  });
+
+  it("round-trips all three new axes together", () => {
+    const filters = parseFiltersFromParams(
+      filtersToParams({
+        hideNoise: false,
+        selectedKinds: [],
+        sessionId: "s1",
+        policyEvidenceOnly: true,
+        evidenceOnly: true,
+        errorsOnly: true,
+      })
+    );
+    expect(filters.hideNoise).toBe(false);
+    expect(filters.sessionId).toBe("s1");
+    expect(filters.policyEvidenceOnly).toBe(true);
+    expect(filters.evidenceOnly).toBe(true);
+    expect(filters.errorsOnly).toBe(true);
+  });
+
+  it("round-trips without new axes — existing filters unaffected", () => {
+    const original: ActivityFilters = {
+      hideNoise: false,
+      selectedKinds: ["tool_start", "rule_check"],
+      sessionId: "sess-xyz",
+    };
+    const parsed = parseFiltersFromParams(filtersToParams(original));
+    expect(parsed.hideNoise).toBe(false);
+    expect(parsed.selectedKinds).toEqual(["tool_start", "rule_check"]);
+    expect(parsed.sessionId).toBe("sess-xyz");
+    expect(parsed.policyEvidenceOnly).toBeUndefined();
+    expect(parsed.evidenceOnly).toBeUndefined();
+    expect(parsed.errorsOnly).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 9: extractVerdict helper
+// ---------------------------------------------------------------------------
+
+describe("extractVerdict", () => {
+  it("returns null for non-rule_check event kind", () => {
+    expect(extractVerdict({ kind: "tool_start", payload: {} })).toBeNull();
+  });
+
+  it("returns null for non-rule_check even if payload has verdict", () => {
+    expect(extractVerdict({ kind: "turn_start", payload: { verdict: "ok" } })).toBeNull();
+  });
+
+  it("returns null for null input", () => {
+    expect(extractVerdict(null)).toBeNull();
+  });
+
+  it("returns null for undefined input", () => {
+    expect(extractVerdict(undefined)).toBeNull();
+  });
+
+  it("returns null for non-object input", () => {
+    expect(extractVerdict("rule_check")).toBeNull();
+    expect(extractVerdict(42)).toBeNull();
+  });
+
+  it("extracts verdict from rule_check event with verdict=ok", () => {
+    const result = extractVerdict({ kind: "rule_check", payload: { verdict: "ok" } });
+    expect(result).not.toBeNull();
+    expect(result!.verdict).toBe("ok");
+    expect(result!.evidenceRef).toBeNull();
+    expect(result!.detail).toBeNull();
+  });
+
+  it("extracts verdict from rule_check event with verdict=violation", () => {
+    const result = extractVerdict({ kind: "rule_check", payload: { verdict: "violation" } });
+    expect(result!.verdict).toBe("violation");
+  });
+
+  it("defaults verdict to pending when payload.verdict is absent", () => {
+    const result = extractVerdict({ kind: "rule_check", payload: {} });
+    expect(result!.verdict).toBe("pending");
+  });
+
+  it("defaults verdict to pending when event has no payload", () => {
+    const result = extractVerdict({ kind: "rule_check" });
+    expect(result!.verdict).toBe("pending");
+    expect(result!.evidenceRef).toBeNull();
+  });
+
+  it("extracts evidenceRef when present and non-empty", () => {
+    const result = extractVerdict({
+      kind: "rule_check",
+      payload: { verdict: "ok", evidenceRef: "receipt:sha256:abc123def456" },
+    });
+    expect(result!.evidenceRef).toBe("receipt:sha256:abc123def456");
+  });
+
+  it("returns null evidenceRef when evidenceRef is empty string", () => {
+    const result = extractVerdict({
+      kind: "rule_check",
+      payload: { verdict: "ok", evidenceRef: "" },
+    });
+    expect(result!.evidenceRef).toBeNull();
+  });
+
+  it("returns null evidenceRef when evidenceRef is absent from payload", () => {
+    const result = extractVerdict({ kind: "rule_check", payload: { verdict: "ok" } });
+    expect(result!.evidenceRef).toBeNull();
+  });
+
+  it("extracts detail string when present and non-empty", () => {
+    const result = extractVerdict({
+      kind: "rule_check",
+      payload: { verdict: "violation", detail: "rule X violated" },
+    });
+    expect(result!.detail).toBe("rule X violated");
+  });
+
+  it("returns null detail when detail is empty string", () => {
+    const result = extractVerdict({
+      kind: "rule_check",
+      payload: { verdict: "ok", detail: "" },
+    });
+    expect(result!.detail).toBeNull();
+  });
+
+  it("works for rule_violation kind", () => {
+    const result = extractVerdict({
+      kind: "rule_violation",
+      payload: { verdict: "violation", evidenceRef: "sha256:xyz" },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.verdict).toBe("violation");
+    expect(result!.evidenceRef).toBe("sha256:xyz");
+  });
+
+  it("returns complete RuleCheckVerdict shape with all fields populated", () => {
+    const result = extractVerdict({
+      kind: "rule_check",
+      payload: {
+        verdict: "ok",
+        evidenceRef: "receipt:sha256:abc123",
+        detail: "evidence verdict state=pass: matched=3 missing=0",
+      },
+    });
+    expect(result).toEqual({
+      verdict: "ok",
+      evidenceRef: "receipt:sha256:abc123",
+      detail: "evidence verdict state=pass: matched=3 missing=0",
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 9: resolveKindCategories helper
+// ---------------------------------------------------------------------------
+
+describe("resolveKindCategories", () => {
+  it("returns CATEGORY_KINDS and NOISE_KINDS fallback when metaCategories is null", () => {
+    const result = resolveKindCategories(null);
+    expect(result.categories).toBe(CATEGORY_KINDS);
+    expect(result.noiseKinds).toBe(NOISE_KINDS);
+  });
+
+  it("returns fallback when metaCategories is undefined", () => {
+    const result = resolveKindCategories(undefined);
+    expect(result.categories).toBe(CATEGORY_KINDS);
+    expect(result.noiseKinds).toBe(NOISE_KINDS);
+  });
+
+  it("returns fallback when metaCategories is a string", () => {
+    const result = resolveKindCategories("not-an-object");
+    expect(result.categories).toBe(CATEGORY_KINDS);
+  });
+
+  it("returns fallback when metaCategories lacks categories key", () => {
+    const result = resolveKindCategories({ noise_kinds: ["text_delta"] });
+    expect(result.categories).toBe(CATEGORY_KINDS);
+  });
+
+  it("returns fallback when categories value is an array (malformed)", () => {
+    const result = resolveKindCategories({ categories: ["lifecycle", "tools"] });
+    expect(result.categories).toBe(CATEGORY_KINDS);
+  });
+
+  it("resolves categories from a well-formed /meta taxonomy payload", () => {
+    const metaCats = {
+      categories: {
+        lifecycle: ["turn_start", "turn_end"],
+        tools: ["tool_start", "tool_end"],
+        policy: ["rule_check", "rule_violation"],
+      },
+      noise_kinds: ["text_delta", "heartbeat"],
+    };
+    const result = resolveKindCategories(metaCats);
+    expect(result.categories).toEqual(metaCats.categories);
+    expect(result.noiseKinds).toEqual(["text_delta", "heartbeat"]);
+  });
+
+  it("falls back to NOISE_KINDS when noise_kinds is absent from payload", () => {
+    const metaCats = {
+      categories: { lifecycle: ["turn_start"] },
+    };
+    const result = resolveKindCategories(metaCats);
+    expect(result.categories).toEqual({ lifecycle: ["turn_start"] });
+    expect(result.noiseKinds).toBe(NOISE_KINDS);
+  });
+
+  it("falls back to NOISE_KINDS when noise_kinds is not an array", () => {
+    const metaCats = {
+      categories: { lifecycle: ["turn_start"] },
+      noise_kinds: "text_delta",
+    };
+    const result = resolveKindCategories(metaCats);
+    expect(result.noiseKinds).toBe(NOISE_KINDS);
+  });
+
+  it("resolves canonical server taxonomy shape (matching get_meta_taxonomy() output)", () => {
+    const serverPayload = {
+      categories: {
+        lifecycle: ["aborted", "checkpoint", "compaction_end", "compaction_start", "turn_end", "turn_start"],
+        tools: ["source_inspected", "tool_end", "tool_start"],
+        policy: ["rule_check", "rule_violation"],
+        errors: ["aborted", "error"],
+        other: ["artifact_created", "child_progress", "task_board"],
+      },
+      noise_kinds: ["text_delta", "heartbeat", "turn_phase", "runtime_trace", "tool_progress"],
+    };
+    const result = resolveKindCategories(serverPayload);
+    expect(Object.keys(result.categories)).toContain("lifecycle");
+    expect(Object.keys(result.categories)).toContain("policy");
+    expect(result.categories["policy"]).toContain("rule_check");
+    expect(result.noiseKinds).toEqual(serverPayload.noise_kinds);
   });
 });

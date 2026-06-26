@@ -5,7 +5,10 @@
  * environment or React context. The page imports and calls this function when
  * constructing the fetch URL.
  *
- * TODO(Task 9): source CATEGORY_KINDS from /meta instead of this static constant.
+ * Task 9: CATEGORY_KINDS is now a fallback constant. The page sources the live
+ * taxonomy from the /meta endpoint's `categories` field via resolveKindCategories.
+ * When /meta is unavailable or returns an older runtime payload without categories,
+ * the functions in this module fall back to CATEGORY_KINDS and NOISE_KINDS.
  */
 
 /** Noise kinds excluded when "Hide noise" is ON (default). */
@@ -18,9 +21,11 @@ export const NOISE_KINDS: readonly string[] = [
 ];
 
 /**
- * Kind taxonomy grouped by category.
- * The categories and kind lists are a FE constant until Task 9 replaces this
- * with the /meta endpoint's `kind_categories` map.
+ * Kind taxonomy grouped by category — fallback constant for older runtimes that
+ * do not yet return `categories` in the /meta payload.
+ *
+ * Live data is sourced from /meta via resolveKindCategories(). This constant is
+ * the fallback used when /meta is unavailable or lacks the categories field.
  *
  * All kind names must match the actual event kinds emitted by the magi-agent
  * runtime into the activity store.
@@ -28,8 +33,6 @@ export const NOISE_KINDS: readonly string[] = [
  * NOTE: `aborted` appears in both Lifecycle and Errors in the canonical server
  * taxonomy; it is placed only under Errors here to avoid double-listing in the
  * kind multi-select UI.
- *
- * TODO(Task 9): source categories from /meta kind_categories.
  */
 export const CATEGORY_KINDS: Record<string, readonly string[]> = {
   Noise: ["text_delta", "heartbeat", "turn_phase", "runtime_trace", "tool_progress"],
@@ -43,10 +46,28 @@ export const CATEGORY_KINDS: Record<string, readonly string[]> = {
 export interface ActivityFilters {
   /** When true, appends exclude_kind with the NOISE_KINDS set. */
   hideNoise: boolean;
-  /** Comma-joined to kind= param when non-empty. */
+  /** Comma-joined to kind= param when non-empty (ignored when policyEvidenceOnly is set). */
   selectedKinds: string[];
   /** Scopes feed to a specific session when set. */
   sessionId: string | null;
+  /**
+   * Quick toggle: when true, forces kind=rule_check,rule_violation regardless of
+   * selectedKinds, scoping the feed to policy-applied events only.
+   * URL key: policy=1
+   */
+  policyEvidenceOnly?: boolean;
+  /**
+   * Sub-toggle for policyEvidenceOnly: when true, also sends has_evidence=true so
+   * only rule_check rows where evidence actually fired are returned.
+   * URL key: evidence=1
+   */
+  evidenceOnly?: boolean;
+  /**
+   * Quick toggle: when true, adds status=error,blocked to scope the feed to
+   * error/blocked events only.
+   * URL key: errors=1
+   */
+  errorsOnly?: boolean;
 }
 
 /** Optional pagination cursors for `buildActivityPageQuery`. */
@@ -81,8 +102,19 @@ export function buildActivityPageQuery(
     params.set("session_id", filters.sessionId);
   }
 
-  if (filters.selectedKinds.length > 0) {
+  // policyEvidenceOnly overrides selectedKinds: forces kind=rule_check,rule_violation.
+  if (filters.policyEvidenceOnly) {
+    params.set("kind", "rule_check,rule_violation");
+  } else if (filters.selectedKinds.length > 0) {
     params.set("kind", filters.selectedKinds.join(","));
+  }
+
+  if (filters.evidenceOnly) {
+    params.set("has_evidence", "true");
+  }
+
+  if (filters.errorsOnly) {
+    params.set("status", "error,blocked");
   }
 
   if (filters.hideNoise) {
@@ -142,17 +174,60 @@ export function mergeEventsById<T extends { id?: number }>(
  *   hideNoise=0   → hideNoise false  (absent or any other value → true, matching DEFAULT_FILTERS)
  *   kind=a,b      → selectedKinds
  *   session_id=x  → sessionId
+ *   policy=1      → policyEvidenceOnly true
+ *   evidence=1    → evidenceOnly true
+ *   errors=1      → errorsOnly true
  *
  * The `exclude_kind` expansion is intentionally kept out of the URL to avoid
  * duplicating the NOISE_KINDS literal; `hideNoise=0` is the canonical signal.
+ *
+ * Optional boolean flags (policyEvidenceOnly, evidenceOnly, errorsOnly) are only
+ * set on the returned object when they are true — this preserves round-trip
+ * symmetry for callers that create ActivityFilters without these optional keys.
  */
 export function parseFiltersFromParams(sp: URLSearchParams): ActivityFilters {
   const noiseParam = sp.get("hideNoise");
-  return {
+  const filters: ActivityFilters = {
     hideNoise: noiseParam === null || noiseParam !== "0",
     selectedKinds: sp.get("kind")?.split(",").filter(Boolean) ?? [],
     sessionId: sp.get("session_id") ?? null,
   };
+  if (sp.get("policy") === "1") filters.policyEvidenceOnly = true;
+  if (sp.get("evidence") === "1") filters.evidenceOnly = true;
+  if (sp.get("errors") === "1") filters.errorsOnly = true;
+  return filters;
+}
+
+/**
+ * Serialize ActivityFilters to URL search params for `router.replace`.
+ * Only non-default values are written so the URL stays minimal.
+ *   hideNoise true (default) → param omitted
+ *   hideNoise false          → hideNoise=0
+ *   policyEvidenceOnly true  → policy=1
+ *   evidenceOnly true        → evidence=1
+ *   errorsOnly true          → errors=1
+ */
+export function filtersToParams(filters: ActivityFilters): URLSearchParams {
+  const p = new URLSearchParams();
+  if (!filters.hideNoise) {
+    p.set("hideNoise", "0");
+  }
+  if (filters.selectedKinds.length > 0) {
+    p.set("kind", filters.selectedKinds.join(","));
+  }
+  if (filters.sessionId) {
+    p.set("session_id", filters.sessionId);
+  }
+  if (filters.policyEvidenceOnly) {
+    p.set("policy", "1");
+  }
+  if (filters.evidenceOnly) {
+    p.set("evidence", "1");
+  }
+  if (filters.errorsOnly) {
+    p.set("errors", "1");
+  }
+  return p;
 }
 
 /** Input shape for formatSessionBreakdown. All fields are optional for back-compat. */
@@ -187,21 +262,82 @@ export function formatSessionBreakdown(session: SessionBreakdownInput): string {
 }
 
 /**
- * Serialize ActivityFilters to URL search params for `router.replace`.
- * Only non-default values are written so the URL stays minimal.
- *   hideNoise true (default) → param omitted
- *   hideNoise false          → hideNoise=0
+ * Verdict extracted from a rule_check or rule_violation event's payload.
+ * Returned by extractVerdict when the event kind qualifies; null otherwise.
  */
-export function filtersToParams(filters: ActivityFilters): URLSearchParams {
-  const p = new URLSearchParams();
-  if (!filters.hideNoise) {
-    p.set("hideNoise", "0");
+export interface RuleCheckVerdict {
+  /** Rule verdict string: "ok" | "pending" | "violation". Defaults to "pending" if absent. */
+  verdict: string;
+  /** Evidence reference hash/receipt when evidence actually fired; null otherwise. */
+  evidenceRef: string | null;
+  /** Human-readable detail string when present; null otherwise. */
+  detail: string | null;
+}
+
+/**
+ * Extract rule_check verdict information from an activity event.
+ *
+ * Returns a RuleCheckVerdict when the event's kind is "rule_check" or
+ * "rule_violation" and the payload contains verdict-shaped data. Returns null
+ * for all other event kinds, or when the input is not a valid event object.
+ *
+ * Confirmed payload field names from magi_agent/runtime/public_events.py and
+ * magi_agent/evidence/event_projection.py:
+ *   payload.verdict    — RuleVerdict string ("ok" | "pending" | "violation")
+ *   payload.evidenceRef — sha256/receipt digest string (optional, top-level key)
+ *   payload.detail     — human-readable string (optional)
+ *   payload.ruleId     — rule identifier string (not surfaced here)
+ */
+export function extractVerdict(event: unknown): RuleCheckVerdict | null {
+  if (typeof event !== "object" || event === null) return null;
+  const ev = event as Record<string, unknown>;
+  if (ev.kind !== "rule_check" && ev.kind !== "rule_violation") return null;
+  const payload =
+    typeof ev.payload === "object" && ev.payload !== null
+      ? (ev.payload as Record<string, unknown>)
+      : {};
+  const verdict = typeof payload.verdict === "string" ? payload.verdict : "pending";
+  const evidenceRef =
+    typeof payload.evidenceRef === "string" && payload.evidenceRef ? payload.evidenceRef : null;
+  const detail =
+    typeof payload.detail === "string" && payload.detail ? payload.detail : null;
+  return { verdict, evidenceRef, detail };
+}
+
+/**
+ * Resolve kind categories and noise kinds from the /meta endpoint's `categories`
+ * payload, falling back to the FE constants (CATEGORY_KINDS / NOISE_KINDS) when
+ * the server payload is absent or malformed (older runtimes without Task 7).
+ *
+ * The /meta categories payload shape (from get_meta_taxonomy()):
+ *   {
+ *     "categories": { "lifecycle": [...], "tools": [...], "policy": [...], ... },
+ *     "noise_kinds": ["text_delta", "heartbeat", ...]
+ *   }
+ *
+ * Usage: const { categories, noiseKinds } = resolveKindCategories(meta?.categories);
+ */
+export function resolveKindCategories(metaCategories: unknown): {
+  categories: Record<string, readonly string[]>;
+  noiseKinds: readonly string[];
+} {
+  if (
+    typeof metaCategories === "object" &&
+    metaCategories !== null &&
+    "categories" in metaCategories
+  ) {
+    const mc = metaCategories as Record<string, unknown>;
+    const cats = mc.categories;
+    if (typeof cats === "object" && cats !== null && !Array.isArray(cats)) {
+      const noiseKinds = Array.isArray(mc.noise_kinds)
+        ? (mc.noise_kinds as string[])
+        : NOISE_KINDS;
+      return {
+        categories: cats as Record<string, readonly string[]>,
+        noiseKinds,
+      };
+    }
   }
-  if (filters.selectedKinds.length > 0) {
-    p.set("kind", filters.selectedKinds.join(","));
-  }
-  if (filters.sessionId) {
-    p.set("session_id", filters.sessionId);
-  }
-  return p;
+  // Fallback: older runtime or malformed payload — use the FE constants.
+  return { categories: CATEGORY_KINDS, noiseKinds: NOISE_KINDS };
 }
