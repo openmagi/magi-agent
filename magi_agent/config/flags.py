@@ -3772,6 +3772,21 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="bool",
     ),
+    # I-1 batch 24: eval-deadline countdown nudge knob.
+    FlagSpec(
+        name="MAGI_EVAL_DEADLINE_SECONDS",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Float-seconds total budget for the current eval/run. When "
+            "set (>0), the toolhost surfaces a one-time nudge at "
+            "progressive threshold crossings. Stored as ``str`` (parsed "
+            "to ``float`` at read time) so the empty / invalid / "
+            "non-positive cases all collapse to ``no deadline``."
+        ),
+        kind="str",
+    ),
 )
 
 
