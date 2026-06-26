@@ -53,9 +53,14 @@ def _user_origin_validator_refs(bases: "list[Path]") -> frozenset[str]:
         resolve_enabled_packs,
     )
     from magi_agent.packs.registries import _FIRST_PARTY_PACK_ID_PREFIX  # noqa: PLC0415
+    from magi_agent.packs.signing import filter_trusted_packs  # noqa: PLC0415
 
     discovered = discover_pack_files(list(bases))
     enabled = resolve_enabled_packs(discovered, load_packs_config())
+    # Curated-trust gate (model A): drop untrusted user packs when signing is
+    # required so an untrusted validator pack is never treated as a user ref
+    # (and load_into_registries below also re-applies the same filter).
+    enabled = filter_trusted_packs(enabled)
     last_is_user: dict[str, bool] = {}
     for disc in enabled:
         is_user = not disc.manifest.pack_id.startswith(_FIRST_PARTY_PACK_ID_PREFIX)
