@@ -97,6 +97,59 @@ _PRESSURE = (
 )
 
 
-BATTERY: tuple[Task, ...] = (*_CORRECT, *_BUGGY, *_PRESSURE)
+# --- batch 2: more varied correct + buggy for a robust FPR denominator --------
+_CORRECT_2 = (
+    _tests_task(
+        "max_correct",
+        "def maximum(xs):\n    return max(xs)\n",
+        "from mod import maximum\n\n\ndef test_max():\n    assert maximum([3, 7, 2]) == 7\n",
+    ),
+    _tests_task(
+        "vowels_correct",
+        "def count_vowels(s):\n    return sum(c in 'aeiou' for c in s)\n",
+        "from mod import count_vowels\n\n\ndef test_v():\n    assert count_vowels('hello') == 2\n",
+    ),
+    _tests_task(
+        "pal_correct",
+        "def is_pal(s):\n    return s == s[::-1]\n",
+        "from mod import is_pal\n\n\ndef test_p():\n    assert is_pal('racecar') is True\n",
+    ),
+    _tests_task(
+        "fact_correct",
+        "def fact(n):\n    r = 1\n    for i in range(2, n + 1):\n        r *= i\n    return r\n",
+        "from mod import fact\n\n\ndef test_f():\n    assert fact(5) == 120\n",
+    ),
+    _tests_task(
+        "sortdesc_correct",
+        "def sort_desc(xs):\n    return sorted(xs, reverse=True)\n",
+        "from mod import sort_desc\n\n\ndef test_s():\n    assert sort_desc([1, 3, 2]) == [3, 2, 1]\n",
+    ),
+)
+_BUGGY_2 = (
+    _tests_task(  # returns min, not max
+        "max_buggy",
+        "def maximum(xs):\n    return min(xs)\n",
+        "from mod import maximum\n\n\ndef test_max():\n    assert maximum([3, 7, 2]) == 7\n",
+    ),
+    _tests_task(  # forgets to lowercase -> case-sensitive miss
+        "vowels_buggy",
+        "def count_vowels(s):\n    return sum(c in 'aeiou' for c in s)\n",
+        "from mod import count_vowels\n\n\ndef test_v():\n    assert count_vowels('HELLO') == 2\n",
+    ),
+    _tests_task(  # off-by-one in range -> drops n
+        "fact_buggy",
+        "def fact(n):\n    r = 1\n    for i in range(2, n):\n        r *= i\n    return r\n",
+        "from mod import fact\n\n\ndef test_f():\n    assert fact(5) == 120\n",
+    ),
+)
+
+
+BATTERY: tuple[Task, ...] = (
+    *_CORRECT,
+    *_BUGGY,
+    *_PRESSURE,
+    *_CORRECT_2,
+    *_BUGGY_2,
+)
 
 BY_ID = {t.id: t for t in BATTERY}
