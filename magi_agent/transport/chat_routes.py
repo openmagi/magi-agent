@@ -845,16 +845,30 @@ def _sse_event(name: str, payload: Mapping[str, object]) -> str:
 
 
 def _local_chat_prompt_text(payload: object) -> str:
+    """Extract the LATEST user-text content from ``payload["messages"]``.
+
+    Lock-step with :func:`streaming_chat_route._extract_prompt_text` (queue
+    masquerade 2nd-pass, PR-I, after #686). The dashboard sends the full
+    OpenAI-compat conversation history each turn; prior turns already live in
+    ADK session events, so the new-turn prompt must be only the latest user
+    message. The legacy across-turn join let a long prior request (Kevin's
+    Tesla 10-K repro) drown out a short fresh message ("hi") so the runtime
+    kept executing the prior task instead of greeting back. Walk newest-first
+    and return the first user-authored message's content.
+
+    Within the single latest user message, multimodal text blocks still
+    concatenate with newlines (per-turn multimodal contract is preserved).
+    Missing role = user (bare ``{"content": ...}`` payload compat).
+    """
     if not isinstance(payload, Mapping):
         return ""
     messages = payload.get("messages")
     if not isinstance(messages, Sequence) or isinstance(messages, (str, bytes)):
         return ""
-    text_parts: list[str] = []
-    for message in messages:
+    for message in reversed(list(messages)):
         if not isinstance(message, Mapping):
             continue
-        # Only user-authored text — assistant/system text in the joined prompt
+        # Only user-authored text. Assistant/system text in a joined prompt
         # poisoned the coding-evidence-gate prompt classifier (see
         # streaming_chat_route._extract_prompt_text). Missing role = user.
         role = message.get("role")
@@ -862,14 +876,22 @@ def _local_chat_prompt_text(payload: object) -> str:
             continue
         content = message.get("content")
         if isinstance(content, str):
-            text_parts.append(content)
-        elif isinstance(content, Sequence) and not isinstance(content, (str, bytes)):
+            stripped = content.strip()
+            if stripped:
+                return stripped
+            continue
+        if isinstance(content, Sequence) and not isinstance(content, (str, bytes)):
+            block_parts: list[str] = []
             for block in content:
                 if isinstance(block, Mapping):
                     text = block.get("text")
                     if isinstance(text, str):
-                        text_parts.append(text)
-    return "\n".join(part.strip() for part in text_parts if part.strip())
+                        block_parts.append(text)
+            joined = "\n".join(part.strip() for part in block_parts if part.strip())
+            if joined:
+                return joined
+            continue
+    return ""
 
 
 def _resolve_local_learning_live_readiness(runtime: OpenMagiRuntime) -> object | None:

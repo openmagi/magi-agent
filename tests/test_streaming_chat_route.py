@@ -2258,13 +2258,20 @@ def test_extract_prompt_text_string_content() -> None:
     assert "You are helpful." not in result
 
 
-def test_extract_prompt_text_excludes_assistant_messages() -> None:
-    """Assistant replies must never be joined into the turn prompt.
+def test_extract_prompt_text_excludes_assistant_and_takes_latest_user() -> None:
+    """Assistant replies must never become the turn prompt; only the LATEST
+    user message wins (queue masquerade 2nd-pass, PR-I after #686).
 
     The bot's own self-introduction mentions coding ("코드 작성/편집 ...");
-    joining it into the prompt made the coding-evidence-gate prompt classifier
-    treat EVERY later turn of the session as a coding task, which triggered the
-    bounded-repair loop on casual chat.
+    using it as the prompt made the coding-evidence-gate prompt classifier
+    treat EVERY later turn of the session as a coding task, which triggered
+    the bounded-repair loop on casual chat. That assistant-exclusion contract
+    is preserved.
+
+    The earlier-turn user "넌 누구니" is now also excluded (PR-I): joining
+    prior user messages let a long prior request drown out a short new one
+    (Kevin's Tesla 10-K + "ㅎㅇ" repro). Prior turns live in the ADK session
+    events; the new-turn prompt is only the latest user message.
     """
     body = {
         "messages": [
@@ -2274,8 +2281,10 @@ def test_extract_prompt_text_excludes_assistant_messages() -> None:
         ]
     }
     result = _extract_prompt_text(body)
-    assert "넌 누구니" in result
-    assert "서브에이전트 3개 스폰해줘" in result
+    assert result == "서브에이전트 3개 스폰해줘"
+    # Earlier-turn user message must NOT bleed in (PR-I).
+    assert "넌 누구니" not in result
+    # Assistant text exclusion contract preserved.
     assert "코드" not in result
 
 
