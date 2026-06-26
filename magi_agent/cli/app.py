@@ -315,6 +315,23 @@ def agent(
         apply_control_plane_overrides_to_env(os.environ, load_overrides())
     except Exception:  # noqa: BLE001 - never let a customize read break startup
         pass
+
+    # WS1 PR1d - durable boot recovery sweep. Runs once, synchronously, before
+    # the first turn dispatches (after the profile + customize env is settled).
+    # Strict no-op + byte-identical when MAGI_DURABLE_STARTUP_RECOVERY_ENABLED is
+    # OFF; fail-open so a corrupt durable store never blocks boot.
+    try:
+        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+        if flag_bool("MAGI_DURABLE_STARTUP_RECOVERY_ENABLED"):
+            from magi_agent.runtime.durable_recovery import (  # noqa: PLC0415
+                run_startup_recovery_from_env,
+            )
+
+            run_startup_recovery_from_env()
+    except Exception:  # noqa: BLE001 - never let boot recovery break startup
+        pass
+
     runner_policy_routing_enabled = local_runner_policy_routing_enabled_from_env()
 
     # ------------------------------------------------------------------ #
