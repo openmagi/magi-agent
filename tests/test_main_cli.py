@@ -132,7 +132,7 @@ def test_resolve_server_host_defaults_to_all_interfaces() -> None:
 
 def test_resolve_server_host_honours_core_agent_host_env() -> None:
     assert (
-        resolve_server_host([], environ={"CORE_AGENT_HOST": "127.0.0.1"})
+        resolve_server_host([], environ={"MAGI_SERVE_HOST": "127.0.0.1"})
         == "127.0.0.1"
     )
 
@@ -152,7 +152,7 @@ def test_resolve_server_host_flag_wins_over_env() -> None:
     assert (
         resolve_server_host(
             ["serve", "--host", "127.0.0.1"],
-            environ={"CORE_AGENT_HOST": "0.0.0.0"},
+            environ={"MAGI_SERVE_HOST": "0.0.0.0"},
         )
         == "127.0.0.1"
     )
@@ -180,7 +180,7 @@ def test_main_threads_host_flag_to_uvicorn(
 
     for key in EXPECTED_LOCAL_FULL_RUNTIME_DEFAULTS:
         monkeypatch.delenv(key, raising=False)
-    monkeypatch.delenv("CORE_AGENT_HOST", raising=False)
+    monkeypatch.delenv("MAGI_SERVE_HOST", raising=False)
     monkeypatch.delenv(main_module.LOCAL_FULL_RUNTIME_DEFAULTS_ENABLED_ENV, raising=False)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(main_module.uvicorn, "run", lambda app, **kwargs: captured.update(kwargs))
@@ -194,13 +194,13 @@ def test_main_threads_core_agent_host_env_to_uvicorn(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    # CORE_AGENT_HOST env (no flag) reaches the uvicorn.run call.
+    # MAGI_SERVE_HOST env (no flag) reaches the uvicorn.run call.
     captured: dict[str, object] = {}
 
     for key in EXPECTED_LOCAL_FULL_RUNTIME_DEFAULTS:
         monkeypatch.delenv(key, raising=False)
     monkeypatch.delenv(main_module.LOCAL_FULL_RUNTIME_DEFAULTS_ENABLED_ENV, raising=False)
-    monkeypatch.setenv("CORE_AGENT_HOST", "127.0.0.1")
+    monkeypatch.setenv("MAGI_SERVE_HOST", "127.0.0.1")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(main_module.uvicorn, "run", lambda app, **kwargs: captured.update(kwargs))
     main_module.main(["serve", "--port", "9095"])

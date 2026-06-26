@@ -3845,7 +3845,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         kind="int",
     ),
     FlagSpec(
-        name="CORE_AGENT_HOST",
+        name="MAGI_SERVE_HOST",
         default="0.0.0.0",
         scope="public",
         stage="stage1",

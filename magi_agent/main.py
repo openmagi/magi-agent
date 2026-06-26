@@ -67,7 +67,7 @@ def resolve_server_host(
     """Resolve the uvicorn bind host for ``serve``.
 
     Mirrors :func:`resolve_server_port`: an optional ``--host`` CLI flag wins,
-    otherwise the typed ``CORE_AGENT_HOST`` flag (env) is read, which defaults
+    otherwise the typed ``MAGI_SERVE_HOST`` flag (env) is read, which defaults
     to ``0.0.0.0``. Hosted behaviour is byte-identical to the historical
     hard-coded ``host="0.0.0.0"``; the desktop shell passes ``--host
     127.0.0.1`` so the local runtime binds loopback only.
@@ -76,7 +76,7 @@ def resolve_server_host(
     from magi_agent.config.flags import flag_str  # noqa: PLC0415
 
     # ``flag_str`` returns the registry default ("0.0.0.0") when unset.
-    default_host = flag_str("CORE_AGENT_HOST", env=env) or "0.0.0.0"
+    default_host = flag_str("MAGI_SERVE_HOST", env=env) or "0.0.0.0"
     raw_args = list(sys.argv[1:] if argv is None else argv)
 
     parser = argparse.ArgumentParser(prog="magi-agent")

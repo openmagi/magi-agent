@@ -139,7 +139,7 @@ fn spawn_serve(bin: &Path, port: u16, log: File) -> std::io::Result<Child> {
         .arg("--port")
         .arg(port.to_string())
         .env("CORE_AGENT_PORT", port.to_string())
-        .env("CORE_AGENT_HOST", "127.0.0.1")
+        .env("MAGI_SERVE_HOST", "127.0.0.1")
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(err_log))
         .stdin(Stdio::null())
