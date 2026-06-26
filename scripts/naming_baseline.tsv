@@ -90,7 +90,7 @@ openmagi	magi_agent/cli/tool_runtime.py	1
 openmagi	magi_agent/cli/wiring.py	2
 openmagi	magi_agent/composio/config.py	2
 openmagi	magi_agent/config/env.py	3
-openmagi	magi_agent/config/flags.py	3
+openmagi	magi_agent/config/flags.py	4
 openmagi	magi_agent/config/models.py	1
 openmagi	magi_agent/connectors/credential_lease.py	6
 openmagi	magi_agent/connectors/marketplace.py	6
@@ -174,7 +174,7 @@ openmagi	magi_agent/research/source_proof.py	4
 openmagi	magi_agent/runtime/__init__.py	1
 openmagi	magi_agent/runtime/adk_turn_runner.py	29
 openmagi	magi_agent/runtime/child_runner_boundary.py	10
-openmagi	magi_agent/runtime/child_runner_live.py	3
+openmagi	magi_agent/runtime/child_runner_live.py	5
 openmagi	magi_agent/runtime/commit_boundary.py	1
 openmagi	magi_agent/runtime/context_lifecycle.py	5
 openmagi	magi_agent/runtime/context_packet.py	10
@@ -198,6 +198,7 @@ openmagi	magi_agent/runtime/session_continuity.py	5
 openmagi	magi_agent/runtime/session_continuity_projection.py	18
 openmagi	magi_agent/runtime/session_continuity_proof.py	3
 openmagi	magi_agent/runtime/slash_control_boundary.py	1
+openmagi	magi_agent/runtime/trace_sink.py	3
 openmagi	magi_agent/sandbox/policy.py	1
 openmagi	magi_agent/security/advisory.py	1
 openmagi	magi_agent/security/compliance.py	4

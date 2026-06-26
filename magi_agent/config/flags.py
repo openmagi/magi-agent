@@ -285,6 +285,21 @@ FLAGS: tuple[FlagSpec, ...] = (
             "unexpected ref leakage) without redeploying a debug wheel."
         ),
     ),
+    FlagSpec(
+        name="MAGI_TRACE_LOG_PATH",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Override path for the file-backed diagnostic trace sink "
+            "(see magi_agent/runtime/trace_sink.py). Default path "
+            "~/.openmagi/trace.log is used when unset. Honours ~ and "
+            "$VAR expansion. The sink exists so MAGI_CHILD_RUNNER_EMPTY_DEBUG "
+            "stamps do not vanish into a wedged uvicorn stderr FD during "
+            "long-running sessions (Kevin's 0.1.86 repro)."
+        ),
+        kind="str",
+    ),
     _b(
         "MAGI_GOAL_NUDGE_ENABLED",
         summary=(

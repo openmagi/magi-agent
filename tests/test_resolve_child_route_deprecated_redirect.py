@@ -15,22 +15,37 @@ This test module pins the new behaviour:
 3. A synthetic deprecated record whose replacement is unresolvable falls back
    to the original deprecated route (no infinite loop, no crash).
 4. :func:`available_child_model_routes` does not advertise deprecated entries.
+
+PR-G moved the trace channel from ``sys.stderr`` to a dedicated file
+(``~/.openmagi/trace.log`` by default, override with ``MAGI_TRACE_LOG_PATH``)
+so the trace stamps no longer vanish into a wedged uvicorn stderr FD during
+long-running sessions. Tests read the file channel back.
 """
 
 from __future__ import annotations
 
 import tempfile
 from collections.abc import Mapping
+from pathlib import Path
 
 import pytest
 
-from magi_agent.runtime import model_tiers
+from magi_agent.runtime import model_tiers, trace_sink
 from magi_agent.runtime.model_tiers import (
     ChildRoute,
     ResolvedModelTier,
     available_child_model_routes,
     resolve_child_route,
 )
+
+
+@pytest.fixture
+def trace_log(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    path = tmp_path / "trace.log"
+    monkeypatch.setenv(trace_sink.MAGI_TRACE_LOG_PATH_ENV, str(path))
+    trace_sink.reset_trace_fd_for_tests()
+    yield path
+    trace_sink.reset_trace_fd_for_tests()
 
 
 def _isolated_env(**extra: str) -> dict[str, str]:
@@ -53,33 +68,25 @@ def test_deprecated_route_redirects_to_replacement() -> None:
     )
 
 
-def test_deprecated_route_logs_redirect_when_env_on(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
+def test_deprecated_route_logs_redirect_when_env_on(trace_log: Path) -> None:
     """With ``MAGI_CHILD_RUNNER_EMPTY_DEBUG=1`` the redirect emits one stamp."""
     env = _isolated_env(MAGI_CHILD_RUNNER_EMPTY_DEBUG="1")
     resolve_child_route("anthropic", "claude-opus-4-6", env)
-    captured = capsys.readouterr()
-    stamps = [
-        line
-        for line in captured.err.splitlines()
-        if "[model_tiers.trace] deprecated_redirect" in line
-    ]
-    assert len(stamps) == 1, f"exactly one redirect stamp expected; stderr was:\n{captured.err!r}"
+    lines = trace_log.read_text(encoding="utf-8").splitlines() if trace_log.exists() else []
+    stamps = [line for line in lines if "[model_tiers.trace] deprecated_redirect" in line]
+    assert len(stamps) == 1, f"exactly one redirect stamp expected; trace was:\n{lines!r}"
     stamp = stamps[0]
     assert "from=claude-opus-4-6" in stamp
     assert "to=claude-opus-4-8" in stamp
 
 
-def test_deprecated_route_silent_when_env_off(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
+def test_deprecated_route_silent_when_env_off(trace_log: Path) -> None:
     """Without the empty-debug env, no stamp is emitted."""
     env = _isolated_env()
     resolve_child_route("anthropic", "claude-opus-4-6", env)
-    captured = capsys.readouterr()
-    assert "[model_tiers.trace] deprecated_redirect" not in captured.err, (
-        f"redirect stamp must not appear when env OFF; stderr was:\n{captured.err!r}"
+    lines = trace_log.read_text(encoding="utf-8").splitlines() if trace_log.exists() else []
+    assert not any("[model_tiers.trace] deprecated_redirect" in line for line in lines), (
+        f"redirect stamp must not appear when env OFF; trace was:\n{lines!r}"
     )
 
 

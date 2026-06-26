@@ -386,24 +386,19 @@ def _empty_debug_enabled_local(env: Mapping[str, str]) -> bool:
 
 
 def _emit_deprecated_redirect_trace(from_model: str, to_model: str) -> None:
-    """Emit the one-line ``deprecated_redirect`` stamp on stderr.
+    """Emit the one-line ``deprecated_redirect`` stamp through the trace sink.
 
-    Mirrors the ``child_runner_live._emit_trace`` shape (stderr + flush, never
-    raise) so the operator's serve log captures the line under the SAME debug
-    env. Inlined here to avoid a circular import; the stamp prefix
-    ``[model_tiers.trace]`` keeps it greppable separately from the child-runner
-    traces.
+    Delegates to the shared :func:`magi_agent.runtime.trace_sink._emit_trace`
+    (PR-G) so the line lands in the same file-backed channel as every other
+    child-runner / boundary trace. The stamp prefix ``[model_tiers.trace]``
+    keeps it greppable separately from the child-runner traces.
     """
-    import sys  # noqa: PLC0415 - local import keeps module-load cost untouched.
+    # Imported lazily so importing this module stays light: model_tiers is
+    # loaded early by the CLI bootstrap and the sink only matters when the
+    # operator opts in via ``MAGI_CHILD_RUNNER_EMPTY_DEBUG``.
+    from magi_agent.runtime.trace_sink import _emit_trace  # noqa: PLC0415
 
-    try:
-        print(
-            f"[model_tiers.trace] deprecated_redirect from={from_model} to={to_model}",
-            file=sys.stderr,
-            flush=True,
-        )
-    except Exception:  # noqa: BLE001 - tracing must never break a turn.
-        return
+    _emit_trace(f"[model_tiers.trace] deprecated_redirect from={from_model} to={to_model}")
 
 
 def _catalog_deprecation_lookup(provider: str, model: str) -> tuple[bool, str | None]:
