@@ -478,7 +478,13 @@ def local_full_runtime_defaults_enabled(environ: Mapping[str, str]) -> bool:
     raw = environ.get(LOCAL_FULL_RUNTIME_DEFAULTS_ENABLED_ENV)
     if raw is not None and not _env_enabled(raw):
         return False
-    profile = (environ.get("MAGI_RUNTIME_PROFILE") or "").strip().lower()
+    # I-1: route the runtime-profile read through the typed flag
+    # registry. ``MAGI_RUNTIME_PROFILE`` is already registered
+    # (``str``, default ``""``); ``flag_str`` returns ``""`` on
+    # unset, which collapses identically under ``(value or "")``.
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    profile = (flag_str("MAGI_RUNTIME_PROFILE", env=environ) or "").strip().lower()
     return profile not in SAFE_RUNTIME_PROFILES
 
 

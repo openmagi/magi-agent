@@ -3772,6 +3772,31 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="bool",
     ),
+    # I-1 batch 23: bootstrap port + agent-require-env knob.
+    FlagSpec(
+        name="CORE_AGENT_PORT",
+        default=8080,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Server bootstrap port. Hosted infra sets this; the "
+            "``--port`` flag still wins when explicitly passed."
+        ),
+        kind="int",
+    ),
+    FlagSpec(
+        name="MAGI_AGENT_REQUIRE_ENV",
+        default=False,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "When truthy, the bootstrap refuses to fall back to local "
+            "dev defaults on a ``RuntimeEnvError`` and re-raises "
+            "instead. Default-OFF so local ``magi serve`` runs without "
+            "a fully-populated hosted env."
+        ),
+        kind="bool",
+    ),
 )
 
 

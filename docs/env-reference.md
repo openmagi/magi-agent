@@ -3,9 +3,11 @@ ERROR: env-reference document missing markers '<!-- BEGIN GENERATED FLAGS (scrip
 
 Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/generate_env_reference.py`. Do not edit this section by hand; register the flag in the registry and regenerate.
 
+- `CORE_AGENT_PORT` (default `8080`) — Server bootstrap port. Hosted infra sets this; the ``--port`` flag still wins when explicitly passed.
 - `CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_LABEL` (no default) — Hosted gate5b shadow-generation provider label override (e.g. ``anthropic``, ``openai``). Empty falls back to the model-derived family. Hosted-only (excluded from the public env-reference).
 - `MAGI_ADK_STREAMING` (no default) — ADK streaming mode. Default-ON; explicit ``0``/``false``/``no``/``off`` disables. Unset / blank → ON. ``str`` kind because the deny-set is wider than ``flag_bool``'s strict truthy convention.
 - `MAGI_AGENT_LOCAL_CHAT_ROUTE` (default off) — Self-host fallback gate for the local ADK chat route. ON makes ``/v1/chat/completions`` serve the local headless engine when the hosted python chat route is OFF; OFF keeps the legacy ``chat_route_disabled`` 503. Strict default-OFF.
+- `MAGI_AGENT_REQUIRE_ENV` (default off) — When truthy, the bootstrap refuses to fall back to local dev defaults on a ``RuntimeEnvError`` and re-raises instead. Default-OFF so local ``magi serve`` runs without a fully-populated hosted env.
 - `MAGI_AGENT_WORKSPACE` (no default) — Workspace directory used by the local chat route, headless CLI wiring, and per-turn memory recall; empty falls back to ``os.getcwd()`` (the historical default).
 - `MAGI_APPLY_PATCH_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Enable the apply-patch tool for multi-file edits (default-ON full profile).
 - `MAGI_ASR_PROVIDER` (default `openai_whisper`) — Provider id for the audio transcription tool (``tools/audio_tools``). Default ``openai_whisper`` keeps the OpenAI Whisper provider; unknown values disable the path.
