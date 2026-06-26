@@ -134,6 +134,7 @@ class _FakeOutcome:
         *,
         tool_name: str = "FileEdit",
         status: str = "ok",
+        output_preview: object = "ok",
         edit_match_receipt=None,
         code_diagnostics_receipt=None,
         coding_mutation_receipt=None,
@@ -141,7 +142,7 @@ class _FakeOutcome:
         self.receipt = _FakeReceipt(tool_name)
         self.status = status
         self.reason = "ok"
-        self.output_preview = "ok"
+        self.output_preview = output_preview
         self.edit_match_receipt = edit_match_receipt
         self.code_diagnostics_receipt = code_diagnostics_receipt
         self.coding_mutation_receipt = coding_mutation_receipt
@@ -194,6 +195,90 @@ def test_no_coding_receipts_no_evidence_key():
     assert "evidence" not in tr.metadata
 
 
+# --- Part B2: GitDiff live producer (derived from output_preview) -----------
+
+
+def _git_output(*paths: str) -> dict:
+    return {
+        "isGitRepo": True,
+        "status": [f" M {p}" for p in paths],
+        "numstat": [{"path": p, "added": 1, "deleted": 0} for p in paths],
+    }
+
+
+def test_git_diff_outcome_emits_evidence_declaration():
+    from magi_agent.tools.core_toolhost import _tool_result_from_outcome
+
+    outcome = _FakeOutcome(tool_name="GitDiff", output_preview=_git_output("a.py", "b.py"))
+    tr = _tool_result_from_outcome(outcome)
+    decls = _evidence(tr.metadata)
+    git = [d for d in decls if d["type"] == "GitDiff"]
+    assert len(git) == 1
+    assert tuple(git[0]["fields"]["changedFiles"]) == ("a.py", "b.py")
+    assert git[0]["fields"]["fileCount"] == 2
+
+
+def test_git_diff_clean_repo_emits_empty_changed_files():
+    from magi_agent.tools.core_toolhost import _tool_result_from_outcome
+
+    outcome = _FakeOutcome(tool_name="GitDiff", output_preview=_git_output())
+    tr = _tool_result_from_outcome(outcome)
+    git = [d for d in _evidence(tr.metadata) if d["type"] == "GitDiff"]
+    assert len(git) == 1
+    assert tuple(git[0]["fields"]["changedFiles"]) == ()
+    assert git[0]["fields"]["fileCount"] == 0
+
+
+def test_git_diff_non_repo_no_evidence():
+    from magi_agent.tools.core_toolhost import _tool_result_from_outcome
+
+    outcome = _FakeOutcome(
+        tool_name="GitDiff",
+        output_preview={"isGitRepo": False, "status": [], "numstat": []},
+    )
+    tr = _tool_result_from_outcome(outcome)
+    assert "evidence" not in tr.metadata
+
+
+def test_git_diff_truncated_output_no_evidence():
+    # Degraded output ({truncated, digest}) must not crash or fabricate.
+    from magi_agent.tools.core_toolhost import _tool_result_from_outcome
+
+    outcome = _FakeOutcome(
+        tool_name="GitDiff",
+        output_preview={"truncated": True, "digest": "sha256:x"},
+    )
+    tr = _tool_result_from_outcome(outcome)
+    assert "evidence" not in tr.metadata
+
+
+def test_git_diff_reaches_durable_ledger(tmp_path, monkeypatch):
+    from magi_agent.evidence.local_tool_collector import LocalToolEvidenceCollector
+    from magi_agent.tools.core_toolhost import _tool_result_from_outcome
+
+    monkeypatch.setenv("MAGI_EVIDENCE_LEDGER_DIR", str(tmp_path))
+    outcome = _FakeOutcome(tool_name="GitDiff", output_preview=_git_output("x.py"))
+    tr = _tool_result_from_outcome(outcome)
+    collector = LocalToolEvidenceCollector()
+    collector.record_tool_result(
+        session_id="sess-g",
+        turn_id="turn-g",
+        tool_call_id="call-g",
+        tool_name="GitDiff",
+        result=tr,
+    )
+    ledger = tmp_path / "sess-g.jsonl"
+    assert ledger.exists()
+    types = set()
+    for ln in ledger.read_text().splitlines():
+        if not ln.strip():
+            continue
+        rec = json.loads(ln).get("record")
+        if isinstance(rec, dict):
+            types.add(rec.get("type"))
+    assert "GitDiff" in types
+
+
 # --- Part C: CommitCheckpoint native plugin ---------------------------------
 
 
@@ -218,6 +303,7 @@ def test_commit_checkpoint_declares_evidence(tmp_path):
         ("EditMatch", {"type", "tier", "tierIndex", "confidence", "ambiguous", "fileDigest", "spanDigest"}),
         ("CodeDiagnostics", {"type", "checker", "fileDigest", "errorCount", "capped", "diagnosticsDigest", "entries"}),
         ("CommitCheckpoint", {"checkpointDigest", "pathRef"}),
+        ("GitDiff", {"changedFiles", "fileCount", "digest"}),
     ],
 )
 def test_shacl_hint_is_subset_of_emitted_fields(type_name, emitted):
@@ -256,9 +342,11 @@ def test_coding_receipts_reach_durable_ledger(tmp_path, monkeypatch):
     )
     ledger = tmp_path / "sess-1.jsonl"
     assert ledger.exists()
-    types = {
-        json.loads(ln)["record"]["type"]
-        for ln in ledger.read_text().splitlines()
-        if ln.strip()
-    }
+    types = set()
+    for ln in ledger.read_text().splitlines():
+        if not ln.strip():
+            continue
+        rec = json.loads(ln).get("record")
+        if isinstance(rec, dict):
+            types.add(rec.get("type"))
     assert {"EditMatch", "CodeDiagnostics"} <= types
