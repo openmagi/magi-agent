@@ -2,9 +2,9 @@
 
 The bootstrap (``magi_agent.cli.memory_bootstrap.apply_memory_config_bootstrap``)
 runs ONCE at real CLI startup.  It overlays ``~/.magi/config.toml[memory]`` on
-the install defaults ``{enabled: True, prefer_local_search: True}`` and
-``setdefault``s the matching ``MAGI_MEMORY_*`` env vars (precedence:
-``env > config > install-default``).
+the install defaults ``{enabled, prefer_local_search, session_extract_enabled,
+vector_search}`` (all True) and ``setdefault``s the matching ``MAGI_MEMORY_*``
+env vars (precedence: ``env > config > install-default``).
 
 Invariants under test:
   * config absent → memory env on (master + prefer_local_search).
@@ -31,6 +31,7 @@ from magi_agent.harness.memory_session_extract import (
 from magi_agent.memory.config import (
     MASTER_ENV_VAR,
     PREFER_LOCAL_SEARCH_ENV_VAR,
+    VECTOR_SEARCH_ENV_VAR,
     WRITE_ENABLED_ENV_VAR,
     PREFER_QMD_AUTO_REGISTER_ENV_VAR,
     resolve_memory_config,
@@ -40,6 +41,7 @@ _INSTALL_DEFAULT_ENV_VARS = {
     MASTER_ENV_VAR,
     PREFER_LOCAL_SEARCH_ENV_VAR,
     MAGI_MEMORY_SESSION_EXTRACT_ENABLED_ENV,
+    VECTOR_SEARCH_ENV_VAR,
 }
 
 
@@ -153,6 +155,28 @@ def test_explicit_session_extract_env_wins() -> None:
     env = {MAGI_MEMORY_SESSION_EXTRACT_ENABLED_ENV: "0"}
     apply_memory_config_bootstrap(env, config={})
     assert env[MAGI_MEMORY_SESSION_EXTRACT_ENABLED_ENV] == "0"
+
+
+def test_vector_search_install_default_on_and_overridable() -> None:
+    # Install default: semantic search ON for the local/self-host install. This
+    # only ARMS the explicit search surfaces; it does not trigger any embed and
+    # the per-turn hot path stays on BM25 (see memory_bootstrap docstring).
+    env: dict[str, str] = {}
+    apply_memory_config_bootstrap(env, config={})
+    assert env[VECTOR_SEARCH_ENV_VAR] == "1"
+
+    # config.toml can turn it back off without touching the master switch.
+    env2: dict[str, str] = {}
+    apply_memory_config_bootstrap(env2, config={"memory": {"vector_search": False}})
+    assert env2[VECTOR_SEARCH_ENV_VAR] == "0"
+    assert env2[MASTER_ENV_VAR] == "1"
+
+
+def test_explicit_vector_search_env_wins() -> None:
+    # A pre-set env var is preserved (setdefault): operator override beats install.
+    env = {VECTOR_SEARCH_ENV_VAR: "0"}
+    apply_memory_config_bootstrap(env, config={})
+    assert env[VECTOR_SEARCH_ENV_VAR] == "0"
 
 
 def test_loads_config_file_when_config_omitted(monkeypatch) -> None:

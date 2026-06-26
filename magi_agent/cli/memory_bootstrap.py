@@ -59,6 +59,7 @@ from magi_agent.harness.memory_session_extract import (
 from magi_agent.memory.config import (
     MASTER_ENV_VAR,
     PREFER_LOCAL_SEARCH_ENV_VAR,
+    VECTOR_SEARCH_ENV_VAR,
     coerce_bool,
 )
 from magi_agent.memory.config import _memory_table as _config_memory_table
@@ -76,12 +77,20 @@ logger = logging.getLogger(__name__)
 #:   that does NOT cascade from master, so it is listed explicitly). The write it
 #:   performs still requires the (cascaded-ON) write gate, and the extractor
 #:   degrades to a no-op when no provider/key is configured.
+#: ``vector_search`` ON ⇒ the EXPLICIT search surfaces (``magi memory search
+#:   --vector`` and the dashboard endpoint) use semantic ``qmd vsearch`` by
+#:   default. This is a "config-default-ON even if the binary is OFF" flag: it
+#:   only arms the capability. The per-turn recall HOT PATH ignores it and always
+#:   stays on BM25, and the ~2GB ``qmd embed`` is NEVER triggered here — it runs
+#:   only via the explicit ``magi memory init --vector``. So flipping this on a
+#:   fresh install costs nothing until the operator opts into the one-time embed.
 #: Everything else absent ⇒ resolver's master cascade / opt-in defaults apply.
 _INSTALL_DEFAULT_KEYS: tuple[tuple[str, str, bool], ...] = (
     # (config_key, env_var, install_default_value)
     ("enabled", MASTER_ENV_VAR, True),
     ("prefer_local_search", PREFER_LOCAL_SEARCH_ENV_VAR, True),
     ("session_extract_enabled", MAGI_MEMORY_SESSION_EXTRACT_ENABLED_ENV, True),
+    ("vector_search", VECTOR_SEARCH_ENV_VAR, True),
 )
 
 
