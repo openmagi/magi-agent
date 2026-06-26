@@ -1624,6 +1624,22 @@ FLAGS: tuple[FlagSpec, ...] = (
         stage="stage2",
     ),
     _b(
+        "MAGI_ONBOARDING_WIZARD_ENABLED",
+        summary=(
+            "OSS self-host first-run onboarding wizard. When ON and no model "
+            "provider is yet configured, the dashboard bootstrap reports "
+            "``setup.needed=true`` so the UI can guide the operator through "
+            "picking a provider and entering an API key (persisted to "
+            "~/.magi/config.toml via the POST /v1/admin/setup/provider route). "
+            "With a provider already configured, or with this flag OFF, the "
+            "bootstrap is behaviorally unchanged (``setup.needed`` is false); an "
+            "additive ``setup`` key is always present and existing consumers "
+            "ignore it. Strict default-OFF; self-host only."
+        ),
+        scope="public",
+        stage="stage2",
+    ),
+    _b(
         "MAGI_CUSTOMIZE_BUDGETS_ENABLED",
         summary=(
             "PR-F7 cost-vocabulary applier: project operator-authored Customize "

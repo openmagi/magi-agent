@@ -65,14 +65,14 @@ def test_dashboard_bundle_uses_local_streaming_chat_contract() -> None:
 
 
 def test_dashboard_bootstrap_is_local_first() -> None:
-    # local-dev token is surfaced so the bundle auto-authenticates locally.
+    # local-dev token is surfaced so the bundle auto-authenticates locally. The
+    # additive `setup` block is also present (default-OFF wizard -> not needed).
     payload = _client("local-dev-token").get("/app/bootstrap.json").json()
-    assert payload == {
-        "ok": True,
-        "agentUrl": "",
-        "tokenRequired": False,
-        "token": "local-dev-token",
-    }
+    assert payload["ok"] is True
+    assert payload["agentUrl"] == ""
+    assert payload["tokenRequired"] is False
+    assert payload["token"] == "local-dev-token"
+    assert payload["setup"]["needed"] is False
 
 
 def test_dashboard_bootstrap_hides_real_gateway_token() -> None:
@@ -81,6 +81,68 @@ def test_dashboard_bootstrap_hides_real_gateway_token() -> None:
     assert payload["token"] is None
     assert payload["tokenRequired"] is True
     assert payload["agentUrl"] == ""
+
+
+# ---------------------------------------------------------------------------
+# Onboarding wizard: bootstrap `setup` block (PR1.1).
+# ---------------------------------------------------------------------------
+def _bootstrap(runtime, monkeypatch, *, flag: str | None, provider_env: bool) -> dict:
+    # Hermetic: control the flag and every provider-selecting env var explicitly.
+    from magi_agent.transport import web_dashboard as wd
+
+    for name in (
+        "MAGI_ONBOARDING_WIZARD_ENABLED",
+        "MAGI_PROVIDER",
+        "MAGI_MODEL",
+        "MAGI_CONFIG",
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "FIREWORKS_API_KEY",
+        "OPENROUTER_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    # Point config at a non-existent file so no real ~/.magi/config.toml leaks in.
+    monkeypatch.setenv("MAGI_CONFIG", "/nonexistent/magi-onboard-test/config.toml")
+    if flag is not None:
+        monkeypatch.setenv("MAGI_ONBOARDING_WIZARD_ENABLED", flag)
+    if provider_env:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-present")
+    return wd.local_dashboard_bootstrap(runtime)
+
+
+def test_bootstrap_setup_lists_providers_and_shape(monkeypatch) -> None:
+    from magi_agent.cli.providers import SUPPORTED_PROVIDERS
+
+    payload = _bootstrap(_runtime(), monkeypatch, flag="1", provider_env=False)
+    setup = payload["setup"]
+    assert set(setup.keys()) == {"needed", "hasProvider", "providers"}
+    assert setup["providers"] == list(SUPPORTED_PROVIDERS)
+    # Existing keys are unchanged.
+    assert payload["ok"] is True
+    assert payload["agentUrl"] == ""
+
+
+def test_bootstrap_setup_needed_when_flag_on_and_no_provider(monkeypatch) -> None:
+    payload = _bootstrap(_runtime(), monkeypatch, flag="1", provider_env=False)
+    assert payload["setup"]["needed"] is True
+    assert payload["setup"]["hasProvider"] is False
+
+
+def test_bootstrap_setup_not_needed_when_provider_present(monkeypatch) -> None:
+    payload = _bootstrap(_runtime(), monkeypatch, flag="1", provider_env=True)
+    assert payload["setup"]["hasProvider"] is True
+    assert payload["setup"]["needed"] is False
+
+
+def test_bootstrap_setup_not_needed_when_flag_off(monkeypatch) -> None:
+    # Flag OFF => never needed, regardless of provider presence.
+    off = _bootstrap(_runtime(), monkeypatch, flag=None, provider_env=False)
+    assert off["setup"]["needed"] is False
+    assert off["setup"]["hasProvider"] is False
+    off_explicit = _bootstrap(_runtime(), monkeypatch, flag="0", provider_env=False)
+    assert off_explicit["setup"]["needed"] is False
 
 
 def test_dashboard_deep_link_prerendered_route() -> None:

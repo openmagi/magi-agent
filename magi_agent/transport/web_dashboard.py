@@ -98,14 +98,32 @@ def local_dashboard_bootstrap(runtime: OpenMagiRuntime) -> dict[str, object]:
     ``agentUrl`` is empty so the UI uses same-origin relative requests. The
     gateway token is exposed only for the local-dev default; otherwise the UI
     treats the runtime as token-required and the operator supplies the token.
+
+    The additive ``setup`` block drives the OSS first-run onboarding wizard
+    (default-OFF, ``MAGI_ONBOARDING_WIZARD_ENABLED``). ``hasProvider`` is true
+    when any supported provider already resolves a key (config or env);
+    ``needed`` is true only when the wizard flag is ON and no provider is yet
+    configured. The ``setup`` key is always present (additive), but with a
+    provider already set up, or with the flag OFF, ``setup.needed`` is false so
+    the bootstrap is behaviorally unchanged and existing consumers ignore it.
     """
+    from magi_agent.cli.providers import SUPPORTED_PROVIDERS, configured_providers
+    from magi_agent.config.flags import flag_bool
+
     token = runtime.config.gateway_token
     expose = token == _LOCAL_DEV_TOKEN
+    has_provider = bool(configured_providers())
+    wizard_enabled = flag_bool("MAGI_ONBOARDING_WIZARD_ENABLED")
     return {
         "ok": True,
         "agentUrl": "",
         "tokenRequired": bool(token) and not expose,
         "token": token if expose else None,
+        "setup": {
+            "needed": wizard_enabled and not has_provider,
+            "hasProvider": has_provider,
+            "providers": list(SUPPORTED_PROVIDERS),
+        },
     }
 
 
