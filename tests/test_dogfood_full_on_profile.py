@@ -388,6 +388,7 @@ _INTENTIONALLY_NOT_IN_FULL_PROFILE: dict[str, str] = {
     "MAGI_CHILD_RUNNER_EMPTY_DEBUG": "diagnostic-only debug flag",
     "MAGI_SCHEDULER_KILL_SWITCH_ENABLED": "kill switch; ON disables the scheduler",
     "MAGI_AGENT_REQUIRE_ENV": "would BLOCK local serve when hosted env partial; reduces convenience for local dev",
+    "MAGI_CUSTOMIZE_NL_INTERACTIVE_ENABLED": "conversational compose UI gate; default-OFF until UI ships",
 }
 
 

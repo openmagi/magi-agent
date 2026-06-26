@@ -627,6 +627,122 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             }
         )
 
+    @app.post("/v1/app/customize/custom-rules/compile-interactive")
+    async def compile_custom_rule_interactive(request: Request) -> JSONResponse:
+        """Conversational multi-turn variant of /custom-rules/compile.
+
+        Mirror of magi-cp's ``/policies/compile-interactive`` adapted to
+        magi-agent's surface (see
+        ``magi_agent/customize/nl_compiler_interactive.py``). Where the
+        one-shot route compiles a whole policy in a single LLM call, this
+        endpoint runs a state machine: the client posts ``(history,
+        draft_so_far, answers)``, the server applies the operator's
+        answers first (immutable for this turn), calls the LLM with the
+        running history, merges the LLM's partial patch on top, then
+        decides the next batch of questions.
+
+        Gated behind ``MAGI_CUSTOMIZE_NL_INTERACTIVE_ENABLED`` (default
+        OFF). When the flag is OFF, returns the same disabled-feature
+        envelope as the one-shot compiler so the dashboard can hide
+        the chat UI without branching on HTTP status.
+
+        Returns:
+          200 {assistant_message, draft, missing_fields, questions,
+               needs_more, ready_to_save, schema_issues}
+              on every successful turn.
+          200 {ok:False, error:"compiler disabled"} when flag OFF.
+          400 invalid JSON / structural cap violation.
+          422 InteractiveInputError / PrecheckError (body shape OK but
+              one cap exceeded — history too long, answer key too long,
+              aggregate text too large).
+          401 auth failure (always before flag check).
+        """
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+
+        try:
+            from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+            interactive_enabled = flag_bool(
+                "MAGI_CUSTOMIZE_NL_INTERACTIVE_ENABLED"
+            )
+        except Exception:  # noqa: BLE001
+            interactive_enabled = False
+        if not interactive_enabled:
+            return JSONResponse(
+                content={"ok": False, "error": "compiler disabled"},
+                status_code=200,
+            )
+
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(
+                status_code=400, content={"ok": False, "error": "invalid_json"}
+            )
+        if not isinstance(body, dict):
+            return JSONResponse(
+                status_code=400,
+                content={"ok": False, "error": "object_required"},
+            )
+
+        history = body.get("history")
+        draft_so_far = body.get("draft_so_far")
+        answers = body.get("answers")
+
+        # Resolve the model factory the same way the one-shot route does,
+        # so the same provider key + env knobs drive both surfaces.
+        from magi_agent.customize.nl_compiler_interactive import (  # noqa: PLC0415
+            InteractiveInputError,
+            PrecheckError,
+            step_compile,
+        )
+
+        # Honor a test-only injection key so backend tests can stub the
+        # LLM without piggy-backing on the production egress critic
+        # factory — same pattern the one-shot route uses for SHACL.
+        injected = body.get("_modelFactory")
+        if callable(injected):
+            model_factory = injected
+        else:
+            from magi_agent.cli.wiring import (  # noqa: PLC0415
+                _build_criterion_model_factory,
+            )
+
+            model_factory = _build_criterion_model_factory
+
+        try:
+            result = await step_compile(
+                history=history,
+                draft_so_far=draft_so_far,
+                answers=answers,
+                model_factory=model_factory,
+            )
+        except InteractiveInputError as exc:
+            return JSONResponse(
+                status_code=422,
+                content={"ok": False, "error": str(exc)},
+            )
+        except PrecheckError as exc:
+            return JSONResponse(
+                status_code=422,
+                content={"ok": False, "error": str(exc)},
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Fail-soft: an LLM-stack failure surfaces as a 200 envelope
+            # with the canonical-fallback questions, so the dashboard
+            # chat stays usable on a transient provider outage.
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "ok": False,
+                    "error": f"compiler_failed: {exc}",
+                },
+            )
+
+        return JSONResponse(content=result, status_code=200)
+
     @app.post("/v1/app/customize/custom-rules/compile")
     async def compile_custom_rule(request: Request) -> JSONResponse:
         """Preview-only NL→SHACL compiler endpoint.

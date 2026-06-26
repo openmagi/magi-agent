@@ -43,6 +43,7 @@ import {
   type DashboardCheck,
 } from "@/lib/packs-dashboard-api";
 import { useAgentFetch } from "@/lib/local-api";
+import { ConversationalCompose } from "./conversational-compose";
 import { InterviewMessage } from "./interview-message";
 import { NlRuleGuide } from "./nl-rule-guide";
 import { ProposalCard } from "./proposal-card";
@@ -194,6 +195,38 @@ export function NlRuleCompose({
   initialNlText,
 }: NlRuleComposeProps): React.ReactElement {
   const agentFetch = useAgentFetch();
+
+  // Conversational mode toggle (PR-F-CONV): the default surface is
+  // still the F-UX6 one-shot+interview compose; the operator can
+  // flip into the magi-cp-style chat-driven builder via the toggle
+  // below. We keep both behind the SAME parent state so the wizard
+  // handoff / "Pick different" affordances continue to work without
+  // adding another phase to AddState.
+  const [conversational, setConversational] = useState(false);
+  if (conversational) {
+    return (
+      <ConversationalCompose
+        agentFetch={agentFetch}
+        initialUserMessage={initialNlText}
+        onPickDifferent={() => setConversational(false)}
+        onSave={async (draft) => {
+          // The conversational compiler only sets ready_to_save once
+          // ``validate_custom_rule`` accepts the draft, so the PUT
+          // should round-trip without surfacing a 4xx.
+          try {
+            await putCustomRule(agentFetch, draft as unknown as CustomRule);
+            onActivated();
+          } catch (err: unknown) {
+            // Toast / banner handling lives in ``onActivated``'s
+            // caller (the customize hub reloads on success); failures
+            // surface via the draft pane's schema-issues block on the
+            // NEXT compile turn. Re-throw so the caller sees it.
+            throw err;
+          }
+        }}
+      />
+    );
+  }
 
   // PR-F-HANDOFF — seed local state with the wizard primer when the parent
   // mounted NlRuleCompose with a non-empty initialNlText. The state is
@@ -436,16 +469,27 @@ export function NlRuleCompose({
       aria-label="Describe a rule in English"
       className="space-y-3 rounded-2xl border border-primary/20 bg-primary/[0.02] p-4 shadow-sm"
     >
-      <header>
-        <h3 className="text-sm font-bold text-foreground">
-          Describe a rule in English
-        </h3>
-        <p className="mt-0.5 text-xs text-secondary">
-          The compiler is a policy architect, not a sentence parser. Tell it
-          what you want; it will ask what it needs and propose the right
-          primitive — or a hybrid composition — with each component&apos;s trust
-          class shown honestly.
-        </p>
+      <header className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-bold text-foreground">
+            Describe a rule in English
+          </h3>
+          <p className="mt-0.5 text-xs text-secondary">
+            The compiler is a policy architect, not a sentence parser. Tell it
+            what you want; it will ask what it needs and propose the right
+            primitive — or a hybrid composition — with each component&apos;s trust
+            class shown honestly.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setConversational(true)}
+          className="shrink-0 rounded-full border border-primary/30 bg-white px-2.5 py-1 text-[11px] font-medium text-primary hover:bg-primary/[0.06]"
+          data-testid="nl-conversational-toggle"
+          title="Build it step-by-step in chat — the assistant asks 1-2 short questions per turn and the draft fills in live."
+        >
+          Try conversational ▸
+        </button>
       </header>
 
       <NlRuleGuide onPickExample={(text) => setNlText(text)} />

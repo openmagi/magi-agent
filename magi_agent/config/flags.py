@@ -1542,6 +1542,23 @@ FLAGS: tuple[FlagSpec, ...] = (
         stage="stage2",
     ),
     _b(
+        "MAGI_CUSTOMIZE_NL_INTERACTIVE_ENABLED",
+        summary=(
+            "Enable the POST /v1/app/customize/custom-rules/compile-interactive "
+            "endpoint: a conversational multi-turn variant of the one-shot "
+            "/custom-rules/compile route. The dashboard's Policies tab uses "
+            "this to drive a chat-style policy builder where the operator "
+            "describes a rule in plain English, the LLM asks 1-2 clarifying "
+            "questions per turn, and the draft IR fills in live until the "
+            "runtime validator accepts it. Registration-time only — never on "
+            "the runtime hot path. Requires a configured provider/key; "
+            "fail-open to a canonical-question fallback when no model is "
+            "available. Strict default-OFF."
+        ),
+        scope="public",
+        stage="stage2",
+    ),
+    _b(
         "MAGI_CUSTOMIZE_NL_RULE_COMPILER_ENABLED",
         summary=(
             "Enable the POST /v1/app/customize/rules/compile endpoint: a "
