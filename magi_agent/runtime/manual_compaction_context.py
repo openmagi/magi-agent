@@ -28,7 +28,6 @@ import threading
 
 MAGI_COMPACTION_MANUAL_ENABLED_ENV: str = "MAGI_COMPACTION_MANUAL_ENABLED"
 
-_TRUTHY_VALUES = frozenset({"1", "true", "yes", "on"})
 
 # Module-level one-shot holder. Guarded by ``_lock`` so the (event-loop-only)
 # writes are safe even though the headless reader daemon thread never touches
@@ -39,16 +38,14 @@ _requested = False
 
 
 def manual_compaction_enabled() -> bool:
-    """Return True when ``MAGI_COMPACTION_MANUAL_ENABLED`` is truthy (default off).
+    """Return True when ``MAGI_COMPACTION_MANUAL_ENABLED`` is truthy (default off)."""
+    # I-1: route through the typed flag registry. ``flag_bool`` returns
+    # the registered default (``False``) for unset and delegates set
+    # values to ``is_true`` (canonical ``TRUE_VALUES`` = ``{"1",
+    # "true", "yes", "on"}``, identical to the local ``_TRUTHY_VALUES``).
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
 
-    Read via the env-name VARIABLE (never a quoted ``MAGI_`` literal) so
-    ``scripts/check_flag_reads.py`` does not count this read against the budget,
-    exactly like ``memory_mode_context.memory_mode_routing_enabled``.
-    """
-    return (
-        os.environ.get(MAGI_COMPACTION_MANUAL_ENABLED_ENV, "").strip().lower()
-        in _TRUTHY_VALUES
-    )
+    return flag_bool(MAGI_COMPACTION_MANUAL_ENABLED_ENV)
 
 
 def request_manual_compaction() -> None:
