@@ -1,3 +1,24 @@
+# 0.1.87 (2026-06-26)
+
+## Customize follow-ups
+- F-QA1/F-QA2/F-QA3/F-QA5 e2e matrix (re-opens of #1032/#1035/#1036/#1038): #1048, #1051, #1053.
+- HTTP→persist→fire round-trip for every authorable kind (#1059 follow-up).
+
+## Subagent enrichment (PR2/3)
+- Child tool lifecycle forwarded into parent progress stream (#1057).
+
+## Flag registry (I-1 series)
+- Batch 22: 6 gate kill-switch / route-attachment / FULL_TOOLHOST reads (#1056, #1062 recovery).
+- Batch 23: bootstrap port + agent-require-env + local-defaults profile (#1065).
+- Batch 24: eval-deadline countdown read (#1068).
+
+## Dashboard
+- `.magi` self-identity files surfaced in Memory tab (#1066).
+
+## Tooling / docs
+- dogfood full-ON profile coverage + completeness gate (#1063).
+- docs/what-works third refresh (#1030, #1069).
+
 # 0.1.86 (2026-06-25)
 
 ## Customize series wave
