@@ -1,3 +1,36 @@
+# 0.1.86 (2026-06-25)
+
+## Customize series wave
+- F-MUT mutator hooks (audit + 3 stages): #973, #978, #982, #983.
+- F-LIFE lifecycle hooks (turn/llm-call/compaction/checkpoint/artifact/session): #984, #985, #986, #1000, #1006, #1027.
+- F-UX series (NL authoring + UX): #998, #1002, #1014, #1023, #1032, #1048, #1051.
+- F-EXEC shell substrate (audit + action + verifier + budget guard): #1003, #1007, #1013, #1014, #1044, #1045, #1052.
+- F-HANDOFF wizard ↔ NL: #988.
+- F-UX-EXTRA condition chips + Policy ID + tooltips: #987.
+- F-QA matrix scaffolding + slot drivers: #1032, #1048, #1051 (#1050/#1053 follow-up).
+
+## Packs runtime (new local-first surface)
+- Third-party pack runtime (local activation + recipe-as-code + capability enforcement) (#1040).
+- Hosted curated-trust pack signing + per-tenant loading (model A, default-OFF) (#1055).
+- User evidence_producer pack emitters at pre-final gate (#1018).
+- Inline tool-handler ABI + capability tokens (planned, follow-up).
+
+## Subagent enrichment
+- child_started events carry agentName + model + taskTitle (#1034).
+- SpawnAgent guidance trimmed under 600-char invariant (#1043).
+
+## Flag registry (I-1 series consolidated)
+- Batches 13–20: vault_local, egress-proxy, runtime-authority, vault-dir, composio, read-quality + empty-debug, environment/allowlist (#1024, #1020, #1015, #1031, #1033, #1039, #1047).
+- Restored #996 silent revert (#1028).
+
+## Lifecycle hotfixes (main red recoveries)
+- _build_policy_blocked_llm_response restored from F-LIFE4b (#1011).
+- F-LIFE4a governed_turn gate wrappers restored (#1021).
+
+## Doc + hygiene
+- docs/changelog (#990, #992).
+- E-15 + meta tests, J-2 step 1, multiple small reference-contract labels (H-series).
+
 # 0.1.84 (2026-06-24)
 
 ## Customize (F-MUT mutator hook series)
