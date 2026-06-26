@@ -63,6 +63,7 @@ def build_api_router(store: ActivityStore, bus: ActivityBus, runtime: Any) -> AP
         since_id: int | None = Query(default=None),
         before_id: int | None = Query(default=None),
         limit: int = Query(default=200, ge=1, le=1000),
+        has_evidence: bool = Query(default=False),
     ) -> dict:
         events = store.list_events(
             session_id=session_id,
@@ -73,6 +74,7 @@ def build_api_router(store: ActivityStore, bus: ActivityBus, runtime: Any) -> AP
             since_id=since_id,
             before_id=before_id,
             limit=limit,
+            has_evidence=has_evidence,
         )
         return {"events": events}
 

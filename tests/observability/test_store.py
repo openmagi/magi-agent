@@ -583,3 +583,166 @@ def test_kind_breakdown_closed_returns_empty(tmp_path):
     store.record_event(ActivityEvent(kind="tool_start"))
     store.close()
     assert store.kind_breakdown() == {}
+
+
+# ---------------------------------------------------------------------------
+# Task-8: has_evidence filter on list_events
+# ---------------------------------------------------------------------------
+
+def _sha256_ref() -> str:
+    """Canonical valid sha256 evidenceRef fixture."""
+    return "sha256:" + "a" * 64
+
+
+def test_has_evidence_includes_rule_check_with_evidence_ref(tmp_path):
+    """rule_check with evidenceRef present and non-empty -> included."""
+    store = ActivityStore(tmp_path / "obs.db")
+    store.record_event(ActivityEvent(
+        kind="rule_check",
+        payload={"type": "rule_check", "ruleId": "verifier:sha256:abc", "verdict": "ok",
+                 "evidenceRef": _sha256_ref()},
+    ))
+    rows = store.list_events(has_evidence=True)
+    assert len(rows) == 1
+    assert rows[0]["kind"] == "rule_check"
+    store.close()
+
+
+def test_has_evidence_excludes_rule_check_with_empty_evidence_ref(tmp_path):
+    """rule_check with evidenceRef present but empty string -> excluded."""
+    store = ActivityStore(tmp_path / "obs.db")
+    store.record_event(ActivityEvent(
+        kind="rule_check",
+        payload={"type": "rule_check", "ruleId": "verifier:sha256:abc", "verdict": "pending",
+                 "evidenceRef": ""},
+    ))
+    rows = store.list_events(has_evidence=True)
+    assert rows == []
+    store.close()
+
+
+def test_has_evidence_excludes_rule_check_with_no_evidence_ref_and_zero_matched(tmp_path):
+    """rule_check with no evidenceRef and detail.matched_evidence=0 -> excluded."""
+    store = ActivityStore(tmp_path / "obs.db")
+    # dict-form detail with matched_evidence=0
+    store.record_event(ActivityEvent(
+        kind="rule_check",
+        payload={"type": "rule_check", "ruleId": "evidence:sha256:abc", "verdict": "pending",
+                 "detail": {"matched_evidence": 0}},
+    ))
+    rows = store.list_events(has_evidence=True)
+    assert rows == []
+    store.close()
+
+
+def test_has_evidence_includes_rule_check_with_detail_matched_evidence_gt_zero(tmp_path):
+    """rule_check with detail.matched_evidence > 0 (dict form) -> included."""
+    store = ActivityStore(tmp_path / "obs.db")
+    store.record_event(ActivityEvent(
+        kind="rule_check",
+        payload={"type": "rule_check", "ruleId": "evidence:sha256:abc", "verdict": "ok",
+                 "detail": {"matched_evidence": 3}},
+    ))
+    rows = store.list_events(has_evidence=True)
+    assert len(rows) == 1
+    store.close()
+
+
+def test_has_evidence_includes_rule_check_with_detail_string_matched_gt_zero(tmp_path):
+    """rule_check with real project_evidence_verdict_rule_event string detail -> included.
+
+    Actual runtime emission from project_evidence_verdict_rule_event:
+    "evidence verdict state=pass: matched=3 missing=0 failures=0 enforcement=hard"
+    The brief describes this as detail.matched_evidence; in the current codebase
+    detail is a plain string, not a nested dict. Filter handles both forms.
+    """
+    store = ActivityStore(tmp_path / "obs.db")
+    store.record_event(ActivityEvent(
+        kind="rule_check",
+        payload={"type": "rule_check", "ruleId": "evidence:sha256:abc", "verdict": "ok",
+                 "detail": "evidence verdict state=pass: matched=3 missing=0 failures=0 enforcement=hard"},
+    ))
+    rows = store.list_events(has_evidence=True)
+    assert len(rows) == 1
+    store.close()
+
+
+def test_has_evidence_excludes_rule_check_with_detail_string_matched_zero(tmp_path):
+    """rule_check with detail string matched=0 -> excluded."""
+    store = ActivityStore(tmp_path / "obs.db")
+    store.record_event(ActivityEvent(
+        kind="rule_check",
+        payload={"type": "rule_check", "ruleId": "evidence:sha256:abc", "verdict": "pending",
+                 "detail": "evidence verdict state=audit: matched=0 missing=1 failures=0 enforcement=audit"},
+    ))
+    rows = store.list_events(has_evidence=True)
+    assert rows == []
+    store.close()
+
+
+def test_has_evidence_excludes_non_rule_check_even_with_evidence_ref(tmp_path):
+    """Non-rule_check event is excluded even if its payload mentions evidenceRef."""
+    store = ActivityStore(tmp_path / "obs.db")
+    # tool_start with evidenceRef in payload — should NOT be returned
+    store.record_event(ActivityEvent(
+        kind="tool_start",
+        payload={"evidenceRef": _sha256_ref()},
+    ))
+    rows = store.list_events(has_evidence=True)
+    assert rows == []
+    store.close()
+
+
+def test_has_evidence_excludes_rule_check_with_no_payload(tmp_path):
+    """rule_check with empty/absent payload -> excluded (no evidence signals)."""
+    store = ActivityStore(tmp_path / "obs.db")
+    store.record_event(ActivityEvent(kind="rule_check"))
+    rows = store.list_events(has_evidence=True)
+    assert rows == []
+    store.close()
+
+
+def test_has_evidence_false_does_not_change_default_behavior(tmp_path):
+    """has_evidence=False (default) -> unchanged behavior, all kinds returned."""
+    store = ActivityStore(tmp_path / "obs.db")
+    store.record_event(ActivityEvent(kind="tool_start"))
+    store.record_event(ActivityEvent(kind="rule_check", payload={"evidenceRef": _sha256_ref()}))
+    store.record_event(ActivityEvent(kind="message"))
+    rows_default = store.list_events()
+    rows_false = store.list_events(has_evidence=False)
+    assert rows_default == rows_false
+    assert len(rows_false) == 3
+    store.close()
+
+
+def test_has_evidence_combined_with_session_id(tmp_path):
+    """has_evidence=True AND session_id -> AND semantics: only matching session."""
+    store = ActivityStore(tmp_path / "obs.db")
+    store.record_event(ActivityEvent(
+        kind="rule_check", session_id="s1",
+        payload={"evidenceRef": _sha256_ref()},
+    ))
+    store.record_event(ActivityEvent(
+        kind="rule_check", session_id="s2",
+        payload={"evidenceRef": _sha256_ref()},
+    ))
+    rows = store.list_events(has_evidence=True, session_id="s1")
+    assert len(rows) == 1
+    assert rows[0]["session_id"] == "s1"
+    store.close()
+
+
+def test_has_evidence_no_false_positive_for_evidenceref_in_string_value(tmp_path):
+    """Payload that has evidenceRef as a string value (not a key) -> excluded.
+
+    Verifies the Python post-filter catches what LIKE alone would falsely include.
+    """
+    store = ActivityStore(tmp_path / "obs.db")
+    # evidenceRef appears as a string VALUE, not a key — empty-string value
+    store.record_event(ActivityEvent(
+        kind="rule_check",
+        payload={"ruleId": "verifier:sha256:abc", "note": "no evidenceRef was set", "evidenceRef": ""},
+    ))
+    rows = store.list_events(has_evidence=True)
+    assert rows == []
+    store.close()

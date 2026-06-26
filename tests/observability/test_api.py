@@ -371,3 +371,58 @@ def test_meta_categories_named_category_keys(tmp_path):
     assert "policy" in cats
     assert "errors" in cats
     assert "other" in cats
+
+
+# ---------------------------------------------------------------------------
+# Task-8: has_evidence query param on /activity
+# ---------------------------------------------------------------------------
+
+def _sha256_ref() -> str:
+    return "sha256:" + "a" * 64
+
+
+def test_activity_has_evidence_absent_returns_all(tmp_path):
+    """Default (no has_evidence param) returns all events, unchanged."""
+    client, store, _ = _client(tmp_path)
+    store.record_event(ActivityEvent(kind="tool_start"))
+    store.record_event(ActivityEvent(kind="rule_check", payload={"evidenceRef": _sha256_ref()}))
+    r = _auth_get(client, "/api/observability/v1/activity")
+    assert r.status_code == 200
+    assert len(r.json()["events"]) == 2
+
+
+def test_activity_has_evidence_true_filters_to_evidence_rule_checks(tmp_path):
+    """has_evidence=true -> only rule_check events with evidence payload returned."""
+    client, store, _ = _client(tmp_path)
+    # This one should appear
+    store.record_event(ActivityEvent(
+        kind="rule_check",
+        payload={"evidenceRef": _sha256_ref(), "ruleId": "verifier:sha256:abc", "verdict": "ok"},
+    ))
+    # This one should NOT appear (no evidence fields)
+    store.record_event(ActivityEvent(kind="rule_check"))
+    # This one should NOT appear (wrong kind)
+    store.record_event(ActivityEvent(kind="tool_start", payload={"evidenceRef": _sha256_ref()}))
+    r = _auth_get(client, "/api/observability/v1/activity?has_evidence=true")
+    assert r.status_code == 200
+    events = r.json()["events"]
+    assert len(events) == 1
+    assert events[0]["kind"] == "rule_check"
+    assert events[0]["payload"]["evidenceRef"] == _sha256_ref()
+
+
+def test_activity_has_evidence_false_returns_all(tmp_path):
+    """has_evidence=false (explicit) behaves identically to default."""
+    client, store, _ = _client(tmp_path)
+    store.record_event(ActivityEvent(kind="tool_start"))
+    store.record_event(ActivityEvent(kind="rule_check"))
+    r = _auth_get(client, "/api/observability/v1/activity?has_evidence=false")
+    assert r.status_code == 200
+    assert len(r.json()["events"]) == 2
+
+
+def test_activity_has_evidence_invalid_returns_422(tmp_path):
+    """Non-boolean has_evidence param -> 422 validation error."""
+    client, _, _ = _client(tmp_path)
+    r = _auth_get(client, "/api/observability/v1/activity?has_evidence=notabool")
+    assert r.status_code == 422

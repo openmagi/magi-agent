@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 import threading
 import time
@@ -10,6 +11,48 @@ from pathlib import Path
 from magi_agent.observability.models import ActivityEvent
 
 logger = logging.getLogger(__name__)
+
+# Regex used by _payload_has_evidence to detect matched=N in detail strings.
+# Matches the literal "matched=<digits>" embedded in evidence verdict detail
+# strings from project_evidence_verdict_rule_event, e.g.
+# "evidence verdict state=pass: matched=3 missing=0 failures=0 enforcement=hard"
+_MATCHED_COUNT_RE = re.compile(r"\bmatched=(\d+)")
+
+
+def _payload_has_evidence(payload: dict) -> bool:
+    """Return True if a ``rule_check`` payload indicates evidence actually fired.
+
+    Two payload shapes exist in the current runtime:
+
+    1. ``project_verifier_result_rule_event`` emits ``evidenceRef`` at the top
+       level — a sha256/receipt digest string (non-empty when evidence is present).
+
+    2. ``project_evidence_verdict_rule_event`` encodes the matched count in the
+       ``detail`` field.  In the current runtime ``detail`` is a plain string
+       (e.g. ``"evidence verdict state=pass: matched=3 missing=0 ..."``) not a
+       nested dict.  The task brief describes this as ``detail.matched_evidence``
+       (int) > 0; this function handles both forms so it stays correct if emitters
+       later switch to a structured dict.
+
+    False-positive guard: a payload whose ``evidenceRef`` value is an empty
+    string, or whose ``detail.matched_evidence`` is 0, is NOT considered
+    evidence-bearing.  This is the key reason a pure SQL LIKE filter is
+    insufficient (LIKE ``'%evidenceRef%'`` would match even empty-value rows).
+    """
+    # Path 1: top-level evidenceRef string (verifier result rule events).
+    evidence_ref = payload.get("evidenceRef")
+    if isinstance(evidence_ref, str) and evidence_ref:
+        return True
+    # Path 2: detail.matched_evidence in dict form (brief-specified; future-proof).
+    detail = payload.get("detail")
+    if isinstance(detail, dict):
+        return int(detail.get("matched_evidence") or 0) > 0
+    # Path 3: matched=N embedded in detail string (current evidence verdict format).
+    if isinstance(detail, str):
+        m = _MATCHED_COUNT_RE.search(detail)
+        return bool(m and int(m.group(1)) > 0)
+    return False
+
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS activity_events (
@@ -147,7 +190,21 @@ class ActivityStore:
         since_id: int | None = None,
         before_id: int | None = None,
         limit: int = 200,
+        has_evidence: bool = False,
     ) -> list[dict]:
+        """Return events matching the given filters.
+
+        ``has_evidence=True`` restricts results to ``kind='rule_check'`` rows
+        whose payload indicates evidence fired (``evidenceRef`` is present and
+        non-empty, OR ``detail.matched_evidence`` > 0).  The filter uses a
+        hybrid strategy: SQL pins ``kind='rule_check'`` (exact, no false
+        positives), then a Python post-filter on the parsed payload handles the
+        structured evidence check — eliminating false positives that a pure
+        ``payload_json LIKE '%evidenceRef%'`` clause would produce for payloads
+        that merely mention the string without a truthy value.
+
+        All other active filters combine with ``has_evidence`` via AND.
+        """
         if self._closed:
             return []
         clauses: list[str] = []
@@ -185,13 +242,22 @@ class ActivityStore:
         if before_id is not None:
             clauses.append("id < ?")
             args.append(before_id)
+        if has_evidence:
+            # SQL pre-filter: evidence can only appear on rule_check events.
+            # AND'd with any caller-supplied kind filter; zero rows result if
+            # kinds are incompatible (correct AND semantics, no special-casing).
+            clauses.append("kind = ?")
+            args.append("rule_check")
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         limit = max(1, min(int(limit), 1000))
         sql = f"SELECT * FROM activity_events{where} ORDER BY id ASC LIMIT ?"
         args.append(limit)
         with self._lock:
             rows = self._conn.execute(sql, args).fetchall()
-        return [_row_to_dict(r) for r in rows]
+        result = [_row_to_dict(r) for r in rows]
+        if has_evidence:
+            result = [r for r in result if _payload_has_evidence(r["payload"])]
+        return result
 
     def count_events(self) -> int:
         if self._closed:
