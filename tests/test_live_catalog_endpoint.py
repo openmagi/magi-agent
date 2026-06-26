@@ -221,12 +221,12 @@ def test_live_catalog_aggregates_per_type_stats(tmp_path, monkeypatch):
     assert "evidence:test-run" in test_run["refsUsing"]
 
     git_diff = by_type["GitDiff"]
-    # Empty hint by design — but still surfaced as a row.
-    assert git_diff["registeredFields"] == []
+    # GitDiff is now a live producer (changedFiles/fileCount/digest).
+    assert set(git_diff["registeredFields"]) == {"changedFiles", "fileCount", "digest"}
     assert git_diff["samplePopulationCount"] == 1
-    # GitDiff has an empty hint, so fieldsPopulatedRecently is also [] (we
-    # only report populated registered fields).
-    assert git_diff["fieldsPopulatedRecently"] == []
+    # Only ``changedFiles`` was populated in the sample row, so it is the sole
+    # recently-populated registered field.
+    assert git_diff["fieldsPopulatedRecently"] == ["changedFiles"]
     assert "evidence:git-diff" in git_diff["refsUsing"]
 
 
