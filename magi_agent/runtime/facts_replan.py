@@ -128,25 +128,18 @@ def parse_facts_replan_env(
     if not is_facts_replan_enabled(source):
         return None
 
-    interval = _int_or_default(
-        source.get(MAGI_FACTS_REPLAN_INTERVAL_ENV), FactsReplanConfig.interval
-    )
-    max_surveys = _int_or_default(
-        source.get(MAGI_FACTS_REPLAN_MAX_PER_TURN_ENV),
-        FactsReplanConfig.max_surveys_per_turn,
-    )
+    # I-1: route both interval knobs through the typed flag registry.
+    # ``flag_int`` returns the registered ``FlagSpec`` default for unset
+    # AND malformed values; both registered defaults already match the
+    # ``FactsReplanConfig`` dataclass defaults (4 / 5) so the prior
+    # ``_int_or_default`` shape is byte-identical.
+    from magi_agent.config.flags import flag_int  # noqa: PLC0415
+
+    interval = flag_int(MAGI_FACTS_REPLAN_INTERVAL_ENV, env=source)
+    max_surveys = flag_int(MAGI_FACTS_REPLAN_MAX_PER_TURN_ENV, env=source)
     if interval <= 0 or max_surveys <= 0:
         return None
     return FactsReplanConfig(interval=interval, max_surveys_per_turn=max_surveys)
-
-
-def _int_or_default(raw: str | None, default: int) -> int:
-    if raw is None:
-        return default
-    try:
-        return int(raw.strip())
-    except (ValueError, AttributeError):
-        return default
 
 
 __all__ = [
