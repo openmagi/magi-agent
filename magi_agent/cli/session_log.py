@@ -97,6 +97,8 @@ __all__ = [
     "ResumeContext",
     "reconstruct_linear_chain",
     "reconstruct_messages",
+    # WS1 PR1c: durable-resume context-only replay reader.
+    "replay_messages_up_to",
     "resume",
     "resume_async",
     "continue_latest",
@@ -539,6 +541,48 @@ def reconstruct_messages(chain: list[Envelope]) -> list[dict[str, str]]:
 
     _flush_assistant()
     return messages
+
+
+def replay_messages_up_to(
+    session_id: str,
+    *,
+    cwd: str | os.PathLike[str],
+    up_to_seq: str,
+    bot_id: str = "",
+) -> list[dict[str, str]]:
+    """WS1 PR1c: the durable-resume context-only TEXT replay reader.
+
+    Loads the persisted Envelope log for ``(bot_id, session_id)`` under ``cwd``,
+    reconstructs its linear chain, TRUNCATES it at the node whose
+    ``uuid == up_to_seq`` (the watermark uuid; correction 4 / section 0.4a -
+    NEVER a chain index), and folds the surviving prefix through the EXISTING
+    :func:`reconstruct_messages` into ``[{"role","content"}]``.
+
+    Because :func:`reconstruct_messages` keeps assistant ``text_delta`` text and
+    emits NO message for ``tool_start``/``tool_end``, the result is the
+    CONTEXT-ONLY prior conversation (no tool entries). This makes no
+    non-re-execution claim (section 0.3 B4): the resumed turn re-runs from this
+    text prefix.
+
+    Truncation semantics: everything AFTER the watermark node is discarded. If
+    ``up_to_seq`` is absent from the reconstructed chain (the chain was
+    reorganized, or the watermark line was lost in a torn tail), this returns
+    ``[]`` - a fresh-start signal, never a guessed index. A best-effort reader:
+    a missing/unreadable log yields ``[]``.
+    """
+    path = resolve_session_path(bot_id, session_id, cwd)
+    envelopes = load(path)
+    chain = reconstruct_linear_chain(envelopes)
+    truncated: list[Envelope] = []
+    found = False
+    for env in chain:
+        truncated.append(env)
+        if env.uuid == up_to_seq:
+            found = True
+            break
+    if not found:
+        return []
+    return reconstruct_messages(truncated)
 
 
 def _lazy_resume_deps() -> dict[str, object]:

@@ -384,6 +384,16 @@ FLAGS: tuple[FlagSpec, ...] = (
         kind="int",
     ),
     _b(
+        "MAGI_DURABLE_CHECKPOINTS_ENABLED",
+        summary=(
+            "Emit WS1 durable execution checkpoints from the headless tap after "
+            "each persisted tool_end and at the turn terminal. Gated additionally "
+            "by MAGI_DURABLE_LOCAL_WRITES_ENABLED (the actual sqlite write). OFF "
+            "is byte-identical: the tap throws the append uuid away and emits "
+            "nothing. Fail-open: an emission error never breaks the turn."
+        ),
+    ),
+    _b(
         "MAGI_DURABLE_STARTUP_RECOVERY_ENABLED",
         summary=(
             "Run the WS1 StartupRecoverySweep at boot: immediately reclaim "

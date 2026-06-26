@@ -24,10 +24,12 @@ from __future__ import annotations
 import asyncio
 import json as _json
 import os
+import re as _re
 import sys
 import threading
 import uuid as _uuid
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import IO, TYPE_CHECKING, Literal
 
@@ -130,19 +132,27 @@ def _session_log_enabled() -> bool:
     return cli_session_log_enabled(os.environ)
 
 
-async def _persist_event(session_log: "SessionLog", event: RuntimeEvent) -> None:
-    """Append one event to the session log off the event loop.
+async def _persist_event(
+    session_log: "SessionLog", event: RuntimeEvent
+) -> str | None:
+    """Append one event to the session log off the event loop; return its uuid.
 
     ``SessionLog.append`` issues a blocking ``os.fsync`` on flush, so it runs in
     a worker thread (``asyncio.to_thread``) to keep the loop non-blocking, per
     the ``session_log`` module's "Sync IO under an async caller" contract.
     Best-effort: a transcript write must never break the live turn.
+
+    WS1 PR1c (minor #2): the append return value used to be DISCARDED; it is now
+    threaded OUT (``uuid = await ...``) so the tap holds the just-assigned
+    envelope uuid (the durable-checkpoint watermark). On a persist error the uuid
+    is ``None`` and the turn continues (fail-open, unchanged behavior).
     """
 
     try:
-        await asyncio.to_thread(session_log.append, event)
+        return await asyncio.to_thread(session_log.append, event)
     except Exception as exc:  # noqa: BLE001 - transcript is best-effort
         _log(f"session_log append failed (ignored): {exc!r}")
+        return None
 
 
 async def _persist_user_prompt(session_log: "SessionLog", prompt: str) -> None:
@@ -178,9 +188,120 @@ async def _close_session_log(session_log: "SessionLog") -> None:
         _log(f"session_log close failed (ignored): {exc!r}")
 
 
+# ---------------------------------------------------------------------------
+# WS1 PR1c: durable checkpoint emission from the SessionLog-owning tap.
+# ---------------------------------------------------------------------------
+# The checkpoint is emitted HERE (the tap), NOT from ``cli/engine._drive``,
+# because the Envelope uuid is assigned by ``SessionLog.append`` and only the
+# tap holds it. ``cli/engine.py`` gains no import and no digest getter
+# (correction 2/3). Gated behind BOTH ``MAGI_DURABLE_CHECKPOINTS_ENABLED`` AND
+# ``MAGI_DURABLE_LOCAL_WRITES_ENABLED``; OFF is byte-identical (the uuid is
+# threaded out but ignored, no emitter is imported, no row is written).
+
+_DURABLE_CHECKPOINTS_FLAG = "MAGI_DURABLE_CHECKPOINTS_ENABLED"
+_DURABLE_LOCAL_WRITES_FLAG = "MAGI_DURABLE_LOCAL_WRITES_ENABLED"
+_CKPT_SAFE_ID = _re.compile(r"[^A-Za-z0-9_-]+")
+
+
+@dataclass
+class CheckpointTapContext:
+    """Per-turn context the tap needs to emit durable checkpoints.
+
+    Supplied by ``run_headless`` only when both durable flags are ON. When
+    ``None`` the tap is byte-identical to today.
+    """
+
+    store: object  # DurableCheckpointStore (duck-typed to avoid a top import)
+    run_id: str
+    turn_id: str
+    session_id: str
+    cwd: str
+    workflow_version: str = "ws1-durable-v1"
+
+
+def _durable_checkpoints_active() -> bool:
+    """Both durable gates must be ON for the tap to emit anything."""
+    return flag_bool(_DURABLE_CHECKPOINTS_FLAG) and flag_bool(_DURABLE_LOCAL_WRITES_FLAG)
+
+
+def _safe_ckpt_token(value: str) -> str:
+    token = _CKPT_SAFE_ID.sub("-", value).strip("-")
+    return token or "x"
+
+
+def _persisted_evidence_line_count(session_id: str) -> int:
+    """LOGICAL evidence-row count for the session (the digest pin). Fail-open."""
+    try:
+        from magi_agent.evidence.ledger_store import (  # noqa: PLC0415
+            EvidenceLedgerReader,
+            resolve_evidence_ledger_dir,
+        )
+
+        base = resolve_evidence_ledger_dir()
+        if base is None:
+            return 0
+        return len(EvidenceLedgerReader(base).read(session_id))
+    except Exception:  # noqa: BLE001 - emission is best-effort
+        return 0
+
+
+def _emit_tap_checkpoint(
+    ctx: CheckpointTapContext,
+    *,
+    watermark_uuid: str | None,
+    step_id: str,
+    pending_tool_ids: tuple[str, ...],
+    last_completed_tool_name: str | None,
+) -> None:
+    """Compute persisted-aligned digests + write one checkpoint. Fail-open.
+
+    The digest computation is the SINGLE exported ``compute_persisted_digests``
+    the boot sweep (PR1d) reuses over the IDENTICAL persisted bytes.
+    """
+    try:
+        from magi_agent.runtime.durable_checkpoint_emitter import (  # noqa: PLC0415
+            build_checkpoint,
+            compute_persisted_digests,
+        )
+        from magi_agent.runtime.durable_side_effects import (  # noqa: PLC0415
+            is_turn_resumable,
+        )
+
+        line_count = _persisted_evidence_line_count(ctx.session_id)
+        digests = compute_persisted_digests(
+            session_id=ctx.session_id,
+            cwd=ctx.cwd,
+            watermark_uuid=watermark_uuid,
+            evidence_line_count=line_count,
+        )
+        resumable = is_turn_resumable(
+            pending_tool_ids=pending_tool_ids,
+            last_completed_tool_name=last_completed_tool_name,
+        )
+        checkpoint = build_checkpoint(
+            run_id=_safe_ckpt_token(ctx.run_id),
+            turn_id=_safe_ckpt_token(ctx.turn_id),
+            step_id=_safe_ckpt_token(step_id),
+            digests=digests,
+            resumable=resumable,
+            workflow_version=ctx.workflow_version,
+        )
+        ctx.store.put(  # type: ignore[attr-defined]
+            checkpoint,
+            turn_id=_safe_ckpt_token(ctx.turn_id),
+            watermark_uuid=watermark_uuid,
+            evidence_line_count=line_count,
+            cwd=ctx.cwd,
+        )
+    except Exception as exc:  # noqa: BLE001 - emission must never break the turn
+        _log(f"durable checkpoint emit failed (ignored): {exc!r}")
+
+
 async def _tap_session_log(
     gen: AsyncGenerator[RuntimeEvent, EngineResult],
     session_log: "SessionLog",
+    *,
+    checkpoint_ctx: "CheckpointTapContext | None" = None,
 ) -> AsyncGenerator[RuntimeEvent, EngineResult]:
     """Re-yield every item from ``gen`` while persisting each ``RuntimeEvent``.
 
@@ -189,12 +310,66 @@ async def _tap_session_log(
     sanitized ``RuntimeEvent`` stream — already projected to the public agent-
     event shape by the engine — is written, satisfying the session-log
     sanitization precondition.
+
+    WS1 PR1c: when ``checkpoint_ctx`` is supplied AND both durable flags are ON,
+    the tap captures the append uuid (the watermark) and emits a durable
+    checkpoint after each persisted ``tool_end`` and at the terminal
+    ``EngineResult`` (an additive ``isinstance`` branch; the terminal does NOT
+    flow through any existing persist/emit point). The pending-tool set and the
+    last-completed-tool name are reconstructed from the persisted
+    ``tool_start``/``tool_end`` stream the tap sees in order, so the classifier
+    needs no engine state. OFF path: the uuid is captured but ignored.
     """
+
+    emit = checkpoint_ctx is not None and _durable_checkpoints_active()
+    pending: dict[str, str] = {}
+    pending_order: list[str] = []
+    last_completed_name: str | None = None
+    last_uuid: str | None = None
+    step_index = 0
 
     async for item in gen:
         if isinstance(item, RuntimeEvent):
-            await _persist_event(session_log, item)
-        yield item  # type: ignore[misc]
+            uuid = await _persist_event(session_log, item)
+            last_uuid = uuid if uuid is not None else last_uuid
+            payload = item.payload if isinstance(item.payload, dict) else {}
+            inner = payload.get("type")
+            call_id = payload.get("id")
+            name = payload.get("name")
+            if inner == "tool_start" and isinstance(call_id, str):
+                if call_id not in pending:
+                    pending[call_id] = name if isinstance(name, str) else ""
+                    pending_order.append(call_id)
+            elif inner == "tool_end" and isinstance(call_id, str):
+                pending.pop(call_id, None)
+                if call_id in pending_order:
+                    pending_order.remove(call_id)
+                if isinstance(name, str):
+                    last_completed_name = name
+                if emit and checkpoint_ctx is not None:
+                    step_index += 1
+                    _emit_tap_checkpoint(
+                        checkpoint_ctx,
+                        watermark_uuid=uuid,
+                        step_id=f"tool-end-{step_index}",
+                        pending_tool_ids=tuple(sorted(pending_order)),
+                        last_completed_tool_name=last_completed_name,
+                    )
+            yield item  # type: ignore[misc]
+        else:
+            # WS1 PR1c (minor #1): the EngineResult terminal passes through here
+            # WITHOUT _persist_event. Fire the terminal checkpoint on this
+            # additive branch (it reaches no existing emit point).
+            if emit and checkpoint_ctx is not None:
+                step_index += 1
+                _emit_tap_checkpoint(
+                    checkpoint_ctx,
+                    watermark_uuid=last_uuid,
+                    step_id=f"terminal-{step_index}",
+                    pending_tool_ids=tuple(sorted(pending_order)),
+                    last_completed_tool_name=last_completed_name,
+                )
+            yield item  # type: ignore[misc]
 
 
 async def drain(
@@ -1029,6 +1204,28 @@ async def run_headless(
         assert session_log is not None  # narrowed for type-checkers
         await _persist_user_prompt(session_log, prompt)
 
+    # WS1 PR1c: build the durable-checkpoint tap context ONLY when both durable
+    # flags are ON (and a transcript is being written). When None the tap is
+    # byte-identical to today. The engine derives a ``cli-turn`` turn id for this
+    # one-shot dict input, matching ``_turn_context_from_input``.
+    checkpoint_ctx: CheckpointTapContext | None = None
+    if write_session_log and _durable_checkpoints_active():
+        try:
+            from magi_agent.storage.durable_checkpoint_store import (  # noqa: PLC0415
+                DurableCheckpointStore,
+            )
+
+            checkpoint_ctx = CheckpointTapContext(
+                store=DurableCheckpointStore(),
+                run_id=sid,
+                turn_id="cli-turn",
+                session_id=sid,
+                cwd=cwd,
+            )
+        except Exception as exc:  # noqa: BLE001 - durable emission is best-effort
+            _log(f"durable checkpoint ctx init failed (ignored): {exc!r}")
+            checkpoint_ctx = None
+
     # ------------------------------------------------------------------ #
     # text / json: collect-then-write (single final write).                #
     # ------------------------------------------------------------------ #
@@ -1053,7 +1250,7 @@ async def run_headless(
         )
         if write_session_log:
             assert session_log is not None
-            gen = _tap_session_log(gen, session_log)
+            gen = _tap_session_log(gen, session_log, checkpoint_ctx=checkpoint_ctx)
         events, terminal = await drain(gen)
         assistant_text = _accumulate_text(events)
         governance_mode, research_audit = _research_governance()
@@ -1084,7 +1281,7 @@ async def run_headless(
                 )
                 if write_session_log:
                     assert session_log is not None
-                    retry_gen = _tap_session_log(retry_gen, session_log)
+                    retry_gen = _tap_session_log(retry_gen, session_log, checkpoint_ctx=checkpoint_ctx)
                 events, terminal = await drain(retry_gen)
                 assistant_text = _accumulate_text(events)
                 retry_audit = ResearchLiveAudit()
@@ -1193,7 +1390,7 @@ async def run_headless(
         )
         if write_session_log:
             assert session_log is not None
-            gen = _tap_session_log(gen, session_log)
+            gen = _tap_session_log(gen, session_log, checkpoint_ctx=checkpoint_ctx)
         governance_mode, research_audit = _research_governance()
         assistant_text, terminal, used_tool = await _project_stream(
             gen,
@@ -1237,7 +1434,7 @@ async def run_headless(
                 )
                 if write_session_log:
                     assert session_log is not None
-                    retry_gen = _tap_session_log(retry_gen, session_log)
+                    retry_gen = _tap_session_log(retry_gen, session_log, checkpoint_ctx=checkpoint_ctx)
                 assistant_text, terminal, used_tool = await _project_stream(
                     retry_gen,
                     writer,
