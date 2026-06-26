@@ -87,6 +87,8 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_DOCUMENT_AUTHORING_COVERAGE` (default `off`) — Tri-state document-coverage gate (off|advisory|block). off keeps the DocumentCoverage evidence audit-only; advisory records counts without blocking; block flips the pre-final verifier-bus decision when coverage fails. Legacy truthy values resolve to ``block`` for back-compat. Strict default ``off``.
 - `MAGI_DOCUMENT_QA_ENABLED` (default off) — Expose the question-conditioned DocumentQA file-QA sidecar tool (requires MAGI_FILE_TOOLS_ENABLED); strict default-OFF in all profiles.
 - `MAGI_DOCUMENT_QA_MODEL` (no default) — Model id override for the DocumentQA sidecar call (e.g. a cheap haiku-class model); unset uses the configured provider model.
+- `MAGI_DURABLE_LOCAL_WRITES_ENABLED` (default off) — Master gate for the WS1 durable substrate: create/write the local durable_checkpoints + plan_ledger tables in the work-queue sqlite. Local sqlite only; never the hosted DB. OFF is byte-identical.
+- `MAGI_DURABLE_MAX_RESUME_ATTEMPTS` (default `2`) — Bound on automatic crash-resume re-entries per (run_id, turn_id) before the startup sweep gives up and starts fresh (E11/R6).
 - `MAGI_EDIT_FORMAT_ON_WRITE_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Run a formatter on files written by the coding harness (default-ON full profile).
 - `MAGI_EDIT_FUZZY_MATCH_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Use the 9-stage fuzzy-match cascade for FileEdit (default-ON full profile).
 - `MAGI_EDIT_RETRY_REFLECTION_ENABLED` (default off) — Reflect on failed edits before retrying (coding repair loop).
