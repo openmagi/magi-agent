@@ -24,6 +24,10 @@ dependencies = [
   "pydantic==2.13.4",
   "python-docx>=1.1",
   "pyshacl>=0.25.0",
+  # YAML frontmatter parsing for the OKF knowledge-bundle loader
+  # (magi_agent/knowledge/okf). Previously only a transitive dep — declared
+  # explicitly so the loader's `import yaml` is a first-class dependency.
+  "pyyaml>=6.0",
   "rdflib>=7.0",
   "uvicorn==0.47.0",
 ]
