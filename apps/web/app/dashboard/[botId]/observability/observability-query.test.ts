@@ -84,10 +84,11 @@ describe("buildActivityQuery", () => {
     expect(qs).toContain("limit=100");
   });
 
-  it("NOISE_KINDS contains exactly the canonical noise set", () => {
+  it("NOISE_KINDS contains exactly the canonical noise set (B1: thinking_delta added)", () => {
     const required = [
       "text_delta",
       "heartbeat",
+      "thinking_delta",
       "turn_phase",
       "runtime_trace",
       "tool_progress",
@@ -116,6 +117,14 @@ describe("buildActivityQuery", () => {
     expect(allKinds).not.toContain("spawn_agent");
     expect(allKinds).not.toContain("stream_start");
     expect(allKinds).not.toContain("agent_result");
+  });
+
+  it("B2: CATEGORY_KINDS Other group includes child_started (subagent spawn)", () => {
+    expect(CATEGORY_KINDS["Other"]).toContain("child_started");
+  });
+
+  it("B1: NOISE_KINDS includes thinking_delta (MAGI_STREAM_THINKING gated)", () => {
+    expect(NOISE_KINDS).toContain("thinking_delta");
   });
 
   it("CATEGORY_KINDS does NOT have a 'Noise' group — noise kinds belong in NOISE_KINDS only", () => {
@@ -954,9 +963,10 @@ describe("resolveKindCategories", () => {
         tools: ["source_inspected", "tool_end", "tool_start"],
         policy: ["rule_check", "rule_violation"],
         errors: ["aborted", "error"],
-        other: ["artifact_created", "child_progress", "task_board"],
+        other: ["artifact_created", "child_progress", "child_started", "task_board"],
       },
-      noise_kinds: ["text_delta", "heartbeat", "turn_phase", "runtime_trace", "tool_progress"],
+      // B1: thinking_delta added; B2: child_started added to other category
+      noise_kinds: ["text_delta", "heartbeat", "thinking_delta", "turn_phase", "runtime_trace", "tool_progress"],
     };
     const result = resolveKindCategories(serverPayload);
     expect(Object.keys(result.categories)).toContain("lifecycle");

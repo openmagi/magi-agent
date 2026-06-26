@@ -11,10 +11,13 @@
  * the functions in this module fall back to CATEGORY_KINDS and NOISE_KINDS.
  */
 
-/** Noise kinds excluded when "Hide noise" is ON (default). */
+/** Noise kinds excluded when "Hide noise" is ON (default).
+ * Must stay identical to the server NOISE_KINDS list in magi_agent/observability/taxonomy.py.
+ */
 export const NOISE_KINDS: readonly string[] = [
   "text_delta",
   "heartbeat",
+  "thinking_delta", // B1: gated behind MAGI_STREAM_THINKING; high-volume sub-turn
   "turn_phase",
   "runtime_trace",
   "tool_progress",
@@ -45,7 +48,7 @@ export const CATEGORY_KINDS: Record<string, readonly string[]> = {
   Tools: ["tool_start", "tool_end", "source_inspected"],
   Policy: ["rule_check", "rule_violation"],
   Errors: ["error", "aborted"],
-  Other: ["child_progress", "artifact_created", "task_board"],
+  Other: ["child_progress", "child_started", "artifact_created", "task_board"],
 };
 
 export interface ActivityFilters {
@@ -116,6 +119,10 @@ export function buildActivityPageQuery(
   }
 
   // policyEvidenceOnly overrides selectedKinds: forces kind=rule_check,rule_violation.
+  // D2: "Policy & Evidence" includes all policy/rule_check events — both user-authored
+  // verifier rules (ruleId prefix "verifier:") and system evidence checks (ruleId prefix
+  // "evidence:"). The ruleId prefix distinguishes them; future enhancement may filter by
+  // source. For now both are surfaced together under this toggle.
   if (filters.policyEvidenceOnly) {
     params.set("kind", "rule_check,rule_violation");
   } else if (filters.selectedKinds.length > 0) {
@@ -123,6 +130,10 @@ export function buildActivityPageQuery(
   }
 
   if (filters.evidenceOnly) {
+    // D1: Evidence-fired filtering (has_evidence=true) narrows to rule_check rows where
+    // evidence actually fired (evidenceRef present and non-empty, or detail.matched_evidence>0).
+    // rule_violation events (hook-emitted via onRuleViolation, no evidenceRef) are intentionally
+    // excluded — they carry no evidence signals and are never returned by the has_evidence path.
     params.set("has_evidence", "true");
   }
 

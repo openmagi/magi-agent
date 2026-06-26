@@ -13,10 +13,11 @@ from magi_agent.observability.taxonomy import (
 # ---------------------------------------------------------------------------
 
 def test_noise_kinds_exact():
-    """NOISE_KINDS is exactly the five runtime noise event kinds."""
+    """NOISE_KINDS is exactly the six runtime noise event kinds (B1: thinking_delta added)."""
     assert set(NOISE_KINDS) == {
         "text_delta",
         "heartbeat",
+        "thinking_delta",
         "turn_phase",
         "runtime_trace",
         "tool_progress",
@@ -60,8 +61,9 @@ def test_errors_kinds():
 
 
 def test_other_kinds():
+    """B2: child_started (subagent spawn) added alongside child_progress."""
     assert set(CATEGORIES["other"]) == {
-        "child_progress", "artifact_created", "task_board"
+        "child_progress", "child_started", "artifact_created", "task_board"
     }
 
 

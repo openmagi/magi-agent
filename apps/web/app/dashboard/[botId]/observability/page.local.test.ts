@@ -164,4 +164,36 @@ describe("local OSS observability dashboard", () => {
     expect(source).toContain("buildActivityQuery(filters, activeNoiseKinds)");
     expect(source).toContain("noiseKinds: activeNoiseKinds");
   });
+
+  // --- Final-review fixes ---
+
+  it("F1: session cards are <button> elements (keyboard-accessible, screen-reader-announced)", () => {
+    // Session cards must use <button type='button'> so they are reachable via keyboard
+    // (Enter/Space) and announced as interactive by screen readers — not non-semantic <div onClick>.
+    expect(source).toContain('<button\n                    type="button"');
+    expect(source).toContain("handleSessionClick(session.id)");
+    // Must NOT use a bare div with onClick for the session card
+    // (div onClick is present elsewhere for non-interactive layout; this just
+    //  confirms the session card specifically uses <button>)
+    expect(source).toContain("text-left");
+    expect(source).toContain("w-full");
+  });
+
+  it("F2: applyFilters is wrapped in useCallback (stable identity across renders)", () => {
+    // applyFilters must be a useCallback so FilterBar does not re-render every time
+    // the parent re-renders (e.g. after pagination state changes).
+    expect(source).toContain("const applyFilters = useCallback(");
+    // handleSessionClick is also stabilized
+    expect(source).toContain("const handleSessionClick = useCallback(");
+  });
+
+  it("F3: uses useRef guard to prevent double-fetch when /meta noise_kinds matches FE constant", () => {
+    // lastFetchedUrlRef prevents a second full reload when activityUrl doesn't actually
+    // change in string value (e.g. /meta returns identical noise_kinds to the FE constant).
+    expect(source).toContain("lastFetchedUrlRef");
+    expect(source).toContain("useRef<string | null>(null)");
+    // Guard must check and update the ref inside loadObservability
+    expect(source).toContain("lastFetchedUrlRef.current === activityUrl");
+    expect(source).toContain("lastFetchedUrlRef.current = activityUrl");
+  });
 });

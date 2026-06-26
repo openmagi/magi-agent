@@ -23,6 +23,7 @@ from __future__ import annotations
 NOISE_KINDS: list[str] = [
     "text_delta",
     "heartbeat",
+    "thinking_delta",  # gated behind MAGI_STREAM_THINKING; high-volume, low-signal
     "turn_phase",
     "runtime_trace",
     "tool_progress",
@@ -61,6 +62,7 @@ CATEGORIES: dict[str, list[str]] = {
     "other": [
         "artifact_created",
         "child_progress",
+        "child_started",  # subagent spawn event; co-located with child_progress
         "task_board",
     ],
 }
@@ -81,10 +83,10 @@ def get_meta_taxonomy() -> dict:
                 "tools":     ["source_inspected", "tool_end", "tool_start"],
                 "policy":    ["rule_check", "rule_violation"],
                 "errors":    ["aborted", "error"],
-                "other":     ["artifact_created", "child_progress", "task_board"],
+                "other":     ["artifact_created", "child_progress", "child_started", "task_board"],
             },
-            "noise_kinds": ["text_delta", "heartbeat", "turn_phase",
-                            "runtime_trace", "tool_progress"],
+            "noise_kinds": ["text_delta", "heartbeat", "thinking_delta",
+                            "turn_phase", "runtime_trace", "tool_progress"],
         }
 
     The frontend uses ``noise_kinds`` to determine which kinds to hide by

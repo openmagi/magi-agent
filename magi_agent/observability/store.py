@@ -226,7 +226,10 @@ class ActivityStore:
                 args.extend(tokens)
             else:
                 clauses.append("kind = ?")
-                args.append(tokens[0] if tokens else kind)
+                # tokens is guaranteed non-empty at this branch (the `if t.strip()`
+                # comprehension produced at least one element); `else kind` was
+                # unreachable and would have appended an un-stripped value if it fired.
+                args.append(tokens[0])
         if exclude_kind is not None:
             tokens = [t.strip() for t in exclude_kind.split(",") if t.strip()]
             if tokens:
@@ -240,8 +243,13 @@ class ActivityStore:
                 clauses.append(f"status IN ({placeholders})")
                 args.extend(tokens)
         if q is not None:
-            clauses.append("summary LIKE ?")
-            args.append(f"%{q}%")
+            # Escape LIKE metacharacters so `%` and `_` in the query string are
+            # treated as literals, not wildcards.  Without escaping, `q="100%"`
+            # would match "1000 rows" (over-matching) and pathological inputs with
+            # many `_` characters can cause excessive LIKE backtracking.
+            q_escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            clauses.append("summary LIKE ? ESCAPE '\\'")
+            args.append(f"%{q_escaped}%")
         if since_id is not None:
             clauses.append("id > ?")
             args.append(since_id)
@@ -252,6 +260,11 @@ class ActivityStore:
             # SQL pre-filter: evidence can only appear on rule_check events.
             # AND'd with any caller-supplied kind filter; zero rows result if
             # kinds are incompatible (correct AND semantics, no special-casing).
+            #
+            # D1 — evidence-fired filtering targets verifier/evidence rule_check rows;
+            # rule_violation events (hook-emitted via onRuleViolation, no evidenceRef)
+            # are intentionally excluded because they carry no evidence signals and
+            # would never pass the _payload_has_evidence post-filter anyway.
             clauses.append("kind = ?")
             args.append("rule_check")
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""

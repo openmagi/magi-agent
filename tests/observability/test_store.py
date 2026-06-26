@@ -237,6 +237,41 @@ def test_q_no_match(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# B3: q LIKE metacharacter escaping
+# ---------------------------------------------------------------------------
+
+def test_q_percent_literal_match(tmp_path):
+    """q containing '%' must match the literal '%' char, not act as a wildcard.
+
+    '100%' must match a summary that contains the literal string '100%' but
+    NOT one that merely happens to contain '1000' (which the unescaped
+    LIKE '%100%%' would falsely include).
+    """
+    store = ActivityStore(tmp_path / "obs_q.db")
+    store.record_event(ActivityEvent(kind="tool_start", summary="done 100% complete"))
+    store.record_event(ActivityEvent(kind="tool_start", summary="done 1000 rows"))
+    rows = store.list_events(q="100%")
+    assert len(rows) == 1
+    assert "100%" in rows[0]["summary"]
+    store.close()
+
+
+def test_q_underscore_literal_match(tmp_path):
+    """q containing '_' must match the literal '_' char, not a wildcard single char.
+
+    'a_b' must match 'a_b' but NOT 'axb' (which an unescaped LIKE '%a_b%' would
+    match because '_' is a single-char wildcard in SQL LIKE).
+    """
+    store = ActivityStore(tmp_path / "obs_q2.db")
+    store.record_event(ActivityEvent(kind="message", summary="reading a_b config"))
+    store.record_event(ActivityEvent(kind="message", summary="reading axb config"))
+    rows = store.list_events(q="a_b")
+    assert len(rows) == 1
+    assert "a_b" in rows[0]["summary"]
+    store.close()
+
+
+# ---------------------------------------------------------------------------
 # before_id: backward pagination (id < ?)
 # ---------------------------------------------------------------------------
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Activity, ClipboardList, HeartPulse, RefreshCw, Rows3, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -338,13 +338,20 @@ function ObservabilityPageInner() {
     parseFiltersFromParams(sp),
   );
 
-  /** Centralized filter apply: updates state + syncs URL (replace, not push). */
-  function applyFilters(next: ActivityFilters) {
+  /**
+   * Centralized filter apply: updates state + syncs URL (replace, not push).
+   *
+   * F2: wrapped in useCallback so identity is stable across renders, preventing
+   * unnecessary FilterBar re-renders and avoiding stale-closure bugs.
+   * Deps are [router] only — setFilters is stable, and `next` is passed in
+   * directly (no capture of the `filters` state variable needed).
+   */
+  const applyFilters = useCallback((next: ActivityFilters) => {
     setFilters(next);
     const params = filtersToParams(next);
     const qs = params.toString();
     router.replace(qs ? `?${qs}` : "?", { scroll: false });
-  }
+  }, [router]);
 
   // Resolve the server's noise kinds from /meta when available. Used for the
   // exclude_kind API param so the actual request matches the server's live taxonomy
@@ -359,6 +366,24 @@ function ObservabilityPageInner() {
     () => OBSERVABILITY_ENDPOINTS.activity + buildActivityQuery(filters, activeNoiseKinds),
     [filters, activeNoiseKinds],
   );
+
+  /**
+   * F3 — double-fetch guard.
+   *
+   * The flow: loadObservability (deps include activityUrl) -> on success setMeta
+   * -> activeNoiseKinds memo recomputes from server noise_kinds -> if the
+   * resulting activityUrl string changes, loadObservability's identity changes
+   * -> the effect refires -> second full reload of all 5 endpoints.
+   *
+   * Guard: track the last URL that was actually fetched. When loadObservability
+   * fires again and the URL equals the last-fetched URL, skip the reload.
+   * This is purely a noise-URL dedup — filter changes and pagination cursors
+   * always produce a different URL so they are never suppressed.
+   *
+   * After B1, the server and FE noise sets are identical so this rarely triggers
+   * in practice, but the structural race is closed regardless.
+   */
+  const lastFetchedUrlRef = useRef<string | null>(null);
 
   /**
    * Cursor ids derived from the currently loaded events (id ASC ordering).
@@ -378,6 +403,12 @@ function ObservabilityPageInner() {
   }, [events]);
 
   const loadObservability = useCallback(async () => {
+    // F3: skip reload if the activity URL hasn't changed since the last fetch.
+    // This prevents the structural double-fetch caused by /meta returning a
+    // noise_kinds list that produces an identical activityUrl after B1.
+    if (lastFetchedUrlRef.current === activityUrl) return;
+    lastFetchedUrlRef.current = activityUrl;
+
     setLoading(true);
     setPaginatingDir(null);
     setError(null);
@@ -476,13 +507,27 @@ function ObservabilityPageInner() {
     return "not ready";
   }, [health]);
 
-  /** Handle clicking a session card — toggles sessionId filter and re-fetches. */
-  function handleSessionClick(sessionId: string) {
-    applyFilters({
-      ...filters,
-      sessionId: filters.sessionId === sessionId ? null : sessionId,
+  /**
+   * Handle clicking a session card — toggles sessionId filter and re-fetches.
+   *
+   * F2: wrapped in useCallback to stabilize identity. Uses the functional form
+   * of setFilters so it never captures stale `filters` state — the toggle
+   * decision (deselect if already active, else select) is computed from `prev`
+   * inside the updater. The URL is synced via a derived value produced inline.
+   */
+  const handleSessionClick = useCallback((sessionId: string) => {
+    setFilters((prev) => {
+      const next: ActivityFilters = {
+        ...prev,
+        sessionId: prev.sessionId === sessionId ? null : sessionId,
+      };
+      // Sync URL alongside state using the same derived `next` value.
+      const params = filtersToParams(next);
+      const qs = params.toString();
+      router.replace(qs ? `?${qs}` : "?", { scroll: false });
+      return next;
     });
-  }
+  }, [router]);
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -657,10 +702,14 @@ function ObservabilityPageInner() {
               {sessions.map((session) => {
                 const isActive = filters.sessionId === session.id;
                 return (
-                  <div
+                  /* F1: session cards are interactive — use <button> so they are
+                     keyboard-reachable (Enter/Space) and properly announced by
+                     screen readers. text-left + w-full preserve card layout. */
+                  <button
+                    type="button"
                     key={session.id ?? String(session.last_active ?? session.last_event_at)}
                     onClick={() => session.id && handleSessionClick(session.id)}
-                    className={`cursor-pointer rounded-xl border p-3 transition-colors ${
+                    className={`w-full cursor-pointer rounded-xl border p-3 text-left transition-colors ${
                       isActive
                         ? "border-primary-light/40 bg-primary-light/10"
                         : "border-black/[0.06] bg-white/70 hover:bg-white/90"
@@ -677,7 +726,7 @@ function ObservabilityPageInner() {
                     <p className="mt-1 text-xs text-secondary">
                       {formatSessionBreakdown(session)} · {eventTime(session.last_active ?? session.last_event_at)}
                     </p>
-                  </div>
+                  </button>
                 );
               })}
             </div>
