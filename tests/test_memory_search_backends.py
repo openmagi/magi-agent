@@ -258,7 +258,9 @@ class _FakeQmd:
             return _FakeCompleted(0, stdout="Indexed: 1 new")
         if sub[:1] == ["update"]:
             return _FakeCompleted(0, stdout="updated")
-        if sub[:1] == ["search"]:
+        # BM25 keyword (``search``) and vector similarity (``vsearch``) emit the
+        # same JSON row shape; the fake returns the canned rows for either.
+        if sub[:1] in (["search"], ["vsearch"]):
             return _FakeCompleted(0, stdout=json.dumps(self.search_rows))
         return _FakeCompleted(0, stdout="")
 
@@ -566,6 +568,111 @@ def test_qmd_capabilities_no_vector() -> None:
     caps = QmdBackend().capabilities
     assert caps.name == "qmd"
     assert caps.supports_vector is False
+
+
+# ---------------------------------------------------------------------------
+# QmdBackend — vector mode (opt-in, explicit-search only)
+# ---------------------------------------------------------------------------
+
+
+def test_qmd_vector_capabilities_report_vector() -> None:
+    caps = QmdBackend(vector=True).capabilities
+    assert caps.name == "qmd"
+    assert caps.supports_vector is True
+
+
+def test_qmd_vector_search_uses_vsearch_command(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Vector mode shells out to ``qmd vsearch`` (not ``qmd search``); BM25 mode
+    still uses ``qmd search``. Both scope to our collection + map paths."""
+    monkeypatch.setattr(qmd_module.shutil, "which", lambda name: "/fake/qmd")
+    root = _mk_memory(tmp_path)
+    name = qmd_module.collection_name_for(root / "memory")
+    rows = [{"score": 0.7, "file": f"qmd://{name}/daily/a.md", "snippet": "semantic"}]
+
+    fake = _FakeQmd(existing={name}, search_rows=rows)
+    monkeypatch.setattr(qmd_module.subprocess, "run", fake)
+    backend = QmdBackend(vector=True)
+    backend.reindex(root)
+    hits = backend.search("meaning", k=5)
+
+    assert [(h.path, h.content) for h in hits] == [("memory/daily/a.md", "semantic")]
+    assert any(c[1:2] == ["vsearch"] for c in fake.calls)
+    assert not any(c[1:2] == ["search"] for c in fake.calls)
+    vsearch_call = next(c for c in fake.calls if c[1:2] == ["vsearch"])
+    assert "--json" in vsearch_call
+
+
+def test_qmd_bm25_mode_uses_search_not_vsearch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(qmd_module.shutil, "which", lambda name: "/fake/qmd")
+    root = _mk_memory(tmp_path)
+    name = qmd_module.collection_name_for(root / "memory")
+    fake = _FakeQmd(existing={name}, search_rows=[])
+    monkeypatch.setattr(qmd_module.subprocess, "run", fake)
+    backend = QmdBackend(vector=False)
+    backend.reindex(root)
+    backend.search("q", k=5)
+    assert any(c[1:2] == ["search"] for c in fake.calls)
+    assert not any(c[1:2] == ["vsearch"] for c in fake.calls)
+
+
+def test_qmd_vector_mode_uses_longer_timeout() -> None:
+    """Vector mode raises the subprocess timeout (cold model load) above the
+    BM25-tuned default; an explicit timeout still wins."""
+    assert QmdBackend(vector=False)._timeout == qmd_module._TIMEOUT_SECONDS
+    assert QmdBackend(vector=True)._timeout == qmd_module._VECTOR_TIMEOUT_SECONDS
+    assert QmdBackend(vector=True, timeout=5)._timeout == 5
+
+
+# ---------------------------------------------------------------------------
+# select_search_backend — vector gating (hot path stays BM25)
+# ---------------------------------------------------------------------------
+
+
+def test_select_vector_engaged_only_with_explicit_caller_and_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(qmd_module.shutil, "which", lambda name: "/usr/local/bin/qmd")
+    cfg = resolve_memory_config(
+        env={}, config={"memory": {"prefer_qmd": True, "vector_search": True}}
+    )
+    assert cfg.vector_search is True
+    # Explicit search surface opts into vector.
+    explicit = select_search_backend(cfg, vector=True)
+    assert isinstance(explicit, QmdBackend)
+    assert explicit.capabilities.supports_vector is True
+    # The per-turn hot-path caller (default vector=False) stays on BM25 even
+    # though the operator enabled vector_search.
+    hot = select_search_backend(cfg)
+    assert isinstance(hot, QmdBackend)
+    assert hot.capabilities.supports_vector is False
+
+
+def test_select_vector_request_ignored_without_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(qmd_module.shutil, "which", lambda name: "/usr/local/bin/qmd")
+    cfg = resolve_memory_config(
+        env={}, config={"memory": {"prefer_qmd": True}}
+    )
+    assert cfg.vector_search is False
+    backend = select_search_backend(cfg, vector=True)
+    assert isinstance(backend, QmdBackend)
+    assert backend.capabilities.supports_vector is False
+
+
+def test_select_vector_falls_back_to_bm25_when_qmd_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(qmd_module.shutil, "which", lambda name: None)
+    cfg = resolve_memory_config(
+        env={}, config={"memory": {"prefer_qmd": True, "vector_search": True}}
+    )
+    backend = select_search_backend(cfg, vector=True)
+    assert isinstance(backend, PyBM25Backend)  # no qmd -> BM25 (no vector)
 
 
 @pytest.mark.skipif(shutil.which("qmd") is None, reason="qmd binary not installed")

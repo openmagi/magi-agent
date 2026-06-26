@@ -308,6 +308,7 @@ graph LR
     transport --> gates
     transport --> introspection
     transport --> learning
+    transport --> memory
     transport --> missions
     transport --> ops
     transport --> packs
@@ -478,7 +479,7 @@ graph LR
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
-| __init__.py | Magi headless CLI foundation (PR-A1). | — | browser/autonomous/tool.py, cli/app.py, cli/tests/test_anthropic_cache_selection.py, cli/tests/test_app.py, cli/tests/test_model_picker_wire.py, computer/autonomous/tool.py, transport/app_api.py |
+| __init__.py | Magi headless CLI foundation (PR-A1). | — | browser/autonomous/tool.py, cli/app.py, cli/memory_cli.py, cli/tests/test_anthropic_cache_selection.py, cli/tests/test_app.py, cli/tests/test_model_picker_wire.py, computer/autonomous/tool.py, transport/app_api.py |
 | __main__.py | Thin stdlib-only shim for ``python -m magi_agent.cli`` (PR-F1). | app | cli/tests/test_app.py |
 | app.py | Typer CLI entrypoint for Magi (PR-F1, Stream F). | catalog, cli, config, control_plane_overrides, daemon, env, headless, health, install_profile_bootstrap, install_runner, installer, legal_eval, local_defaults, memory_bootstrap, otel_noise, providers, scaffold, service_install, session_log, store, watchers, wiring | cli/__main__.py, cli/tests/test_app.py, cli/tests/test_composio_cli.py, cli/tests/test_doctor.py, cli/tests/test_gateway_start_daemon.py, cli/tests/test_plan_mode.py |
 | clipboard_image.py | Read an image from the OS clipboard for CLI/TUI image attach. | message_builder | cli/tests/test_clipboard_image.py, cli/tui/app.py |
@@ -494,6 +495,7 @@ graph LR
 | litellm_empty_observer.py | Wrapper for ADK's ``LiteLlm`` that surfaces silent-empty completions. | — | cli/real_runner.py |
 | local_runner.py | — | — | cli/tests/test_real_runner.py, cli/wiring.py |
 | memory_bootstrap.py | CLI memory bootstrap: ``config.toml[memory]`` → process env (PR-C). | config, memory_session_extract, providers | (root)/main.py, cli/app.py |
+| memory_cli.py | ``magi memory`` CLI helpers: optional qmd install + explicit search. | cli, config, qmd, search | — |
 | memory_manifest.py | PR3 — memory file manifest (frontmatter + mtime, newest-first). | conformance | cli/memory_recall_block.py, cli/memory_recall_rerank.py |
 | memory_recall_block.py | Per-turn query-based memory recall block builder (PR-E item 3). | config, memory_manifest, memory_mode_guard, memory_recall_rerank, prompt_projection, search | cli/tool_runtime.py |
 | memory_recall_rerank.py | PR3 — optional cheap-model semantic re-rank over BM25 recall candidates. | base, memory_manifest, readonly_classifier | cli/memory_recall_block.py |
@@ -1225,7 +1227,7 @@ graph LR
 | adk_bridge.py | — | contracts, policy | — |
 | compaction_tree.py | 5-level persistent compaction tree + ROOT.md synthesis (PR-A). | compactor, config, local_file_writable | runtime/memory_turn_hook.py |
 | compactor.py | Deterministic, IO-free memory compactor (gap-closer B2). | — | memory/adapters/local_file_writable.py, memory/compaction_tree.py |
-| config.py | Single source of truth for Hipocampus memory activation (PR1). | — | cli/memory_bootstrap.py, cli/memory_recall_block.py, gates/memory_write_readiness.py, memory/adapters/hipocampus_readonly.py, memory/adapters/local_file_writable.py, memory/adapters/operator_soul_writer.py, memory/compaction_tree.py, memory/policy.py, memory/search/__init__.py, memory/summarizer_runtime.py, runtime/memory_turn_hook.py |
+| config.py | Single source of truth for Hipocampus memory activation (PR1). | — | cli/memory_bootstrap.py, cli/memory_cli.py, cli/memory_recall_block.py, gates/memory_write_readiness.py, memory/adapters/hipocampus_readonly.py, memory/adapters/local_file_writable.py, memory/adapters/operator_soul_writer.py, memory/compaction_tree.py, memory/policy.py, memory/search/__init__.py, memory/summarizer_runtime.py, runtime/memory_turn_hook.py, transport/app_api.py |
 | conformance.py | — | authority, declarative_filter, hipocampus_readonly, local_file_writable, policy | cli/memory_manifest.py |
 | continuity_policy.py | A1 — memory continuity policy block. | — | cli/tool_runtime.py, memory/prompt_projection.py |
 | contracts.py | — | authority | cli/learning_recall.py, harness/memory_recall.py, harness/memory_write.py, learning/injection.py, memory/__init__.py, memory/adapters/hipocampus_readonly.py, memory/adapters/local_file_writable.py, memory/adk_bridge.py, memory/namespaces.py, memory/policy.py, memory/projection.py, recipes/first_party/memory_recall.py |
@@ -1252,10 +1254,10 @@ graph LR
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
-| __init__.py | Hipocampus memory search backends (PR2, read-side, unwired). | base, bm25, config, qmd | cli/memory_recall_block.py, memory/adapters/hipocampus_readonly.py |
+| __init__.py | Hipocampus memory search backends (PR2, read-side, unwired). | base, bm25, config, qmd | cli/memory_cli.py, cli/memory_recall_block.py, memory/adapters/hipocampus_readonly.py, transport/app_api.py |
 | base.py | SearchBackend abstraction for Hipocampus memory (PR2, read-side). | — | cli/memory_recall_rerank.py, memory/search/__init__.py, memory/search/bm25.py, memory/search/qmd.py |
 | bm25.py | Pure-Python Okapi BM25 backend (PR2) — the DEFAULT search backend. | base | memory/search/__init__.py |
-| qmd.py | ``qmd`` CLI search backend (PR2). | base | memory/search/__init__.py |
+| qmd.py | ``qmd`` CLI search backend (PR2). | base | cli/memory_cli.py, memory/search/__init__.py |
 
 ### meta_orchestration/
 
@@ -1882,7 +1884,7 @@ graph LR
 |---|---|---|---|
 | __init__.py | — | health | adk_bridge/event_adapter.py, cli/tests/test_sse_sanitize_control_request.py, transport/sse.py |
 | active_turn.py | Process-local registry of in-flight streaming-chat turns. | permissions | cli/tests/test_streaming_driver.py, transport/chat_routes.py, transport/streaming_chat_route.py, transport/streaming_driver.py |
-| app_api.py | Dashboard ``/v1/app/*`` API surface. | cli, openmagi_runtime, providers, session_store, skills, tools | (root)/app.py, customize/catalog.py, transport/streaming_chat_route.py |
+| app_api.py | Dashboard ``/v1/app/*`` API surface. | cli, config, openmagi_runtime, providers, search, session_store, skills, tools | (root)/app.py, customize/catalog.py, transport/streaming_chat_route.py |
 | chat.py | Re-export shim for the decomposed Gate5B chat serving stack (08-PR1). | chat_routes, chat_shared, compiler, egress_critic, egress_gate, env, gate1a_egress_correlation, gate1a_readonly_tools, gate2_activation_loop_a, gate2_durable_evidence, gate2_readiness, gate2_sandbox_canary, gate5b4c3_live_runner_boundary, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, gate5b_full_toolhost, gate8_readiness, generation_request, materializer, message_builder, observed_egress, openmagi_runtime, public_events, research_first_canary, session_identity, shadow_generations, usage_receipt_emit, user_visible_model_routing | (root)/app.py, (root)/main.py, transport/health.py, transport/streaming_chat_route.py |
 | chat_routes.py | Chat route registration and the Gate5B user-visible serving engine. | _truthy, active_sessions, active_turn, chat_shared, child_runner_status, compiler, contracts, egress_critic, egress_gate, env, flags, gate1a_egress_correlation, gate1a_readonly_tools, gate2_sandbox_canary, gate5b4c3_live_runner_boundary, gate5b4c3_runner_input_adapter, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, gate5b_full_toolhost, gate5b_governance, gate8_readiness, generation_request, goal_loop_policy, governed_turn, hosted_engine_result, hosted_runtime, hosted_turn_context, kernel_recipe_packs, learning_live_readiness, materializer, memory_mode_context, memory_turn_hook, observed_egress, openmagi_runtime, per_turn_goal_loop_context, public_events, real_runner, research_first_canary, session_identity, shadow_generations, turn_context, usage_receipt_emit, user_visible_model_routing, wiring, work_queue | transport/chat.py |
 | chat_shared.py | Shared primitives for the decomposed Gate5B chat serving stack. | _truthy, child_runner_live, env, flags, gate1a_readonly_tools, gate5b4c3_live_runner_boundary, gate5b_full_toolhost, openmagi_runtime, shadow_generations, user_visible_model_routing | transport/chat.py, transport/chat_routes.py, transport/control_requests.py, transport/gate2_sandbox_canary.py, transport/generation_request.py |

@@ -29,6 +29,45 @@ This install-default-on behaviour comes from the CLI startup bootstrap only; the
 code-level default (`resolve_memory_config()` with an empty env/config) stays
 off, so library/test imports never silently activate memory.
 
+## Search index (optional qmd, optional vectors)
+
+Memory search has two backends behind one selector:
+
+- **PyBM25** — pure-Python Okapi BM25, the zero-dependency default. It indexes
+  `memory/**/*.md` plus top-level `MEMORY.md` / `ROOT.md` and ranks keyword
+  matches. No install, sub-second, always available.
+- **qmd** — the external `qmd` binary (the `@tobilu/qmd` npm package, or a
+  Homebrew `qmd` formula), used when it is on `PATH` and `[memory] prefer_qmd`
+  is true (the default). On the per-turn recall path it runs `qmd search`
+  (BM25, no model load).
+
+qmd is **not** a hard dependency — a fresh install searches memory fine without
+it. To opt in, run the one-time setup:
+
+```
+magi memory init            # install qmd (brew or npm) + index this workspace
+magi memory init --vector   # also generate embeddings for semantic search
+```
+
+`init` installs the binary if missing, registers this workspace's `memory/` tree
+as a private qmd collection (so search is not silently empty), and writes the
+opt-ins to `~/.magi/config.toml`. `magi doctor` shows whether qmd is present.
+
+**Vector search is explicit-only.** `--vector` runs `qmd embed` (first run
+downloads an embedding model, ~2GB) and sets `[memory] vector_search = true`.
+Even then, semantic `qmd vsearch` runs **only** on the explicit, latency-tolerant
+surfaces — `magi memory search --vector` and the dashboard
+`/v1/app/memory/search?vector=1` endpoint — because each vsearch invocation
+cold-loads the embedding model (~10-40s). The **per-turn recall hot path always
+stays on BM25** regardless of `vector_search`, so turn latency is never affected.
+
+Search memory directly:
+
+```
+magi memory search "billing reconciliation"            # BM25 keyword
+magi memory search "how do we reconcile credits" --vector   # semantic
+```
+
 ## Memory vs Context
 
 Context is what the model sees during a run. Memory is durable state that can be

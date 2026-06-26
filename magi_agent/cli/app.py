@@ -207,6 +207,23 @@ def _composio_status_line(prefix: str) -> str:
     return " | ".join(parts)
 
 
+def _qmd_status_line() -> str:
+    """Report whether the optional ``qmd`` search index is installed.
+
+    Memory search works without qmd (built-in BM25); this line tells the operator
+    how to opt into the faster/semantic index via ``magi memory init``.
+    """
+    from magi_agent.cli import memory_cli  # noqa: PLC0415
+
+    version = memory_cli.qmd_version()
+    if version:
+        return f"qmd: OK ({version}) — run `magi memory init` to index this workspace"
+    return (
+        "qmd: not installed (optional) — memory search uses built-in BM25; "
+        "run `magi memory init [--vector]` to enable the qmd index"
+    )
+
+
 # ---------------------------------------------------------------------------
 # The default "agent" command (a real sibling command, routed to by default)
 # ---------------------------------------------------------------------------
@@ -477,6 +494,7 @@ def doctor(
         typer.echo(f"workspace: NOT WRITABLE ({cwd})", err=False)
 
     # Optional integration status.
+    typer.echo(_qmd_status_line(), err=False)
     typer.echo(_composio_status_line("Composio"), err=False)
 
 
@@ -587,6 +605,81 @@ def pack_new(
 
 
 app.add_typer(pack_app, name="pack")
+
+
+# ---------------------------------------------------------------------------
+# `magi memory` — optional qmd install + explicit search
+# ---------------------------------------------------------------------------
+
+memory_app = typer.Typer(
+    name="memory",
+    help="Manage the optional qmd search index for Hipocampus memory.",
+    invoke_without_command=True,
+    no_args_is_help=False,
+)
+
+
+@memory_app.callback(invoke_without_command=True)
+def memory_root(ctx: typer.Context) -> None:
+    """Manage the optional qmd search index for Hipocampus memory."""
+    if ctx.invoked_subcommand is None:
+        typer.echo(
+            "magi memory: use `magi memory init [--vector]` or "
+            "`magi memory search <query> [--vector]`.",
+            err=False,
+        )
+
+
+@memory_app.command("init")
+def memory_init(
+    vector: bool = typer.Option(
+        False,
+        "--vector",
+        help=(
+            "Also generate vector embeddings (`qmd embed`, first run downloads "
+            "~2GB) and enable semantic search on the explicit search surfaces. "
+            "OFF by default — the per-turn recall path always stays on fast BM25."
+        ),
+    ),
+) -> None:
+    """Install qmd (if missing), register this workspace's memory/ collection,
+    and persist the opt-ins. With --vector also embeds for semantic search."""
+    from magi_agent.cli import memory_cli  # noqa: PLC0415
+
+    report = memory_cli.init_memory(root=Path.cwd(), vector=vector)
+    for line in report.lines:
+        typer.echo(line, err=False)
+
+
+@memory_app.command("search")
+def memory_search(
+    query: str = typer.Argument(..., help="The search query."),
+    vector: bool = typer.Option(
+        False,
+        "--vector",
+        help=(
+            "Semantic search via `qmd vsearch` (needs `magi memory init --vector` "
+            "first; cold-loads the embedding model, ~10-40s). Default: BM25 keyword."
+        ),
+    ),
+    limit: int = typer.Option(8, "--limit", "-k", help="Max results."),
+) -> None:
+    """Search Hipocampus memory (BM25 by default, semantic with --vector)."""
+    from magi_agent.cli import memory_cli  # noqa: PLC0415
+
+    results = memory_cli.search_memory(
+        root=Path.cwd(), query=query, vector=vector, k=limit
+    )
+    if not results:
+        typer.echo("no results.", err=False)
+        return
+    for path, score, snippet in results:
+        typer.echo(f"{score:.3f}  {path}", err=False)
+        if snippet:
+            typer.echo(f"        {snippet}", err=False)
+
+
+app.add_typer(memory_app, name="memory")
 
 
 # ---------------------------------------------------------------------------
