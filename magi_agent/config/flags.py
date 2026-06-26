@@ -3548,9 +3548,14 @@ FLAGS: tuple[FlagSpec, ...] = (
         scope="public",
         stage="stage1",
         summary=(
-            "Composio credential source (``env`` / ``hosted``). Default ``env`` "
-            "uses the operator's own ``COMPOSIO_API_KEY``; ``hosted`` brokers "
-            "credentials through the platform master key (Open Magi Pro+)."
+            "Composio credential source (``env`` / ``hosted`` / ``platform``). "
+            "Default auto-selects: a local ``COMPOSIO_API_KEY`` uses ``env`` "
+            "(operator's own key); otherwise a free platform token "
+            "(``MAGI_PLATFORM_API_KEY``) opts into ``platform`` mode, which "
+            "brokers tool calls through the platform broker (``MAGI_PLATFORM_"
+            "BASE_URL``, master key held server-side) so no Composio key is "
+            "needed. ``hosted`` brokers through an in-process platform master "
+            "key (Open Magi Pro+ pods)."
         ),
         kind="str",
     ),

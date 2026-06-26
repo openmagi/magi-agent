@@ -235,6 +235,151 @@ def test_hosted_source_refuses_default_entity() -> None:
     assert cfg.disabled_reason == "missing_hosted_entity"
 
 
+def test_platform_source_is_default_when_platform_token_present_and_no_key() -> None:
+    from magi_agent.composio.config import resolve_composio_config
+
+    cfg = resolve_composio_config(
+        {"MAGI_PLATFORM_API_KEY": "magi_tok_123"},
+        # Platform (broker) mode needs no local composio SDK installed.
+        package_available=False,
+    )
+
+    assert cfg.credential_source == "platform"
+    assert cfg.active is True
+    assert cfg.configured is True
+    assert cfg.platform_token == "magi_tok_123"
+    assert cfg.platform_broker_url == "https://api.openmagi.ai"
+    assert cfg.disabled_reason is None
+
+
+def test_local_composio_key_wins_over_platform_token() -> None:
+    from magi_agent.composio.config import resolve_composio_config
+
+    cfg = resolve_composio_config(
+        {
+            "COMPOSIO_API_KEY": "cp_test_secret",
+            "MAGI_PLATFORM_API_KEY": "magi_tok_123",
+        },
+        package_available=True,
+    )
+
+    assert cfg.credential_source == "env"
+    assert cfg.active is True
+    assert cfg.platform_token is None
+
+
+def test_explicit_platform_source_uses_default_broker_and_token() -> None:
+    from magi_agent.composio.config import resolve_composio_config
+
+    cfg = resolve_composio_config(
+        {
+            "MAGI_COMPOSIO_ENABLED": "on",
+            "MAGI_COMPOSIO_CREDENTIAL_SOURCE": "platform",
+            "MAGI_PLATFORM_API_KEY": "magi_tok_123",
+        },
+        package_available=False,
+    )
+
+    assert cfg.credential_source == "platform"
+    assert cfg.active is True
+    assert cfg.platform_broker_url == "https://api.openmagi.ai"
+
+
+def test_platform_source_honors_explicit_broker_url() -> None:
+    from magi_agent.composio.config import resolve_composio_config
+
+    cfg = resolve_composio_config(
+        {
+            "MAGI_COMPOSIO_CREDENTIAL_SOURCE": "platform",
+            "MAGI_PLATFORM_BASE_URL": "https://broker.staging.openmagi.ai",
+            "MAGI_PLATFORM_API_KEY": "magi_tok_123",
+        },
+        package_available=False,
+    )
+
+    assert cfg.active is True
+    assert cfg.platform_broker_url == "https://broker.staging.openmagi.ai"
+
+
+def test_explicit_platform_source_without_token_is_missing_platform_token() -> None:
+    from magi_agent.composio.config import resolve_composio_config
+
+    cfg = resolve_composio_config(
+        {
+            "MAGI_COMPOSIO_ENABLED": "on",
+            "MAGI_COMPOSIO_CREDENTIAL_SOURCE": "platform",
+        }
+    )
+
+    assert cfg.credential_source == "platform"
+    assert cfg.active is False
+    assert cfg.configured is False
+    assert cfg.disabled_reason == "missing_platform_token"
+
+
+def test_platform_source_with_invalid_broker_url_is_missing_broker_url() -> None:
+    from magi_agent.composio.config import resolve_composio_config
+
+    cfg = resolve_composio_config(
+        {
+            "MAGI_COMPOSIO_CREDENTIAL_SOURCE": "platform",
+            "MAGI_PLATFORM_BASE_URL": "http://insecure.example",
+            "MAGI_PLATFORM_API_KEY": "magi_tok_123",
+        }
+    )
+
+    assert cfg.active is False
+    assert cfg.disabled_reason == "missing_platform_broker_url"
+
+
+def test_platform_source_respects_safe_runtime_profile() -> None:
+    from magi_agent.composio.config import resolve_composio_config
+
+    cfg = resolve_composio_config(
+        {
+            "MAGI_PLATFORM_API_KEY": "magi_tok_123",
+            "MAGI_RUNTIME_PROFILE": "safe",
+        },
+        package_available=False,
+    )
+
+    assert cfg.credential_source == "platform"
+    assert cfg.active is False
+    assert cfg.disabled_reason == "disabled_by_config"
+
+
+def test_platform_token_is_not_serialized_or_represented() -> None:
+    from magi_agent.composio.config import resolve_composio_config
+
+    cfg = resolve_composio_config(
+        {"MAGI_PLATFORM_API_KEY": "magi_tok_supersecret"},
+        package_available=False,
+    )
+    by_alias = cfg.model_dump(by_alias=True)
+    rendered = repr(cfg) + cfg.model_dump_json() + str(by_alias)
+
+    assert cfg.platform_token == "magi_tok_supersecret"
+    assert by_alias["platformTokenPresent"] is True
+    assert "platformToken" not in by_alias
+    assert "magi_tok_supersecret" not in rendered
+
+
+def test_platform_source_derives_entity_from_user_and_bot() -> None:
+    from magi_agent.composio.config import resolve_composio_config
+
+    cfg = resolve_composio_config(
+        {
+            "MAGI_PLATFORM_API_KEY": "magi_tok_123",
+            "USER_ID": "user-123",
+            "BOT_ID": "bot-456",
+        },
+        package_available=False,
+    )
+
+    assert cfg.active is True
+    assert cfg.entity_id == "openmagi:user:user-123:bot:bot-456"
+
+
 def test_toolkits_are_normalized_deduped_and_safe() -> None:
     from magi_agent.composio.config import resolve_composio_config
 

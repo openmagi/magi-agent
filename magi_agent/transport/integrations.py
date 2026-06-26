@@ -49,6 +49,7 @@ from magi_agent.channels.channel_validate import (
 )
 from magi_agent.channels.telegram_validate import InvalidBotToken, validate_bot_token
 from magi_agent.composio import connections as composio_connections
+from magi_agent.composio.broker import ComposioBrokerClient
 from magi_agent.composio.config import resolve_composio_config
 from magi_agent.credentials_admin import store, vault_local
 from magi_agent.credentials_admin.local_vault import LocalVault
@@ -60,6 +61,7 @@ logger = logging.getLogger(__name__)
 _MAX_FIELD_LEN = 4096
 
 ComposioClientProvider = Callable[[], Any | None]
+ComposioBrokerProvider = Callable[[], ComposioBrokerClient | None]
 TelegramFetchJson = Callable[[str], dict[str, Any]]
 TelegramAuthPortProvider = Callable[[], TelegramUserAuthPort | None]
 
@@ -76,6 +78,7 @@ def register_integrations_routes(
     runtime: OpenMagiRuntime,
     *,
     composio_client_provider: ComposioClientProvider | None = None,
+    composio_broker_provider: ComposioBrokerProvider | None = None,
     telegram_fetch_json: TelegramFetchJson | None = None,
     telegram_auth_port_provider: TelegramAuthPortProvider | None = None,
     easy_session_store: EasySessionStore | None = None,
@@ -84,6 +87,9 @@ def register_integrations_routes(
     slack_fetch_json: ChannelFetchJson | None = None,
 ) -> None:
     provide_composio = composio_client_provider or _default_composio_client_provider
+    provide_composio_broker = (
+        composio_broker_provider or _default_composio_broker_provider
+    )
     fetch_json = telegram_fetch_json or _default_telegram_fetch_json
     discord_fetch = discord_fetch_json or _default_discord_fetch_json
     slack_fetch = slack_fetch_json or _default_slack_fetch_json
@@ -147,12 +153,21 @@ def register_integrations_routes(
         unauthorized = _unauthorized_response(request, runtime)
         if unauthorized is not None:
             return unauthorized
-        client = provide_composio()
-        if client is None:
-            return _composio_not_configured()
         category = request.query_params.get("category")
         cursor = request.query_params.get("cursor")
         managed_only = request.query_params.get("managed_only", "1") not in ("0", "false")
+        broker = provide_composio_broker()
+        if broker is not None:
+            try:
+                page = broker.catalog(
+                    category=category, cursor=cursor, managed_only=managed_only
+                )
+            except Exception:
+                return _composio_upstream_error("catalog")
+            return JSONResponse(content=page)
+        client = provide_composio()
+        if client is None:
+            return _composio_not_configured()
         try:
             page = composio_connections.list_catalog(
                 client, category=category, cursor=cursor, managed_only=managed_only
@@ -173,6 +188,13 @@ def register_integrations_routes(
         toolkit = body.get("toolkit")
         if not isinstance(toolkit, str) or not toolkit.strip():
             return JSONResponse(status_code=400, content={"error": "toolkit_required"})
+        broker = provide_composio_broker()
+        if broker is not None:
+            try:
+                result = broker.initiate(toolkit.strip())
+            except Exception:
+                return _composio_upstream_error("connect")
+            return JSONResponse(content=result)
         client = provide_composio()
         if client is None:
             return _composio_not_configured()
@@ -190,6 +212,13 @@ def register_integrations_routes(
         unauthorized = _unauthorized_response(request, runtime)
         if unauthorized is not None:
             return unauthorized
+        broker = provide_composio_broker()
+        if broker is not None:
+            try:
+                result = broker.status(connection_id)
+            except Exception:
+                return _composio_upstream_error("status")
+            return JSONResponse(content=result)
         client = provide_composio()
         if client is None:
             return _composio_not_configured()
@@ -207,6 +236,13 @@ def register_integrations_routes(
         unauthorized = _unauthorized_response(request, runtime)
         if unauthorized is not None:
             return unauthorized
+        broker = provide_composio_broker()
+        if broker is not None:
+            try:
+                items = broker.list()
+            except Exception:
+                return _composio_upstream_error("connections")
+            return JSONResponse(content={"connections": items})
         client = provide_composio()
         if client is None:
             return _composio_not_configured()
@@ -224,6 +260,13 @@ def register_integrations_routes(
         unauthorized = _unauthorized_response(request, runtime)
         if unauthorized is not None:
             return unauthorized
+        broker = provide_composio_broker()
+        if broker is not None:
+            try:
+                broker.delete(connection_id)
+            except Exception:
+                return _composio_upstream_error("disconnect")
+            return JSONResponse(content={"disconnected": connection_id})
         client = provide_composio()
         if client is None:
             return _composio_not_configured()
@@ -649,6 +692,47 @@ def _default_composio_client_provider() -> Any | None:
     if not api_key:
         return None
     return composio_connections.build_connections_client(api_key)
+
+
+def _default_composio_broker_provider() -> ComposioBrokerClient | None:
+    # Active only in ``platform`` credential mode: the connect/catalog routes
+    # then proxy through the platform broker (Bearer token) instead of a local
+    # Composio client. Every other source returns ``None`` so the local-client
+    # path stays byte-identical.
+    config = resolve_composio_config(os.environ)
+    if config.credential_source != "platform" or not config.active:
+        return None
+    if not config.platform_broker_url or not config.platform_token:
+        return None
+    return ComposioBrokerClient(
+        base_url=config.platform_broker_url,
+        token=config.platform_token,
+        entity_id=config.entity_id or "default",
+        transport=_default_broker_transport,
+    )
+
+
+def _default_broker_transport(
+    method: str,
+    url: str,
+    *,
+    token: str,
+    json: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    import httpx
+
+    response = httpx.request(
+        method,
+        url,
+        headers={"Authorization": f"Bearer {token}"},
+        json=json,
+        timeout=30.0,
+    )
+    response.raise_for_status()
+    if not response.content:
+        return {}
+    parsed = response.json()
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _default_telegram_fetch_json(url: str) -> dict[str, Any]:

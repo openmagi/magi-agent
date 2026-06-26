@@ -703,6 +703,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | config, mcp | transport/integrations.py |
+| broker.py | HTTP client for the platform Composio broker (``platform`` credential mode). | — | transport/integrations.py |
 | config.py | — | credential_vocab, flags | cli/app.py, cli/wiring.py, composio/__init__.py, composio/health.py, composio/mcp.py, transport/health.py, transport/integrations.py |
 | connections.py | Composio connection management used by the dashboard Integrations tab. | — | — |
 | health.py | — | config, mcp, redaction | cli/app.py, transport/health.py |
@@ -1907,7 +1908,7 @@ graph LR
 | health.py | — | chat, child_runner_status, config, flags, gate2_activation_loop_a, gate2_readiness, gate3_readiness, gate4_readiness, gate5_readiness, gate5b_full_toolhost, gate7_readiness, gate8_readiness, health, observed_egress, openmagi_runtime, ops, readiness | (root)/app.py, observability/api.py, transport/__init__.py |
 | hosted_engine_result.py | Async collector: engine event stream → Gate5B4C3LiveRunnerBoundaryResult. | contracts, gate5b4c3_live_runner_boundary, gate5b4c3_shadow_generation_contract, headless | transport/chat_routes.py |
 | hosted_turn_context.py | Pure mapper: Gate5B4C3ShadowGenerationRequest → TurnContext. | gate5b4c3_live_runner_boundary, gate5b4c3_shadow_generation_contract, turn_context | transport/chat_routes.py |
-| integrations.py | Dashboard "Integrations" admin routes. | channel_validate, channels, composio, config, credentials_admin, local_vault, openmagi_runtime, telegram_easy, telegram_easy_telethon, telegram_validate, tools | (root)/app.py |
+| integrations.py | Dashboard "Integrations" admin routes. | broker, channel_validate, channels, composio, config, credentials_admin, local_vault, openmagi_runtime, telegram_easy, telegram_easy_telethon, telegram_validate, tools | (root)/app.py |
 | learning_dashboard.py | Learning governance dashboard API — FastAPI router. | api, config, models, openmagi_runtime, store | (root)/app.py |
 | packs_dashboard.py | Dashboard pack-builder REST endpoints (self-host only, default-OFF, 410 gate). | catalog, dashboard_authored, discovery, env | (root)/app.py |
 | plugins.py | — | audit, manager, openmagi_runtime | (root)/app.py |

@@ -9,12 +9,14 @@ from urllib.parse import parse_qsl, unquote_plus, urlsplit
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 ComposioEnabledMode = Literal["auto", "on", "off"]
-ComposioCredentialSource = Literal["env", "hosted", "missing"]
+ComposioCredentialSource = Literal["env", "hosted", "platform", "missing"]
 ComposioDisabledReason = Literal[
     "disabled_by_config",
     "invalid_config",
     "missing_api_key",
     "missing_hosted_entity",
+    "missing_platform_broker_url",
+    "missing_platform_token",
     "missing_python_package",
     "not_configured",
 ]
@@ -22,6 +24,13 @@ ComposioDisabledReason = Literal[
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 _FALSE_VALUES = frozenset({"0", "false", "no", "off"})
 _RUNTIME_PROFILE_ENV = "MAGI_RUNTIME_PROFILE"
+# Platform (broker) mode reuses the existing platform plumbing (the same
+# ``MAGI_PLATFORM_*`` Bearer pair the web-acquisition broker uses), so a
+# self-hoster with a free platform token gets Composio without ever touching a
+# Composio key. The broker holds the master key server-side.
+_PLATFORM_BASE_URL_ENV = "MAGI_PLATFORM_BASE_URL"
+_PLATFORM_TOKEN_ENV = "MAGI_PLATFORM_API_KEY"
+_DEFAULT_PLATFORM_BROKER_URL = "https://api.openmagi.ai"
 _SAFE_RUNTIME_PROFILES = frozenset({"safe", "off", "minimal", "conservative", "eval"})
 _SAFE_TOKEN_RE = re.compile(r"^[a-z][a-z0-9_:-]{0,80}$")
 _ENTITY_ID_UNSAFE_RE = re.compile(r"[^A-Za-z0-9_.:-]+")
@@ -102,6 +111,24 @@ class ComposioConfig(BaseModel):
         default=False,
         alias="mcpUrlOverridePresent",
     )
+    platform_broker_url: str | None = Field(
+        default=None,
+        alias="platformBrokerUrl",
+    )
+    platform_broker_url_present: bool = Field(
+        default=False,
+        alias="platformBrokerUrlPresent",
+    )
+    platform_token: str | None = Field(
+        default=None,
+        alias="platformToken",
+        repr=False,
+        exclude=True,
+    )
+    platform_token_present: bool = Field(
+        default=False,
+        alias="platformTokenPresent",
+    )
     disabled_reason: ComposioDisabledReason | None = Field(
         default=None,
         alias="disabledReason",
@@ -109,6 +136,10 @@ class ComposioConfig(BaseModel):
 
     @field_serializer("api_key")
     def _serialize_api_key(self, _value: str | None) -> None:
+        return None
+
+    @field_serializer("platform_token")
+    def _serialize_platform_token(self, _value: str | None) -> None:
         return None
 
 
@@ -136,9 +167,16 @@ def resolve_composio_config(
         if package_available is None
         else package_available
     )
+    # Platform (broker) credentials reuse the shared ``MAGI_PLATFORM_*`` pair
+    # (read raw, like ``COMPOSIO_API_KEY`` — these are cross-cutting platform
+    # creds, not composio-scoped ``MAGI_COMPOSIO_*`` knobs).
+    platform_token = _trim(env.get(_PLATFORM_TOKEN_ENV))
+    platform_broker_url = _parse_platform_broker_url(env.get(_PLATFORM_BASE_URL_ENV))
+    platform_broker_url_set = _trim(env.get(_PLATFORM_BASE_URL_ENV)) is not None
     source, source_valid = _parse_credential_source(
         flag_str("MAGI_COMPOSIO_CREDENTIAL_SOURCE", env=env),
         api_key,
+        platform_available=platform_token is not None,
     )
     # ``_parse_explicit_entity_id`` distinguishes ``None`` (unset, valid)
     # from ``""`` (set-but-empty, INVALID), so map the registry's
@@ -155,7 +193,11 @@ def resolve_composio_config(
         flag_str("MAGI_COMPOSIO_MCP_URL", env=env)
     )
 
-    configured = api_key is not None
+    # ``platform`` mode is credentialed by the broker token (no local Composio
+    # key); every other source is credentialed by ``COMPOSIO_API_KEY``.
+    configured = api_key is not None or (
+        source == "platform" and platform_token is not None
+    )
     required = enabled_mode == "on"
     disabled_reason: ComposioDisabledReason | None = None
     active = False
@@ -173,6 +215,15 @@ def resolve_composio_config(
         enabled_mode == "auto" and not _runtime_profile_auto_enabled(env)
     ):
         disabled_reason = "disabled_by_config"
+    elif source == "platform":
+        # Broker mode needs no local Composio SDK (the toolset is an MCP client
+        # pointed at the broker), so ``package_ready`` is intentionally skipped.
+        if platform_broker_url is None:
+            disabled_reason = "missing_platform_broker_url"
+        elif platform_token is None:
+            disabled_reason = "missing_platform_token"
+        else:
+            active = True
     elif api_key is None:
         disabled_reason = (
             "missing_api_key" if enabled_mode == "on" else "not_configured"
@@ -186,6 +237,7 @@ def resolve_composio_config(
     else:
         active = True
 
+    is_platform = source == "platform"
     return ComposioConfig(
         enabledMode=enabled_mode,
         active=active,
@@ -194,11 +246,15 @@ def resolve_composio_config(
         credentialSource=source,
         apiKey=api_key,
         apiKeyPresent=api_key is not None,
-        entityId=entity_id if api_key is not None and entity_valid else None,
+        entityId=entity_id if configured and entity_valid else None,
         entityConfigured=bool(explicit_entity or runtime_entity),
         toolkits=toolkits,
         mcpUrlOverride=mcp_url_override,
         mcpUrlOverridePresent=mcp_url_override is not None,
+        platformBrokerUrl=platform_broker_url if is_platform else None,
+        platformBrokerUrlPresent=platform_broker_url_set if is_platform else False,
+        platformToken=platform_token if is_platform else None,
+        platformTokenPresent=(platform_token is not None) if is_platform else False,
         disabledReason=disabled_reason,
     )
 
@@ -228,13 +284,22 @@ def _runtime_profile_auto_enabled(env: Mapping[str, str]) -> bool:
 def _parse_credential_source(
     raw: str | None,
     api_key: str | None,
+    *,
+    platform_available: bool = False,
 ) -> tuple[ComposioCredentialSource, bool]:
     if raw is None or not raw.strip():
+        # Auto-selection precedence: a local Composio key (BYO) always wins so
+        # existing installs are byte-identical; otherwise a free platform token
+        # opts into brokered ``platform`` mode (zero Composio key); else off.
         if api_key:
             return "env", True
+        if platform_available:
+            return "platform", True
         return "missing", True
 
     value = raw.strip().lower()
+    if value == "platform":
+        return "platform", True
     if value == "hosted":
         return "hosted", True
     if value == "env":
@@ -242,6 +307,39 @@ def _parse_credential_source(
     if value == "missing" and not api_key:
         return "missing", True
     return ("env" if api_key else "missing"), False
+
+
+def _parse_platform_broker_url(raw: str | None) -> str | None:
+    """Resolve the platform broker base URL for ``platform`` mode.
+
+    Unset → the default platform broker (zero-config). Set → validated as an
+    HTTPS URL with no embedded credentials (mirrors the MCP-url override guard);
+    an invalid value returns ``None`` so the caller reports a clear disabled
+    reason rather than silently falling back to the default (which would risk
+    leaking the Bearer token to an attacker-chosen host).
+    """
+
+    value = _trim(raw)
+    if value is None:
+        return _DEFAULT_PLATFORM_BROKER_URL
+
+    try:
+        parsed = urlsplit(value)
+        hostname = parsed.hostname
+    except ValueError:
+        return None
+
+    if parsed.scheme != "https" or not hostname:
+        return None
+    if parsed.username is not None or parsed.password is not None:
+        return None
+    if parsed.fragment:
+        return None
+    for key in _query_keys(parsed.query):
+        if _is_credential_query_key(key):
+            return None
+
+    return value
 
 
 def _parse_toolkits(raw: str | None) -> tuple[tuple[str, ...], bool]:

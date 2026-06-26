@@ -8,7 +8,10 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from magi_agent.composio.config import ComposioConfig
+from magi_agent.composio.config import (
+    _DEFAULT_PLATFORM_BROKER_URL,
+    ComposioConfig,
+)
 from magi_agent.composio.redaction import redact_composio_text
 
 _MISSING_PACKAGE_PREVIEW = "install the composio optional extra to enable integrations"
@@ -50,8 +53,12 @@ def build_composio_toolset_bundle(
             reason=config.disabled_reason or "not_configured",
         )
 
+    is_platform = config.credential_source == "platform"
     api_key = config.api_key
-    if not api_key:
+    # The secret to scrub from any error preview: the broker token in platform
+    # mode (no Composio key is present), else the Composio api key.
+    redaction_secret = config.platform_token if is_platform else api_key
+    if not is_platform and not api_key:
         return ComposioToolsetBundle(
             active=False,
             status="inactive",
@@ -59,7 +66,18 @@ def build_composio_toolset_bundle(
         )
 
     try:
-        if config.mcp_url_override:
+        if is_platform:
+            # Broker mode: point the ADK MCP client at the platform broker
+            # endpoint with the platform Bearer token. The broker holds the
+            # master Composio key server-side and scopes the session to this
+            # tenant/entity; no local Composio client is created.
+            mcp_url = _platform_mcp_url(config.platform_broker_url)
+            headers = _platform_request_headers(config)
+            resolved_toolset_cls, resolved_params_cls = _resolve_adk_classes(
+                toolset_cls,
+                connection_params_cls,
+            )
+        elif config.mcp_url_override:
             mcp_url = config.mcp_url_override
             headers = {"Authorization": f"Bearer {api_key}"}
             resolved_toolset_cls, resolved_params_cls = _resolve_adk_classes(
@@ -106,7 +124,7 @@ def build_composio_toolset_bundle(
             status="error",
             reason="toolset_build_failed",
             lastErrorClass=type(exc).__name__,
-            lastErrorPreview=_sanitize_error_preview(exc, api_key),
+            lastErrorPreview=_sanitize_error_preview(exc, redaction_secret),
         )
 
 
@@ -374,6 +392,26 @@ def _default_composio_client(api_key: str) -> _ComposioClient:
     return Composio(api_key=api_key)
 
 
+# Broker MCP endpoint exposed by the magi-cp control-plane. The runtime points
+# its ADK MCP client here in ``platform`` mode; the broker resolves the tenant
+# from the Bearer token and the entity/toolkit headers.
+_PLATFORM_MCP_PATH = "/v1/integrations/composio/mcp"
+
+
+def _platform_mcp_url(broker_url: str | None) -> str:
+    base = (broker_url or _DEFAULT_PLATFORM_BROKER_URL).rstrip("/")
+    return f"{base}{_PLATFORM_MCP_PATH}"
+
+
+def _platform_request_headers(config: ComposioConfig) -> dict[str, str]:
+    headers = {"Authorization": f"Bearer {config.platform_token}"}
+    if config.entity_id:
+        headers["X-Magi-Composio-Entity"] = config.entity_id
+    if config.toolkits:
+        headers["X-Magi-Composio-Toolkits"] = ",".join(config.toolkits)
+    return headers
+
+
 def _resolve_adk_classes(
     toolset_cls: Callable[..., Any] | None,
     connection_params_cls: Callable[..., Any] | None,
@@ -392,9 +430,10 @@ def _resolve_adk_classes(
     )
 
 
-def _sanitize_error_preview(exc: Exception, api_key: str) -> str:
+def _sanitize_error_preview(exc: Exception, secret: str | None) -> str:
     preview = redact_composio_text(str(exc))
-    preview = preview.replace(api_key, "[redacted-composio-secret]")
+    if secret:
+        preview = preview.replace(secret, "[redacted-composio-secret]")
     return preview[:_ERROR_PREVIEW_LIMIT]
 
 
