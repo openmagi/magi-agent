@@ -9,6 +9,7 @@ from magi_agent.knowledge.provider_boundary import (
 )
 from magi_agent.knowledge.source_tools import LocalKnowledgeSourceToolBoundary
 from magi_agent.plugins.native._common import blocked_result, ok_result
+from magi_agent.plugins.native._hosted_knowledge import hosted_egress
 from magi_agent.tools.context import ToolContext
 from magi_agent.tools.result import ToolResult
 from magi_agent.web_acquisition.policy import redact_public_text
@@ -41,6 +42,9 @@ def _boundary() -> LocalKnowledgeSourceToolBoundary:
 
 
 async def knowledge_search(arguments: dict[str, object], context: ToolContext) -> ToolResult:
+    hosted = hosted_egress()
+    if hosted is not None:
+        return await hosted(arguments, context)
     return await _boundary().execute_tool("KnowledgeSearch", arguments, context)
 
 
