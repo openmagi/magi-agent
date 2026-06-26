@@ -330,3 +330,118 @@ def test_every_profile_listed_registry_flag_is_enabled(
             checked += 1
     # Guard against a silently-empty cross-check (e.g. a parser regression).
     assert checked >= 20
+
+
+# ---------------------------------------------------------------------------
+# Reverse-direction COMPLETENESS gate.
+#
+# The cross-check above only proves "every flag the profile lists resolves ON".
+# It does NOT prove "every public default-OFF capability flag IS in the profile"
+# — so a newly-added flag that nobody wired into the profile passed silently.
+# That asymmetry is exactly how full-power flags kept slipping out of the
+# profile. This gate closes it: every PUBLIC, default-OFF boolean capability
+# flag in the registry must be either (a) present in the profile (turned on, or
+# deliberately =0), or (b) named in _INTENTIONALLY_NOT_IN_FULL_PROFILE with a
+# reason. Adding a new such flag fails this test until its author makes that
+# explicit decision.
+# ---------------------------------------------------------------------------
+
+# Public default-OFF capability flags deliberately NOT turned on by the full
+# profile, each with the reason. Mirrors the "DELIBERATELY NOT SET HERE" prose
+# block in scripts/dogfood-full-on.env; this dict is the machine-checked source
+# of truth for the completeness gate below.
+_INTENTIONALLY_NOT_IN_FULL_PROFILE: dict[str, str] = {
+    "MAGI_VERIFY_ANSWER_QUALITY": "LLM-judge block gate; enable behind a measured false-positive pass",
+    "MAGI_VERIFY_CLAIM_CITATION": "LLM-judge block gate; enable behind a measured false-positive pass",
+    "MAGI_VERIFY_COMPLETION_EVIDENCE": "LLM-judge block gate; enable behind a measured false-positive pass",
+    "MAGI_VERIFY_OUTPUT_PURITY": "LLM-judge block gate; enable behind a measured false-positive pass",
+    "MAGI_VERIFY_PARALLEL_RESEARCH": "LLM-judge block gate; enable behind a measured false-positive pass",
+    "MAGI_VERIFY_PRE_REFUSAL": "LLM-judge block gate; enable behind a measured false-positive pass",
+    "MAGI_VERIFY_RESOURCE_CLAIM": "LLM-judge block gate; enable behind a measured false-positive pass",
+    "MAGI_VERIFY_RESPONSE_LANGUAGE": "block gate; needs a configured language policy first",
+    "MAGI_VERIFY_TASKBOARD_COMPLETION": "block gate; enable behind a measured false-positive pass",
+    "MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED": "block gate; measure FP first (see VERIFY family)",
+    "MAGI_KERNEL_RECIPE_PACKS_ENABLED": "needs ON-path re-verify (the #641 default-ON flip broke ~10 policy tests)",
+    "MAGI_KERNEL_ROLE_PROVIDES_ENABLED": "needs ON-path re-verify (the #641 default-ON flip broke ~10 policy tests)",
+    "MAGI_SHACL_VERIFIER_ENABLED": "pre-final block gate; inert without compiler + authored SHACL rules",
+    "MAGI_SHACL_COMPILER_ENABLED": "NL->SHACL endpoint only; no runtime effect without authored rules",
+    "MAGI_CUSTOMIZE_SEAM_SPEC_ENABLED": "NL-spec endpoints only; no runtime effect",
+    "MAGI_GROUNDED_ANSWER_GUARD_ENABLED": "GAIA-harness metadata only",
+    "MAGI_KERNEL_RECIPE_ENTRY_POINTS_ENABLED": "imports external publisher modules (self-host trust); hosted floor must never",
+    "MAGI_KERNEL_VERIFIER_ENTRY_POINTS_ENABLED": "imports external publisher modules (self-host trust); hosted floor must never",
+    "MAGI_SERVE_EVIDENCE_ENABLED": "hosted gate5b serve path; needs obs-home PVC write + soak",
+    "MAGI_SERVE_TOKEN_ESTIMATE_REAL": "hosted gate5b serve path only",
+    "MAGI_COMPUTER_TOOL_ENABLED": "needs cua-driver + macOS accessibility/screen-recording grants",
+    "MAGI_VIDEO_DOWNLOAD_ENABLED": "needs yt-dlp installed",
+    "MAGI_EGRESS_PROXY_ENABLED": "needs MAGI_EGRESS_PROXY_URL; raises/inert without proxy config",
+    "MAGI_LOCAL_VAULT_ENABLED": "needs local credential vault setup",
+    "MAGI_LOCAL_VAULT_PROXY_ENABLED": "needs local credential vault setup",
+    "MAGI_VAULT_ADMIN_ENABLED": "needs local credential vault setup",
+    "MAGI_HOOK_ALLOW_INTERNAL_URLS": "security loosening; only meaningful with external hooks aimed at internal addrs",
+    "MAGI_EVAL_AUTONOMY_ENABLED": "eval-profile only",
+    "MAGI_EVAL_ZERO_EDIT_GUARD_ENABLED": "eval-profile only",
+    "MAGI_LEDGER_ORCHESTRATOR_ENABLED": "GAIA benchmark code",
+    "MAGI_OC_CRON_ACTIVE": "operator signal flag, not a capability",
+    "MAGI_PACK_SIGNING_REQUIRED": "would BLOCK unsigned packs; reduces convenience",
+    "MAGI_PLAN_MODE_TOOLS_ENABLED": "restricts the toolset to read-only; reduces capability",
+    "MAGI_TUI_LEGACY_RICHLOG": "forces the legacy TUI widget; the new renderer is the capable path",
+    "MAGI_CHILD_RUNNER_EMPTY_DEBUG": "diagnostic-only debug flag",
+    "MAGI_SCHEDULER_KILL_SWITCH_ENABLED": "kill switch; ON disables the scheduler",
+}
+
+
+def _is_default_off_bool(spec) -> bool:
+    """A strict opt-in boolean capability flag (kind='bool') whose default is
+    OFF. profile_bool flags (default None) are auto-ON under the full profile, so
+    they are not part of this completeness gate."""
+    if spec.kind != "bool":
+        return False
+    d = spec.default
+    if isinstance(d, bool):
+        return d is False
+    if isinstance(d, str):
+        return d.strip().lower() in ("", "0", "off", "false", "advisory", "disabled", "none")
+    return d is None
+
+
+def test_full_profile_covers_every_public_capability_flag(
+    profile: dict[str, str],
+) -> None:
+    """Every public default-OFF boolean capability flag must be a deliberate
+    decision: either set by the profile or recorded in
+    _INTENTIONALLY_NOT_IN_FULL_PROFILE. A new flag that is neither fails here."""
+    from magi_agent.config.flags import FLAGS
+
+    uncovered = []
+    for spec in FLAGS:
+        if getattr(spec, "scope", "") == "hosted":
+            continue  # hosted infra seams are governed by their own gates
+        if not _is_default_off_bool(spec):
+            continue
+        if spec.name in profile:
+            continue
+        if spec.name in _INTENTIONALLY_NOT_IN_FULL_PROFILE:
+            continue
+        uncovered.append(spec.name)
+
+    assert not uncovered, (
+        "These public default-OFF capability flags are neither set by "
+        "scripts/dogfood-full-on.env nor recorded in "
+        "_INTENTIONALLY_NOT_IN_FULL_PROFILE. Turn each ON in the profile, or "
+        "add it to the exclusion map with a reason:\n  " + "\n  ".join(sorted(uncovered))
+    )
+
+
+def test_full_profile_exclusion_map_has_no_stale_entries() -> None:
+    """Keep the exclusion map honest: every name in it must be a real registry
+    flag that is still default-OFF and NOT also set by the profile (otherwise the
+    entry is contradictory or stale)."""
+    from magi_agent.config.flags import FLAGS_BY_NAME
+
+    profile = _load_profile()
+    for name in _INTENTIONALLY_NOT_IN_FULL_PROFILE:
+        spec = FLAGS_BY_NAME.get(name)
+        assert spec is not None, f"{name} is not a registered flag (stale exclusion)"
+        assert name not in profile, (
+            f"{name} is both in the profile and the exclusion map — pick one"
+        )
