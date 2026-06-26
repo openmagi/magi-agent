@@ -19,13 +19,23 @@ The gateway poll loop calls the bridge's ``on_inbound`` from a worker thread
 callable that drives the async turn to completion with ``asyncio.run`` (the
 worker thread has no running event loop).
 """
+
 from __future__ import annotations
 
+import os
 import uuid
 from collections.abc import AsyncGenerator, Callable
 
 from magi_agent.channels.turn_bridge import ChannelInbound, RunTurn
 from magi_agent.runtime.child_governed_collector import collect_governed_child_turn
+
+# PR-H: main-turn finalize-path TRACE stamp (gated on the existing
+# MAGI_CHILD_RUNNER_EMPTY_DEBUG env). Logs once after the channel turn's
+# stream consumption loop finishes so the operator can confirm the loop
+# actually reached a terminal vs ended silently with no result text.
+from magi_agent.runtime.child_runner_live import (
+    _maybe_log_trace_turn_engine_stream_consumed,
+)
 from magi_agent.runtime.governed_turn import run_governed_turn
 from magi_agent.runtime.turn_context import TurnContext
 
@@ -48,9 +58,29 @@ async def run_channel_turn_async(
         turn_id=turn_id,
         memory_mode=memory_mode,
     )
-    summary, _evidence_refs, _status = await collect_governed_child_turn(
-        stream_factory(ctx)
-    )
+    # PR-H: stamp the end of the channel turn's stream-consumption loop.
+    # ``items`` here is a length proxy (summary chars) -- the consumer
+    # collapses RuntimeEvent text deltas into ``summary`` before returning,
+    # so we cannot report event count without re-instrumenting the
+    # collector. Status doubles as ``terminal_kind`` (``completed`` /
+    # ``failed`` / raised exception name).
+    terminal_kind: object = None
+    items = 0
+    exception_cls: type | None = None
+    try:
+        summary, _evidence_refs, status = await collect_governed_child_turn(stream_factory(ctx))
+        items = len(summary)
+        terminal_kind = status
+    except Exception as exc:  # noqa: BLE001 - re-raised; captured for trace.
+        exception_cls = exc.__class__
+        raise
+    finally:
+        _maybe_log_trace_turn_engine_stream_consumed(
+            os.environ,
+            turn_id=turn_id,
+            items=items,
+            terminal_kind=(exception_cls.__name__ if exception_cls is not None else terminal_kind),
+        )
     return summary
 
 

@@ -1947,14 +1947,53 @@ class MagiEngineDriver:
             empty_response_recovery=self._empty_response_recovery,
             goal_loop_judge_factory=self._goal_loop_judge_factory,
         )
+        # PR-H: track terminal kind + accumulated text-delta length + exit
+        # cause so the engine.trace run_turn_stream_finalize stamp can tell
+        # the operator WHICH layer finalized the turn. Default-OFF (gated
+        # on existing MAGI_CHILD_RUNNER_EMPTY_DEBUG); zero-cost when unset.
+        _finalize_terminal_cls: object = None
+        _finalize_text_len = 0
+        _finalize_exception_cls: type | None = None
         try:
             async for item in driver_gen:
+                try:
+                    payload = getattr(item, "payload", None)
+                    if isinstance(payload, dict) and payload.get("type") == "text_delta":
+                        delta = payload.get("delta")
+                        if isinstance(delta, str):
+                            _finalize_text_len += len(delta)
+                    if isinstance(item, EngineResult):
+                        _finalize_terminal_cls = item.__class__.__name__
+                except Exception:  # noqa: BLE001 - never let trace bookkeeping break the turn.
+                    pass
                 yield item  # RuntimeEvent OR the terminal EngineResult
+        except BaseException as exc:
+            _finalize_exception_cls = exc.__class__
+            raise
         finally:
             # FIX 3 (global review): release() MUST run even if aclose() raises,
             # else the session's single-flight slot leaks and every future turn
             # for this session is rejected as ``active_session_turn``.
             try:
+                # PR-H: stamp the canonical "did the engine finalize?" line.
+                # Logged INSIDE the finally so it lands on every exit path
+                # (normal completion, mid-stream raise, consumer aclose).
+                try:
+                    import os as _os  # noqa: PLC0415
+
+                    from magi_agent.runtime.child_runner_live import (  # noqa: PLC0415
+                        _maybe_log_trace_engine_run_turn_stream_finalize,
+                    )
+
+                    _maybe_log_trace_engine_run_turn_stream_finalize(
+                        _os.environ,
+                        turn_id=turn_id,
+                        terminal=_finalize_terminal_cls,
+                        text_len=_finalize_text_len,
+                        exception=_finalize_exception_cls,
+                    )
+                except Exception:  # noqa: BLE001 - trace must never break a turn.
+                    pass
                 await driver_gen.aclose()
             finally:
                 registry.release(session_key=session_id, turn_id=turn_id)  # type: ignore[attr-defined]
