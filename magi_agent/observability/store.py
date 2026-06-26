@@ -91,7 +91,11 @@ class ActivityStore:
         *,
         session_id: str | None = None,
         kind: str | None = None,
+        exclude_kind: str | None = None,
+        status: str | None = None,
+        q: str | None = None,
         since_id: int | None = None,
+        before_id: int | None = None,
         limit: int = 200,
     ) -> list[dict]:
         if self._closed:
@@ -102,11 +106,35 @@ class ActivityStore:
             clauses.append("session_id = ?")
             args.append(session_id)
         if kind is not None:
-            clauses.append("kind = ?")
-            args.append(kind)
+            tokens = [t.strip() for t in kind.split(",") if t.strip()]
+            if len(tokens) > 1:
+                placeholders = ",".join("?" * len(tokens))
+                clauses.append(f"kind IN ({placeholders})")
+                args.extend(tokens)
+            else:
+                clauses.append("kind = ?")
+                args.append(tokens[0] if tokens else kind)
+        if exclude_kind is not None:
+            tokens = [t.strip() for t in exclude_kind.split(",") if t.strip()]
+            if tokens:
+                placeholders = ",".join("?" * len(tokens))
+                clauses.append(f"kind NOT IN ({placeholders})")
+                args.extend(tokens)
+        if status is not None:
+            tokens = [t.strip() for t in status.split(",") if t.strip()]
+            if tokens:
+                placeholders = ",".join("?" * len(tokens))
+                clauses.append(f"status IN ({placeholders})")
+                args.extend(tokens)
+        if q is not None:
+            clauses.append("summary LIKE ?")
+            args.append(f"%{q}%")
         if since_id is not None:
             clauses.append("id > ?")
             args.append(since_id)
+        if before_id is not None:
+            clauses.append("id < ?")
+            args.append(before_id)
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         limit = max(1, min(int(limit), 1000))
         sql = f"SELECT * FROM activity_events{where} ORDER BY id ASC LIMIT ?"

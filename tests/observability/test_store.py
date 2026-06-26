@@ -104,3 +104,188 @@ def test_latest_event_with_kind_like(tmp_path):
     assert latest["id"] == store.list_events(kind="task_board", limit=10)[-1]["id"]
     assert store.latest_event_with_kind_like("nope") is None
     store.close()
+
+
+# ---------------------------------------------------------------------------
+# Helper: seed a store with varied rows for filter tests
+# ---------------------------------------------------------------------------
+
+def _seed_store(tmp_path):
+    """Return a seeded ActivityStore with 6 rows of varied kind/status/summary."""
+    store = ActivityStore(tmp_path / "obs_filter.db")
+    store.record_event(ActivityEvent(kind="tool_start", status="ok",    summary="reading file",   session_id="s1"))
+    store.record_event(ActivityEvent(kind="tool_end",   status="ok",    summary="done reading",   session_id="s1"))
+    store.record_event(ActivityEvent(kind="tool_start", status="error", summary="write failed",   session_id="s1"))
+    store.record_event(ActivityEvent(kind="message",    status="ok",    summary="user message",   session_id="s2"))
+    store.record_event(ActivityEvent(kind="task_board", status="pending",summary="board snapshot",session_id="s2"))
+    store.record_event(ActivityEvent(kind="tool_end",   status="error", summary="timed out",      session_id="s2"))
+    return store
+
+
+# ---------------------------------------------------------------------------
+# Back-compat: no-new-arg call returns the same rows as before
+# ---------------------------------------------------------------------------
+
+def test_back_compat_no_new_args(tmp_path):
+    store = _seed_store(tmp_path)
+    rows = store.list_events()
+    assert len(rows) == 6
+    assert [r["kind"] for r in rows] == [
+        "tool_start", "tool_end", "tool_start", "message", "task_board", "tool_end"
+    ]
+    store.close()
+
+
+# ---------------------------------------------------------------------------
+# kind: single value still produces same single-clause behavior
+# ---------------------------------------------------------------------------
+
+def test_kind_single_unchanged(tmp_path):
+    store = _seed_store(tmp_path)
+    rows = store.list_events(kind="tool_start")
+    assert len(rows) == 2
+    assert all(r["kind"] == "tool_start" for r in rows)
+    store.close()
+
+
+# ---------------------------------------------------------------------------
+# kind: comma-separated string -> IN list
+# ---------------------------------------------------------------------------
+
+def test_kind_multi_in(tmp_path):
+    store = _seed_store(tmp_path)
+    rows = store.list_events(kind="tool_start,tool_end")
+    assert len(rows) == 4
+    assert all(r["kind"] in {"tool_start", "tool_end"} for r in rows)
+    store.close()
+
+
+def test_kind_multi_in_with_spaces_stripped(tmp_path):
+    """Tokens in comma list must be stripped of surrounding whitespace."""
+    store = _seed_store(tmp_path)
+    rows = store.list_events(kind=" tool_start , tool_end ")
+    assert len(rows) == 4
+    store.close()
+
+
+# ---------------------------------------------------------------------------
+# exclude_kind: comma string -> kind NOT IN
+# ---------------------------------------------------------------------------
+
+def test_exclude_kind_single(tmp_path):
+    store = _seed_store(tmp_path)
+    rows = store.list_events(exclude_kind="message")
+    assert len(rows) == 5
+    assert all(r["kind"] != "message" for r in rows)
+    store.close()
+
+
+def test_exclude_kind_multi(tmp_path):
+    store = _seed_store(tmp_path)
+    rows = store.list_events(exclude_kind="message,task_board")
+    assert len(rows) == 4
+    assert all(r["kind"] not in {"message", "task_board"} for r in rows)
+    store.close()
+
+
+def test_kind_and_exclude_kind_combine_with_and(tmp_path):
+    """kind=tool_start,tool_end AND exclude_kind=tool_end -> only tool_start rows."""
+    store = _seed_store(tmp_path)
+    rows = store.list_events(kind="tool_start,tool_end", exclude_kind="tool_end")
+    assert len(rows) == 2
+    assert all(r["kind"] == "tool_start" for r in rows)
+    store.close()
+
+
+# ---------------------------------------------------------------------------
+# status: comma string -> status IN
+# ---------------------------------------------------------------------------
+
+def test_status_filter_single(tmp_path):
+    store = _seed_store(tmp_path)
+    rows = store.list_events(status="ok")
+    assert len(rows) == 3
+    assert all(r["status"] == "ok" for r in rows)
+    store.close()
+
+
+def test_status_filter_multi(tmp_path):
+    store = _seed_store(tmp_path)
+    rows = store.list_events(status="ok,error")
+    assert len(rows) == 5
+    assert all(r["status"] in {"ok", "error"} for r in rows)
+    store.close()
+
+
+# ---------------------------------------------------------------------------
+# q: substring match on summary
+# ---------------------------------------------------------------------------
+
+def test_q_substring_match(tmp_path):
+    store = _seed_store(tmp_path)
+    rows = store.list_events(q="reading")
+    assert len(rows) == 2
+    assert all("reading" in r["summary"] for r in rows)
+    store.close()
+
+
+def test_q_no_match(tmp_path):
+    store = _seed_store(tmp_path)
+    rows = store.list_events(q="xyzzy")
+    assert rows == []
+    store.close()
+
+
+# ---------------------------------------------------------------------------
+# before_id: backward pagination (id < ?)
+# ---------------------------------------------------------------------------
+
+def test_before_id_paging(tmp_path):
+    store = _seed_store(tmp_path)
+    all_rows = store.list_events()
+    pivot = all_rows[3]["id"]  # id of 4th row (0-indexed)
+    rows = store.list_events(before_id=pivot)
+    assert len(rows) == 3
+    assert all(r["id"] < pivot for r in rows)
+    store.close()
+
+
+def test_before_id_ordering_asc(tmp_path):
+    """Rows returned by before_id are still ordered ASC by id."""
+    store = _seed_store(tmp_path)
+    all_rows = store.list_events()
+    pivot = all_rows[4]["id"]
+    rows = store.list_events(before_id=pivot)
+    assert rows == sorted(rows, key=lambda r: r["id"])
+    store.close()
+
+
+# ---------------------------------------------------------------------------
+# Combined filters
+# ---------------------------------------------------------------------------
+
+def test_combined_kind_status(tmp_path):
+    store = _seed_store(tmp_path)
+    rows = store.list_events(kind="tool_start,tool_end", status="error")
+    assert len(rows) == 2
+    assert all(r["kind"] in {"tool_start", "tool_end"} and r["status"] == "error" for r in rows)
+    store.close()
+
+
+def test_combined_session_q(tmp_path):
+    store = _seed_store(tmp_path)
+    rows = store.list_events(session_id="s1", q="reading")
+    assert len(rows) == 2
+    assert all(r["session_id"] == "s1" and "reading" in r["summary"] for r in rows)
+    store.close()
+
+
+def test_combined_exclude_kind_and_before_id(tmp_path):
+    store = _seed_store(tmp_path)
+    all_rows = store.list_events()
+    pivot = all_rows[4]["id"]
+    rows = store.list_events(exclude_kind="message", before_id=pivot)
+    # rows before pivot, excluding message kind
+    expected = [r for r in all_rows if r["id"] < pivot and r["kind"] != "message"]
+    assert [r["id"] for r in rows] == [r["id"] for r in expected]
+    store.close()
