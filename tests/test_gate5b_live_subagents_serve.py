@@ -205,11 +205,18 @@ async def test_serve_turn_spawn_agent_executes_live_child(
     event_types = [event["type"] for event in public_events]
     assert "child_started" in event_types
     assert "child_completed" in event_types
-    # Prompt + child summary never leak into the sanitized public events.
+    # Privacy contract: the PROMPT body never leaks into the public events.
+    # The CHILD SUMMARY (the redacted preview of the child's answer) is
+    # surfaced on ``child_completed`` so the dashboard chip can show what
+    # the agent came back with — this is the same string the parent LLM
+    # already consumes via the tool result, so exposing a preview to the
+    # same user via the UI does not leak any new information.
     import json
 
-    assert "assign a helper" not in json.dumps(public_events, sort_keys=True)
-    assert "Delegated child completed" not in json.dumps(public_events, sort_keys=True)
+    serialized = json.dumps(public_events, sort_keys=True)
+    assert "assign a helper" not in serialized
+    completed = next(e for e in public_events if e.get("type") == "child_completed")
+    assert completed.get("summary") == "Delegated child completed."
     bundle.host.shutdown()
 
 
