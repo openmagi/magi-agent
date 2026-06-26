@@ -89,7 +89,7 @@ openmagi	magi_agent/cli/tests/test_source_ledger_gate_wiring.py	5
 openmagi	magi_agent/cli/tests/test_tool_runtime.py	2
 openmagi	magi_agent/cli/tool_runtime.py	1
 openmagi	magi_agent/cli/wiring.py	2
-openmagi	magi_agent/composio/config.py	1
+openmagi	magi_agent/composio/config.py	2
 openmagi	magi_agent/config/env.py	3
 openmagi	magi_agent/config/flags.py	3
 openmagi	magi_agent/config/models.py	1

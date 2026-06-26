@@ -93,6 +93,35 @@ they are sent once and never returned over HTTP. The HTTP surface is
 > Composio MCP path under `magi_agent/composio/` (see the on-hold note above) —
 > the dashboard manages connections, not the runtime attachment policy.
 
+### Composio apps (platform broker — no Composio key)
+
+Self-hosters who don't want to issue a Composio key can let the openmagi
+control-plane broker Composio for them. Set a free openmagi platform token and
+the runtime auto-selects the `platform` credential source:
+
+```sh
+export MAGI_PLATFORM_API_KEY=<your free openmagi token>
+# optional; defaults to https://api.openmagi.ai
+export MAGI_PLATFORM_BASE_URL=https://api.openmagi.ai
+```
+
+In this mode the runtime holds **no** Composio key. Catalog, connect, status,
+list, and disconnect all proxy through the broker (`/v1/integrations/composio/*`,
+Bearer = your platform token), which holds the master Composio key server-side
+and scopes connected accounts to your tenant + bot entity
+(`openmagi:user:<USER_ID>:bot:<BOT_ID>`). The `composio` Python package is **not**
+required (the toolset is an MCP client pointed at the broker). Connecting an app
+opens the same OAuth flow; the broker enforces per-bot usage caps.
+
+Selection precedence (`MAGI_COMPOSIO_CREDENTIAL_SOURCE` auto):
+
+1. A local `COMPOSIO_API_KEY` → `env` (BYO; talks to Composio directly).
+2. Else a platform token → `platform` (brokered, zero Composio key).
+3. Else Composio is off.
+
+Set `MAGI_COMPOSIO_CREDENTIAL_SOURCE=platform` to force broker mode, or `env`
+to force BYO even when a platform token is present.
+
 ### Telegram bot
 
 Two ways to connect, both converging on the same validate (`getMe`) + vault store
