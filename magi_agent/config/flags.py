@@ -180,6 +180,14 @@ FLAGS: tuple[FlagSpec, ...] = (
         summary="Allow the memory subsystem to persist writes (vs read-only recall).",
     ),
     _b(
+        "MAGI_MEMORY_LOCAL_DEV",
+        summary=(
+            "Local single-user dev short-circuit for the memory-write readiness "
+            "gate. Default-OFF; opt-in only with the readiness + write env "
+            "gates ON and the kill-switch INACTIVE."
+        ),
+    ),
+    _b(
         "MAGI_MEMORY_RECALL_ENABLED",
         summary="Enable memory recall/injection into the working context.",
     ),

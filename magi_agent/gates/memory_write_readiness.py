@@ -55,7 +55,6 @@ MemoryWriteExecutionMode = Literal["disabled", "shadow", "live"]
 
 _DIGEST_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
 _SAFE_ENVIRONMENTS = frozenset({"local", "development", "staging", "production"})
-_TRUE_STRINGS = frozenset({"1", "true", "yes", "on"})
 
 #: Master readiness env gate (default OFF).  Resolved via
 #: ``magi_agent.memory.config.resolve_memory_config`` (see ``_readiness_env_enabled``).
@@ -110,7 +109,15 @@ def _kill_switch_env_active() -> bool:
 
 def _write_enabled_env_active() -> bool:
     """Return True when ``MAGI_MEMORY_WRITE_ENABLED`` is explicitly truthy."""
-    return os.environ.get(MAGI_MEMORY_WRITE_ENABLED_ENV, "").lower() in _TRUE_STRINGS
+    # I-1: route through the typed flag registry. ``flag_bool`` returns
+    # the registered default (``False``) for unset and delegates every
+    # set value to ``is_true`` (canonical ``TRUE_VALUES`` =
+    # ``{"1", "true", "yes", "on"}``, identical to the local
+    # ``_TRUE_STRINGS`` here). Byte-identical for the unset / empty /
+    # truthy / falsy paths.
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool(MAGI_MEMORY_WRITE_ENABLED_ENV)
 
 
 def _local_dev_env_active() -> bool:
@@ -130,8 +137,13 @@ def _local_dev_env_active() -> bool:
     MAGI_MEMORY_LOCAL_DEV, so they cannot reach "live" through this path — only
     through canary promotion.
     """
+    # I-1: route the local-dev short-circuit through the typed flag
+    # registry. ``flag_bool`` is byte-identical to the prior
+    # ``in _TRUE_STRINGS`` check for the unset / truthy / falsy paths.
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
     return (
-        os.environ.get(MAGI_MEMORY_LOCAL_DEV_ENV, "").lower() in _TRUE_STRINGS
+        flag_bool(MAGI_MEMORY_LOCAL_DEV_ENV)
         and _readiness_env_enabled()
         and _write_enabled_env_active()
         and not _kill_switch_env_active()
