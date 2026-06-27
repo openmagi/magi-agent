@@ -1,5 +1,6 @@
-// Open Magi desktop shell. Launches a local `magi serve` and loads its
-// dashboard in a hardened Tauri v2 webview.
+// Open Magi desktop shell. Launches the local serve runtime (`magi-agent`,
+// i.e. `magi_agent.main:main`) and loads its dashboard in a hardened Tauri v2
+// webview.
 //
 // Do not pop a console window on Windows for the release build.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -20,12 +21,17 @@ use tauri::webview::NewWindowResponse;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 /// Total time we wait for the runtime to report ready before failing.
-const READY_DEADLINE: Duration = Duration::from_secs(30);
+///
+/// The bundled PyInstaller onedir sidecar (~370 MB: litellm, google-genai,
+/// rdflib, pyshacl) can take well over 30s to import and boot on first launch,
+/// so a short deadline would wrongly fail a healthy-but-slow cold start. Be
+/// generous: a couple of minutes covers the worst first-run import.
+const READY_DEADLINE: Duration = Duration::from_secs(120);
 /// Delay between bootstrap polls.
 const POLL_INTERVAL: Duration = Duration::from_millis(400);
 
-/// Owns the spawned `magi serve` child so we can kill it on exit. Stored in
-/// Tauri managed state behind a mutex.
+/// Owns the spawned serve child so we can kill it on exit. Stored in Tauri
+/// managed state behind a mutex.
 struct ServeProcess(Mutex<Option<Child>>);
 
 impl ServeProcess {
@@ -36,7 +42,8 @@ impl ServeProcess {
         let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(mut child) = guard.take() {
             // Ask politely, then ensure it is gone. `kill` on a process
-            // that already exited returns an error we can ignore.
+            // that already exited returns an error we can ignore. A poisoned
+            // mutex must NOT leave the serve child orphaned.
             let _ = child.kill();
             let _ = child.wait();
         }
@@ -99,7 +106,7 @@ fn restrict_file_to_owner(path: &Path) {
 #[cfg(not(unix))]
 fn restrict_file_to_owner(_path: &Path) {}
 
-/// Find the `magi` binary using the pure resolution order. The bundled runtime
+/// Find the serve binary using the pure resolution order. The bundled runtime
 /// is the PyInstaller `--onedir` tree shipped as a Tauri resource, so the
 /// executable lives at `<resource_dir>/magi/magi` (see
 /// `server::bundled_resource_binary`). `resource_dir` is the app's resolved
@@ -123,17 +130,22 @@ fn which_on_path(name: &str) -> Option<PathBuf> {
     None
 }
 
-/// Spawn `magi serve --host 127.0.0.1 --port <port>` with stdout/stderr teed
-/// to the log file.
+/// Spawn `<bin> --host 127.0.0.1 --port <port>` with stdout/stderr teed to the
+/// log file.
 ///
-/// The desktop app MUST bind loopback only: `magi serve` otherwise binds
+/// The serve entrypoint is the `magi-agent` console script
+/// (`magi_agent.main:main`), a plain argparse that takes `--host`/`--port`
+/// directly: there is NO `serve` subcommand. The bundled PyInstaller binary is
+/// named `magi` but is the same `main:main` entry, so it accepts these flags
+/// too.
+///
+/// The desktop app MUST bind loopback only: the runtime otherwise binds
 /// `0.0.0.0` with a well-known dev token, which would expose the agent to
 /// anyone on the same LAN (remote takeover on shared wifi). We pin `--host
 /// 127.0.0.1` so the runtime is reachable only from this machine.
 fn spawn_serve(bin: &Path, port: u16, log: File) -> std::io::Result<Child> {
     let err_log = log.try_clone()?;
     Command::new(bin)
-        .arg("serve")
         .arg("--host")
         .arg("127.0.0.1")
         .arg("--port")
@@ -234,6 +246,9 @@ margin:0 .15rem;border-radius:50%;background:#22c55e;animation:b 1s infinite}\
 .dot:nth-child(2){animation-delay:.15s}.dot:nth-child(3){animation-delay:.3s}\
 @keyframes b{0%,100%{opacity:.3}50%{opacity:1}}</style></head><body><main>\
 <h1>Starting Open Magi</h1><p>Launching the local agent runtime.</p>\
+<p style=\"opacity:.7;font-size:.9rem;max-width:30rem\">First launch can take \
+up to a couple of minutes while the local model runtime starts. Later launches \
+are much faster.</p>\
 <div><span class=\"dot\"></span><span class=\"dot\"></span>\
 <span class=\"dot\"></span></div></main></body></html>"
 }
@@ -269,8 +284,8 @@ fn main() {
                 None => {
                     show_error(
                         &handle,
-                        "could not find the `magi` binary. Install Open Magi (brew install \
-                         openmagi/tap/magi-agent) or set MAGI_BIN.",
+                        "could not find the serve binary (`magi-agent`). Install Open Magi \
+                         (brew install openmagi/tap/magi-agent) or set MAGI_BIN.",
                     );
                     return Ok(());
                 }
@@ -288,7 +303,7 @@ fn main() {
             let child = match spawn_serve(&bin, port, log) {
                 Ok(c) => c,
                 Err(e) => {
-                    show_error(&handle, &format!("could not start `magi serve`: {e}"));
+                    show_error(&handle, &format!("could not start the serve runtime: {e}"));
                     return Ok(());
                 }
             };

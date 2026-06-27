@@ -226,6 +226,21 @@ def test_main_serve_help_does_not_require_runtime_environment(
     assert "usage: magi-agent" in capsys.readouterr().out
 
 
+def test_main_help_lists_host_flag(capsys: pytest.CaptureFixture[str]) -> None:
+    # ``--host`` must be discoverable in ``magi-agent --help`` (it was only
+    # parsed by a separate resolver before, so it never appeared in help).
+    with pytest.raises(SystemExit) as exc_info:
+        main_module.main(["--help"])
+
+    assert exc_info.value.code == 0
+    assert "--host" in capsys.readouterr().out
+
+
+def test_resolve_server_port_default_host_does_not_change_port() -> None:
+    # Declaring ``--host`` on the port parser must not alter port resolution.
+    assert resolve_server_port(["--host", "127.0.0.1", "--port", "9098"], environ={}) == 9098
+
+
 def test_main_uses_local_full_runtime_defaults_when_env_is_absent(
     monkeypatch,
     tmp_path: Path,

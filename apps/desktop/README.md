@@ -1,11 +1,18 @@
 # Open Magi desktop shell
 
 A thin Tauri v2 desktop wrapper for self-hosting Open Magi. On launch it starts
-a local `magi serve` process, waits for it to report ready, then loads the live
+the local serve runtime, waits for it to report ready, then loads the live
 dashboard at `http://127.0.0.1:<port>/dashboard` in a hardened webview. A
-self-host user double-clicks an app instead of running `magi serve` in a
+self-host user double-clicks an app instead of running the serve command in a
 terminal. First-run setup happens in-app because the committed dashboard already
 serves the onboarding wizard.
+
+The serve entrypoint is the SERVE console script `magi-agent`
+(`magi_agent.main:main`), a plain argparse invoked as
+`<bin> --host 127.0.0.1 --port <port>`. There is NO `serve` subcommand. (The
+brew-installed `magi` command is the Typer CLI, `magi_agent.cli.__main__`, which
+has no serve command; the bundled PyInstaller binary is named `magi` but is the
+same `main:main` serve entry, so it accepts these flags too.)
 
 ## Crate layout
 
@@ -75,8 +82,9 @@ The icons are build artifacts and are not committed (see `.gitignore`).
 
 ### Python runtime (`magi` onedir)
 
-The shell runs the Python `magi serve` runtime. For a self-contained app we
-bundle a standalone `magi` built with PyInstaller **`--onedir`**. Onedir
+The shell runs the Python serve runtime (`magi_agent.main:main`). For a
+self-contained app we bundle a standalone `magi` built with PyInstaller
+**`--onedir`**. Onedir
 produces a DIRECTORY (`magi/` plus `_internal/`), so it ships as a Tauri
 **`bundle.resources`** entry, NOT `externalBin` (externalBin is single-file per
 target triple and cannot carry a dependency tree).
@@ -108,10 +116,16 @@ At runtime the shell resolves the binary in this order (see
 
 1. the bundled onedir executable, `<resource_dir>/magi/magi`,
 2. the `MAGI_BIN` environment override,
-3. `~/.magi/bin/magi`,
-4. `magi` on `PATH`.
+3. `~/.magi/bin/magi-agent` (the serve console script),
+4. `~/.magi/bin/magi` (secondary),
+5. `magi-agent` on `PATH` (brew's serve console script),
+6. `magi` on `PATH` (secondary; the Typer CLI).
 
-So the bundled tree is optional for Homebrew users: if a `magi` is already on
+The system fallback prefers `magi-agent` because that is the SERVE console
+script. The brew `magi` command is the Typer CLI and has no serve command, so it
+is only a secondary candidate.
+
+So the bundled tree is optional for Homebrew users: if `magi-agent` is already on
 `PATH` (from `brew install openmagi/tap/magi-agent`), the shell uses it and no
 resource tree needs to ship. The bundled tree exists for users who want a single
 double-clickable app with no separate install.
@@ -125,9 +139,9 @@ embeds any signing secret.
 
 ## Security posture
 
-- The runtime binds loopback only. The shell launches `magi serve --host
-  127.0.0.1`, so the agent (which uses a well-known local dev token) is NOT
-  reachable from the LAN.
+- The runtime binds loopback only. The shell launches the serve runtime as
+  `<bin> --host 127.0.0.1 --port <port>`, so the agent (which uses a well-known
+  local dev token) is NOT reachable from the LAN.
 - Only the exact loopback origin we launched (`http://127.0.0.1:<port>`) loads
   in-window. `localhost` is treated as External: we bind and launch at
   `127.0.0.1`, and `localhost` can resolve elsewhere (IPv6, hosts overrides).

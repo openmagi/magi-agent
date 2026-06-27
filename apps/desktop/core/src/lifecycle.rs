@@ -135,6 +135,37 @@ mod tests {
         assert_eq!(got, Phase::Failed("boom".to_string()));
     }
 
+    // The desktop shell uses a generous 120s readiness deadline so the bundled
+    // PyInstaller sidecar's slow first-launch cold start is not wrongly failed.
+    const DEADLINE_120: Duration = Duration::from_secs(120);
+
+    #[test]
+    fn under_120s_deadline_failing_polls_keep_waiting() {
+        // Well past the old 30s cutoff but under the new 120s deadline: a
+        // healthy-but-slow sidecar must stay in WaitingForHealth, not Failed.
+        let got = next(
+            &Phase::WaitingForHealth { attempts: 100 },
+            false,
+            Duration::from_secs(90),
+            DEADLINE_120,
+        );
+        assert_eq!(got, Phase::WaitingForHealth { attempts: 101 });
+    }
+
+    #[test]
+    fn at_120s_deadline_without_health_fails() {
+        let got = next(
+            &Phase::WaitingForHealth { attempts: 200 },
+            false,
+            Duration::from_secs(121),
+            DEADLINE_120,
+        );
+        match got {
+            Phase::Failed(reason) => assert!(reason.contains("120 seconds")),
+            other => panic!("expected Failed, got {other:?}"),
+        }
+    }
+
     #[test]
     fn deadline_takes_precedence_only_when_health_false() {
         // Even past the deadline, a successful health check still wins.
