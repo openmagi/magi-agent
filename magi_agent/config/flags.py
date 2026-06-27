@@ -404,6 +404,22 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_DURABLE_FOREGROUND_CONTINUATION_ENABLED",
+        summary=(
+            "Within the WS1 StartupRecoverySweep, additionally perform a "
+            "context-only foreground continuation of resumable turn checkpoints "
+            "after the background reclaim. For each admissible checkpoint "
+            "(non-superseded, resumable, under the resume-attempt bound, with a "
+            "present Envelope transcript) the sweep evaluates admissibility and, "
+            "ONLY when a live re-drive consumer is wired, re-enters the drive with "
+            "the replayed TEXT fold; without a consumer the continuation is inert "
+            "(no attempt-counter burn). It does NOT call verify_resume_request "
+            "(Correction F). Requires MAGI_DURABLE_STARTUP_RECOVERY_ENABLED and is "
+            "excluded from the v1 profile. OFF is byte-identical (no checkpoint is "
+            "listed or resumed)."
+        ),
+    ),
+    _b(
         "MAGI_WORK_QUEUE_BOARD_API_ENABLED",
         summary="Mount the read-only work-queue board HTTP API.",
     ),
