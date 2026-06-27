@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from magi_agent.observability.bus import ActivityBus
 from magi_agent.observability.store import ActivityStore
@@ -125,6 +125,39 @@ def build_api_router(store: ActivityStore, bus: ActivityBus, runtime: Any) -> AP
             "session_id": session_id,
             "events": store.list_events(session_id=session_id, since_id=since_id, limit=limit),
         }
+
+    @router.get("/sessions/{session_id}/audit")
+    async def session_audit(
+        session_id: str,
+        _: str = Depends(auth),
+        limit: int = Query(default=200, ge=1, le=1000),
+    ) -> JSONResponse:
+        # Default-OFF feature gate: when the Audit panel flag is unset, this read
+        # surface does not exist (404). Byte-identical behavior to before the
+        # flag was added for every existing client.
+        #
+        # AUTHZ CAVEAT: this endpoint performs no per-session ownership check
+        # beyond the shared gateway token (single-tenant OSS local-serve). It
+        # MUST NOT be copied into a multi-tenant / hosted context without first
+        # adding a session->owner authorization check.
+        from magi_agent.config.flags import flag_bool
+
+        if not flag_bool("MAGI_CHAT_AUDIT_PANEL_ENABLED"):
+            return JSONResponse({"error": "feature_disabled"}, status_code=404)
+
+        from magi_agent.observability.audit_view import build_session_audit
+
+        # source_records=[] => the Sources box (Box B) is always empty here. This
+        # is NOT merely "no reader exposed on this router": the per-source detail
+        # (uri/title/trust_tier) is a NESTED mapping on `source_inspected` public
+        # events, and project_public_event() DROPS nested dict values at
+        # projection time (observability/projector.py ~L82-90), so durable
+        # per-session sources do not exist in the store at all. The real records
+        # live only in an in-memory per-turn LocalResearchSourceLedger
+        # (evidence/source_ledger.py). Populating Box B is therefore a Phase-2
+        # durable-source-projection dependency, not a quick wiring change.
+        payload = build_session_audit(session_id, store=store, source_records=[], limit=limit)
+        return JSONResponse(payload)
 
     @router.get("/health/live")
     async def health_live(_: str = Depends(auth)) -> dict:

@@ -331,6 +331,14 @@ FLAGS: tuple[FlagSpec, ...] = (
         summary="Enable the hook-tap observability module (bot-activity visibility).",
     ),
     _b(
+        "MAGI_CHAT_AUDIT_PANEL_ENABLED",
+        summary=(
+            "Enable the chat Audit panel: per-session policy-enforcement verdict "
+            "read endpoint and UI tab (default-OFF). Read/observability surface "
+            "over existing data; produces no new verdicts."
+        ),
+    ),
+    _b(
         "MAGI_SESSION_TRANSCRIPT_ENABLED",
         summary=(
             "Write per-session JSONL debug transcripts (turn stages, tool "
