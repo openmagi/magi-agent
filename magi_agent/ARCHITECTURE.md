@@ -1197,6 +1197,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | provider_boundary | — |
+| local_index.py | Read-only scan + keyword search over the workspace knowledge directory. | — | plugins/native/knowledge.py |
 | provider_boundary.py | — | — | knowledge/__init__.py, knowledge/source_tools.py, plugins/native/knowledge.py |
 | source_tools.py | — | policy, provider_boundary, result, source_ledger | plugins/native/knowledge.py |
 
@@ -1418,7 +1419,7 @@ graph LR
 | browser.py | — | context, provider_boundary, result, source_tools | — |
 | coding.py | — | _common, context, result | — |
 | documents.py | — | _common, _file_delivery_fakes, context, contract, file_delivery, file_delivery_live, orchestrator, result, spreadsheet_tools | — |
-| knowledge.py | — | _common, _hosted_knowledge, context, policy, provider_boundary, result, source_tools | — |
+| knowledge.py | — | _common, _hosted_knowledge, context, local_index, policy, provider_boundary, result, source_tools | — |
 | missions.py | — | _common, context, env, flags, policy, result | — |
 | okf.py | The redaction-free ``OkfLookup`` native tool (PR2). | _common, bundle_loader, config, context, result | — |
 | scheduled_work.py | — | _common, context, env, models, policy, result, store | — |
