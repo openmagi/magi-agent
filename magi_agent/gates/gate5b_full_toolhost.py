@@ -629,6 +629,29 @@ class Gate5BFullToolReceipt(_Gate5BFullModel):
         return _digest(value)
 
 
+def _test_run_evidence_declarations(
+    tool_name: str, args: Mapping[str, object], output: object
+) -> tuple[dict[str, object], ...]:
+    """Build a typed TestRun evidence declaration from a live TestRun call.
+
+    The coding evidence-gate's TestRun ``EvidenceRequirement`` matches on
+    ``command`` (exists) + ``exitCode == 0``. ``command`` is the input arg
+    (REDACTED — commands can carry secrets), ``exitCode`` comes off the shell
+    result. Returns ``()`` for non-TestRun tools or a malformed result
+    (honest-degrade — never fabricates an exit code).
+    """
+    if tool_name != "TestRun" or not isinstance(output, Mapping):
+        return ()
+    command = _redact(str(args.get("command", "")))
+    return (
+        {
+            "type": "TestRun",
+            "fields": {"command": command, "exitCode": output.get("exitCode")},
+            "source": {"kind": "tool_trace", "toolName": "TestRun"},
+        },
+    )
+
+
 class Gate5BFullToolOutcome(_Gate5BFullModel):
     status: Gate5BFullToolOutcomeStatus
     reason: str
@@ -646,6 +669,14 @@ class Gate5BFullToolOutcome(_Gate5BFullModel):
     edit_match_receipt: EditMatchReceiptRecord | None = Field(
         default=None,
         alias="editMatchReceipt",
+    )
+    # Pre-built typed evidence declarations the dispatch site supplies when the
+    # producing data is only available at dispatch (not in output_preview) — e.g.
+    # the TestRun `command` lives in `args`. Lifted by core_toolhost into
+    # metadata["evidence"]. Empty by default = byte-identical for all other tools.
+    extra_evidence_declarations: tuple[dict[str, object], ...] = Field(
+        default=(),
+        alias="extraEvidenceDeclarations",
     )
 
 
@@ -723,6 +754,7 @@ class Gate5BFullToolCounter:
         coding_mutation_receipt: CodingToolReceiptRecord | None = None,
         code_diagnostics_receipt: CodeDiagnosticsRecord | None = None,
         edit_match_receipt: EditMatchReceiptRecord | None = None,
+        extra_evidence_declarations: tuple[dict[str, object], ...] = (),
     ) -> Gate5BFullToolOutcome:
         receipt = Gate5BFullToolReceipt(
             requestDigest=request_digest,
@@ -744,6 +776,7 @@ class Gate5BFullToolCounter:
             codingMutationReceipt=coding_mutation_receipt,
             codeDiagnosticsReceipt=code_diagnostics_receipt,
             editMatchReceipt=edit_match_receipt,
+            extraEvidenceDeclarations=tuple(extra_evidence_declarations),
         )
 
     def blocked(
@@ -1072,6 +1105,11 @@ class Gate5BFullToolHost:
                     coding_mutation_receipt=coding_receipt,
                     code_diagnostics_receipt=diagnostics_receipt,
                     edit_match_receipt=edit_match_receipt,
+                    # TestRun's `command` lives in `args` (not output_preview), so
+                    # build the typed declaration here where both are in scope.
+                    extra_evidence_declarations=_test_run_evidence_declarations(
+                        tool_name, args, output
+                    ),
                 )
                 return outcome
             except Gate5BFullToolRegistryBlocked as error:
