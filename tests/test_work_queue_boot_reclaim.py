@@ -284,9 +284,13 @@ def test_off_no_reclaim(tmp_path, monkeypatch):
     assert store.get("t").status == "running"  # untouched
 
 
-def test_startup_recovery_flag_registered():
+def test_startup_recovery_flag_registered(monkeypatch):
     """The new flag is registered in the typed flag registry (default-OFF)."""
     from magi_agent.config.flags import flag_bool
 
+    # Env-isolate: the lab/full profile (and a developer shell) set this flag ON
+    # in os.environ, so the registry-default assertion must drop the ambient
+    # override to check the library default rather than the activated value.
+    monkeypatch.delenv("MAGI_DURABLE_STARTUP_RECOVERY_ENABLED", raising=False)
     # Resolves through the registry without raising (registered) and defaults OFF.
     assert flag_bool("MAGI_DURABLE_STARTUP_RECOVERY_ENABLED") is False
