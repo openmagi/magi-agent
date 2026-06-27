@@ -98,14 +98,43 @@ def local_dashboard_bootstrap(runtime: OpenMagiRuntime) -> dict[str, object]:
     ``agentUrl`` is empty so the UI uses same-origin relative requests. The
     gateway token is exposed only for the local-dev default; otherwise the UI
     treats the runtime as token-required and the operator supplies the token.
+
+    The additive ``setup`` block drives the OSS first-run onboarding wizard
+    (default-OFF, ``MAGI_ONBOARDING_WIZARD_ENABLED``). ``hasProvider`` is true
+    when any supported provider already resolves a key (config or env);
+    ``needed`` is true only when the wizard flag is ON and no provider is yet
+    configured. The ``setup`` key is always present (additive), but with a
+    provider already set up, or with the flag OFF, ``setup.needed`` is false so
+    the bootstrap is behaviorally unchanged and existing consumers ignore it.
     """
+    from magi_agent.cli import providers
+    from magi_agent.cli.providers import SUPPORTED_PROVIDERS
+    from magi_agent.config.flags import flag_bool
+
     token = runtime.config.gateway_token
     expose = token == _LOCAL_DEV_TOKEN
+    # Use the SAME canonical resolver the chat path uses so the onboarding
+    # signal matches reality across every key location ([model].api_key,
+    # [providers.*].api_key, env). ``configured_providers()`` reads only the
+    # latter two, which let the wizard re-pop forever after it saves to
+    # [model].api_key via PUT /v1/app/config. Resolution can raise (e.g.
+    # UnknownModelError on catalog drift); treat any failure as "no provider
+    # resolved", mirroring app_api._config_snapshot.
+    try:
+        has_provider = providers.resolve_provider_config() is not None
+    except Exception:  # noqa: BLE001 - bad config must not break the bootstrap
+        has_provider = False
+    wizard_enabled = flag_bool("MAGI_ONBOARDING_WIZARD_ENABLED")
     return {
         "ok": True,
         "agentUrl": "",
         "tokenRequired": bool(token) and not expose,
         "token": token if expose else None,
+        "setup": {
+            "needed": wizard_enabled and not has_provider,
+            "hasProvider": has_provider,
+            "providers": list(SUPPORTED_PROVIDERS),
+        },
     }
 
 

@@ -993,6 +993,27 @@ const zh: LocaleMessages = {
     workAssistantHighlights: "",
     minimaxM2_5: "MiniMax M2.7",
     minimaxM2_5Desc: "MiniMax旗舰模型。托管在美国数据中心(Fireworks AI)。",
+
+    localSetupTitle: "设置你的本地智能体",
+    localSetupSubtitle:
+      "选择模型提供商并粘贴 API 密钥,即可运行 Magi Agent。密钥仅保存在你的本地配置中,绝不会进入浏览器。",
+    localSetupStep: "第 {current} 步,共 {total} 步",
+    localSetupProviderLabel: "提供商",
+    localSetupApiKeyLabel: "API 密钥",
+    localSetupModelLabel: "模型",
+    localSetupCustomModelLabel: "自定义模型 ID",
+    localSetupCustomModelOption: "自定义…(输入模型 ID)",
+    localSetupIntegrationsCopy:
+      "可选:连接工具(Gmail、GitHub、Slack 等),让你的智能体能够操作它们。你随时可以稍后在“集成”页面完成此操作。",
+    localSetupConnectTools: "连接工具",
+    localSetupFinish: "完成",
+    localSetupSaving: "保存中…",
+    localSetupNext: "下一步",
+    localSetupBack: "上一步",
+    localSetupSkip: "跳过。我将通过环境变量进行配置。",
+    localSetupNoProviders:
+      "未报告任何受支持的提供商。请通过环境变量配置提供商,然后重新加载。",
+    localSetupSaveError: "保存配置失败",
   },
 
   // Dashboard

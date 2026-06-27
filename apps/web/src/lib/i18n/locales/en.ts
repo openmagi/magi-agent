@@ -1105,6 +1105,28 @@ const en = {
     workAssistantHighlights: "Email drafts \u00b7 Meeting prep \u00b7 Data entry",
     minimaxM2_5: "MiniMax M2.7",
     minimaxM2_5Desc: "MiniMax's flagship model. Hosted on trusted US data centers via Fireworks AI.",
+
+    // OSS local-runtime setup wizard (self-hosted dashboard first run).
+    localSetupTitle: "Set up your local agent",
+    localSetupSubtitle:
+      "Pick a model provider and paste an API key so Magi Agent can run. Keys stay in your local config and never reach the browser.",
+    localSetupStep: "Step {current} of {total}",
+    localSetupProviderLabel: "Provider",
+    localSetupApiKeyLabel: "API key",
+    localSetupModelLabel: "Model",
+    localSetupCustomModelLabel: "Custom model id",
+    localSetupCustomModelOption: "Custom… (enter model id)",
+    localSetupIntegrationsCopy:
+      "Optional: connect tools (Gmail, GitHub, Slack, and more) so your agent can act on them. You can always do this later from the Integrations page.",
+    localSetupConnectTools: "Connect tools",
+    localSetupFinish: "Finish",
+    localSetupSaving: "Saving…",
+    localSetupNext: "Next",
+    localSetupBack: "Back",
+    localSetupSkip: "Skip. I will configure via env vars.",
+    localSetupNoProviders:
+      "No supported providers were reported. Configure a provider via environment variables, then reload.",
+    localSetupSaveError: "Failed to save configuration",
   },
 
   // Dashboard

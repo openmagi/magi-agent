@@ -352,6 +352,24 @@ def test_dashboard_pack_authoring_helper_default_off_and_strict_truthy() -> None
     )
 
 
+def test_onboarding_wizard_flag_registered_default_off() -> None:
+    # OSS self-host onboarding wizard gate: registered strict default-OFF public
+    # bool flag at stage2 (enabling changes local/single-user behaviour).
+    spec = get_flag("MAGI_ONBOARDING_WIZARD_ENABLED")
+    assert spec.scope == "public"
+    assert spec.kind == "bool"
+    assert spec.stage == "stage2"
+    assert spec.default is False
+    assert flag_bool("MAGI_ONBOARDING_WIZARD_ENABLED", env={}) is False
+    assert (
+        flag_bool(
+            "MAGI_ONBOARDING_WIZARD_ENABLED",
+            env={"MAGI_ONBOARDING_WIZARD_ENABLED": "1"},
+        )
+        is True
+    )
+
+
 def test_flagscope_and_stage_are_string_literal_aliases() -> None:
     # Pure type-alias sanity: importable and usable as annotations.
     assert FlagScope is not None

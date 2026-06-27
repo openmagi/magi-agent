@@ -1099,6 +1099,27 @@ const ko: LocaleMessages = {
     workAssistantHighlights: "\uc774\uba54\uc77c \ucd08\uc548 \u00b7 \ud68c\uc758 \uc900\ube44 \u00b7 \ub370\uc774\ud130 \uc785\ub825",
     minimaxM2_5: "MiniMax M2.7",
     minimaxM2_5Desc: "MiniMax의 플래그십 모델. 미국 데이터센터(Fireworks AI) 호스팅.",
+
+    localSetupTitle: "로컬 에이전트 설정",
+    localSetupSubtitle:
+      "모델 제공자를 고르고 API 키를 붙여넣으면 Magi Agent가 실행됩니다. 키는 로컬 설정에만 저장되며 브라우저로 전송되지 않습니다.",
+    localSetupStep: "{total}단계 중 {current}단계",
+    localSetupProviderLabel: "제공자",
+    localSetupApiKeyLabel: "API 키",
+    localSetupModelLabel: "모델",
+    localSetupCustomModelLabel: "사용자 지정 모델 ID",
+    localSetupCustomModelOption: "사용자 지정… (모델 ID 입력)",
+    localSetupIntegrationsCopy:
+      "선택 사항: 도구(Gmail, GitHub, Slack 등)를 연결하면 에이전트가 해당 도구로 작업할 수 있습니다. 나중에 통합 페이지에서 언제든 설정할 수 있습니다.",
+    localSetupConnectTools: "도구 연결",
+    localSetupFinish: "완료",
+    localSetupSaving: "저장 중…",
+    localSetupNext: "다음",
+    localSetupBack: "뒤로",
+    localSetupSkip: "건너뛰기. 환경 변수로 설정하겠습니다.",
+    localSetupNoProviders:
+      "지원되는 제공자가 보고되지 않았습니다. 환경 변수로 제공자를 설정한 뒤 다시 로드하세요.",
+    localSetupSaveError: "구성을 저장하지 못했습니다",
   },
 
   // Dashboard

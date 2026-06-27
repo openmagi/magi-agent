@@ -3,6 +3,7 @@
 import { Suspense } from "react";
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { MobileSidebar } from "@/components/dashboard/mobile-sidebar";
+import { DashboardSetupGate } from "@/components/onboarding/dashboard-setup-gate";
 
 function LocalRuntimeHeader() {
   return (
@@ -26,6 +27,7 @@ function LocalRuntimeHeader() {
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-[var(--color-surface-base)]">
+      <DashboardSetupGate />
       <MobileSidebar />
       <div className="flex">
         <SidebarNav className="hidden md:flex" />
