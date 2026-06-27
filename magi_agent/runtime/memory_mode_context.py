@@ -21,7 +21,6 @@ from magi_agent.runtime.session_identity import MemoryMode, _memory_mode_from_he
 
 MAGI_MEMORY_MODE_ROUTING_ENABLED_ENV: str = "MAGI_MEMORY_MODE_ROUTING_ENABLED"
 
-_TRUTHY_VALUES = frozenset({"1", "true", "yes", "on"})
 
 _current_memory_mode: ContextVar[MemoryMode] = ContextVar(
     "_current_memory_mode", default=MemoryMode.NORMAL
@@ -30,10 +29,10 @@ _current_memory_mode: ContextVar[MemoryMode] = ContextVar(
 
 def memory_mode_routing_enabled() -> bool:
     """Return True when ``MAGI_MEMORY_MODE_ROUTING_ENABLED`` is truthy (default off)."""
-    return (
-        os.environ.get(MAGI_MEMORY_MODE_ROUTING_ENABLED_ENV, "").strip().lower()
-        in _TRUTHY_VALUES
-    )
+    # I-1: route through the typed flag registry.
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool(MAGI_MEMORY_MODE_ROUTING_ENABLED_ENV)
 
 
 def current_memory_mode() -> MemoryMode:
