@@ -62,7 +62,9 @@ class _CapturingPost:
 # ---------------------------------------------------------------------------
 # (a) gate OFF -> falls through to the existing fake/local boundary path.
 # ---------------------------------------------------------------------------
-def test_gate_off_falls_through_to_local_fake(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gate_off_falls_through_to_local_fake(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
     # No flag set, so even with a token+bot present the gate stays off.
     monkeypatch.setenv("BOT_ID", "bot-test")
     monkeypatch.setenv("GATEWAY_TOKEN", "tok-abc")
@@ -73,16 +75,22 @@ def test_gate_off_falls_through_to_local_fake(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr(_hosted_knowledge, "_http_post", _boom)
 
-    result = _run(knowledge.knowledge_search({"query": "vacation policy"}, _context()))
+    # The local boundary now reads the real on-disk workspace KB instead of a
+    # canned placeholder. Seed a matching document so fall-through returns it.
+    doc = tmp_path / "knowledge" / "hr" / "leave.md"
+    doc.parent.mkdir(parents=True, exist_ok=True)
+    doc.write_text("Vacation policy: 20 days per year.", encoding="utf-8")
+    ctx = ToolContext(botId="bot-test", turnId="turn-1", workspaceRoot=str(tmp_path))
+
+    result = _run(knowledge.knowledge_search({"query": "vacation policy"}, ctx))
 
     assert _hosted_knowledge.hosted_egress() is None
     assert result.status == "ok"
-    # The fake/local boundary preview text must still be present.
+    # The local boundary returns a REAL record from the workspace KB.
     sources = result.output["sources"]  # type: ignore[index]
-    assert sources, "local boundary should still return a fake record"
-    # The fake/local boundary surfaces its identifying text in the title.
-    assert sources[0]["sourceRef"] == "knowledge:local"
-    assert "Local KB result for vacation policy" in sources[0]["title"]
+    assert sources, "local boundary should return the on-disk KB record"
+    assert sources[0]["title"] == "knowledge/hr/leave.md"
+    assert "Vacation" in sources[0]["publicPreview"]
     # And the result came from the boundary handler, not the hosted egress.
     assert result.metadata.get("handler") != "hosted_egress"
 
@@ -177,7 +185,10 @@ def test_gate_on_missing_bot_id_falls_through(monkeypatch: pytest.MonkeyPatch) -
     result = _run(knowledge.knowledge_search({"query": "vacation policy"}, _context()))
     assert result.status == "ok"
     assert result.metadata.get("handler") != "hosted_egress"
-    assert result.output["sources"][0]["sourceRef"] == "knowledge:local"  # type: ignore[index]
+    # _context() has no workspace KB, so the local boundary returns zero records
+    # (it no longer fabricates a placeholder) while still staying off the hosted
+    # path. The key contract here is the fall-through, not the record content.
+    assert result.output["sources"] == ()  # type: ignore[index]
 
 
 def test_gate_on_missing_token_falls_through(monkeypatch: pytest.MonkeyPatch) -> None:

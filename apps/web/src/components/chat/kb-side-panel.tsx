@@ -17,6 +17,7 @@ import type {
   KbDocReference,
   QueuedMessage,
 } from "@/chat-core";
+import { agentFetch } from "@/lib/local-api";
 import type { KbCollectionWithDocs, KbDocEntry } from "@/hooks/use-kb-docs";
 import {
   buildKbPreviewUrl,
@@ -457,7 +458,12 @@ export function KbSidePanel({
     }
     setPreview({ id: doc.id, source: "kb", filename: doc.filename, content: null, loading: true, error: null });
     try {
-      const res = await fetch(buildKbPreviewUrl({ botId, doc }));
+      const res =
+        botId === "local"
+          ? await agentFetch(
+              `/v1/app/knowledge/file?path=${encodeURIComponent(doc.path ?? "")}`,
+            )
+          : await fetch(buildKbPreviewUrl({ botId, doc }));
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         throw new Error(body?.error || `Failed (${res.status})`);

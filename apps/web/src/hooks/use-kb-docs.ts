@@ -2,6 +2,9 @@
 
 import { useEffect, useState, useCallback } from "react";
 
+import { agentFetch } from "@/lib/local-api";
+import { mapLocalKnowledgeIndex } from "@/lib/knowledge/local-knowledge";
+
 interface KbCollection {
   id: string;
   name: string;
@@ -132,10 +135,22 @@ export function useKbDocs(botId: string): {
 
     async function load(): Promise<void> {
       if (botId === "local") {
-        if (!cancelled) {
-          setCollections([]);
-          setLoading(false);
-          setRefreshing(false);
+        // Local self-host: read the on-disk workspace KB directly from the
+        // Python runtime (`<workspace>/knowledge/` + `.magi/knowledge/`).
+        if (isInitial) setLoading(true);
+        else setRefreshing(true);
+        try {
+          const res = await agentFetch("/v1/app/knowledge");
+          if (!res.ok) return;
+          const data = await res.json();
+          if (!cancelled) setCollections(mapLocalKnowledgeIndex(data));
+        } catch (err) {
+          console.error("[use-kb-docs] Failed to load local KB:", err);
+        } finally {
+          if (!cancelled) {
+            setLoading(false);
+            setRefreshing(false);
+          }
         }
         return;
       }
