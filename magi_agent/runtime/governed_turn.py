@@ -169,6 +169,7 @@ async def run_governed_turn(
 
     from magi_agent.runtime.child_runner_live import (  # noqa: PLC0415
         _maybe_log_trace_engine_stream_yield,
+        _maybe_log_trace_governed_yield_loop_exception,
         _maybe_log_trace_governed_yield_loop_exit,
     )
 
@@ -219,11 +220,27 @@ async def run_governed_turn(
                 )
             _items_yielded += 1
             yield replaced if replaced is not None else item
+    except Exception as exc:
+        # PR-K: dedicated Exception branch (more specific than the prior
+        # BaseException catch) so we can surface the actual exception
+        # class + a sanitised first-80 chars of the message BEFORE the
+        # re-raise. The PR-H ``yield_loop_exit`` finalize line only said
+        # ``reason=exception``; this stamp closes the diagnostic gap by
+        # naming WHAT raised. Re-raises so control flow is unchanged.
+        _yield_loop_exit_reason = "exception"
+        _maybe_log_trace_governed_yield_loop_exception(
+            _trace_env, exception=exc
+        )
+        raise
     except BaseException:
         # PR-H: any non-normal exit (Exception OR CancelledError /
         # GeneratorExit) is recorded as "exception" for the finalize
         # trace. The re-raise preserves prior behavior; this branch only
-        # flips the trace reason.
+        # flips the trace reason. CancelledError / GeneratorExit fall
+        # through HERE (the PR-K Exception branch above caught real
+        # Exception subclasses); they intentionally do NOT emit the
+        # yield_loop_exception stamp because they are normal cancellation
+        # / cleanup signals, not dispatch failures.
         _yield_loop_exit_reason = "exception"
         raise
     finally:

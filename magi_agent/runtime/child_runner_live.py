@@ -497,6 +497,222 @@ def _maybe_log_trace_engine_run_turn_stream_finalize(
 
 
 # ---------------------------------------------------------------------------
+# PR-K: deeper trace at the collector terminal + run_governed_turn exception
+# path + engine LLM dispatch site. Kevin's 0.1.88 trace pinpointed
+# status=failed reason=child_llm_collector_status_failed for anthropic /
+# google / fireworks SpawnAgent children but did NOT say WHAT made the
+# Terminal != completed. The helpers below close that diagnostic gap:
+#
+# * ``governed_collector.trace terminal_consumed`` (collect_governed_child_turn
+#   right before return). Surfaces the actual Terminal enum + items_yielded
+#   + any error_code / reason fields the EngineResult carries.
+# * ``governed_turn.trace yield_loop_exception`` (run_governed_turn except
+#   Exception branch). Surfaces the exception class + sanitized first-80
+#   chars of the message BEFORE the re-raise.
+# * ``engine.trace llm_call_start`` / ``llm_call_completed`` / ``llm_call_
+#   exception`` (MagiEngineDriver._drive at the adapter.run_turn dispatch
+#   site). Covers entry, normal completion, and the exception path.
+#
+# All default-OFF (silent unless ``MAGI_CHILD_RUNNER_EMPTY_DEBUG`` is
+# truthy). All wrap their own emit in try/except so trace logging can
+# never break a turn. Exception fields log only ``exc.__class__.__name__``
+# plus the FIRST 80 chars of ``str(exc)`` stripped. The message body can
+# carry user prompt data, so we never log it unbounded.
+# ---------------------------------------------------------------------------
+
+
+def _maybe_log_trace_governed_collector_terminal(
+    env: Mapping[str, str],
+    *,
+    terminal: object,
+    status: object,
+    summary_len: int,
+    evidence_refs_count: int,
+    items_yielded: int,
+) -> None:
+    """Stamp at the END of :func:`collect_governed_child_turn`.
+
+    Surfaces:
+      * the actual ``Terminal`` enum NAME (``completed`` / ``aborted`` /
+        ``max_turns`` / ``error``). The existing collector only emitted
+        the computed ``status`` (``completed`` or ``failed``), which lost
+        the distinction between ``aborted`` / ``max_turns`` / ``error`` as
+        the underlying terminal kind.
+      * the computed ``status`` token the collector returns.
+      * ``summary_len`` / ``evidence_refs`` counts so the operator can see
+        whether the stream produced text / refs BEFORE the terminal.
+      * ``items_yielded``: number of non-terminal events drained from the
+        stream (zero-yield is the silent-empty hallmark).
+      * ``error_code`` / ``reason`` / ``error``: defensively read via
+        :func:`getattr` (today's :class:`~magi_agent.cli.contracts.EngineResult`
+        carries only ``error``; future engine versions may carry the
+        other two). Fail-soft so the trace stays useful as the contract
+        evolves.
+
+    Default-OFF (gated on the same ``MAGI_CHILD_RUNNER_EMPTY_DEBUG`` env as
+    every other PR-1/PR-H/PR-K trace helper). Fail-safe: the entire body
+    is wrapped in ``try / except`` so a malformed terminal object can
+    never break a turn through logging.
+    """
+    if not _empty_debug_enabled(env):
+        return
+    try:
+        # The collector calls us with the EngineResult instance as
+        # ``terminal``; the actual Terminal enum lives on ``terminal.terminal``.
+        # Fall back to ``repr(terminal_obj)`` when ``.name`` is missing so
+        # exotic test doubles still produce a readable line.
+        terminal_obj = getattr(terminal, "terminal", None)
+        terminal_name = getattr(terminal_obj, "name", None) or repr(terminal_obj)
+        error_code = getattr(terminal, "error_code", None)
+        reason = getattr(terminal, "reason", None)
+        error = getattr(terminal, "error", None)
+        _emit_trace(
+            f"[governed_collector.trace] terminal_consumed "
+            f"terminal={terminal_name} status={status} "
+            f"summary_len={summary_len} evidence_refs={evidence_refs_count} "
+            f"items_yielded={items_yielded} "
+            f"error_code={error_code!r} reason={reason!r} error={error!r}"
+        )
+    except Exception:  # noqa: BLE001 (logging must never break a turn).
+        return
+
+
+def _sanitize_exception_message_first80(exception: BaseException) -> str:
+    """Return the first 80 chars of ``str(exception)`` stripped, fail-soft.
+
+    The message body can echo user prompt data, so we cap it BEFORE
+    logging. Stripped of leading/trailing whitespace so multi-line
+    exception messages render on one line. Returns the empty string on
+    any failure (e.g. exotic ``__str__`` that raises) so the caller can
+    always log a value.
+    """
+    try:
+        message = str(exception)
+    except Exception:  # noqa: BLE001
+        return ""
+    try:
+        return message[:80].strip()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _maybe_log_trace_governed_yield_loop_exception(
+    env: Mapping[str, str],
+    *,
+    exception: BaseException,
+) -> None:
+    """Stamp inside :func:`run_governed_turn` ``except Exception`` branch.
+
+    Sibling of :func:`_maybe_log_trace_governed_yield_loop_exit`. The
+    PR-H ``yield_loop_exit`` line told the operator the loop ended in
+    ``reason='exception'`` but did not name the exception class or
+    surface any message. This helper closes that gap: it logs the
+    exception ``__class__.__name__`` plus the FIRST 80 chars of
+    ``str(exc)`` (stripped) so the operator can see WHAT made the loop
+    raise BEFORE the re-raise propagates upward.
+
+    Default-OFF. Fail-safe. Logged values are bounded so an attacker-
+    controlled exception message cannot blow up the serve log.
+    """
+    if not _empty_debug_enabled(env):
+        return
+    try:
+        exc_class = exception.__class__.__name__
+        message = _sanitize_exception_message_first80(exception)
+        _emit_trace(
+            f"[governed_turn.trace] yield_loop_exception "
+            f"exception={exc_class} message_first80={message!r}"
+        )
+    except Exception:  # noqa: BLE001
+        return
+
+
+def _maybe_log_trace_engine_llm_call_start(
+    env: Mapping[str, str],
+    *,
+    attempt: int,
+    turn_id: object,
+) -> None:
+    """Stamp on entry to one ``adapter.run_turn`` dispatch in
+    :py:meth:`MagiEngineDriver._drive` (the canonical LLM call site).
+
+    Paired with :func:`_maybe_log_trace_engine_llm_call_completed` and
+    :func:`_maybe_log_trace_engine_llm_call_exception`. The operator can
+    see whether the engine ENTERED a fresh dispatch attempt at all (a
+    zero-``llm_call_start`` turn proves the failure is upstream of the
+    dispatch loop; a ``start`` without a matching ``completed`` /
+    ``exception`` proves the engine wedged INSIDE the dispatch).
+
+    ``attempt`` is the per-turn 1-based attempt counter (incremented at
+    every outer-loop iteration of ``_drive``; recoveries, output-
+    continuations, goal-nudges, and grace re-invocations all bump it).
+    Default-OFF.
+    """
+    if not _empty_debug_enabled(env):
+        return
+    try:
+        _emit_trace(f"[engine.trace] llm_call_start attempt={attempt} turn_id={turn_id!r}")
+    except Exception:  # noqa: BLE001
+        return
+
+
+def _maybe_log_trace_engine_llm_call_completed(
+    env: Mapping[str, str],
+    *,
+    attempt: int,
+    turn_id: object,
+) -> None:
+    """Stamp on normal completion of one ``adapter.run_turn`` dispatch.
+
+    Logged AFTER the inner ADK event loop drains naturally (exhaustion
+    or cancel). NOT logged when the dispatch raised. The operator gets
+    the matching ``llm_call_exception`` line on that path. Paired with
+    :func:`_maybe_log_trace_engine_llm_call_start`.
+
+    Default-OFF.
+    """
+    if not _empty_debug_enabled(env):
+        return
+    try:
+        _emit_trace(f"[engine.trace] llm_call_completed attempt={attempt} turn_id={turn_id!r}")
+    except Exception:  # noqa: BLE001
+        return
+
+
+def _maybe_log_trace_engine_llm_call_exception(
+    env: Mapping[str, str],
+    *,
+    attempt: int,
+    turn_id: object,
+    exception: BaseException,
+) -> None:
+    """Stamp inside the engine's adapter-dispatch ``except`` branch.
+
+    Surfaces the actual exception class + a bounded (first-80 chars,
+    stripped) sanitisation of ``str(exc)``. The engine then captures
+    the exception into its existing ``attempt_error`` slot and lets the
+    recovery layer decide whether to re-invoke; this stamp fires
+    BEFORE that recovery decision so the operator sees the dispatch-
+    side failure independent of the recovery outcome.
+
+    Message bodies are NEVER logged unbounded (they can echo user
+    prompt data). Default-OFF.
+    """
+    if not _empty_debug_enabled(env):
+        return
+    try:
+        exc_class = exception.__class__.__name__
+        message = _sanitize_exception_message_first80(exception)
+        _emit_trace(
+            f"[engine.trace] llm_call_exception "
+            f"attempt={attempt} turn_id={turn_id!r} "
+            f"exception={exc_class} message_first80={message!r}"
+        )
+    except Exception:  # noqa: BLE001
+        return
+
+
+# ---------------------------------------------------------------------------
 # Env-gate constants and helper (mirrors artifacts/file_delivery_live.py)
 # ---------------------------------------------------------------------------
 

@@ -16,12 +16,14 @@ Design notes
 """
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncGenerator, Mapping
 from typing import Union
 
 from magi_agent.cli.contracts import EngineResult, Terminal
 from magi_agent.runtime.child_runner_live import (
     _MAX_SUMMARY_CHARS as _MAX_SUMMARY_CHARS,
+    _maybe_log_trace_governed_collector_terminal,
     _public_evidence_refs,
 )
 from magi_agent.runtime.events import RuntimeEvent
@@ -87,6 +89,10 @@ async def collect_governed_child_turn(
     text_chunks: list[str] = []
     raw_refs: set[str] = set()
     terminal: EngineResult | None = None
+    # PR-K: count non-terminal events drained from the stream so the
+    # terminal_consumed trace can surface the silent-empty-dispatch
+    # signature (items_yielded == 0).
+    items_yielded = 0
 
     async for item in stream:
         if isinstance(item, EngineResult):
@@ -95,6 +101,7 @@ async def collect_governed_child_turn(
             break
 
         # item is a RuntimeEvent
+        items_yielded += 1
         payload = item.payload
         _collect_public_refs(payload, raw_refs)
 
@@ -111,5 +118,19 @@ async def collect_governed_child_turn(
     summary = "".join(text_chunks)[:_MAX_SUMMARY_CHARS]
     evidence_refs = _public_evidence_refs(list(raw_refs))
     status = "completed" if terminal.terminal is Terminal.completed else "failed"
+
+    # PR-K: deeper terminal-consumed trace. Surfaces the actual Terminal
+    # enum NAME (vs the binary completed / failed status the collector
+    # returns), the counts, and any error_code / reason / error fields
+    # the EngineResult carries. Default-OFF (MAGI_CHILD_RUNNER_EMPTY_DEBUG);
+    # fail-safe inside the helper so trace bookkeeping never breaks a turn.
+    _maybe_log_trace_governed_collector_terminal(
+        os.environ,
+        terminal=terminal,
+        status=status,
+        summary_len=len(summary),
+        evidence_refs_count=len(evidence_refs),
+        items_yielded=items_yielded,
+    )
 
     return summary, evidence_refs, status
