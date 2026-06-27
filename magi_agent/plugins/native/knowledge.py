@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
 
+from magi_agent.knowledge.local_index import search_local_knowledge
 from magi_agent.knowledge.provider_boundary import (
     KnowledgeBoundary,
     KnowledgeBoundaryConfig,
@@ -16,28 +18,32 @@ from magi_agent.web_acquisition.policy import redact_public_text
 
 
 class _LocalKnowledgeProvider:
+    # In-process, non-network local provider. The boundary trusts only providers
+    # carrying this marker (it gates network/production providers off); despite
+    # the historical name it now reads the operator's real on-disk knowledge base
+    # under ``<workspace>/knowledge/`` rather than returning a placeholder.
     openmagi_local_fake_provider = True
 
+    def __init__(self, workspace_root: str | None = None) -> None:
+        self._workspace_root = workspace_root
+
     def execute(self, request: KnowledgeBoundaryRequest) -> dict[str, object]:
-        query = request.query or "local knowledge"
-        return {
-            "records": (
-                {
-                    "sourceRef": "knowledge:local",
-                    "title": f"Local KB result for {query}",
-                    "snippet": f"Local first-party KB result for {query}. Configure a KB provider for hosted collections.",
-                    "metadata": {"visibility": "public-safe", "publicSafe": True},
-                },
-            )
-        }
+        query = request.query or ""
+        if not self._workspace_root:
+            return {"records": ()}
+        records = search_local_knowledge(
+            [Path(self._workspace_root)], query, limit=5
+        )
+        return {"records": tuple(records)}
 
 
-def _boundary() -> LocalKnowledgeSourceToolBoundary:
+def _boundary(context: ToolContext | None = None) -> LocalKnowledgeSourceToolBoundary:
+    workspace_root = getattr(context, "workspace_root", None)
     return LocalKnowledgeSourceToolBoundary(
         boundary=KnowledgeBoundary(
             KnowledgeBoundaryConfig(enabled=True, localFakeProviderEnabled=True)
         ),
-        provider=_LocalKnowledgeProvider(),
+        provider=_LocalKnowledgeProvider(workspace_root=workspace_root),
     )
 
 
@@ -45,7 +51,7 @@ async def knowledge_search(arguments: dict[str, object], context: ToolContext) -
     hosted = hosted_egress()
     if hosted is not None:
         return await hosted(arguments, context)
-    return await _boundary().execute_tool("KnowledgeSearch", arguments, context)
+    return await _boundary(context).execute_tool("KnowledgeSearch", arguments, context)
 
 
 def knowledge_write(arguments: dict[str, object], context: ToolContext) -> ToolResult:

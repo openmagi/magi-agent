@@ -335,7 +335,16 @@ def _records_from_output(
     max_preview_chars: int,
 ) -> list[KnowledgeSourceRecord]:
     data = output if isinstance(output, Mapping) else {}
-    raw_items = data.get("records") or data.get("results") or (data,)
+    # An explicitly-present ``records``/``results`` key is authoritative even when
+    # empty (a provider returning zero matches must yield zero records, not a
+    # phantom record synthesized from the wrapper dict). Fall back to treating the
+    # whole output as a single record only when neither key is present.
+    if "records" in data:
+        raw_items = data["records"]
+    elif "results" in data:
+        raw_items = data["results"]
+    else:
+        raw_items = (data,)
     if isinstance(raw_items, Mapping):
         raw_items = (raw_items,)
     if not isinstance(raw_items, Sequence) or isinstance(raw_items, str | bytes | bytearray):
