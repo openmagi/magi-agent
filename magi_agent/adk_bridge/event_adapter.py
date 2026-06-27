@@ -593,6 +593,14 @@ def project_runner_end_event(
         event["reason"] = _safe_stop_reason(reason or stop_reason, default="aborted")
         if status == "committed" and safe_receipt_ref is None and expect_receipt:
             event["reason"] = "missing_runtime_receipt"
+    # Carry the local-serve invariant forward as an explicit marker so
+    # downstream sanitizers (notably ``transport.sse._sanitize_turn_end_event``)
+    # don't re-apply the strict-receipt downgrade and rewrite a perfectly
+    # successful local turn back to ``aborted/missing_runtime_receipt``.
+    # The hosted path (``expect_receipt=True``) emits no marker, preserving
+    # byte-identical behavior on the protocol-violation safety net.
+    if not expect_receipt:
+        event["expectReceipt"] = False
     return EventProjection(agent_events=[event])
 
 
