@@ -715,6 +715,52 @@ app.add_typer(memory_app, name="memory")
 
 
 # ---------------------------------------------------------------------------
+# `magi knowledge` — optional qmd index over the workspace KB
+# ---------------------------------------------------------------------------
+
+knowledge_app = typer.Typer(
+    name="knowledge",
+    help="Manage the optional qmd search index for the workspace knowledge base.",
+    invoke_without_command=True,
+    no_args_is_help=False,
+)
+
+
+@knowledge_app.callback(invoke_without_command=True)
+def knowledge_root(ctx: typer.Context) -> None:
+    """Manage the optional qmd search index for the workspace knowledge base."""
+    if ctx.invoked_subcommand is None:
+        typer.echo(
+            "magi knowledge: use `magi knowledge init [--vector]` to index "
+            "`knowledge/` for the native KnowledgeSearch tool.",
+            err=False,
+        )
+
+
+@knowledge_app.command("init")
+def knowledge_init(
+    vector: bool = typer.Option(
+        False,
+        "--vector/--no-vector",
+        help=(
+            "Also generate vector embeddings (`qmd embed`, first run downloads "
+            "~2GB) for semantic KB search. Default: keyword-only BM25 index."
+        ),
+    ),
+) -> None:
+    """Install qmd (if missing) and register this workspace's knowledge/ tree
+    as a qmd collection so KnowledgeSearch gets BM25 ranking + scale."""
+    from magi_agent.cli import knowledge_cli  # noqa: PLC0415
+
+    report = knowledge_cli.init_knowledge(root=Path.cwd(), vector=vector)
+    for line in report.lines:
+        typer.echo(line, err=False)
+
+
+app.add_typer(knowledge_app, name="knowledge")
+
+
+# ---------------------------------------------------------------------------
 # `magi gateway` — always-on daemon (Track F)
 # ---------------------------------------------------------------------------
 

@@ -58,6 +58,7 @@ graph LR
     cli --> harness
     cli --> hooks
     cli --> introspection
+    cli --> knowledge
     cli --> learning
     cli --> main
     cli --> memory
@@ -176,6 +177,7 @@ graph LR
     introspection --> evidence
     introspection --> tools
     knowledge --> evidence
+    knowledge --> memory
     knowledge --> tools
     knowledge --> web_acquisition
     learning --> gates
@@ -216,6 +218,7 @@ graph LR
     plugins --> channels
     plugins --> config
     plugins --> knowledge
+    plugins --> memory
     plugins --> missions
     plugins --> runtime
     plugins --> tools
@@ -488,7 +491,7 @@ graph LR
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
-| __init__.py | Magi headless CLI foundation (PR-A1). | — | browser/autonomous/tool.py, cli/app.py, cli/memory_cli.py, cli/tests/test_anthropic_cache_selection.py, cli/tests/test_app.py, cli/tests/test_model_picker_wire.py, computer/autonomous/tool.py, transport/app_api.py, transport/web_dashboard.py |
+| __init__.py | Magi headless CLI foundation (PR-A1). | — | browser/autonomous/tool.py, cli/app.py, cli/knowledge_cli.py, cli/memory_cli.py, cli/tests/test_anthropic_cache_selection.py, cli/tests/test_app.py, cli/tests/test_model_picker_wire.py, computer/autonomous/tool.py, transport/app_api.py, transport/web_dashboard.py |
 | __main__.py | Thin stdlib-only shim for ``python -m magi_agent.cli`` (PR-F1). | app | cli/tests/test_app.py |
 | app.py | Typer CLI entrypoint for Magi (PR-F1, Stream F). | catalog, cli, config, control_plane_overrides, daemon, durable_recovery, env, flags, headless, health, install_profile_bootstrap, install_runner, installer, legal_eval, local_defaults, memory_bootstrap, otel_noise, providers, scaffold, service_install, session_log, store, watchers, wiring | cli/__main__.py, cli/tests/test_app.py, cli/tests/test_composio_cli.py, cli/tests/test_doctor.py, cli/tests/test_gateway_start_daemon.py, cli/tests/test_plan_mode.py |
 | clipboard_image.py | Read an image from the OS clipboard for CLI/TUI image attach. | message_builder | cli/tests/test_clipboard_image.py, cli/tui/app.py |
@@ -500,6 +503,7 @@ graph LR
 | hook_wiring.py | Bridge CC-style user ``settings.json`` hooks into the CLI engine's ADK | bus, command_executor, context, env, external_config, manifest, resolved, settings_loader | cli/engine.py, cli/wiring.py |
 | identity.py | Identity + project-context loading for the local ``magi`` CLI agent. | — | cli/tests/test_identity.py, cli/tool_runtime.py |
 | install_profile_bootstrap.py | CLI install profile bootstrap: ``~/.magi/profile.env`` → process env. | — | (root)/main.py, cli/app.py, cli/tests/test_install_profile_bootstrap.py |
+| knowledge_cli.py | ``magi knowledge`` CLI helpers: optional qmd index over the workspace KB. | cli, qmd_index | — |
 | learning_recall.py | CLI learning-recall block builder. | config, contracts, injection, memory_mode_guard, memory_recall, memory_write, models, namespaces, store | cli/tool_runtime.py |
 | litellm_empty_observer.py | Wrapper for ADK's ``LiteLlm`` that surfaces silent-empty completions. | — | cli/real_runner.py |
 | local_runner.py | — | — | cli/tests/test_real_runner.py, cli/wiring.py |
@@ -1197,8 +1201,9 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | provider_boundary | — |
-| local_index.py | Read-only scan + keyword search over the workspace knowledge directory. | — | plugins/native/knowledge.py |
+| local_index.py | Read-only scan + keyword search over the workspace knowledge directory. | — | knowledge/qmd_index.py, plugins/native/knowledge.py |
 | provider_boundary.py | — | — | knowledge/__init__.py, knowledge/source_tools.py, plugins/native/knowledge.py |
+| qmd_index.py | Optional ``qmd``-accelerated search over the workspace knowledge base. | local_index, qmd | cli/knowledge_cli.py, plugins/native/knowledge.py |
 | source_tools.py | — | policy, provider_boundary, result, source_ledger | plugins/native/knowledge.py |
 
 ### knowledge/okf/
@@ -1238,7 +1243,7 @@ graph LR
 | adk_bridge.py | — | contracts, policy | — |
 | compaction_tree.py | 5-level persistent compaction tree + ROOT.md synthesis (PR-A). | compactor, config, local_file_writable | runtime/memory_turn_hook.py |
 | compactor.py | Deterministic, IO-free memory compactor (gap-closer B2). | — | memory/adapters/local_file_writable.py, memory/compaction_tree.py |
-| config.py | Single source of truth for Hipocampus memory activation (PR1). | — | cli/app.py, cli/memory_bootstrap.py, cli/memory_cli.py, cli/memory_recall_block.py, gates/memory_write_readiness.py, memory/adapters/hipocampus_readonly.py, memory/adapters/local_file_writable.py, memory/adapters/operator_soul_writer.py, memory/compaction_tree.py, memory/policy.py, memory/search/__init__.py, memory/summarizer_runtime.py, runtime/memory_turn_hook.py, transport/app_api.py |
+| config.py | Single source of truth for Hipocampus memory activation (PR1). | — | cli/app.py, cli/memory_bootstrap.py, cli/memory_cli.py, cli/memory_recall_block.py, gates/memory_write_readiness.py, memory/adapters/hipocampus_readonly.py, memory/adapters/local_file_writable.py, memory/adapters/operator_soul_writer.py, memory/compaction_tree.py, memory/policy.py, memory/search/__init__.py, memory/summarizer_runtime.py, plugins/native/knowledge.py, runtime/memory_turn_hook.py, transport/app_api.py |
 | conformance.py | — | authority, declarative_filter, hipocampus_readonly, local_file_writable, policy | cli/memory_manifest.py |
 | continuity_policy.py | A1 — memory continuity policy block. | — | cli/tool_runtime.py, memory/prompt_projection.py |
 | contracts.py | — | authority | cli/learning_recall.py, harness/memory_recall.py, harness/memory_write.py, learning/injection.py, memory/__init__.py, memory/adapters/hipocampus_readonly.py, memory/adapters/local_file_writable.py, memory/adk_bridge.py, memory/namespaces.py, memory/policy.py, memory/projection.py, recipes/first_party/memory_recall.py |
@@ -1268,7 +1273,7 @@ graph LR
 | __init__.py | Hipocampus memory search backends (PR2, read-side, unwired). | base, bm25, config, qmd | cli/memory_cli.py, cli/memory_recall_block.py, memory/adapters/hipocampus_readonly.py, transport/app_api.py |
 | base.py | SearchBackend abstraction for Hipocampus memory (PR2, read-side). | — | cli/memory_recall_rerank.py, memory/search/__init__.py, memory/search/bm25.py, memory/search/qmd.py |
 | bm25.py | Pure-Python Okapi BM25 backend (PR2) — the DEFAULT search backend. | base | memory/search/__init__.py |
-| qmd.py | ``qmd`` CLI search backend (PR2). | base | cli/memory_cli.py, memory/search/__init__.py |
+| qmd.py | ``qmd`` CLI search backend (PR2). | base | cli/memory_cli.py, knowledge/qmd_index.py, memory/search/__init__.py |
 
 ### meta_orchestration/
 
@@ -1419,7 +1424,7 @@ graph LR
 | browser.py | — | context, provider_boundary, result, source_tools | — |
 | coding.py | — | _common, context, result | — |
 | documents.py | — | _common, _file_delivery_fakes, context, contract, file_delivery, file_delivery_live, orchestrator, result, spreadsheet_tools | — |
-| knowledge.py | — | _common, _hosted_knowledge, context, local_index, policy, provider_boundary, result, source_tools | — |
+| knowledge.py | — | _common, _hosted_knowledge, config, context, local_index, policy, provider_boundary, qmd_index, result, source_tools | — |
 | missions.py | — | _common, context, env, flags, policy, result | — |
 | okf.py | The redaction-free ``OkfLookup`` native tool (PR2). | _common, bundle_loader, config, context, result | — |
 | scheduled_work.py | — | _common, context, env, models, policy, result, store | — |

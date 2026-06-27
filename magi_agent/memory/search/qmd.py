@@ -64,23 +64,24 @@ _VECTOR_TIMEOUT_SECONDS = 90
 _COLLECTION_PREFIX = "magi-mem-"
 
 
-def collection_name_for(memory_dir: Path) -> str:
-    """Deterministic, collision-free qmd collection name for a memory directory.
+def collection_name_for(memory_dir: Path, *, prefix: str = _COLLECTION_PREFIX) -> str:
+    """Deterministic, collision-free qmd collection name for an indexed directory.
 
-    Keyed on the resolved absolute path so two bots whose memory dirs share the
-    basename ``memory`` still get distinct collections.
+    Keyed on the resolved absolute path so two bots whose dirs share the basename
+    still get distinct collections. ``prefix`` lets non-memory subtrees (e.g. the
+    workspace ``knowledge/`` KB) get their own namespace.
     """
     digest = hashlib.sha1(str(memory_dir.resolve()).encode("utf-8")).hexdigest()
-    return f"{_COLLECTION_PREFIX}{digest[:12]}"
+    return f"{prefix}{digest[:12]}"
 
 
-def _memory_path_from_qmd_suffix(suffix: str) -> str | None:
+def _memory_path_from_qmd_suffix(suffix: str, *, subdir: str = "memory") -> str | None:
     if suffix == "" or suffix.startswith("/"):
         return None
     parts = suffix.split("/")
     if any(part in ("", ".", "..") for part in parts):
         return None
-    return f"memory/{suffix}"
+    return f"{subdir}/{suffix}"
 
 
 class QmdBackend:
@@ -98,8 +99,15 @@ class QmdBackend:
         timeout: int | None = None,
         auto_register: bool = False,
         vector: bool = False,
+        subdir: str = "memory",
+        collection_prefix: str = _COLLECTION_PREFIX,
     ) -> None:
         self._binary = binary
+        #: Workspace-relative subtree this backend indexes (``memory`` by default;
+        #: e.g. ``knowledge`` for the first-party KB). Drives both the registered
+        #: directory and the ``qmd://<name>/<rel>`` -> ``<subdir>/<rel>`` mapping.
+        self._subdir = subdir
+        self._collection_prefix = collection_prefix
         #: When ``vector`` is on, :meth:`search` runs ``qmd vsearch`` (pure vector
         #: similarity) instead of ``qmd search`` (BM25). It cold-loads the
         #: embedding model, so the timeout defaults higher unless overridden.
@@ -126,8 +134,42 @@ class QmdBackend:
         """True when the ``qmd`` binary is resolvable on PATH."""
         return shutil.which(self._binary) is not None
 
+    @property
+    def bound(self) -> bool:
+        """True when :meth:`reindex` resolved an existing/registered collection.
+
+        Lets callers distinguish "no collection, fall back to another backend"
+        from "collection exists but matched nothing" (``search`` returns ``[]``
+        in both cases).
+        """
+        return self._collection is not None
+
+    def bind(self, root: Path) -> bool:
+        """Bind to an ALREADY-registered collection for this root, without indexing.
+
+        Unlike :meth:`reindex` (which may run a slow ``qmd update``/``add``), this
+        only probes ``collection list`` and binds ``self._collection`` when the
+        collection already exists, so :meth:`search` can run on the hot path
+        without paying a refresh. Returns True when bound. Fail-soft.
+        """
+        self._collection = None
+        target = root / self._subdir
+        if not target.is_dir():
+            return False
+        resolved = target.resolve()
+        try:
+            resolved.relative_to(root.resolve())
+        except ValueError:
+            return False
+        self._memory_dir = resolved
+        name = collection_name_for(resolved, prefix=self._collection_prefix)
+        if self._collection_exists(name):
+            self._collection = name
+            return True
+        return False
+
     def reindex(self, root: Path, *, allow_auto_register: bool | None = None) -> None:
-        """(Re)index the workspace ``memory/`` tree.
+        """(Re)index the workspace ``{subdir}/`` tree (``memory`` by default).
 
         ``allow_auto_register`` gates the ONLY operation that mutates the user's
         GLOBAL qmd index — registering a brand-new collection via
@@ -145,7 +187,7 @@ class QmdBackend:
         """
         if allow_auto_register is None:
             allow_auto_register = self._auto_register
-        memory_dir = root / "memory"
+        memory_dir = root / self._subdir
         self._memory_dir = memory_dir
         self._collection = None
         if not memory_dir.is_dir():
@@ -156,12 +198,12 @@ class QmdBackend:
         try:
             memory_resolved.relative_to(root_resolved)
         except ValueError:
-            # Do not register a workspace memory/ symlink that points outside the
+            # Do not register a workspace subtree symlink that points outside the
             # workspace; qmd would index that external tree before search-time
             # filtering can help.
             return
         self._memory_dir = memory_resolved
-        collection = collection_name_for(memory_resolved)
+        collection = collection_name_for(memory_resolved, prefix=self._collection_prefix)
         if self._collection_exists(collection):
             # Already ours: best-effort refresh (slow; off the hot path). Bind
             # the collection so search() scopes to it.
@@ -189,7 +231,9 @@ class QmdBackend:
         completed = self._run([self._binary, command, query, "--json"])
         if completed is None or completed.returncode != 0:
             return []
-        return self._parse_hits(completed.stdout, collection=self._collection, k=k)
+        return self._parse_hits(
+            completed.stdout, collection=self._collection, k=k, subdir=self._subdir
+        )
 
     def _collection_exists(self, name: str) -> bool:
         completed = self._run([self._binary, "collection", "list"])
@@ -213,7 +257,9 @@ class QmdBackend:
             return None
 
     @staticmethod
-    def _parse_hits(stdout: str, *, collection: str, k: int) -> list[SearchHit]:
+    def _parse_hits(
+        stdout: str, *, collection: str, k: int, subdir: str = "memory"
+    ) -> list[SearchHit]:
         if not stdout.strip():
             return []
         try:
@@ -239,9 +285,9 @@ class QmdBackend:
                 continue
             if not isinstance(content, str):
                 content = ""
-            # qmd://<name>/<relpath> → workspace-root-relative "memory/<relpath>".
+            # qmd://<name>/<relpath> → workspace-root-relative "<subdir>/<relpath>".
             rel = file_uri[len(prefix):]
-            path = _memory_path_from_qmd_suffix(rel)
+            path = _memory_path_from_qmd_suffix(rel, subdir=subdir)
             if path is None:
                 continue
             hits.append(SearchHit(path=path, content=content, score=float(score)))
