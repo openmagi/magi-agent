@@ -849,14 +849,20 @@ def test_event_bridge_projects_final_text_to_public_delta_before_turn_end() -> N
     turn_end = projection.agent_events[1]
     # live_compatible (local CLI/dashboard) emits a committed turn_end without
     # a receiptRef because the local OSS runner has no receipt infrastructure;
-    # the previous behavior — downgrading every successful local turn to
-    # aborted/missing_runtime_receipt — broke observability and any consumer
+    # the previous behavior, downgrading every successful local turn to
+    # aborted/missing_runtime_receipt, broke observability and any consumer
     # that read the raw projection (vs the transport reconciler).
+    # The ``expectReceipt: False`` marker tells downstream sanitizers (notably
+    # ``transport.sse._sanitize_turn_end_event``) not to re-apply the strict
+    # receipt downgrade. That closes the second-pass receipt re-write that
+    # produced ``aborted/missing_runtime_receipt`` on the SSE wire even when
+    # the projection was committed.
     assert turn_end == {
         "type": "turn_end",
         "turnId": "turn-final",
         "status": "committed",
         "stopReason": "end_turn",
+        "expectReceipt": False,
     }
     assert projection.legacy_deltas == []
     rendered_agent_events = json.dumps(projection.agent_events)
@@ -895,11 +901,14 @@ def test_event_bridge_live_compatible_final_empty_events_emit_turn_end() -> None
         turn_end = projection.agent_events[0]
         # As above: local OSS path emits a committed turn_end without a
         # receiptRef instead of the historical missing_runtime_receipt downgrade.
+        # ``expectReceipt: False`` carries the local-serve invariant forward so
+        # the SSE sanitizer does not re-apply the strict-receipt downgrade.
         assert turn_end == {
             "type": "turn_end",
             "turnId": event.invocation_id,
             "status": "committed",
             "stopReason": "end_turn",
+            "expectReceipt": False,
         }
         assert projection.legacy_deltas == []
         assert projection.transcript_entries == []

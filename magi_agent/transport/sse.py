@@ -706,7 +706,21 @@ def _sanitize_turn_end_event(event: Mapping[str, object]) -> dict[str, object]:
         if isinstance(receipt_ref, str) and _RECEIPT_REF_RE.fullmatch(receipt_ref)
         else None
     )
+    # Local-serve invariant: when the upstream projection layer attests
+    # ``expectReceipt=False`` (the local OSS runner has no runtime-receipt
+    # infrastructure), do NOT re-apply the strict-receipt downgrade. Without
+    # this carve-out a fully successful local turn (text + tools) ends up as
+    # ``aborted/missing_runtime_receipt`` in the persisted record even though
+    # the model produced a complete reply. The dashboard then renders "no
+    # final answer" on Kevin's 0.1.86 Gemini 3.5 Flash + Tesla 10-K shape.
+    # The hosted path leaves the marker absent so the strict-receipt safety
+    # net is preserved byte-identically. The marker itself is internal-only
+    # and is never propagated to the public output (this function rebuilds
+    # ``sanitized`` from scratch).
+    receipt_not_expected = event.get("expectReceipt") is False
     if status == "committed" and safe_receipt_ref is not None:
+        safe_status = "committed"
+    elif status == "committed" and receipt_not_expected:
         safe_status = "committed"
     else:
         safe_status = "aborted"
@@ -715,9 +729,13 @@ def _sanitize_turn_end_event(event: Mapping[str, object]) -> dict[str, object]:
         "turnId": _public_turn_id(event),
         "status": safe_status,
     }
-    if safe_status == "committed":
+    if safe_status == "committed" and safe_receipt_ref is not None:
         sanitized["receiptRef"] = safe_receipt_ref
-    missing_receipt = status == "committed" and safe_receipt_ref is None
+    missing_receipt = (
+        status == "committed"
+        and safe_receipt_ref is None
+        and not receipt_not_expected
+    )
     reason = (
         "missing_runtime_receipt"
         if missing_receipt
