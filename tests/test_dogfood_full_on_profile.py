@@ -390,6 +390,8 @@ _INTENTIONALLY_NOT_IN_FULL_PROFILE: dict[str, str] = {
     "MAGI_AGENT_REQUIRE_ENV": "would BLOCK local serve when hosted env partial; reduces convenience for local dev",
     "MAGI_CUSTOMIZE_NL_INTERACTIVE_ENABLED": "conversational compose UI gate; default-OFF until UI ships",
     "MAGI_DURABLE_LOCAL_WRITES_ENABLED": "WS1 durable substrate: opt-in operational flag (sqlite writes); enable per-host, not via profile",
+    "MAGI_DURABLE_CHECKPOINTS_ENABLED": "WS1 durable substrate: opt-in checkpoint emission; gated by LOCAL_WRITES, enable per-host",
+    "MAGI_DURABLE_STARTUP_RECOVERY_ENABLED": "WS1 durable substrate: opt-in boot reclaim sweep; enable per-host",
 }
 
 
