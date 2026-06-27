@@ -652,6 +652,45 @@ def _test_run_evidence_declarations(
     )
 
 
+def _calculation_observed_numbers(value: object) -> tuple[str, ...]:
+    """Stringified numeric token(s) from a Calculation result value."""
+    if isinstance(value, bool):  # bool is an int subclass — exclude
+        return ()
+    if isinstance(value, (int, float)):
+        return (str(value),)
+    if isinstance(value, str) and value.strip():
+        return (value.strip(),)
+    return ()
+
+
+def _calculation_evidence_declarations(
+    tool_name: str, args: Mapping[str, object], output: object
+) -> tuple[dict[str, object], ...]:
+    """Build a typed Calculation evidence declaration from a live calc call.
+
+    The Calculation tool returns ``{"value": <number>}``; promote it to a typed
+    record so the bench's `calculated` claim type + SHACL/deterministic_ref rules
+    can reference it. ``expression`` comes from ``args`` (REDACTED). Returns
+    ``()`` for non-Calculation tools or a malformed result (honest-degrade).
+    """
+    if tool_name != "Calculation" or not isinstance(output, Mapping):
+        return ()
+    value = output.get("value")
+    expression = str(args.get("expression", ""))
+    return (
+        {
+            "type": "Calculation",
+            "fields": {
+                "expression": _redact(expression),
+                "value": value,
+                "resultDigest": _digest({"expression": expression, "value": value}),
+                "observedNumbers": _calculation_observed_numbers(value),
+            },
+            "source": {"kind": "tool_trace", "toolName": "Calculation"},
+        },
+    )
+
+
 class Gate5BFullToolOutcome(_Gate5BFullModel):
     status: Gate5BFullToolOutcomeStatus
     reason: str
@@ -1105,10 +1144,12 @@ class Gate5BFullToolHost:
                     coding_mutation_receipt=coding_receipt,
                     code_diagnostics_receipt=diagnostics_receipt,
                     edit_match_receipt=edit_match_receipt,
-                    # TestRun's `command` lives in `args` (not output_preview), so
-                    # build the typed declaration here where both are in scope.
-                    extra_evidence_declarations=_test_run_evidence_declarations(
-                        tool_name, args, output
+                    # TestRun's `command` / Calculation's `expression` live in
+                    # `args` (not output_preview), so build the typed declarations
+                    # here where both args and output are in scope.
+                    extra_evidence_declarations=(
+                        *_test_run_evidence_declarations(tool_name, args, output),
+                        *_calculation_evidence_declarations(tool_name, args, output),
                     ),
                 )
                 return outcome

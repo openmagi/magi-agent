@@ -140,6 +140,7 @@ _BUILTIN_FIELD_HINTS: dict[str, list[str]] = {
     # Verified against real producers — keys are actually emitted.
     "TestRun":                     ["command", "exitCode"],
     "GitDiff":                     ["changedFiles", "fileCount", "digest"],  # live gate5b GitDiff -> core_toolhost evidence declaration
+    "Calculation":                 ["expression", "value", "resultDigest", "observedNumbers"],  # live gate5b Calculation -> evidence declaration
     "CodeDiagnostics":             ["checker", "errorCount", "fileDigest", "diagnosticsDigest"],
     "CommitCheckpoint":            ["checkpointDigest", "pathRef"],
     "DeterministicEvidenceVerifier": [
@@ -164,7 +165,6 @@ _BUILTIN_FIELD_HINTS: dict[str, list[str]] = {
     "FileDeliver":                 [],  # file_deliver sets toolName/handler/digests but no "evidence" key
     "ArtifactVerify":              [],  # no producer construction site located in magi_agent/
     "PlanVerifier":                [],  # only catalog + verifier-bus refs; no concrete producer
-    "Calculation":                 [],  # _calculation returns raw {"value": ...}, never lifted to evidence.fields
     "DateRange":                   [],  # date_range uses ok_result() which omits the "evidence" metadata key
     "TelegramDeliveryAck":         [],  # external_ack source.kind is dropped by extraction.py before record build
 }

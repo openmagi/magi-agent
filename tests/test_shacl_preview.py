@@ -305,7 +305,6 @@ def test_types_without_confident_producer_have_empty_field_hints() -> None:
         "FileDeliver",    # delivery metadata lives in ToolResult, not EvidenceRecord.fields
         "ArtifactVerify", # no EvidenceRecord field producer found
         "PlanVerifier",   # catalog type only; no concrete EvidenceRecord producer
-        "Calculation",    # tool returns raw {"value": ...}, not EvidenceRecord.fields
         "DateRange",      # shadow contract ref only; no concrete producer found
         "TelegramDeliveryAck",  # no EvidenceRecord field producer found
     }

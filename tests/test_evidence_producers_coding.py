@@ -368,6 +368,67 @@ def test_test_run_reaches_durable_ledger(tmp_path, monkeypatch):
     assert "TestRun" in types
 
 
+# --- Part B4: Calculation live producer -------------------------------------
+
+
+def test_calculation_evidence_declaration_built():
+    from magi_agent.gates.gate5b_full_toolhost import (
+        _calculation_evidence_declarations,
+    )
+
+    decls = _calculation_evidence_declarations(
+        "Calculation", {"expression": "2+2"}, {"value": 4}
+    )
+    assert len(decls) == 1
+    fields = decls[0]["fields"]
+    assert decls[0]["type"] == "Calculation"
+    assert fields["value"] == 4
+    assert fields["expression"] == "2+2"
+    assert fields["resultDigest"].startswith("sha256:")
+    assert "4" in [str(n) for n in fields["observedNumbers"]]
+
+
+def test_calculation_skips_non_calculation():
+    from magi_agent.gates.gate5b_full_toolhost import (
+        _calculation_evidence_declarations,
+    )
+
+    assert _calculation_evidence_declarations("Bash", {}, {"value": 1}) == ()
+
+
+def test_calculation_reaches_durable_ledger(tmp_path, monkeypatch):
+    from magi_agent.evidence.local_tool_collector import LocalToolEvidenceCollector
+    from magi_agent.gates.gate5b_full_toolhost import (
+        _calculation_evidence_declarations,
+    )
+    from magi_agent.tools.core_toolhost import _tool_result_from_outcome
+
+    monkeypatch.setenv("MAGI_EVIDENCE_LEDGER_DIR", str(tmp_path))
+    decls = _calculation_evidence_declarations(
+        "Calculation", {"expression": "6*7"}, {"value": 42}
+    )
+    outcome = _FakeOutcome(tool_name="Calculation", extra_evidence_declarations=decls)
+    tr = _tool_result_from_outcome(outcome)
+    collector = LocalToolEvidenceCollector()
+    collector.record_tool_result(
+        session_id="sess-c",
+        turn_id="turn-c",
+        tool_call_id="call-c",
+        tool_name="Calculation",
+        result=tr,
+    )
+    ledger = tmp_path / "sess-c.jsonl"
+    assert ledger.exists()
+    types = set()
+    for ln in ledger.read_text().splitlines():
+        if not ln.strip():
+            continue
+        rec = json.loads(ln).get("record")
+        if isinstance(rec, dict):
+            types.add(rec.get("type"))
+    assert "Calculation" in types
+
+
 # --- Part C: CommitCheckpoint native plugin ---------------------------------
 
 
@@ -393,6 +454,7 @@ def test_commit_checkpoint_declares_evidence(tmp_path):
         ("CodeDiagnostics", {"type", "checker", "fileDigest", "errorCount", "capped", "diagnosticsDigest", "entries"}),
         ("CommitCheckpoint", {"checkpointDigest", "pathRef"}),
         ("GitDiff", {"changedFiles", "fileCount", "digest"}),
+        ("Calculation", {"expression", "value", "resultDigest", "observedNumbers"}),
     ],
 )
 def test_shacl_hint_is_subset_of_emitted_fields(type_name, emitted):

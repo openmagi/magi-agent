@@ -26,7 +26,7 @@ silently never fire, defeating determinism.
 WHAT THIS TEST VERIFIES
 =======================
 
-1. The 6 "no producer located" types stay empty.  This is the F2-task lock:
+1. The 5 "no producer located" types stay empty.  This is the F2-task lock:
    independent producer-source review (recorded in the source comments
    above ``_BUILTIN_FIELD_HINTS``) found no concrete ``EvidenceRecord``
    field emission for these types.  If a future PR adds a producer, the
@@ -54,7 +54,7 @@ from magi_agent.evidence.builtin import builtin_evidence_catalog
 
 
 # ---------------------------------------------------------------------------
-# Block 1: the 6 honest-empty types.  Verified producer-absent at F2 time.
+# Block 1: the 5 honest-empty types.  Verified producer-absent at F2 time.
 # Producer-source notes live in shacl_compiler.py above _BUILTIN_FIELD_HINTS.
 # ---------------------------------------------------------------------------
 
@@ -64,7 +64,8 @@ _EMPTY_HINT_TYPES_LOCK: tuple[str, ...] = (
     "FileDeliver",          # documents.file_deliver sets metadata sans 'evidence' key
     "ArtifactVerify",       # no producer construction site located anywhere
     "PlanVerifier",         # only catalog/verifier-bus refs; no producer site
-    "Calculation",          # gate handlers return raw {'value': ...}; no evidence key
+    # Calculation removed: live gate5b Calculation handler now emits a typed
+    # EvidenceRecord (expression/value/resultDigest/observedNumbers).
     "DateRange",            # source_ledger.date_range uses ok_result (no evidence key)
     "TelegramDeliveryAck",  # external_ack source_kind is dropped by extraction.py
 )
@@ -72,7 +73,7 @@ _EMPTY_HINT_TYPES_LOCK: tuple[str, ...] = (
 
 @pytest.mark.parametrize("evidence_type", _EMPTY_HINT_TYPES_LOCK)
 def test_empty_hint_types_remain_empty(evidence_type: str) -> None:
-    """Lock the honest-empty hint policy for the 6 producer-absent types.
+    """Lock the honest-empty hint policy for the 5 producer-absent types.
 
     Adding a non-empty hint here without first wiring a real producer would
     silently corrupt the NL→SHACL compiler.  If you have a real producer,
