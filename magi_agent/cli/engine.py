@@ -2271,12 +2271,40 @@ class MagiEngineDriver:
         file_edit_calls = 0
         zero_edit_retry_done = False
 
+        # PR-K: per-turn 1-based dispatch-attempt counter for the
+        # ``engine.trace llm_call_*`` stamps. Increments at every outer-loop
+        # iteration of ``_drive`` (so output-continuation, goal-nudge,
+        # grace, empty-response-recovery, and rate-limit recovery re-
+        # invocations all advance it). Default-OFF for the trace; the
+        # counter itself costs nothing.
+        llm_call_attempt = 0
+
         try:
             while True:
                 # (Re-)invoke the run: a FRESH ``adapter.run_turn`` is a fresh
                 # ``Runner.run_async`` and therefore a real model call. On the
                 # first iteration this is the original invocation; on a recovery
                 # retry it is the genuine second invocation.
+                llm_call_attempt += 1
+                # PR-K: stamp BEFORE the adapter.run_turn dispatch. Paired
+                # with the matching ``llm_call_completed`` / ``llm_call_
+                # exception`` stamps below so the operator can see whether
+                # the engine entered a fresh dispatch attempt at all, and
+                # whether it exited that attempt normally vs by raising.
+                try:
+                    import os as _pr_k_os  # noqa: PLC0415
+
+                    from magi_agent.runtime.child_runner_live import (  # noqa: PLC0415
+                        _maybe_log_trace_engine_llm_call_start,
+                    )
+
+                    _maybe_log_trace_engine_llm_call_start(
+                        _pr_k_os.environ,
+                        attempt=llm_call_attempt,
+                        turn_id=turn_id,
+                    )
+                except Exception:  # noqa: BLE001 - trace must never break a turn.
+                    pass
                 adk_iter: AsyncIterator[object] = (
                     adapter.run_turn(runner_input).__aiter__()  # type: ignore[union-attr]
                 )
@@ -2398,6 +2426,27 @@ class MagiEngineDriver:
                             budget_exhausted = True
                             break
                 except Exception as exc:  # noqa: BLE001 - surface as terminal error
+                    # PR-K: stamp the dispatch-side exception BEFORE the
+                    # existing recovery flow captures it into attempt_error.
+                    # The recovery layer still decides whether to re-invoke;
+                    # this trace fires independent of that decision so the
+                    # operator sees the failure shape regardless of whether
+                    # the engine retried or surfaced the terminal error.
+                    try:
+                        import os as _pr_k_os  # noqa: PLC0415
+
+                        from magi_agent.runtime.child_runner_live import (  # noqa: PLC0415
+                            _maybe_log_trace_engine_llm_call_exception,
+                        )
+
+                        _maybe_log_trace_engine_llm_call_exception(
+                            _pr_k_os.environ,
+                            attempt=llm_call_attempt,
+                            turn_id=turn_id,
+                            exception=exc,
+                        )
+                    except Exception:  # noqa: BLE001 - trace never breaks a turn.
+                        pass
                     attempt_error = exc
                 finally:
                     await self._aclose_iter(adk_iter)
@@ -2405,6 +2454,28 @@ class MagiEngineDriver:
                     # re-invocations). Runs on every exit — exhaustion, error, and
                     # cancel — so partial usage survives on aborted turns too.
                     _fold_usage(usage, attempt_usage)
+
+                # PR-K: stamp the normal-completion path. Fires when the
+                # adapter dispatch exited without raising AND the turn was
+                # not cancelled mid-flight. Paired with the matching
+                # ``llm_call_start`` so a turn that started a dispatch but
+                # neither completed nor exceptioned is visible as a
+                # zero-completion gap in the operator's log.
+                if attempt_error is None and not cancelled:
+                    try:
+                        import os as _pr_k_os  # noqa: PLC0415
+
+                        from magi_agent.runtime.child_runner_live import (  # noqa: PLC0415
+                            _maybe_log_trace_engine_llm_call_completed,
+                        )
+
+                        _maybe_log_trace_engine_llm_call_completed(
+                            _pr_k_os.environ,
+                            attempt=llm_call_attempt,
+                            turn_id=turn_id,
+                        )
+                    except Exception:  # noqa: BLE001 - trace never breaks a turn.
+                        pass
 
                 if cancelled:
                     break
