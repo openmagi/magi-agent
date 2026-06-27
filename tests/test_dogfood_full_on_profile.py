@@ -392,6 +392,7 @@ _INTENTIONALLY_NOT_IN_FULL_PROFILE: dict[str, str] = {
     "MAGI_DURABLE_LOCAL_WRITES_ENABLED": "WS1 durable substrate: opt-in operational flag (sqlite writes); enable per-host, not via profile",
     "MAGI_DURABLE_CHECKPOINTS_ENABLED": "WS1 durable substrate: opt-in checkpoint emission; gated by LOCAL_WRITES, enable per-host",
     "MAGI_DURABLE_STARTUP_RECOVERY_ENABLED": "WS1 durable substrate: opt-in boot reclaim sweep; enable per-host",
+    "MAGI_DURABLE_FOREGROUND_CONTINUATION_ENABLED": "WS1 OPTIONAL context-only foreground continuation; opt-in only, ships OFF everywhere in v1 (primary value is T1 background reclaim)",
 }
 
 
