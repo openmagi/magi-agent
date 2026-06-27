@@ -24,12 +24,22 @@ export interface LocalBootstrapSetup {
   providers: string[];
 }
 
+/**
+ * Default-OFF feature toggles the dashboard reads to hide gated surfaces
+ * (e.g. the chat Audit tab) when their backend flag is off. Older runtimes
+ * omit `features`, in which case every gated surface stays hidden.
+ */
+export interface LocalBootstrapFeatures {
+  auditPanel?: boolean;
+}
+
 export interface LocalBootstrap {
   ok?: boolean;
   agentUrl?: string;
   tokenRequired?: boolean;
   token?: string;
   setup?: LocalBootstrapSetup;
+  features?: LocalBootstrapFeatures;
 }
 
 let bootstrapPromise: Promise<LocalBootstrap | null> | null = null;

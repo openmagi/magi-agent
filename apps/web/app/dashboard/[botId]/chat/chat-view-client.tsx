@@ -2330,6 +2330,7 @@ export function ChatViewClient({
         getAccessToken={getAccessToken}
         missionChannelType="app"
         missionChannelId={activeChannel}
+        auditSessionId={chatApi.buildSessionKey(botId, activeChannel)}
         channelState={channelState}
         uiLanguage={locale}
         queuedMessages={queuedMessages[activeChannel] ?? []}
