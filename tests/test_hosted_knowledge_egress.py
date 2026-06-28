@@ -74,6 +74,8 @@ def test_gate_off_falls_through_to_local_fake(
         raise AssertionError("hosted egress must not run when the flag is off")
 
     monkeypatch.setattr(_hosted_knowledge, "_http_post", _boom)
+    # Force the linear-scan path (qmd may or may not be installed on the host).
+    monkeypatch.setattr(knowledge, "search_knowledge_via_qmd", lambda *a, **k: None)
 
     # The local boundary now reads the real on-disk workspace KB instead of a
     # canned placeholder. Seed a matching document so fall-through returns it.
