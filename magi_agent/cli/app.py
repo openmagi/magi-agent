@@ -45,7 +45,7 @@ from magi_agent.cli.wiring import (
     build_tui_app,
     local_runner_policy_routing_enabled_from_env,
 )
-from magi_agent.runtime.local_defaults import apply_local_full_runtime_defaults
+from magi_agent.runtime.local_defaults import apply_runtime_profile_defaults
 
 __all__ = ["app", "main", "resolve_headless_permission_mode"]
 
@@ -294,16 +294,10 @@ def agent(
     from magi_agent.config.flags import flag_str  # noqa: PLC0415
 
     runtime_profile = _normalize_runtime_profile(flag_str("MAGI_RUNTIME_PROFILE"))
-    if runtime_profile == "eval":
-        from magi_agent.runtime.local_defaults import apply_local_eval_runtime_defaults  # noqa: PLC0415
-
-        apply_local_eval_runtime_defaults(os.environ)
-    elif runtime_profile == "lab":
-        from magi_agent.runtime.local_defaults import apply_lab_runtime_defaults  # noqa: PLC0415
-
-        apply_lab_runtime_defaults(os.environ)
-    else:
-        apply_local_full_runtime_defaults(os.environ)
+    # Default (unset) profile resolves to the experimental ``lab`` tier; explicit
+    # full/eval/safe still win. Dispatch is centralized in local_defaults so the
+    # serve path (main.py) and the CLI never drift.
+    apply_runtime_profile_defaults(os.environ)
     # User-facing control-plane behavior toggles (~/.magi/customize.json) win
     # over the profile seed just applied: project them as an explicit overwrite.
     try:

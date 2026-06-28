@@ -451,6 +451,41 @@ def apply_lab_runtime_defaults(environ: MutableMapping[str, str]) -> None:
         environ.setdefault(key, value)
 
 
+def apply_runtime_profile_defaults(environ: MutableMapping[str, str]) -> None:
+    """Single profile-dispatch entry point shared by ``magi`` (cli/app.py) and
+    ``magi-agent serve`` (main.py).
+
+    The DEFAULT (no ``MAGI_RUNTIME_PROFILE`` set) is the experimental ``lab``
+    tier: a clean install boots with the full experimental flat-flag set ON. The
+    lab features graduated into the shipped default once they were trusted, so an
+    operator no longer has to pin ``MAGI_RUNTIME_PROFILE=lab`` to get them.
+
+    Explicit profiles still win (all seeding is setdefault-based, so explicit env
+    incl. per-flag ``MAGI_X=0`` also wins):
+
+    * unset / ``lab`` -> ``apply_lab_runtime_defaults`` (local-full + experimental)
+    * ``full``        -> ``apply_local_full_runtime_defaults`` (leaner stable tier)
+    * ``eval``        -> ``apply_local_eval_runtime_defaults`` (benchmark tier)
+    * ``safe`` / ``minimal`` / ``off`` / ``conservative`` -> no-op overlay: they
+      are non-empty and not ``lab``/``full``/``eval``, so they fall through to
+      apply_lab, whose internal ``local_full_runtime_defaults_enabled`` gate
+      skips them (no experimental seeding, conservative as before).
+
+    Registry defaults in ``config/flags.py`` are NOT changed by any branch, so a
+    library/test import (which never calls this) stays byte-identical default-OFF.
+    """
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
+    profile = (flag_str("MAGI_RUNTIME_PROFILE", env=environ) or "").strip().lower()
+    if profile == "eval":
+        apply_local_eval_runtime_defaults(environ)
+    elif profile == "full":
+        apply_local_full_runtime_defaults(environ)
+    else:
+        # Unset (default) and explicit ``lab`` both get the experimental tier.
+        apply_lab_runtime_defaults(environ)
+
+
 def apply_local_eval_runtime_defaults(environ: MutableMapping[str, str]) -> None:
     """Apply the one-shot eval profile (MAGI_RUNTIME_PROFILE=eval). setdefault
     semantics: explicit operator env always wins."""
@@ -459,13 +494,15 @@ def apply_local_eval_runtime_defaults(environ: MutableMapping[str, str]) -> None
 
 
 def apply_local_full_runtime_defaults(environ: MutableMapping[str, str]) -> None:
-    """Apply the default installed/local profile to a mutable env mapping.
+    """Apply the leaner ``full`` local profile to a mutable env mapping.
 
-    The underlying feature gates can remain conservative for import-time tests
-    and custom deployments. A clean local ``magi`` or ``magi-agent serve``
-    install should start the full local runtime unless the operator explicitly
-    opts out with ``MAGI_RUNTIME_PROFILE=safe|minimal|off|conservative|eval`` or
-    ``MAGI_AGENT_LOCAL_FULL_RUNTIME_DEFAULTS=0``.
+    NOTE: as of the lab-graduation change this is the EXPLICIT ``full`` tier, not
+    the default a clean install gets. ``apply_runtime_profile_defaults`` now
+    routes an unset profile to ``lab`` (full + experimental); set
+    ``MAGI_RUNTIME_PROFILE=full`` for this leaner tier. The underlying feature
+    gates can remain conservative for import-time tests and custom deployments,
+    and the safe tiers (``MAGI_RUNTIME_PROFILE=safe|minimal|off|conservative|eval``
+    or ``MAGI_AGENT_LOCAL_FULL_RUNTIME_DEFAULTS=0``) still opt out entirely.
     """
 
     if not local_full_runtime_defaults_enabled(environ):
