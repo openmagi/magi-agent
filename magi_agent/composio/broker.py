@@ -25,10 +25,11 @@ _CONNECT_PATH = "/v1/integrations/composio/connect"
 _CONNECTIONS_PATH = "/v1/integrations/composio/connections"
 _CONNECTION_PATH = "/v1/integrations/composio/connection"
 _CATALOG_PATH = "/v1/integrations/composio/catalog"
+_SESSION_PATH = "/v1/integrations/composio/session"
 
 
 class ComposioBrokerClient:
-    """Tenant-scoped client for the magi-cp Composio broker endpoints.
+    """Tenant-scoped client for the platform Composio broker endpoints.
 
     The broker resolves the tenant from the Bearer ``token`` and scopes
     connected accounts to ``entity_id`` (the per-user/bot segment derived by
@@ -113,3 +114,61 @@ class ComposioBrokerClient:
                 "entity_id": self._entity,
             },
         )
+
+    def session(self, *, toolkits: tuple[str, ...] = ()) -> dict[str, Any]:
+        """Mint a Composio MCP session for this entity (approach A).
+
+        Returns ``{"mcp_url", "headers"}`` for Composio's own MCP endpoint; the
+        caller connects its ADK toolset DIRECTLY there (the broker steps out of
+        the tool-call path after minting).
+        """
+        body: dict[str, Any] = {"entity_id": self._entity}
+        if toolkits:
+            body["toolkits"] = list(toolkits)
+        return self._call("POST", _SESSION_PATH, json=body)
+
+
+def default_http_transport(
+    method: str,
+    url: str,
+    *,
+    token: str,
+    json: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Bearer-authed httpx transport (lazy import keeps cold-start clean)."""
+    import httpx
+
+    response = httpx.request(
+        method,
+        url,
+        headers={"Authorization": f"Bearer {token}"},
+        json=json,
+        timeout=30.0,
+    )
+    response.raise_for_status()
+    if not response.content:
+        return {}
+    parsed = response.json()
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def build_broker_client(
+    config: Any,
+    *,
+    transport: BrokerTransport | None = None,
+) -> ComposioBrokerClient | None:
+    """Build a broker client from a resolved ``platform``-mode config, or None.
+
+    Returns ``None`` unless the config carries a broker URL + platform token
+    (i.e. ``credential_source == "platform"`` and active).
+    """
+    base_url = getattr(config, "platform_broker_url", None)
+    token = getattr(config, "platform_token", None)
+    if not base_url or not token:
+        return None
+    return ComposioBrokerClient(
+        base_url=base_url,
+        token=token,
+        entity_id=getattr(config, "entity_id", None) or "default",
+        transport=transport or default_http_transport,
+    )
