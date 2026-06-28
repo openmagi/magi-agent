@@ -201,9 +201,8 @@ def build_cli_model_runner(
     build_model = model_factory or _build_litellm_model
     model = build_model(config)
     receipt_store = general_automation_receipts or GeneralAutomationReceiptLedgerStore()
-    tool_evidence_collector = (
-        local_tool_evidence_collector
-        or LocalToolEvidenceCollector(general_automation_receipts=receipt_store)
+    tool_evidence_collector = local_tool_evidence_collector or LocalToolEvidenceCollector(
+        general_automation_receipts=receipt_store
     )
 
     effective_workspace_root = workspace_root if workspace_root is not None else os.getcwd()
@@ -261,9 +260,7 @@ def build_cli_model_runner(
     # leave the plane present but behaviorally empty.
     plane_plugin = build_default_plugin(
         general_automation_receipts=receipt_store,
-        contract_required=_required_deliverable_evidence_from_assembly(
-            runner_policy_assembly
-        ),
+        contract_required=_required_deliverable_evidence_from_assembly(runner_policy_assembly),
         agent_role="general",
         self_review_fork_runner=self_review_fork_runner,
         self_review_candidate_sink=self_review_candidate_sink,
@@ -423,6 +420,71 @@ def reset_per_turn_reasoning_effort(token: Token[str | None]) -> None:
     _per_turn_reasoning_effort.reset(token)
 
 
+def _resolve_reasoning_kwargs_from_effort(
+    value: str,
+    *,
+    provider: str | None,
+    config: ProviderConfig | None,
+) -> dict[str, object]:
+    """Translate an effort string (env or per-turn) into per-model wire kwargs.
+
+    This is the PR-L root fix for the multi-session silent-empty saga
+    (issues A/B from 0.1.62 through 0.1.89). Before, both code paths
+    forwarded ``{"reasoning_effort": value}`` blind to provider/model;
+    anthropic adaptive-only models (Opus 4.7/4.8) and Gemini 400 on that
+    shape, LiteLLM retries 4x and the SpawnAgent child terminates as
+    ``error/failed`` with ``summary_len=0``. Kevin's 0.1.89 sandbox repro
+    (``magi-serve.log`` line 233) captured the exact failure.
+
+    When the catalog has a record for ``(config.provider, config.model)``,
+    the per-model ``reasoning_style`` decides the wire shape:
+
+    * ``adaptive`` -> ``{"thinking": {"type": "adaptive"}}`` (operator's
+      effort level is discarded; adaptive models do not accept it).
+    * ``effort``   -> ``{"reasoning_effort": <normalized value>}``.
+    * ``budget``   -> ``{}`` (use ``MAGI_MODEL_THINKING_BUDGET_TOKENS``).
+    * ``none`` / record missing the ``reasoning`` capability -> ``{}``.
+
+    When ``config`` is ``None`` (legacy fixtures that build without a typed
+    config) OR the catalog has no record (custom pin / OpenRouter
+    routed-only model), the today-byte-identical pass-through
+    ``{"reasoning_effort": <normalized value>}`` is preserved.
+
+    The :data:`_PROVIDERS_THAT_REJECT_REASONING_EFFORT` reject set (currently
+    ``{"fireworks"}``) is applied AFTER catalog classification so a future
+    authoring slip that flips a fireworks record to ``effort`` style is still
+    caught by the runtime guardrail.
+    """
+
+    if config is None:
+        if provider in _PROVIDERS_THAT_REJECT_REASONING_EFFORT:
+            return {}
+        return {"reasoning_effort": _normalize_reasoning_effort(value, provider)}
+    from magi_agent.models import ModelCatalog  # noqa: PLC0415
+
+    record = ModelCatalog.builtin().record(config.provider, config.model)
+    if record is None:
+        # Catalog has no row for this id (custom pin / routed-only alias);
+        # keep the today-pass-through so untyped fixtures and exotic configs
+        # do not regress.
+        if provider in _PROVIDERS_THAT_REJECT_REASONING_EFFORT:
+            return {}
+        return {"reasoning_effort": _normalize_reasoning_effort(value, provider)}
+    if "reasoning" not in record.capabilities or record.reasoning_style == "none":
+        return {}
+    if record.reasoning_style == "adaptive":
+        return {"thinking": {"type": "adaptive"}}
+    if record.reasoning_style == "budget":
+        # Budget models want explicit token counts via
+        # MAGI_MODEL_THINKING_BUDGET_TOKENS, not effort levels.
+        return {}
+    # ``effort`` style: apply the provider reject-set AFTER catalog
+    # classification (kept as a guardrail against catalog authoring drift).
+    if (provider or config.provider) in _PROVIDERS_THAT_REJECT_REASONING_EFFORT:
+        return {}
+    return {"reasoning_effort": _normalize_reasoning_effort(value, provider)}
+
+
 def _model_reasoning_kwargs(
     env: Mapping[str, str] | None = None,
     *,
@@ -447,14 +509,18 @@ def _model_reasoning_kwargs(
       budgeted thinking (e.g. Sonnet 4.5). Adaptive-only models (Opus 4.7/4.8)
       REJECT this shape with a 400 — use ``MAGI_MODEL_REASONING_EFFORT`` (or
       ``MAGI_MODEL_THINKING_TYPE=adaptive``) for those.
-    * Per-turn ContextVar override (chat-completions ``reasoningEffort``).
-    * ``MAGI_MODEL_REASONING_EFFORT`` — litellm's cross-provider
-      ``reasoning_effort`` (``minimal``/``low``/``medium``/``high``/``xhigh``/
-      ``max``); ``off``/``none`` disable. RECOMMENDED knob: litellm maps it
-      per-model — adaptive models get ``thinking={"type": "adaptive"}`` plus
-      ``output_config.effort``, budget models get an enabled budget. When
-      ``provider`` is supplied, values are also normalized per-provider
-      (notably ``max`` → ``xhigh`` for OpenAI/OpenRouter, which reject ``max``).
+    * Per-turn ContextVar override (chat-completions ``reasoningEffort``);
+      routed through :func:`_resolve_reasoning_kwargs_from_effort` so the
+      dashboard's per-turn picker honors the catalog's per-model wire shape.
+    * ``MAGI_MODEL_REASONING_EFFORT`` (truthy, non-disable value); also routed
+      through :func:`_resolve_reasoning_kwargs_from_effort`. PR-L root fix:
+      adaptive models -> ``thinking={type:adaptive}``, effort models ->
+      ``reasoning_effort=<normalized>``, none/budget -> dropped. With no
+      ``config`` (legacy fixtures), the helper preserves the today-byte-
+      identical pass-through.
+    * ``MAGI_MODEL_REASONING_EFFORT=off`` (or ``none`` / ``0`` / ``false`` /
+      ``disable`` / ``disabled``) is an explicit kill switch that returns
+      ``{}`` even when the catalog default would otherwise apply.
     * Catalog default (E-6, gated by ``MAGI_MODEL_REASONING_DEFAULT_ON``) —
       lowest precedence; sourced from
       :meth:`magi_agent.models.ModelCatalog.reasoning_default` so a fresh
@@ -462,10 +528,6 @@ def _model_reasoning_kwargs(
       numbers were measured. Requires ``config`` to know which (provider,
       model) row to consult. Default-OFF for soak — when the flag is OFF
       this function returns ``{}`` from this branch, byte-identical to today.
-
-    ``MAGI_MODEL_REASONING_EFFORT=off`` (or ``none`` / ``0`` / etc.) is an
-    explicit disable that returns ``{}`` even when the catalog default would
-    otherwise apply — operators retain a hard kill switch.
     """
 
     from magi_agent.config.flags import flag_int, flag_str  # noqa: PLC0415
@@ -484,9 +546,7 @@ def _model_reasoning_kwargs(
     # an explicit per-turn pick that should beat the env knob.
     override = _per_turn_reasoning_effort.get()
     if override:
-        if provider in _PROVIDERS_THAT_REJECT_REASONING_EFFORT:
-            return {}
-        return {"reasoning_effort": _normalize_reasoning_effort(override, provider)}
+        return _resolve_reasoning_kwargs_from_effort(override, provider=provider, config=config)
     effort_raw = (flag_str("MAGI_MODEL_REASONING_EFFORT", env=source) or "").strip().lower()
     _disable_tokens = {"off", "none", "0", "false", "disable", "disabled"}
     if effort_raw in _disable_tokens:
@@ -494,9 +554,7 @@ def _model_reasoning_kwargs(
         # the default-on flag is set — preserves a hard escape hatch.
         return {}
     if effort_raw:
-        if provider in _PROVIDERS_THAT_REJECT_REASONING_EFFORT:
-            return {}
-        return {"reasoning_effort": _normalize_reasoning_effort(effort_raw, provider)}
+        return _resolve_reasoning_kwargs_from_effort(effort_raw, provider=provider, config=config)
     # E-6: catalog-sourced default reasoning kwargs. Gated default-OFF for soak
     # per AGENTS.md flag-promotion-verification — OFF stays byte-identical to
     # today (no env set + no override + no flag ⇒ ``{}``). Local import keeps
@@ -508,9 +566,7 @@ def _model_reasoning_kwargs(
 
     if not flag_bool("MAGI_MODEL_REASONING_DEFAULT_ON", env=source):
         return {}
-    default_kwargs = dict(
-        ModelCatalog.builtin().reasoning_default(config.provider, config.model)
-    )
+    default_kwargs = dict(ModelCatalog.builtin().reasoning_default(config.provider, config.model))
     if not default_kwargs:
         return {}
     # The per-provider reject-list applies to catalog defaults too — fireworks
@@ -583,9 +639,7 @@ def _maybe_build_cache_aware_anthropic(
     )
 
 
-def _build_litellm_model(
-    config: ProviderConfig, env: Mapping[str, str] | None = None
-) -> object:
+def _build_litellm_model(config: ProviderConfig, env: Mapping[str, str] | None = None) -> object:
     cache_aware = _maybe_build_cache_aware_anthropic(config, env)
     if cache_aware is not None:
         return cache_aware
@@ -830,9 +884,7 @@ def _apply_customize_verification(required_validators: list[str]) -> list[str]:
             # the ref into UNRELATED turns (e.g. a non-coding chat answer), so the
             # gate would block on a ref no producer can satisfy. Only an explicit
             # opt-OUT subtracts.
-            enabled = policy.resolve_enabled(
-                preset_id, default=seam.runtime_default_on
-            )
+            enabled = policy.resolve_enabled(preset_id, default=seam.runtime_default_on)
             if not enabled:
                 result = [r for r in result if r not in seam.controls_refs]
         # Custom deterministic_ref rules (P1) compile as opt-out adds: an enabled
@@ -854,9 +906,7 @@ def _apply_customize_verification(required_validators: list[str]) -> list[str]:
         # identical). Curated mapping in ``customize.catalog.RECIPE_ID_TO_PACK_IDS``
         # leaves security-critical packs unmapped so a user cannot disable them
         # through this seam.
-        disabled_validator_refs, _disabled_evidence_refs = (
-            _disabled_recipe_pack_refs(policy)
-        )
+        disabled_validator_refs, _disabled_evidence_refs = _disabled_recipe_pack_refs(policy)
         if disabled_validator_refs:
             result = [r for r in result if r not in disabled_validator_refs]
         return result
@@ -901,12 +951,8 @@ def _disabled_recipe_pack_refs(policy: object) -> tuple[frozenset[str], frozense
                     pack = registry.get(pack_id)
                 except Exception:  # noqa: BLE001 — unknown pack ⇒ skip
                     continue
-                disabled_validator_refs.update(
-                    getattr(pack, "validator_refs", ()) or ()
-                )
-                disabled_evidence_refs.update(
-                    getattr(pack, "evidence_refs", ()) or ()
-                )
+                disabled_validator_refs.update(getattr(pack, "validator_refs", ()) or ())
+                disabled_evidence_refs.update(getattr(pack, "evidence_refs", ()) or ())
         return (frozenset(disabled_validator_refs), frozenset(disabled_evidence_refs))
     except Exception:  # noqa: BLE001 — never wedge the assembly build
         return (frozenset(), frozenset())
@@ -942,9 +988,7 @@ def _apply_customize_evidence_overrides(required_evidence: list[str]) -> list[st
                 result = [r for r in result if r not in seam.controls_refs]
         # Phase 3 — recipe opt-out: same allowlist semantics as the validator
         # pass above. Empty ``enabled_recipes`` ⇒ no-op (byte-identical).
-        _disabled_validator_refs, disabled_evidence_refs = (
-            _disabled_recipe_pack_refs(policy)
-        )
+        _disabled_validator_refs, disabled_evidence_refs = _disabled_recipe_pack_refs(policy)
         if disabled_evidence_refs:
             result = [r for r in result if r not in disabled_evidence_refs]
         return result
@@ -1053,19 +1097,17 @@ def _build_default_runner_policy_assembly(
     from magi_agent.recipes.kernel_recipe_packs import (  # noqa: PLC0415
         build_runtime_pack_registry,
     )
+
     _pin_registry = build_runtime_pack_registry()
     from magi_agent.recipes.recipe_routing import (  # noqa: PLC0415
         normalize_pinned_recipe_pack_ids,
     )
-    validated_pins = normalize_pinned_recipe_pack_ids(
-        pinned_recipe_pack_ids, _pin_registry
-    )
+
+    validated_pins = normalize_pinned_recipe_pack_ids(pinned_recipe_pack_ids, _pin_registry)
     required_refs: list[dict[str, str]] = []
     if forced_recipe:
         required_refs.append({"recipeId": forced_recipe})
-    required_refs.extend(
-        {"recipeId": pid} for pid in validated_pins if pid != forced_recipe
-    )
+    required_refs.extend({"recipeId": pid} for pid in validated_pins if pid != forced_recipe)
     if required_refs:
         runtime_context["explicitRecipeSelection"] = {
             "mode": "this_turn",
@@ -1152,11 +1194,7 @@ def _attach_first_party_policy_callback(
         return
     original = getattr(agent, "before_tool_callback", None)
     original_as_list = (
-        []
-        if original is None
-        else list(original)
-        if isinstance(original, list)
-        else [original]
+        [] if original is None else list(original) if isinstance(original, list) else [original]
     )
 
     # Recipe-scoped tool enforcement (HB-3) is gated behind the recipe-routing
@@ -1227,9 +1265,7 @@ def _attach_first_party_policy_callback(
     ]
 
 
-def _read_selected_recipe_pack_ids(
-    tool_context: object, state_key: str
-) -> tuple[str, ...]:
+def _read_selected_recipe_pack_ids(tool_context: object, state_key: str) -> tuple[str, ...]:
     """Read accumulated recipe-pack selections from the RAW ADK tool context.
 
     The before_tool_callback receives ADK's own tool context, which exposes a
@@ -1251,11 +1287,15 @@ def _contains_forbidden_production_authority(value: object) -> bool:
     if isinstance(value, Mapping):
         for key, nested in value.items():
             key_text = str(key)
-            if key_text in {
-                "productionWriteAllowed",
-                "productionBlockEnabled",
-                "productionAuthority",
-            } and nested is True:
+            if (
+                key_text
+                in {
+                    "productionWriteAllowed",
+                    "productionBlockEnabled",
+                    "productionAuthority",
+                }
+                and nested is True
+            ):
                 return True
             if _contains_forbidden_production_authority(nested):
                 return True
