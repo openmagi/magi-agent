@@ -75,6 +75,17 @@ magi memory search "billing reconciliation"            # BM25 keyword
 magi memory search "how do we reconcile credits" --vector   # semantic
 ```
 
+### External qmd endpoint (`MAGI_QMD_ENDPOINT`)
+
+Advanced/hosted topologies can run qmd as a separate service (e.g. a per-pod
+sidecar that keeps the embedding model warm) instead of a local binary. Set
+`MAGI_QMD_ENDPOINT=http://host:port` (or `[memory] qmd_endpoint`) and the
+**explicit vector surfaces** (`magi memory search --vector`, dashboard
+`/v1/app/memory/search?vector=1`) POST to `<endpoint>/vsearch` instead of shelling
+out to a local `qmd`. Requires `vector_search` on. The per-turn recall path is
+unaffected by this setting (it uses the separate `MAGI_MEMORY_QMD_LIVE_ENABLED`
+live-recall path). Unset (the default) ⇒ local CLI/BM25 as above.
+
 ## Memory vs Context
 
 Context is what the model sees during a run. Memory is durable state that can be

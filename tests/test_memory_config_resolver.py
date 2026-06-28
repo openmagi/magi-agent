@@ -52,6 +52,26 @@ def test_master_defaults_off_when_nothing_set() -> None:
     # The dual-gate recall companion is inert when the master is off.
     assert cfg.prefer_local_search is False
     assert cfg.prefer_qmd_auto_register is False
+    # No external qmd endpoint by default (local CLI/BM25 only).
+    assert cfg.qmd_endpoint is None
+
+
+def test_qmd_endpoint_resolves_from_env_and_config_and_blank() -> None:
+    # Unset -> None.
+    assert resolve_memory_config(env={}, config={}).qmd_endpoint is None
+    # config.toml value.
+    cfg = resolve_memory_config(
+        env={}, config={"memory": {"qmd_endpoint": "http://127.0.0.1:7700"}}
+    )
+    assert cfg.qmd_endpoint == "http://127.0.0.1:7700"
+    # env wins over config.
+    cfg = resolve_memory_config(
+        env={"MAGI_QMD_ENDPOINT": "http://10.0.0.1:9"},
+        config={"memory": {"qmd_endpoint": "http://127.0.0.1:7700"}},
+    )
+    assert cfg.qmd_endpoint == "http://10.0.0.1:9"
+    # blank/whitespace normalizes to None (an empty env var is not "configured").
+    assert resolve_memory_config(env={"MAGI_QMD_ENDPOINT": "   "}, config={}).qmd_endpoint is None
 
 
 def test_default_tunables_are_stable_regardless_of_master() -> None:
