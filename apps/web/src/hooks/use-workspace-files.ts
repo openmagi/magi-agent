@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { agentFetch } from "@/lib/local-api";
 import {
   normalizeWorkspaceFileList,
   type WorkspaceFileApiRow,
@@ -28,10 +29,22 @@ export function useWorkspaceFiles(botId: string): {
 
     async function load(): Promise<void> {
       if (botId === "local") {
-        if (!cancelled) {
-          setFiles([]);
-          setLoading(false);
-          setRefreshing(false);
+        // Local self-host: list the on-disk workspace files (root level + nested,
+        // minus noise + the memory/knowledge subtrees) from the Python runtime.
+        if (isInitial) setLoading(true);
+        else setRefreshing(true);
+        try {
+          const res = await agentFetch("/v1/app/workspace");
+          if (!res.ok) return;
+          const data = await res.json() as { files?: WorkspaceFileApiRow[] };
+          if (!cancelled) setFiles(normalizeWorkspaceFileList(data.files ?? []));
+        } catch (err) {
+          console.error("[use-workspace-files] Failed to load local workspace:", err);
+        } finally {
+          if (!cancelled) {
+            setLoading(false);
+            setRefreshing(false);
+          }
         }
         return;
       }

@@ -562,7 +562,12 @@ export function KbSidePanel({
     });
 
     try {
-      const res = await fetch(buildWorkspaceFileContentUrl({ botId, path: file.path, mode: "content" }));
+      const res =
+        botId === "local"
+          ? await agentFetch(
+              `/v1/app/workspace/file?path=${encodeURIComponent(file.path)}`,
+            )
+          : await fetch(buildWorkspaceFileContentUrl({ botId, path: file.path, mode: "content" }));
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         throw new Error(body?.error || `Failed (${res.status})`);
