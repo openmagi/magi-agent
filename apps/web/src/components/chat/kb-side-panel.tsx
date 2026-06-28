@@ -6,6 +6,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { WorkConsolePanel } from "./work-console-panel";
 import { MissionsPanel, type MissionChannelType, type MissionFocusRequest } from "./missions-panel";
+import { AuditPanel } from "./audit-panel";
+import { useAuditEnabled } from "@/hooks/use-audit-events";
 import {
   OPEN_MISSION_LEDGER_EVENT,
   readOpenMissionLedgerEvent,
@@ -56,7 +58,7 @@ const MIN_PREVIEW_HEIGHT = 80;
 const KB_PANEL_ROW_LIMIT = 20;
 
 type PanelScope = KbPanelScope | "workspace";
-export type RightInspectorView = "work" | "missions" | "knowledge";
+export type RightInspectorView = "work" | "missions" | "knowledge" | "audit";
 
 interface KbSidePanelProps {
   botId: string;
@@ -73,6 +75,8 @@ interface KbSidePanelProps {
   getAccessToken?: () => Promise<string | null>;
   missionChannelType?: MissionChannelType;
   missionChannelId?: string | null;
+  /** Backend observability session id for the active channel (Audit tab). */
+  auditSessionId?: string | null;
   channelState?: ChannelState;
   queuedMessages?: QueuedMessage[];
   controlRequests?: ControlRequestRecord[];
@@ -128,7 +132,14 @@ function shouldSuppressInlineRunDetails(
 }
 
 function parseRightInspectorView(value: string | null): RightInspectorView | null {
-  if (value === "work" || value === "missions" || value === "knowledge") return value;
+  if (
+    value === "work" ||
+    value === "missions" ||
+    value === "knowledge" ||
+    value === "audit"
+  ) {
+    return value;
+  }
   return null;
 }
 
@@ -282,6 +293,7 @@ export function KbSidePanel({
   getAccessToken,
   missionChannelType,
   missionChannelId,
+  auditSessionId,
   channelState = EMPTY_CHANNEL_STATE,
   queuedMessages = [],
   controlRequests = [],
@@ -289,6 +301,7 @@ export function KbSidePanel({
   onWorkOpenChange,
   uiLanguage,
 }: KbSidePanelProps): React.ReactElement {
+  const auditEnabled = useAuditEnabled();
   const [expanded, setExpanded] = useState(() => {
     if (typeof window === "undefined") return true;
     try { return localStorage.getItem(PANEL_KEY) !== "0"; } catch { return true; }
@@ -314,6 +327,21 @@ export function KbSidePanel({
   });
   const [activeView, setActiveView] =
     useState<RightInspectorView>(getInitialRightInspectorView);
+  // Fall back to "work" when a stale localStorage value selects the Audit tab
+  // but the feature is off (flag off, or bootstrap not yet resolved). The
+  // stored state is left untouched so the tab restores once the flag is on.
+  const effectiveView: RightInspectorView =
+    activeView === "audit" && !auditEnabled ? "work" : activeView;
+  // The Audit tab only appears when the backend feature flag is on (read from
+  // the local bootstrap). Default-OFF: 3 tabs unless audit is enabled.
+  const inspectorTabs: Array<[RightInspectorView, string]> = [
+    ["work", "Work"],
+    ["missions", "Missions"],
+    ["knowledge", "Knowledge"],
+    ...(auditEnabled
+      ? [["audit", "Audit"] as [RightInspectorView, string]]
+      : []),
+  ];
   const [missionFocusRequest, setMissionFocusRequest] = useState<MissionFocusRequest | null>(null);
   const [search, setSearch] = useState("");
   const [openCols, setOpenCols] = useState<Set<string>>(() => new Set());
@@ -369,9 +397,9 @@ export function KbSidePanel({
   }, [selectView]);
 
   useEffect(() => {
-    onViewChange?.(activeView);
-    onWorkOpenChange?.(expanded && activeView === "work");
-  }, [activeView, expanded, onViewChange, onWorkOpenChange]);
+    onViewChange?.(effectiveView);
+    onWorkOpenChange?.(expanded && effectiveView === "work");
+  }, [effectiveView, expanded, onViewChange, onWorkOpenChange]);
 
   // Auto-expand the first visible collection for the active scope.
   useEffect(() => {
@@ -800,15 +828,17 @@ export function KbSidePanel({
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2.5 border-b border-black/[0.06]">
         <span className="text-[11px] font-semibold text-secondary/70 uppercase tracking-wide">
-          {activeView === "work"
+          {effectiveView === "work"
             ? "Work"
-            : activeView === "missions"
+            : effectiveView === "missions"
               ? "Missions"
-              : "Knowledge Base"}
+              : effectiveView === "audit"
+                ? "Audit"
+                : "Knowledge Base"}
         </span>
         <div className="flex items-center gap-0.5">
           {/* Refresh button */}
-          {activeView === "knowledge" && (
+          {effectiveView === "knowledge" && (
             <button
               onClick={isWorkspaceScope ? onWorkspaceRefresh : onRefresh}
               disabled={panelRefreshing}
@@ -841,13 +871,13 @@ export function KbSidePanel({
       </div>
 
       <div className="px-2 pt-2">
-        <div className="grid grid-cols-3 rounded-lg bg-black/[0.04] p-0.5" role="tablist" aria-label="Right inspector">
-          {([
-            ["work", "Work"],
-            ["missions", "Missions"],
-            ["knowledge", "Knowledge"],
-          ] as const).map(([view, label]) => {
-            const isActive = activeView === view;
+        <div
+          className={`grid ${inspectorTabs.length === 4 ? "grid-cols-4" : "grid-cols-3"} rounded-lg bg-black/[0.04] p-0.5`}
+          role="tablist"
+          aria-label="Right inspector"
+        >
+          {inspectorTabs.map(([view, label]) => {
+            const isActive = effectiveView === view;
             return (
               <button
                 key={view}
@@ -861,14 +891,14 @@ export function KbSidePanel({
                 role="tab"
                 aria-selected={isActive}
               >
-                {label}
+                <span className="block truncate">{label}</span>
               </button>
             );
           })}
         </div>
       </div>
 
-      {activeView === "work" && (
+      {effectiveView === "work" && (
         <div className="flex min-h-0 flex-1 flex-col">
           <WorkConsolePanel
             channelState={channelState}
@@ -880,8 +910,12 @@ export function KbSidePanel({
         </div>
       )}
 
+      {auditEnabled && effectiveView === "audit" && (
+        <AuditPanel botId={botId} sessionId={auditSessionId} />
+      )}
+
       <div
-        className={`${activeView === "missions" ? "flex" : "hidden"} min-h-0 flex-1 flex-col`}
+        className={`${effectiveView === "missions" ? "flex" : "hidden"} min-h-0 flex-1 flex-col`}
         data-mission-channel-type={missionChannelType}
         data-mission-channel-id={missionChannelId ?? undefined}
       >
@@ -899,7 +933,7 @@ export function KbSidePanel({
         />
       </div>
 
-      {activeView === "knowledge" && (
+      {effectiveView === "knowledge" && (
       <div className="flex min-h-0 flex-1 flex-col">
 
       {/* Scope tabs */}
