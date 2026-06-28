@@ -1,4 +1,4 @@
-//! Pure helpers for locating and supervising the `magi serve` process.
+//! Pure helpers for locating and supervising the serve process.
 //!
 //! Everything here is GUI-free and side-effect-light so it is unit-testable
 //! without the tauri toolchain. The actual process spawn and HTTP polling live
@@ -20,14 +20,23 @@ pub fn bundled_resource_binary(resource_dir: &Path) -> PathBuf {
     resource_dir.join("magi").join("magi")
 }
 
-/// Resolve the `magi` binary to launch.
+/// Resolve the serve binary to launch.
+///
+/// The serve entrypoint is the `magi-agent` console script
+/// (`magi_agent.main:main`), which takes `--host`/`--port` directly. The
+/// brew-installed `magi` command is the Typer CLI (`magi_agent.cli.__main__`)
+/// and has NO serve command, so we PREFER `magi-agent` for the system
+/// fallbacks. The bundled PyInstaller executable is named `magi` but IS the
+/// same `main:main` serve entry, so it stays valid as candidate 1.
 ///
 /// Resolution order, first existing wins:
 ///   1. the bundled onedir executable (`<resource_dir>/magi/magi`), when the
 ///      app ships the standalone PyInstaller `--onedir` tree as a resource,
 ///   2. the `MAGI_BIN` environment override,
-///   3. `~/.magi/bin/magi`,
-///   4. a `magi` discovered on `PATH` (where Homebrew installs land).
+///   3. `~/.magi/bin/magi-agent` (the serve console script),
+///   4. `~/.magi/bin/magi` (secondary; the bundled-style serve binary),
+///   5. `magi-agent` discovered on `PATH` (brew's serve console script),
+///   6. `magi` discovered on `PATH` (secondary; the Typer CLI).
 ///
 /// `exists` is injected so the ordering is testable without touching the real
 /// filesystem. `path_lookup` resolves a bare command name against `PATH`.
@@ -50,7 +59,10 @@ where
         candidates.push(e);
     }
     if let Some(h) = home {
-        candidates.push(h.join(".magi").join("bin").join("magi"));
+        let bin_dir = h.join(".magi").join("bin");
+        // Prefer the serve console script over the Typer CLI.
+        candidates.push(bin_dir.join("magi-agent"));
+        candidates.push(bin_dir.join("magi"));
     }
 
     for candidate in candidates {
@@ -59,8 +71,10 @@ where
         }
     }
 
-    // Last resort: a `magi` on PATH (brew installs land here).
-    path_lookup("magi")
+    // Last resort: a serve entry on PATH (brew installs land here). `magi-agent`
+    // is the serve console script; `magi` is the Typer CLI without a serve
+    // command, so it is only a secondary fallback.
+    path_lookup("magi-agent").or_else(|| path_lookup("magi"))
 }
 
 /// Decide whether a bootstrap response means the server is ready.
@@ -124,7 +138,7 @@ pub fn log_file_path(home: &Path) -> PathBuf {
 
 /// Pick a free TCP port on loopback by binding to port 0 and reading back the
 /// assigned port. The listener is dropped before returning, so the caller can
-/// hand the port to `magi serve`. There is an inherent TOCTOU window, which is
+/// hand the port to the serve runtime. There is an inherent TOCTOU window, which is
 /// acceptable for a single-user desktop launch.
 pub fn pick_free_port() -> io::Result<u16> {
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
@@ -179,7 +193,29 @@ mod tests {
     }
 
     #[test]
-    fn resolve_falls_to_home_when_bundled_and_env_missing() {
+    fn resolve_prefers_home_magi_agent_over_home_magi() {
+        // Both serve scripts exist under ~/.magi/bin; the serve console script
+        // `magi-agent` must win over the Typer CLI `magi`.
+        let home = Path::new("/home/u");
+        let expected = home.join(".magi").join("bin").join("magi-agent");
+        let bundled = bundled_resource_binary(Path::new("/app/Resources"));
+        let found = resolve_magi_binary(
+            Some(bundled),
+            Some(p("/env/magi")),
+            Some(home),
+            |path| {
+                path == home.join(".magi").join("bin").join("magi-agent")
+                    || path == home.join(".magi").join("bin").join("magi")
+            },
+            |_| Some(p("/usr/bin/magi")),
+        );
+        assert_eq!(found, Some(expected));
+    }
+
+    #[test]
+    fn resolve_falls_to_home_magi_when_only_magi_exists() {
+        // Only the secondary `~/.magi/bin/magi` is present (no `magi-agent`):
+        // it is still preferred over any PATH lookup.
         let home = Path::new("/home/u");
         let expected = home.join(".magi").join("bin").join("magi");
         let exp = expected.clone();
@@ -189,22 +225,44 @@ mod tests {
             Some(p("/env/magi")),
             Some(home),
             move |path| path == exp.as_path(),
-            |_| Some(p("/usr/bin/magi")),
+            |_| Some(p("/usr/bin/magi-agent")),
         );
         assert_eq!(found, Some(expected));
     }
 
     #[test]
-    fn resolve_falls_to_path_when_nothing_exists() {
+    fn resolve_path_prefers_magi_agent_over_magi() {
+        // Nothing exists on disk; both `magi-agent` and `magi` resolve on PATH.
+        // The serve console script `magi-agent` must win.
         let bundled = bundled_resource_binary(Path::new("/app/Resources"));
         let found = resolve_magi_binary(
             Some(bundled),
             Some(p("/env/magi")),
             Some(Path::new("/home/u")),
             |_| false,
-            |name| {
-                assert_eq!(name, "magi");
-                Some(p("/usr/local/bin/magi"))
+            |name| match name {
+                "magi-agent" => Some(p("/usr/local/bin/magi-agent")),
+                "magi" => Some(p("/usr/local/bin/magi")),
+                _ => None,
+            },
+        );
+        assert_eq!(found, Some(p("/usr/local/bin/magi-agent")));
+    }
+
+    #[test]
+    fn resolve_path_falls_to_magi_when_no_magi_agent() {
+        // Only the Typer CLI `magi` is on PATH (no serve console script): it is
+        // the secondary fallback.
+        let bundled = bundled_resource_binary(Path::new("/app/Resources"));
+        let found = resolve_magi_binary(
+            Some(bundled),
+            Some(p("/env/magi")),
+            Some(Path::new("/home/u")),
+            |_| false,
+            |name| match name {
+                "magi-agent" => None,
+                "magi" => Some(p("/usr/local/bin/magi")),
+                _ => None,
             },
         );
         assert_eq!(found, Some(p("/usr/local/bin/magi")));
@@ -321,18 +379,23 @@ mod tests {
     }
 
     #[test]
-    fn path_lookup_closure_receives_bare_name() {
-        let seen = RefCell::new(String::new());
+    fn path_lookup_closure_receives_bare_names_in_preference_order() {
+        // When nothing else resolves, PATH is probed for the serve console
+        // script `magi-agent` first, then the secondary `magi`.
+        let seen = RefCell::new(Vec::<String>::new());
         let _ = resolve_magi_binary(
             None,
             None,
             None,
             |_| false,
             |name| {
-                *seen.borrow_mut() = name.to_string();
+                seen.borrow_mut().push(name.to_string());
                 None
             },
         );
-        assert_eq!(*seen.borrow(), "magi");
+        assert_eq!(
+            *seen.borrow(),
+            vec!["magi-agent".to_string(), "magi".to_string()]
+        );
     }
 }

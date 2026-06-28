@@ -44,18 +44,32 @@ def resolve_server_port(
     # byte-identical to the prior ``int(env.get(NAME, "8080"))`` shape.
     from magi_agent.config.flags import flag_int  # noqa: PLC0415
 
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+
     default_port = flag_int("CORE_AGENT_PORT", env=env)
+    # ``flag_str`` returns the registry default ("0.0.0.0") when unset.
+    default_host = flag_str("MAGI_SERVE_HOST", env=env) or "0.0.0.0"
     raw_args = list(sys.argv[1:] if argv is None else argv)
 
     parser = argparse.ArgumentParser(prog="magi-agent")
     parser.add_argument("--port", type=int, default=default_port)
+    # ``--host`` is declared here too so it is DISCOVERABLE in
+    # ``magi-agent --help`` (this is the parser that handles ``-h``, being the
+    # first resolver invoked). The authoritative host value is still resolved by
+    # ``resolve_server_host``; here we only parse-and-ignore it via
+    # ``parse_known_args``, so behaviour is unchanged.
+    parser.add_argument(
+        "--host",
+        type=str,
+        default=default_host,
+        help="Server bind host (env MAGI_SERVE_HOST, default 0.0.0.0).",
+    )
 
     if raw_args and raw_args[0] == "serve":
         raw_args = raw_args[1:]
     elif raw_args and not raw_args[0].startswith("-"):
         parser.error(f"unknown command: {raw_args[0]}")
 
-    # Ignore unrelated flags (e.g. ``--host``) so the two resolvers compose.
     return int(parser.parse_known_args(raw_args)[0].port)
 
 
