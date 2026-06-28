@@ -641,7 +641,7 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         running history, merges the LLM's partial patch on top, then
         decides the next batch of questions.
 
-        Gated behind ``MAGI_CUSTOMIZE_NL_INTERACTIVE_ENABLED`` (default
+        Gated behind ``MAGI_CUSTOMIZE_NL_INTERACTIVE_ENABLED`` (profile-aware default: ON in full / lab,
         OFF). When the flag is OFF, returns the same disabled-feature
         envelope as the one-shot compiler so the dashboard can hide
         the chat UI without branching on HTTP status.
@@ -662,9 +662,13 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             return unauthorized
 
         try:
-            from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+            from magi_agent.config.flags import flag_profile_bool  # noqa: PLC0415
 
-            interactive_enabled = flag_bool(
+            # Profile-aware default: ON under the full / lab profile so a
+            # local-serve operator sees the conversational chat surface
+            # without exporting an extra env var; OFF under safe / eval
+            # so a key-less benchmark host stays quiet.
+            interactive_enabled = flag_profile_bool(
                 "MAGI_CUSTOMIZE_NL_INTERACTIVE_ENABLED"
             )
         except Exception:  # noqa: BLE001

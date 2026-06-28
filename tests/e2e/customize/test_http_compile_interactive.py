@@ -70,7 +70,13 @@ def test_requires_auth(noauth_client: TestClient) -> None:
 def test_flag_off_returns_disabled_envelope(
     auth_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Profile-aware OFF path: the safe / eval profiles disable the
+    conversational compiler so a key-less benchmark host stays quiet.
+    The full / lab profiles default-ON, so this test pins the OFF
+    path by forcing ``MAGI_RUNTIME_PROFILE=safe`` AND clearing any
+    explicit override env var the operator may have set."""
     monkeypatch.delenv("MAGI_CUSTOMIZE_NL_INTERACTIVE_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_RUNTIME_PROFILE", "safe")
     resp = auth_client.post(
         "/v1/app/customize/custom-rules/compile-interactive",
         json={"history": [], "draft_so_far": None, "answers": None},
