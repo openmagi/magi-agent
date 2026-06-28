@@ -1241,10 +1241,23 @@ class RealLocalChildRunner:
 
         # --- Build the child's governed runtime (restricted toolset) ---------
         workspace = self._workspace_root or tempfile.mkdtemp()
-        # ``config`` carries the resolved model string so we extract it for the
-        # ``model`` kwarg; build_headless_runtime accepts it for future
-        # model-selection wiring.
-        route_model = _clean_str(getattr(config, "model", None))
+        # PR-M (TRUE root fix for the multi-session silent-empty saga,
+        # 0.1.62 .. 0.1.90): prefer ``config.litellm_model`` (the
+        # ``<provider>/<model>`` slug) over the bare ``config.model``.
+        # ``build_headless_runtime`` re-resolves the provider downstream via
+        # ``cli.providers.resolve_provider_config(model_override=model)``; a
+        # bare model id (e.g. ``"claude-opus-4-8"``) falls into the openai
+        # auto-detect branch and the catalog lookup fails, which causes PR-L
+        # (#1130) to hit its byte-identical pass-through and emit
+        # ``reasoning_effort=medium`` on a model the OpenAI provider validator
+        # rejects ("openai does not support parameters: ['reasoning_effort'],
+        # for model=claude-opus-4-8"). The slug form preserves provider
+        # attribution end-to-end. Fallback to ``config.model`` keeps
+        # byte-identical behaviour for test fixtures whose minimal mock
+        # configs do not implement the ``litellm_model`` property.
+        route_model = _clean_str(getattr(config, "litellm_model", None)) or _clean_str(
+            getattr(config, "model", None)
+        )
         rt = build_headless_runtime(
             cwd=workspace,
             session_id=session_id,
