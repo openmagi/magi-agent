@@ -711,11 +711,11 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | config, mcp | transport/composio_broker.py, transport/integrations.py |
-| broker.py | HTTP client for the platform Composio broker (``platform`` credential mode). | — | transport/integrations.py |
+| broker.py | HTTP client for the platform Composio broker (``platform`` credential mode). | — | composio/mcp.py, transport/integrations.py |
 | config.py | — | credential_vocab, flags | cli/app.py, cli/wiring.py, composio/__init__.py, composio/health.py, composio/mcp.py, transport/health.py, transport/integrations.py |
 | connections.py | Composio connection management used by the dashboard Integrations tab. | — | — |
 | health.py | — | config, mcp, redaction | cli/app.py, transport/health.py |
-| mcp.py | — | config, redaction | cli/wiring.py, composio/__init__.py, composio/health.py |
+| mcp.py | — | broker, config, redaction | cli/wiring.py, composio/__init__.py, composio/health.py |
 | redaction.py | — | safety | cli/headless.py, composio/health.py, composio/mcp.py, transport/sse.py |
 
 ### computer/

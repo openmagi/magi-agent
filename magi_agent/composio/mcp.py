@@ -8,10 +8,7 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from magi_agent.composio.config import (
-    _DEFAULT_PLATFORM_BROKER_URL,
-    ComposioConfig,
-)
+from magi_agent.composio.config import ComposioConfig
 from magi_agent.composio.redaction import redact_composio_text
 
 _MISSING_PACKAGE_PREVIEW = "install the composio optional extra to enable integrations"
@@ -45,6 +42,7 @@ def build_composio_toolset_bundle(
     composio_client_factory: Callable[[str], _ComposioClient] | None = None,
     toolset_cls: Callable[..., Any] | None = None,
     connection_params_cls: Callable[..., Any] | None = None,
+    platform_session_fetcher: Callable[[ComposioConfig], dict[str, Any]] | None = None,
 ) -> ComposioToolsetBundle:
     if not config.active:
         return ComposioToolsetBundle(
@@ -67,12 +65,14 @@ def build_composio_toolset_bundle(
 
     try:
         if is_platform:
-            # Broker mode: point the ADK MCP client at the platform broker
-            # endpoint with the platform Bearer token. The broker holds the
-            # master Composio key server-side and scopes the session to this
-            # tenant/entity; no local Composio client is created.
-            mcp_url = _platform_mcp_url(config.platform_broker_url)
-            headers = _platform_request_headers(config)
+            # Approach A: ask the broker to mint a Composio session for our
+            # entity, then connect the toolset DIRECTLY to Composio. The broker
+            # holds the master key and steps out of the tool-call path after
+            # minting; no local Composio key/client is used here.
+            fetch = platform_session_fetcher or _default_platform_session_fetcher
+            session = fetch(config)
+            mcp_url = session["mcp_url"]
+            headers = session.get("headers") or {}
             resolved_toolset_cls, resolved_params_cls = _resolve_adk_classes(
                 toolset_cls,
                 connection_params_cls,
@@ -392,24 +392,19 @@ def _default_composio_client(api_key: str) -> _ComposioClient:
     return Composio(api_key=api_key)
 
 
-# Broker MCP endpoint exposed by the magi-cp control-plane. The runtime points
-# its ADK MCP client here in ``platform`` mode; the broker resolves the tenant
-# from the Bearer token and the entity/toolkit headers.
-_PLATFORM_MCP_PATH = "/v1/integrations/composio/mcp"
+def _default_platform_session_fetcher(config: ComposioConfig) -> dict[str, Any]:
+    """Mint a Composio session via the platform broker (approach A).
 
+    Returns Composio's own ``{"mcp_url", "headers"}`` so the toolset connects
+    directly to Composio. Raises if the broker isn't configured (the caller
+    surfaces it as a toolset_build_failed bundle with the token redacted).
+    """
+    from magi_agent.composio.broker import build_broker_client
 
-def _platform_mcp_url(broker_url: str | None) -> str:
-    base = (broker_url or _DEFAULT_PLATFORM_BROKER_URL).rstrip("/")
-    return f"{base}{_PLATFORM_MCP_PATH}"
-
-
-def _platform_request_headers(config: ComposioConfig) -> dict[str, str]:
-    headers = {"Authorization": f"Bearer {config.platform_token}"}
-    if config.entity_id:
-        headers["X-Magi-Composio-Entity"] = config.entity_id
-    if config.toolkits:
-        headers["X-Magi-Composio-Toolkits"] = ",".join(config.toolkits)
-    return headers
+    client = build_broker_client(config)
+    if client is None:
+        raise RuntimeError("platform broker not configured")
+    return client.session(toolkits=config.toolkits)
 
 
 def _resolve_adk_classes(

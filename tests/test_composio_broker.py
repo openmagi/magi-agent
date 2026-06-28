@@ -112,3 +112,58 @@ def test_non_dict_transport_result_is_coerced_to_empty() -> None:
 
     result = _broker(_BadTransport()).initiate("gmail")
     assert result == {}
+
+
+def test_session_posts_mint_with_entity_and_toolkits() -> None:
+    transport = _RecordingTransport(
+        {
+            "mcp_url": "https://mcp.composio.dev/session/minted",
+            "headers": {"x-composio-session": "s_1"},
+        }
+    )
+    result = _broker(transport).session(toolkits=("gmail", "googledrive"))
+
+    assert result["mcp_url"] == "https://mcp.composio.dev/session/minted"
+    call = transport.calls[0]
+    assert call["method"] == "POST"
+    assert call["url"] == "https://api.openmagi.ai/v1/integrations/composio/session"
+    assert call["token"] == "magi_tok_123"
+    assert call["json"] == {
+        "entity_id": "openmagi:user:u1:bot:b2",
+        "toolkits": ["gmail", "googledrive"],
+    }
+
+
+def test_session_omits_toolkits_when_empty() -> None:
+    transport = _RecordingTransport({"mcp_url": "https://x", "headers": {}})
+    _broker(transport).session()
+    assert transport.calls[0]["json"] == {"entity_id": "openmagi:user:u1:bot:b2"}
+
+
+def test_build_broker_client_returns_none_without_broker_config() -> None:
+    from magi_agent.composio.broker import build_broker_client
+
+    class _Cfg:
+        platform_broker_url = None
+        platform_token = None
+        entity_id = "default"
+
+    assert build_broker_client(_Cfg()) is None
+
+
+def test_build_broker_client_wires_config_and_transport() -> None:
+    from magi_agent.composio.broker import build_broker_client
+
+    class _Cfg:
+        platform_broker_url = "https://broker.example.com"
+        platform_token = "tok_9"
+        entity_id = "openmagi:user:a:bot:b"
+
+    transport = _RecordingTransport({"mcp_url": "https://m", "headers": {}})
+    client = build_broker_client(_Cfg(), transport=transport)
+    assert client is not None
+    client.session()
+    call = transport.calls[0]
+    assert call["url"] == "https://broker.example.com/v1/integrations/composio/session"
+    assert call["token"] == "tok_9"
+    assert call["json"] == {"entity_id": "openmagi:user:a:bot:b"}
