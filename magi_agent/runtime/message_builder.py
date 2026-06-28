@@ -283,6 +283,28 @@ OUTPUT_EFFICIENCY_BLOCK = "\n".join(
     ]
 )
 
+CITATION_CONVENTION_BLOCK = "\n".join(
+    [
+        "<citation-convention>",
+        "When you state a fact that comes from a web / KB / file tool result,",
+        "cite it INLINE using standard markdown link syntax right after the fact:",
+        "",
+        "    Tesla revenue grew 12% YoY in Q3 ([10-K filing](https://www.sec.gov/...)).",
+        "",
+        "Rules:",
+        "- Use the EXACT URL the tool result returned. Never invent or fabricate a URL.",
+        "- One citation per fact is enough — don't repeat the same link multiple times for restated material.",
+        "- Cite the most specific page you actually inspected, not a generic homepage.",
+        "- The link label is a brief human-readable hint (e.g. publisher, doc type), not a full sentence.",
+        "- Plain interpretation, reasoning, or your own opinion needs no citation.",
+        "- If you're unsure whether a fact came from a tool result vs. prior knowledge, do NOT add a citation.",
+        "",
+        "The dashboard turns matching links into clickable source chips with hover previews,",
+        "so accurate citations directly improve the user's ability to audit your answer.",
+        "</citation-convention>",
+    ]
+)
+
 ACTION_SAFETY_BLOCK = "\n".join(
     [
         "<action-safety>",
@@ -672,6 +694,7 @@ def _assemble_prompt_sections(
     static_parts.extend([
         DEFERRAL_PREVENTION_BLOCK,
         OUTPUT_RULES_BLOCK,
+        CITATION_CONVENTION_BLOCK,
         OUTPUT_EFFICIENCY_BLOCK,
         ACTION_SAFETY_BLOCK,
     ])
