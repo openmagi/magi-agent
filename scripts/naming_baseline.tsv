@@ -101,6 +101,7 @@ openmagi	magi_agent/customize/field_constraint_compiler.py	1
 openmagi	magi_agent/customize/rule_compiler.py	2
 openmagi	magi_agent/customize/shacl_compiler.py	1
 openmagi	magi_agent/evidence/__init__.py	2
+openmagi	magi_agent/evidence/audit_labels.py	1
 openmagi	magi_agent/evidence/child_runtime_envelope.py	4
 openmagi	magi_agent/evidence/contracts.py	1
 openmagi	magi_agent/evidence/local_tool_collector.py	2

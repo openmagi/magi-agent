@@ -135,6 +135,11 @@ def local_dashboard_bootstrap(runtime: OpenMagiRuntime) -> dict[str, object]:
             "hasProvider": has_provider,
             "providers": list(SUPPORTED_PROVIDERS),
         },
+        # Default-OFF feature toggles the dashboard reads to hide gated surfaces
+        # (e.g. the chat Audit tab) when their flag is off.
+        "features": {
+            "auditPanel": flag_bool("MAGI_CHAT_AUDIT_PANEL_ENABLED"),
+        },
     }
 
 

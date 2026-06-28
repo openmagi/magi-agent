@@ -97,3 +97,15 @@ def get_meta_taxonomy() -> dict:
         "categories": {cat: list(kinds) for cat, kinds in CATEGORIES.items()},
         "noise_kinds": list(NOISE_KINDS),
     }
+
+
+def policy_event_kinds() -> tuple[str, ...]:
+    """Return the event kinds in the ``policy`` category as an immutable tuple.
+
+    This is the single typed accessor for the policy/enforcement event kinds so
+    consumers (e.g. ``evidence.audit_labels.ENFORCEMENT_EVENT_KINDS``) derive
+    from this one mapping instead of re-hardcoding it. taxonomy.py imports
+    nothing from ``magi_agent`` so importing it from lower layers (evidence/)
+    cannot create a cycle.
+    """
+    return tuple(CATEGORIES["policy"])
