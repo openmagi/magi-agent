@@ -1083,3 +1083,67 @@ def test_providers_put_with_key_and_model_get_shows_configured_and_model(
     by_name = {p["name"]: p for p in res.json()["providers"]}
     assert by_name["openai"]["configured"] is True
     assert by_name["openai"]["model"] == "gpt-5.5"
+
+
+# --------------------------------------------------------------------------- #
+# Workspace file listing (Knowledge → Workspace tab, local self-host)
+# --------------------------------------------------------------------------- #
+def _seed(root, rel: str, text: str = "x") -> None:
+    from pathlib import Path
+
+    p = Path(root) / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text, encoding="utf-8")
+
+
+def test_workspace_lists_root_and_nested_files(tmp_path, monkeypatch) -> None:
+    _seed(tmp_path, "whitepaper.html", "<h1>hi</h1>")
+    _seed(tmp_path, "notes.md", "# notes")
+    _seed(tmp_path, "sub/report.txt", "body")
+    client = _client(tmp_path, monkeypatch)
+
+    res = client.get("/v1/app/workspace")
+    assert res.status_code == 200
+    paths = {row["path"] for row in res.json()["files"]}
+    assert {"whitepaper.html", "notes.md", "sub/report.txt"} <= paths
+    row = next(r for r in res.json()["files"] if r["path"] == "notes.md")
+    assert row["size"] > 0 and isinstance(row["modifiedAt"], str)
+
+
+def test_workspace_excludes_dedicated_tabs_and_noise(tmp_path, monkeypatch) -> None:
+    _seed(tmp_path, "keep.md")
+    _seed(tmp_path, "memory/daily/x.md")
+    _seed(tmp_path, "knowledge/coll/doc.md")
+    _seed(tmp_path, ".magi/identity.md")
+    _seed(tmp_path, "node_modules/pkg/index.js")
+    _seed(tmp_path, ".git/config")
+    _seed(tmp_path, "__pycache__/x.pyc")
+    client = _client(tmp_path, monkeypatch)
+
+    paths = {row["path"] for row in client.get("/v1/app/workspace").json()["files"]}
+    assert "keep.md" in paths
+    assert not any(
+        p.startswith(("memory/", "knowledge/", ".magi/", "node_modules/", ".git/", "__pycache__/"))
+        for p in paths
+    )
+
+
+def test_workspace_file_returns_content(tmp_path, monkeypatch) -> None:
+    _seed(tmp_path, "doc.md", "hello world")
+    client = _client(tmp_path, monkeypatch)
+    res = client.get("/v1/app/workspace/file", params={"path": "doc.md"})
+    assert res.status_code == 200
+    assert res.json()["content"] == "hello world"
+
+
+def test_workspace_file_blocks_traversal(tmp_path, monkeypatch) -> None:
+    client = _client(tmp_path, monkeypatch)
+    res = client.get("/v1/app/workspace/file", params={"path": "../../etc/passwd"})
+    assert res.status_code in (403, 404)
+
+
+def test_workspace_requires_gateway_token(tmp_path, monkeypatch) -> None:
+    client = _client(tmp_path, monkeypatch)
+    client.headers.pop("x-gateway-token", None)
+    assert client.get("/v1/app/workspace").status_code == 401
+    assert client.get("/v1/app/workspace/file", params={"path": "x"}).status_code == 401

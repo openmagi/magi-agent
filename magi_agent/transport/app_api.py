@@ -27,6 +27,7 @@ from __future__ import annotations
 import os
 import re
 import stat
+from datetime import datetime, timezone
 from importlib import resources
 from importlib.resources.abc import Traversable
 from pathlib import Path
@@ -725,6 +726,82 @@ def _list_markdown(rel_dirs: list[str], extra_files: list[str]) -> list[dict[str
     return out
 
 
+#: Directories never surfaced in the generic workspace file listing: VCS/build
+#: noise, plus the subtrees that already have their own dashboard tabs
+#: (``memory``/``knowledge``) and the internal ``.magi`` namespace.
+_WORKSPACE_LIST_EXCLUDE_DIRS = frozenset(
+    {
+        ".git",
+        "node_modules",
+        "__pycache__",
+        ".venv",
+        "venv",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".next",
+        ".cache",
+        "memory",
+        "knowledge",
+        ".magi",
+    }
+)
+
+#: Cap so a pathological tree can't wedge the listing endpoint.
+_WORKSPACE_LIST_MAX_FILES = 1000
+
+
+def _workspace_files() -> list[dict[str, Any]]:
+    """List workspace files (root level + nested) for the dashboard.
+
+    Walks each workspace root, pruning VCS/build noise, hidden directories, and
+    the ``memory``/``knowledge``/``.magi`` subtrees that have their own tabs.
+    Root-level files (e.g. a stray ``*.md`` / ``*.html`` the bot wrote) ARE
+    included, which is the common "where did my workspace file go" case. Returns
+    rows shaped for the web ``WorkspaceFileApiRow`` (``path``/``size``/
+    ``modifiedAt``). Fail-soft: unreadable entries are skipped.
+    """
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for root in _workspace_roots():
+        for dirpath, dirnames, filenames in os.walk(root):
+            # Prune excluded + hidden directories in place so os.walk skips them.
+            dirnames[:] = sorted(
+                d
+                for d in dirnames
+                if d not in _WORKSPACE_LIST_EXCLUDE_DIRS and not d.startswith(".")
+            )
+            for name in sorted(filenames):
+                path = Path(dirpath) / name
+                if not path.is_file() or _is_protected(path):
+                    continue
+                try:
+                    rel = path.relative_to(root).as_posix()
+                except ValueError:
+                    continue
+                if rel in seen:
+                    continue
+                try:
+                    stat = path.stat()
+                except OSError:
+                    continue
+                seen.add(rel)
+                out.append(
+                    {
+                        "path": rel,
+                        "size": stat.st_size,
+                        "modifiedAt": datetime.fromtimestamp(
+                            stat.st_mtime, tz=timezone.utc
+                        ).isoformat(),
+                    }
+                )
+                if len(out) >= _WORKSPACE_LIST_MAX_FILES:
+                    out.sort(key=lambda row: row["path"])
+                    return out
+    out.sort(key=lambda row: row["path"])
+    return out
+
+
 def _search_files(files: list[dict[str, Any]], query: str, limit: int) -> list[dict[str, Any]]:
     needle = query.lower()
     results: list[dict[str, Any]] = []
@@ -1031,6 +1108,26 @@ def register_app_api_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         except OSError as exc:
             return JSONResponse(status_code=500, content={"error": str(exc)})
         return JSONResponse(content={"path": rel})
+
+    @app.get("/v1/app/workspace")
+    def app_workspace(request: Request) -> JSONResponse:
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        return JSONResponse(content={"files": _workspace_files()})
+
+    @app.get("/v1/app/workspace/file")
+    def app_workspace_file(request: Request, path: str) -> JSONResponse:
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        target = _resolve_in_workspace(path)
+        if target is None or _is_protected(target):
+            return JSONResponse(status_code=403, content={"error": "forbidden_path"})
+        content = _read_text(target)
+        if content is None:
+            return JSONResponse(status_code=404, content={"error": "not_found"})
+        return JSONResponse(content={"content": content, "path": path})
 
     # ---- knowledge ------------------------------------------------------ #
     @app.get("/v1/app/knowledge")
