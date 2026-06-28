@@ -1605,7 +1605,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         scope="public",
         stage="stage2",
     ),
-    _b(
+    _pb(
         "MAGI_CUSTOMIZE_NL_INTERACTIVE_ENABLED",
         summary=(
             "Enable the POST /v1/app/customize/custom-rules/compile-interactive "
@@ -1617,7 +1617,8 @@ FLAGS: tuple[FlagSpec, ...] = (
             "runtime validator accepts it. Registration-time only — never on "
             "the runtime hot path. Requires a configured provider/key; "
             "fail-open to a canonical-question fallback when no model is "
-            "available. Strict default-OFF."
+            "available. Default-ON under the full / lab profile, OFF under "
+            "safe / eval so a key-less benchmark host stays quiet."
         ),
         scope="public",
         stage="stage2",
