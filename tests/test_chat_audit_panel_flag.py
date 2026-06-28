@@ -1,7 +1,9 @@
-"""TDD: MAGI_CHAT_AUDIT_PANEL_ENABLED flag — strict default-OFF boolean.
+"""TDD: MAGI_CHAT_AUDIT_PANEL_ENABLED flag — default-ON boolean.
 
-Mirrors tests/test_serve_evidence_flag.py: a single-line ``_b(...)`` entry in
-FLAGS, readable via ``flag_bool``, default=False, truthy values opt-in.
+A single-line ``_b(..., default=True)`` entry in FLAGS, readable via
+``flag_bool``. The Audit panel is a read-only surfacing of existing
+observability data (no new verdict production), so it ships ON; an operator can
+hide it with an explicit ``=0``.
 
 All tests are hermetic (no network, no model traffic, no disk I/O, no reliance
 on ambient MAGI_* shell env — env is supplied explicitly).
@@ -36,17 +38,17 @@ def test_flag_scope_is_public() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Default-OFF behaviour
+# Default-ON behaviour
 # ---------------------------------------------------------------------------
 
 
-def test_flag_is_false_with_no_env() -> None:
-    assert flag_bool(_FLAG, env={}) is False
+def test_flag_is_true_with_no_env() -> None:
+    assert flag_bool(_FLAG, env={}) is True
 
 
-def test_flag_is_false_when_unset_in_os_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_flag_is_true_when_unset_in_os_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(_FLAG, raising=False)
-    assert flag_bool(_FLAG) is False
+    assert flag_bool(_FLAG) is True
 
 
 # ---------------------------------------------------------------------------

@@ -332,10 +332,12 @@ FLAGS: tuple[FlagSpec, ...] = (
     ),
     _b(
         "MAGI_CHAT_AUDIT_PANEL_ENABLED",
+        default=True,
         summary=(
             "Enable the chat Audit panel: per-session policy-enforcement verdict "
-            "read endpoint and UI tab (default-OFF). Read/observability surface "
-            "over existing data; produces no new verdicts."
+            "read endpoint and UI tab (default-ON). Read-only surfacing over "
+            "existing observability data; produces no new verdicts. Set =0 to "
+            "hide the tab and 404 the endpoint."
         ),
     ),
     _b(

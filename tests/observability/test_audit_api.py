@@ -1,7 +1,9 @@
 """Endpoint: GET /api/observability/v1/sessions/{id}/audit.
 
-Flag-gated (default-OFF -> 404). Hermetic: explicit token + monkeypatched flag
-env, real ActivityStore on tmp_path. Mirrors tests/observability/test_api.py.
+Flag-gated default-ON: an unset flag serves the read surface (200); an explicit
+MAGI_CHAT_AUDIT_PANEL_ENABLED=0 hides it (404). Hermetic: explicit token +
+monkeypatched flag env, real ActivityStore on tmp_path. Mirrors
+tests/observability/test_api.py.
 """
 from __future__ import annotations
 
@@ -30,12 +32,22 @@ def _client(tmp_path, token="local-dev-token"):
     return TestClient(app), store
 
 
-def test_audit_flag_off_returns_404(tmp_path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.delenv(_FLAG, raising=False)
+def test_audit_flag_explicit_off_returns_404(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    # Default-ON: only an explicit =0 disables the surface.
+    monkeypatch.setenv(_FLAG, "0")
     client, store = _client(tmp_path)
     r = client.get("/api/observability/v1/sessions/s1/audit", headers=_AUTH)
     assert r.status_code == 404
     assert r.json() == {"error": "feature_disabled"}
+
+
+def test_audit_default_on_returns_200(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    # No env set -> the registry default (ON) serves the read surface.
+    monkeypatch.delenv(_FLAG, raising=False)
+    client, store = _client(tmp_path)
+    r = client.get("/api/observability/v1/sessions/s1/audit", headers=_AUTH)
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
 
 
 def test_audit_requires_auth(tmp_path, monkeypatch: pytest.MonkeyPatch):
