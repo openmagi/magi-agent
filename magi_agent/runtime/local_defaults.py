@@ -71,6 +71,15 @@ LOCAL_FULL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     "MAGI_BROWSER_TOOL_ENABLED": "1",
     "MAGI_SELF_INTROSPECTION_ENABLED": "1",
     "MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED": "1",
+    # Belt-and-suspenders memory master (WS2 PR2a). The shipped CLI bootstrap
+    # (cli/memory_bootstrap.apply_memory_config_bootstrap) already setdefaults
+    # MAGI_MEMORY_ENABLED=1 BEFORE this overlay runs at real startup, so this
+    # entry is a no-op there. It exists so the overlay surface is self-consistent
+    # with the bootstrap and so a non-CLI embedder that applies this overlay
+    # WITHOUT the bootstrap still resolves the master ON. setdefault semantics
+    # mean an explicit operator MAGI_MEMORY_ENABLED=0 still wins per-flag. Kept in
+    # LOCAL_FULL only; never widened onto a lean/safe/eval profile.
+    "MAGI_MEMORY_ENABLED": "1",
     "MAGI_MEMORY_WRITE_READINESS_ENABLED": "1",
     "MAGI_MEMORY_WRITE_ENABLED": "1",
     "MAGI_MEMORY_LOCAL_DEV": "1",
