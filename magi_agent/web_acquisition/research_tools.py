@@ -51,8 +51,8 @@ _TOOL_LIVE_OPERATIONS: Mapping[str, str] = {
     "WebReader": "reader",
 }
 
-LIVE_WEB_ACQUISITION_ENABLED_ENV = "CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED"
-LIVE_WEB_ACQUISITION_KILL_SWITCH_ENV = "CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_KILL_SWITCH"
+LIVE_WEB_ACQUISITION_ENABLED_ENV = "MAGI_LIVE_WEB_ACQUISITION_ENABLED"
+LIVE_WEB_ACQUISITION_KILL_SWITCH_ENV = "MAGI_LIVE_WEB_ACQUISITION_KILL_SWITCH"
 # Duplicated deliberately to match the harness/canary env-gate convention
 # (see research_first_canary.py) rather than importing a shared helper.
 # Mirrors the live-pack ref grammar so digest refs we mint stay valid public ids.
@@ -69,9 +69,16 @@ def _is_true(value: object) -> bool:
 
 def live_web_acquisition_active(*, env: Mapping[str, str] | None = None) -> bool:
     resolved_env = os.environ if env is None else env
-    return _is_true(
-        resolved_env.get(LIVE_WEB_ACQUISITION_ENABLED_ENV)
-    ) and not _is_true(resolved_env.get(LIVE_WEB_ACQUISITION_KILL_SWITCH_ENV))
+    # I-1: route the master + kill switch through the typed flag
+    # registry. Both ``FlagSpec``s are strict default-OFF ``bool`` so
+    # ``flag_bool`` returns ``False`` on unset/invalid, byte-identical
+    # to ``_is_true(env.get(NAME))``. (Recovers PR #1071's intent that
+    # was silently dropped by the squash-merge.)
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool(
+        LIVE_WEB_ACQUISITION_ENABLED_ENV, env=resolved_env
+    ) and not flag_bool(LIVE_WEB_ACQUISITION_KILL_SWITCH_ENV, env=resolved_env)
 
 
 class LocalWebResearchToolBoundary:
@@ -691,7 +698,7 @@ def _short_digest(value: str) -> str:
 
 MAGI_PLATFORM_BASE_URL_ENV = "MAGI_PLATFORM_BASE_URL"
 MAGI_PLATFORM_API_KEY_ENV = "MAGI_PLATFORM_API_KEY"
-PROVIDER_ROUTER_ENABLED_ENV = "CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED"
+PROVIDER_ROUTER_ENABLED_ENV = "MAGI_WEB_PROVIDER_ROUTER_ENABLED"
 
 # Names used in the provider allowlist and router providers dict.
 PLATFORM_SEARCH_PROVIDER_NAME = "platform.search"
@@ -699,12 +706,12 @@ PLATFORM_FETCH_PROVIDER_NAME = "platform.fetch"
 
 # Jina Reader provider — default-OFF, lazily imported.
 JINA_READER_PROVIDER_NAME = "jina.reader"
-JINA_READER_ENABLED_ENV = "CORE_AGENT_PYTHON_JINA_READER_ENABLED"
+JINA_READER_ENABLED_ENV = "MAGI_JINA_READER_ENABLED"
 MAGI_JINA_API_KEY_ENV = "MAGI_JINA_API_KEY"
 
 # InsaneFetch (curl_cffi WAF-bypass) provider — default-OFF, lazily imported.
 INSANE_FETCH_PROVIDER_NAME = "insane.fetch"
-INSANE_FETCH_ENABLED_ENV = "CORE_AGENT_PYTHON_INSANE_FETCH_ENABLED"
+INSANE_FETCH_ENABLED_ENV = "MAGI_INSANE_FETCH_ENABLED"
 
 
 def build_live_research_boundary(
@@ -717,7 +724,7 @@ def build_live_research_boundary(
 
     Three levels must all be True to reach real network calls:
 
-    1. ``CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED=1`` (and kill-switch unset)
+    1. ``MAGI_LIVE_WEB_ACQUISITION_ENABLED=1`` (and kill-switch unset)
        — checked by ``live_web_acquisition_active()``.
     2. ``pack_config`` with ``live_network_enabled=True`` and a non-empty
        ``provider_allowlist`` — or auto-built from env when ``pack_config`` is None.
@@ -753,9 +760,13 @@ def build_live_research_boundary(
 
     resolved_env: Mapping[str, str] = os.environ if env is None else env
 
-    base_url = resolved_env.get(MAGI_PLATFORM_BASE_URL_ENV, "").strip()
-    api_key = resolved_env.get(MAGI_PLATFORM_API_KEY_ENV, "").strip()
-    router_enabled = _is_true(resolved_env.get(PROVIDER_ROUTER_ENABLED_ENV, ""))
+    # I-1: route the web-acquisition provider knobs through the typed
+    # flag registry (recovers PR #1071's intent dropped by squash).
+    from magi_agent.config.flags import flag_bool, flag_str  # noqa: PLC0415
+
+    base_url = (flag_str(MAGI_PLATFORM_BASE_URL_ENV, env=resolved_env) or "").strip()
+    api_key = (flag_str(MAGI_PLATFORM_API_KEY_ENV, env=resolved_env) or "").strip()
+    router_enabled = flag_bool(PROVIDER_ROUTER_ENABLED_ENV, env=resolved_env)
 
     # Build providers dict.
     providers: dict[str, object] = {}
@@ -776,7 +787,7 @@ def build_live_research_boundary(
     # InsaneFetch (curl_cffi WAF-bypass) — fallback fetch provider, default-OFF.
     # Ordered AFTER platform so platform remains primary; insane.fetch is the
     # first non-platform fallback for fetch operations.
-    if _is_true(resolved_env.get(INSANE_FETCH_ENABLED_ENV)):
+    if flag_bool(INSANE_FETCH_ENABLED_ENV, env=resolved_env):
         from magi_agent.web_acquisition.providers.insane_fetch import (
             InsaneFetchProvider,
         )
@@ -787,12 +798,12 @@ def build_live_research_boundary(
 
     # Jina Reader — fallback reader/fetch provider, default-OFF.
     # Ordered last so platform + insane.fetch are tried first.
-    if _is_true(resolved_env.get(JINA_READER_ENABLED_ENV)):
+    if flag_bool(JINA_READER_ENABLED_ENV, env=resolved_env):
         from magi_agent.web_acquisition.providers.jina_reader import (
             JinaReaderProvider,
         )
 
-        jina_api_key = resolved_env.get(MAGI_JINA_API_KEY_ENV) or None
+        jina_api_key = flag_str(MAGI_JINA_API_KEY_ENV, env=resolved_env) or None
         jina_reader_provider = JinaReaderProvider(api_key=jina_api_key)
         providers[JINA_READER_PROVIDER_NAME] = jina_reader_provider
         provider_names.append(JINA_READER_PROVIDER_NAME)
@@ -852,7 +863,7 @@ def build_native_web_boundary(
     boundary = build_live_research_boundary(env=env)
     router = boundary._provider_router
     # Require an enabled router with at least one provider. Without the router
-    # gate (CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED) the boundary would
+    # gate (MAGI_WEB_PROVIDER_ROUTER_ENABLED) the boundary would
     # silently serve the local fixture path, so treat that as not-configured.
     if router is None or not router.config.enabled or not router.config.providers:
         return None

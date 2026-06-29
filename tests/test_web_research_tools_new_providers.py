@@ -54,7 +54,7 @@ def test_build_live_research_boundary_registers_jina_and_insane_when_enabled() -
     from magi_agent.web_acquisition.provider_router import WebAcquisitionProviderRouter
 
     env = {
-        "CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED": "1",
+        "MAGI_LIVE_WEB_ACQUISITION_ENABLED": "1",
         PROVIDER_ROUTER_ENABLED_ENV: "1",
         "MAGI_PLATFORM_BASE_URL": "https://platform.example.com",
         "MAGI_PLATFORM_API_KEY": "test-key",
@@ -239,7 +239,7 @@ def _build_boundary_with_providers(
     router = WebAcquisitionProviderRouter(pack=pack, config=router_config, providers=providers)
 
     live_env = {
-        "CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED": "1",
+        "MAGI_LIVE_WEB_ACQUISITION_ENABLED": "1",
         **(env or {}),
     }
     return LocalWebResearchToolBoundary(

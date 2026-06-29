@@ -4049,6 +4049,105 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
+    # I-1 batch 25 (REDO): live web-acquisition provider toggles +
+    # credentials. The original PR #1071 squash silently dropped the
+    # entire batch — recovered here on a fresh branch.
+    FlagSpec(
+        name="MAGI_LIVE_WEB_ACQUISITION_ENABLED",
+        default=False,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Master switch for the live web-acquisition stack (platform "
+            "endpoint + insane.fetch + jina reader). Default-OFF; the "
+            "research/citation tools fall back to local-only when this "
+            "is unset."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="MAGI_LIVE_WEB_ACQUISITION_KILL_SWITCH",
+        default=False,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Kill switch for the live web-acquisition stack. When "
+            "truthy, ``live_web_acquisition_active`` returns ``False`` "
+            "regardless of the master enable. Default-OFF (alive)."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="MAGI_WEB_PROVIDER_ROUTER_ENABLED",
+        default=False,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Enable the multi-provider router that picks search vs. "
+            "fetch backends per request. Default-OFF; the first viable "
+            "provider in the resolved order wins when this is unset."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="MAGI_INSANE_FETCH_ENABLED",
+        default=False,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Enable the ``insane.fetch`` (``curl_cffi``-based) WAF-"
+            "bypass fetch provider. Default-OFF; loaded lazily on first "
+            "ON observation."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="MAGI_JINA_READER_ENABLED",
+        default=False,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Enable the Jina Reader fallback fetch/reader provider. "
+            "Default-OFF; loaded lazily and ordered after the platform "
+            "+ insane.fetch providers."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
+        name="MAGI_PLATFORM_BASE_URL",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Base URL of the hosted Magi platform search/fetch endpoint. "
+            "When set together with ``MAGI_PLATFORM_API_KEY``, the "
+            "platform provider becomes the primary live-web backend."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_PLATFORM_API_KEY",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "API key for the hosted Magi platform search/fetch endpoint. "
+            "Required together with ``MAGI_PLATFORM_BASE_URL`` to enable "
+            "the platform provider; left empty for self-host."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_JINA_API_KEY",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "API key for the Jina Reader fallback provider. Optional; "
+            "Jina Reader works without a key but with stricter quotas."
+        ),
+        kind="str",
+    ),
 )
 
 

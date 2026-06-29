@@ -9,10 +9,10 @@ def test_websearch_not_configured_message_does_not_suggest_jina_for_search(
     monkeypatch,
 ) -> None:
     for name in (
-        "CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED",
-        "CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED",
-        "CORE_AGENT_PYTHON_JINA_READER_ENABLED",
-        "CORE_AGENT_PYTHON_INSANE_FETCH_ENABLED",
+        "MAGI_LIVE_WEB_ACQUISITION_ENABLED",
+        "MAGI_WEB_PROVIDER_ROUTER_ENABLED",
+        "MAGI_JINA_READER_ENABLED",
+        "MAGI_INSANE_FETCH_ENABLED",
         "MAGI_JINA_API_KEY",
         "MAGI_PLATFORM_BASE_URL",
         "MAGI_PLATFORM_API_KEY",

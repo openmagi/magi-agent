@@ -23,11 +23,11 @@ from magi_agent.tools.context import ToolContext
 from magi_agent.tools.result import ToolResult
 
 _LIVE_WEB_FLAGS = (
-    "CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED",
-    "CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_KILL_SWITCH",
-    "CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED",
-    "CORE_AGENT_PYTHON_JINA_READER_ENABLED",
-    "CORE_AGENT_PYTHON_INSANE_FETCH_ENABLED",
+    "MAGI_LIVE_WEB_ACQUISITION_ENABLED",
+    "MAGI_LIVE_WEB_ACQUISITION_KILL_SWITCH",
+    "MAGI_WEB_PROVIDER_ROUTER_ENABLED",
+    "MAGI_JINA_READER_ENABLED",
+    "MAGI_INSANE_FETCH_ENABLED",
     "MAGI_JINA_API_KEY",
     "MAGI_PLATFORM_BASE_URL",
     "MAGI_PLATFORM_API_KEY",
@@ -44,9 +44,9 @@ def fresh_env(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def live_env(monkeypatch: pytest.MonkeyPatch, fresh_env: None) -> None:
     """Minimal live configuration: master gate + router gate + one provider."""
-    monkeypatch.setenv("CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED", "1")
-    monkeypatch.setenv("CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED", "1")
-    monkeypatch.setenv("CORE_AGENT_PYTHON_JINA_READER_ENABLED", "1")
+    monkeypatch.setenv("MAGI_LIVE_WEB_ACQUISITION_ENABLED", "1")
+    monkeypatch.setenv("MAGI_WEB_PROVIDER_ROUTER_ENABLED", "1")
+    monkeypatch.setenv("MAGI_JINA_READER_ENABLED", "1")
 
 
 def _context() -> ToolContext:
@@ -76,28 +76,28 @@ def test_live_provider_configured_false_on_fresh_install(fresh_env: None) -> Non
 def test_live_provider_configured_requires_router_gate(
     live_env: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delenv("CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED")
+    monkeypatch.delenv("MAGI_WEB_PROVIDER_ROUTER_ENABLED")
     assert _live_provider_configured() is False
 
 
 def test_live_provider_configured_requires_a_provider_source(
     live_env: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delenv("CORE_AGENT_PYTHON_JINA_READER_ENABLED")
+    monkeypatch.delenv("MAGI_JINA_READER_ENABLED")
     assert _live_provider_configured() is False
 
 
 def test_live_provider_configured_respects_kill_switch(
     live_env: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_KILL_SWITCH", "1")
+    monkeypatch.setenv("MAGI_LIVE_WEB_ACQUISITION_KILL_SWITCH", "1")
     assert _live_provider_configured() is False
 
 
 def test_live_provider_configured_with_platform_pair(
     live_env: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delenv("CORE_AGENT_PYTHON_JINA_READER_ENABLED")
+    monkeypatch.delenv("MAGI_JINA_READER_ENABLED")
     monkeypatch.setenv("MAGI_PLATFORM_BASE_URL", "https://platform.example")
     monkeypatch.setenv("MAGI_PLATFORM_API_KEY", "secret-key")
     assert _live_provider_configured() is True

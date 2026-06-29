@@ -61,10 +61,10 @@ They have **no fabricated fallback**: when no live web provider is resolved they
 return an honest `web_research_not_configured` error instead of simulated
 results. On a default **local** install this rarely happens for `WebFetch`,
 because the full local runtime overlay seeds the keyless web path on
-(`CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED`,
-`CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED`,
-`CORE_AGENT_PYTHON_JINA_READER_ENABLED`,
-`CORE_AGENT_PYTHON_INSANE_FETCH_ENABLED`, see
+(`MAGI_LIVE_WEB_ACQUISITION_ENABLED`,
+`MAGI_WEB_PROVIDER_ROUTER_ENABLED`,
+`MAGI_JINA_READER_ENABLED`,
+`MAGI_INSANE_FETCH_ENABLED`, see
 [What Works Today](/docs/what-works-today)): jina-reader is keyless and
 insane-fetch runs locally via `curl_cffi`, so URL fetch works with zero keys.
 `WebSearch` engine results still need a search provider. In a conservative
@@ -72,12 +72,12 @@ profile (`safe`/`eval`) or when the overlay is off, both return the honest error
 Local CLI search uses the direct web toolset when `BRAVE_API_KEY` and `FIRECRAWL_API_KEY`
 are set, or when `MAGI_WEB_SEARCH_PROVIDER=serpapi`, `SERPAPI_API_KEY`, and
 `FIRECRAWL_API_KEY` are set. To activate the native provider-router path, set
-`CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED=1` and
-`CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED=1`, then configure
+`MAGI_LIVE_WEB_ACQUISITION_ENABLED=1` and
+`MAGI_WEB_PROVIDER_ROUTER_ENABLED=1`, then configure
 `MAGI_PLATFORM_BASE_URL` + `MAGI_PLATFORM_API_KEY`. Jina Reader
-(`CORE_AGENT_PYTHON_JINA_READER_ENABLED=1`, optionally with
+(`MAGI_JINA_READER_ENABLED=1`, optionally with
 `MAGI_JINA_API_KEY`) and InsaneFetch
-(`CORE_AGENT_PYTHON_INSANE_FETCH_ENABLED=1`) are fetch/reader-style providers;
+(`MAGI_INSANE_FETCH_ENABLED=1`) are fetch/reader-style providers;
 they do not by themselves provide live search. With router providers set, the
 handlers delegate to `magi_agent/web_acquisition/research_tools.py`.
 
