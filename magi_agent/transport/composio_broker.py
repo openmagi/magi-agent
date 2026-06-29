@@ -41,9 +41,24 @@ _BROKER_TOKENS_ENV = "MAGI_COMPOSIO_BROKER_TOKENS"
 def register_composio_broker_routes(
     app: FastAPI,
     *,
+    enabled: bool | None = None,
     master_client_provider: MasterClientProvider | None = None,
     token_validator: TokenValidator | None = None,
 ) -> None:
+    """Register the platform Composio broker endpoints.
+
+    Default-OFF: when ``enabled`` is ``None`` the gate is read from
+    ``MAGI_COMPOSIO_BROKER_ENABLED`` (off by default), so the production app
+    assembly registers NOTHING unless an operator opts in to running a broker.
+    Callers that inject providers (tests) pass ``enabled=True`` explicitly.
+    """
+    if enabled is None:
+        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+        enabled = flag_bool("MAGI_COMPOSIO_BROKER_ENABLED")
+    if not enabled:
+        return
+
     provide_master = master_client_provider or _default_master_client_provider
     validate_token = token_validator or _default_token_validator
 

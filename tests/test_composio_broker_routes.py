@@ -54,6 +54,7 @@ def _client(*, client=None, valid_token="good-token"):
     master = client if client is not None else _FakeMasterClient()
     register_composio_broker_routes(
         app,
+        enabled=True,
         master_client_provider=lambda: master,
         token_validator=lambda t: t if t == valid_token else None,
     )
@@ -114,6 +115,7 @@ def test_session_503_when_master_key_unconfigured() -> None:
     app = FastAPI()
     register_composio_broker_routes(
         app,
+        enabled=True,
         master_client_provider=lambda: None,
         token_validator=lambda t: "ok",
     )
@@ -175,3 +177,39 @@ def test_upstream_error_maps_to_502() -> None:
     r = c.post("/v1/integrations/composio/session", headers=HDR, json={})
     assert r.status_code == 502
     assert r.json()["op"] == "session"
+
+
+# ── default-OFF gate ───────────────────────────────────────────────────
+
+
+def test_disabled_by_default_registers_no_routes(monkeypatch) -> None:
+    monkeypatch.delenv("MAGI_COMPOSIO_BROKER_ENABLED", raising=False)
+    app = FastAPI()
+    # enabled=None → reads the (unset) flag → OFF → no routes registered.
+    register_composio_broker_routes(
+        app,
+        master_client_provider=lambda: _FakeMasterClient(),
+        token_validator=lambda t: "ok",
+    )
+    r = TestClient(app).post(
+        "/v1/integrations/composio/session",
+        headers={"Authorization": "Bearer x"},
+        json={},
+    )
+    assert r.status_code == 404  # route does not exist when broker is off
+
+
+def test_flag_enables_routes(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_COMPOSIO_BROKER_ENABLED", "1")
+    app = FastAPI()
+    register_composio_broker_routes(
+        app,
+        master_client_provider=lambda: _FakeMasterClient(),
+        token_validator=lambda t: "ok" if t == "good" else None,
+    )
+    r = TestClient(app).post(
+        "/v1/integrations/composio/session",
+        headers={"Authorization": "Bearer good"},
+        json={},
+    )
+    assert r.status_code == 200
