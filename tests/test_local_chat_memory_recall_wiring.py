@@ -99,9 +99,14 @@ def test_build_cli_instruction_injects_recall_block_when_on(
     from magi_agent.cli.tool_runtime import build_cli_instruction
 
     _on(monkeypatch)
+    # WS2 PR2c: recall hits are deduped against the assembled snapshot (which
+    # includes the projected recent ``memory/daily/*.md`` tail). To prove recall
+    # WIRING here, surface the hit from a non-daily memory subdir (BM25 indexes
+    # ``memory/**`` recursively; the projection only globs ``memory/daily/*.md``),
+    # so it is recall-able but NOT already in the snapshot and survives dedup.
     _write(
         tmp_path,
-        "memory/daily/2026-06-01.md",
+        "memory/decisions/2026-06-01.md",
         "decision: adopt zebraquux for the billing rollout next sprint",
     )
     _write(tmp_path, "memory/daily/2026-06-02.md", "an unrelated grocery list note")
@@ -180,10 +185,14 @@ def test_recall_leads_snapshot_follows_when_both_present(
     # Snapshot source (curated MEMORY.md) carries a marker disjoint from the
     # recall query so each block's distinctive token is unambiguous.
     _write(tmp_path, "MEMORY.md", "curated snapshot marker snapshotonlymarker")
-    # Recall source: a daily log matching the query term.
+    # Recall source: a non-daily memory log matching the query term. WS2 PR2c
+    # dedups recall hits against the assembled snapshot (which includes the
+    # projected recent ``memory/daily/*.md`` tail), so a daily source here would
+    # be deduped out; a ``memory/decisions/`` file is recall-able but NOT in the
+    # snapshot, so both the recall AND the snapshot blocks coexist.
     _write(
         tmp_path,
-        "memory/daily/2026-06-01.md",
+        "memory/decisions/2026-06-01.md",
         "decision: adopt zebraquux for the billing rollout",
     )
 
@@ -212,9 +221,11 @@ def test_serve_recall_is_background_tagged_fenced_block_not_a_turn(
     from magi_agent.cli.tool_runtime import build_cli_instruction
 
     _on(monkeypatch)
+    # WS2 PR2c: surface the recall hit from a non-daily memory subdir so it is
+    # not deduped against the projected recent-daily tail of the snapshot.
     _write(
         tmp_path,
-        "memory/daily/2026-06-01.md",
+        "memory/decisions/2026-06-01.md",
         "decision: adopt zebraquux for the billing rollout next sprint",
     )
 
@@ -256,9 +267,10 @@ def test_serve_recall_continuity_policy_present_once_with_snapshot(
     _on(monkeypatch)
     monkeypatch.setenv("MAGI_MEMORY_PROJECTION_ENABLED", "1")
     _write(tmp_path, "MEMORY.md", "curated snapshot marker snapshotonlymarker")
+    # WS2 PR2c: non-daily recall source so it is not deduped against the snapshot.
     _write(
         tmp_path,
-        "memory/daily/2026-06-01.md",
+        "memory/decisions/2026-06-01.md",
         "decision: adopt zebraquux for the billing rollout",
     )
 
@@ -291,11 +303,13 @@ def test_serve_recall_continuity_policy_present_without_snapshot(
     from magi_agent.memory.continuity_policy import MEMORY_CONTINUITY_POLICY_OPEN
 
     _on(monkeypatch)
-    # Snapshot projection OFF (default): no <memory-context>, no policy from it.
-    monkeypatch.delenv("MAGI_MEMORY_PROJECTION_ENABLED", raising=False)
+    # Force the snapshot projection OFF explicitly: it FOLLOWS the master (now on
+    # via _on), so a bare delenv would leave it on. With it off there is no
+    # <memory-context> and no projected recent-daily tail to dedup against.
+    monkeypatch.setenv("MAGI_MEMORY_PROJECTION_ENABLED", "0")
     _write(
         tmp_path,
-        "memory/daily/2026-06-01.md",
+        "memory/decisions/2026-06-01.md",
         "decision: adopt zebraquux for the billing rollout",
     )
 

@@ -34,6 +34,7 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,7 @@ def rerank_hits(
     query: str,
     memory_dir: "Path",
     config: object,
+    env: "Mapping[str, str] | None" = None,
 ) -> object:
     """Lazy seam for the optional cheap-model re-rank (PR3).
 
@@ -76,12 +78,19 @@ def rerank_hits(
     fail-open inside the callee: when the rerank flag is off (or anything fails)
     it returns the BM25 order UNCHANGED, so the block stays byte-identical to the
     pre-PR3 output.  Tests monkeypatch this attribute to inject a fake selector.
+
+    ``env`` is an optional injectable environment forwarded to the gate read
+    (``MAGI_MEMORY_RECALL_RERANK_ENABLED``); default ``None`` keeps every existing
+    caller byte-identical (the callee falls back to ``os.environ``). Design: WS2
+    PR2c (hermetic ON-path).
     """
     from magi_agent.cli.memory_recall_rerank import (  # noqa: PLC0415
         rerank_hits as _rerank,
     )
 
-    return _rerank(hits=hits, query=query, memory_dir=memory_dir, config=config)
+    return _rerank(
+        hits=hits, query=query, memory_dir=memory_dir, config=config, env=env
+    )
 
 
 def build_cli_memory_recall_block(
@@ -89,6 +98,8 @@ def build_cli_memory_recall_block(
     workspace_root: str | None,
     query: str,
     memory_mode: str,
+    env: "Mapping[str, str] | None" = None,
+    projection_text: str | None = None,
 ) -> str:
     """Return a fenced ``<memory-recall>`` block for ``query``, or ``""``.
 
@@ -100,6 +111,16 @@ def build_cli_memory_recall_block(
         query: The current user message; used as the search query.
         memory_mode: ``"normal"`` | ``"read_only"`` | ``"incognito"``.
             Incognito suppresses recall.
+        env: Optional injectable environment threaded into the rerank/staleness
+            gate reads (``MAGI_MEMORY_RECALL_RERANK_ENABLED``). Default ``None``
+            -> ``os.environ``, so existing callers stay byte-identical. Design:
+            WS2 PR2c (hermetic ON-path / SC-9).
+        projection_text: Optional assembled memory snapshot block (the COMBINED
+            projection + learning-recall block, per ``tool_runtime``). When
+            provided, recall hits whose content already appears in it are omitted
+            so the same memory is never injected twice. Default ``None`` -> no
+            dedup (byte-identical to existing callers). Design: WS2 PR2c, finding
+            14.
     """
     if workspace_root is None or not query.strip():
         return ""
@@ -126,6 +147,8 @@ def build_cli_memory_recall_block(
             recall_k=config.recall_k,
             max_bytes=config.recall_max_bytes,
             config=config,
+            env=env,
+            projection_text=projection_text,
         )
     except Exception:
         logger.debug("Memory recall failed; skipping", exc_info=True)
@@ -157,6 +180,8 @@ def _build_block(
     recall_k: int,
     max_bytes: int,
     config: object,
+    env: "Mapping[str, str] | None" = None,
+    projection_text: str | None = None,
 ) -> str:
     """Inner implementation — may raise; caller wraps in try/except."""
     from pathlib import Path  # noqa: PLC0415
@@ -186,15 +211,24 @@ def _build_block(
     # byte-identical to the pre-PR3 output.  Never drops a candidate.
     memory_dir = root / "memory"
     try:
-        hits = rerank_hits(hits=hits, query=query, memory_dir=memory_dir, config=config)
+        hits = rerank_hits(
+            hits=hits, query=query, memory_dir=memory_dir, config=config, env=env
+        )
     except Exception:  # noqa: BLE001 — re-rank must never break recall
         logger.debug("Memory recall re-rank seam failed; using BM25 order", exc_info=True)
+
+    # WS2 PR2c (finding 14): drop any recalled hit whose content already appears
+    # in the assembled snapshot block (projection + learning-recall) the caller
+    # passes.  Identity when ``projection_text`` is None/empty (fail-open: never
+    # silently drops everything).  Strictly more dedup; never removes distinct
+    # content.  Done AFTER rerank so the kept order reflects the final ranking.
+    hits = _dedup_against_projection(hits, projection_text)
 
     # PR3: stale-pick markers — entries older than one day get a trailing
     # <system-reminder> staleness note appended INSIDE their part.  Built only
     # when rerank is active (it surfaces older docs the model chose); off-path
     # leaves ``stale_paths`` empty so the output is unchanged.
-    stale_paths = _stale_recall_paths(memory_dir)
+    stale_paths = _stale_recall_paths(memory_dir, env=env)
 
     headroom = len(MEMORY_RECALL_OPEN.encode()) + len(MEMORY_RECALL_CLOSE.encode()) + 4
     content_budget = max(int(max_bytes) - headroom, 0)
@@ -229,6 +263,43 @@ def _build_block(
     return f"{MEMORY_RECALL_OPEN}\n{combined}\n{MEMORY_RECALL_CLOSE}"
 
 
+# Minimum collapsed-content length before a recall hit may be deduped against
+# the projection, so a pathologically short (one-token) memory doc is not
+# coincidentally dropped because its single word appears in an unrelated
+# projection line.
+_DEDUP_MIN_MATCH_CHARS = 24
+
+
+def _dedup_against_projection(hits: object, projection_text: str | None) -> list:
+    """Drop hits whose content already appears in ``projection_text`` (WS2 PR2c).
+
+    Pure + side-effect-free: returns a new list. Identity (the full input order,
+    materialised to a list) when ``projection_text`` is None/empty so the caller
+    can never silently drop everything (fail-open). Comparison is on COLLAPSED
+    whitespace of the rendered hit content vs the rendered snapshot block text
+    only (no reach into projection internals), so re-wrapping does not cause a
+    false-negative. A hit whose content normalises to empty is never matched (it
+    is left for the downstream empty-content filter, not dropped here).
+
+    Design: WS2 memory-continuity design, section "PR2c" / finding 14 (dedup
+    against the FULL combined snapshot is strictly more dedup and never removes
+    distinct content).
+    """
+    ordered = list(hits)
+    if not projection_text or not projection_text.strip():
+        return ordered
+    haystack = " ".join(projection_text.split())
+    kept: list = []
+    for hit in ordered:
+        content = getattr(hit, "content", None)
+        if isinstance(content, str):
+            needle = " ".join(content.split())
+            if len(needle) >= _DEDUP_MIN_MATCH_CHARS and needle in haystack:
+                continue
+        kept.append(hit)
+    return kept
+
+
 def _staleness_note() -> str:
     """The trailing staleness reminder appended to a stale recall pick (PR3)."""
     return (
@@ -238,7 +309,10 @@ def _staleness_note() -> str:
     )
 
 
-def _stale_recall_paths(memory_dir: "Path") -> set[str]:
+def _stale_recall_paths(
+    memory_dir: "Path",
+    env: "Mapping[str, str] | None" = None,
+) -> set[str]:
     """Return the set of WORKSPACE-relative hit paths that are stale (>1 day).
 
     Only computed when the re-rank gate is ON, so the default recall path pays no
@@ -246,13 +320,19 @@ def _stale_recall_paths(memory_dir: "Path") -> set[str]:
     paths are relative to ``memory/`` (e.g. ``daily/x.md``); BM25 hit paths are
     workspace-relative (``memory/daily/x.md``), so each stale entry is re-prefixed
     to match.  Fail-soft: any error returns an empty set (no notes appended).
+
+    ``env`` is the optional injectable environment for the gate read (WS2 PR2c,
+    the previously-unenumerated FIFTH gate). Default ``None`` -> ``os.environ``,
+    so existing callers stay byte-identical; an ON-path test injects ``env`` so
+    the gate honours the threaded env rather than a developer-exported
+    ``MAGI_MEMORY_RECALL_RERANK_ENABLED`` (SC-9 hermeticity).
     """
     try:
         from magi_agent.cli.memory_recall_rerank import (  # noqa: PLC0415
             _rerank_gate_open,
         )
 
-        if not _rerank_gate_open():
+        if not _rerank_gate_open(env):
             return set()
         from magi_agent.cli.memory_manifest import (  # noqa: PLC0415
             build_memory_manifest,
