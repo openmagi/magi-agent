@@ -479,11 +479,21 @@ def apply_runtime_profile_defaults(environ: MutableMapping[str, str]) -> None:
     profile = (flag_str("MAGI_RUNTIME_PROFILE", env=environ) or "").strip().lower()
     if profile == "eval":
         apply_local_eval_runtime_defaults(environ)
-    elif profile == "full":
+        return
+    if profile == "full":
         apply_local_full_runtime_defaults(environ)
-    else:
-        # Unset (default) and explicit ``lab`` both get the experimental tier.
-        apply_lab_runtime_defaults(environ)
+        return
+    # Unset (default) and explicit ``lab`` both get the experimental tier — but
+    # honour the opt-out BEFORE stamping anything. apply_lab_runtime_defaults
+    # setdefaults MAGI_RUNTIME_PROFILE="lab" as its first step (it was only ever
+    # reached for an explicit ``lab`` profile, where that stamp is a no-op), so
+    # without this guard a clean opt-out (MAGI_AGENT_LOCAL_FULL_RUNTIME_DEFAULTS=0)
+    # or a safe profile would still get the profile identity stamped. The gate is
+    # the same predicate apply_local_full uses, so safe/opt-out stay conservative
+    # and byte-identical.
+    if not local_full_runtime_defaults_enabled(environ):
+        return
+    apply_lab_runtime_defaults(environ)
 
 
 def apply_local_eval_runtime_defaults(environ: MutableMapping[str, str]) -> None:

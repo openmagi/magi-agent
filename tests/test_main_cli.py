@@ -241,10 +241,14 @@ def test_resolve_server_port_default_host_does_not_change_port() -> None:
     assert resolve_server_port(["--host", "127.0.0.1", "--port", "9098"], environ={}) == 9098
 
 
-def test_main_uses_local_full_runtime_defaults_when_env_is_absent(
+def test_main_uses_lab_runtime_defaults_when_env_is_absent(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
+    # The default (no MAGI_RUNTIME_PROFILE) tier is now `lab`: the full overlay
+    # PLUS the experimental flat-flag set. The profile identity resolves to
+    # "lab", and every full-overlay value is still present (lab is a superset of
+    # full; only the profile identity differs from the old `full` default).
     captured: dict[str, object] = {}
 
     for key in EXPECTED_LOCAL_FULL_RUNTIME_DEFAULTS:
@@ -256,7 +260,10 @@ def test_main_uses_local_full_runtime_defaults_when_env_is_absent(
 
     assert captured["host"] == "0.0.0.0"
     assert captured["port"] == 9093
+    assert main_module.os.environ["MAGI_RUNTIME_PROFILE"] == "lab"
     for key, value in EXPECTED_LOCAL_FULL_RUNTIME_DEFAULTS.items():
+        if key == "MAGI_RUNTIME_PROFILE":
+            continue  # lab overrides the identity; full overlay values below
         assert main_module.os.environ[key] == value
 
 
