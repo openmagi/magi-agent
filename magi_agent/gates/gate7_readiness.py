@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-import hashlib
 import importlib
-import re
 
 from magi_agent.config.models import PythonGate7ReadinessConfig
+from magi_agent.gates._readiness_common import (
+    DIGEST_RE as _DIGEST_RE,
+    digest_present as _digest_present,
+    sha256_text_digest as _sha256_text_digest,
+)
 
 
-_DIGEST_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
 _SAFE_ENVIRONMENTS = frozenset({"local", "development", "staging", "production"})
 _DEFAULT_REQUIRED_SURFACES = (
     "local_child_runner_boundary",
@@ -214,14 +216,6 @@ def _child_modules_ready(
             continue
         ready.append(surface)
     return True, tuple(dict.fromkeys(ready)), ()
-
-
-def _sha256_text_digest(value: str) -> str:
-    return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
-def _digest_present(value: object) -> bool:
-    return isinstance(value, str) and _DIGEST_RE.fullmatch(value) is not None
 
 
 __all__ = ["gate7_readiness_health_metadata"]

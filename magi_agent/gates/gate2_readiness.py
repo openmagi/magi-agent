@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import re
 
 from magi_agent.config.models import PythonGate2ReadinessConfig
@@ -15,9 +14,13 @@ from magi_agent.shadow.gate2_shadow_tool_policy import (
     GATE2_ALLOWED_SANDBOX_ACTIONS,
     GATE2_FORBIDDEN_ACTIONS,
 )
+from magi_agent.gates._readiness_common import (
+    DIGEST_RE as _DIGEST_RE,
+    digest_present as _digest_present,
+    sha256_text_digest as _sha256_text_digest,
+)
 
 
-_DIGEST_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
 _SAFE_PUBLIC_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 _UNSAFE_PUBLIC_TEXT_RE = re.compile(
     r"auth|cookie|credential|key|password|private|secret|session|token|"
@@ -150,14 +153,6 @@ def _reason_codes_for_scope(
     if not reasons:
         return ("selected_sandbox_readiness_ready",)
     return tuple(dict.fromkeys(reasons))
-
-
-def _sha256_text_digest(value: str) -> str:
-    return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
-def _digest_present(value: object) -> bool:
-    return isinstance(value, str) and _DIGEST_RE.fullmatch(value) is not None
 
 
 def _selected_scope_matched(

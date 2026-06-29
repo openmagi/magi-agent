@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import hashlib
 import json
-import re
 from collections.abc import Mapping
 from typing import Literal, Self
 
@@ -16,9 +14,13 @@ from magi_agent.evidence.gate1a_egress_correlation import (
     GATE1A_EGRESS_CORRELATION_MODE,
     GATE1A_EGRESS_TELEMETRY_SOURCE,
 )
+from magi_agent.gates._readiness_common import (
+    DIGEST_RE as _DIGEST_RE,
+    digest_present as _digest_present,
+    sha256_text_digest as _sha256_text_digest,
+)
 
 
-_DIGEST_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
 _SAFE_ENVIRONMENTS = frozenset({"local", "development", "staging", "production"})
 
 
@@ -304,10 +306,6 @@ def _continuity_evidence_metadata(
     }
 
 
-def _sha256_text_digest(value: str) -> str:
-    return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
 def _sha256_json(value: Mapping[str, object] | object) -> str:
     serialized = json.dumps(
         value,
@@ -316,10 +314,6 @@ def _sha256_json(value: Mapping[str, object] | object) -> str:
         default=str,
     )
     return _sha256_text_digest(serialized)
-
-
-def _digest_present(value: object) -> bool:
-    return isinstance(value, str) and _DIGEST_RE.fullmatch(value) is not None
 
 
 def _egress_correlation_ready(observed_egress: Mapping[str, object] | None) -> bool:

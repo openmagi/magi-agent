@@ -26,16 +26,18 @@ preserved: an unconfigured gate resolves to ``disabled`` (no dispatch).
 """
 from __future__ import annotations
 
-import hashlib
-import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from magi_agent.gates._readiness_common import (
+    DIGEST_RE as _DIGEST_RE,
+    digest_present as _digest_present,
+    sha256_text_digest as _sha256_text_digest,
+)
 
 
 WorkflowExecutionMode = Literal["disabled", "shadow", "live"]
 
-_DIGEST_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
 _SAFE_ENVIRONMENTS = frozenset({"local", "development", "staging", "production"})
 
 #: The gate at which live (canary) dispatch first becomes eligible.  Mirrors the
@@ -237,14 +239,6 @@ def _selected_scope_matched(
     if config.environment not in _SAFE_ENVIRONMENTS:
         return False
     return config.environment in config.environment_allowlist
-
-
-def _sha256_text_digest(value: str) -> str:
-    return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
-def _digest_present(value: object) -> bool:
-    return isinstance(value, str) and _DIGEST_RE.fullmatch(value) is not None
 
 
 __all__ = [
