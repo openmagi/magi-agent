@@ -156,8 +156,92 @@ def goal_is_met(
     return not missing_evidence
 
 
+@dataclass(frozen=True)
+class GoalNudgeEvidenceReasons:
+    """WS6 PR6c: transport-safe evidence-reason fields for the nudge status.
+
+    Pure value object surfaced on the EXISTING ``goal_nudge`` status event so a
+    client can see WHY the turn continued (the evidence gate was not satisfied).
+    All fields are public, redaction-safe tokens (validator names and gate
+    reason codes), never user content.
+
+    Parameters
+    ----------
+    missing_validators:
+        The subset of ``requirement_labels`` the gate reports as still unmet,
+        parsed from ``missing_required_evidence:<token>`` reason codes.
+    requirement_labels:
+        The full ``GoalNudge.required_evidence`` tuple the gate evaluated.
+    reason_codes:
+        The full reason-code tuple of the gate decision.
+    """
+
+    missing_validators: tuple[str, ...]
+    requirement_labels: tuple[str, ...]
+    reason_codes: tuple[str, ...]
+
+
+def goal_nudge_evidence_reasons(
+    nudge: GoalNudge,
+    *,
+    evidence_records: "Iterable[object]",
+) -> GoalNudgeEvidenceReasons:
+    """Project the goal_nudge evidence decision into transport-safe reason fields.
+
+    WS6 PR6c. Re-runs the SAME :class:`~magi_agent.evidence.final_output_gate.\
+FinalOutputGate` evaluation that :func:`goal_is_met` performs, over the SAME
+    evidence records, then derives the ``missingValidators`` / ``requirementLabels``
+    / ``reasonCodes`` used to ENRICH the existing ``goal_nudge`` status event.
+    Pure and side-effect free; it does NOT alter the continue/re-invoke control
+    flow (the engine still ``continue``s after emitting the enriched event).
+
+    When ``nudge.required_evidence`` is empty the gate is not consulted (as in
+    :func:`goal_is_met`, which returns ``False`` unconditionally in that case),
+    so every field is empty.
+    """
+    requirement_labels = tuple(nudge.required_evidence)
+    if not requirement_labels:
+        return GoalNudgeEvidenceReasons(
+            missing_validators=(),
+            requirement_labels=(),
+            reason_codes=(),
+        )
+
+    # Lazy import so the module stays cheap to import (mirrors ``goal_is_met``).
+    from magi_agent.evidence.final_output_gate import (  # noqa: PLC0415
+        FinalOutputGate,
+        FinalOutputGateConfig,
+        FinalOutputGateRequest,
+    )
+
+    records = tuple(evidence_records)
+    decision = FinalOutputGate(
+        FinalOutputGateConfig(enabled=True, localEvaluationEnabled=True)
+    ).evaluate(
+        FinalOutputGateRequest(
+            domain=nudge.domain,
+            outputText="",
+            requiredEvidence=requirement_labels,
+            evidenceRecords=records,
+            modelTier="standard",
+        )
+    )
+    missing_validators = tuple(
+        code.split(":", 1)[1]
+        for code in decision.reason_codes
+        if code.startswith("missing_required_evidence:")
+    )
+    return GoalNudgeEvidenceReasons(
+        missing_validators=missing_validators,
+        requirement_labels=requirement_labels,
+        reason_codes=tuple(decision.reason_codes),
+    )
+
+
 __all__ = [
     "GoalNudge",
+    "GoalNudgeEvidenceReasons",
     "build_nudge_message",
     "goal_is_met",
+    "goal_nudge_evidence_reasons",
 ]

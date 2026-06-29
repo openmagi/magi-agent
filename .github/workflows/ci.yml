@@ -211,6 +211,58 @@ jobs:
           tests/test_context_compaction_proactive.py
           tests/test_ws4_proactive_activation.py
 
+  ws6-onpath:
+    # WS6 PR6c: mandatory ON-path job (flag-promotion rule; "OFF is
+    # byte-identical" is necessary but not sufficient, ref incident #641/#650).
+    # Runs the WS6 deterministic-verification suites with the WS6 lab flags ON in
+    # a hermetic, env-cleared run so Kevin's exported MAGI_* + provider keys
+    # cannot give a false green. The job sets the flags DIRECTLY (the explicit ON
+    # set that mirrors the lab seed) rather than relying on MAGI_RUNTIME_PROFILE
+    # =lab, so the assertion is on the flags themselves.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install Python
+        run: uv python install 3.12
+      - name: Sync deps (dev + cli extras)
+        run: uv sync --python 3.12 --extra dev --extra cli
+      - name: WS6 deterministic-verification suite (ON-path, hermetic, env-cleared)
+        # ``env -i`` drops every inherited MAGI_* / provider key, then we set
+        # ONLY the WS6 lab flags ON (an explicit allowlist). These suites are
+        # robust under the global flags: the soft-consequence + completion-tie
+        # behaviour is proven directly from the flag state. PR6c's goal_nudge tie
+        # asserts NO terminal at the nudge point and that the goal_nudge status
+        # event carries the evidence-reason fields with no reserved delta key.
+        run: >
+          env -i HOME="$HOME" PATH="$PATH"
+          MAGI_CONFIG="${{ runner.temp }}/magi-ci-config.toml"
+          MAGI_RESEARCH_GOVERNANCE_SOFT_BLOCK_ENABLED=1
+          MAGI_EVIDENCE_HEDGE_ON_GUESS_ENABLED=1
+          MAGI_FACT_GROUNDING_VERIFICATION_ENABLED=1
+          MAGI_FINAL_OUTPUT_GATE_LOCAL_ENABLED=1
+          uv run --no-sync pytest -q
+          tests/runtime/test_goal_nudge_evidence_tie.py
+          tests/runtime/test_evidence_hedge_pairing_guard.py
+          tests/evidence/test_final_output_gate_local_enable.py
+          tests/research/test_live_research_final_gate_wiring.py
+          tests/cli/test_engine_fact_grounding_hedge.py
+      - name: WS6 research-governance soft-notice suite (hermetic, env-cleared)
+        # This file pairs ON-path soft-notice tests with OFF-path
+        # byte-identical/fail-open tests that assert the hard refuse with the
+        # hedge flag OFF; each test self-manages its WS6 flags via monkeypatch.
+        # It therefore runs env-cleared WITHOUT job-wide flag forcing (forcing
+        # the hedge flag globally would override its OFF-path assertions). The
+        # env-clear is the source-of-truth hermeticity guarantee (#650).
+        run: >
+          env -i HOME="$HOME" PATH="$PATH"
+          MAGI_CONFIG="${{ runner.temp }}/magi-ci-config.toml"
+          uv run --no-sync pytest -q
+          tests/cli/test_engine_research_soft_notice.py
+
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
