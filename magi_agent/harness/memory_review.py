@@ -45,7 +45,6 @@ from magi_agent.tools.context import ToolContext
 #: Env gate (default OFF). ``review()`` requires BOTH this AND ``config.enabled``.
 MAGI_MEMORY_REVIEW_ENABLED_ENV: str = "MAGI_MEMORY_REVIEW_ENABLED"
 
-_TRUE_STRINGS = frozenset({"1", "true", "yes", "on"})
 
 #: Reviewer seam: returns candidate fact strings extracted from the transcript.
 #: A live model-backed extractor plugs in here later; this PR injects a fake.
@@ -57,7 +56,12 @@ WriteOutcome = Literal["ok", "simulated", "blocked"]
 
 def _review_env_enabled() -> bool:
     """Return True only when ``MAGI_MEMORY_REVIEW_ENABLED`` is explicitly truthy."""
-    return os.environ.get(MAGI_MEMORY_REVIEW_ENABLED_ENV, "").lower() in _TRUE_STRINGS
+    # I-1: route through the typed flag registry. ``flag_bool`` is
+    # byte-identical to the prior ``in _TRUE_STRINGS`` check for the
+    # unset / truthy / falsy paths (``TRUE_VALUES`` == ``_TRUE_STRINGS``).
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool(MAGI_MEMORY_REVIEW_ENABLED_ENV)
 
 
 class MemoryReviewConfig(FalseOnlyAuthorityModel):

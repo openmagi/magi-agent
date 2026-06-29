@@ -426,12 +426,13 @@ def _qmd_live_recall_enabled() -> bool:
 
     Default (unset/falsy): False — the JSON-file path is used byte-identically.
     """
-    return os.environ.get(MAGI_MEMORY_QMD_LIVE_ENABLED_ENV, "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
+    # I-1: route through the typed flag registry. ``flag_bool`` returns
+    # the registered default (``False``) on unset and delegates set
+    # values to ``is_true`` (canonical ``TRUE_VALUES`` =
+    # ``{"1", "true", "yes", "on"}``, identical to the inline tuple).
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool(MAGI_MEMORY_QMD_LIVE_ENABLED_ENV)
 
 
 def _empty_result(
