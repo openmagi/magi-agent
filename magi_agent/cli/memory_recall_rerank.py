@@ -57,7 +57,6 @@ _DEFAULT_TIMEOUT_SECS = 10.0
 #: Per-candidate snippet length handed to the selector (untrusted body — capped).
 _MAX_SNIPPET_CHARS = 400
 
-_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 
 _RERANK_PROMPT_TEMPLATE = """\
 You are a memory re-ranker. Given the user query and a list of candidate memory
@@ -77,8 +76,13 @@ Reply with ONLY a JSON object, no other text:
 
 def _rerank_gate_open(env: "os._Environ[str] | dict[str, str] | None" = None) -> bool:
     source = os.environ if env is None else env
-    raw = str(source.get(MAGI_MEMORY_RECALL_RERANK_ENABLED_ENV, "")).strip().lower()
-    return raw in _TRUE_VALUES
+    # I-1: route through the typed flag registry. ``flag_bool`` returns
+    # ``False`` on unset (matches the prior ``in _TRUE_VALUES`` check on
+    # ``""``); ``TRUE_VALUES`` (canonical) matches the local
+    # ``_TRUE_VALUES`` literal ``{"1", "true", "yes", "on"}``.
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool(MAGI_MEMORY_RECALL_RERANK_ENABLED_ENV, env=source)
 
 
 def rerank_hits(

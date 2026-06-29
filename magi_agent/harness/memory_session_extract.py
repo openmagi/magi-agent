@@ -63,7 +63,6 @@ MAGI_MEMORY_SESSION_EXTRACT_MODEL_ENV: str = "MAGI_MEMORY_SESSION_EXTRACT_MODEL"
 _MAGI_SESSION_EXTRACT_TIMEOUT_ENV: str = "MAGI_MEMORY_SESSION_EXTRACT_TIMEOUT"
 _DEFAULT_EXTRACT_TIMEOUT_SECS: float = 15.0
 
-_TRUE_STRINGS = frozenset({"1", "true", "yes", "on"})
 
 #: The kind/label every session-extracted fact is written under.
 _SESSION_EXTRACT_KIND = "session_extract"
@@ -80,10 +79,10 @@ SessionExtractStatus = Literal["disabled", "extracted"]
 
 def _feature_enabled() -> bool:
     """True only when ``MAGI_MEMORY_SESSION_EXTRACT_ENABLED`` is explicitly truthy."""
-    return (
-        os.environ.get(MAGI_MEMORY_SESSION_EXTRACT_ENABLED_ENV, "").strip().lower()
-        in _TRUE_STRINGS
-    )
+    # I-1: route through the typed flag registry.
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool(MAGI_MEMORY_SESSION_EXTRACT_ENABLED_ENV)
 
 
 def _extract_timeout() -> float:
