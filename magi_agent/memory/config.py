@@ -78,6 +78,12 @@ ROOT_MAX_TOKENS_ENV_VAR: str = "MAGI_MEMORY_ROOT_MAX_TOKENS"
 MODE_ENV_VAR: str = "MAGI_MEMORY_MODE"
 RECALL_K_ENV_VAR: str = "MAGI_MEMORY_RECALL_K"
 RECALL_MAX_BYTES_ENV_VAR: str = "MAGI_MEMORY_RECALL_MAX_BYTES"
+#: External qmd HTTP search endpoint (e.g. a per-pod qmd sidecar). When set, the
+#: explicit-vector search surfaces route to it instead of the local qmd CLI /
+#: PyBM25 backend.  Mirrors the constant in :mod:`magi_agent.memory.qmd_client`
+#: (the recall path reads the same env var directly); kept here so the resolved
+#: config can drive ``select_search_backend`` without reaching into os.environ.
+QMD_ENDPOINT_ENV_VAR: str = "MAGI_QMD_ENDPOINT"
 
 #: config.toml table that mirrors the env names (snake_case keys).
 CONFIG_TABLE: str = "memory"
@@ -150,6 +156,9 @@ class MemoryRuntimeConfig(BaseModel):
     )
     root_max_tokens: int = Field(default=_DEFAULT_ROOT_MAX_TOKENS, ge=1, alias="rootMaxTokens")
     mode: MemoryMode = Field(default=_DEFAULT_MODE)
+    #: External qmd HTTP endpoint (None = use local CLI/BM25). Not master-gated;
+    #: an unset endpoint leaves all hosted-only HTTP routing off (local-identical).
+    qmd_endpoint: str | None = Field(default=None, alias="qmdEndpoint")
     recall_k: int = Field(default=_DEFAULT_RECALL_K, ge=1, alias="recallK")
     recall_max_bytes: int = Field(
         default=_DEFAULT_RECALL_MAX_BYTES, ge=1, alias="recallMaxBytes"
@@ -269,6 +278,9 @@ def resolve_memory_config(
             env, table, env_var=RECALL_MAX_BYTES_ENV_VAR, config_key="recall_max_bytes",
             default=_DEFAULT_RECALL_MAX_BYTES, minimum=1,
         ),
+        qmdEndpoint=_resolve_str(
+            env, table, env_var=QMD_ENDPOINT_ENV_VAR, config_key="qmd_endpoint",
+        ),
     )
 
 
@@ -364,6 +376,27 @@ def _resolve_int(
     return default
 
 
+def _resolve_str(
+    env: Mapping[str, str],
+    table: Mapping[str, object],
+    *,
+    env_var: str,
+    config_key: str,
+) -> str | None:
+    """Resolve an optional string (env beats config), or None if neither set.
+
+    Blank/whitespace values normalize to None so an empty env var does not look
+    like a configured endpoint.
+    """
+    raw = env.get(env_var)
+    if raw is None or not str(raw).strip():
+        candidate = table.get(config_key)
+        raw = candidate if isinstance(candidate, str) else None
+    if raw is None or not str(raw).strip():
+        return None
+    return str(raw).strip()
+
+
 def _resolve_mode(
     env: Mapping[str, str],
     table: Mapping[str, object],
@@ -385,6 +418,7 @@ __all__ = [
     "MASTER_ENV_VAR",
     "PREFER_LOCAL_SEARCH_ENV_VAR",
     "PREFER_QMD_AUTO_REGISTER_ENV_VAR",
+    "QMD_ENDPOINT_ENV_VAR",
     "MemoryMode",
     "MemoryRuntimeConfig",
     "coerce_bool",

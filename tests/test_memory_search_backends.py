@@ -17,10 +17,12 @@ from magi_agent.memory.config import resolve_memory_config
 from magi_agent.memory.search import (
     PyBM25Backend,
     QmdBackend,
+    QmdHttpBackend,
     SearchHit,
     select_search_backend,
 )
 from magi_agent.memory.search import qmd as qmd_module
+from magi_agent.memory.search import qmd_http as qmd_http_module
 
 
 # ---------------------------------------------------------------------------
@@ -694,3 +696,198 @@ def test_qmd_real_binary_end_to_end(tmp_path: Path) -> None:
         listed = sp.run(["qmd", "collection", "list"], stdin=sp.DEVNULL,
                         capture_output=True, text=True, timeout=30, check=False)
         assert name not in listed.stdout  # left nothing behind
+
+
+# ---------------------------------------------------------------------------
+# QmdHttpBackend — HTTP sidecar path (explicit-vector surfaces only)
+# ---------------------------------------------------------------------------
+
+
+class _FakeHttpResponse:
+    def __init__(self, body: bytes) -> None:
+        self._body = body
+
+    def read(self) -> bytes:
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc) -> None:
+        return None
+
+
+def _patch_urlopen(monkeypatch, handler):
+    """Patch urllib.request.urlopen (QmdHttpBackend lazy-imports it)."""
+    import urllib.request as urllib_request
+
+    monkeypatch.setattr(urllib_request, "urlopen", handler)
+
+
+def test_qmd_http_capabilities_report_vector() -> None:
+    caps = QmdHttpBackend(endpoint="http://127.0.0.1:7700").capabilities
+    assert caps.name == "qmd-http"
+    assert caps.supports_vector is True
+
+
+def test_qmd_http_reindex_is_noop(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def explode(*a, **k):  # pragma: no cover - reindex must not hit the network
+        raise AssertionError("QmdHttpBackend.reindex must be a no-op (no network)")
+
+    _patch_urlopen(monkeypatch, explode)
+    QmdHttpBackend(endpoint="http://127.0.0.1:7700").reindex(tmp_path)  # no raise
+
+
+def test_qmd_http_search_posts_to_vsearch_and_maps_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request, timeout=None):
+        captured["url"] = request.full_url
+        captured["method"] = request.get_method()
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        rows = {
+            "results": [
+                {"path": "memory/a.md", "content": "alpha", "score": 0.3},
+                {"path": "memory/b.md", "content": "beta", "score": 0.9},
+            ]
+        }
+        return _FakeHttpResponse(json.dumps(rows).encode("utf-8"))
+
+    _patch_urlopen(monkeypatch, handler)
+    backend = QmdHttpBackend(endpoint="http://127.0.0.1:7700/")
+    hits = backend.search("meaning", k=10)
+
+    # Routes to /vsearch (trailing slash on endpoint is normalized).
+    assert captured["url"] == "http://127.0.0.1:7700/vsearch"
+    assert captured["method"] == "POST"
+    assert captured["body"]["query"] == "meaning"
+    assert captured["body"]["limit"] == 10
+    # Sorted by score desc, mapped to SearchHit.
+    assert [(h.path, h.content) for h in hits] == [
+        ("memory/b.md", "beta"),
+        ("memory/a.md", "alpha"),
+    ]
+    assert all(isinstance(h, SearchHit) for h in hits)
+
+
+def test_qmd_http_search_respects_k_and_empty_query(monkeypatch: pytest.MonkeyPatch) -> None:
+    def handler(request, timeout=None):
+        rows = {"results": [
+            {"path": f"memory/d{i}.md", "content": str(i), "score": float(i)} for i in range(5)
+        ]}
+        return _FakeHttpResponse(json.dumps(rows).encode("utf-8"))
+
+    _patch_urlopen(monkeypatch, handler)
+    backend = QmdHttpBackend(endpoint="http://127.0.0.1:7700")
+    assert len(backend.search("q", k=2)) == 2
+    assert backend.search("   ", k=5) == []
+    assert backend.search("q", k=0) == []
+
+
+def test_qmd_http_failsoft_on_network_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    from urllib import error as urllib_error
+
+    def handler(request, timeout=None):
+        raise urllib_error.URLError("connection refused")
+
+    _patch_urlopen(monkeypatch, handler)
+    assert QmdHttpBackend(endpoint="http://127.0.0.1:7700").search("q", k=5) == []
+
+
+def test_qmd_http_failsoft_on_garbage_and_bad_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    def garbage(request, timeout=None):
+        return _FakeHttpResponse(b"<<<not json>>>")
+
+    _patch_urlopen(monkeypatch, garbage)
+    assert QmdHttpBackend(endpoint="http://127.0.0.1:7700").search("q", k=5) == []
+
+    def bad_rows(request, timeout=None):
+        rows = {"results": [
+            {"path": "memory/ok.md", "content": "good", "score": 0.5},
+            {"path": 123, "content": "x", "score": 0.5},
+            {"path": "memory/n.md", "content": "x"},          # missing score
+            {"path": "memory/b.md", "content": "x", "score": True},  # bool score
+            "not a dict",
+        ]}
+        return _FakeHttpResponse(json.dumps(rows).encode("utf-8"))
+
+    _patch_urlopen(monkeypatch, bad_rows)
+    hits = QmdHttpBackend(endpoint="http://127.0.0.1:7700").search("q", k=10)
+    assert [h.path for h in hits] == ["memory/ok.md"]
+
+
+def test_qmd_http_rejects_non_http_scheme(monkeypatch: pytest.MonkeyPatch) -> None:
+    def explode(*a, **k):  # pragma: no cover
+        raise AssertionError("must not open a non-http endpoint")
+
+    _patch_urlopen(monkeypatch, explode)
+    assert QmdHttpBackend(endpoint="file:///etc/passwd").search("q", k=5) == []
+
+
+# ---------------------------------------------------------------------------
+# select_search_backend — HTTP sidecar routing (explicit-vector caller only)
+# ---------------------------------------------------------------------------
+
+
+def test_select_routes_to_http_for_explicit_vector_when_endpoint_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # qmd binary present, but endpoint+vector_search+vector=True must win for the
+    # explicit caller and pick the HTTP backend (the sidecar).
+    monkeypatch.setattr(qmd_module.shutil, "which", lambda name: "/usr/local/bin/qmd")
+    cfg = resolve_memory_config(
+        env={},
+        config={"memory": {
+            "prefer_qmd": True, "vector_search": True,
+            "qmd_endpoint": "http://127.0.0.1:7700",
+        }},
+    )
+    backend = select_search_backend(cfg, vector=True)
+    assert isinstance(backend, QmdHttpBackend)
+    assert backend.capabilities.supports_vector is True
+
+
+def test_select_recall_caller_never_routes_to_http(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # vector=False (per-turn recall) must NOT use the HTTP sidecar even with an
+    # endpoint configured — it stays on the local CLI/BM25 path.
+    monkeypatch.setattr(qmd_module.shutil, "which", lambda name: "/usr/local/bin/qmd")
+    cfg = resolve_memory_config(
+        env={},
+        config={"memory": {
+            "prefer_qmd": True, "vector_search": True,
+            "qmd_endpoint": "http://127.0.0.1:7700",
+        }},
+    )
+    backend = select_search_backend(cfg)  # vector defaults False
+    assert isinstance(backend, QmdBackend)
+    assert not isinstance(backend, QmdHttpBackend)
+
+
+def test_select_no_endpoint_is_byte_identical_local(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # No endpoint configured -> never the HTTP backend, even for explicit vector.
+    monkeypatch.setattr(qmd_module.shutil, "which", lambda name: "/usr/local/bin/qmd")
+    cfg = resolve_memory_config(
+        env={}, config={"memory": {"prefer_qmd": True, "vector_search": True}}
+    )
+    assert cfg.qmd_endpoint is None
+    backend = select_search_backend(cfg, vector=True)
+    assert isinstance(backend, QmdBackend) and not isinstance(backend, QmdHttpBackend)
+
+
+def test_select_http_requires_vector_search_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # endpoint set + vector=True but vector_search OFF -> no HTTP routing.
+    monkeypatch.setattr(qmd_module.shutil, "which", lambda name: None)
+    cfg = resolve_memory_config(
+        env={}, config={"memory": {"qmd_endpoint": "http://127.0.0.1:7700"}}
+    )
+    assert cfg.vector_search is False
+    backend = select_search_backend(cfg, vector=True)
+    assert isinstance(backend, PyBM25Backend)
