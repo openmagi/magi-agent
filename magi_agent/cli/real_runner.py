@@ -79,6 +79,7 @@ class CliModelRunner:
         runner_policy_assembly: RunnerPolicyAssembly | None = None,
         general_automation_receipts: object | None = None,
         local_tool_evidence_collector: object | None = None,
+        plan_ledger_handler_set: object | None = None,
     ) -> None:
         self._runner = runner
         self._agent = agent
@@ -91,6 +92,7 @@ class CliModelRunner:
         self._runner_policy_assembly = runner_policy_assembly
         self._general_automation_receipts = general_automation_receipts
         self._local_tool_evidence_collector = local_tool_evidence_collector
+        self._plan_ledger_handler_set = plan_ledger_handler_set
 
     @property
     def agent(self) -> object:
@@ -115,6 +117,15 @@ class CliModelRunner:
     @property
     def local_tool_evidence_collector(self) -> object | None:
         return self._local_tool_evidence_collector
+
+    @property
+    def plan_ledger_handler_set(self) -> object | None:
+        # WS3 PR3a: the per-turn TodoWriteHandlerSet (with its durable ledger
+        # sink attached) is surfaced as a runner attribute, mirroring
+        # ``local_tool_evidence_collector``, so the engine wiring can read it
+        # back via ``_plan_ledger_handler_set(runner)``. ``None`` when the
+        # durable-ledger flag is OFF or no handler set was built.
+        return self._plan_ledger_handler_set
 
     async def run_async(self, **kwargs: object) -> AsyncGenerator[object, None]:
         user_id = _as_str(kwargs.get("user_id"), self._default_user_id)
@@ -160,6 +171,7 @@ def build_cli_model_runner(
     task_profile: Mapping[str, object] | None = None,
     general_automation_receipts: object | None = None,
     local_tool_evidence_collector: object | None = None,
+    plan_ledger_handler_set: object | None = None,
     self_review_fork_runner: object | None = None,
     self_review_candidate_sink: object | None = None,
     self_review_config: object | None = None,
@@ -299,6 +311,7 @@ def build_cli_model_runner(
         runner_policy_assembly=runner_policy_assembly,
         general_automation_receipts=receipt_store,
         local_tool_evidence_collector=tool_evidence_collector,
+        plan_ledger_handler_set=plan_ledger_handler_set,
     )
 
 

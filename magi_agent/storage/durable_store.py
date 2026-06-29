@@ -69,6 +69,10 @@ RUNTIME_METADATA_COLLECTIONS: tuple[str, ...] = (
     "eval_observations",
     "delivery_action_receipts",
     "credential_lease_metadata",
+    # WS3 PR3a: content-free index for the durable plan/todo ledger. The todo
+    # text itself lives in the workspace JSONL; this collection only holds
+    # digests + safe int/ref metadata for WS1 StartupRecoverySweep discovery.
+    "plan_ledger",
 )
 
 

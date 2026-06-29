@@ -324,6 +324,19 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_PLAN_LEDGER_DURABLE_ENABLED",
+        summary=(
+            "Enable the durable plan/todo ledger (WS3 PR3a): TodoWrite "
+            "mutations append a full snapshot to "
+            "<workspace_root>/.magi/durable/plan_ledger/<session_id>.jsonl and "
+            "the per-turn handler-set build re-seeds the in-memory todo list "
+            "from the JSONL last line so the plan survives across turns / a "
+            "process restart (strict default-OFF; OFF attaches no sink, runs no "
+            "restore, writes no file, byte-identical to pre-WS3). The durable "
+            "index half additionally requires MAGI_DURABLE_LOCAL_WRITES_ENABLED."
+        ),
+    ),
+    _b(
         "MAGI_CHANNEL_LIVE_DISCORD",
         stage="stage3",
         summary=(

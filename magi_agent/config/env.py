@@ -2315,6 +2315,37 @@ def is_goal_nudge_enabled(env: Mapping[str, str] | None = None) -> bool:
     return flag_bool(MAGI_GOAL_NUDGE_ENABLED_ENV, env=source)
 
 
+MAGI_PLAN_LEDGER_DURABLE_ENABLED_ENV = "MAGI_PLAN_LEDGER_DURABLE_ENABLED"
+
+
+def is_plan_ledger_durable_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the durable plan/todo ledger activation flag.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF, the CLI
+    wiring attaches no ledger sink and calls no ``restore_into``, so
+    ``TodoWriteHandlerSet`` and ``MagiEngineDriver`` behave byte-identically to
+    pre-WS3. When ON, every ``TodoWrite`` mutation appends a full snapshot to
+    ``<workspace_root>/.magi/durable/plan_ledger/<session_id>.jsonl`` and the
+    per-turn handler-set build re-seeds the in-memory todo list from that JSONL
+    (the durable index half additionally requires WS1's
+    ``MAGI_DURABLE_LOCAL_WRITES_ENABLED``). Like ``is_goal_nudge_enabled`` this
+    deliberately does NOT follow the runtime-profile default-ON convention; it is
+    an additive, default-disabled seam.
+
+    Design: WS3 Goal/Completion + Durable Cross-Turn Todo Ledger, PR3a.
+
+    Delegates to the canonical ``config.flags`` registry (``flag_bool``) backed
+    by the ``MAGI_PLAN_LEDGER_DURABLE_ENABLED`` ``FlagSpec``: byte-identical to
+    the raw ``_is_true(source.get(...))`` form because the flag is registered
+    with a ``False`` default and the same strict-truthy parser. Imported lazily
+    to avoid a config<->flags import cycle.
+    """
+    from .flags import flag_bool
+
+    source = os.environ if env is None else env
+    return flag_bool(MAGI_PLAN_LEDGER_DURABLE_ENABLED_ENV, env=source)
+
+
 MAGI_RESEARCH_FACT_GUIDANCE_ENABLED_ENV = "MAGI_RESEARCH_FACT_GUIDANCE_ENABLED"
 
 
