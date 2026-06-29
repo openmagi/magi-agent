@@ -185,11 +185,13 @@ def _base_env(run_dir: Path, *, full_runtime: bool, layer: str) -> dict[str, str
     env["MAGI_CLI_SESSION_DIR"] = str(run_dir / "transcript")
     # Keep memory/network side effects out of the measurement.
     env["MAGI_MEMORY_WRITE_ENABLED"] = "0"
-    # Make the worktree source win over the installed package for the run.
-    existing = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = (
-        str(_WORKTREE_ROOT) + (os.pathsep + existing if existing else "")
-    )
+    # IMPORTANT: do NOT inject the worktree onto PYTHONPATH. The worktree is
+    # ~100 commits behind main and predates the evidence producers
+    # (Calculation/TestRun/GitDiff/EditMatch/CodeDiagnostics/CommitCheckpoint,
+    # merged 2026-06-26/27). We run the INSTALLED package (homebrew 0.1.90+),
+    # which carries those producers, so calc/cited claim types actually emit
+    # typed records. _default_magi_cmd() already resolves to the install python.
+    env.pop("PYTHONPATH", None)
     return env
 
 

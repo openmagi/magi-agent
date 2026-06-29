@@ -87,7 +87,11 @@ _PATTERNS: dict[ClaimType, tuple[re.Pattern[str], ...]] = {
     ClaimType.CALCULATED: (
         re.compile(r"\bthe\s+total\s+is\b", re.I),
         re.compile(r"\bI\s+(calculated|computed)\b", re.I),
+        # "the sum is 333" / "the sum/total `3840`" / "sum of ... is N"
+        re.compile(r"\b(sum|total|result|product|count|answer)\b[^.\n]{0,40}?[`\s:=]\s*-?\d", re.I),
         re.compile(r"계산\s*(한\s*)?결과", re.I),
+        # Korean: "합계 333" / "합계는 333" / "총합 ... 333"
+        re.compile(r"(합계|총합|총계|결과)\s*(는|은|:)?\s*[`]?\s*-?\d", re.I),
     ),
     ClaimType.DELIVERED: (
         re.compile(r"\b(delivered|sent)\s+the\s+(file|report|document)\b", re.I),
