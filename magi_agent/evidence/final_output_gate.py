@@ -98,6 +98,33 @@ class FinalOutputGateDecision(BaseModel):
         }
 
 
+def resolve_local_final_output_gate_config(
+    env: Mapping[str, str] | None = None,
+) -> FinalOutputGateConfig:
+    """Resolve the engine-path FinalOutputGate config from the WS6 local flag.
+
+    Design: WS6 deterministic-verification activation, PR6b. The live finalizer
+    ``FinalOutputGate`` defaults ``enabled=False`` / ``local_evaluation_enabled=
+    False`` (so ``evaluate`` short-circuits to ``skipped`` via ``gate_is_live``).
+    When ``MAGI_FINAL_OUTPUT_GATE_LOCAL_ENABLED`` is ON this returns a live
+    config (both booleans True) so an opted-in recipe's gate evaluates locally;
+    when OFF it returns the disabled default so the gate stays ``skipped`` and
+    behavior is byte-identical to ``main``. Strict default-OFF; lab-only
+    activation. This flag does NOT touch ``runtime.goal_nudge.goal_is_met``,
+    which constructs its own ``enabled=True`` config.
+    """
+    import os  # noqa: PLC0415
+
+    from magi_agent.config.env import (  # noqa: PLC0415
+        parse_final_output_gate_local_enabled,
+    )
+
+    resolved_env = env if env is not None else os.environ
+    if parse_final_output_gate_local_enabled(resolved_env):
+        return FinalOutputGateConfig(enabled=True, localEvaluationEnabled=True)
+    return FinalOutputGateConfig()
+
+
 class FinalOutputGate:
     def __init__(self, config: FinalOutputGateConfig | None = None) -> None:
         self.config = config or FinalOutputGateConfig()
@@ -277,4 +304,5 @@ __all__ = [
     "FinalOutputGateDecision",
     "FinalOutputGateRequest",
     "FinalGateStatus",
+    "resolve_local_final_output_gate_config",
 ]
