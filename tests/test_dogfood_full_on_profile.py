@@ -402,6 +402,7 @@ _INTENTIONALLY_NOT_IN_FULL_PROFILE: dict[str, str] = {
     "MAGI_SERVE_EVIDENCE_ENABLED": "hosted gate5b serve path; needs obs-home PVC write + soak",
     "MAGI_SERVE_TOKEN_ESTIMATE_REAL": "hosted gate5b serve path only",
     "MAGI_COMPUTER_TOOL_ENABLED": "needs cua-driver + macOS accessibility/screen-recording grants",
+    "MAGI_COMPOSIO_BROKER_ENABLED": "deployment-role flag: turns THIS instance into the Composio broker (serves /v1/integrations/composio/*); not a capability to dogfood",
     "MAGI_VIDEO_DOWNLOAD_ENABLED": "needs yt-dlp installed",
     "MAGI_EGRESS_PROXY_ENABLED": "needs MAGI_EGRESS_PROXY_URL; raises/inert without proxy config",
     "MAGI_LOCAL_VAULT_ENABLED": "needs local credential vault setup",
