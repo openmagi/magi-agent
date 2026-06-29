@@ -11,6 +11,7 @@ import { TaskBoard } from "./task-board";
 import { AgentActivityTimeline } from "./agent-activity-timeline";
 import { ThinkingBlock } from "./thinking-block";
 import { EChartRenderer } from "./echart-renderer";
+import { CitationLinkChip } from "./citation-link-chip";
 import { parseMarkers } from "@/chat-core";
 import { parseKbContextMarker } from "@/chat-core";
 import { buildMessageCopyText } from "@/chat-core/message-copy";
@@ -930,6 +931,11 @@ export function MessageBubble({ role, content, timestamp, isStreaming, inlineBef
                     td: ({ children, ...props }) => <td {...props}>{injectCitationsIntoChildren(children, evidenceSources)}</td>,
                     th: ({ children, ...props }) => <th {...props}>{injectCitationsIntoChildren(children, evidenceSources)}</th>,
                     strong: ({ children }) => <strong>{injectCitationsIntoChildren(children, evidenceSources)}</strong>,
+                    a: ({ href, children }) => (
+                      <CitationLinkChip href={href} sources={evidenceSources}>
+                        {children}
+                      </CitationLinkChip>
+                    ),
                   } : {}),
                 }}
               >

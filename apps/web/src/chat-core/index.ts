@@ -18,6 +18,7 @@ export * from "./channel-navigation";
 export * from "./channel-order";
 export * from "./channel-runtime-cache";
 export * from "./chat-store";
+export * from "./citation-source-match";
 export * from "./clipboard-images";
 export * from "./reasoning-effort";
 export * from "./control-questions";
