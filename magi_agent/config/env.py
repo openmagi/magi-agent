@@ -3363,6 +3363,31 @@ def parse_fact_grounding_verification_enabled(env: Mapping[str, str]) -> bool:
     return flag_bool("MAGI_FACT_GROUNDING_VERIFICATION_ENABLED", env=env)
 
 
+def parse_research_governance_soft_block_enabled(env: Mapping[str, str]) -> bool:
+    """MAGI_RESEARCH_GOVERNANCE_SOFT_BLOCK_ENABLED: soft research notice gate.
+
+    Design: WS6 deterministic-verification activation, PR6a. Promotes the
+    in-scope research recipes from the hard ``pre_final_evidence_gate_blocked``
+    terminal to a SOFT, user-visible "could not verify these claims" notice
+    appended after the already-streamed answer. When an in-scope research recipe
+    is selected and the gate decision is ``block`` with a non-empty missing
+    validator/evidence set, the engine resolves research governance to
+    ``local_block_intent`` and appends a trailing notice (a
+    ``research_governance_notice`` status event plus a ``text_delta`` suffix)
+    instead of refusing the turn, then completes normally.
+
+    This is a **strict default-OFF** gate: it never defaults ON in any runtime
+    profile and only flips for an explicit truthy value, so flag-OFF behavior
+    stays byte-identical to ``main`` (the existing hard refuse is preserved).
+    It is activated in the experimental ``lab`` profile only (via
+    ``LAB_EXPERIMENTAL_FLAGS``); default self-host (``full``) and hosted keep it
+    unset until a measured false-block budget and sign-off.
+    """
+    from .flags import flag_bool
+
+    return flag_bool("MAGI_RESEARCH_GOVERNANCE_SOFT_BLOCK_ENABLED", env=env)
+
+
 def parse_answer_quality_verification_enabled(env: Mapping[str, str]) -> bool:
     """MAGI_VERIFY_ANSWER_QUALITY — LLM answer-quality pre-final gate.
 

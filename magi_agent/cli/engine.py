@@ -898,6 +898,43 @@ _RESEARCH_RECIPE_PACK_IDS: frozenset[str] = frozenset(
 )
 _PARALLEL_RESEARCH_MIN_SOURCES = 2
 
+# WS6 PR6a: the bare/prefixed validator labels that mark a recipe as having
+# opted into the research evidence contract (so the soft research-governance
+# notice applies). citation_support has no live satisfier (always unmet on an
+# openmagi.research turn), so it is the load-bearing membership; fact_grounding
+# and the named source-evidence verifier are research markers too.
+_RESEARCH_CONTRACT_VALIDATOR_LABELS: frozenset[str] = frozenset(
+    {"citation_support", "fact_grounding", "verifier:research-source-evidence"}
+)
+_RESEARCH_SOFT_NOTICE_CONTRACT_ID = "live-research-governance"
+# Net-new WS6 code: the fixed-format trailing notice appended after the answer
+# when an in-scope research turn could not be verified. Kept as a module-level
+# constant for test stability. No em-dashes.
+_RESEARCH_SOFT_NOTICE_TEXT = (
+    "\n\n[Verification notice] Magi could not verify some claims in this answer "
+    "against the opened sources. Treat the unverified statements with caution "
+    "and confirm them before relying on them."
+)
+
+
+def _is_research_recipe_scope(
+    assembly: RunnerPolicyAssembly,
+    live_selected_pack_ids: Sequence[str] = (),
+) -> bool:
+    """Return whether the assembled policy opted into the research evidence
+    contract, so the WS6 soft research-governance notice is in scope.
+
+    Design: WS6 PR6a. Scope is keyed on the recipe having a research evidence
+    contract (a research validator label) or a research pack selection, NOT on a
+    specific missing label.
+    """
+    required = set(getattr(assembly, "required_validators", ()) or ())
+    if required & _RESEARCH_CONTRACT_VALIDATOR_LABELS:
+        return True
+    selected = set(getattr(assembly, "selected_pack_ids", ()) or ())
+    selected.update(live_selected_pack_ids or ())
+    return bool(selected & _RESEARCH_RECIPE_PACK_IDS)
+
 
 def _resolve_document_coverage_mode_with_preset() -> str:
     """Resolve the document-coverage gate mode, honoring the Customize opt-in seam.
@@ -3052,6 +3089,11 @@ class MagiEngineDriver:
             return
 
         repair_token_buffer: list[RuntimeEvent] = []
+        # WS6 PR6a (MINOR-2): the soft notice may only append a suffix when the
+        # live answer is on the wire. A repair-suppressed turn discards its
+        # buffered answer, so the suffix invariant fails. Track suppression and
+        # skip the soft branch when it has happened.
+        repair_output_suppressed = False
         while True:
             pre_final_gate = self._pre_final_gate_payload(
                 session_id=session_id,
@@ -3084,6 +3126,7 @@ class MagiEngineDriver:
                     turn_id=turn_id,
                 )
                 repair_token_buffer = []
+                repair_output_suppressed = True
 
             repair_decision = pre_final_gate.get("repairDecision")
             repair_policy = pre_final_gate.get("repairPolicy")
@@ -3094,6 +3137,32 @@ class MagiEngineDriver:
                 and _coding_repair_loop_enabled()
             )
             if not should_repair:
+                # WS6 PR6a: convert the hard research pre-final refuse into a
+                # SOFT appended notice (research governance -> local_block_intent)
+                # when an in-scope research recipe blocked under the flag. The
+                # already-streamed answer is kept; only a trailing notice is
+                # appended. Skipped (existing hard refuse runs) when the flag is
+                # OFF, the recipe is out of scope, or a repair-suppressed turn
+                # discarded its answer (MINOR-2). Fail-open inside the helper.
+                if not repair_output_suppressed:
+                    soft_notice_events = self._research_governance_soft_notice(
+                        turn_id=turn_id,
+                        session_id=session_id,
+                        final_text=emitted_text,
+                        pre_final_gate=pre_final_gate,
+                        live_selected_pack_ids=live_selected,
+                    )
+                    if soft_notice_events is not None:
+                        for soft_event in soft_notice_events:
+                            yield soft_event
+                        yield EngineResult(  # type: ignore[misc]
+                            terminal=Terminal.completed,
+                            usage=usage,
+                            cost_usd=0.0,
+                            session_id=session_id,
+                            turn_id=turn_id,
+                        )
+                        return
                 yield EngineResult(  # type: ignore[misc]
                     terminal=Terminal.error,
                     usage=usage,
@@ -4828,6 +4897,106 @@ class MagiEngineDriver:
         except Exception:
             logger.debug("fact-grounding satisfier failed", exc_info=True)
             return []
+
+    def _research_governance_soft_notice(
+        self,
+        *,
+        turn_id: str,
+        session_id: str,
+        final_text: str,
+        pre_final_gate: Mapping[str, object],
+        live_selected_pack_ids: Sequence[str] = (),
+    ) -> tuple[RuntimeEvent, ...] | None:
+        """Resolve a hard research block into a SOFT appended could-not-verify
+        notice, or ``None`` to fall through to the existing hard refuse.
+
+        Design: WS6 deterministic-verification activation, PR6a. Behind the
+        strict default-OFF ``MAGI_RESEARCH_GOVERNANCE_SOFT_BLOCK_ENABLED`` flag.
+        Fires only when (a) the flag is ON, (b) the assembled recipe opted into
+        the research evidence contract, and (c) the gate decision is ``block``
+        with a NON-EMPTY missing validator/evidence set. The reason-discrimination
+        is label-agnostic (it does NOT key on a specific label), because
+        ``openmagi.research`` blocks on the satisfier-less ``citation_support``
+        whether or not ``fact_grounding`` is also unmet (the design 1a correction).
+
+        Returns the status + trailing ``text_delta`` notice events to yield (the
+        caller then yields ``Terminal.completed``), or ``None`` when the soft
+        consequence does not apply. The live ``turn_id``/cited refs are NORMALIZED
+        before the research gate request is constructed (design 3.3 / 3.6), so a
+        digit/hex ``turn_id`` or raw URL refs never raise into the fail-open wrap.
+        Fail-open: any internal fault returns ``None`` (existing behavior), never
+        a wedge.
+        """
+        import os  # noqa: PLC0415
+
+        try:
+            from magi_agent.config.env import (  # noqa: PLC0415
+                parse_research_governance_soft_block_enabled,
+            )
+
+            if not parse_research_governance_soft_block_enabled(os.environ):
+                return None
+            assembly = self._runner_policy_assembly
+            if assembly is None:
+                return None
+            if not _is_research_recipe_scope(assembly, live_selected_pack_ids):
+                return None
+            missing_validators = [
+                str(ref)
+                for ref in pre_final_gate.get("missingValidators") or []
+                if isinstance(ref, str)
+            ]
+            missing_evidence = [
+                str(ref)
+                for ref in pre_final_gate.get("missingEvidence") or []
+                if isinstance(ref, str)
+            ]
+            if not (missing_validators or missing_evidence):
+                return None
+
+            # Evaluate the richer research final gate over NORMALIZED ids/refs to
+            # enrich the notice with deterministic reason codes. A construction
+            # ValueError would be a wiring bug (un-normalized input), not a
+            # runtime condition; the builder normalizes upstream so it cannot
+            # raise into this fail-open wrap.
+            from magi_agent.research.live_research_final_gate import (  # noqa: PLC0415
+                evaluate_live_research_final_gate,
+            )
+
+            result = evaluate_live_research_final_gate(
+                contract_id=_RESEARCH_SOFT_NOTICE_CONTRACT_ID,
+                turn_id=turn_id,
+                session_id=session_id,
+                final_text=final_text,
+                evidence_records=self._collect_evidence(turn_id),
+            )
+            reason_codes = list(result.reason_codes) if result.block_intent else []
+            cited_without_source = list(result.output_link_digests)
+
+            status_payload: dict[str, object] = {
+                "type": "research_governance_notice",
+                "turnId": turn_id,
+                "mode": "local_block_intent",
+                "reasonCodes": reason_codes,
+                "missingValidators": missing_validators,
+                "citedWithoutSource": cited_without_source,
+                "noticeAppended": True,
+            }
+            status_event = RuntimeEvent(
+                type="status", payload=status_payload, turn_id=turn_id
+            )
+            notice_event = RuntimeEvent(
+                type="token",
+                payload={"type": "text_delta", "delta": _RESEARCH_SOFT_NOTICE_TEXT},
+                turn_id=turn_id,
+            )
+            return (status_event, notice_event)
+        except Exception:
+            logger.debug(
+                "research-governance soft notice failed; falling through to hard branch",
+                exc_info=True,
+            )
+            return None
 
     def _source_ledger_matched_requirement_refs(
         self,

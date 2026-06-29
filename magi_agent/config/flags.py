@@ -1560,6 +1560,19 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_RESEARCH_GOVERNANCE_SOFT_BLOCK_ENABLED",
+        stage="stage2",
+        summary=(
+            "Promote in-scope research recipes from the hard pre-final "
+            "evidence-gate refuse to a SOFT, user-visible 'could not verify "
+            "these claims' notice appended after the already-streamed answer "
+            "(research governance resolved to local_block_intent). Covers the "
+            "FULL non-empty missing validator/evidence set (incl. the "
+            "satisfier-less citation_support). Strict default-OFF and inert "
+            "unless explicitly set; lab-only activation, never a hard block."
+        ),
+    ),
+    _b(
         "MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED",
         stage="stage2",
         summary=(
