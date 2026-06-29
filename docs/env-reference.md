@@ -165,7 +165,9 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_MEMORY_PROJECTION_ENABLED` (default off) — Project a lean memory view into the serve prompt block.
 - `MAGI_MEMORY_QMD_LIVE_ENABLED` (default off) — Use the live qmd search backend for memory recall.
 - `MAGI_MEMORY_RECALL_ENABLED` (default off) — Enable memory recall/injection into the working context.
+- `MAGI_MEMORY_RECALL_RERANK_ENABLED` (default off) — Default-OFF: ask the cheap rerank LLM to reorder memory-recall hits before injection. Off keeps the BM25 / vector order verbatim.
 - `MAGI_MEMORY_REVIEW_ENABLED` (default off) — Default-OFF master switch for the background memory-review harness. When OFF the reviewer short-circuits without any write.
+- `MAGI_MEMORY_SESSION_EXTRACT_ENABLED` (default off) — Default-OFF master switch for the session-end fact extractor. When ON the harness summarises a closed session and (gated) persists declarative facts; OFF skips both extraction and write.
 - `MAGI_MEMORY_WRITE_ENABLED` (default off) — Allow the memory subsystem to persist writes (vs read-only recall).
 - `MAGI_MESSAGE_CACHE_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Mark the last ~2 non-system conversation messages with an Anthropic ephemeral ``cache_control`` marker so the growing conversation tail is prompt-cached in addition to the system prefix (default-ON full profile).
 - `MAGI_MODEL` (no default) — Bare provider-native model id override (e.g. ``claude-opus-4-8`` or ``gpt-5.5``). When set, overrides every provider's catalog default; empty/unset keeps each provider's built-in default.
