@@ -256,6 +256,36 @@ def test_memory_subsystem_fully_resolved_on(profile: dict[str, str]) -> None:
     assert cfg.prefer_local_search is True
 
 
+def test_okf_knowledge_enabled_under_profile(profile: dict[str, str]) -> None:
+    """The full profile turns the OKF knowledge bundle ON via its OWN resolver.
+
+    OKF is not in the central flag registry (it uses ``resolve_okf_config``), so
+    the generic registry cross-check skips it — this verifies the ON path
+    directly through OKF's real reader (flag-promotion rule: prove ON, don't
+    trust "OFF is byte-identical"). INDEX_INJECT stays OFF (Mode B unimplemented).
+    """
+    from magi_agent.knowledge.okf.config import resolve_okf_config
+
+    assert profile.get("MAGI_KNOWLEDGE_OKF_ENABLED") == "1"
+    assert profile.get("MAGI_KNOWLEDGE_OKF_LOOKUP_ENABLED") == "1"
+    cfg = resolve_okf_config(env=profile)
+    assert cfg.master_enabled is True
+    assert cfg.lookup_enabled is True
+    # Mode B index injection (PR3) is not implemented; the profile must not set it.
+    assert cfg.index_inject_enabled is False
+    assert "MAGI_KNOWLEDGE_OKF_INDEX_INJECT_ENABLED" not in profile
+
+
+def test_okf_knowledge_default_off_when_profile_unset() -> None:
+    """Symmetric guard: OKF resolves OFF on empty env (profile is config, not a
+    code-default flip)."""
+    from magi_agent.knowledge.okf.config import resolve_okf_config
+
+    cfg = resolve_okf_config(env={})
+    assert cfg.master_enabled is False
+    assert cfg.lookup_enabled is False
+
+
 # ---------------------------------------------------------------------------
 # The profile is CONFIG, not a code-default flip: the SAME readers return
 # default-OFF when the profile is not loaded (empty env). If any strict gate
