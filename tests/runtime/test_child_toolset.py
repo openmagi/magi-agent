@@ -4,6 +4,7 @@ These tests exercise the SMALL pure module ``magi_agent.runtime.child_toolset``
 that maps the ``MAGI_CHILD_RUNNER_TOOLSET`` env gate to a profile literal plus
 a read-only tool allowlist. No network, no model, no heavy imports.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -49,11 +50,18 @@ def test_resolve_uses_os_environ_when_env_is_none(monkeypatch) -> None:
     assert resolve_child_toolset_profile() == "readonly"
 
 
-def test_readonly_tool_names_are_read_only_inspection_tools() -> None:
-    """The read-only allowlist must contain ONLY non-mutating inspection tools."""
+def test_readonly_tool_names_are_non_mutating_tools() -> None:
+    """The read-only allowlist must contain ONLY non-mutating tools.
+
+    Includes source-inspection tools plus pure side-effect-free helpers
+    (PR-N added ``Calculation``, a deterministic AST expression evaluator
+    with no fs/net/subprocess surface).
+    """
     assert "FileRead" in READONLY_TOOL_NAMES
     assert "Glob" in READONLY_TOOL_NAMES
     assert "Grep" in READONLY_TOOL_NAMES
+    # PR-N: pure helpers are allowed when they have zero side effects.
+    assert "Calculation" in READONLY_TOOL_NAMES
     # No workspace-mutating tools may appear in the read-only allowlist.
     for forbidden in ("FileWrite", "Edit", "Bash", "PatchApply"):
         assert forbidden not in READONLY_TOOL_NAMES

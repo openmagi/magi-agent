@@ -16,10 +16,15 @@ prefer gate) — capability and activation are decoupled.
 Profiles
 --------
 * ``none``     — empty toolset (default; text-only child, byte-identical to v1).
-* ``readonly`` — non-mutating source-inspection tools only (FileRead/Glob/Grep/
-                 GitDiff). Safe to enable without the child-sandbox/permissions
-                 decision (doc 09) because nothing in the allowlist mutates the
-                 workspace.
+* ``readonly`` (non-mutating source-inspection tools FileRead/Glob/Grep/
+                 GitDiff, plus pure side-effect-free helpers like Calculation,
+                 a deterministic AST expression evaluator). Safe to enable
+                 without the child-sandbox/permissions decision (doc 09)
+                 because nothing in the allowlist mutates the workspace or
+                 makes a network call. ``Calculation`` was added (PR-N) after
+                 Kevin's 0.1.91 SOTA-spawn debug showed 6/9 children
+                 (opus/haiku/gemini-flash variants, some gpt-5.5) crashing
+                 with ``Tool 'Calculation' not found`` on simple arithmetic.
 * ``full``     — the whole CLI core toolset (Write/Edit/Bash/...). GATED behind
                  the child sandbox + permission-unification follow-up (doc 09);
                  this module only RESOLVES the literal, it does not authorise it.
@@ -27,6 +32,7 @@ Profiles
 Anything unrecognised (typo, ``1``, ``true``, ``all``, ...) degrades to the
 safe ``none`` profile — fail-closed, never escalate by accident.
 """
+
 from __future__ import annotations
 
 import os
@@ -44,10 +50,28 @@ ChildToolsetProfile = Literal["none", "readonly", "full"]
 #: FIRST entry (``none``).
 _KNOWN_PROFILES: tuple[ChildToolsetProfile, ...] = ("none", "readonly", "full")
 
-#: Read-only, non-mutating source-inspection tool names (FileRead/Glob/Grep/
-#: GitDiff). Sourced from the single canonical definition so this allowlist can
-#: never drift from the local read-only tool host.
-READONLY_TOOL_NAMES: tuple[str, ...] = tuple(LOCAL_READONLY_TOOL_NAMES)
+#: Pure, side-effect-free tools that are SAFE to expose to a readonly child
+#: even though they are NOT source-inspection tools. Each entry MUST be
+#: deterministic, never touch the filesystem, never make a network call, and
+#: never spawn a subprocess. Adding a tool here is a security decision; the
+#: bar is the same as for ``LOCAL_READONLY_TOOL_NAMES`` (zero side effects).
+#:
+#: * ``Calculation``: gate1a's AST-based arithmetic evaluator
+#:   (:func:`magi_agent.gates.gate1a_readonly_tools._evaluate_expression`).
+#:   Only ``ast.Constant``/``ast.UnaryOp``/``ast.BinOp`` nodes are honoured;
+#:   any other AST node raises ``ValueError``. No fs/net/subprocess surface.
+_PURE_NON_INSPECTION_TOOL_NAMES: tuple[str, ...] = ("Calculation",)
+
+#: Tools the readonly child profile forwards to the model. Built as the
+#: source-inspection set (:data:`LOCAL_READONLY_TOOL_NAMES`, the single
+#: canonical definition for ``SourceInspection`` projection) UNIONED with
+#: :data:`_PURE_NON_INSPECTION_TOOL_NAMES`. Keeping the two sources separate
+#: preserves the SourceInspection contract (``LOCAL_READONLY_TOOL_NAMES`` is
+#: the authoritative source-projection set; ``Calculation`` does NOT project
+#: a source) while letting the child profile expose more pure helpers.
+READONLY_TOOL_NAMES: tuple[str, ...] = (
+    tuple(LOCAL_READONLY_TOOL_NAMES) + _PURE_NON_INSPECTION_TOOL_NAMES
+)
 
 
 def resolve_child_toolset_profile(
