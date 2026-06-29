@@ -39,7 +39,6 @@ logger = logging.getLogger(__name__)
 #: summarizer uses. A ``<provider>/<model>`` slug also switches provider.
 SESSION_EXTRACT_MODEL_ENV_VAR = "MAGI_MEMORY_SESSION_EXTRACT_MODEL"
 
-_TRUTHY = {"1", "true", "yes", "on"}
 
 
 def session_extract_enabled(env: Mapping[str, str] | None = None) -> bool:
@@ -48,9 +47,13 @@ def session_extract_enabled(env: Mapping[str, str] | None = None) -> bool:
         MAGI_MEMORY_SESSION_EXTRACT_ENABLED_ENV,
     )
 
+    # I-1: route through the typed flag registry. ``flag_bool`` returns
+    # ``False`` on unset (matches the prior ``in _TRUTHY`` check on
+    # ``""``); ``TRUE_VALUES`` matches the local ``_TRUTHY`` literal.
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
     source = os.environ if env is None else env
-    raw = str(source.get(MAGI_MEMORY_SESSION_EXTRACT_ENABLED_ENV, "")).strip().lower()
-    return raw in _TRUTHY
+    return flag_bool(MAGI_MEMORY_SESSION_EXTRACT_ENABLED_ENV, env=source)
 
 
 def _build_extract_model() -> Any | None:

@@ -214,6 +214,21 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_MEMORY_PROJECTION_ENABLED",
         summary="Project a lean memory view into the serve prompt block.",
     ),
+    _b(
+        "MAGI_MEMORY_RECALL_RERANK_ENABLED",
+        summary=(
+            "Default-OFF: ask the cheap rerank LLM to reorder memory-recall "
+            "hits before injection. Off keeps the BM25 / vector order verbatim."
+        ),
+    ),
+    _b(
+        "MAGI_MEMORY_SESSION_EXTRACT_ENABLED",
+        summary=(
+            "Default-OFF master switch for the session-end fact extractor. "
+            "When ON the harness summarises a closed session and (gated) "
+            "persists declarative facts; OFF skips both extraction and write."
+        ),
+    ),
     # --- Learning / self-improvement ---------------------------------------
     _b(
         "MAGI_LEARNING_ENABLED",
