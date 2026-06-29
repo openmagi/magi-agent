@@ -197,12 +197,12 @@ export function NlRuleCompose({
   const agentFetch = useAgentFetch();
 
   // Conversational mode toggle (PR-F-CONV): the default surface is
-  // still the F-UX6 one-shot+interview compose; the operator can
-  // flip into the magi-cp-style chat-driven builder via the toggle
-  // below. We keep both behind the SAME parent state so the wizard
-  // handoff / "Pick different" affordances continue to work without
-  // adding another phase to AddState.
-  const [conversational, setConversational] = useState(false);
+  // the magi-cp-style chat-driven builder; the operator can flip back
+  // into the F-UX6 one-shot+interview textarea via the toggle below.
+  // We keep both behind the SAME parent state so the wizard handoff /
+  // "Pick different" affordances continue to work without adding
+  // another phase to AddState.
+  const [conversational, setConversational] = useState(true);
   if (conversational) {
     return (
       <ConversationalCompose
@@ -488,7 +488,7 @@ export function NlRuleCompose({
           data-testid="nl-conversational-toggle"
           title="Build it step-by-step in chat — the assistant asks 1-2 short questions per turn and the draft fills in live."
         >
-          Try conversational ▸
+          Back to conversational ▸
         </button>
       </header>
 
