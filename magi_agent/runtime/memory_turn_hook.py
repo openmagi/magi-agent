@@ -18,8 +18,11 @@ GOVERNANCE INVARIANT
 --------------------
 The flag gates *activation*, never *capability*.  When ``write_enabled`` /
 ``compaction_enabled`` resolve True this hook ACTUALLY writes the daily file and
-builds the tree; when the master default is OFF (PR-B keeps it OFF) every path
-below short-circuits to an inert no-op — no daily file, no ROOT, no IO.
+builds the tree; when the resolved master is OFF every path below short-circuits
+to an inert no-op (no daily file, no ROOT, no IO).  The registry/library default
+is OFF, but shipped full installs resolve the master (and the cascaded
+``compaction_enabled``) ON via the CLI bootstrap setdefault (Design: WS2), so
+this hook is live there.
 
 Fail-soft
 ---------

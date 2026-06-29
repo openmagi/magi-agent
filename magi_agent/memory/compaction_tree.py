@@ -26,8 +26,11 @@ GOVERNANCE INVARIANT
 The flag gates *activation*, never *capability*: when
 ``MemoryRuntimeConfig.compaction_enabled`` is True the tree ACTUALLY builds;
 when False ``run()`` is an inert no-op returning a ``skipped`` result.  PR-A
-delivers the engine only — PR-B wires the trigger (session hook / cron) and
-flips the default ON.  Nothing here auto-triggers.
+delivers the engine; PR-B wires the trigger (turn-end session hook).  The
+registry/library default stays OFF, but shipped full installs already resolve
+``compaction_enabled`` True because it cascades from the memory master that the
+CLI bootstrap setdefaults ON (Design: WS2). Nothing here auto-triggers; the
+hook calls :meth:`run` once per session under the engine's own 24h cooldown.
 
 Reuse (no second copies)
 ------------------------
@@ -84,6 +87,19 @@ _ROOT_SECTIONS = (
 
 _STATE_FILENAME = ".compaction-state.json"
 _DAILY_NAME_RE_LEN = len("YYYY-MM-DD")  # 10
+
+#: Machine-owned banner stamped as ROOT.md line 2 (Design: WS2 PR2b - machine-vs-
+#: user region hardening).  ROOT.md is re-synthesized from scratch every
+#: compaction run, so it is the machine-regenerated surface, NOT a user-editable
+#: file: this banner marks it so it is never mistaken for one (durable user notes
+#: belong in the append-only user-region ``MEMORY.md``).  Embedded into the first
+#: rendered element via a single ``\n`` so it sits on line 2 under the load-bearing
+#: ``# Memory Root (synthesized)`` H1 without disturbing the four canonical
+#: sections, the redact-then-cap flow, or the token cap.
+_ROOT_BANNER = (
+    "<!-- machine-generated; edits here are overwritten on next compaction. "
+    "Put durable notes in MEMORY.md -->"
+)
 
 
 @runtime_checkable
@@ -546,7 +562,11 @@ def _build_root_document(
         (_ROOT_SECTIONS[2], historical),
         (_ROOT_SECTIONS[3], topics_index),
     ]
-    rendered: list[str] = ["# Memory Root (synthesized)"]
+    # Embed the machine-owned banner into the title's join-block via a single
+    # ``\n`` (NOT a separate list element): the ``"\n\n".join`` below would put a
+    # separate element on line 3 with a blank line 2, so the banner must share
+    # the title element to land on line 2 (``splitlines()[1]``).
+    rendered: list[str] = ["# Memory Root (synthesized)\n" + _ROOT_BANNER]
     for heading, body in blocks:
         rendered.append(heading)
         rendered.append(body.strip() if body.strip() else "_(none)_")
