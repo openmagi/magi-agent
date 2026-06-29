@@ -263,6 +263,62 @@ jobs:
           uv run --no-sync pytest -q
           tests/cli/test_engine_research_soft_notice.py
 
+  ws3-goal-on-path:
+    # WS3 PR3c: mandatory ON-path job (flag-promotion rule; "OFF is
+    # byte-identical" is necessary but not sufficient, ref incident #641). PR3c
+    # flips MAGI_PLAN_LEDGER_DURABLE_ENABLED + MAGI_GOAL_COMPLETION_EVIDENCE_FIRST_ENABLED
+    # ON for the full local profile. TWO invocations run the WS3 suite in a
+    # hermetic, env-cleared run (``env -i`` drops Kevin's exported MAGI_* +
+    # provider keys so they cannot give a false green, R4):
+    #   1. LAB (SEAM 1 + SEAM 3): also sets MAGI_GOAL_LOOP_ENABLED=1, so the
+    #      pre-judge short-circuit and the budget/max-turns goal_paused wrap that
+    #      live INSIDE the goal-loop guard are exercised.
+    #   2. FULL (SEAM 2, the shipped "full" deliverable): leaves
+    #      MAGI_GOAL_LOOP_ENABLED UNSET (env -i never sets it), so goal_loop_policy
+    #      is None and the ledger-all-complete -> done short-circuit + the honest
+    #      pre-judge pause run under the ACTUAL full wiring. This second invocation
+    #      is mandatory: without it the loop-OFF SEAM-2 tests would exist in the
+    #      suite but never run under loop-OFF in CI (the arch-tdd trap of the
+    #      WS3 design 4.4). The judge_caller is a scripted fake; no model call.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install Python
+        run: uv python install 3.12
+      - name: Sync deps (dev + cli extras)
+        run: uv sync --python 3.12 --extra dev --extra cli
+      - name: WS3 goal/ledger suite (FULL profile, SEAM 2, loop OFF)
+        # MAGI_GOAL_LOOP_ENABLED is intentionally NOT set: goal_loop_policy is
+        # None, so the SEAM-2 ledger-all-complete -> done and pre-judge pause are
+        # the shipped "full" deliverable under test. MAGI_GOAL_NUDGE_ENABLED is
+        # also unset to prove Reader 2 independence (design 4.5).
+        run: >
+          env -i HOME="$HOME" PATH="$PATH"
+          MAGI_CONFIG="${{ runner.temp }}/magi-ci-config.toml"
+          MAGI_PLAN_LEDGER_DURABLE_ENABLED=1
+          MAGI_GOAL_COMPLETION_EVIDENCE_FIRST_ENABLED=1
+          uv run --no-sync pytest -q
+          tests/runtime/test_plan_ledger.py
+          tests/runtime/test_goal_loop_evidence.py
+          tests/cli/test_engine_goal_pause.py
+          tests/test_ws3_goal_activation.py
+      - name: WS3 goal/ledger suite (LAB, SEAM 1 + SEAM 3, judge loop ON)
+        run: >
+          env -i HOME="$HOME" PATH="$PATH"
+          MAGI_CONFIG="${{ runner.temp }}/magi-ci-config.toml"
+          MAGI_PLAN_LEDGER_DURABLE_ENABLED=1
+          MAGI_GOAL_COMPLETION_EVIDENCE_FIRST_ENABLED=1
+          MAGI_GOAL_LOOP_ENABLED=1
+          uv run --no-sync pytest -q
+          tests/runtime/test_plan_ledger.py
+          tests/runtime/test_goal_loop_evidence.py
+          tests/cli/test_engine_goal_pause.py
+          tests/test_ws3_goal_activation.py
+
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10

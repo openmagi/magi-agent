@@ -428,8 +428,12 @@ _INTENTIONALLY_NOT_IN_FULL_PROFILE: dict[str, str] = {
     "MAGI_WEB_PROVIDER_ROUTER_ENABLED": "router on top of the live web stack; only meaningful when MAGI_LIVE_WEB_ACQUISITION_ENABLED is also on",
     "MAGI_INSANE_FETCH_ENABLED": "loads the curl_cffi WAF-bypass provider; off by default (extra dep + active fingerprinting evasion)",
     "MAGI_JINA_READER_ENABLED": "loads the Jina Reader provider; off by default (third-party endpoint + optional API key)",
-    "MAGI_PLAN_LEDGER_DURABLE_ENABLED": "WS3 PR3a ships the durable plan-ledger substrate default-OFF; profile activation is deferred to WS3 PR3c (adds it to LOCAL_FULL_RUNTIME_ENV_DEFAULTS) after the ledger lands",
-    "MAGI_GOAL_COMPLETION_EVIDENCE_FIRST_ENABLED": "WS3 PR3b ships evidence-first goal completion default-OFF; profile activation is deferred to WS3 PR3c (adds it to LOCAL_FULL_RUNTIME_ENV_DEFAULTS) after the seam lands",
+    # WS3 PR3c activates MAGI_PLAN_LEDGER_DURABLE_ENABLED and
+    # MAGI_GOAL_COMPLETION_EVIDENCE_FIRST_ENABLED in the full profile (both
+    # exported in scripts/dogfood-full-on.env and seeded into
+    # LOCAL_FULL_RUNTIME_ENV_DEFAULTS), so they are no longer recorded as
+    # deliberate omissions. MAGI_GOAL_LOOP_ENABLED (the cost-bearing lab judge
+    # loop) stays in LAB_EXPERIMENTAL_FLAGS and is NOT promoted to full by WS3.
 }
 
 
