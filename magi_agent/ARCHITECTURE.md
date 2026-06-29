@@ -1273,10 +1273,11 @@ graph LR
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
-| __init__.py | Hipocampus memory search backends (PR2, read-side, unwired). | base, bm25, config, qmd | cli/memory_cli.py, cli/memory_recall_block.py, memory/adapters/hipocampus_readonly.py, transport/app_api.py |
-| base.py | SearchBackend abstraction for Hipocampus memory (PR2, read-side). | — | cli/memory_recall_rerank.py, memory/search/__init__.py, memory/search/bm25.py, memory/search/qmd.py |
+| __init__.py | Hipocampus memory search backends (PR2, read-side, unwired). | base, bm25, config, qmd, qmd_http | cli/memory_cli.py, cli/memory_recall_block.py, memory/adapters/hipocampus_readonly.py, transport/app_api.py |
+| base.py | SearchBackend abstraction for Hipocampus memory (PR2, read-side). | — | cli/memory_recall_rerank.py, memory/search/__init__.py, memory/search/bm25.py, memory/search/qmd.py, memory/search/qmd_http.py |
 | bm25.py | Pure-Python Okapi BM25 backend (PR2) — the DEFAULT search backend. | base | memory/search/__init__.py |
 | qmd.py | ``qmd`` CLI search backend (PR2). | base | cli/memory_cli.py, knowledge/qmd_index.py, memory/search/__init__.py |
+| qmd_http.py | HTTP qmd search backend — talks to an external qmd endpoint (e.g. a per-pod | base | memory/search/__init__.py |
 
 ### meta_orchestration/
 
