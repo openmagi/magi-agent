@@ -132,9 +132,9 @@ def build_api_router(store: ActivityStore, bus: ActivityBus, runtime: Any) -> AP
         _: str = Depends(auth),
         limit: int = Query(default=200, ge=1, le=1000),
     ) -> JSONResponse:
-        # Default-OFF feature gate: when the Audit panel flag is unset, this read
-        # surface does not exist (404). Byte-identical behavior to before the
-        # flag was added for every existing client.
+        # Feature gate (default-ON, read-only surfacing): operators can hide the
+        # Audit panel with MAGI_CHAT_AUDIT_PANEL_ENABLED=0, which 404s this read
+        # surface. No new verdicts are produced either way.
         #
         # AUTHZ CAVEAT: this endpoint performs no per-session ownership check
         # beyond the shared gateway token (single-tenant OSS local-serve). It
