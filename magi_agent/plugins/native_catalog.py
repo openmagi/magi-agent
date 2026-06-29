@@ -443,13 +443,16 @@ _NATIVE_PLUGIN_DATA: tuple[Mapping[str, object], ...] = (
         "kind": "native",
         "version": "0.1.0-adk-scaffold",
         "description": (
-            "Redaction-free lookup over trusted Open Knowledge Format (OKF) "
-            "bundles. The OkfLookup tool returns curated doc paths/body/"
-            "frontmatter VERBATIM (it does NOT route through the fake-provider "
-            "KnowledgeBoundary). Read-only and runtime default-OFF: inert until "
-            "MAGI_KNOWLEDGE_OKF_ENABLED + MAGI_KNOWLEDGE_OKF_LOOKUP_ENABLED are "
-            "set (the env switch is the real activation gate; the tool returns "
-            "okf_disabled otherwise)."
+            "Curated local knowledge store in Open Knowledge Format (OKF) for "
+            "trusted, human-maintained facts (schemas, definitions, domain "
+            "references). The OkfLookup tool searches it BEFORE answering "
+            "domain/factual questions: pass a `query` (free-text) or `path` "
+            "(exact doc path) and it returns matching documents with their file "
+            "path, body, and source URL VERBATIM. Operator note: read-only and "
+            "runtime default-OFF (inert until MAGI_KNOWLEDGE_OKF_ENABLED + "
+            "MAGI_KNOWLEDGE_OKF_LOOKUP_ENABLED are set; returns okf_disabled "
+            "otherwise) and it does NOT route through the redacting "
+            "KnowledgeBoundary."
         ),
         "publisher": "openmagi",
         "defaultInstalled": True,
