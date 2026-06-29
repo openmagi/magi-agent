@@ -390,6 +390,7 @@ _INTENTIONALLY_NOT_IN_FULL_PROFILE: dict[str, str] = {
     "MAGI_AGENT_REQUIRE_ENV": "would BLOCK local serve when hosted env partial; reduces convenience for local dev",
     "MAGI_CUSTOMIZE_NL_INTERACTIVE_ENABLED": "conversational compose UI gate; default-OFF until UI ships",
     "MAGI_DURABLE_FOREGROUND_CONTINUATION_ENABLED": "WS1 OPTIONAL context-only foreground continuation; opt-in only, ships OFF everywhere in v1 (primary value is T1 background reclaim)",
+    "MAGI_MEMORY_REVIEW_ENABLED": "Memory-review gate: opt-in workflow that scans memory writes; default-OFF until UI ships",
     "MAGI_LIVE_WEB_ACQUISITION_ENABLED": "needs an outbound network policy decision + at least one provider configured (platform creds / jina key / insane.fetch); off by default to keep the local boundary fixture-only",
     "MAGI_LIVE_WEB_ACQUISITION_KILL_SWITCH": "kill switch; ON disables the live web stack",
     "MAGI_WEB_PROVIDER_ROUTER_ENABLED": "router on top of the live web stack; only meaningful when MAGI_LIVE_WEB_ACQUISITION_ENABLED is also on",
