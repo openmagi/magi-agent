@@ -518,6 +518,37 @@ def _available_subagent_models_block() -> str:
         return ""
 
 
+def _okf_guidance_block(env: Mapping[str, str] | None = None) -> str:
+    """System-prompt block inducing the agent to discover the OKF knowledge store.
+
+    Empty unless the OKF master + lookup flags are BOTH enabled (default-OFF), so
+    a deployment without a curated ``knowledge/okf`` store is byte-identical.
+    Resolution is delegated to the single source of truth
+    (:func:`~magi_agent.knowledge.okf.config.resolve_okf_config`); ``env`` is
+    injectable so callers/tests stay hermetic. Fail-soft: any resolver error
+    yields ``""`` (prompt assembly must never crash).
+    """
+    try:
+        from magi_agent.knowledge.okf.config import (  # noqa: PLC0415
+            resolve_okf_config,
+        )
+
+        config = resolve_okf_config(env=env)
+        if not (config.master_enabled and config.lookup_enabled):
+            return ""
+    except Exception:  # noqa: BLE001 — fail-soft; no block on resolver error.
+        return ""
+    return (
+        "<knowledge_okf>\n"
+        "This workspace may include a curated knowledge store under "
+        "`knowledge/okf/` (Open Knowledge Format). For domain or factual "
+        "questions, consult it FIRST with the OkfLookup tool (pass a `query`) "
+        "before relying on general knowledge; cite the returned document "
+        "path/source.\n"
+        "</knowledge_okf>"
+    )
+
+
 def _user_rules_block() -> str:
     """Operator-supplied advisory text configured in the Customize Guidance tab.
 
@@ -639,6 +670,7 @@ def _assemble_prompt_sections(
     model: str,
     model_aware_prompts_enabled: bool,
     memory_snapshot_block: str = "",
+    okf_guidance_block: str = "",
 ) -> tuple[list[str], list[str]]:
     """Single source of truth for system-prompt section assembly.
 
@@ -687,6 +719,11 @@ def _assemble_prompt_sections(
             hint = _coding_model_hint_for(model)
             if hint:
                 static_parts.append(hint)
+    # OKF knowledge-store guidance: caller-built, default-OFF capability block.
+    # Appended after the coding blocks with the other capability hints; only
+    # present when non-empty so the OFF path stays byte-identical.
+    if okf_guidance_block:
+        static_parts.append(okf_guidance_block)
 
     dynamic_parts: list[str] = [
         session_header,
@@ -927,6 +964,7 @@ def build_system_prompt(
     hook_context: "object | None" = None,
     evidence_sink: "Callable[[Mapping[str, object]], None] | None" = None,
     memory_snapshot_block: str = "",
+    okf_guidance_block: str = "",
 ) -> str:
     runtime_now = _coerce_utc(now)
     static_parts, dynamic_parts = _assemble_prompt_sections(
@@ -941,6 +979,7 @@ def build_system_prompt(
         model=model,
         model_aware_prompts_enabled=model_aware_prompts_enabled,
         memory_snapshot_block=memory_snapshot_block,
+        okf_guidance_block=okf_guidance_block,
     )
 
     static_parts = _apply_prompt_transform(
@@ -976,6 +1015,7 @@ def build_system_prompt_blocks(
     hook_context: "object | None" = None,
     evidence_sink: "Callable[[Mapping[str, object]], None] | None" = None,
     memory_snapshot_block: str = "",
+    okf_guidance_block: str = "",
 ) -> list[dict[str, object]]:
     """Build the system prompt as a list of structured blocks with optional cache markers.
 
@@ -1041,6 +1081,7 @@ def build_system_prompt_blocks(
         model=model if model_aware_prompts_enabled else "",
         model_aware_prompts_enabled=model_aware_prompts_enabled,
         memory_snapshot_block=memory_snapshot_block,
+        okf_guidance_block=okf_guidance_block,
     )
     static_parts = _apply_prompt_transform(
         static_parts,
