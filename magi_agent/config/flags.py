@@ -200,6 +200,13 @@ FLAGS: tuple[FlagSpec, ...] = (
         summary="Use the live qmd search backend for memory recall.",
     ),
     _b(
+        "MAGI_MEMORY_REVIEW_ENABLED",
+        summary=(
+            "Default-OFF master switch for the background memory-review harness. "
+            "When OFF the reviewer short-circuits without any write."
+        ),
+    ),
+    _b(
         "MAGI_MEMORY_MODE_ROUTING_ENABLED",
         summary="Honour the per-channel memory mode header (normal/read-only/incognito).",
     ),
