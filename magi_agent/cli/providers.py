@@ -147,6 +147,7 @@ def _render_toml(data: dict[str, object]) -> str:
         result += "\n"
     return result
 
+
 from magi_agent.config.env import LOCAL_DEV_MODEL_SENTINEL
 
 # Auto-detect order. Anthropic first (magi's primary deployment posture), then
@@ -171,6 +172,7 @@ _PROVIDER_ENV_KEYS: dict[str, tuple[str, ...]] = {
     "openrouter": ("OPENROUTER_API_KEY",),
 }
 
+
 # Default model id and litellm prefix per provider, sourced from the single
 # ``ModelCatalog`` (E-1). Edit ``magi_agent/models/builtin_catalog.json`` (and
 # regenerate the TS companion via ``python -m magi_agent.models.export_ts``) to
@@ -192,6 +194,38 @@ def _provider_litellm_prefix_table() -> dict[str, str]:
 
 _DEFAULT_MODEL: dict[str, str] = _provider_default_table()
 _LITELLM_PREFIX: dict[str, str] = _provider_litellm_prefix_table()
+
+
+def _provider_prefix_alias_table() -> dict[str, str]:
+    """Map every accepted slug prefix to its canonical SUPPORTED_PROVIDERS name.
+
+    Single source of truth for which ``<prefix>/<model>`` slugs
+    :func:`_split_provider_slug` accepts. Built from three layers:
+
+    1. Identity: every name in :data:`SUPPORTED_PROVIDERS` maps to itself
+       (``anthropic/...`` -> anthropic, ``openai/...`` -> openai, etc.).
+    2. Explicit alias: ``google/...`` is treated as ``gemini/...`` because
+       the chat-core slug map writes ``google/`` for Gemini models.
+    3. Catalog litellm_prefix: when a provider's ``litellm_prefix`` differs
+       from its provider name (currently only ``fireworks`` -> ``fireworks_ai``),
+       the prefix is added as an alias so the wire form emitted by
+       :attr:`ProviderConfig.litellm_model` round-trips through this resolver.
+       Without this, PR-M's child-runner round-trip (which passes
+       ``cfg.litellm_model`` back as ``model_override``) mis-attributes
+       fireworks calls to whatever the config default provider is.
+
+    Identity entries win over catalog entries (``setdefault``), so a future
+    catalog change that aliases a real provider name to something else cannot
+    quietly break routing.
+    """
+    aliases: dict[str, str] = {p: p for p in SUPPORTED_PROVIDERS}
+    aliases["google"] = "gemini"
+    for provider, prefix in _LITELLM_PREFIX.items():
+        aliases.setdefault(prefix, provider)
+    return aliases
+
+
+_PROVIDER_PREFIX_ALIASES: dict[str, str] = _provider_prefix_alias_table()
 
 
 class UnknownProviderError(ValueError):
@@ -342,8 +376,7 @@ def default_model_for(provider: str) -> str:
         model = _DEFAULT_MODEL[provider]
     except KeyError:
         raise UnknownProviderError(
-            f"Unsupported provider {provider!r}. "
-            f"Supported: {', '.join(SUPPORTED_PROVIDERS)}."
+            f"Unsupported provider {provider!r}. Supported: {', '.join(SUPPORTED_PROVIDERS)}."
         ) from None
     _validate_builtin_default(provider, model)
     return model
@@ -352,19 +385,21 @@ def default_model_for(provider: str) -> str:
 def _split_provider_slug(value: str | None) -> tuple[str | None, str | None]:
     """If ``value`` is a ``<provider>/<model>`` slug, return ``(provider, model)``.
 
-    Recognizes only the known provider prefixes (``SUPPORTED_PROVIDERS`` plus the
-    ``google`` alias for ``gemini``) so the Fireworks raw model id
-    ``accounts/fireworks/models/...`` — which also contains slashes — is
-    correctly treated as a bare id, not as a provider/<model> slug. Returns
-    ``(None, None)`` for an unprefixed id, an empty string, or ``None``.
+    Recognizes the prefixes listed in :data:`_PROVIDER_PREFIX_ALIASES` (every
+    name in :data:`SUPPORTED_PROVIDERS`, the ``google`` alias for ``gemini``,
+    and any catalog ``litellm_prefix`` that differs from its provider name,
+    e.g. ``fireworks_ai`` for ``fireworks``). The Fireworks raw model id
+    ``accounts/fireworks/models/...`` (which contains slashes but does not
+    start with a known prefix) is correctly treated as a bare id, not as a
+    provider slug. Returns ``(None, None)`` for an unprefixed id, an empty
+    string, or ``None``.
     """
     cleaned = _clean(value)
     if cleaned is None or "/" not in cleaned:
         return None, None
     prefix, _, rest = cleaned.partition("/")
-    prefix_lc = prefix.lower()
-    canonical = "gemini" if prefix_lc == "google" else prefix_lc
-    if canonical not in SUPPORTED_PROVIDERS or not rest.strip():
+    canonical = _PROVIDER_PREFIX_ALIASES.get(prefix.lower())
+    if canonical is None or not rest.strip():
         return None, None
     return canonical, rest.strip()
 
@@ -442,8 +477,7 @@ def resolve_provider_config(
         provider = explicit.lower()
         if provider not in SUPPORTED_PROVIDERS:
             raise UnknownProviderError(
-                f"Unsupported provider {provider!r}. "
-                f"Supported: {', '.join(SUPPORTED_PROVIDERS)}."
+                f"Unsupported provider {provider!r}. Supported: {', '.join(SUPPORTED_PROVIDERS)}."
             )
         api_key = _clean(model_section.get("api_key")) or key_for(provider)
         if not api_key:
@@ -567,8 +601,7 @@ def persist_provider_keys(
             normalized = "gemini"
         if normalized not in SUPPORTED_PROVIDERS:
             raise UnknownProviderError(
-                f"Unsupported provider {raw_name!r}. "
-                f"Supported: {', '.join(SUPPORTED_PROVIDERS)}."
+                f"Unsupported provider {raw_name!r}. Supported: {', '.join(SUPPORTED_PROVIDERS)}."
             )
         canonical_updates[normalized] = key_value
 
@@ -579,8 +612,7 @@ def persist_provider_keys(
             norm_active = "gemini"
         if norm_active not in SUPPORTED_PROVIDERS:
             raise UnknownProviderError(
-                f"Unsupported provider {active!r}. "
-                f"Supported: {', '.join(SUPPORTED_PROVIDERS)}."
+                f"Unsupported provider {active!r}. Supported: {', '.join(SUPPORTED_PROVIDERS)}."
             )
         canonical_active = norm_active
 
@@ -710,13 +742,22 @@ def _infer_provider_for_model(model_id: str) -> str | None:
     text = model_id.strip().lower()
     if not text:
         return None
-    if text.startswith("accounts/fireworks/") or text.startswith("kimi-") or text.startswith("minimax-"):
+    if (
+        text.startswith("accounts/fireworks/")
+        or text.startswith("kimi-")
+        or text.startswith("minimax-")
+    ):
         return "fireworks"
     if text.startswith("claude-"):
         return "anthropic"
     if text.startswith("gemini-"):
         return "gemini"
-    if text.startswith("gpt-") or text.startswith("o1-") or text.startswith("o3-") or text.startswith("o4-"):
+    if (
+        text.startswith("gpt-")
+        or text.startswith("o1-")
+        or text.startswith("o3-")
+        or text.startswith("o4-")
+    ):
         return "openai"
     # ``<vendor>/<model>`` slug is OpenRouter's id shape (e.g. "openai/gpt-5.5").
     if "/" in text and not text.startswith("accounts/"):
