@@ -8,9 +8,9 @@ falling back to the original Composio MCP path when they are not.
 Environment variables:
     MAGI_PLATFORM_BASE_URL          Platform API proxy base URL.
     MAGI_PLATFORM_API_KEY           Bearer token for the platform API.
-    CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED
+    MAGI_WEB_PROVIDER_ROUTER_ENABLED
                                     Set to "1" to enable provider router.
-    CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED
+    MAGI_LIVE_WEB_ACQUISITION_ENABLED
                                     Set to "1" to enable live web acquisition.
 
     MAGI_DEEP_WEB_RESEARCH_ENABLED  Set to "1" to enable deep web research

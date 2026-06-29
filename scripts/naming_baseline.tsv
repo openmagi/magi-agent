@@ -24,7 +24,6 @@ CORE_AGENT_	magi_agent/transport/gate2_sandbox_canary.py	10
 CORE_AGENT_	magi_agent/transport/health.py	1
 CORE_AGENT_	magi_agent/transport/streaming_chat_route.py	1
 CORE_AGENT_	magi_agent/transport/usage_receipt_emit.py	1
-CORE_AGENT_	magi_agent/web_acquisition/research_tools.py	7
 clawy	magi_agent/credentials_admin/vault_local.py	1
 clawy	magi_agent/plugins/native/_hosted_knowledge.py	1
 clawy	magi_agent/tools/memory_mode_guard.py	1

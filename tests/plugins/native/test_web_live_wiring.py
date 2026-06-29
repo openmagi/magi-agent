@@ -30,11 +30,11 @@ from magi_agent.tools.context import ToolContext
 from magi_agent.tools.result import ToolResult
 
 _LIVE_WEB_FLAGS = (
-    "CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED",
-    "CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_KILL_SWITCH",
-    "CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED",
-    "CORE_AGENT_PYTHON_JINA_READER_ENABLED",
-    "CORE_AGENT_PYTHON_INSANE_FETCH_ENABLED",
+    "MAGI_LIVE_WEB_ACQUISITION_ENABLED",
+    "MAGI_LIVE_WEB_ACQUISITION_KILL_SWITCH",
+    "MAGI_WEB_PROVIDER_ROUTER_ENABLED",
+    "MAGI_JINA_READER_ENABLED",
+    "MAGI_INSANE_FETCH_ENABLED",
     "MAGI_JINA_API_KEY",
     "MAGI_PLATFORM_BASE_URL",
     "MAGI_PLATFORM_API_KEY",
@@ -56,9 +56,9 @@ def fresh_env() -> dict[str, str]:
 def jina_live_env() -> dict[str, str]:
     """Minimal live config that reaches a provider via jina alone (no platform)."""
     return {
-        "CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED": "1",
-        "CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED": "1",
-        "CORE_AGENT_PYTHON_JINA_READER_ENABLED": "1",
+        "MAGI_LIVE_WEB_ACQUISITION_ENABLED": "1",
+        "MAGI_WEB_PROVIDER_ROUTER_ENABLED": "1",
+        "MAGI_JINA_READER_ENABLED": "1",
         "MAGI_JINA_API_KEY": _runtime_fixture_key(),
     }
 
@@ -67,9 +67,9 @@ def jina_live_env() -> dict[str, str]:
 def insane_live_env() -> dict[str, str]:
     """Minimal live config that reaches a provider via insane.fetch alone."""
     return {
-        "CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED": "1",
-        "CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED": "1",
-        "CORE_AGENT_PYTHON_INSANE_FETCH_ENABLED": "1",
+        "MAGI_LIVE_WEB_ACQUISITION_ENABLED": "1",
+        "MAGI_WEB_PROVIDER_ROUTER_ENABLED": "1",
+        "MAGI_INSANE_FETCH_ENABLED": "1",
     }
 
 
@@ -89,13 +89,13 @@ def test_native_boundary_none_on_fresh_install(fresh_env: dict[str, str]) -> Non
 
 def test_native_boundary_none_when_master_gate_off(jina_live_env: dict[str, str]) -> None:
     env = dict(jina_live_env)
-    env.pop("CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED")
+    env.pop("MAGI_LIVE_WEB_ACQUISITION_ENABLED")
     assert build_native_web_boundary(env) is None
 
 
 def test_native_boundary_none_when_kill_switch_set(jina_live_env: dict[str, str]) -> None:
     env = dict(jina_live_env)
-    env["CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_KILL_SWITCH"] = "1"
+    env["MAGI_LIVE_WEB_ACQUISITION_KILL_SWITCH"] = "1"
     assert build_native_web_boundary(env) is None
 
 

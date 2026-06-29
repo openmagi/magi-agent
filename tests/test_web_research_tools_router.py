@@ -93,7 +93,7 @@ def _build_boundary_with_router(
     router = WebAcquisitionProviderRouter(pack=pack, config=router_config, providers=providers)
 
     live_env = {
-        "CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED": "1",
+        "MAGI_LIVE_WEB_ACQUISITION_ENABLED": "1",
         **(env or {}),
     }
     return LocalWebResearchToolBoundary(
@@ -237,7 +237,7 @@ def test_legacy_live_path_websearch_still_works() -> None:
     boundary = LocalWebResearchToolBoundary(
         live_pack=pack,
         live_provider=_DirectProvider(),
-        env={"CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED": "1"},
+        env={"MAGI_LIVE_WEB_ACQUISITION_ENABLED": "1"},
     )
 
     result = _run(boundary.execute_tool("WebSearch", {"query": "direct test"}))
@@ -286,7 +286,7 @@ def test_build_live_research_boundary_with_platform_keys_creates_router() -> Non
 
 
 def test_build_live_research_boundary_router_disabled_without_flag() -> None:
-    """Router requires CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED=1 to be active."""
+    """Router requires MAGI_WEB_PROVIDER_ROUTER_ENABLED=1 to be active."""
     from magi_agent.web_acquisition.research_tools import build_live_research_boundary
     from magi_agent.web_acquisition.provider_router import WebAcquisitionProviderRouter
 

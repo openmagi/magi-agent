@@ -4053,7 +4053,7 @@ FLAGS: tuple[FlagSpec, ...] = (
     # credentials. The original PR #1071 squash silently dropped the
     # entire batch — recovered here on a fresh branch.
     FlagSpec(
-        name="CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED",
+        name="MAGI_LIVE_WEB_ACQUISITION_ENABLED",
         default=False,
         scope="public",
         stage="stage1",
@@ -4066,7 +4066,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         kind="bool",
     ),
     FlagSpec(
-        name="CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_KILL_SWITCH",
+        name="MAGI_LIVE_WEB_ACQUISITION_KILL_SWITCH",
         default=False,
         scope="public",
         stage="stage1",
@@ -4078,7 +4078,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         kind="bool",
     ),
     FlagSpec(
-        name="CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED",
+        name="MAGI_WEB_PROVIDER_ROUTER_ENABLED",
         default=False,
         scope="public",
         stage="stage1",
@@ -4090,7 +4090,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         kind="bool",
     ),
     FlagSpec(
-        name="CORE_AGENT_PYTHON_INSANE_FETCH_ENABLED",
+        name="MAGI_INSANE_FETCH_ENABLED",
         default=False,
         scope="public",
         stage="stage1",
@@ -4102,7 +4102,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         kind="bool",
     ),
     FlagSpec(
-        name="CORE_AGENT_PYTHON_JINA_READER_ENABLED",
+        name="MAGI_JINA_READER_ENABLED",
         default=False,
         scope="public",
         stage="stage1",

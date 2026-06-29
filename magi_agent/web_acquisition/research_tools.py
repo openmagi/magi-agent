@@ -51,8 +51,8 @@ _TOOL_LIVE_OPERATIONS: Mapping[str, str] = {
     "WebReader": "reader",
 }
 
-LIVE_WEB_ACQUISITION_ENABLED_ENV = "CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED"
-LIVE_WEB_ACQUISITION_KILL_SWITCH_ENV = "CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_KILL_SWITCH"
+LIVE_WEB_ACQUISITION_ENABLED_ENV = "MAGI_LIVE_WEB_ACQUISITION_ENABLED"
+LIVE_WEB_ACQUISITION_KILL_SWITCH_ENV = "MAGI_LIVE_WEB_ACQUISITION_KILL_SWITCH"
 # Duplicated deliberately to match the harness/canary env-gate convention
 # (see research_first_canary.py) rather than importing a shared helper.
 # Mirrors the live-pack ref grammar so digest refs we mint stay valid public ids.
@@ -698,7 +698,7 @@ def _short_digest(value: str) -> str:
 
 MAGI_PLATFORM_BASE_URL_ENV = "MAGI_PLATFORM_BASE_URL"
 MAGI_PLATFORM_API_KEY_ENV = "MAGI_PLATFORM_API_KEY"
-PROVIDER_ROUTER_ENABLED_ENV = "CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED"
+PROVIDER_ROUTER_ENABLED_ENV = "MAGI_WEB_PROVIDER_ROUTER_ENABLED"
 
 # Names used in the provider allowlist and router providers dict.
 PLATFORM_SEARCH_PROVIDER_NAME = "platform.search"
@@ -706,12 +706,12 @@ PLATFORM_FETCH_PROVIDER_NAME = "platform.fetch"
 
 # Jina Reader provider — default-OFF, lazily imported.
 JINA_READER_PROVIDER_NAME = "jina.reader"
-JINA_READER_ENABLED_ENV = "CORE_AGENT_PYTHON_JINA_READER_ENABLED"
+JINA_READER_ENABLED_ENV = "MAGI_JINA_READER_ENABLED"
 MAGI_JINA_API_KEY_ENV = "MAGI_JINA_API_KEY"
 
 # InsaneFetch (curl_cffi WAF-bypass) provider — default-OFF, lazily imported.
 INSANE_FETCH_PROVIDER_NAME = "insane.fetch"
-INSANE_FETCH_ENABLED_ENV = "CORE_AGENT_PYTHON_INSANE_FETCH_ENABLED"
+INSANE_FETCH_ENABLED_ENV = "MAGI_INSANE_FETCH_ENABLED"
 
 
 def build_live_research_boundary(
@@ -724,7 +724,7 @@ def build_live_research_boundary(
 
     Three levels must all be True to reach real network calls:
 
-    1. ``CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED=1`` (and kill-switch unset)
+    1. ``MAGI_LIVE_WEB_ACQUISITION_ENABLED=1`` (and kill-switch unset)
        — checked by ``live_web_acquisition_active()``.
     2. ``pack_config`` with ``live_network_enabled=True`` and a non-empty
        ``provider_allowlist`` — or auto-built from env when ``pack_config`` is None.
@@ -863,7 +863,7 @@ def build_native_web_boundary(
     boundary = build_live_research_boundary(env=env)
     router = boundary._provider_router
     # Require an enabled router with at least one provider. Without the router
-    # gate (CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED) the boundary would
+    # gate (MAGI_WEB_PROVIDER_ROUTER_ENABLED) the boundary would
     # silently serve the local fixture path, so treat that as not-configured.
     if router is None or not router.config.enabled or not router.config.providers:
         return None
