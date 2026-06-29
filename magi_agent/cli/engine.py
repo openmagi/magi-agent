@@ -1282,6 +1282,18 @@ class MagiEngineDriver:
         # configured provider keys; tests inject a fake judge for hermetic
         # behavior.
         goal_loop_judge_factory: Callable[..., object] | None = None,
+        # WS3 PR3b evidence-first goal completion (default-OFF DI; all three
+        # values resolve to their byte-identical OFF state when the flag is
+        # unset). ``evidence_first`` is the master gate for ALL THREE seams in
+        # ``_drive`` (each body is guarded ``if evidence_first``), so the
+        # OFF-path byte-identical proof depends on it. ``plan_ledger_reader``
+        # reads the durable todo snapshot for a session id (mirror
+        # ``evidence_collector``); ``required_evidence`` is the engine-side
+        # terminus of Reader 2 (``config.env.read_goal_required_evidence``),
+        # consumed by ``resolve_pre_judge_outcome`` at both SEAM 1 and SEAM 2.
+        evidence_first: bool = False,
+        plan_ledger_reader: Callable[[str], Sequence[object]] | None = None,
+        required_evidence: tuple[str, ...] = (),
     ) -> None:
         self._runner = runner
         # Optional wire profile for the HOSTED path (T4). ``None`` (default) keeps
@@ -1312,6 +1324,16 @@ class MagiEngineDriver:
         self._goal_loop_judge_factory: Callable[..., object] | None = (
             goal_loop_judge_factory
         )
+        # WS3 PR3b: evidence-first goal completion. ``self._evidence_first``
+        # False (default) -> all three seams in ``_drive`` are inert and the
+        # clean-break control flow is byte-identical to pre-WS3. Resolved from
+        # ``is_goal_completion_evidence_first_enabled()`` at the wiring site (NOT
+        # read inside the engine, so the ctor stays env-pure / testable).
+        self._evidence_first: bool = evidence_first
+        self._plan_ledger_reader: Callable[[str], Sequence[object]] | None = (
+            plan_ledger_reader
+        )
+        self._required_evidence: tuple[str, ...] = tuple(required_evidence)
         # Output-continuation: resume a response truncated at the model's
         # per-response output-token cap by re-invoking and appending. ``None``
         # (default) -> no continuation logic; streaming is byte-identical.
@@ -1996,6 +2018,9 @@ class MagiEngineDriver:
             output_continuation=self._output_continuation,
             empty_response_recovery=self._empty_response_recovery,
             goal_loop_judge_factory=self._goal_loop_judge_factory,
+            evidence_first=self._evidence_first,
+            plan_ledger_reader=self._plan_ledger_reader,
+            required_evidence=self._required_evidence,
         )
         # PR-H: track terminal kind + accumulated text-delta length + exit
         # cause so the engine.trace run_turn_stream_finalize stamp can tell
@@ -2064,6 +2089,9 @@ class MagiEngineDriver:
         output_continuation: "OutputContinuationConfig | None" = None,
         empty_response_recovery: "EmptyResponseRecoveryConfig | None" = None,
         goal_loop_judge_factory: Callable[..., object] | None = None,
+        evidence_first: bool = False,
+        plan_ledger_reader: Callable[[str], Sequence[object]] | None = None,
+        required_evidence: tuple[str, ...] = (),
     ) -> AsyncGenerator[RuntimeEvent, EngineResult]:
         # PR-04-PR2 (resume rehydration): consume ``initial_messages`` by
         # synthesizing the prior transcript into a prefix on the opening user
@@ -2740,6 +2768,49 @@ class MagiEngineDriver:
 
                     goal_loop_policy = current_per_turn_goal_loop_policy()
                     if goal_loop_policy is not None:
+                        # SEAM 1 (WS3 PR3b, lab loop ON): evidence-first pre-judge
+                        # short-circuit. Runs BEFORE the LLM judge; ``done`` /
+                        # ``pause`` terminate deterministically with no model call.
+                        # ``continue`` / ``defer_to_judge`` fall through to the
+                        # UNCHANGED judge below, which enforces the max_turns /
+                        # parse-budget bounds and drives the continuation, so the
+                        # ledger short-circuit never introduces an unbounded loop.
+                        # Guarded by ``evidence_first`` so the OFF path is the
+                        # current code byte-for-byte.
+                        if evidence_first and plan_ledger_reader is not None:
+                            from magi_agent.runtime.goal_loop_evidence import (  # noqa: PLC0415
+                                resolve_pre_judge_outcome,
+                            )
+
+                            pre_judge_snapshot = tuple(plan_ledger_reader(session_id))
+                            pre_judge_outcome = resolve_pre_judge_outcome(
+                                required_evidence=required_evidence,
+                                evidence_records=self._collect_evidence(turn_id),
+                                ledger_snapshot=pre_judge_snapshot,
+                            )
+                            if pre_judge_outcome == "done":
+                                yield RuntimeEvent(
+                                    type="status",
+                                    payload={
+                                        "type": "goal_loop_complete",
+                                        "reason": "ledger_all_complete",
+                                        "continuations": goal_loop_continuations,
+                                    },
+                                    turn_id=turn_id,
+                                )
+                                break
+                            if pre_judge_outcome == "pause":
+                                yield self._goal_paused_event(
+                                    turn_id=turn_id,
+                                    reason="evidence_unverifiable",
+                                    objective=goal_loop_policy.objective,
+                                    open_todos=self._open_todo_count(
+                                        pre_judge_snapshot
+                                    ),
+                                )
+                                break
+                            # "continue" / "defer_to_judge" -> fall through to the
+                            # bounded judge below (unchanged).
                         from magi_agent.runtime.goal_loop_judge import (  # noqa: PLC0415
                             evaluate_goal_completion,
                         )
@@ -2754,6 +2825,22 @@ class MagiEngineDriver:
                                 },
                                 turn_id=turn_id,
                             )
+                            # SEAM 3 (WS3 PR3b, lab loop ON): additively emit the
+                            # honest pause alongside the existing exhaustion event
+                            # so the bare termination never masquerades as success.
+                            if evidence_first:
+                                yield self._goal_paused_event(
+                                    turn_id=turn_id,
+                                    reason="max_turns_exhausted",
+                                    objective=goal_loop_policy.objective,
+                                    open_todos=(
+                                        self._open_todo_count(
+                                            tuple(plan_ledger_reader(session_id))
+                                        )
+                                        if plan_ledger_reader is not None
+                                        else None
+                                    ),
+                                )
                             break
                         if (
                             goal_loop_judge_parse_failures
@@ -2769,6 +2856,20 @@ class MagiEngineDriver:
                                 },
                                 turn_id=turn_id,
                             )
+                            # SEAM 3 (WS3 PR3b): additive honest pause.
+                            if evidence_first:
+                                yield self._goal_paused_event(
+                                    turn_id=turn_id,
+                                    reason="parse_failure_budget",
+                                    objective=goal_loop_policy.objective,
+                                    open_todos=(
+                                        self._open_todo_count(
+                                            tuple(plan_ledger_reader(session_id))
+                                        )
+                                        if plan_ledger_reader is not None
+                                        else None
+                                    ),
+                                )
                             break
                         if goal_loop_judge_caller is None:
                             if goal_loop_judge_factory is None:
@@ -2829,6 +2930,20 @@ class MagiEngineDriver:
                                 },
                                 turn_id=turn_id,
                             )
+                            # SEAM 3 (WS3 PR3b): additive honest pause.
+                            if evidence_first:
+                                yield self._goal_paused_event(
+                                    turn_id=turn_id,
+                                    reason="parse_failure_budget",
+                                    objective=goal_loop_policy.objective,
+                                    open_todos=(
+                                        self._open_todo_count(
+                                            tuple(plan_ledger_reader(session_id))
+                                        )
+                                        if plan_ledger_reader is not None
+                                        else None
+                                    ),
+                                )
                             break
                         goal_loop_continuations += 1
                         yield RuntimeEvent(
@@ -2857,6 +2972,52 @@ class MagiEngineDriver:
                             harnessState=effective_harness_state,
                         )
                         continue  # re-invoke run_async (genuine new model call)
+                    # SEAM 2 (WS3 PR3b, the "full" profile deliverable): HOISTED
+                    # OUTSIDE the ``if goal_loop_policy is not None:`` guard above,
+                    # immediately before the bare ``break`` loop-OFF terminus.
+                    # ``goal_loop_policy is None`` for "full" users (the lab loop
+                    # flag is not seeded there), so this is the ONLY seam that
+                    # delivers the ledger-all-complete short-circuit and the
+                    # honest pre-judge pause to them. There is no judge in this
+                    # branch: ``continue`` / ``defer_to_judge`` degrade to the bare
+                    # break. The OFF branch (flag unset OR reader None OR a policy
+                    # IS present) is byte-identical to the bare ``break`` below.
+                    if (
+                        evidence_first
+                        and goal_loop_policy is None
+                        and plan_ledger_reader is not None
+                    ):
+                        from magi_agent.runtime.goal_loop_evidence import (  # noqa: PLC0415
+                            resolve_pre_judge_outcome,
+                        )
+
+                        seam2_snapshot = tuple(plan_ledger_reader(session_id))
+                        seam2_outcome = resolve_pre_judge_outcome(
+                            required_evidence=required_evidence,
+                            evidence_records=self._collect_evidence(turn_id),
+                            ledger_snapshot=seam2_snapshot,
+                        )
+                        if seam2_outcome == "done":
+                            yield RuntimeEvent(
+                                type="status",
+                                payload={
+                                    "type": "goal_loop_complete",
+                                    "reason": "ledger_all_complete",
+                                    "continuations": goal_loop_continuations,
+                                },
+                                turn_id=turn_id,
+                            )
+                            break
+                        if seam2_outcome == "pause":
+                            yield self._goal_paused_event(
+                                turn_id=turn_id,
+                                reason="evidence_unverifiable",
+                                objective=None,
+                                open_todos=self._open_todo_count(seam2_snapshot),
+                            )
+                            break
+                        # "continue" / "defer_to_judge" -> bare break (no judge to
+                        # re-loop without a policy).
                     break
 
                 # The run invocation raised. Decide whether to GENUINELY retry.
@@ -3483,6 +3644,46 @@ class MagiEngineDriver:
                 "goal_nudge evidence-reason enrichment failed; status left unenriched",
                 exc_info=True,
             )
+
+    @staticmethod
+    def _open_todo_count(ledger_snapshot: Sequence[object]) -> int | None:
+        """Number of not-``completed`` todos in a ledger snapshot, or ``None``.
+
+        ``None`` when the snapshot is empty (no ledger signal). WS3 PR3b helper
+        for the ``goal_paused`` payload; never raises (defensive ``getattr``).
+        """
+        if not ledger_snapshot:
+            return None
+        return sum(
+            1
+            for item in ledger_snapshot
+            if getattr(item, "status", None) != "completed"
+        )
+
+    def _goal_paused_event(
+        self,
+        *,
+        turn_id: str,
+        reason: str,
+        objective: str | None,
+        open_todos: int | None,
+    ) -> RuntimeEvent:
+        """Build the WS3 PR3b ``goal_paused`` honest-stop status event.
+
+        Additive: this is a NEW sibling event the UI renders as "worked on this
+        but could not confirm it is done". It does NOT delete output or append a
+        synthetic success message; the turn still ends with the same ``break``.
+        """
+        return RuntimeEvent(
+            type="status",
+            payload={
+                "type": "goal_paused",
+                "reason": reason,
+                "objective": objective,
+                "openTodos": open_todos,
+            },
+            turn_id=turn_id,
+        )
 
     def _collect_evidence(self, turn_id: str) -> tuple[object, ...]:
         """Return evidence records for the given turn.

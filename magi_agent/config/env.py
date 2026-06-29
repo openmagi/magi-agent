@@ -2346,6 +2346,72 @@ def is_plan_ledger_durable_enabled(env: Mapping[str, str] | None = None) -> bool
     return flag_bool(MAGI_PLAN_LEDGER_DURABLE_ENABLED_ENV, env=source)
 
 
+MAGI_GOAL_COMPLETION_EVIDENCE_FIRST_ENABLED_ENV = (
+    "MAGI_GOAL_COMPLETION_EVIDENCE_FIRST_ENABLED"
+)
+
+
+def is_goal_completion_evidence_first_enabled(
+    env: Mapping[str, str] | None = None,
+) -> bool:
+    """Single source of truth for the evidence-first goal-completion flag (WS3 PR3b).
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF, the CLI
+    wiring constructs ``MagiEngineDriver`` with ``evidence_first=False`` so all
+    three goal-completion seams (the pre-judge short-circuit, the loop-OFF "full"
+    short-circuit, and the honest ``goal_paused`` wrap) are inert and ``_drive``
+    is byte-identical to pre-WS3. When ON, ``resolve_pre_judge_outcome`` decides
+    completion from the durable todo ledger + (when declared) the evidence gate
+    BEFORE the model's say-so, and a clean stop short of confirmed completion
+    emits a user-visible ``goal_paused`` status instead of masquerading as
+    success. Like ``is_goal_nudge_enabled`` this deliberately does NOT follow the
+    runtime-profile default-ON convention; it is an additive, default-disabled
+    seam (profile activation is WS3 PR3c).
+
+    Design: WS3 Goal/Completion + Durable Cross-Turn Todo Ledger, PR3b.
+
+    Delegates to the canonical ``config.flags`` registry (``flag_bool``) backed
+    by the ``MAGI_GOAL_COMPLETION_EVIDENCE_FIRST_ENABLED`` ``FlagSpec``:
+    byte-identical to the raw ``_is_true(source.get(...))`` form because the flag
+    is registered with a ``False`` default and the same strict-truthy parser.
+    Imported lazily to avoid a config<->flags import cycle.
+    """
+    from .flags import flag_bool
+
+    source = os.environ if env is None else env
+    return flag_bool(MAGI_GOAL_COMPLETION_EVIDENCE_FIRST_ENABLED_ENV, env=source)
+
+
+MAGI_GOAL_NUDGE_REQUIRED_EVIDENCE_ENV = "MAGI_GOAL_NUDGE_REQUIRED_EVIDENCE"
+
+
+def read_goal_required_evidence(
+    env: Mapping[str, str] | None = None,
+) -> tuple[str, ...]:
+    """Parse ``MAGI_GOAL_NUDGE_REQUIRED_EVIDENCE`` into a tuple of tokens (Reader 2).
+
+    Comma-split + trim; empty / whitespace-only tokens are dropped; returns
+    ``()`` when the variable is unset or yields no tokens. This is the INDEPENDENT
+    reader of the WS3 PR3b design (section 4.5): it is gated ONLY by the CLI
+    wiring's ``is_goal_completion_evidence_first_enabled()`` check at its call
+    site, NEVER by ``is_goal_nudge_enabled``. That is what lets the evidence
+    branch of ``resolve_pre_judge_outcome`` (and therefore the honest
+    evidence-unverifiable ``pause``) be reachable under the "full" profile, where
+    the legacy nudge reader in ``cli/goal_nudge_wiring.py`` is dead (subsystem A
+    is never activated by WS3).
+
+    Pure: does NOT consult any flag itself, so subsystem A (Reader 1) can reuse
+    it unchanged behind its own ``is_goal_nudge_enabled`` early-return.
+
+    Design: WS3 Goal/Completion + Durable Cross-Turn Todo Ledger, PR3b.
+    """
+    source = os.environ if env is None else env
+    raw = source.get(MAGI_GOAL_NUDGE_REQUIRED_EVIDENCE_ENV)
+    if not raw:
+        return ()
+    return tuple(token for token in (part.strip() for part in raw.split(",")) if token)
+
+
 MAGI_RESEARCH_FACT_GUIDANCE_ENABLED_ENV = "MAGI_RESEARCH_FACT_GUIDANCE_ENABLED"
 
 

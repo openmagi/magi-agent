@@ -110,50 +110,32 @@ def goal_is_met(
     the nudge itself is the mechanism (the model self-checks on the synthetic
     turn).
 
-    When ``nudge.required_evidence`` is non-empty, delegates to
-    :class:`~magi_agent.evidence.final_output_gate.FinalOutputGate` with
-    ``enabled=True`` and ``localEvaluationEnabled=True``.  Returns ``True``
-    when the gate decision is NOT a hard failure (``status`` not in
-    ``{"blocked", "fail"}``) AND none of the decision's ``reason_codes``
-    starts with ``"missing_required_evidence:"`` — because the gate returns
-    ``"repair_required"`` for BOTH present and absent evidence, distinguished
-    only via reason codes, so the status field alone is insufficient to
-    determine done-ness.
+    When ``nudge.required_evidence`` is non-empty, the bool is DERIVED from the
+    single shared :func:`~magi_agent.runtime.goal_loop_evidence.evaluate_required_evidence`
+    verdict (the one ``FinalOutputGate`` call site in the codebase, WS3 PR3b):
+    done iff the verdict is ``"satisfied"``.  ``"missing"`` (evidence absent)
+    and ``"unverifiable"`` (gate ``status == "blocked"``, a hard calc failure)
+    both yield ``False``, byte-identical to the prior status/reason-code check
+    (the gate returns ``"repair_required"`` for BOTH present-needs-repair and
+    absent evidence, distinguished only via reason codes, so the status field
+    alone is insufficient; the shared helper keys off both, exactly as before).
     """
     if not nudge.required_evidence:
         return False
 
-    # Lazy import so the module stays cheap to import.
-    from magi_agent.evidence.final_output_gate import (  # noqa: PLC0415
-        FinalOutputGate,
-        FinalOutputGateConfig,
-        FinalOutputGateRequest,
+    # Lazy import so the module stays cheap to import. The shared helper is the
+    # one evidence-evaluation site; subsystem A's bool is derived from its
+    # multi-valued verdict so the two can never drift (WS3 PR3b, section 3.2).
+    from magi_agent.runtime.goal_loop_evidence import (  # noqa: PLC0415
+        evaluate_required_evidence,
     )
 
-    records = tuple(evidence_records)
-    decision = FinalOutputGate(
-        FinalOutputGateConfig(enabled=True, localEvaluationEnabled=True)
-    ).evaluate(
-        FinalOutputGateRequest(
-            domain=nudge.domain,
-            outputText="",
-            requiredEvidence=nudge.required_evidence,
-            evidenceRecords=records,
-            modelTier="standard",
-        )
+    verdict = evaluate_required_evidence(
+        nudge.required_evidence,
+        tuple(evidence_records),
+        domain=nudge.domain,
     )
-    # The gate returns "repair_required" for BOTH missing and present evidence
-    # (differentiating via reason_codes).  "blocked" = hard calc failure.
-    # "fail" is not a real status but guard defensively.
-    # Per the spec: done iff status not in the failing set ("blocked", "fail")
-    # AND no missing_required_evidence reason codes (which distinguish
-    # "evidence present but needs repair" from "evidence truly absent").
-    if decision.status in ("blocked", "fail"):
-        return False
-    missing_evidence = any(
-        code.startswith("missing_required_evidence:") for code in decision.reason_codes
-    )
-    return not missing_evidence
+    return verdict == "satisfied"
 
 
 @dataclass(frozen=True)

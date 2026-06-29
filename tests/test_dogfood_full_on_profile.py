@@ -429,6 +429,7 @@ _INTENTIONALLY_NOT_IN_FULL_PROFILE: dict[str, str] = {
     "MAGI_INSANE_FETCH_ENABLED": "loads the curl_cffi WAF-bypass provider; off by default (extra dep + active fingerprinting evasion)",
     "MAGI_JINA_READER_ENABLED": "loads the Jina Reader provider; off by default (third-party endpoint + optional API key)",
     "MAGI_PLAN_LEDGER_DURABLE_ENABLED": "WS3 PR3a ships the durable plan-ledger substrate default-OFF; profile activation is deferred to WS3 PR3c (adds it to LOCAL_FULL_RUNTIME_ENV_DEFAULTS) after the ledger lands",
+    "MAGI_GOAL_COMPLETION_EVIDENCE_FIRST_ENABLED": "WS3 PR3b ships evidence-first goal completion default-OFF; profile activation is deferred to WS3 PR3c (adds it to LOCAL_FULL_RUNTIME_ENV_DEFAULTS) after the seam lands",
 }
 
 
