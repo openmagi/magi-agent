@@ -99,6 +99,8 @@ jobs:
         run: bash scripts/check_naming.sh
       - name: Web-dashboard bundle freshness gate
         run: bash scripts/check_web_dashboard_freshness.sh
+      - name: Web-dashboard chunks resolvable gate
+        run: bash scripts/check_dashboard_chunks_resolvable.sh
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
