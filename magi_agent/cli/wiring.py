@@ -1011,6 +1011,12 @@ def _build_composio_bundle_for_mode(
         def _composio_context_factory(**_kwargs: object) -> ToolContext:
             return ToolContext(botId="composio", channel="composio")
 
+        # WS9 PR9a-2: resolve the MCP resilience policy (strict default-OFF; only
+        # ON when MAGI_MCP_RESILIENCE_ENABLED=1, which no profile sets today) and
+        # thread it + a process-wide breaker registry into the guarded toolsets.
+        # The breaker is keyed on the bundle's per-endpoint sha256(mcp_url) digest.
+        from magi_agent.config.env import parse_mcp_resilience_env  # noqa: PLC0415
+
         composio_attached = attach_composio_toolsets_through_dispatcher(
             runner,
             composio_bundle,
@@ -1018,6 +1024,7 @@ def _build_composio_bundle_for_mode(
             mode=mode if mode != "plan" else "act",
             context_factory=_composio_context_factory,
             receipt_ledger=ComposioReceiptLedger(),
+            resilience=parse_mcp_resilience_env(os.environ),
         )
         return composio_bundle, composio_attached
 
