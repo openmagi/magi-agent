@@ -78,6 +78,10 @@ _C3_RESILIENCE_OVERLAY: Mapping[str, str] = {
     # wires at the resilience stage with no sign-off dependency. Flipping it ON
     # for the hosted fleet still follows the standard image-bump + canary drill.
     "MAGI_MCP_RESILIENCE_ENABLED": "1",
+    # WS8 PR8a-3: Telegram inbound poll resilience. Pure in-memory backoff +
+    # circuit breaker (no PVC / persistence), so unlike the durable write gate it
+    # wires at the resilience stage with no sign-off dependency.
+    "MAGI_TELEGRAM_POLL_RESILIENCE_ENABLED": "1",
     "MAGI_MAX_STEPS_BRAKE_ENABLED": "1",
 }
 
