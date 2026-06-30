@@ -15,12 +15,22 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import random
 import socket
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from magi_agent.gateway.daemon import GatewayWatcher
+from magi_agent.gateway.poll_resilience import (
+    PollCircuitState,
+    on_failure,
+    on_success,
+)
+
+if TYPE_CHECKING:
+    from magi_agent.gateway.poll_resilience import PollResilienceConfig
 
 _log = logging.getLogger(__name__)
 
@@ -471,6 +481,10 @@ def build_channel_poll_watcher(
     poll_once: Callable[[], Any],
     is_enabled: Callable[[], bool],
     interval_seconds: float,
+    poll_resilience_config: "PollResilienceConfig | None" = None,
+    on_persistent_failure: Callable[[Mapping[str, object]], None] | None = None,
+    clock: Callable[[], int] | None = None,
+    rng: "random.Random | None" = None,
 ) -> GatewayWatcher:
     """Wrap an injected single-cycle poll function as a continuous watcher.
 
@@ -486,11 +500,71 @@ def build_channel_poll_watcher(
 
     Gate: ``is_enabled`` is the injected per-platform gate (e.g.
     ``channels.telegram_live.is_live_telegram_enabled``).
+
+    WS8 PR8a-2 (default-OFF): when ``poll_resilience_config`` is provided AND
+    ``enabled``, the loop applies full-jitter exponential backoff + a circuit
+    breaker (``gateway.poll_resilience``) and emits a one-shot
+    ``telegram_poll_persistent_failure`` notice via ``on_persistent_failure``.
+    When the config is ``None`` or disabled, the loop is the LITERAL legacy
+    fixed-interval path (byte-identical). ``clock`` (monotonic ms) and ``rng``
+    are injectable so the breaker transition + jitter are deterministic in tests.
     """
 
     name = f"channel_{channel_type}"
+    cfg = poll_resilience_config
+    use_resilience = cfg is not None and cfg.enabled
+    monotonic_ms = clock if clock is not None else (lambda: time.monotonic_ns() // 1_000_000)
+
+    async def _run_resilient(stop_event: asyncio.Event) -> None:
+        assert cfg is not None  # narrowed by use_resilience
+        state = PollCircuitState()
+        jitter = rng if rng is not None else random.Random()
+        interval_ms = int(interval_seconds * 1000)
+        while not stop_event.is_set():
+            now_ms = monotonic_ms()
+            try:
+                await asyncio.to_thread(poll_once)
+            except Exception as exc:  # noqa: BLE001 (transient poll error must not stop loop)
+                directive = on_failure(state, now_ms, cfg, rng=jitter)
+                _log.warning(
+                    "channel %s poll cycle failed (failures=%d, circuit_open=%s)",
+                    channel_type,
+                    state.consecutive_failures,
+                    directive.circuit_open,
+                    exc_info=True,
+                )
+                if directive.should_notify:
+                    from magi_agent.channels.telegram_live import (  # noqa: PLC0415
+                        _scrub_token,
+                    )
+
+                    excerpt = _scrub_token(str(exc))[:120]
+                    notice: dict[str, object] = {
+                        "telegramPollPersistentFailure": True,
+                        "consecutiveFailures": state.consecutive_failures,
+                        "reasonCode": "poll_cycle_exception",
+                        "lastErrorExcerpt": excerpt,
+                    }
+                    _log.error("channel %s persistent poll failure: %s", channel_type, notice)
+                    if on_persistent_failure is not None:
+                        on_persistent_failure(notice)
+            else:
+                directive = on_success(
+                    state, now_ms, cfg, normal_interval_ms=interval_ms
+                )
+            if stop_event.is_set():
+                break
+            try:
+                await asyncio.wait_for(
+                    stop_event.wait(), timeout=directive.sleep_ms / 1000
+                )
+            except asyncio.TimeoutError:
+                continue
 
     async def run(stop_event: asyncio.Event) -> None:
+        if use_resilience:
+            await _run_resilient(stop_event)
+            return
         while not stop_event.is_set():
             try:
                 await asyncio.to_thread(poll_once)
