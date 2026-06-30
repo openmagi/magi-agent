@@ -75,6 +75,45 @@ _FILE_SEND_INPUT_SCHEMA: dict[str, object] = {
     },
     "required": ("path",),
 }
+#: Model-facing argument schema for ``OkfLookup`` (and its ``okf-lookup``
+#: alias).  Without this the projection falls back to ``_GENERIC_INPUT_SCHEMA``
+#: and the model never learns the tool takes a ``query``/``path`` argument.
+#: No ``required`` key: either ``query`` OR ``path`` works and the tool itself
+#: enforces "at least one" (returns ``query_required`` otherwise).
+_OKF_LOOKUP_INPUT_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "properties": {
+        "query": {
+            "type": "string",
+            "description": (
+                "Free-text search over the OKF bundle "
+                "(title/description/tags/body)."
+            ),
+        },
+        "path": {
+            "type": "string",
+            "description": (
+                "Exact bundle-relative document path, e.g. "
+                "sales/tables/orders.md."
+            ),
+        },
+    },
+    "additionalProperties": False,
+}
+#: Model-facing description for ``OkfLookup``.  Leads with WHEN to use it and
+#: WHAT it returns so the agent is induced to consult the curated knowledge/okf
+#: store before answering domain/factual questions.
+_OKF_LOOKUP_DESCRIPTION: str = (
+    "Search the curated local knowledge bundle (Open Knowledge Format) for "
+    "trusted, human-maintained facts: schemas, definitions, domain references. "
+    "Use this BEFORE answering domain or factual questions when a knowledge/okf "
+    "store may exist; it returns matching documents with their file path, body, "
+    "and source URL verbatim. Args: `query` (free-text search) or `path` (exact "
+    "doc path). Read-only and default-OFF (inert until the deployment enables "
+    "the OKF knowledge store)."
+)
+
+
 def _build_spawn_agent_input_schema(
     env: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
@@ -258,6 +297,14 @@ _SPECIAL_TOOL_METADATA: dict[tuple[str, str], dict[str, object]] = {
     },
     ("openmagi.source-ledger", "ExternalSourceCache"): {
         "permission": "write",
+    },
+    ("openmagi.knowledge-okf", "OkfLookup"): {
+        "description": _OKF_LOOKUP_DESCRIPTION,
+        "input_schema": _OKF_LOOKUP_INPUT_SCHEMA,
+    },
+    ("openmagi.knowledge-okf", "okf-lookup"): {
+        "description": _OKF_LOOKUP_DESCRIPTION,
+        "input_schema": _OKF_LOOKUP_INPUT_SCHEMA,
     },
     ("openmagi.subagents", "SpawnAgent"): {
         "description": (

@@ -248,6 +248,70 @@ def test_projected_tool_manifests_are_metadata_only_and_execution_free() -> None
     assert "magi_agent.plugins.native" not in dumped
 
 
+def test_okf_lookup_projection_is_model_facing_with_query_path_arg_schema() -> None:
+    """OkfLookup must surface a model-facing description + query/path arg schema.
+
+    Without an entry in ``_SPECIAL_TOOL_METADATA`` the projection falls back to
+    the generic ``{"type": "object", "additionalProperties": True}`` schema and
+    the operator-framed default description — the model then cannot see that
+    ``OkfLookup`` takes a ``query``/``path`` argument and is not induced to use
+    the curated knowledge/okf store.  Both the canonical name and the kebab
+    alias must carry the same induced surface.
+    """
+    state = resolve_plugin_state(native_plugin_manifests())
+
+    projected = project_native_plugin_tool_manifests(state)
+    by_name = {manifest.name: manifest for manifest in projected}
+
+    for tool_name in ("OkfLookup", "okf-lookup"):
+        okf = by_name[tool_name]
+        assert okf.plugin_id == "openmagi.knowledge-okf"
+        assert okf.permission == "read"
+
+        schema = okf.input_schema
+        assert schema["type"] == "object"
+        assert schema["additionalProperties"] is False
+        props = schema["properties"]
+        assert set(props) == {"query", "path"}
+        assert props["query"]["type"] == "string"
+        assert props["path"]["type"] == "string"
+        assert "description" in props["query"]
+        assert "description" in props["path"]
+        # Either query OR path works; the tool enforces "at least one" itself.
+        assert "required" not in schema
+
+        # Model-facing description leads with WHEN/WHAT (Open Knowledge Format),
+        # not env-flag / KnowledgeBoundary operator framing.
+        assert "Open Knowledge Format" in okf.description
+        assert "query" in okf.description
+        assert "MAGI_KNOWLEDGE_OKF_ENABLED" not in okf.description
+        assert "KnowledgeBoundary" not in okf.description
+
+
+def test_okf_lookup_projection_returns_defensive_schema_copies() -> None:
+    state = resolve_plugin_state(native_plugin_manifests())
+
+    first = {m.name: m for m in project_native_plugin_tool_manifests(state)}
+    first["OkfLookup"].input_schema["properties"]["query"]["type"] = "mutated"  # type: ignore[index]
+
+    second = {m.name: m for m in project_native_plugin_tool_manifests(state)}
+    assert second["OkfLookup"].input_schema["properties"]["query"]["type"] == "string"  # type: ignore[index]
+
+
+def test_okf_native_catalog_pack_description_is_model_facing() -> None:
+    okf_pack = next(
+        manifest
+        for manifest in native_plugin_manifests()
+        if manifest.plugin_id == "openmagi.knowledge-okf"
+    )
+    # Leads with model guidance (Open Knowledge Format), mentions the tool +
+    # the query argument; one short operator note (read-only / default-OFF) is
+    # allowed at the end.
+    assert "Open Knowledge Format" in okf_pack.description
+    assert "OkfLookup" in okf_pack.description
+    assert "query" in okf_pack.description
+
+
 def test_file_delivery_projection_is_default_enabled_metadata_only_and_channel_traffic_free() -> None:
     state = resolve_plugin_state(native_plugin_manifests())
 

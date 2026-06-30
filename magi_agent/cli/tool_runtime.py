@@ -913,7 +913,10 @@ def build_cli_instruction(
     from pathlib import Path  # noqa: PLC0415
 
     from magi_agent.runtime.memory_snapshot_cache import MemorySnapshotCache  # noqa: PLC0415
-    from magi_agent.runtime.message_builder import build_system_prompt  # noqa: PLC0415
+    from magi_agent.runtime.message_builder import (  # noqa: PLC0415
+        _okf_guidance_block,
+        build_system_prompt,
+    )
 
     identity = None
     if workspace_root is not None:
@@ -1059,6 +1062,9 @@ def build_cli_instruction(
         coding_agent=True,
         model=model,
         memory_snapshot_block=memory_snapshot_block,
+        # Default-OFF: empty unless the OKF master + lookup flags are both on,
+        # in which case the agent is induced to consult the knowledge/okf store.
+        okf_guidance_block=_okf_guidance_block(),
     )
 
     # Registry-driven tool advertisement (Principle P2: "built ≠ used").
