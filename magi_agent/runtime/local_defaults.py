@@ -31,6 +31,10 @@ LOCAL_FULL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     "MAGI_EMPTY_RESPONSE_ESCALATION_ENABLED": "1",
     "MAGI_CONTEXT_COMPACTION_ENABLED": "1",
     "MAGI_MAX_STEPS_BRAKE_ENABLED": "1",
+    # WS9 PR9c: MCP connection resilience (caller-bounded timeout + per-endpoint
+    # circuit breaker + bounded reconnect) for the live composio dispatcher seam.
+    # Pure in-memory, accuracy-neutral, so it is safe in the full profile.
+    "MAGI_MCP_RESILIENCE_ENABLED": "1",
     "MAGI_SELF_REVIEW_ENABLED": "1",
     "MAGI_SELF_REVIEW_SHADOW": "0",
     "MAGI_SELF_REVIEW_PIPELINE_ENABLED": "1",
