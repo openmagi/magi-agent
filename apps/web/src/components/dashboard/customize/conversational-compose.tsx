@@ -51,8 +51,9 @@ export interface ConversationalComposeProps {
   /** Called when the operator clicks Save on a validator-clean draft.
    *  The parent persists via ``putCustomRule`` and toasts on success. */
   onSave: (draft: Record<string, unknown>) => Promise<void> | void;
-  /** Called when the operator clicks "Pick different" to back out to
-   *  the authoring-mode picker. */
+  /** Called when the operator clicks "Use textarea instead" to drop
+   *  back to the F-UX6 single-shot textarea. The parent's mode-picker
+   *  AuthoringHeader handles back-out to a different authoring mode. */
   onPickDifferent: () => void;
   /** Optional textarea pre-fill (e.g. handoff from the guided wizard).
    *  Operator can edit before sending. */
@@ -286,23 +287,16 @@ export function ConversationalCompose({
       className="flex flex-col gap-4"
       data-testid="conversational-compose-root"
     >
-      <header className="flex items-center justify-between">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
-            Authoring
-          </p>
-          <h2 className="mt-0.5 text-base font-semibold text-foreground">
-            Conversational compose
-          </h2>
-        </div>
+      <div className="flex items-center justify-end">
         <button
           type="button"
           onClick={onPickDifferent}
-          className="text-xs text-secondary hover:text-foreground"
+          className="rounded-full border border-primary/30 bg-white px-2.5 py-1 text-[11px] font-medium text-primary hover:bg-primary/[0.06]"
+          title="Switch to the single-shot textarea — useful for short one-line rules where chat would be overkill."
         >
-          ← Pick different
+          Use textarea instead ▸
         </button>
-      </header>
+      </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_360px]">
         {/* Left column: chat */}
