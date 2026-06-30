@@ -35,6 +35,9 @@ __all__ = [
     "should_grace",
     "build_empty_response_message",
     "build_grace_message",
+    "build_blocked_or_final_message",
+    "build_blocked_notice",
+    "select_recovery_message",
 ]
 
 _DEFAULT_MAX_RECOVERIES = 1
@@ -47,11 +50,20 @@ _DEFAULT_GRACE_EVENT_ALLOWANCE = 64
 
 @dataclass(frozen=True)
 class EmptyResponseRecoveryConfig:
-    """Resolved recovery policy. ``enabled=False`` makes the seam inert."""
+    """Resolved recovery policy. ``enabled=False`` makes the seam inert.
+
+    ``escalate`` (PR5b) opts into a bounded second corrective attempt: the env
+    default for ``max_recoveries`` becomes 2 (an operator override still wins)
+    and the final allowed recovery uses the blocked-or-final message instead of
+    the plain corrective message. The effective bound is set at config-build
+    time, so the engine adds no clamp. ``escalate`` defaults False so an
+    OFF-escalation config equals the pre-PR5b dataclass byte-for-byte.
+    """
 
     enabled: bool = False
     max_recoveries: int = _DEFAULT_MAX_RECOVERIES
     grace_event_allowance: int = _DEFAULT_GRACE_EVENT_ALLOWANCE
+    escalate: bool = False
 
 
 def should_recover_empty(
@@ -111,3 +123,49 @@ def build_grace_message() -> str:
         "You have reached the step budget for this turn. Produce your final "
         "answer now from what you already have; do not call more tools."
     )
+
+
+def build_blocked_or_final_message() -> str:
+    """Final corrective message for the last escalated recovery attempt.
+
+    Asks the model to either produce a real answer from the tool results or
+    state, briefly and explicitly, what is blocking it. The "or state what is
+    blocking you" half is what turns an otherwise-blank turn into an honest,
+    user-visible non-answer instead of a silent blank completion.
+    """
+    return (
+        "Produce a final answer now from the tool results above. If you "
+        "cannot, state explicitly and briefly what is blocking you. Do "
+        "not call more tools."
+    )
+
+
+def build_blocked_notice() -> str:
+    """Deterministic explicit non-answer streamed when every attempt stayed empty.
+
+    This is NOT a fabricated answer: it is a fixed, neutral statement that the
+    turn could not be completed, emitted as a synthetic ``text_delta`` so the
+    streamed answer-body is non-empty (the frontend renders a message instead of
+    a "no final answer text arrived" fallback banner). The wording is frozen so
+    a reviewer can diff any change and confirm it never drifts into looking like
+    a real result.
+    """
+    return (
+        "I was not able to produce a final answer for this turn after "
+        "retrying. The tools ran but I could not synthesize a result. "
+        "Please rephrase or narrow the request, or check the tool output "
+        "above."
+    )
+
+
+def select_recovery_message(*, escalate: bool, is_final: bool) -> str:
+    """Pick the corrective message for a recovery re-invocation.
+
+    Pure so the engine branch stays a one-liner and the selection is unit
+    tested without the runner harness. Only the FINAL allowed recovery under
+    escalation uses the blocked-or-final message; every other case uses the
+    plain corrective message (so escalation OFF is byte-identical).
+    """
+    if escalate and is_final:
+        return build_blocked_or_final_message()
+    return build_empty_response_message()

@@ -21,8 +21,11 @@ from magi_agent.config.env import (
 )
 from magi_agent.runtime.empty_response_recovery import (
     EmptyResponseRecoveryConfig,
+    build_blocked_notice,
+    build_blocked_or_final_message,
     build_empty_response_message,
     build_grace_message,
+    select_recovery_message,
     should_grace,
     should_recover_empty,
 )
@@ -138,6 +141,75 @@ class TestMessages:
         )
 
 
+class TestConfigEscalateDefault:
+    def test_escalate_defaults_false(self) -> None:
+        # The new PR5b ``escalate`` field defaults False so an OFF-escalation
+        # config is exactly equal to the pre-PR5b dataclass.
+        cfg = EmptyResponseRecoveryConfig(enabled=True, max_recoveries=1)
+        assert cfg.escalate is False
+        assert cfg == EmptyResponseRecoveryConfig(
+            enabled=True,
+            max_recoveries=1,
+            grace_event_allowance=64,
+            escalate=False,
+        )
+
+
+class TestEscalationMessages:
+    def test_blocked_or_final_message_non_empty_and_distinct(self) -> None:
+        msg = build_blocked_or_final_message()
+        assert isinstance(msg, str) and msg
+        assert msg != build_empty_response_message()
+        assert msg != build_grace_message()
+
+    def test_blocked_notice_non_empty_and_distinct(self) -> None:
+        notice = build_blocked_notice()
+        assert isinstance(notice, str) and notice
+        assert notice != build_blocked_or_final_message()
+        assert notice != build_empty_response_message()
+
+    def test_blocked_notice_literal(self) -> None:
+        # E14: freeze the exact non-answer wording so a reviewer diffs any
+        # change and it cannot drift into looking like a fabricated answer.
+        assert build_blocked_notice() == (
+            "I was not able to produce a final answer for this turn after "
+            "retrying. The tools ran but I could not synthesize a result. "
+            "Please rephrase or narrow the request, or check the tool output "
+            "above."
+        )
+
+    def test_blocked_or_final_message_literal(self) -> None:
+        assert build_blocked_or_final_message() == (
+            "Produce a final answer now from the tool results above. If you "
+            "cannot, state explicitly and briefly what is blocking you. Do "
+            "not call more tools."
+        )
+
+
+class TestSelectRecoveryMessage:
+    def test_escalation_off_always_empty_response_message(self) -> None:
+        assert (
+            select_recovery_message(escalate=False, is_final=False)
+            == build_empty_response_message()
+        )
+        assert (
+            select_recovery_message(escalate=False, is_final=True)
+            == build_empty_response_message()
+        )
+
+    def test_escalation_on_non_final_uses_empty_response_message(self) -> None:
+        assert (
+            select_recovery_message(escalate=True, is_final=False)
+            == build_empty_response_message()
+        )
+
+    def test_escalation_on_final_uses_blocked_or_final_message(self) -> None:
+        assert (
+            select_recovery_message(escalate=True, is_final=True)
+            == build_blocked_or_final_message()
+        )
+
+
 class TestEnvParsing:
     def test_default_off(self) -> None:
         parsed = parse_empty_response_recovery_env({})
@@ -183,3 +255,62 @@ class TestEnvParsing:
             parse_empty_response_recovery_env(
                 {"MAGI_EMPTY_RESPONSE_MAX_RECOVERIES": "0"}
             )
+
+
+class TestEscalationEnvParsing:
+    def test_escalation_default_off(self) -> None:
+        parsed = parse_empty_response_recovery_env(
+            {"MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED": "1"}
+        )
+        assert parsed.escalate is False
+
+    def test_escalation_off_max_one(self) -> None:
+        # Regression: without escalation the default max stays 1.
+        parsed = parse_empty_response_recovery_env(
+            {"MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED": "1"}
+        )
+        assert parsed.max_recoveries == 1
+
+    def test_escalation_strict_truthy_on(self) -> None:
+        for value in ("1", "true", "yes", "on", " TRUE "):
+            parsed = parse_empty_response_recovery_env(
+                {
+                    "MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED": "1",
+                    "MAGI_EMPTY_RESPONSE_ESCALATION_ENABLED": value,
+                }
+            )
+            assert parsed.escalate is True
+
+    def test_escalation_default_max_two(self) -> None:
+        # Escalation ON with no explicit max -> default becomes 2.
+        parsed = parse_empty_response_recovery_env(
+            {
+                "MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED": "1",
+                "MAGI_EMPTY_RESPONSE_ESCALATION_ENABLED": "1",
+            }
+        )
+        assert parsed.max_recoveries == 2
+
+    def test_escalation_explicit_max_override_wins(self) -> None:
+        # Operator override always wins (key present), including an explicit =1.
+        for explicit, expected in (("1", 1), ("3", 3)):
+            parsed = parse_empty_response_recovery_env(
+                {
+                    "MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED": "1",
+                    "MAGI_EMPTY_RESPONSE_ESCALATION_ENABLED": "1",
+                    "MAGI_EMPTY_RESPONSE_MAX_RECOVERIES": explicit,
+                }
+            )
+            assert parsed.max_recoveries == expected
+
+    def test_escalation_non_truthy_stays_off(self) -> None:
+        for value in ("0", "false", "off", "", "enable", "2"):
+            parsed = parse_empty_response_recovery_env(
+                {
+                    "MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED": "1",
+                    "MAGI_EMPTY_RESPONSE_ESCALATION_ENABLED": value,
+                }
+            )
+            assert parsed.escalate is False
+            # And the max default falls back to 1 when escalation is OFF.
+            assert parsed.max_recoveries == 1

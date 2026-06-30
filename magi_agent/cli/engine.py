@@ -457,9 +457,13 @@ def build_empty_response_recovery_config(
     parsed = parse_empty_response_recovery_env(mapping)
     if not parsed.enabled:
         return None
+    # PR5b: thread ``escalate`` explicitly. When escalation is OFF the resulting
+    # config is byte-identical to the pre-PR5b dataclass (escalate defaults
+    # False, grace_event_allowance keeps its dataclass default).
     return EmptyResponseRecoveryConfig(
         enabled=True,
         max_recoveries=parsed.max_recoveries,
+        escalate=parsed.escalate,
     )
 
 
@@ -2156,8 +2160,10 @@ class MagiEngineDriver:
         # Empty-response recovery helpers (R2, pure, dependency-light). Same
         # deferred-import pattern as output_continuation above.
         from magi_agent.runtime.empty_response_recovery import (  # noqa: PLC0415
+            build_blocked_notice,
             build_empty_response_message,
             build_grace_message,
+            select_recovery_message,
             should_grace,
             should_recover_empty,
         )
@@ -2266,6 +2272,14 @@ class MagiEngineDriver:
         recoveries_used = 0
         graces_used = 0
         grace_event_extra = 0
+        # PR5b: monotonic "any NET user-visible text reached the consumer this
+        # turn" flag. Set True on every streamed text_delta with a non-empty
+        # delta and NEVER reset by a response_clear (unlike ``emitted_text``,
+        # which a response_clear blanks). The terminal-side escalated_blank guard
+        # uses this so a turn that streamed text and then cleared it is not
+        # mis-classified as "never produced text". Stays False when escalation /
+        # recovery is OFF, so the OFF path is byte-identical.
+        net_user_text_streamed = False
         # P3 zero-edit guard: count file-mutating tool calls this turn.
         # zero_edit_retry_done ensures we fire the guard at most once per turn.
         file_edit_calls = 0
@@ -2390,6 +2404,8 @@ class MagiEngineDriver:
                                 delta = safe.get("delta")
                                 if isinstance(delta, str):
                                     emitted_text += delta
+                                    if delta:
+                                        net_user_text_streamed = True
                             # PR4 goal-nudge: reset the goal-mode latch whenever a
                             # tool fires so the next clean stop is eligible for a
                             # nudge again (re-arm).
@@ -2568,6 +2584,22 @@ class MagiEngineDriver:
                         recoveries_used=recoveries_used,
                     ):
                         recoveries_used += 1
+                        # PR5b: the equality below is POST-increment.
+                        # ``recoveries_used`` was just bumped, so it equals
+                        # ``max_recoveries`` exactly on the FINAL allowed
+                        # recovery. Reading it pre-increment would fire the
+                        # blocked-or-final message one attempt early/late.
+                        # ``select_recovery_message`` returns the plain
+                        # corrective message whenever escalate is False, so the
+                        # escalation-OFF path is byte-identical.
+                        is_final_recovery = (
+                            recoveries_used
+                            == empty_response_recovery.max_recoveries  # type: ignore[union-attr]
+                        )
+                        recovery_message = select_recovery_message(
+                            escalate=empty_response_recovery.escalate,  # type: ignore[union-attr]
+                            is_final=is_final_recovery,
+                        )
                         runner_input = runner_turn_input_cls(
                             userId=self._user_id,
                             sessionId=session_id,
@@ -2577,7 +2609,7 @@ class MagiEngineDriver:
                                 role="user",
                                 parts=[
                                     types.Part(  # type: ignore[attr-defined]
-                                        text=build_empty_response_message()
+                                        text=recovery_message
                                     )
                                 ],
                             ),
@@ -3163,6 +3195,8 @@ class MagiEngineDriver:
                             delta = safe.get("delta")
                             if isinstance(delta, str):
                                 emitted_text += delta
+                                if delta:
+                                    net_user_text_streamed = True
                         yielded_events += 1
                         self._observe_event(safe, session_id, turn_id)
                         event_kind = _map_event_kind(safe.get("type"))
@@ -3245,6 +3279,49 @@ class MagiEngineDriver:
                     turn_id=turn_id,
                 )
                 return
+
+        # PR5b terminal-side honest blocked notice. Computed HERE (not cached at
+        # the recovery-loop exit) on the CURRENT ``emitted_text``, because the
+        # zero-edit guard and the coding-repair fork above can mutate it and a
+        # ``response_clear`` can blank it. Reaching this point means every
+        # finalizer error-terminal pre-emption already returned: the cancel /
+        # engine-error surfaces, the six LLM-block gates
+        # (custom_llm_criterion_blocked), and the pre-final-gate / coding-repair
+        # loop (pre_final_evidence_gate_blocked). So a gated turn correctly
+        # surfaces Terminal.error and never reaches this notice (gates win).
+        # When escalation is OFF the whole block is a no-op (escalated_blank is
+        # False), so the OFF and PR5a paths stay byte-identical.
+        escalated_blank = (
+            bool(empty_response_recovery)
+            and getattr(empty_response_recovery, "escalate", False)
+            and recoveries_used > 0
+            and not budget_exhausted
+            and not emitted_text
+            and not net_user_text_streamed
+        )
+        if escalated_blank:
+            yield RuntimeEvent(
+                type="status",
+                payload={
+                    "type": "empty_response_blocked",
+                    "reason": "exhausted_empty",
+                    # initial invocation + the corrective re-invocations.
+                    "attempts": recoveries_used + 1,
+                },
+                turn_id=turn_id,
+            )
+            # The ONLY mechanism that suppresses the web fallback banner: a
+            # synthetic text_delta (token-kind) RuntimeEvent carrying the
+            # deterministic non-answer. EngineResult has no final_text field;
+            # the streamed text_delta is the entire mechanism.
+            yield RuntimeEvent(
+                type="token",
+                payload={
+                    "type": "text_delta",
+                    "delta": build_blocked_notice(),
+                },
+                turn_id=turn_id,
+            )
 
         yield EngineResult(  # type: ignore[misc]
             terminal=Terminal.completed,

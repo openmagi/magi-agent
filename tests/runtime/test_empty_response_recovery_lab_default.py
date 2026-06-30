@@ -25,3 +25,13 @@ def test_lab_profile_includes_empty_response_recovery() -> None:
         "Lab profile must auto-enable empty_response_recovery so the main "
         "agent retries once instead of silently ending the turn with no text."
     )
+
+
+def test_lab_profile_includes_empty_response_escalation() -> None:
+    # WS5 PR5b: lab opts into the bounded second attempt + honest blocked
+    # notice so the dogfood surface exercises the escalation path.
+    assert "MAGI_EMPTY_RESPONSE_ESCALATION_ENABLED" in LAB_EXPERIMENTAL_FLAGS, (
+        "Lab profile must auto-enable empty_response_escalation so the main "
+        "agent does a bounded second attempt and ends with an honest blocked "
+        "notice instead of completing blank."
+    )

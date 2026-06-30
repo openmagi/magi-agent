@@ -24,6 +24,11 @@ LOCAL_FULL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     # once (the recovery + grace helpers are already wired; this flips them ON so a
     # default self-host turn does not silently complete blank).
     "MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED": "1",
+    # WS5 PR5b: do a bounded second attempt whose final message asks for an answer
+    # OR an explicit "what is blocking me" statement; if still empty, stream a
+    # deterministic blocked notice so the turn ends honestly instead of blank.
+    # Inert unless the recovery flag above is also ON.
+    "MAGI_EMPTY_RESPONSE_ESCALATION_ENABLED": "1",
     "MAGI_CONTEXT_COMPACTION_ENABLED": "1",
     "MAGI_MAX_STEPS_BRAKE_ENABLED": "1",
     "MAGI_SELF_REVIEW_ENABLED": "1",
@@ -349,6 +354,10 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     "MAGI_DOCUMENT_QA_ENABLED",
     "MAGI_EDIT_RETRY_REFLECTION_ENABLED",
     "MAGI_EGRESS_GATE_ENABLED",
+    # WS5 PR5b escalation: bounded second corrective attempt + honest blocked
+    # notice. Inert unless MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED is also on; lab
+    # opts in so the dogfood surface exercises the escalation path.
+    "MAGI_EMPTY_RESPONSE_ESCALATION_ENABLED",
     # Empty-response recovery (Hermes mechanism 3). When the main agent
     # streams tool calls but ends the turn with zero text, the engine
     # re-invokes once with "produce your final answer now". Default OFF
