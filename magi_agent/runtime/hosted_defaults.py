@@ -108,6 +108,10 @@ _DURABLE_RESILIENCE_OVERLAY: Mapping[str, str] = {
 # it only observes (no live candidate generation) until ``hardgate``.
 _C3_FULL_OVERLAY: Mapping[str, str] = {
     "MAGI_CONTEXT_COMPACTION_ENABLED": "1",
+    # WS4 PR4b: live proactive context recovery (tiers 6-7) at the hosted FULL
+    # stage only (NOT resilience). Cost-free safety net; tier-7 uses the hermetic
+    # stub summarizer (a live-model summarizer on hosted is a separate sign-off).
+    "MAGI_CONTEXT_PROACTIVE_RECOVERY_ENABLED": "1",
     "MAGI_SELF_REVIEW_ENABLED": "1",
     "MAGI_SELF_REVIEW_SHADOW": "1",
 }
