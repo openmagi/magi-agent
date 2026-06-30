@@ -27,6 +27,7 @@ from .models import (
 )
 
 if TYPE_CHECKING:
+    from magi_agent.plugins.mcp_resilience import McpResiliencePolicy
     from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
         Gate5B4C3ShadowGenerationBudgets,
         Gate5B4C3ShadowGenerationProviderCredentialBinding,
@@ -240,6 +241,92 @@ def parse_tool_exception_reflection_env(
             f"{TOOL_EXCEPTION_MAX_ATTEMPTS_ENV} must be >= 1"
         )
     return ToolExceptionReflectionEnv(enabled=enabled, max_attempts=max_attempts)
+
+
+# WS9 PR9a: single source of truth for the MCP resilience flags. The bool gate
+# routes through the typed flag registry (``flag_bool`` against the registered
+# ``MAGI_MCP_RESILIENCE_ENABLED`` FlagSpec); the six numerics are read with
+# ``_int_env`` ONLY when enabled, so a malformed numeric on an OFF runtime never
+# raises. No MAGI_MCP_* env is read via ``os.environ`` outside this module: the
+# resolved policy is threaded as an explicit kwarg into ``call_with_resilience``
+# / ``McpAdapter.call_tool`` (keeps the check_flag_reads ratchet baseline green).
+MCP_RESILIENCE_ENABLED_ENV = "MAGI_MCP_RESILIENCE_ENABLED"
+MCP_CALL_TIMEOUT_MS_ENV = "MAGI_MCP_CALL_TIMEOUT_MS"
+MCP_CIRCUIT_FAIL_THRESHOLD_ENV = "MAGI_MCP_CIRCUIT_FAIL_THRESHOLD"
+MCP_CIRCUIT_COOLDOWN_MS_ENV = "MAGI_MCP_CIRCUIT_COOLDOWN_MS"
+MCP_RECONNECT_MAX_ATTEMPTS_ENV = "MAGI_MCP_RECONNECT_MAX_ATTEMPTS"
+MCP_RECONNECT_BACKOFF_BASE_MS_ENV = "MAGI_MCP_RECONNECT_BACKOFF_BASE_MS"
+MCP_RECONNECT_BACKOFF_CAP_MS_ENV = "MAGI_MCP_RECONNECT_BACKOFF_CAP_MS"
+
+_MCP_CALL_TIMEOUT_MS_DEFAULT = 30000
+_MCP_CIRCUIT_FAIL_THRESHOLD_DEFAULT = 3
+_MCP_CIRCUIT_COOLDOWN_MS_DEFAULT = 60000
+_MCP_RECONNECT_MAX_ATTEMPTS_DEFAULT = 5
+_MCP_RECONNECT_BACKOFF_BASE_MS_DEFAULT = 500
+_MCP_RECONNECT_BACKOFF_CAP_MS_DEFAULT = 60000
+
+
+def parse_mcp_resilience_env(env: Mapping[str, str]) -> "McpResiliencePolicy":
+    """Resolve the MCP resilience policy from the environment (strict opt-in).
+
+    Mirrors ``parse_tool_exception_reflection_env``: ``flag_bool`` for the gate,
+    ``_int_env`` for the numerics (read only when enabled). Out-of-range numerics
+    raise ``RuntimeEnvError`` at parse so an operator fails loud at startup; a
+    malformed numeric on an OFF runtime never raises.
+    """
+    from .flags import flag_bool  # noqa: PLC0415
+    from ..plugins.mcp_resilience import McpResiliencePolicy  # noqa: PLC0415
+
+    enabled = flag_bool(MCP_RESILIENCE_ENABLED_ENV, env=env)
+    if not enabled:
+        return McpResiliencePolicy()
+
+    call_timeout_ms = _int_env(
+        env, MCP_CALL_TIMEOUT_MS_ENV, _MCP_CALL_TIMEOUT_MS_DEFAULT
+    )
+    if call_timeout_ms < 1 or call_timeout_ms > 600000:
+        raise RuntimeEnvError(
+            f"{MCP_CALL_TIMEOUT_MS_ENV} must be between 1 and 600000"
+        )
+    fail_threshold = _int_env(
+        env, MCP_CIRCUIT_FAIL_THRESHOLD_ENV, _MCP_CIRCUIT_FAIL_THRESHOLD_DEFAULT
+    )
+    if fail_threshold < 1 or fail_threshold > 20:
+        raise RuntimeEnvError(
+            f"{MCP_CIRCUIT_FAIL_THRESHOLD_ENV} must be between 1 and 20"
+        )
+    cooldown_ms = _int_env(
+        env, MCP_CIRCUIT_COOLDOWN_MS_ENV, _MCP_CIRCUIT_COOLDOWN_MS_DEFAULT
+    )
+    if cooldown_ms < 1000:
+        raise RuntimeEnvError(f"{MCP_CIRCUIT_COOLDOWN_MS_ENV} must be >= 1000")
+    max_attempts = _int_env(
+        env, MCP_RECONNECT_MAX_ATTEMPTS_ENV, _MCP_RECONNECT_MAX_ATTEMPTS_DEFAULT
+    )
+    if max_attempts < 1 or max_attempts > 10:
+        raise RuntimeEnvError(
+            f"{MCP_RECONNECT_MAX_ATTEMPTS_ENV} must be between 1 and 10"
+        )
+    backoff_base_ms = _int_env(
+        env, MCP_RECONNECT_BACKOFF_BASE_MS_ENV, _MCP_RECONNECT_BACKOFF_BASE_MS_DEFAULT
+    )
+    if backoff_base_ms < 1:
+        raise RuntimeEnvError(f"{MCP_RECONNECT_BACKOFF_BASE_MS_ENV} must be >= 1")
+    backoff_cap_ms = _int_env(
+        env, MCP_RECONNECT_BACKOFF_CAP_MS_ENV, _MCP_RECONNECT_BACKOFF_CAP_MS_DEFAULT
+    )
+    if backoff_cap_ms < 1000:
+        raise RuntimeEnvError(f"{MCP_RECONNECT_BACKOFF_CAP_MS_ENV} must be >= 1000")
+
+    return McpResiliencePolicy(
+        enabled=True,
+        call_timeout_ms=call_timeout_ms,
+        circuit_fail_threshold=fail_threshold,
+        circuit_cooldown_ms=cooldown_ms,
+        reconnect_max_attempts=max_attempts,
+        reconnect_backoff_base_ms=backoff_base_ms,
+        reconnect_backoff_cap_ms=backoff_cap_ms,
+    )
 
 
 # Single source of truth for the schema-invalid argument feedback flags

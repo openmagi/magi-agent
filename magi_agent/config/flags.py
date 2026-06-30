@@ -2935,6 +2935,22 @@ FLAGS: tuple[FlagSpec, ...] = (
             "under a per-invocation attempt budget. Default-OFF."
         ),
     ),
+    # WS9 PR9a: MCP resilience primitive (per-attempt timeout / bounded
+    # reconnect / per-server circuit breaker / auth-not-retried). Strict
+    # default-OFF (NOT ``_runtime_feature_enabled``): profile-independent so an
+    # eval/benchmark or a bare ``MAGI_RUNTIME_PROFILE=full`` does not silently
+    # enable it unless a profile/overlay dict explicitly sets ``=1``. Mirrors
+    # the ``MAGI_TOOL_EXCEPTION_REFLECTION_ENABLED`` precedent above.
+    _b(
+        "MAGI_MCP_RESILIENCE_ENABLED",
+        summary=(
+            "Wrap MCP provider tool calls in a reusable resilience primitive: a "
+            "per-attempt call timeout, bounded reconnect with exponential "
+            "backoff, a per-server circuit breaker, and non-retryable auth "
+            "handling that surfaces a model-visible reconnect signal. When OFF "
+            "the call boundary is byte-identical to today. Default-OFF."
+        ),
+    ),
     # I-1: register the seven 1-liner ``parse_*_*`` flags so the typed
     # registry inventories them and ``flag_bool`` is the single read path.
     # Each kept strictly default-OFF per its function docstring's existing
