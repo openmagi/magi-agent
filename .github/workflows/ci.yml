@@ -88,6 +88,31 @@ jobs:
           tests/test_ws1_durable_activation.py
           tests/test_durable_recovery_sweep.py
 
+  ws5-empty-response-onpath:
+    # WS5 PR5a: mandatory ON-path job (flag-promotion rule, ref #641). Runs the
+    # empty-response recovery suites with the flag ON in a hermetic env-cleared
+    # run so an exported MAGI_* / provider key cannot give a false green.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install Python
+        run: uv python install 3.12
+      - name: Sync deps (dev + cli extras)
+        run: uv sync --python 3.12 --extra dev --extra cli
+      - name: WS5 empty-response recovery (ON-path, hermetic, env-cleared)
+        run: >
+          env -i HOME="$HOME" PATH="$PATH"
+          MAGI_CONFIG="${{ runner.temp }}/magi-ci-config.toml"
+          MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED=1
+          uv run --no-sync pytest -q
+          tests/test_ws5_empty_response_activation.py
+          tests/runtime/test_empty_response_recovery.py
+          tests/cli/test_engine_empty_response_recovery.py
+
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10

@@ -20,6 +20,10 @@ LOCAL_FULL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     "MAGI_EDIT_RETRY_REFLECTION_ENABLED": "1",
     "MAGI_LOOP_GUARD_ENABLED": "1",
     "MAGI_ERROR_RECOVERY_ENABLED": "1",
+    # WS5 PR5a: recover a "tools ran but the model said nothing" turn by re-invoking
+    # once (the recovery + grace helpers are already wired; this flips them ON so a
+    # default self-host turn does not silently complete blank).
+    "MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED": "1",
     "MAGI_CONTEXT_COMPACTION_ENABLED": "1",
     "MAGI_MAX_STEPS_BRAKE_ENABLED": "1",
     "MAGI_SELF_REVIEW_ENABLED": "1",
