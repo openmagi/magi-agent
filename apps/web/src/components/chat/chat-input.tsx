@@ -5,7 +5,7 @@ import { CHAT_ATTACHMENT_ACCEPT, validateFile } from "@/chat-core/attachments";
 import { isImageMimetype, formatFileSize } from "@/chat-core";
 import { extractClipboardImageFiles } from "@/chat-core";
 import { kbUploadKey } from "@/chat-core/kb-uploads";
-import type { ChatResponseLanguage, ReplyTo, KbDocReference } from "@/chat-core";
+import type { ChatResponseLanguage, ReplyTo, KbDocReference, AgentModeSummary } from "@/chat-core";
 import { isStreamingComposerBlockedByQueue } from "@/chat-core";
 import { SKILLS } from "@/lib/skills-catalog";
 import type { KbDocEntry } from "@/hooks/use-kb-docs";
@@ -123,6 +123,9 @@ export interface ChatInputSendOptions {
    * support reasoning (Anthropic extended thinking / OpenAI o-series & GPT-5
    * reasoning_effort / Gemini thinking). Backend wiring lands in a follow-up. */
   reasoningEffort?: ReasoningEffort;
+  /** Active agent-mode id (posture). Empty/undefined → bot default (no field on
+   * the payload). Runtime resolves it into the system prompt + tool delta. */
+  agentMode?: string;
 }
 
 export function buildChatInputSendOptions(
@@ -130,6 +133,7 @@ export function buildChatInputSendOptions(
   recipe?: ChatRecipeOption,
   reasoningEffort?: ReasoningEffort,
   goalMode = false,
+  agentMode?: string | null,
 ): ChatInputSendOptions {
   const explicitRecipeSelection = buildExplicitRecipeSelection(
     recipeMode,
@@ -143,6 +147,9 @@ export function buildChatInputSendOptions(
     ...(goalMode ? { goalMode: true } : {}),
     ...(explicitRecipeSelection ? { explicitRecipeSelection } : {}),
     ...(reasoningEffort ? { reasoningEffort } : {}),
+    // Empty string (the "Default" selector option) → no field, byte-identical
+    // to a send with no mode selected.
+    ...(agentMode ? { agentMode } : {}),
   };
 }
 
@@ -199,6 +206,13 @@ interface ChatInputProps {
   reasoningEffort?: ReasoningEffort;
   /** Called when the user picks a different effort level. */
   onReasoningEffortChange?: (effort: ReasoningEffort) => void;
+  /** User-authored agent modes (postures) available to select. When empty the
+   * mode selector is hidden — a bot with no modes behaves exactly as today. */
+  availableModes?: AgentModeSummary[];
+  /** Active agent-mode id, or null/"" for the bot default. */
+  agentMode?: string | null;
+  /** Called when the user picks a different mode (empty string = default). */
+  onAgentModeChange?: (modeId: string) => void;
 }
 
 interface ComposerEnterEvent {
@@ -302,10 +316,21 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     supportsReasoningEffort = false,
     reasoningEffort,
     onReasoningEffortChange,
+    availableModes = [],
+    agentMode,
+    onAgentModeChange,
   },
   ref,
 ) {
   const effectiveReasoningEffort: ReasoningEffort = reasoningEffort ?? DEFAULT_REASONING_EFFORT;
+  // Only honor a selected mode id that still exists in the list the composer
+  // currently knows about. This keeps the <select> value and the sent value in
+  // sync; if a mode is deleted while selected and the composer's list has since
+  // refreshed, the stale id falls back to "" (Default) rather than hitting the
+  // wire. (The composer's list is not live-synced with the Customize panel, so
+  // this is best-effort; the runtime also tolerates an unknown id.)
+  const effectiveAgentMode =
+    agentMode && availableModes.some((mode) => mode.id === agentMode) ? agentMode : "";
   const [text, setText] = useState("");
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -560,6 +585,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           selectedRecipe,
           supportsReasoningEffort ? effectiveReasoningEffort : undefined,
           goalMode,
+          effectiveAgentMode,
         ),
       );
       if (result === false) return;
@@ -583,6 +609,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     supportsReasoningEffort,
     effectiveReasoningEffort,
     goalMode,
+    effectiveAgentMode,
   ]);
 
   const handleKeyDown = useCallback(
@@ -998,6 +1025,34 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             {composerAccessory && (
               <div className="flex min-w-0 items-center" data-composer-accessory="bottom-row">
                 {composerAccessory}
+              </div>
+            )}
+
+            {availableModes.length > 0 && (
+              <div className="flex shrink-0 items-center" data-chat-mode-selector="dropdown">
+                <label className="sr-only" htmlFor="chat-input-agent-mode">
+                  {t(language, "Agent mode", "에이전트 모드")}
+                </label>
+                <select
+                  id="chat-input-agent-mode"
+                  value={effectiveAgentMode}
+                  onChange={(event) => onAgentModeChange?.(event.target.value)}
+                  disabled={disabled || isSubmitting}
+                  aria-label={t(language, "Agent mode", "에이전트 모드")}
+                  title={t(
+                    language,
+                    "Agent mode (posture) for this turn — applies a saved system prompt + tool set",
+                    "이번 턴의 에이전트 모드 (포스처) — 저장된 시스템 프롬프트와 도구 세트를 적용합니다",
+                  )}
+                  className="h-8 max-w-[9rem] cursor-pointer truncate rounded-md border border-border/60 bg-transparent px-2 text-xs text-muted-foreground hover:border-border focus:border-foreground/40 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="">{t(language, "Default", "기본값")}</option>
+                  {availableModes.map((mode) => (
+                    <option key={mode.id} value={mode.id}>
+                      {mode.displayName}
+                    </option>
+                  ))}
+                </select>
               </div>
             )}
 

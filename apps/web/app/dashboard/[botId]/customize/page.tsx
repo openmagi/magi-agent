@@ -23,6 +23,7 @@ import {
 const VALID_SECTIONS: ReadonlyArray<CustomizeSection> = [
   "rules",
   "guidance",
+  "modes",
   "tools",
   "recipes",
   "hooks",

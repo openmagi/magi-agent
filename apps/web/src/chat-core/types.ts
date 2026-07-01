@@ -560,6 +560,8 @@ export interface QueuedMessage {
   explicitRecipeSelection?: ExplicitRecipeSelectionRequest["explicitRecipeSelection"];
   /** Preserve per-turn reasoning-effort override when the message drains later. */
   reasoningEffort?: ReasoningEffort;
+  /** Preserve the active agent-mode id (posture) when the message drains later. */
+  agentMode?: string;
   queuedAt: number;
 }
 
