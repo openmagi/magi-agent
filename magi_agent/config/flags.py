@@ -2996,6 +2996,26 @@ FLAGS: tuple[FlagSpec, ...] = (
             "attempt budget instead of killing the whole turn. Default-OFF."
         ),
     ),
+    # PR-R: soft-fail unknown-tool as a tool_result so the model can retry.
+    # Default-ON because the retry pool is bounded by the toolset the runtime
+    # already advertises (unknown tool -> corrective dict lists the exposed
+    # tools; model must pick one of THOSE, cannot escalate authority), and the
+    # corrective error text is information-identical to what ADK already
+    # raises today (no new public info). Opt out via =0.
+    _b(
+        "MAGI_TOOL_NOT_FOUND_SOFT_FAIL",
+        default=True,
+        summary=(
+            "Convert Google ADK's ``ValueError('Tool '<name>' not found. "
+            "Available tools: ...')`` raise into a model-visible corrective "
+            "tool_result carrying the requested tool name plus the parsed "
+            "available-tools list, so the model can pick a valid tool on the "
+            "next iteration instead of the child turn dying with "
+            "llm_call_exception. Bounded per-invocation attempt budget "
+            "(``MAGI_TOOL_NOT_FOUND_SOFT_FAIL_MAX_ATTEMPTS`` default 3) so a "
+            "hallucination loop still terminates. Default-ON."
+        ),
+    ),
     _b(
         "MAGI_TOOL_SCHEMA_FEEDBACK_ENABLED",
         summary=(

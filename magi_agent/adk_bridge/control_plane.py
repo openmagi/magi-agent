@@ -1216,6 +1216,48 @@ class _ToolExceptionReflectionLoopControl(BaseLoopControl):
         )
 
 
+class _ToolNotFoundSoftFailLoopControl(BaseLoopControl):
+    """Thin LoopControl adapter exposing MagiToolNotFoundSoftFailPlugin (PR-R).
+
+    Same shape as ``_ToolExceptionReflectionLoopControl``: exposes
+    ``._plugin`` so ``_ExtendedControlPlanePlugin`` can fan out
+    ``on_tool_error_callback`` and ``after_run_callback`` into the plugin.
+    Kept ordered BEFORE the generic tool-exception reflection control so the
+    plane's first-non-None fan-out labels ADK unknown-tool errors with the
+    specific ``tool_not_found`` error_code (a specific handler winning over
+    the generic reflection is the whole point of the split).
+    """
+
+    def __init__(self, plugin: Any) -> None:
+        self._plugin = plugin
+
+    @property
+    def name(self) -> str:  # type: ignore[override]
+        return getattr(self._plugin, "name", "magi_tool_not_found_soft_fail_control")
+
+    async def apply_tool_error(
+        self,
+        ctx: Any,
+        *,
+        tool: Any,
+        tool_args: dict[str, Any],
+        tool_context: Any,
+        error: Exception,
+    ) -> dict[str, Any] | None:
+        """Typed-context entry point (S-C): drive the attempt budget against
+        the runtime-owned ``PerInvocationState`` from the context (falls back
+        to the plugin default state when the context carries none). Behavior
+        is byte-identical to ``on_tool_error_callback``."""
+        state = getattr(ctx, "per_invocation", None) or self._plugin._default_state
+        return self._plugin.reflect_with_state(
+            state=state,
+            tool=tool,
+            tool_args=tool_args,
+            tool_context=tool_context,
+            error=error,
+        )
+
+
 class _ResilienceLoopControl(BaseLoopControl):
     """Thin LoopControl adapter delegating ``after_tool_callback`` to MagiResiliencePlugin."""
 
@@ -1659,6 +1701,7 @@ def build_loop_resilience_controls(
     env = os_environ if os_environ is not None else dict(os.environ)
     from magi_agent.config.env import (  # noqa: PLC0415 — avoid circular import
         parse_tool_exception_reflection_env,
+        parse_tool_not_found_soft_fail_env,
         parse_tool_schema_feedback_env,
     )
     from magi_agent.adk_bridge.schema_feedback import (  # noqa: PLC0415
@@ -1667,8 +1710,26 @@ def build_loop_resilience_controls(
     from magi_agent.adk_bridge.tool_exception_reflection import (  # noqa: PLC0415
         build_tool_exception_reflection_plugin,
     )
+    from magi_agent.adk_bridge.tool_not_found_soft_fail import (  # noqa: PLC0415
+        build_tool_not_found_soft_fail_plugin,
+    )
 
     controls: list[LoopControl] = []
+    # PR-R: soft-fail unknown-tool as a corrective tool_result. Registered
+    # FIRST so the plane's first-non-None fan-out labels ADK unknown-tool
+    # errors with the specific ``tool_not_found`` error_code before the
+    # generic reflection has a chance to overwrite them with its generic
+    # "review the error and retry" message. The soft-fail plugin returns
+    # None for every non-unknown-tool raise, so it never eats a real
+    # exception the generic reflection should handle.
+    tool_not_found_env = parse_tool_not_found_soft_fail_env(env)
+    tool_not_found_plugin = build_tool_not_found_soft_fail_plugin(
+        enabled=tool_not_found_env.enabled,
+        max_attempts=tool_not_found_env.max_attempts,
+    )
+    if tool_not_found_plugin is not None:
+        controls.append(_ToolNotFoundSoftFailLoopControl(tool_not_found_plugin))
+
     tool_exception_env = parse_tool_exception_reflection_env(env)
     tool_exception_plugin = build_tool_exception_reflection_plugin(
         enabled=tool_exception_env.enabled,

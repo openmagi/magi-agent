@@ -243,6 +243,55 @@ def parse_tool_exception_reflection_env(
     return ToolExceptionReflectionEnv(enabled=enabled, max_attempts=max_attempts)
 
 
+# PR-R: single source of truth for the tool-not-found soft-fail flags. When
+# enabled, the ADK ``ValueError("Tool '<name>' not found. Available tools: ...")``
+# raise is converted into a model-visible corrective tool_result carrying the
+# original error text plus the parsed available-tools list, so the model can
+# pick a valid tool on the next iteration instead of the child turn dying with
+# ``llm_call_exception``. Bounded per-invocation attempt budget: once
+# max_attempts is exceeded the plugin returns None and ADK re-raises the
+# original ValueError (today's abort). Default-ON: the retry pool is bounded
+# by the toolset the runtime already advertises, and the error text is
+# information-identical to what ADK raises today, so no new public info is
+# surfaced. Flag routed through the typed flag registry
+# (``MAGI_TOOL_NOT_FOUND_SOFT_FAIL`` in ``config.flags``); the numeric is
+# read only when enabled so a malformed value on an OFF runtime never raises.
+TOOL_NOT_FOUND_SOFT_FAIL_ENV = "MAGI_TOOL_NOT_FOUND_SOFT_FAIL"
+TOOL_NOT_FOUND_SOFT_FAIL_MAX_ATTEMPTS_ENV = "MAGI_TOOL_NOT_FOUND_SOFT_FAIL_MAX_ATTEMPTS"
+_TOOL_NOT_FOUND_SOFT_FAIL_MAX_ATTEMPTS_DEFAULT = 3
+
+
+@dataclass(frozen=True)
+class ToolNotFoundSoftFailEnv:
+    enabled: bool = True
+    max_attempts: int = _TOOL_NOT_FOUND_SOFT_FAIL_MAX_ATTEMPTS_DEFAULT
+
+
+def parse_tool_not_found_soft_fail_env(
+    env: Mapping[str, str],
+) -> ToolNotFoundSoftFailEnv:
+    """Resolve the tool-not-found soft-fail policy from ``env`` (default-ON).
+
+    Mirrors :func:`parse_tool_exception_reflection_env`: ``flag_bool`` for the
+    gate, ``_int_env`` for the numeric (read only when enabled). Out-of-range
+    numeric raises ``RuntimeEnvError`` at parse so an operator fails loud at
+    startup; a malformed numeric on an OFF runtime never raises.
+    """
+    from .flags import flag_bool  # noqa: PLC0415
+
+    enabled = flag_bool(TOOL_NOT_FOUND_SOFT_FAIL_ENV, env=env)
+    max_attempts = _int_env(
+        env,
+        TOOL_NOT_FOUND_SOFT_FAIL_MAX_ATTEMPTS_ENV,
+        _TOOL_NOT_FOUND_SOFT_FAIL_MAX_ATTEMPTS_DEFAULT,
+    )
+    if enabled and max_attempts < 1:
+        raise RuntimeEnvError(
+            f"{TOOL_NOT_FOUND_SOFT_FAIL_MAX_ATTEMPTS_ENV} must be >= 1"
+        )
+    return ToolNotFoundSoftFailEnv(enabled=enabled, max_attempts=max_attempts)
+
+
 # WS9 PR9a: single source of truth for the MCP resilience flags. The bool gate
 # routes through the typed flag registry (``flag_bool`` against the registered
 # ``MAGI_MCP_RESILIENCE_ENABLED`` FlagSpec); the six numerics are read with
