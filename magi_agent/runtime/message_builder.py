@@ -624,6 +624,51 @@ def _user_rules_block() -> str:
     )
 
 
+def _agent_mode_block() -> str:
+    """Active agent MODE (posture) system-prompt injection.
+
+    Reads the session-sticky active mode (customize ``active_agent_mode`` +
+    ``agent_modes``) and injects its ``system_prompt`` as a dynamic prompt part,
+    wrapped in an ``<agent_mode>`` fence with an honest header. A mode is an
+    EXPLICIT operator selection, so this is opt-in by construction: no active
+    mode ⇒ ``""`` ⇒ byte-identical. Uses the SAME dynamic-parts seam as
+    ``_user_rules_block`` (operator-authored prompt text), so mode text inherits
+    the same run-share / observability treatment as user rules (no new leak
+    surface). Fail-soft to ``""``.
+
+    No default-OFF env flag (per the abolish-default-OFF-inert policy): the gate
+    is active-mode presence. A fleet-wide kill-switch can be layered later if
+    hosted needs one.
+    """
+    try:
+        from magi_agent.customize.modes import active_mode_id, get_mode
+
+        mode_id = active_mode_id()
+        if not mode_id:
+            return ""
+        mode = get_mode(mode_id)
+        if mode is None:
+            return ""
+        prompt = mode.system_prompt.strip()
+    except Exception:
+        return ""
+    if not prompt:
+        return ""
+    # Sanitize a literal closing fence in BOTH the body and the display name
+    # (the name is interpolated into the header) so neither can prematurely close
+    # the envelope (mirrors _user_rules_block for the body).
+    safe_text = prompt.replace("</agent_mode>", "</agent_mode_>")
+    safe_name = mode.display_name.replace("</agent_mode>", "</agent_mode_>")
+    return (
+        "<agent_mode>\n"
+        f"Active mode: {safe_name} (operator-selected posture; guidance "
+        "for how to approach this session).\n"
+        "\n"
+        f"{safe_text}\n"
+        "</agent_mode>"
+    )
+
+
 def _credentials_awareness_block() -> str:
     """Redacted summary of registered Agent Vault credentials, injected each turn.
 
@@ -763,6 +808,9 @@ def _assemble_prompt_sections(
     user_rules_block = _user_rules_block()
     if user_rules_block:
         dynamic_parts.append(user_rules_block)
+    agent_mode_block = _agent_mode_block()
+    if agent_mode_block:
+        dynamic_parts.append(agent_mode_block)
     credentials_block = _credentials_awareness_block()
     if credentials_block:
         dynamic_parts.append(credentials_block)
