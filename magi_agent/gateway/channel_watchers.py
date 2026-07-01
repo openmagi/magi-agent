@@ -32,7 +32,9 @@ import asyncio
 import importlib.util
 import logging
 import os
-from collections.abc import Callable
+import random
+import time
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from magi_agent.channels.discord_adapter import (
@@ -55,6 +57,7 @@ from magi_agent.channels.slack_live import (
 from magi_agent.channels.telegram_adapter import TelegramInboundUpdate
 from magi_agent.channels.telegram_live import (
     TelegramLivePollState,
+    _scrub_token,
     is_live_telegram_enabled,
     to_channel_inbound,
 )
@@ -65,6 +68,12 @@ from magi_agent.channels.turn_bridge import (
     make_inbound_handler,
 )
 from magi_agent.gateway.daemon import GatewayWatcher
+from magi_agent.gateway.poll_resilience import (
+    PollCircuitState,
+    on_failure,
+    on_success,
+    resolve_poll_resilience_config,
+)
 from magi_agent.gateway.watchers import build_channel_poll_watcher
 from magi_agent.harness.scheduler_delivery import is_silent_output
 
@@ -193,12 +202,18 @@ def build_telegram_supervisor_watcher(
     on_inbound: OnInbound | None = None,
     run_turn: RunTurn | None = None,
     interval_seconds: float = DEFAULT_TELEGRAM_POLL_INTERVAL_SECONDS,
+    on_persistent_failure: Callable[[Mapping[str, object]], None] | None = None,
 ) -> GatewayWatcher:
     """Long-lived supervisor watcher for dashboard-managed Telegram.
 
     Always startable (gated by ``is_dashboard_telegram_enabled``); the run loop
     idles until a token is resolvable, so it is safe to add even before any token
     is connected.
+
+    WS8 PR8a-2 (default-OFF): when the poll-resilience flag is ON, the supervisor
+    tick loop applies the same backoff/circuit policy as the live poll watcher
+    (shared ``gateway.poll_resilience`` module). When the flag is unset the loop
+    is the literal legacy fixed-interval path (byte-identical).
     """
     supervisor = TelegramSupervisor(
         resolve_token=resolve_token or _default_resolve_telegram_token,
@@ -207,8 +222,53 @@ def build_telegram_supervisor_watcher(
         run_turn=run_turn,
     )
 
+    cfg = resolve_poll_resilience_config(os.environ)
+    use_resilience = cfg.enabled
+
+    async def _tick_resilient(stop_event: asyncio.Event) -> None:
+        state = PollCircuitState()
+        jitter = random.Random()
+        interval_ms = int(interval_seconds * 1000)
+        while not stop_event.is_set():
+            now_ms = time.monotonic_ns() // 1_000_000
+            try:
+                await asyncio.to_thread(supervisor.tick)
+            except Exception as exc:  # noqa: BLE001 (transient tick error must not stop loop)
+                directive = on_failure(state, now_ms, cfg, rng=jitter)
+                _log.warning(
+                    "telegram supervisor tick failed (failures=%d, circuit_open=%s)",
+                    state.consecutive_failures,
+                    directive.circuit_open,
+                    exc_info=True,
+                )
+                if directive.should_notify:
+                    notice: dict[str, object] = {
+                        "telegramPollPersistentFailure": True,
+                        "consecutiveFailures": state.consecutive_failures,
+                        "reasonCode": "supervisor_tick_exception",
+                        "lastErrorExcerpt": _scrub_token(str(exc))[:120],
+                    }
+                    _log.error("telegram supervisor persistent failure: %s", notice)
+                    if on_persistent_failure is not None:
+                        on_persistent_failure(notice)
+            else:
+                directive = on_success(
+                    state, now_ms, cfg, normal_interval_ms=interval_ms
+                )
+            if stop_event.is_set():
+                break
+            try:
+                await asyncio.wait_for(
+                    stop_event.wait(), timeout=directive.sleep_ms / 1000
+                )
+            except asyncio.TimeoutError:
+                continue
+
     async def run(stop_event: asyncio.Event) -> None:
         try:
+            if use_resilience:
+                await _tick_resilient(stop_event)
+                return
             while not stop_event.is_set():
                 try:
                     await asyncio.to_thread(supervisor.tick)
@@ -422,6 +482,7 @@ def build_telegram_channel_watcher(
     on_inbound: OnInbound | None = None,
     run_turn: RunTurn | None = None,
     interval_seconds: float = DEFAULT_TELEGRAM_POLL_INTERVAL_SECONDS,
+    on_persistent_failure: Callable[[Mapping[str, object]], None] | None = None,
 ) -> GatewayWatcher | None:
     """Build the live Telegram channel watcher, or None if not fully configured.
 
@@ -451,11 +512,18 @@ def build_telegram_channel_watcher(
     )
     poll_once = build_telegram_poll_once(provider=provider, on_inbound=dispatch)
 
+    # WS8 PR8a-2 (default-OFF): resolve the poll-resilience config once and thread
+    # it (plus the optional persistent-failure notice) into the poll watcher. When
+    # the flag is unset the watcher runs the legacy fixed-interval loop unchanged.
+    poll_resilience_config = resolve_poll_resilience_config(os.environ)
+
     return build_channel_poll_watcher(
         channel_type="telegram",
         poll_once=poll_once,
         is_enabled=is_live_telegram_enabled,
         interval_seconds=interval_seconds,
+        poll_resilience_config=poll_resilience_config,
+        on_persistent_failure=on_persistent_failure,
     )
 
 

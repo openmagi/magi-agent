@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -86,6 +87,53 @@ def is_live_telegram_enabled() -> bool:
     from magi_agent.config._truthy import env_bool  # noqa: PLC0415
 
     return env_bool(os.environ, "MAGI_CHANNEL_LIVE_TELEGRAM", default=False)
+
+
+def is_poll_resilience_enabled() -> bool:
+    """Return True iff MAGI_TELEGRAM_POLL_RESILIENCE_ENABLED is truthy (WS8 PR8a).
+
+    Evaluated at call time (not import time), strict-allowlist semantics, same
+    shape as :func:`is_live_telegram_enabled`. Default-OFF.
+    """
+    from magi_agent.config._truthy import env_bool  # noqa: PLC0415
+
+    return env_bool(
+        os.environ, "MAGI_TELEGRAM_POLL_RESILIENCE_ENABLED", default=False
+    )
+
+
+# ---------------------------------------------------------------------------
+# Token redaction (shared by the webhook-delete except branch and the WS8
+# persistent-failure excerpt)
+# ---------------------------------------------------------------------------
+
+def _scrub_token(s: str) -> str:
+    """Strip anything that looks like a Telegram bot token (``<id>:<secret>``).
+
+    Factored out of ``startup_delete_webhook``'s inline regex so the WS8
+    persistent-failure excerpt and the existing webhook-delete error path share
+    one redaction helper. ``re`` is stdlib (not one of the forbidden HTTP libs).
+    """
+    return re.sub(r"\b\d{5,}:[A-Za-z0-9_-]{8,}\b", "[redacted-token]", s)
+
+
+# ---------------------------------------------------------------------------
+# Typed poll error (WS8 PR8a: boundary-path detectability)
+# ---------------------------------------------------------------------------
+
+class TelegramPollError(Exception):
+    """Raised by ``poll_and_dispatch`` on a provider error decision when the
+    poll-resilience flag is ON, so the caller can back off (instead of the
+    legacy silent ``return 0``) while still advancing the offset.
+
+    Carries ``reason_code`` (the boundary's first reason code) and the
+    ``next_offset`` the boundary computed (``None`` if unavailable).
+    """
+
+    def __init__(self, *, reason_code: str, next_offset: int | None) -> None:
+        super().__init__(f"telegram poll error: {reason_code}")
+        self.reason_code = reason_code
+        self.next_offset = next_offset
 
 
 # ---------------------------------------------------------------------------
@@ -190,12 +238,7 @@ def startup_delete_webhook(
         evidence["webhookDeleteCalled"] = True
         evidence["webhookDeleteOk"] = False
         # Redact: store only a safe excerpt, never raw exception message
-        safe_err = str(exc)[:120]
-        # Strip anything that looks like a token/secret
-        import re
-        safe_err = re.sub(
-            r"\b\d{5,}:[A-Za-z0-9_-]{8,}\b", "[redacted-token]", safe_err
-        )
+        safe_err = _scrub_token(str(exc)[:120])
         evidence["webhookDeleteError"] = safe_err[:120]
         return False
 
@@ -297,10 +340,23 @@ def poll_and_dispatch(
 
     if decision.status not in {"inbound_projected_local_fake"}:
         evidence["pollUpdateCount"] = 0
-        evidence["pollError"] = decision.reason_codes[0] if decision.reason_codes else "unknown"
+        reason_code = decision.reason_codes[0] if decision.reason_codes else "unknown"
+        evidence["pollError"] = reason_code
         # Still advance offset if next_offset is available
         if decision.next_offset is not None:
             state.advance(decision.next_offset)
+        # WS8 PR8a-2: when the resilience flag is ON, surface a real provider
+        # error as a typed exception so the watcher loop can back off, instead
+        # of the legacy ambiguous ``return 0`` that cannot be distinguished from
+        # a benign empty poll. Only ``provider_error_swallowed`` raises; gated /
+        # disabled sub-cases still return 0 (byte-identical OFF behaviour).
+        if (
+            is_poll_resilience_enabled()
+            and decision.status == "provider_error_swallowed"
+        ):
+            raise TelegramPollError(
+                reason_code=reason_code, next_offset=decision.next_offset
+            )
         return 0
 
     # Advance offset from the boundary decision
@@ -445,8 +501,10 @@ def to_channel_inbound(update: TelegramInboundUpdate) -> "ChannelInbound":
 __all__ = [
     "TelegramLiveProviderPort",
     "TelegramLivePollState",
+    "TelegramPollError",
     "deliver",
     "is_live_telegram_enabled",
+    "is_poll_resilience_enabled",
     "poll_and_dispatch",
     "startup_delete_webhook",
     "to_channel_inbound",
