@@ -1,20 +1,21 @@
 "use client";
 
 /**
- * Modes panel — CRUD over agent modes (postures).
+ * Modes panel: CRUD over agent modes (postures).
  *
  * A *mode* is an explicit, user-selected posture: a soft system prompt + a tool
  * allow/deny DELTA from the bot default + the ids of scoped policies active in
  * that mode. The composer's mode selector picks which mode to send per turn;
  * this panel is where the user authors them.
  *
- * Storage-only fields today (surfaced, but the runtime does not yet apply them):
- * `toolDelta.include` (re-enabling a default-off tool needs the universal
- * hard-safety cap) and `scopedPolicyIds` (needs the policy resolver). The
- * editor labels those as "not yet enforced" so the operator is not misled.
+ * All fields are enforced at runtime: `systemPrompt` is injected, `toolDelta`
+ * narrows (exclude) / widens within a hard-safety cap (include), and
+ * `scopedPolicyIds` force-activates user-authored policies (custom rules +
+ * dashboard checks) only while the mode is active. The scoped-policy picker
+ * below sources its options from the unified policy index.
  */
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Layers, Plus, Trash2, Pencil, Check } from "lucide-react";
 
 import { useAgentFetch } from "@/lib/local-api";
@@ -25,9 +26,20 @@ import {
   setActiveMode,
   type AgentModeInput,
 } from "@/lib/agent-modes-api";
+import { useCustomize } from "@/lib/customize-api";
+import { getDashboardChecks, type DashboardCheck } from "@/lib/packs-dashboard-api";
+import { unifyPolicies } from "@/lib/policy-model";
 import type { AgentMode } from "@/chat-core";
 import { PageHint } from "./page-hint";
-import { parseList, slugifyModeId } from "./modes-panel.helpers";
+import { parseList, selectedScopedIds, slugifyModeId, toggleScopedId } from "./modes-panel.helpers";
+
+/** A user-authored policy the Modes editor can scope (custom rule or dashboard
+ * check), keyed by the resolver's prefixed id (`custom_rule:` / `dashboard_check:`). */
+export interface ScopablePolicyOption {
+  id: string;
+  name: string;
+  kind: "custom_rule" | "dashboard_check";
+}
 
 interface EditorState {
   /** Existing mode id when editing; null when creating a new mode. */
@@ -68,6 +80,36 @@ export function ModesPanel({ botId }: { botId: string }): React.JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
 
+  // Scopable-policy picker source: the user-authored custom rules + dashboard
+  // checks, keyed by the resolver's prefixed id. Reuses the dashboard's unified
+  // policy index so the ids match exactly what the backend resolver expects.
+  const { data: customizeData, loading: customizeLoading } = useCustomize();
+  const [dashboardChecks, setDashboardChecks] = useState<DashboardCheck[]>([]);
+  const [checksLoading, setChecksLoading] = useState(true);
+  useEffect(() => {
+    getDashboardChecks(agentFetch)
+      .then((resp) => setDashboardChecks(resp.checks))
+      .catch(() => setDashboardChecks([])) // 410 (flag-off) → silently empty
+      .finally(() => setChecksLoading(false));
+  }, [agentFetch]);
+  const policiesLoading = customizeLoading || checksLoading;
+  const policyOptions = useMemo<ScopablePolicyOption[]>(() => {
+    if (!customizeData) return [];
+    return unifyPolicies({
+      catalog: customizeData.catalog,
+      overrides: customizeData.overrides,
+      dashboardChecks,
+    })
+      .filter(
+        (p) => p.rawSource.kind === "custom_rule" || p.rawSource.kind === "dashboard_check",
+      )
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        kind: p.rawSource.kind as "custom_rule" | "dashboard_check",
+      }));
+  }, [customizeData, dashboardChecks]);
+
   const load = useCallback(() => {
     setLoading(true);
     getModes(agentFetch)
@@ -87,7 +129,7 @@ export function ModesPanel({ botId }: { botId: string }): React.JSX.Element {
 
   const handleSetActive = useCallback(
     (modeId: string | null) => {
-      // Optimistic — snap the selection, reconcile from the response.
+      // Optimistic: snap the selection, reconcile from the response.
       const prev = active;
       setActive(modeId);
       setError(null);
@@ -167,14 +209,15 @@ export function ModesPanel({ botId }: { botId: string }): React.JSX.Element {
   return (
     <div className="space-y-5">
       <PageHint
-        title="Modes — saved agent postures"
+        title="Modes: saved agent postures"
         can={[
           { text: <>A soft <strong>system prompt</strong> the model follows this turn</> },
-          { text: <>A <strong>tool delta</strong> — turn default tools off for this posture</> },
+          { text: <>A <strong>tool delta</strong>: narrow (exclude) or safely widen (include)</> },
+          { text: <>Scope <strong>policies</strong> to fire only in this mode (additive)</> },
         ]}
         cannot={[
-          { text: <>Hard enforcement → use <strong>Policies</strong></> },
-          { text: <>Re-enabling default-off tools (<code>include</code>) is not yet applied</> },
+          { text: <>Loosen a global policy: scoping only ever tightens a turn</> },
+          { text: <>Re-enable a dangerous tool (Bash/exec/net) via <code>include</code></> },
         ]}
         note={
           <>
@@ -206,6 +249,8 @@ export function ModesPanel({ botId }: { botId: string }): React.JSX.Element {
         <ModeEditor
           editor={editor}
           busy={busy}
+          policyOptions={policyOptions}
+          policiesLoading={policiesLoading}
           onChange={setEditor}
           onSave={handleSave}
           onCancel={() => setEditor(null)}
@@ -330,18 +375,28 @@ function ActivePill({
 function ModeEditor({
   editor,
   busy,
+  policyOptions,
+  policiesLoading,
   onChange,
   onSave,
   onCancel,
 }: {
   editor: EditorState;
   busy: boolean;
+  policyOptions: ScopablePolicyOption[];
+  policiesLoading: boolean;
   onChange: (next: EditorState) => void;
   onSave: () => void;
   onCancel: () => void;
 }): React.ReactElement {
   const set = <K extends keyof EditorState>(key: K, value: EditorState[K]) =>
     onChange({ ...editor, [key]: value });
+  // Scoped-policy picker: the editor keeps scopedPolicyIds as a newline string
+  // (the wire shape); the checkboxes toggle prefixed ids in/out of it, and the
+  // advanced textarea stays the escape hatch for ids not in the known list.
+  const scopedSelected = selectedScopedIds(editor.scopedPolicyIds);
+  const toggleScoped = (id: string) =>
+    set("scopedPolicyIds", toggleScopedId(editor.scopedPolicyIds, id));
   const labelCls = "block text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70";
   const inputCls =
     "mt-1 w-full rounded-lg border border-black/[0.10] bg-white px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50";
@@ -397,37 +452,76 @@ function ModeEditor({
             value={editor.exclude}
             onChange={(e) => set("exclude", e.target.value)}
             rows={3}
-            placeholder="One per line — turns a default-ON tool off"
+            placeholder="One per line: turns a default-ON tool off"
             className={`${inputCls} resize-y font-mono text-xs`}
           />
         </div>
         <div>
           <label className={labelCls} htmlFor="mode-include">
-            Include tools <span className="normal-case text-secondary/60">(not yet enforced)</span>
+            Include tools{" "}
+            <span className="normal-case text-secondary/60">(re-enable a default-off tool)</span>
           </label>
           <textarea
             id="mode-include"
             value={editor.include}
             onChange={(e) => set("include", e.target.value)}
             rows={3}
-            placeholder="Stored, but re-enabling default-off tools is not applied yet"
+            placeholder="One per line: re-enables a default-off tool (safe tools only; never Bash/exec/net)"
             className={`${inputCls} resize-y font-mono text-xs`}
           />
         </div>
       </div>
 
       <div>
-        <label className={labelCls} htmlFor="mode-policies">
-          Scoped policy ids <span className="normal-case text-secondary/60">(not yet enforced)</span>
+        <label className={labelCls}>
+          Scoped policies{" "}
+          <span className="normal-case text-secondary/60">
+            (active only in this mode: additive, tightens the turn)
+          </span>
         </label>
-        <textarea
-          id="mode-policies"
-          value={editor.scopedPolicyIds}
-          onChange={(e) => set("scopedPolicyIds", e.target.value)}
-          rows={2}
-          placeholder="Policy ids active only in this mode. Stored; resolver wiring pending."
-          className={`${inputCls} resize-y font-mono text-xs`}
-        />
+        {policyOptions.length > 0 ? (
+          <div className="mt-1 max-h-44 space-y-1 overflow-y-auto rounded-lg border border-black/[0.08] bg-white p-2">
+            {policyOptions.map((option) => (
+              <label
+                key={option.id}
+                className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-black/[0.03]"
+              >
+                <input
+                  type="checkbox"
+                  checked={scopedSelected.has(option.id)}
+                  onChange={() => toggleScoped(option.id)}
+                  className="h-3.5 w-3.5 accent-primary"
+                />
+                <span className="truncate text-foreground">{option.name}</span>
+                <span className="ml-auto shrink-0 rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] text-secondary">
+                  {option.kind === "custom_rule" ? "rule" : "check"}
+                </span>
+              </label>
+            ))}
+          </div>
+        ) : policiesLoading ? (
+          <p className="mt-1 rounded-lg border border-dashed border-black/[0.10] bg-gray-50/60 px-3 py-2 text-xs text-secondary">
+            Loading policies…
+          </p>
+        ) : (
+          <p className="mt-1 rounded-lg border border-dashed border-black/[0.10] bg-gray-50/60 px-3 py-2 text-xs text-secondary">
+            No user-authored policies yet. Create one under{" "}
+            <strong>Policies</strong>, then scope it to this mode.
+          </p>
+        )}
+        <details className="mt-2">
+          <summary className="cursor-pointer text-[11px] text-secondary/70">
+            Advanced: raw ids
+          </summary>
+          <textarea
+            id="mode-policies"
+            value={editor.scopedPolicyIds}
+            onChange={(e) => set("scopedPolicyIds", e.target.value)}
+            rows={2}
+            placeholder="One prefixed id per line, e.g. custom_rule:cr_… / dashboard_check:…"
+            className={`${inputCls} resize-y font-mono text-xs`}
+          />
+        </details>
       </div>
 
       <div className="flex items-center justify-end gap-2">

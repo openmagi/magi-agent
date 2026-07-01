@@ -35,3 +35,20 @@ export function parseList(text: string): string[] {
   }
   return seen;
 }
+
+/** The set of ids currently selected in a scoped-policy list (the mode editor
+ * keeps the list as a newline/comma string; the picker reads selection from it). */
+export function selectedScopedIds(raw: string): Set<string> {
+  return new Set(parseList(raw));
+}
+
+/** Toggle one id in a scoped-policy list string. Adds it when absent, removes it
+ * when present; every OTHER id (including ones not shown in the picker, e.g. a
+ * ``seam_spec:`` or a since-deleted policy) is preserved. Returns the rewritten
+ * newline-joined string. */
+export function toggleScopedId(raw: string, id: string): string {
+  const set = selectedScopedIds(raw);
+  if (set.has(id)) set.delete(id);
+  else set.add(id);
+  return [...set].join("\n");
+}
