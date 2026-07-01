@@ -154,7 +154,7 @@ def test_rerank_on_reorders_candidates_per_selector(
 
     captured: dict[str, object] = {}
 
-    def _fake_rerank(*, hits, query, memory_dir, config):  # noqa: ANN001
+    def _fake_rerank(*, hits, query, memory_dir, config, env=None):  # noqa: ANN001
         captured["query"] = query
         captured["n"] = len(hits)
         # Reverse the BM25 order deterministically.
@@ -224,7 +224,7 @@ def test_rerank_selector_failure_falls_back_to_bm25_byte_identical(
     monkeypatch.setenv("MAGI_MEMORY_RECALL_RERANK_ENABLED", "1")
     import magi_agent.cli.memory_recall_block as rb
 
-    def _boom(*, hits, query, memory_dir, config):  # noqa: ANN001
+    def _boom(*, hits, query, memory_dir, config, env=None):  # noqa: ANN001
         raise RuntimeError("selector boom")
 
     monkeypatch.setattr(rb, "rerank_hits", _boom)
@@ -279,7 +279,7 @@ def test_stale_pick_gets_staleness_reminder_note(
 
     # Identity reranker (keeps the one stale hit).
     monkeypatch.setattr(
-        rb, "rerank_hits", lambda *, hits, query, memory_dir, config: list(hits)
+        rb, "rerank_hits", lambda *, hits, query, memory_dir, config, env=None: list(hits)
     )
 
     block = build_cli_memory_recall_block(
@@ -307,7 +307,7 @@ def test_fresh_pick_has_no_staleness_reminder(
     import magi_agent.cli.memory_recall_block as rb
 
     monkeypatch.setattr(
-        rb, "rerank_hits", lambda *, hits, query, memory_dir, config: list(hits)
+        rb, "rerank_hits", lambda *, hits, query, memory_dir, config, env=None: list(hits)
     )
 
     block = build_cli_memory_recall_block(

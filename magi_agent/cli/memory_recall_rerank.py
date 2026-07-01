@@ -92,15 +92,21 @@ def rerank_hits(
     memory_dir: Path,
     config: object,
     model_factory: Callable[[], object] | None = None,
+    env: "os._Environ[str] | dict[str, str] | None" = None,
 ) -> "list[SearchHit]":
     """Return ``hits`` re-ordered by a cheap model, or unchanged (fail-open).
 
     Identity (input order, byte-for-byte downstream) when the gate is OFF, fewer
     than two candidates, or any failure in model resolution / invocation /
     parsing.  Never raises; never drops a candidate.
+
+    ``env`` is an optional injectable environment for the gate read
+    (``MAGI_MEMORY_RECALL_RERANK_ENABLED``); it defaults to ``None`` so every
+    existing caller stays byte-identical (falls back to ``os.environ``). Design:
+    WS2 PR2c (hermetic ON-path).
     """
     ordered = list(hits)
-    if len(ordered) < 2 or not _rerank_gate_open():
+    if len(ordered) < 2 or not _rerank_gate_open(env):
         return ordered
     try:
         model = _resolve_model(config, model_factory)

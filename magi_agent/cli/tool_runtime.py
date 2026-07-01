@@ -968,10 +968,16 @@ def build_cli_instruction(
             build_cli_memory_recall_block,
         )
 
+        # WS2 PR2c (finding 14): pass the COMBINED assembled snapshot (frozen
+        # projection + learning-recall block, assembled above) as projection_text
+        # so a recall hit whose content already sits in that snapshot is deduped
+        # out of <memory-recall> (the same memory is never injected twice). When
+        # the snapshot is empty the recall builder treats it as no-dedup.
         _recall_block = build_cli_memory_recall_block(
             workspace_root=workspace_root,
             query=recall_query,
             memory_mode=memory_mode_value,
+            projection_text=memory_snapshot_block,
         )
         if _recall_block:
             # A2: recalled memory must be framed as BACKGROUND reference, not as

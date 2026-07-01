@@ -83,6 +83,15 @@ LOCAL_FULL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     "MAGI_MEMORY_WRITE_READINESS_ENABLED": "1",
     "MAGI_MEMORY_WRITE_ENABLED": "1",
     "MAGI_MEMORY_LOCAL_DEV": "1",
+    # WS2 PR2c: the per-turn recall reranker (cheap-model semantic reorder + the
+    # staleness-note scan). This flag follows NO master and is set by NO other
+    # profile, so rerank/staleness are inert on a shipped full install unless we
+    # seed them here. Turning it ON in the full local profile is the only
+    # behaviour-changing activation in WS2. Fail-open in the callee (no key -> BM25
+    # order), so it never breaks a turn. setdefault keeps an explicit operator
+    # MAGI_MEMORY_RECALL_RERANK_ENABLED=0 winning. lab inherits this via
+    # apply_local_full_runtime_defaults; safe/eval/off never apply this overlay.
+    "MAGI_MEMORY_RECALL_RERANK_ENABLED": "1",
     "MAGI_PROMPT_TRANSFORM_HOOKS_ENABLED": "1",
     # CC-style user HookBus (~/.magi/settings.json + <workspace>/.magi/settings.json).
     # ON for self-host (full) and lab; a no-op unless the user authored hooks. This
