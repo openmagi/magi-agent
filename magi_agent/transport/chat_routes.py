@@ -339,6 +339,10 @@ async def _local_adk_chat_sse(
         reset_per_turn_goal_loop_policy,
         set_per_turn_goal_loop_policy,
     )
+    from magi_agent.runtime.per_turn_agent_mode_context import (
+        reset_per_turn_agent_mode,
+        set_per_turn_agent_mode,
+    )
 
     session_id = _local_chat_string(payload, "sessionId", "local-dashboard")
     turn_id = _local_chat_string(payload, "turnId", f"{session_id}:turn")
@@ -415,6 +419,7 @@ async def _local_adk_chat_sse(
     # turn (byte-identical to pre-PR2c behavior).
     _payload_reasoning_effort: str | None = None
     _payload_goal_mode_requested = False
+    _payload_agent_mode: str | None = None
     if isinstance(payload, Mapping):
         _raw_reasoning = payload.get("reasoningEffort")
         if isinstance(_raw_reasoning, str):
@@ -423,6 +428,12 @@ async def _local_adk_chat_sse(
         # surfaces here as ``goalMode: true``. Phase 1 is opt-in, so absence /
         # falsy values must keep behavior byte-identical to today.
         _payload_goal_mode_requested = bool(payload.get("goalMode"))
+        # PR-4c (agent-mode wire): the composer's mode toggle surfaces as
+        # ``agentMode: "<mode-id>"``. A non-str / absent value leaves it None so
+        # the stored sticky default (customize) stays authoritative for the turn.
+        _raw_agent_mode = payload.get("agentMode")
+        if isinstance(_raw_agent_mode, str) and _raw_agent_mode.strip():
+            _payload_agent_mode = _raw_agent_mode.strip()
     # Scope the per-turn override across the LiteLlm build (inside
     # ``build_headless_runtime``) AND the entire streaming loop. Child/subagent
     # runners can spawn during the turn and call ``_build_litellm_model`` in
@@ -441,6 +452,10 @@ async def _local_adk_chat_sse(
         env=os.environ,
     )
     _goal_loop_token = set_per_turn_goal_loop_policy(_goal_loop_policy)
+    # PR-4c: publish the per-send agent mode. An explicit request mode wins over
+    # the operator's stored sticky default (customize.active_agent_mode); absence
+    # (None) keeps PR-4b behavior. Reset in the finally below.
+    _agent_mode_token = set_per_turn_agent_mode(_payload_agent_mode)
     # Out-of-band agent-event channel. SpawnAgent (and any other tool that
     # wants to surface child / subagent lifecycle into the dashboard Work
     # pane) pushes events here from inside the tool dispatch; the SSE
@@ -638,6 +653,7 @@ async def _local_adk_chat_sse(
     finally:
         reset_per_turn_reasoning_effort(_reasoning_token)
         reset_per_turn_goal_loop_policy(_goal_loop_token)
+        reset_per_turn_agent_mode(_agent_mode_token)
     # ── TURN-END MEMORY HOOK (PR-B) ─────────────────────────────────────────
     # This is the turn-finalization point of the live local chat path: the
     # engine stream has drained, so the assistant turn is complete. Flush a
