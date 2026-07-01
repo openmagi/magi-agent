@@ -1015,3 +1015,44 @@ async def test_workspace_writes_block_symlink_to_protected_git_path(tmp_path):
     assert legacy_write.status == "blocked"
     assert legacy_write.reason == "protected_git_path"
     assert not (tmp_path / ".git" / "hooks" / "pre-commit").exists()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_unwraps_arguments_envelope(tmp_path):
+    """The empty legacy tool inputSchema ({type:object, additionalProperties})
+    leads some ADK providers to nest the call args under a top-level
+    ``arguments`` key (``{"arguments": {"path": ..., "content": ...}}``) instead
+    of passing them flat. Dispatch must unwrap that envelope so the write does
+    not silently no-op (path resolves to empty -> nothing written)."""
+    bundle = build_gate5b_full_toolhost_bundle(
+        config=Gate5BFullToolHostConfig.model_validate(
+            {
+                "enabled": True,
+                "killSwitchEnabled": False,
+                "routeAttachmentEnabled": True,
+                "selectedBotDigest": _sha256("bot-test"),
+                "selectedOwnerDigest": _sha256("user-test"),
+                "environment": "production",
+                "environmentAllowlist": ("production",),
+                "allowedToolNames": GATE5B_FULL_TOOLHOST_TOOL_NAMES,
+                "maxToolCallsPerTurn": 8,
+            }
+        ),
+        scope={
+            "selectedBotDigest": _sha256("bot-test"),
+            "selectedOwnerDigest": _sha256("user-test"),
+            "environment": "production",
+        },
+        workspace_root=tmp_path,
+    )
+    assert bundle.status == "ready"
+
+    outcome = await bundle.host.dispatch(
+        "FileWrite",
+        {"arguments": {"path": "wrapped.txt", "content": "unwrapped-ok\n"}},
+        request_digest=_sha256("request-wrap"),
+        tool_call_id="call-wrap-1",
+    )
+
+    assert outcome.status == "ok"
+    assert (tmp_path / "wrapped.txt").read_text(encoding="utf-8") == "unwrapped-ok\n"
