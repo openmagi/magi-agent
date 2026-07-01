@@ -145,7 +145,12 @@ fn which_on_path(name: &str) -> Option<PathBuf> {
 /// 127.0.0.1` so the runtime is reachable only from this machine.
 fn spawn_serve(bin: &Path, port: u16, log: File) -> std::io::Result<Child> {
     let err_log = log.try_clone()?;
+    // A GUI-launched .app inherits CWD "/" (read-only), but the runtime writes
+    // some state to relative paths (e.g. the observability store ".openmagi").
+    // Pin the child's working directory to the home dir so those writes land in
+    // a writable location instead of crashing on a read-only filesystem.
     Command::new(bin)
+        .current_dir(home_dir())
         .arg("--host")
         .arg("127.0.0.1")
         .arg("--port")
@@ -313,13 +318,55 @@ fn main() {
                 }
             }
 
-            // 3. Show a loading window immediately, then poll readiness off the
-            //    main thread so the UI stays responsive.
+            // 3. Show the single main window immediately (loading page), with the
+            //    navigation guards installed up front. We NEVER close and recreate
+            //    this window: closing it fires WindowEvent::Destroyed, which the
+            //    handler treats as "app is exiting" and kills the serve child. So
+            //    on readiness we navigate THIS window to the dashboard instead of
+            //    rebuilding it, which keeps the runtime alive.
+            let guard_handle = handle.clone();
+            let new_window_handle = handle.clone();
             let loading =
                 WebviewWindowBuilder::new(&handle, "main", WebviewUrl::App("about:blank".into()))
                     .title("Open Magi")
                     .inner_size(1280.0, 860.0)
                     .min_inner_size(960.0, 600.0)
+                    .on_navigation(move |target| {
+                        let t = target.as_str();
+                        // Our own loading / error page is written into about:blank.
+                        if t == "about:blank" || t.starts_with("about:") {
+                            return true;
+                        }
+                        match classify(t, port) {
+                            UrlClass::InApp => true,
+                            UrlClass::External => {
+                                use tauri_plugin_opener::OpenerExt;
+                                let _ = guard_handle.opener().open_url(t, None::<&str>);
+                                false
+                            }
+                            UrlClass::Invalid => false,
+                        }
+                    })
+                    // Guard window.open / target=_blank / programmatic new webviews:
+                    // deny every new window (single-window shell) and route the URL
+                    // through the same policy. Fail-closed.
+                    .on_new_window(move |requested, _features| {
+                        match classify(requested.as_str(), port) {
+                            UrlClass::External => {
+                                use tauri_plugin_opener::OpenerExt;
+                                let _ = new_window_handle
+                                    .opener()
+                                    .open_url(requested.as_str(), None::<&str>);
+                            }
+                            UrlClass::InApp => {
+                                if let Some(main) = new_window_handle.get_webview_window("main") {
+                                    let _ = main.navigate(requested.clone());
+                                }
+                            }
+                            UrlClass::Invalid => {}
+                        }
+                        NewWindowResponse::Deny
+                    })
                     .build()?;
             let _ = loading.eval(format!(
                 "document.open();document.write({});document.close();",
@@ -357,8 +404,11 @@ fn main() {
         });
 }
 
-/// Replace the window contents with the dashboard, installing the navigation
-/// guard so only the loopback origin loads in-window.
+/// Navigate the existing (already guarded) main window to the dashboard. We do
+/// NOT close and rebuild the window: closing it fires WindowEvent::Destroyed,
+/// which the handler treats as the app exiting and kills the serve child, so the
+/// rebuilt window would load a dead server. The navigation guard installed when
+/// the loading window was created applies to this navigation as well.
 fn navigate_to_dashboard(handle: &tauri::AppHandle, port: u16) {
     let dashboard = format!("http://127.0.0.1:{port}/dashboard");
     let url = match dashboard.parse() {
@@ -368,56 +418,13 @@ fn navigate_to_dashboard(handle: &tauri::AppHandle, port: u16) {
             return;
         }
     };
-
-    // Rebuild the window pointing at the dashboard with a navigation guard.
-    // External targets are opened in the system browser and blocked in-window.
-    let guard_handle = handle.clone();
-    let new_window_handle = handle.clone();
-    if let Some(existing) = handle.get_webview_window("main") {
-        let _ = existing.close();
-    }
-    let built = WebviewWindowBuilder::new(handle, "main", WebviewUrl::External(url))
-        .title("Open Magi")
-        .inner_size(1280.0, 860.0)
-        .min_inner_size(960.0, 600.0)
-        .on_navigation(move |target| match classify(target.as_str(), port) {
-            UrlClass::InApp => true,
-            UrlClass::External => {
-                use tauri_plugin_opener::OpenerExt;
-                let _ = guard_handle
-                    .opener()
-                    .open_url(target.as_str(), None::<&str>);
-                false
+    match handle.get_webview_window("main") {
+        Some(win) => {
+            if let Err(e) = win.navigate(url) {
+                show_error(handle, &format!("could not load the dashboard: {e}"));
             }
-            UrlClass::Invalid => false,
-        })
-        // Guard `window.open` / `target=_blank` / programmatic new webviews too.
-        // `on_navigation` only covers top-level navigation in this window, so a
-        // popup would otherwise be unguarded (a phishing surface). We Deny every
-        // new window (this is a single-window self-host shell), and route the
-        // requested URL through the same policy: External opens in the system
-        // browser; an in-app loopback link navigates the existing main window;
-        // anything else is dropped. Fail-closed: the popup never opens in-app.
-        .on_new_window(move |requested, _features| {
-            match classify(requested.as_str(), port) {
-                UrlClass::External => {
-                    use tauri_plugin_opener::OpenerExt;
-                    let _ = new_window_handle
-                        .opener()
-                        .open_url(requested.as_str(), None::<&str>);
-                }
-                UrlClass::InApp => {
-                    if let Some(main) = new_window_handle.get_webview_window("main") {
-                        let _ = main.navigate(requested.clone());
-                    }
-                }
-                UrlClass::Invalid => {}
-            }
-            NewWindowResponse::Deny
-        })
-        .build();
-    if let Err(e) = built {
-        show_error(handle, &format!("could not open the dashboard window: {e}"));
+        }
+        None => show_error(handle, "internal: main window was not available"),
     }
 }
 
