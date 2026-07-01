@@ -24,7 +24,7 @@ from .runtime.hosted_defaults import apply_hosted_runtime_defaults
 from .runtime.local_defaults import (
     LOCAL_FULL_RUNTIME_DEFAULTS_ENABLED_ENV,
     LOCAL_FULL_RUNTIME_ENV_DEFAULTS,
-    apply_local_full_runtime_defaults,
+    apply_runtime_profile_defaults,
     local_full_runtime_defaults_enabled,
 )
 from .transport.chat import (
@@ -148,19 +148,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     host = resolve_server_host(argv)
     config = _parse_runtime_config(os.environ)
     if _local_runtime_defaults_active(config):
-        # ``MAGI_RUNTIME_PROFILE=lab`` is local-full plus the experimental
-        # flat-flag set (see runtime/local_defaults.apply_lab_runtime_defaults).
-        # Mirror the cli/app.py dispatch so a local ``magi-agent serve`` under the
-        # lab profile gets the same opt-in dogfood tier. Both paths are
-        # setdefault-based, so explicit env (incl. per-flag MAGI_X=0) still wins.
-        from .config.flags import flag_str
-
-        if (flag_str("MAGI_RUNTIME_PROFILE", env=os.environ) or "").strip().lower() == "lab":
-            from .runtime.local_defaults import apply_lab_runtime_defaults
-
-            apply_lab_runtime_defaults(os.environ)
-        else:
-            apply_local_full_runtime_defaults(os.environ)
+        # The DEFAULT (unset) profile resolves to the experimental ``lab`` tier
+        # (local-full + the experimental flat-flag set); explicit full/eval/safe
+        # still win. Dispatch is centralized in local_defaults so this serve path
+        # and the cli/app.py CLI never drift. setdefault-based, so explicit env
+        # (incl. per-flag MAGI_X=0) still wins.
+        apply_runtime_profile_defaults(os.environ)
         # User-facing control-plane behavior toggles (~/.magi/customize.json)
         # win over the profile seed just applied: project them onto os.environ
         # as an explicit overwrite. Fail-soft; a no-op when the section is empty.
