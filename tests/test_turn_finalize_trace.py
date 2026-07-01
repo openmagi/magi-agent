@@ -1,5 +1,10 @@
 """PR-H: instrumentation for the silent ``turn_end``-not-emitted finalize path.
 
+PR-G moved every dispatch-path ``_emit_trace`` call from ``sys.stderr``
+to a dedicated file-backed sink (default ``~/.openmagi/trace.log``,
+override with ``MAGI_TRACE_LOG_PATH``). This test module reads the
+sink file back via the ``trace_log`` fixture instead of ``capsys``.
+
 Kevin's 0.1.86 Tesla 10-K capture showed 39 ``tool_end`` rows for the main
 turn and ZERO ``turn_end`` events. The dashboard rendered "Work started,
 but no final answer text arrived. Please try again." but no layer logged
@@ -9,16 +14,21 @@ This module pins six trace helpers in
 :mod:`magi_agent.runtime.child_runner_live` that stamp every step of the
 main-turn finalize path. All gated on the existing
 ``MAGI_CHILD_RUNNER_EMPTY_DEBUG`` env (no new flag). All write through
-``_emit_trace`` (stderr, never raises).
+``_emit_trace`` (file-backed sink, never raises).
 
 Default-OFF: each helper is silent when the env is empty / not in
-``{"1","true","yes","on"}``; default-ON paths emit exactly one stderr
+``{"1","true","yes","on"}``; default-ON paths emit exactly one trace
 line per stamp. Every helper swallows its own exceptions so trace logging
 can never break a turn.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
+from magi_agent.runtime import trace_sink
 from magi_agent.runtime.child_runner_live import (
     CHILD_RUNNER_EMPTY_DEBUG_ENV,
     _maybe_log_trace_chat_turn_handler_exit,
@@ -30,30 +40,47 @@ from magi_agent.runtime.child_runner_live import (
 )
 
 
+@pytest.fixture
+def trace_log(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Point the file-backed sink at ``tmp_path/trace.log`` for this test."""
+    path = tmp_path / "trace.log"
+    monkeypatch.setenv(trace_sink.MAGI_TRACE_LOG_PATH_ENV, str(path))
+    trace_sink.reset_trace_fd_for_tests()
+    yield path
+    trace_sink.reset_trace_fd_for_tests()
+
+
+def _read_trace(path: Path) -> str:
+    """Return the raw trace-log contents (empty string if the file was never opened)."""
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8")
+
+
 # ---------------------------------------------------------------------- #
 # 1. chat_routes / streaming_chat_route handler entry + exit             #
 # ---------------------------------------------------------------------- #
 
 
-def test_chat_turn_start_silent_when_flag_off(capsys) -> None:
+def test_chat_turn_start_silent_when_flag_off(trace_log: Path) -> None:
     _maybe_log_trace_chat_turn_start({}, session_id="sess-1", turn_id="t-1")
-    assert capsys.readouterr().err == ""
+    assert _read_trace(trace_log) == ""
 
 
-def test_chat_turn_start_fires_when_flag_on(capsys) -> None:
+def test_chat_turn_start_fires_when_flag_on(trace_log: Path) -> None:
     _maybe_log_trace_chat_turn_start(
         {CHILD_RUNNER_EMPTY_DEBUG_ENV: "1"},
         session_id="sess-1",
         turn_id="t-1",
     )
-    err = capsys.readouterr().err
+    err = _read_trace(trace_log)
     assert err.count("\n") == 1
     assert "[chat_routes.trace] turn_start" in err
     assert "session_id='sess-1'" in err
     assert "turn_id='t-1'" in err
 
 
-def test_chat_turn_handler_exit_silent_when_flag_off(capsys) -> None:
+def test_chat_turn_handler_exit_silent_when_flag_off(trace_log: Path) -> None:
     _maybe_log_trace_chat_turn_handler_exit(
         {},
         session_id="sess-1",
@@ -61,10 +88,10 @@ def test_chat_turn_handler_exit_silent_when_flag_off(capsys) -> None:
         final_text_len=0,
         exception=None,
     )
-    assert capsys.readouterr().err == ""
+    assert _read_trace(trace_log) == ""
 
 
-def test_chat_turn_handler_exit_normal_path(capsys) -> None:
+def test_chat_turn_handler_exit_normal_path(trace_log: Path) -> None:
     _maybe_log_trace_chat_turn_handler_exit(
         {CHILD_RUNNER_EMPTY_DEBUG_ENV: "yes"},
         session_id="sess-1",
@@ -72,7 +99,7 @@ def test_chat_turn_handler_exit_normal_path(capsys) -> None:
         final_text_len=42,
         exception=None,
     )
-    err = capsys.readouterr().err
+    err = _read_trace(trace_log)
     assert err.count("\n") == 1
     assert "[chat_routes.trace] turn_handler_exit" in err
     assert "session_id='sess-1'" in err
@@ -81,7 +108,7 @@ def test_chat_turn_handler_exit_normal_path(capsys) -> None:
     assert "exception=None" in err
 
 
-def test_chat_turn_handler_exit_exception_path(capsys) -> None:
+def test_chat_turn_handler_exit_exception_path(trace_log: Path) -> None:
     _maybe_log_trace_chat_turn_handler_exit(
         {CHILD_RUNNER_EMPTY_DEBUG_ENV: "on"},
         session_id="sess-1",
@@ -89,7 +116,7 @@ def test_chat_turn_handler_exit_exception_path(capsys) -> None:
         final_text_len=0,
         exception=RuntimeError,
     )
-    err = capsys.readouterr().err
+    err = _read_trace(trace_log)
     assert err.count("\n") == 1
     # Logs ONLY the exception class name (the message can carry user data).
     assert "exception=RuntimeError" in err
@@ -102,19 +129,19 @@ def test_chat_turn_handler_exit_exception_path(capsys) -> None:
 # ---------------------------------------------------------------------- #
 
 
-def test_turn_engine_stream_consumed_silent_when_flag_off(capsys) -> None:
+def test_turn_engine_stream_consumed_silent_when_flag_off(trace_log: Path) -> None:
     _maybe_log_trace_turn_engine_stream_consumed({}, turn_id="t-1", items=0, terminal_kind=None)
-    assert capsys.readouterr().err == ""
+    assert _read_trace(trace_log) == ""
 
 
-def test_turn_engine_stream_consumed_fires_when_flag_on(capsys) -> None:
+def test_turn_engine_stream_consumed_fires_when_flag_on(trace_log: Path) -> None:
     _maybe_log_trace_turn_engine_stream_consumed(
         {CHILD_RUNNER_EMPTY_DEBUG_ENV: "1"},
         turn_id="t-1",
         items=5,
         terminal_kind="EngineResult",
     )
-    err = capsys.readouterr().err
+    err = _read_trace(trace_log)
     assert err.count("\n") == 1
     assert "[turn_engine.trace] stream_consumed" in err
     assert "turn_id='t-1'" in err
@@ -127,31 +154,31 @@ def test_turn_engine_stream_consumed_fires_when_flag_on(capsys) -> None:
 # ---------------------------------------------------------------------- #
 
 
-def test_yield_loop_exit_silent_when_flag_off(capsys) -> None:
+def test_yield_loop_exit_silent_when_flag_off(trace_log: Path) -> None:
     _maybe_log_trace_governed_yield_loop_exit({}, reason="normal", items_yielded=0)
-    assert capsys.readouterr().err == ""
+    assert _read_trace(trace_log) == ""
 
 
-def test_yield_loop_exit_normal_reason(capsys) -> None:
+def test_yield_loop_exit_normal_reason(trace_log: Path) -> None:
     _maybe_log_trace_governed_yield_loop_exit(
         {CHILD_RUNNER_EMPTY_DEBUG_ENV: "1"},
         reason="normal",
         items_yielded=12,
     )
-    err = capsys.readouterr().err
+    err = _read_trace(trace_log)
     assert err.count("\n") == 1
     assert "[governed_turn.trace] yield_loop_exit" in err
     assert "reason='normal'" in err
     assert "items_yielded=12" in err
 
 
-def test_yield_loop_exit_exception_reason(capsys) -> None:
+def test_yield_loop_exit_exception_reason(trace_log: Path) -> None:
     _maybe_log_trace_governed_yield_loop_exit(
         {CHILD_RUNNER_EMPTY_DEBUG_ENV: "1"},
         reason="exception",
         items_yielded=3,
     )
-    err = capsys.readouterr().err
+    err = _read_trace(trace_log)
     assert "reason='exception'" in err
     assert "items_yielded=3" in err
 
@@ -161,18 +188,18 @@ def test_yield_loop_exit_exception_reason(capsys) -> None:
 # ---------------------------------------------------------------------- #
 
 
-def test_turn_end_audit_fired_silent_when_flag_off(capsys) -> None:
+def test_turn_end_audit_fired_silent_when_flag_off(trace_log: Path) -> None:
     _maybe_log_trace_governed_turn_end_audit_fired({}, session_id="sess-1", result_text_len=0)
-    assert capsys.readouterr().err == ""
+    assert _read_trace(trace_log) == ""
 
 
-def test_turn_end_audit_fired_when_flag_on(capsys) -> None:
+def test_turn_end_audit_fired_when_flag_on(trace_log: Path) -> None:
     _maybe_log_trace_governed_turn_end_audit_fired(
         {CHILD_RUNNER_EMPTY_DEBUG_ENV: "true"},
         session_id="sess-1",
         result_text_len=128,
     )
-    err = capsys.readouterr().err
+    err = _read_trace(trace_log)
     assert err.count("\n") == 1
     assert "[governed_turn.trace] turn_end_audit_fired" in err
     assert "session_id='sess-1'" in err
@@ -184,7 +211,7 @@ def test_turn_end_audit_fired_when_flag_on(capsys) -> None:
 # ---------------------------------------------------------------------- #
 
 
-def test_run_turn_stream_finalize_silent_when_flag_off(capsys) -> None:
+def test_run_turn_stream_finalize_silent_when_flag_off(trace_log: Path) -> None:
     _maybe_log_trace_engine_run_turn_stream_finalize(
         {},
         turn_id="t-1",
@@ -192,10 +219,10 @@ def test_run_turn_stream_finalize_silent_when_flag_off(capsys) -> None:
         text_len=0,
         exception=None,
     )
-    assert capsys.readouterr().err == ""
+    assert _read_trace(trace_log) == ""
 
 
-def test_run_turn_stream_finalize_normal_path(capsys) -> None:
+def test_run_turn_stream_finalize_normal_path(trace_log: Path) -> None:
     _maybe_log_trace_engine_run_turn_stream_finalize(
         {CHILD_RUNNER_EMPTY_DEBUG_ENV: "1"},
         turn_id="t-1",
@@ -203,7 +230,7 @@ def test_run_turn_stream_finalize_normal_path(capsys) -> None:
         text_len=256,
         exception=None,
     )
-    err = capsys.readouterr().err
+    err = _read_trace(trace_log)
     assert err.count("\n") == 1
     assert "[engine.trace] run_turn_stream_finalize" in err
     assert "turn_id='t-1'" in err
@@ -212,7 +239,7 @@ def test_run_turn_stream_finalize_normal_path(capsys) -> None:
     assert "exception=None" in err
 
 
-def test_run_turn_stream_finalize_exception_path(capsys) -> None:
+def test_run_turn_stream_finalize_exception_path(trace_log: Path) -> None:
     _maybe_log_trace_engine_run_turn_stream_finalize(
         {CHILD_RUNNER_EMPTY_DEBUG_ENV: "1"},
         turn_id="t-1",
@@ -220,7 +247,7 @@ def test_run_turn_stream_finalize_exception_path(capsys) -> None:
         text_len=0,
         exception=ValueError,
     )
-    err = capsys.readouterr().err
+    err = _read_trace(trace_log)
     assert "exception=ValueError" in err
     # Never log message/value text; only class name.
     assert "Traceback" not in err
@@ -236,7 +263,7 @@ class _Boom:
         raise RuntimeError("repr blew up")
 
 
-def test_helpers_never_raise_on_exotic_input(capsys) -> None:
+def test_helpers_never_raise_on_exotic_input(trace_log: Path) -> None:
     """Every trace helper MUST swallow its own faults.
 
     A logging helper that raises would break the live turn it is trying to
@@ -278,6 +305,6 @@ def test_helpers_never_raise_on_exotic_input(capsys) -> None:
         exception=None,  # type: ignore[arg-type]
     )
     # Reaching here = no helper raised.
-    # capsys may capture nothing (all reprs failed inside the try/except),
+    # The sink may capture nothing (all reprs failed inside the try/except),
     # which is the documented fail-safe behavior.
-    _ = capsys.readouterr()
+    _ = _read_trace(trace_log)

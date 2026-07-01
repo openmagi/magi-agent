@@ -24,10 +24,20 @@ This module pins the three new stamps that close that gap:
   existing ``_maybe_log_trace_boundary_output`` helper.
 
 All three obey ``MAGI_CHILD_RUNNER_EMPTY_DEBUG`` (no new env). Default-OFF.
+
+PR-G moved the emit channel from stderr to a dedicated file (default
+``~/.openmagi/trace.log``; override with ``MAGI_TRACE_LOG_PATH``) so the
+trace stamps no longer vanish into a wedged uvicorn stderr FD during
+long-running sessions. These tests read the file channel back.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
+from magi_agent.runtime import trace_sink
 from magi_agent.runtime.child_runner_boundary import (
     _maybe_log_trace_envelope_pre,
 )
@@ -38,12 +48,27 @@ from magi_agent.runtime.child_runner_live import (
 )
 
 
+@pytest.fixture
+def trace_log(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    path = tmp_path / "trace.log"
+    monkeypatch.setenv(trace_sink.MAGI_TRACE_LOG_PATH_ENV, str(path))
+    trace_sink.reset_trace_fd_for_tests()
+    yield path
+    trace_sink.reset_trace_fd_for_tests()
+
+
+def _read_lines(path: Path) -> list[str]:
+    if not path.exists():
+        return []
+    return [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
 # ---------------------------------------------------------------------- #
 # _maybe_log_trace_drive_one_turn                                        #
 # ---------------------------------------------------------------------- #
 
 
-def test_drive_one_turn_silent_when_flag_off(capsys) -> None:
+def test_drive_one_turn_silent_when_flag_off(trace_log: Path) -> None:
     _maybe_log_trace_drive_one_turn(
         {},
         phase="enter",
@@ -51,10 +76,10 @@ def test_drive_one_turn_silent_when_flag_off(capsys) -> None:
         model="claude-opus-4-8",
         config_id=12345,
     )
-    assert capsys.readouterr().err == ""
+    assert _read_lines(trace_log) == []
 
 
-def test_drive_one_turn_logs_enter_and_exit_phases(capsys) -> None:
+def test_drive_one_turn_logs_enter_and_exit_phases(trace_log: Path) -> None:
     env = {CHILD_RUNNER_EMPTY_DEBUG_ENV: "1"}
     _maybe_log_trace_drive_one_turn(
         env,
@@ -70,8 +95,7 @@ def test_drive_one_turn_logs_enter_and_exit_phases(capsys) -> None:
         model="claude-opus-4-8",
         config_id=12345,
     )
-    err = capsys.readouterr().err
-    lines = [line for line in err.split("\n") if line.strip()]
+    lines = _read_lines(trace_log)
     assert len(lines) == 2
     assert "[child_runner.trace] drive_one_turn_enter" in lines[0]
     assert "[child_runner.trace] drive_one_turn_exit" in lines[1]
@@ -86,7 +110,7 @@ def test_drive_one_turn_logs_enter_and_exit_phases(capsys) -> None:
 # ---------------------------------------------------------------------- #
 
 
-def test_engine_stream_yield_silent_when_flag_off(capsys) -> None:
+def test_engine_stream_yield_silent_when_flag_off(trace_log: Path) -> None:
     _maybe_log_trace_engine_stream_yield(
         {},
         index=0,
@@ -94,10 +118,10 @@ def test_engine_stream_yield_silent_when_flag_off(capsys) -> None:
         has_text_delta=True,
         evidence_refs_in_payload=0,
     )
-    assert capsys.readouterr().err == ""
+    assert _read_lines(trace_log) == []
 
 
-def test_engine_stream_yield_logs_fields(capsys) -> None:
+def test_engine_stream_yield_logs_fields(trace_log: Path) -> None:
     _maybe_log_trace_engine_stream_yield(
         {CHILD_RUNNER_EMPTY_DEBUG_ENV: "1"},
         index=3,
@@ -105,13 +129,14 @@ def test_engine_stream_yield_logs_fields(capsys) -> None:
         has_text_delta=True,
         evidence_refs_in_payload=2,
     )
-    err = capsys.readouterr().err
-    assert err.count("\n") == 1
-    assert "[governed_turn.trace] stream_yield" in err
-    assert "i=3" in err
-    assert "kind=text_delta" in err
-    assert "has_text_delta=True" in err
-    assert "evidence_refs_in_payload=2" in err
+    lines = _read_lines(trace_log)
+    assert len(lines) == 1
+    line = lines[0]
+    assert "[governed_turn.trace] stream_yield" in line
+    assert "i=3" in line
+    assert "kind=text_delta" in line
+    assert "has_text_delta=True" in line
+    assert "evidence_refs_in_payload=2" in line
 
 
 # ---------------------------------------------------------------------- #
@@ -119,15 +144,15 @@ def test_engine_stream_yield_logs_fields(capsys) -> None:
 # ---------------------------------------------------------------------- #
 
 
-def test_envelope_pre_silent_when_flag_off(capsys) -> None:
+def test_envelope_pre_silent_when_flag_off(trace_log: Path) -> None:
     _maybe_log_trace_envelope_pre(
         {},
         output={"status": "completed", "summary": "hi", "evidenceRefs": ()},
     )
-    assert capsys.readouterr().err == ""
+    assert _read_lines(trace_log) == []
 
 
-def test_envelope_pre_logs_status_summary_first80_and_refs(capsys) -> None:
+def test_envelope_pre_logs_status_summary_first80_and_refs(trace_log: Path) -> None:
     summary = "a" * 100  # > 80 chars so the truncation is visible.
     _maybe_log_trace_envelope_pre(
         {CHILD_RUNNER_EMPTY_DEBUG_ENV: "1"},
@@ -137,15 +162,16 @@ def test_envelope_pre_logs_status_summary_first80_and_refs(capsys) -> None:
             "evidenceRefs": ("evidence:abc", "evidence:def"),
         },
     )
-    err = capsys.readouterr().err
-    assert err.count("\n") == 1
-    assert "[boundary.trace] envelope_pre" in err
-    assert "status='completed'" in err
+    lines = _read_lines(trace_log)
+    assert len(lines) == 1
+    line = lines[0]
+    assert "[boundary.trace] envelope_pre" in line
+    assert "status='completed'" in line
     # The helper must surface up to the first 80 chars (not the whole 100).
-    assert "summary_first80=" in err
-    assert "a" * 80 in err
-    assert "a" * 90 not in err
-    assert "evidence_refs=2" in err
+    assert "summary_first80=" in line
+    assert "a" * 80 in line
+    assert "a" * 90 not in line
+    assert "evidence_refs=2" in line
 
 
 # ---------------------------------------------------------------------- #
@@ -153,7 +179,7 @@ def test_envelope_pre_logs_status_summary_first80_and_refs(capsys) -> None:
 # ---------------------------------------------------------------------- #
 
 
-def test_new_trace_helpers_never_raise(capsys) -> None:
+def test_new_trace_helpers_never_raise(trace_log: Path) -> None:
     env = {CHILD_RUNNER_EMPTY_DEBUG_ENV: "1"}
     _maybe_log_trace_drive_one_turn(env, phase="enter", provider=None, model=None, config_id=None)
     _maybe_log_trace_drive_one_turn(env, phase="exit", provider=None, model=None, config_id=None)
@@ -161,6 +187,6 @@ def test_new_trace_helpers_never_raise(capsys) -> None:
         env, index=0, kind=None, has_text_delta=False, evidence_refs_in_payload=0
     )
     _maybe_log_trace_envelope_pre(env, output=None)
-    err = capsys.readouterr().err
+    lines = _read_lines(trace_log)
     # All 4 invocations must have produced a single line each without raising.
-    assert err.count("\n") == 4
+    assert len(lines) == 4

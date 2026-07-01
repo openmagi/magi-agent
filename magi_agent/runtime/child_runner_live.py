@@ -48,38 +48,32 @@ import hashlib
 import inspect
 import os
 import re
-import sys
 from collections.abc import Callable, Mapping
 from typing import Any
 
+# PR-G: the trace channel is file-backed (``~/.openmagi/trace.log`` or
+# ``MAGI_TRACE_LOG_PATH``). PR #994's ``print(..., file=sys.stderr, flush=True)``
+# substrate worked for short sessions but Kevin's 0.1.86 long-running repro
+# showed the uvicorn stderr FD wedging mid-session (log mtime froze at
+# 21:59:24 while SQLite kept getting writes until 22:04:34). The dedicated
+# sink FD is distinct from the uvicorn stdout/stderr handles so a wedged
+# uvicorn FD no longer freezes the diagnostic channel.
+from magi_agent.runtime.trace_sink import _emit_trace
+
 #: Operator opt-in env for verbose child-runner empty-stream diagnostics.
 #: Default-OFF. When set to a truthy value, the empty-result and dispatch-
-#: trace helpers emit one line per event to ``sys.stderr`` (NOT through the
-#: ``logging`` system). Reason: ``magi-serve`` does not call
+#: trace helpers emit one line per event to the file-backed sink (default
+#: ``~/.openmagi/trace.log``; override with ``MAGI_TRACE_LOG_PATH``). Reason
+#: it does not use ``logging``: ``magi-serve`` never calls
 #: ``logging.basicConfig`` / ``dictConfig``, so a ``_logger.warning(...)``
-#: would never reach the operator's serve log (this is exactly what the
-#: 0.1.84 repro hit: traces were called, never written). ``print(..., file=
-#: sys.stderr, flush=True)`` bypasses the logging system entirely and lands
-#: in the same stream uvicorn/pydantic warnings use.
+#: would never reach the operator (exactly the 0.1.84 repro shape). The
+#: file-backed sink lives in :mod:`magi_agent.runtime.trace_sink`.
 CHILD_RUNNER_EMPTY_DEBUG_ENV = "MAGI_CHILD_RUNNER_EMPTY_DEBUG"
 
 
 def _empty_debug_enabled(env: Mapping[str, str]) -> bool:
     raw = env.get(CHILD_RUNNER_EMPTY_DEBUG_ENV, "")
     return str(raw).strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _emit_trace(line: str) -> None:
-    """Write ``line`` to ``sys.stderr`` and flush. Never raise.
-
-    Used by every trace/empty-debug helper in this module + the boundary
-    so the operator's serve log captures the diagnostic regardless of
-    whether the application root logger has any handlers attached.
-    """
-    try:
-        print(line, file=sys.stderr, flush=True)
-    except Exception:  # noqa: BLE001 (logging must never break a turn).
-        return
 
 
 def _maybe_log_governed_collect_result(
@@ -1415,9 +1409,7 @@ class RealLocalChildRunner:
                             "detail": f"Tool: {fcall_name} | start",
                         }
                     )
-                fresp_name = _safe_tool_phase_name(
-                    getattr(part, "function_response", None)
-                )
+                fresp_name = _safe_tool_phase_name(getattr(part, "function_response", None))
                 if fresp_name is not None:
                     await self._emit_progress(
                         {

@@ -1,5 +1,10 @@
 """PR-K: deeper trace at the collector terminal.
 
+PR-G moved every dispatch-path ``_emit_trace`` call from ``sys.stderr``
+to a dedicated file-backed sink (default ``~/.openmagi/trace.log``,
+override with ``MAGI_TRACE_LOG_PATH``). This test module reads the
+sink file back via the ``trace_log`` fixture instead of ``capsys``.
+
 Kevin's 0.1.88 SOTA-spawn trace pinpointed status=failed
 reason=child_llm_collector_status_failed for anthropic / google /
 fireworks children but did NOT surface WHAT made the Terminal !=
@@ -16,19 +21,18 @@ This test module covers:
 * the integration with :func:`collect_governed_child_turn` : the
   ``items_yielded`` counter MUST match the number of non-terminal
   events the stream produced.
-
-All tests use ``capsys`` (the trace helper prints to ``sys.stderr``
-via ``_emit_trace``); no file IO, no real provider calls.
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
+from pathlib import Path
 
 import pytest
 
 from magi_agent.cli.contracts import EngineResult, Terminal
+from magi_agent.runtime import trace_sink
 from magi_agent.runtime.child_governed_collector import collect_governed_child_turn
 from magi_agent.runtime.child_runner_live import (
     CHILD_RUNNER_EMPTY_DEBUG_ENV,
@@ -38,8 +42,30 @@ from magi_agent.runtime.events import RuntimeEvent
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Fixtures / helpers
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def trace_log(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Point the file-backed sink at ``tmp_path/trace.log`` for this test.
+
+    PR-G moved every ``_emit_trace`` call to a dedicated file. Reset the
+    module-level FD before and after so a prior test's open handle cannot
+    leak into this one.
+    """
+    path = tmp_path / "trace.log"
+    monkeypatch.setenv(trace_sink.MAGI_TRACE_LOG_PATH_ENV, str(path))
+    trace_sink.reset_trace_fd_for_tests()
+    yield path
+    trace_sink.reset_trace_fd_for_tests()
+
+
+def _read_trace(path: Path) -> str:
+    """Return the raw trace-log contents (empty string if the file was never opened)."""
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8")
 
 
 @pytest.fixture(autouse=True)
@@ -109,7 +135,7 @@ async def _stream_error_terminal_with_extras():
 # ---------------------------------------------------------------------------
 
 
-def test_helper_silent_when_flag_off(capsys: pytest.CaptureFixture) -> None:
+def test_helper_silent_when_flag_off(trace_log: Path) -> None:
     """Default-OFF: zero output when the empty-debug env is unset."""
     _maybe_log_trace_governed_collector_terminal(
         {},  # no MAGI_CHILD_RUNNER_EMPTY_DEBUG
@@ -119,11 +145,11 @@ def test_helper_silent_when_flag_off(capsys: pytest.CaptureFixture) -> None:
         evidence_refs_count=0,
         items_yielded=3,
     )
-    assert capsys.readouterr().err == ""
+    assert _read_trace(trace_log) == ""
 
 
 def test_helper_logs_completed_terminal_with_all_counters(
-    capsys: pytest.CaptureFixture,
+    trace_log: Path,
 ) -> None:
     env = {CHILD_RUNNER_EMPTY_DEBUG_ENV: "1"}
     _maybe_log_trace_governed_collector_terminal(
@@ -134,7 +160,7 @@ def test_helper_logs_completed_terminal_with_all_counters(
         evidence_refs_count=2,
         items_yielded=7,
     )
-    err = capsys.readouterr().err
+    err = _read_trace(trace_log)
     assert err.count("\n") == 1
     assert "[governed_collector.trace] terminal_consumed" in err
     assert "terminal=completed" in err
@@ -148,7 +174,7 @@ def test_helper_logs_completed_terminal_with_all_counters(
 
 
 def test_helper_logs_error_code_and_reason_when_present(
-    capsys: pytest.CaptureFixture,
+    trace_log: Path,
 ) -> None:
     env = {CHILD_RUNNER_EMPTY_DEBUG_ENV: "1"}
     terminal = _engine_result_with_extras(
@@ -165,7 +191,7 @@ def test_helper_logs_error_code_and_reason_when_present(
         evidence_refs_count=0,
         items_yielded=0,
     )
-    err = capsys.readouterr().err
+    err = _read_trace(trace_log)
     assert "terminal=error" in err
     assert "status=failed" in err
     assert "error_code='rate_limit_exceeded'" in err
@@ -174,7 +200,7 @@ def test_helper_logs_error_code_and_reason_when_present(
 
 
 def test_helper_never_raises_on_exotic_terminal(
-    capsys: pytest.CaptureFixture,
+    trace_log: Path,
 ) -> None:
     """Fail-safe: a terminal whose attribute access raises must not propagate."""
 
@@ -192,7 +218,7 @@ def test_helper_never_raises_on_exotic_terminal(
         evidence_refs_count=0,
         items_yielded=0,
     )
-    _ = capsys.readouterr()
+    _ = _read_trace(trace_log)
 
 
 # ---------------------------------------------------------------------------
@@ -201,12 +227,12 @@ def test_helper_never_raises_on_exotic_terminal(
 
 
 def test_terminal_completed_emits_completed_status_trace(
-    capsys: pytest.CaptureFixture,
+    trace_log: Path,
 ) -> None:
     """Happy-path: Terminal.completed surfaces ``status=completed`` AND
     ``terminal=completed`` in the trace line."""
     asyncio.run(collect_governed_child_turn(_stream_completed(["he", "llo"])))
-    err = capsys.readouterr().err
+    err = _read_trace(trace_log)
     assert "[governed_collector.trace] terminal_consumed" in err
     assert "terminal=completed" in err
     assert "status=completed" in err
@@ -214,12 +240,12 @@ def test_terminal_completed_emits_completed_status_trace(
 
 
 def test_terminal_failed_emits_failed_status_with_terminal_name(
-    capsys: pytest.CaptureFixture,
+    trace_log: Path,
 ) -> None:
     """Non-completed terminal preserves the underlying enum NAME (``aborted``)
     in the trace even though the public ``status`` collapses to ``failed``."""
     asyncio.run(collect_governed_child_turn(_stream_aborted(["oops"])))
-    err = capsys.readouterr().err
+    err = _read_trace(trace_log)
     assert "[governed_collector.trace] terminal_consumed" in err
     # status collapses to "failed" (public contract) ...
     assert "status=failed" in err
@@ -233,7 +259,7 @@ def test_terminal_failed_emits_failed_status_with_terminal_name(
 
 
 def test_items_yielded_counter_matches_stream_length(
-    capsys: pytest.CaptureFixture,
+    trace_log: Path,
 ) -> None:
     """The new ``items_yielded`` counter must equal the number of NON-terminal
     events the stream produced (not the number of text deltas)."""
@@ -245,18 +271,18 @@ def test_items_yielded_counter_matches_stream_length(
         yield EngineResult(terminal=Terminal.completed, usage={}, cost_usd=0.0)
 
     asyncio.run(collect_governed_child_turn(_three_non_terminals_then_done()))
-    err = capsys.readouterr().err
+    err = _read_trace(trace_log)
     assert "[governed_collector.trace] terminal_consumed" in err
     assert "items_yielded=3" in err
 
 
 def test_error_code_and_reason_appear_when_present(
-    capsys: pytest.CaptureFixture,
+    trace_log: Path,
 ) -> None:
     """A terminal carrying ``error_code`` / ``reason`` (future engine versions
     or test doubles) must surface both fields in the trace line."""
     asyncio.run(collect_governed_child_turn(_stream_error_terminal_with_extras()))
-    err = capsys.readouterr().err
+    err = _read_trace(trace_log)
     assert "[governed_collector.trace] terminal_consumed" in err
     assert "terminal=error" in err
     assert "status=failed" in err
@@ -272,7 +298,7 @@ def test_error_code_and_reason_appear_when_present(
 
 
 def test_collector_integration_silent_when_env_off(
-    capsys: pytest.CaptureFixture,
+    trace_log: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When MAGI_CHILD_RUNNER_EMPTY_DEBUG is OFF the collector must NOT emit
@@ -281,5 +307,5 @@ def test_collector_integration_silent_when_env_off(
     # Sanity: env is actually OFF for this test
     assert os.environ.get(CHILD_RUNNER_EMPTY_DEBUG_ENV) is None
     asyncio.run(collect_governed_child_turn(_stream_completed(["hi"])))
-    err = capsys.readouterr().err
+    err = _read_trace(trace_log)
     assert "[governed_collector.trace] terminal_consumed" not in err

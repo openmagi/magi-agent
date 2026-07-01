@@ -1,5 +1,10 @@
 """PR-K: run_governed_turn yield-loop exception trace.
 
+PR-G moved every dispatch-path ``_emit_trace`` call from ``sys.stderr``
+to a dedicated file-backed sink (default ``~/.openmagi/trace.log``,
+override with ``MAGI_TRACE_LOG_PATH``). This test module reads the
+sink file back via the ``trace_log`` fixture instead of ``capsys``.
+
 The PR-H ``[governed_turn.trace] yield_loop_exit reason=exception``
 stamp told the operator the loop raised but did not name WHAT raised.
 PR-K adds a dedicated ``except Exception`` branch above the pre-
@@ -21,16 +26,35 @@ Coverage:
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from magi_agent.runtime import trace_sink
 from magi_agent.runtime.child_runner_live import (
     CHILD_RUNNER_EMPTY_DEBUG_ENV,
     _maybe_log_trace_governed_yield_loop_exception,
 )
 from magi_agent.runtime.governed_turn import run_governed_turn
 from magi_agent.runtime.turn_context import TurnContext
+
+
+@pytest.fixture
+def trace_log(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Point the file-backed sink at ``tmp_path/trace.log`` for this test."""
+    path = tmp_path / "trace.log"
+    monkeypatch.setenv(trace_sink.MAGI_TRACE_LOG_PATH_ENV, str(path))
+    trace_sink.reset_trace_fd_for_tests()
+    yield path
+    trace_sink.reset_trace_fd_for_tests()
+
+
+def _read_trace(path: Path) -> str:
+    """Return the raw trace-log contents (empty string if the file was never opened)."""
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -86,16 +110,16 @@ async def _drain(agen) -> list[object]:
 # ---------------------------------------------------------------------------
 
 
-def test_helper_silent_when_flag_off(capsys: pytest.CaptureFixture) -> None:
+def test_helper_silent_when_flag_off(trace_log: Path) -> None:
     _maybe_log_trace_governed_yield_loop_exception(
         {},
         exception=RuntimeError("hidden"),
     )
-    assert capsys.readouterr().err == ""
+    assert _read_trace(trace_log) == ""
 
 
 def test_helper_logs_class_and_truncated_message(
-    capsys: pytest.CaptureFixture,
+    trace_log: Path,
 ) -> None:
     env = {CHILD_RUNNER_EMPTY_DEBUG_ENV: "1"}
     # 200-char message ensures truncation to 80 is visible.
@@ -104,7 +128,7 @@ def test_helper_logs_class_and_truncated_message(
         env,
         exception=RuntimeError(long_msg),
     )
-    err = capsys.readouterr().err
+    err = _read_trace(trace_log)
     assert err.count("\n") == 1
     assert "[governed_turn.trace] yield_loop_exception" in err
     assert "exception=RuntimeError" in err
@@ -118,21 +142,21 @@ def test_helper_logs_class_and_truncated_message(
 
 
 def test_helper_strips_leading_trailing_whitespace(
-    capsys: pytest.CaptureFixture,
+    trace_log: Path,
 ) -> None:
     env = {CHILD_RUNNER_EMPTY_DEBUG_ENV: "1"}
     _maybe_log_trace_governed_yield_loop_exception(
         env,
         exception=ValueError("  surrounded  \n"),
     )
-    err = capsys.readouterr().err
+    err = _read_trace(trace_log)
     # The repr of the stripped message is 'surrounded' (no leading/trailing
     # whitespace).
     assert "message_first80='surrounded'" in err
 
 
 def test_helper_never_raises_on_exotic_exception(
-    capsys: pytest.CaptureFixture,
+    trace_log: Path,
 ) -> None:
     """An exception whose __str__ raises must not break the helper."""
 
@@ -142,7 +166,7 @@ def test_helper_never_raises_on_exotic_exception(
 
     env = {CHILD_RUNNER_EMPTY_DEBUG_ENV: "1"}
     _maybe_log_trace_governed_yield_loop_exception(env, exception=_BadStr())
-    err = capsys.readouterr().err
+    err = _read_trace(trace_log)
     # Helper emitted the line (class name + empty message_first80) without
     # propagating the inner failure.
     assert "[governed_turn.trace] yield_loop_exception" in err
@@ -155,7 +179,7 @@ def test_helper_never_raises_on_exotic_exception(
 
 
 def test_exception_raised_in_yield_loop_logged_then_reraised(
-    capsys: pytest.CaptureFixture,
+    trace_log: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When an Exception propagates out of the engine stream the new
@@ -170,7 +194,7 @@ def test_exception_raised_in_yield_loop_logged_then_reraised(
     with pytest.raises(RuntimeError, match="kaboom-during-yield"):
         asyncio.run(_drain(run_governed_turn(ctx, runtime=rt)))
 
-    err = capsys.readouterr().err
+    err = _read_trace(trace_log)
     assert "[governed_turn.trace] yield_loop_exception" in err
     assert "exception=RuntimeError" in err
     assert "kaboom-during-yield" in err
@@ -181,7 +205,7 @@ def test_exception_raised_in_yield_loop_logged_then_reraised(
 
 
 def test_normal_completion_does_not_emit_exception_trace(
-    capsys: pytest.CaptureFixture,
+    trace_log: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A clean async-for completion MUST NOT emit the new exception trace.
@@ -195,7 +219,7 @@ def test_normal_completion_does_not_emit_exception_trace(
 
     asyncio.run(_drain(run_governed_turn(ctx, runtime=rt)))
 
-    err = capsys.readouterr().err
+    err = _read_trace(trace_log)
     assert "[governed_turn.trace] yield_loop_exception" not in err
     # PR-H sibling line still fires; reason='normal'.
     assert "[governed_turn.trace] yield_loop_exit" in err

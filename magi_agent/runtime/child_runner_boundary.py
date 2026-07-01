@@ -9,6 +9,7 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_serializer, field_validator
 
+from magi_agent.runtime.trace_sink import _emit_trace
 from magi_agent.evidence.child_runtime_envelope import (
     ChildRuntimeEnvelope,
     ChildRuntimeEnvelopeAuthorityFlags,
@@ -1383,16 +1384,6 @@ CHILD_RUNNER_EMPTY_DEBUG_ENV = "MAGI_CHILD_RUNNER_EMPTY_DEBUG"
 def _trace_enabled(env: Mapping[str, str]) -> bool:
     raw = env.get(CHILD_RUNNER_EMPTY_DEBUG_ENV, "")
     return str(raw).strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _emit_trace(line: str) -> None:
-    """Write ``line`` to ``sys.stderr`` and flush. Never raise."""
-    try:
-        import sys  # noqa: PLC0415 (kept LOCAL to preserve module import discipline).
-
-        print(line, file=sys.stderr, flush=True)
-    except Exception:  # noqa: BLE001
-        return
 
 
 def _maybe_log_trace_boundary_output(
