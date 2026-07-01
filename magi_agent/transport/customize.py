@@ -261,6 +261,108 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             }
         )
 
+    # Agent MODES (postures) CRUD. Operator-authored, session-sticky postures
+    # (system prompt + tool delta + scoped policy ids). Backed by customize.modes
+    # over customize.json (``agent_modes`` / ``active_agent_mode``). Auth-gated
+    # like the other customize routes.
+    @app.get("/v1/app/modes")
+    async def list_agent_modes(request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        from magi_agent.customize.modes import active_mode_id, list_modes
+
+        return JSONResponse(
+            content={
+                "modes": [mode.to_payload() for mode in list_modes()],
+                "activeMode": active_mode_id(),
+            }
+        )
+
+    @app.put("/v1/app/modes/{mode_id}")
+    async def upsert_agent_mode(mode_id: str, request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        if not isinstance(body, dict):
+            return JSONResponse(status_code=400, content={"error": "object_required"})
+        from pydantic import ValidationError
+
+        from magi_agent.customize.modes import (
+            AgentMode,
+            active_mode_id,
+            list_modes,
+            upsert_mode,
+        )
+
+        # The path id is authoritative: drop any body-supplied id (alias) or
+        # ``mode_id`` (field-name form, since populate_by_name is on) so neither
+        # can conflict, then set the path id.
+        payload = {key: value for key, value in body.items() if key not in ("id", "mode_id")}
+        payload["id"] = mode_id
+        try:
+            mode = AgentMode.model_validate(payload)
+        except ValidationError:
+            return JSONResponse(status_code=400, content={"error": "invalid_mode"})
+        try:
+            upsert_mode(mode)
+        except ValueError as exc:
+            return JSONResponse(
+                status_code=400, content={"error": "upsert_rejected", "message": str(exc)}
+            )
+        # Return the full refreshed view so the UI does not need a follow-up GET.
+        return JSONResponse(
+            content={
+                "mode": mode.to_payload(),
+                "modes": [item.to_payload() for item in list_modes()],
+                "activeMode": active_mode_id(),
+            }
+        )
+
+    @app.delete("/v1/app/modes/{mode_id}")
+    async def delete_agent_mode(mode_id: str, request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        from magi_agent.customize.modes import active_mode_id, delete_mode, list_modes
+
+        delete_mode(mode_id)
+        return JSONResponse(
+            content={
+                "modes": [mode.to_payload() for mode in list_modes()],
+                "activeMode": active_mode_id(),
+            }
+        )
+
+    @app.post("/v1/app/modes/active")
+    async def set_active_agent_mode(request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        # Require the key to be PRESENT so a malformed/empty body cannot silently
+        # clear the active mode; explicit ``null`` still clears.
+        if not isinstance(body, dict) or "modeId" not in body:
+            return JSONResponse(status_code=400, content={"error": "modeId_required"})
+        mode_id = body["modeId"]
+        if mode_id is not None and not isinstance(mode_id, str):
+            return JSONResponse(status_code=400, content={"error": "modeId_str_or_null"})
+        from magi_agent.customize.modes import active_mode_id, set_active_mode
+
+        try:
+            set_active_mode(mode_id)
+        except ValueError:
+            # Do not echo the caller-supplied id back in the response.
+            return JSONResponse(status_code=404, content={"error": "unknown_mode"})
+        return JSONResponse(content={"activeMode": active_mode_id()})
+
     @app.get("/v1/app/customize/evidence/live-catalog")
     async def get_live_catalog(request: Request) -> JSONResponse:
         """Per-evidence-type live view fused from hints + ledger + WHAT-menu.
