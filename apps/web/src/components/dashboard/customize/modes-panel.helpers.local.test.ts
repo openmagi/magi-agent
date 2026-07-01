@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseList, slugifyModeId } from "./modes-panel.helpers";
+import { parseList, selectedScopedIds, slugifyModeId, toggleScopedId } from "./modes-panel.helpers";
 
 /** Backend id contract: `magi_agent/customize/modes.py` `_MODE_ID_RE`. */
 const MODE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
@@ -82,5 +82,36 @@ describe("parseList", () => {
 
   it("returns [] for an all-whitespace input", () => {
     expect(parseList("   \n , ")).toEqual([]);
+  });
+});
+
+
+describe("scoped-policy list helpers", () => {
+  it("selectedScopedIds parses the stored list into a set", () => {
+    expect(selectedScopedIds("custom_rule:a\ndashboard_check:b")).toEqual(
+      new Set(["custom_rule:a", "dashboard_check:b"]),
+    );
+  });
+
+  it("toggleScopedId adds an absent id and removes a present one", () => {
+    expect(toggleScopedId("", "custom_rule:a")).toBe("custom_rule:a");
+    expect(toggleScopedId("custom_rule:a", "custom_rule:a")).toBe("");
+  });
+
+  it("toggleScopedId preserves other ids, including ones not in the picker", () => {
+    // seam_spec:x is not a pickable option but must survive toggling a peer.
+    const raw = "seam_spec:x\ncustom_rule:a";
+    const afterRemove = toggleScopedId(raw, "custom_rule:a");
+    expect(selectedScopedIds(afterRemove)).toEqual(new Set(["seam_spec:x"]));
+    const afterAdd = toggleScopedId(afterRemove, "dashboard_check:b");
+    expect(selectedScopedIds(afterAdd)).toEqual(
+      new Set(["seam_spec:x", "dashboard_check:b"]),
+    );
+  });
+
+  it("toggle round-trips (add then remove returns to the original set)", () => {
+    const raw = "custom_rule:a";
+    const back = toggleScopedId(toggleScopedId(raw, "dashboard_check:b"), "dashboard_check:b");
+    expect(selectedScopedIds(back)).toEqual(selectedScopedIds(raw));
   });
 });
