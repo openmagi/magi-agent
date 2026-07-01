@@ -25,7 +25,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ShieldCheck, Wrench, Layers, Webhook, Wand2, Plus, SlidersHorizontal, Gauge, Drama } from "lucide-react";
+import { ShieldCheck, Wrench, Layers, Webhook, Plus, SlidersHorizontal, Gauge, Drama } from "lucide-react";
 import {
   useCustomize,
   patchToolOverride,
@@ -84,7 +84,6 @@ import {
 
 export type CustomizeSection =
   | "rules"
-  | "guidance"
   | "modes"
   | "tools"
   | "behaviors"
@@ -100,17 +99,10 @@ const SECTIONS: ReadonlyArray<{
 }> = [
   {
     id: "rules",
-    label: "Policies",
+    label: "Rules",
     icon: <ShieldCheck className="h-4 w-4" />,
     description:
-      "Every rule that gates the agent in one list. Built-in + your own — same shape, same controls.",
-  },
-  {
-    id: "guidance",
-    label: "Guidance",
-    icon: <Wand2 className="h-4 w-4" />,
-    description:
-      "Soft prompt instructions injected into the system prompt every turn. The model is asked to follow them but is not forced to.",
+      "Enforcement: rules that gate the agent (block / audit / require). Built-in + your own, same shape, same controls. Toggles here set the GLOBAL default for every turn; to apply a rule only in a specific stance, scope it in Modes.",
   },
   {
     id: "modes",
@@ -130,7 +122,7 @@ const SECTIONS: ReadonlyArray<{
     label: "Behaviors",
     icon: <SlidersHorizontal className="h-4 w-4" />,
     description:
-      "In-context runtime behaviors (periodic facts survey, goal nudge, tool-synthesis nudge, empty-response recovery). These are seeded ON by the lab/dogfood profile; a toggle here overrides that.",
+      "Capability (soft): things that nudge or help the agent but never block. Your freeform guidance plus the built-in in-context behaviors (facts survey, goal nudge, tool-synthesis nudge, empty-response recovery).",
   },
   {
     id: "budgets",
@@ -141,9 +133,10 @@ const SECTIONS: ReadonlyArray<{
   },
   {
     id: "recipes",
-    label: "Recipes",
+    label: "Packs",
     icon: <Layers className="h-4 w-4" />,
-    description: "Opt out of first-party recipe packs (allowlist semantics).",
+    description:
+      "First-party packs that contribute rules, behaviors, and tools. Opt a pack in or out (allowlist semantics); opting out drops the refs it contributes.",
   },
   {
     id: "hooks",
@@ -436,7 +429,7 @@ export function CustomizeHub({
             // shape there is nothing to bulk-seed; we surface a banner so the
             // operator understands why the toggle cannot disable.
             throw new Error(
-              `Cannot disable "${id}" — no other mapped recipes to seed the allowlist with. Add another recipe pack first.`,
+              `Cannot disable "${id}": no other mapped packs to seed the allowlist with. Add another pack first.`,
             );
           }
           return overrides;
@@ -592,12 +585,40 @@ export function CustomizeHub({
           />
         ) : null}
 
-        {section === "guidance" ? (
-          <GuidancePanel
-            userRules={userRules}
-            rulesSaving={rulesSaving}
-            onSaveRules={handleSaveRules}
-          />
+        {section === "behaviors" ? (
+          <div className="space-y-8">
+            <section className="space-y-3">
+              <div>
+                <h3 className="text-sm font-bold text-foreground">Your guidance</h3>
+                <p className="mt-0.5 text-xs leading-relaxed text-secondary">
+                  Soft prompt instructions injected into the system prompt every
+                  turn. The model is asked to follow them but is never forced to.
+                </p>
+              </div>
+              <GuidancePanel
+                userRules={userRules}
+                rulesSaving={rulesSaving}
+                onSaveRules={handleSaveRules}
+              />
+            </section>
+            <section className="space-y-3">
+              <div>
+                <h3 className="text-sm font-bold text-foreground">Built-in behaviors</h3>
+                <p className="mt-0.5 text-xs leading-relaxed text-secondary">
+                  In-context nudges and recovery (facts survey, goal nudge,
+                  tool-synthesis nudge, empty-response recovery). Seeded ON by the
+                  lab/dogfood profile; a toggle here overrides that. Never blocks.
+                </p>
+              </div>
+              <BehaviorsPanel
+                behaviors={data.catalog.controlPlane ?? []}
+                overrides={behaviorOverrides}
+                onToggle={handleToggleBehavior}
+                pendingIds={behaviorPending}
+                error={behaviorError}
+              />
+            </section>
+          </div>
         ) : null}
 
         {section === "modes" ? <ModesPanel botId={botId} /> : null}
@@ -612,15 +633,6 @@ export function CustomizeHub({
           />
         ) : null}
 
-        {section === "behaviors" ? (
-          <BehaviorsPanel
-            behaviors={data.catalog.controlPlane ?? []}
-            overrides={behaviorOverrides}
-            onToggle={handleToggleBehavior}
-            pendingIds={behaviorPending}
-            error={behaviorError}
-          />
-        ) : null}
 
         {section === "budgets" ? (
           <BudgetsTab
@@ -838,7 +850,7 @@ function RulesSectionMount({
             className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-primary/90"
           >
             <Plus className="h-3.5 w-3.5" />
-            Add policy
+            Add rule
           </button>
         ) : null}
       </div>
@@ -853,7 +865,7 @@ function RulesSectionMount({
       {addState.phase === "nl" ? (
         <section className="space-y-2">
           <AuthoringHeader
-            label="Natural language"
+            label="Describe it"
             onPickDifferent={() => setAddState({ phase: "picking_mode" })}
             onClose={() => setAddState({ phase: "idle" })}
           />
@@ -894,7 +906,7 @@ function RulesSectionMount({
       {addState.phase === "raw_picking" ? (
         <section className="space-y-2">
           <AuthoringHeader
-            label="Advanced — pick a rule kind"
+            label="Advanced: pick a rule kind"
             onPickDifferent={() => setAddState({ phase: "picking_mode" })}
             onClose={() => setAddState({ phase: "idle" })}
           />
@@ -910,7 +922,7 @@ function RulesSectionMount({
       {addState.phase === "raw_authoring" ? (
         <section className="space-y-2">
           <AuthoringHeader
-            label={`Advanced — ${LABEL_FOR_CHOICE[addState.choice]}`}
+            label={`Advanced: ${LABEL_FOR_CHOICE[addState.choice]}`}
             onPickDifferent={() => setAddState({ phase: "raw_picking" })}
             onClose={() => setAddState({ phase: "idle" })}
           />
@@ -971,7 +983,7 @@ function RulesSectionMount({
         </>
       ) : (
         <div className="rounded-xl border border-dashed border-black/[0.08] bg-gray-50/60 px-4 py-3 text-xs text-secondary">
-          List hidden while adding a policy. Cancel above to return.
+          List hidden while adding a rule. Cancel above to return.
         </div>
       )}
     </div>
@@ -1099,7 +1111,7 @@ function RecipesPanel({
   if (recipes.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-black/[0.10] bg-gray-50/80 px-4 py-8 text-center text-sm leading-6 text-secondary">
-        No recipes catalogued yet.
+        No packs catalogued yet.
       </div>
     );
   }
@@ -1114,12 +1126,13 @@ function RecipesPanel({
         </div>
       ) : null}
       <p className="mb-3 text-xs leading-relaxed text-secondary">
-        Recipes contributed by first-party packs. An empty <code>packIds</code> means the
-        UI label has no live mapping — the toggle is disabled because flipping it would
-        have no runtime effect. Mapped recipes can be opted in/out via the allowlist:
-        with no override, every recipe is enabled; the first opt-out seeds the allowlist
-        with every other mapped recipe (so only the one you turned off is dropped), then
-        the list behaves as an explicit allowlist (only the ids you keep on stay enabled).
+        First-party packs and the refs they contribute (rules / behaviors / tools).
+        An empty <code>packIds</code> means the label has no live mapping, so the toggle
+        is disabled (flipping it would have no runtime effect). Mapped packs can be opted
+        in/out via the allowlist: with no override, every pack is enabled; the first
+        opt-out seeds the allowlist with every other mapped pack (so only the one you
+        turned off is dropped), then the list behaves as an explicit allowlist (only the
+        ids you keep on stay enabled).
       </p>
       {recipes.map((r) => {
         const mapped = Array.isArray(r.packIds) && r.packIds.length > 0;

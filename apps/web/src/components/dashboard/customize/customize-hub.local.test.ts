@@ -7,16 +7,24 @@ const src = readFileSync(
 );
 
 describe("CustomizeHub — Policy unification (PR-E1)", () => {
-  it("keeps the rules / guidance / tools / recipes / hooks sub-nav (deep-link compat)", () => {
+  it("keeps the rules / modes / tools / behaviors / recipes / hooks sub-nav (deep-link compat)", () => {
     expect(src).toContain('"rules"');
-    expect(src).toContain('"guidance"');
     expect(src).toContain('"tools"');
     expect(src).toContain('"recipes"');
     expect(src).toContain('"hooks"');
+    // Guidance merged into the capability "behaviors" tab (PR-U2); it renders
+    // GuidancePanel + BehaviorsPanel under one section.
+    expect(src).toContain('"behaviors"');
+    expect(src).toContain("GuidancePanel");
+    expect(src).toContain("BehaviorsPanel");
   });
 
-  it("renames the Rules section label to 'Policies' (unified terminology)", () => {
-    expect(src).toContain('label: "Policies"');
+  it("labels the enforcement section 'Rules' and the pack section 'Packs' (region terminology)", () => {
+    expect(src).toContain('label: "Rules"');
+    expect(src).toContain('label: "Packs"');
+    // the section ids stay stable so deep-links / routes are unaffected
+    expect(src).toContain('id: "rules"');
+    expect(src).toContain('id: "recipes"');
   });
 
   it("mounts the unified PoliciesTable, Reusable Evidence + Conditions sub-tabs", () => {
@@ -55,8 +63,8 @@ describe("CustomizeHub — Policy unification (PR-E1)", () => {
     expect(src).toContain("deleteSeamSpecApi");
   });
 
-  it("renames the Add button to 'Add policy' (matches the unified concept)", () => {
-    expect(src).toContain("Add policy");
+  it("PR-U3.1: names the Rules-tab add button 'Add rule' (region-aligned)", () => {
+    expect(src).toContain("Add rule");
   });
 
   it("keeps the legacy CustomRulesSection / CustomChecksSection / SeamBuilderPanel reachable under raw_authoring", () => {
@@ -66,7 +74,7 @@ describe("CustomizeHub — Policy unification (PR-E1)", () => {
   });
 
   it("hides the unified list while authoring so the page is focused", () => {
-    expect(src).toContain("List hidden while adding a policy");
+    expect(src).toContain("List hidden while adding a rule");
   });
 
   it("registers the PR-F7 Budgets sub-tab (id, label, icon, panel mount)", () => {

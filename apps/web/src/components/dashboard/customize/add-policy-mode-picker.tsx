@@ -1,13 +1,15 @@
 "use client";
 
 /**
- * AddPolicyModePicker — 3-mode entry point (NL / Guided / Raw).
+ * AddPolicyModePicker: how-to-author entry for a new Rule (NL / Guided / Raw).
  *
- * Maps the control-plane "How do you want to author this policy?" prompt
- * to magi-agent. NL ships in PR-E1 via the existing ``NlRuleCompose``;
- * Guided is a placeholder until PR-E3 lands the toss-style wizard; Raw
- * routes back to the legacy 4-kind picker so power-users can still drop
- * to the structured form.
+ * PR-U3.1 reframe (2026-07-01): this is the Rules-tab, region-aligned add
+ * entry. A Rule is an enforcement control: it can BLOCK a turn or a tool, ask
+ * for confirmation, or record an audit note. The picker states that region up
+ * front and offers three authoring paths that all produce the same kind of
+ * rule; it no longer leaks the internal primitive vocabulary into the
+ * operator-facing copy (the plain-language cards replace the old mono
+ * implementation chips).
  */
 
 import { Code, Sparkles, SlidersHorizontal, X as XIcon } from "lucide-react";
@@ -28,7 +30,6 @@ interface ModeCard {
   label: string;
   description: string;
   icon: React.ReactNode;
-  backing: string;
   badge?: string;
 }
 
@@ -36,28 +37,25 @@ interface ModeCard {
 const MODES: ReadonlyArray<ModeCard> = [
   {
     id: "nl",
-    label: "Natural language",
+    label: "Describe it",
     description:
-      "Describe the policy in plain English or Korean — an LLM compiles it into a draft for you to review.",
+      "Say what the agent must or must not do, in plain English or Korean. We draft the rule for you to review before it goes live.",
     icon: <Sparkles className="h-5 w-5" />,
-    backing: "NL → routedKind compiler",
     badge: "Recommended",
   },
   {
     id: "guided",
-    label: "Guided assembly",
+    label: "Answer a few questions",
     description:
-      "Step-by-step picker — answer one question per screen. No NL ambiguity, no raw form burden.",
+      "A short step-by-step: what to check, when it runs, and what happens (block, ask, or just note it). No jargon, no blank form.",
     icon: <SlidersHorizontal className="h-5 w-5" />,
-    backing: "Constrained wizard",
   },
   {
     id: "raw",
-    label: "Advanced — direct form",
+    label: "Advanced: fill the form",
     description:
-      "For users who know the underlying primitive. Fill rule fields by hand (kind / scope / firesAt / action).",
+      "For when you already know the exact shape you want and would rather set every field by hand.",
     icon: <Code className="h-5 w-5" />,
-    backing: "Custom Rule / SeamSpec / Dashboard Check forms",
   },
 ];
 
@@ -68,23 +66,24 @@ export function AddPolicyModePicker({
 }: AddPolicyModePickerProps): React.ReactElement {
   return (
     <section
-      aria-label="How do you want to author this policy?"
+      aria-label="How do you want to add this rule?"
       className="rounded-2xl border border-primary/20 bg-primary/[0.02] p-4 shadow-sm"
     >
       <header className="mb-3 flex items-center justify-between">
         <div>
           <h3 className="text-sm font-bold text-foreground">
-            How do you want to author this policy?
+            How do you want to add this rule?
           </h3>
           <p className="mt-0.5 text-xs text-secondary">
-            Pick a path. All three produce the same kind of policy — choose
-            what feels right for the rule you have in mind.
+            A rule enforces something: it can block a turn or a tool, ask for
+            confirmation, or record an audit note. Pick the way that feels
+            easiest; they all create the same kind of rule.
           </p>
         </div>
         <button
           type="button"
           onClick={onCancel}
-          aria-label="Close add policy picker"
+          aria-label="Close add rule picker"
           className="rounded-lg p-1.5 text-secondary hover:bg-black/[0.04] hover:text-foreground"
         >
           <XIcon className="h-4 w-4" />
@@ -121,9 +120,6 @@ export function AddPolicyModePicker({
             </span>
             <span className="text-xs leading-relaxed text-secondary">
               {m.description}
-            </span>
-            <span className="mt-1 rounded bg-black/[0.04] px-1.5 py-0.5 text-[10px] font-mono text-secondary/80">
-              → {m.backing}
             </span>
           </button>
         ))}
