@@ -159,6 +159,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_LSP_DIAGNOSTICS_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Surface LSP diagnostics to the coding harness (default-ON full profile).
 - `MAGI_MAX_RECOVERY_ATTEMPTS` (default `3`) — Maximum retry attempts the error-recovery framework will make for a recoverable category (default 3).
 - `MAGI_MAX_STEPS_BRAKE_ENABLED` (default off) — Register the MaxStepsBrakeControl wrap-up brake on the control plane (the seam is wired with ``max_iterations=0``; H-9 audit may delete the seam entirely). Strict default-OFF.
+- `MAGI_MCP_RESILIENCE_ENABLED` (default off) — Wrap MCP provider tool calls in a reusable resilience primitive: a per-attempt call timeout, bounded reconnect with exponential backoff, a per-server circuit breaker, and non-retryable auth handling that surfaces a model-visible reconnect signal. When OFF the call boundary is byte-identical to today. Default-OFF.
 - `MAGI_MEMORY_COMPACTION_ENABLED` (default off) — Enable the 5-level compaction tree builder for stored memory.
 - `MAGI_MEMORY_ENABLED` (default off) — Master switch for the agent memory subsystem (3-tier + compaction).
 - `MAGI_MEMORY_LOCAL_DEV` (default off) — Local single-user dev short-circuit for the memory-write readiness gate. Default-OFF; opt-in only with the readiness + write env gates ON and the kill-switch INACTIVE.

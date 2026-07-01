@@ -8,6 +8,16 @@ from typing import Any, Literal, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
+from magi_agent.plugins.mcp_resilience import (
+    CircuitBreakerRegistry,
+    McpResiliencePolicy,
+    McpServerUnreachable,
+    REASON_CIRCUIT_OPEN,
+    REASON_NEEDS_REAUTH,
+    REASON_SERVER_UNREACHABLE,
+    call_with_resilience,
+    mcp_user_message as _mcp_user_message,
+)
 from magi_agent.runtime.provider_receipts import build_provider_receipt
 from magi_agent.tools.manifest import Budget, ToolManifest, ToolSource
 from magi_agent.tools.output_budget import BudgetedToolResult, budget_tool_result
@@ -411,6 +421,7 @@ class McpAdapter:
         provider: McpProviderPort | None = None,
         server_ref: str | None = None,
         security_manifest: McpServerSecurityManifest | Mapping[str, object] | None = None,
+        resilience: McpResiliencePolicy | None = None,
     ) -> McpCallDecision:
         safe_server_ref = _safe_public_ref(server_ref or manifest.source.package, prefix="mcp")
         diagnostics = {
@@ -454,20 +465,55 @@ class McpAdapter:
                 ("local_fake_mcp_provider_untrusted",),
                 diagnostic_metadata=diagnostics,
             )
-        try:
-            raw_result = provider.call_tool(safe_server_ref, manifest.name, dict(arguments))
-        except McpAuthError as exc:
-            return _call_decision(
-                "auth_required",
-                ("mcp_auth_required",),
-                diagnostic_metadata={**diagnostics, "providerErrorDigest": _digest(_safe_text(str(exc)))[:16]},
-            )
-        except Exception as exc:
-            return _call_decision(
-                "error",
-                ("mcp_provider_call_failed",),
-                diagnostic_metadata={**diagnostics, "providerErrorDigest": _digest(_safe_text(str(exc)))[:16]},
-            )
+        if resilience is None or not resilience.enabled:
+            # OFF path: byte-identical to the original direct provider call.
+            try:
+                raw_result = provider.call_tool(safe_server_ref, manifest.name, dict(arguments))
+            except McpAuthError as exc:
+                return _call_decision(
+                    "auth_required",
+                    ("mcp_auth_required",),
+                    diagnostic_metadata={**diagnostics, "providerErrorDigest": _digest(_safe_text(str(exc)))[:16]},
+                )
+            except Exception as exc:
+                return _call_decision(
+                    "error",
+                    ("mcp_provider_call_failed",),
+                    diagnostic_metadata={**diagnostics, "providerErrorDigest": _digest(_safe_text(str(exc)))[:16]},
+                )
+        else:
+            # ON path: wrap the provider call in the shared resilience primitive.
+            # The breaker key is the adapter's real per-server ``server_ref``.
+            registry = CircuitBreakerRegistry.default()
+            try:
+                raw_result = call_with_resilience(
+                    resilience,
+                    registry,
+                    safe_server_ref,
+                    lambda: provider.call_tool(safe_server_ref, manifest.name, dict(arguments)),
+                    auth_error_types=(McpAuthError,),
+                )
+            except McpAuthError as exc:
+                return _call_decision(
+                    "auth_required",
+                    (REASON_NEEDS_REAUTH,),
+                    diagnostic_metadata={**diagnostics, "providerErrorDigest": _digest(_safe_text(str(exc)))[:16]},
+                )
+            except McpServerUnreachable as exc:
+                reason = getattr(exc, "reason_code", REASON_SERVER_UNREACHABLE)
+                if reason not in (REASON_SERVER_UNREACHABLE, REASON_CIRCUIT_OPEN):
+                    reason = REASON_SERVER_UNREACHABLE
+                return _call_decision(
+                    "error",
+                    (reason,),
+                    diagnostic_metadata={**diagnostics, "providerErrorDigest": _digest(_safe_text(str(exc)))[:16]},
+                )
+            except Exception as exc:
+                return _call_decision(
+                    "error",
+                    ("mcp_provider_call_failed",),
+                    diagnostic_metadata={**diagnostics, "providerErrorDigest": _digest(_safe_text(str(exc)))[:16]},
+                )
 
         public_output = _extract_public_mcp_output(raw_result)
         tool_result = ToolResult(
@@ -626,6 +672,16 @@ def _call_decision(
         diagnosticMetadata=_safe_metadata(diagnostic_metadata or {}),
         authorityFlags=McpAuthorityFlags(),
     )
+
+
+def mcp_user_message(decision: McpCallDecision) -> str | None:
+    """Translate a resilience reason code on a decision into an actionable string.
+
+    Single translation point for a future live tool host: ``mcp_needs_reauth`` /
+    ``mcp_server_unreachable`` / ``mcp_circuit_open`` map to a user-facing
+    message; an ``ok`` / non-resilience decision returns ``None``.
+    """
+    return _mcp_user_message(decision)
 
 
 def _coerce_security_manifest(
