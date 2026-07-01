@@ -18,8 +18,9 @@ describe("PoliciesTable — unified policy surface (PR-E1)", () => {
     expect(src).toContain("aria-pressed={active}");
   });
 
-  it("renders user policies before built-in (Your policies group first)", () => {
-    expect(src).toContain('title="Your policies"');
+  it("renders user rules before built-in (Your rules group first)", () => {
+    // PR-P1: the Rules tab uses "rules" terminology, not "policies".
+    expect(src).toContain('title="Your rules"');
     expect(src).toContain("userPolicies.length > 0");
   });
 
@@ -44,7 +45,7 @@ describe("PoliciesTable — unified policy surface (PR-E1)", () => {
     expect(src).toContain("scopeFilter");
     expect(src).toContain("firesAtFilter");
     expect(src).toContain('type="search"');
-    expect(src).toContain('aria-label="Search policies"');
+    expect(src).toContain('aria-label="Search rules"');
   });
 
   it("matches the search needle against name + description + condition summary", () => {

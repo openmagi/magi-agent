@@ -62,3 +62,29 @@ describe("ModesPanel: PR-U3.4 conversational NL → mode composer", () => {
     expect(src).toContain("author by hand");
   });
 });
+
+describe("ModesPanel: PR-P1 tool picker replaces freeform typing", () => {
+  it("renders a ModeToolPicker sourced from the live tool catalog", () => {
+    expect(src).toContain("function ModeToolPicker");
+    expect(src).toContain("<ModeToolPicker");
+    expect(src).toContain("customizeData?.catalog.tools");
+    expect(src).toContain("tools={toolItems}");
+  });
+
+  it("splits into default-on (exclude) and safe default-off (include), never dangerous", () => {
+    expect(src).toContain("t.enabled && match(t)");
+    // Only safe, currently-off tools are offerable to include.
+    expect(src).toContain("!t.enabled && !t.dangerous && match(t)");
+  });
+
+  it("toggles selection through the newline exclude/include strings", () => {
+    expect(src).toContain("toggleListItem(editor.exclude, name)");
+    expect(src).toContain("toggleListItem(editor.include, name)");
+  });
+
+  it("keeps the raw name textareas as an Advanced escape hatch", () => {
+    expect(src).toContain("Advanced: tools by name");
+    expect(src).toContain('id="mode-exclude"');
+    expect(src).toContain('id="mode-include"');
+  });
+});

@@ -28,12 +28,12 @@ import {
   type AgentModeInput,
   type ModeCompileDraft,
 } from "@/lib/agent-modes-api";
-import { useCustomize } from "@/lib/customize-api";
+import { useCustomize, type ToolItem } from "@/lib/customize-api";
 import { getDashboardChecks, type DashboardCheck } from "@/lib/packs-dashboard-api";
 import { unifyPolicies } from "@/lib/policy-model";
 import type { AgentMode } from "@/chat-core";
 import { PageHint } from "./page-hint";
-import { parseList, selectedScopedIds, slugifyModeId, toggleScopedId } from "./modes-panel.helpers";
+import { parseList, selectedScopedIds, slugifyModeId, toggleListItem, toggleScopedId } from "./modes-panel.helpers";
 
 /** A user-authored policy the Modes editor can scope (custom rule or dashboard
  * check), keyed by the resolver's prefixed id (`custom_rule:` / `dashboard_check:`). */
@@ -133,6 +133,13 @@ export function ModesPanel({ botId }: { botId: string }): React.JSX.Element {
         kind: p.rawSource.kind as "custom_rule" | "dashboard_check",
       }));
   }, [customizeData, dashboardChecks]);
+
+  // PR-P1: the live tool catalog powers the mode tool picker (checkbox lists),
+  // replacing the freeform "type tool names" textareas.
+  const toolItems = useMemo<ToolItem[]>(
+    () => customizeData?.catalog.tools ?? [],
+    [customizeData],
+  );
 
   const load = useCallback(() => {
     setLoading(true);
@@ -264,6 +271,7 @@ export function ModesPanel({ botId }: { botId: string }): React.JSX.Element {
           editor={editor}
           busy={busy}
           warnings={draftWarnings}
+          tools={toolItems}
           policyOptions={policyOptions}
           policiesLoading={policiesLoading}
           onChange={setEditor}
@@ -432,6 +440,7 @@ function ModeEditor({
   editor,
   busy,
   warnings = [],
+  tools,
   policyOptions,
   policiesLoading,
   onChange,
@@ -441,6 +450,7 @@ function ModeEditor({
   editor: EditorState;
   busy: boolean;
   warnings?: string[];
+  tools: ToolItem[];
   policyOptions: ScopablePolicyOption[];
   policiesLoading: boolean;
   onChange: (next: EditorState) => void;
@@ -543,35 +553,47 @@ function ModeEditor({
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div>
-          <label className={labelCls} htmlFor="mode-exclude">
-            Turn tools off
-          </label>
-          <textarea
-            id="mode-exclude"
-            value={editor.exclude}
-            onChange={(e) => set("exclude", e.target.value)}
-            rows={3}
-            placeholder="One per line: turns a default-ON tool off in this mode"
-            className={`${inputCls} resize-y font-mono text-xs`}
-          />
+      <ModeToolPicker
+        tools={tools}
+        exclude={editor.exclude}
+        include={editor.include}
+        onToggleExclude={(name) => set("exclude", toggleListItem(editor.exclude, name))}
+        onToggleInclude={(name) => set("include", toggleListItem(editor.include, name))}
+      />
+      <details>
+        <summary className="cursor-pointer text-[11px] text-secondary/70">
+          Advanced: tools by name (one per line)
+        </summary>
+        <div className="mt-2 grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className={labelCls} htmlFor="mode-exclude">
+              Turn tools off
+            </label>
+            <textarea
+              id="mode-exclude"
+              value={editor.exclude}
+              onChange={(e) => set("exclude", e.target.value)}
+              rows={3}
+              placeholder="One per line: turns a default-ON tool off in this mode"
+              className={`${inputCls} resize-y font-mono text-xs`}
+            />
+          </div>
+          <div>
+            <label className={labelCls} htmlFor="mode-include">
+              Turn extra tools on{" "}
+              <span className="normal-case text-secondary/60">(re-enable a default-off tool)</span>
+            </label>
+            <textarea
+              id="mode-include"
+              value={editor.include}
+              onChange={(e) => set("include", e.target.value)}
+              rows={3}
+              placeholder="One per line: re-enables a default-off tool (safe tools only; never Bash/exec/net)"
+              className={`${inputCls} resize-y font-mono text-xs`}
+            />
+          </div>
         </div>
-        <div>
-          <label className={labelCls} htmlFor="mode-include">
-            Turn extra tools on{" "}
-            <span className="normal-case text-secondary/60">(re-enable a default-off tool)</span>
-          </label>
-          <textarea
-            id="mode-include"
-            value={editor.include}
-            onChange={(e) => set("include", e.target.value)}
-            rows={3}
-            placeholder="One per line: re-enables a default-off tool (safe tools only; never Bash/exec/net)"
-            className={`${inputCls} resize-y font-mono text-xs`}
-          />
-        </div>
-      </div>
+      </details>
 
       <div>
         <label className={labelCls}>
@@ -645,6 +667,112 @@ function ModeEditor({
         </button>
       </div>
     </section>
+  );
+}
+
+/**
+ * ModeToolPicker (PR-P1): checkbox lists over the live tool catalog, replacing
+ * the freeform "type tool names one per line" textareas.
+ *
+ *  - "Turn tools off": tools on by default (enabled) → checking one adds it to
+ *    the mode's exclude list.
+ *  - "Turn extra tools on": tools off by default AND not dangerous → checking
+ *    one adds it to the include list. Dangerous tools are never offered here
+ *    (hard-safety: a mode can never re-enable Bash/exec/net via include).
+ *
+ * Selection round-trips through the same newline exclude/include strings the
+ * editor already stores; the Advanced textareas remain the escape hatch for a
+ * name not in the catalog.
+ */
+function ModeToolPicker({
+  tools,
+  exclude,
+  include,
+  onToggleExclude,
+  onToggleInclude,
+}: {
+  tools: ToolItem[];
+  exclude: string;
+  include: string;
+  onToggleExclude: (name: string) => void;
+  onToggleInclude: (name: string) => void;
+}): React.ReactElement {
+  const [query, setQuery] = useState("");
+  const excluded = useMemo(() => new Set(parseList(exclude)), [exclude]);
+  const included = useMemo(() => new Set(parseList(include)), [include]);
+  const needle = query.trim().toLowerCase();
+  const match = (t: ToolItem) =>
+    !needle || t.name.toLowerCase().includes(needle);
+
+  const onByDefault = tools.filter((t) => t.enabled && match(t));
+  // Only safe, currently-off tools can be re-enabled by a mode.
+  const offAndSafe = tools.filter((t) => !t.enabled && !t.dangerous && match(t));
+
+  const labelCls =
+    "block text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70";
+  const listCls =
+    "mt-1 max-h-44 space-y-1 overflow-y-auto rounded-lg border border-black/[0.08] bg-white p-2";
+  const rowCls =
+    "flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-black/[0.03]";
+  const emptyCls =
+    "mt-1 rounded-lg border border-dashed border-black/[0.10] bg-gray-50/60 px-3 py-2 text-xs text-secondary";
+
+  return (
+    <div className="space-y-3">
+      <input
+        type="search"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Filter tools…"
+        aria-label="Filter tools"
+        className="w-full rounded-lg border border-black/[0.08] bg-white px-3 py-1.5 text-xs text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+      />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label className={labelCls}>Turn tools off</label>
+          {onByDefault.length > 0 ? (
+            <div className={listCls}>
+              {onByDefault.map((t) => (
+                <label key={t.name} className={rowCls} title={t.description}>
+                  <input
+                    type="checkbox"
+                    checked={excluded.has(t.name)}
+                    onChange={() => onToggleExclude(t.name)}
+                    className="h-3.5 w-3.5 accent-primary"
+                  />
+                  <span className="truncate text-foreground">{t.name}</span>
+                </label>
+              ))}
+            </div>
+          ) : (
+            <p className={emptyCls}>No matching default-on tools.</p>
+          )}
+        </div>
+        <div>
+          <label className={labelCls}>
+            Turn extra tools on{" "}
+            <span className="normal-case text-secondary/60">(safe, default-off only)</span>
+          </label>
+          {offAndSafe.length > 0 ? (
+            <div className={listCls}>
+              {offAndSafe.map((t) => (
+                <label key={t.name} className={rowCls} title={t.description}>
+                  <input
+                    type="checkbox"
+                    checked={included.has(t.name)}
+                    onChange={() => onToggleInclude(t.name)}
+                    className="h-3.5 w-3.5 accent-primary"
+                  />
+                  <span className="truncate text-foreground">{t.name}</span>
+                </label>
+              ))}
+            </div>
+          ) : (
+            <p className={emptyCls}>No safe default-off tools to re-enable.</p>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
