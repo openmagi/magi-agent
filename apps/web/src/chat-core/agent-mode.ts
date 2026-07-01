@@ -15,6 +15,16 @@ export interface AgentModeToolDelta {
   include: string[];
 }
 
+/** Permission posture a mode may set for its turns. Mirrors the runtime
+ * `PermissionMode`. `null` = the mode does not override the deployment posture.
+ * A mode can only TIGHTEN approvals (never loosen); hard-safety denies are
+ * unaffected regardless. */
+export type AgentModePermissionMode =
+  | "default"
+  | "acceptEdits"
+  | "bypassPermissions"
+  | "smartApprove";
+
 /** Full mode record as returned by `GET/PUT /v1/app/modes`. */
 export interface AgentMode {
   id: string;
@@ -22,6 +32,7 @@ export interface AgentMode {
   systemPrompt: string;
   toolDelta: AgentModeToolDelta;
   scopedPolicyIds: string[];
+  permissionMode: AgentModePermissionMode | null;
 }
 
 /**
