@@ -32,7 +32,9 @@
     "shortDescription": "Self-host Open Magi as a desktop app.",
     "longDescription": "Open Magi desktop launches a local magi serve runtime and loads its dashboard in a hardened webview, so self-host users double-click an app instead of running a terminal command.",
     "macOS": {
-      "minimumSystemVersion": "10.15"
+      "minimumSystemVersion": "11.0",
+      "hardenedRuntime": true,
+      "entitlements": "entitlements.plist"
     },
     "linux": {
       "deb": {

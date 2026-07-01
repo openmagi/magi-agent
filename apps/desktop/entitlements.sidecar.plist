@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Sidecar entitlements for the bundled PyInstaller `magi` runtime.
+
+  These are applied when the release pipeline deep-signs every Mach-O under
+  binaries/magi/ (the `magi` executable and every .so/.dylib in _internal/)
+  BEFORE `cargo tauri build` bundles the tree into Contents/Resources/magi/.
+  See .github/workflows/desktop-release-macos.yml and README.md.
+
+  A frozen CPython interpreter (PyInstaller onedir) CANNOT run under the macOS
+  Hardened Runtime without these three exceptions; without them the child
+  crashes on launch instead of serving. Each is required and scoped only to the
+  sidecar process, never to the outer shell:
+
+    com.apple.security.cs.allow-jit
+      CPython and several native deps allocate executable memory pages (JIT /
+      trampolines). Hardened Runtime blocks this by default.
+
+    com.apple.security.cs.allow-unsigned-executable-memory
+      PyInstaller's bootloader maps and executes the interpreter and extension
+      code from memory that is not backed by a signed on-disk page. Required or
+      the process is killed with a codesign / hardened-runtime violation.
+
+    com.apple.security.cs.disable-library-validation
+      The onedir _internal/ tree contains many .dylib/.so files that are signed
+      with OUR Developer ID but are not all Apple-notarized-as-a-team libraries;
+      it also dlopen()s plugins at runtime. Library validation would refuse to
+      load dylibs whose Team ID differs, so it must be disabled for this process.
+
+  Security trade-off (documented, accepted): these three relax memory-integrity
+  and library-provenance guarantees FOR THE SIDECAR PROCESS ONLY. This is the
+  standard, unavoidable entitlement set for shipping a notarized frozen-Python
+  binary under Hardened Runtime. The shell (entitlements.plist) keeps the full
+  Hardened Runtime with no exceptions, and the runtime binds loopback only.
+-->
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+  </dict>
+</plist>
