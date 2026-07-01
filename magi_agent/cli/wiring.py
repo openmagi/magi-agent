@@ -243,6 +243,34 @@ class _NullFrameWriter:
         del frame
 
 
+def _agent_mode_excluded_tool_names() -> frozenset[str]:
+    """Tool names the active agent MODE excludes from the turn's toolset.
+
+    Resolved consistently with the system-prompt block: an explicit per-turn
+    selection wins over the operator's stored sticky default. Returns an empty
+    set when no mode is active, the mode is unknown, or on any error (fail-soft
+    ⇒ byte-identical). PR-4d is EXCLUDE-ONLY: a mode may only NARROW the toolset
+    (inherently safe — it can never enable a tool). The ``include`` half
+    (re-enabling a default-off tool) needs the universal hard-safety cap and is
+    a follow-up; it is intentionally NOT applied here.
+    """
+    try:
+        from magi_agent.customize.modes import active_mode_id, get_mode
+        from magi_agent.runtime.per_turn_agent_mode_context import (
+            current_per_turn_agent_mode,
+        )
+
+        mode_id = current_per_turn_agent_mode() or active_mode_id()
+        if not mode_id:
+            return frozenset()
+        mode = get_mode(mode_id)
+        if mode is None:
+            return frozenset()
+        return frozenset(mode.tool_delta.exclude)
+    except Exception:
+        return frozenset()
+
+
 def build_headless_runtime(
     *,
     cwd: str | os.PathLike[str] | None = None,
@@ -820,6 +848,21 @@ def _build_first_party_adk_tools(
             and _cli_tool_allowed_for_mode(registration.manifest, mode=mode)
         )
     )
+
+    # PR-4d: an active agent mode may NARROW the toolset (exclude default-ON
+    # tools — e.g. a review mode = read-only). Exclude-only is inherently safe
+    # (a mode can only REMOVE tools, never enable one); include (re-enabling a
+    # default-off tool) needs the universal hard-safety cap and is a follow-up.
+    # Applied BEFORE the snapshot + spawn cap below so they reflect the narrowed
+    # set. Byte-identical when no mode is active / the mode has no exclusions.
+    # Resolved once per runtime build: on the serve path each turn rebuilds (the
+    # per-turn ContextVar is set before build), so it is effectively per-turn; a
+    # persistent TUI would re-narrow only on rebuild (tool binding is build-time).
+    _mode_excluded_tools = _agent_mode_excluded_tool_names()
+    if _mode_excluded_tools:
+        exposed_tool_names = tuple(
+            name for name in exposed_tool_names if name not in _mode_excluded_tools
+        )
 
     # Capture parent tool names once at factory-build time (mirrors spawn_depth
     # threading: a stable value known at construction is closed over and threaded
