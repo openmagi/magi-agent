@@ -1510,6 +1510,11 @@ class RealLocalChildRunner:
         # default-OFF attachment seam and is out of scope here.
         """
         from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+        from magi_agent.runtime.child_bash import (  # noqa: PLC0415
+            ChildBashSandbox,
+            child_bash_sandbox_enabled,
+            wrap_child_bash_tool,
+        )
         from magi_agent.runtime.child_toolset import (  # noqa: PLC0415
             toolset_allowlist,
         )
@@ -1519,7 +1524,10 @@ class RealLocalChildRunner:
             collector = self._evidence_collector if self._tools else None
             return list(self._tools), collector
 
-        allowlist = toolset_allowlist(self._toolset_profile)  # () | names | None
+        # PR-S: pass the runner's env so the readonly allowlist can expand to
+        # include ``Bash`` when MAGI_CHILD_BASH_SANDBOX_ENABLED is on. Tests
+        # flip the flag deterministically without touching os.environ.
+        allowlist = toolset_allowlist(self._toolset_profile, env=self._env)  # () | names | None
         if allowlist == ():
             # ``none`` profile — historical text-only child (empty toolset). No
             # collector is built so the no-toolset path stays byte-identical.
@@ -1529,6 +1537,16 @@ class RealLocalChildRunner:
         # FIRST so it can be wired into the tools and queried after the turn.
         collector = self._evidence_collector or self._build_evidence_collector()
         tools = self._build_core_tools(session_id, collector)
+
+        # PR-S: when the sandbox flag is ON, swap the built-in ``Bash`` ADK
+        # tool's ``func`` for a sandboxed callable BEFORE any name-filtering
+        # happens. Byte-identical when the flag is OFF (the wrap is skipped
+        # entirely). When ON the child sees ``Bash`` under the same name it
+        # learned from parent-symmetric training, but hits the allowlist +
+        # tempdir + env-stripped surface instead of the parent gate5b Bash.
+        if child_bash_sandbox_enabled(self._env):
+            tools = wrap_child_bash_tool(tools, sandbox=ChildBashSandbox())
+
         if allowlist is None:
             # ``full`` profile — forward the whole toolset.
             profile_tools: list[object] = list(tools)
