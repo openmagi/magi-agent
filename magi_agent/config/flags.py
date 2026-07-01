@@ -3010,6 +3010,36 @@ FLAGS: tuple[FlagSpec, ...] = (
             "attempt budget instead of killing the whole turn. Default-OFF."
         ),
     ),
+    # PR-R: soft-fail unknown-tool as a tool_result so the model can retry.
+    # Profile-aware default-ON (``_pb`` / ``flag_profile_bool``): ON in the
+    # full runtime profile, OFF under ``MAGI_RUNTIME_PROFILE`` in
+    # ``safe``/``eval``/``minimal``/``conservative``/``off`` so the safe
+    # profile still yields an empty loop-resilience plane (mirrors
+    # ``MAGI_EDIT_FUZZY_MATCH_ENABLED`` / ``MAGI_EDIT_FORMAT_ON_WRITE_ENABLED``).
+    # The retry pool is bounded by the toolset the runtime already advertises
+    # (unknown tool -> corrective dict lists the exposed tools; model must
+    # pick one of THOSE, cannot escalate authority), and the corrective error
+    # text is information-identical to what ADK already raises today (no new
+    # public info). Opt out on the full profile via ``=0``; opt IN under safe
+    # via an explicit ``=1``.
+    _pb(
+        "MAGI_TOOL_NOT_FOUND_SOFT_FAIL",
+        summary=(
+            "Convert Google ADK's ``ValueError('Tool '<name>' not found. "
+            "Available tools: ...')`` raise into a model-visible corrective "
+            "tool_result carrying the requested tool name plus the parsed "
+            "available-tools list, so the model can pick a valid tool on the "
+            "next iteration instead of the child turn dying with "
+            "llm_call_exception. Retry policy is delegated to the model plus "
+            "the runtime's turn-level iteration cap (Claude Code / OpenAI "
+            "Agents SDK / OpenCode parity); no per-tool retry cap is imposed "
+            "by default. Operators may opt in to a per-invocation cap via "
+            "``MAGI_TOOL_NOT_FOUND_ATTEMPT_CAP=N`` (N >= 1); default ``0`` "
+            "means unlimited. Default-ON in the full runtime profile, OFF "
+            "under ``MAGI_RUNTIME_PROFILE`` in "
+            "safe/eval/minimal/conservative/off."
+        ),
+    ),
     _b(
         "MAGI_TOOL_SCHEMA_FEEDBACK_ENABLED",
         summary=(

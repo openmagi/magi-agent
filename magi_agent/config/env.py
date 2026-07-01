@@ -243,6 +243,77 @@ def parse_tool_exception_reflection_env(
     return ToolExceptionReflectionEnv(enabled=enabled, max_attempts=max_attempts)
 
 
+# PR-R: single source of truth for the tool-not-found soft-fail flags. When
+# enabled, the ADK ``ValueError("Tool '<name>' not found. Available tools: ...")``
+# raise is converted into a model-visible corrective tool_result carrying the
+# original error text plus the parsed available-tools list, so the model can
+# pick a valid tool on the next iteration instead of the child turn dying with
+# ``llm_call_exception``. Retry policy is delegated to the model plus the
+# runtime's turn-level iteration cap (Claude Code / OpenAI Agents SDK /
+# OpenCode parity); this module intentionally does NOT hard-code an "n
+# retries then hard-fail" rule. Default-ON: the retry pool is bounded by the
+# toolset the runtime already advertises, and the error text is
+# information-identical to what ADK raises today, so no new public info is
+# surfaced. Flag routed through the typed flag registry
+# (``MAGI_TOOL_NOT_FOUND_SOFT_FAIL`` in ``config.flags``).
+#
+# ``MAGI_TOOL_NOT_FOUND_ATTEMPT_CAP`` is an opt-in operator escape hatch: the
+# default value is ``0`` (interpreted as unlimited, so the plugin never
+# hard-fails the corrective path itself). When and only when the operator
+# explicitly sets it to N >= 1 does the plugin enforce a per-invocation
+# cap; the numeric is only used when the soft-fail feature is enabled, so a
+# malformed value on an OFF runtime never raises.
+TOOL_NOT_FOUND_SOFT_FAIL_ENV = "MAGI_TOOL_NOT_FOUND_SOFT_FAIL"
+TOOL_NOT_FOUND_ATTEMPT_CAP_ENV = "MAGI_TOOL_NOT_FOUND_ATTEMPT_CAP"
+# ``0`` = unlimited (default). Only values >= 1 opt in to an operator-imposed
+# cap; the semantic path never terminates on cap unless the operator sets it.
+_TOOL_NOT_FOUND_ATTEMPT_CAP_DEFAULT = 0
+
+
+@dataclass(frozen=True)
+class ToolNotFoundSoftFailEnv:
+    enabled: bool = True
+    # ``0`` = unlimited (default; retry policy delegated to the model + the
+    # runtime's turn-level iteration cap). ``>= 1`` = operator-imposed per-
+    # invocation cap.
+    attempt_cap: int = _TOOL_NOT_FOUND_ATTEMPT_CAP_DEFAULT
+
+
+def parse_tool_not_found_soft_fail_env(
+    env: Mapping[str, str],
+) -> ToolNotFoundSoftFailEnv:
+    """Resolve the tool-not-found soft-fail policy from ``env`` (profile-aware default-ON).
+
+    Delegates to :func:`flag_profile_bool` so the gate is ON in the full
+    runtime profile but OFF under ``MAGI_RUNTIME_PROFILE`` in
+    ``safe``/``eval``/``minimal``/``conservative``/``off`` (mirrors
+    ``parse_edit_format_on_write_env``); an explicit ``=1`` opts in under
+    those profiles and an explicit ``=0`` opts out under the full profile.
+
+    ``MAGI_TOOL_NOT_FOUND_ATTEMPT_CAP`` is optional. The default (``0``)
+    means unlimited: the plugin never terminates the corrective path itself,
+    delegating retry policy to the model + the runtime's turn-level
+    iteration cap. An operator opts in by setting the env to a value ``>= 1``;
+    a negative or otherwise out-of-range value raises ``RuntimeEnvError`` at
+    parse so an operator fails loud at startup. The numeric is only surfaced
+    when the soft-fail feature is enabled, so a malformed numeric on an OFF
+    runtime never raises.
+    """
+    from .flags import flag_profile_bool  # noqa: PLC0415
+
+    enabled = flag_profile_bool(TOOL_NOT_FOUND_SOFT_FAIL_ENV, env=env)
+    attempt_cap = _int_env(
+        env,
+        TOOL_NOT_FOUND_ATTEMPT_CAP_ENV,
+        _TOOL_NOT_FOUND_ATTEMPT_CAP_DEFAULT,
+    )
+    if enabled and attempt_cap < 0:
+        raise RuntimeEnvError(
+            f"{TOOL_NOT_FOUND_ATTEMPT_CAP_ENV} must be >= 0 (0 = unlimited)"
+        )
+    return ToolNotFoundSoftFailEnv(enabled=enabled, attempt_cap=attempt_cap)
+
+
 # WS9 PR9a: single source of truth for the MCP resilience flags. The bool gate
 # routes through the typed flag registry (``flag_bool`` against the registered
 # ``MAGI_MCP_RESILIENCE_ENABLED`` FlagSpec); the six numerics are read with
