@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Shared chrome for the Guided policy wizards (PR-E3).
+ * Shared chrome for the Guided rule wizard (PR-E3).
  *
  * One header + progress-bar + back/next/save row + ``RadioCard``
  * primitive that every per-kind sub-wizard reuses, so all wizards share
@@ -31,7 +31,7 @@ export interface WizardChromeProps {
   /** Step body content. */
   children: React.ReactNode;
   /** Wrap the section with an ARIA label so screen-readers announce
-   *  "Guided policy wizard, step N / M". */
+   *  "Guided rule wizard, step N / M". */
   ariaLabel?: string;
   /** PR-F-HANDOFF — when provided, the chrome renders a persistent
    *  "Continue in NL" button in the nav row that switches the operator
@@ -55,7 +55,7 @@ export function WizardChrome({
   saving,
   error,
   children,
-  ariaLabel = "Guided policy wizard",
+  ariaLabel = "Guided rule wizard",
   onContinueInNl,
 }: WizardChromeProps): React.ReactElement {
   const isFirst = step === 0;
@@ -118,7 +118,7 @@ export function WizardChrome({
             disabled={saving || !canAdvance}
             className="inline-flex items-center rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {saving ? "Saving…" : "Save policy"}
+            {saving ? "Saving…" : "Save rule"}
           </button>
         ) : (
           <button
