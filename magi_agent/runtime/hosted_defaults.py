@@ -73,6 +73,11 @@ _C3_RESILIENCE_OVERLAY: Mapping[str, str] = {
     # WS5 PR5a: re-invoke once on a tools-ran-but-silent turn (recovery helpers
     # already wired; flipped ON from the resilience stage up).
     "MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED": "1",
+    # WS9 PR9c: MCP connection resilience for the live composio seam. Pure
+    # in-memory breaker + timeout (no PVC / persistence), accuracy-neutral, so it
+    # wires at the resilience stage with no sign-off dependency. Flipping it ON
+    # for the hosted fleet still follows the standard image-bump + canary drill.
+    "MAGI_MCP_RESILIENCE_ENABLED": "1",
     "MAGI_MAX_STEPS_BRAKE_ENABLED": "1",
 }
 
