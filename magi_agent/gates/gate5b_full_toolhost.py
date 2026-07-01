@@ -414,6 +414,20 @@ _LEGACY_TOOL_INPUT_SCHEMA: dict[str, object] = {
     "additionalProperties": True,
 }
 
+# The legacy tool inputSchema is intentionally open ({type:object,
+# additionalProperties:True}), so some ADK providers nest the real call args
+# under a single top-level ``arguments`` key instead of passing them flat. When
+# that happens the flat handlers (``args.get("path")`` etc.) silently see no
+# path and no-op the write. Unwrap that envelope BEFORE dispatch reads the args.
+#
+# Conservative: only unwrap when ``arguments`` is the SOLE key and its value is a
+# mapping. A flat call (path/content already at top level) is byte-identical.
+def _unwrap_arguments_envelope(args: dict[str, object]) -> dict[str, object]:
+    if set(args.keys()) == {"arguments"} and isinstance(args["arguments"], Mapping):
+        return dict(args["arguments"])
+    return args
+
+
 _SAFE_ENVIRONMENTS = frozenset({"local", "development", "staging", "production"})
 _DIGEST_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
 _SENSITIVE_PATH_PART_RE = re.compile(
@@ -1075,6 +1089,7 @@ class Gate5BFullToolHost:
         tool_call_id: str,
     ) -> Gate5BFullToolOutcome:
         args = dict(arguments or {})
+        args = _unwrap_arguments_envelope(args)
         tool_call_digest = _digest({"tool": tool_name, "id": tool_call_id})
         argument_digest = _digest(args)
         tool_event_id = _gate5b_live_tool_event_id(tool_call_digest)
