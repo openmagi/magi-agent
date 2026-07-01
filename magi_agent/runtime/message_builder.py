@@ -642,8 +642,14 @@ def _agent_mode_block() -> str:
     """
     try:
         from magi_agent.customize.modes import active_mode_id, get_mode
+        from magi_agent.runtime.per_turn_agent_mode_context import (
+            current_per_turn_agent_mode,
+        )
 
-        mode_id = active_mode_id()
+        # An explicit per-send selection (chat request ``agentMode``) WINS over
+        # the operator's stored sticky default; fall back to the stored active
+        # mode when the request did not specify one.
+        mode_id = current_per_turn_agent_mode() or active_mode_id()
         if not mode_id:
             return ""
         mode = get_mode(mode_id)
