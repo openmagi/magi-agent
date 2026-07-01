@@ -766,3 +766,38 @@ def test_life4b_firesat_slots_listed_in_FIRES_AT():
     assert "on_task_complete" in FIRES_AT
     assert "on_session_start" in FIRES_AT
     assert "on_session_end" in FIRES_AT
+
+
+# --- PR-D0: reference-safe custom-rule id validation --------------------------
+
+
+def test_id_absent_is_valid():
+    # The transport backfills cr_<uuid> when absent, so a rule with no id is
+    # valid at the validator layer.
+    assert "id" not in _det()
+    assert validate_custom_rule(_det()) == []
+
+
+def test_valid_ids_accepted():
+    for rid in ("cr_abc", "block-secrets", "rule-001", "cr_" + "a1b2c3d4" * 4):
+        assert validate_custom_rule(_det(id=rid)) == [], rid
+
+
+def test_id_with_colon_rejected():
+    errs = validate_custom_rule(_det(id="custom_rule:foo"))
+    assert any(e.startswith("id must be") for e in errs), errs
+
+
+def test_id_with_whitespace_rejected():
+    assert any(e.startswith("id must be") for e in validate_custom_rule(_det(id="a b")))
+
+
+def test_empty_or_nonstring_id_rejected():
+    assert any(e.startswith("id must be") for e in validate_custom_rule(_det(id="")))
+    assert any(e.startswith("id must be") for e in validate_custom_rule(_det(id=123)))
+
+
+def test_id_length_boundary_matches_frontend_contract():
+    # 128 chars accepted (matches the guided-wizard Policy-ID max), 129 rejected.
+    assert validate_custom_rule(_det(id="a" * 128)) == []
+    assert any(e.startswith("id must be") for e in validate_custom_rule(_det(id="a" * 129)))

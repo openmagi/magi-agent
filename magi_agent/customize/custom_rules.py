@@ -19,6 +19,17 @@ from magi_agent.customize.what_menu import allowed_actions_for, is_known_ref
 
 CRITERION_MAX = 2000
 
+# A custom rule's ``id`` (when the client supplies one) must be a reference-safe
+# token: no ``:`` (the ``custom_rule:<id>`` prefix separator used by mode
+# scoped_policy_ids and the dashboard's unified policy index), no whitespace,
+# bounded length. The transport backfills ``cr_<uuid.hex>`` when absent, which
+# conforms. Validating a supplied id keeps ``custom_rule:<id>`` referencing
+# unambiguous. The length bound matches the guided-wizard Policy-ID contract
+# (frontend ``^[a-z0-9][a-z0-9_-]{0,127}$``) so a UI-authored id never round-trips
+# to a 400; the char class is a touch wider (allows uppercase) to accept any
+# pre-existing ids.
+_RULE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
+
 SCOPES = frozenset({"always", "coding", "research", "delivery", "memory", "task"})
 KINDS = frozenset(
     {
@@ -382,6 +393,17 @@ def validate_custom_rule(rule: Any) -> list[str]:
     errors: list[str] = []
     if not isinstance(rule, dict):
         return ["rule must be an object"]
+
+    # Optional ``id``: absent is valid (the transport backfills ``cr_<uuid>``).
+    # When present it must be a reference-safe token so ``custom_rule:<id>``
+    # (mode scoped_policy_ids + the dashboard unified index) parses unambiguously.
+    if "id" in rule:
+        rid = rule.get("id")
+        if not isinstance(rid, str) or _RULE_ID_RE.fullmatch(rid) is None:
+            errors.append(
+                "id must be a token matching [A-Za-z0-9][A-Za-z0-9_-]{0,127} "
+                "(no ':' or whitespace) when provided"
+            )
 
     scope = rule.get("scope")
     if scope not in SCOPES:
