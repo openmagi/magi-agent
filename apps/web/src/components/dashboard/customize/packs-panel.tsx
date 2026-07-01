@@ -1,0 +1,170 @@
+"use client";
+
+/**
+ * PacksPanel (PR-P3): read-only "what's in each installed pack" view.
+ *
+ * Round-2 gap 1: the Packs tab used to show only a pack id ("packs:
+ * openmagi.research") with no way to see what it contributes. This lists the
+ * installed packs (first-party + user) and, per pack, groups its `provides`
+ * refs under friendly category labels (Rules / Behaviors / Tools / …) so the
+ * operator can see the contents at a glance. Enable/disable is a follow-up;
+ * this is read-only (the `enabled` badge reflects the resolved runtime state).
+ */
+
+import React, { useEffect, useMemo, useState } from "react";
+import { Layers, Check } from "lucide-react";
+
+import { useAgentFetch } from "@/lib/local-api";
+import { getPacks, type PackInfo, type PackProvide } from "@/lib/packs-api";
+
+/** Map the 12 ProvidesType kinds to the operator-facing category vocabulary. */
+const PROVIDE_CATEGORY: Record<string, string> = {
+  tool: "Tools",
+  validator: "Rules",
+  harness: "Rules",
+  control_plane: "Behaviors",
+  callback: "Behaviors",
+  loop_policy: "Behaviors",
+  schedule_policy: "Behaviors",
+  memory_strategy: "Behaviors",
+  evidence_producer: "Evidence",
+  recipe: "Recipes",
+  connector: "Connectors",
+  role: "Roles",
+};
+
+function categoryOf(type: string): string {
+  return PROVIDE_CATEGORY[type] ?? "Other";
+}
+
+function groupProvides(provides: PackProvide[]): [string, PackProvide[]][] {
+  const groups = new Map<string, PackProvide[]>();
+  for (const p of provides) {
+    const cat = categoryOf(p.type);
+    const bucket = groups.get(cat);
+    if (bucket) bucket.push(p);
+    else groups.set(cat, [p]);
+  }
+  return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+}
+
+export function PacksPanel(): React.ReactElement {
+  const agentFetch = useAgentFetch();
+  const [packs, setPacks] = useState<PackInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getPacks(agentFetch)
+      .then((resp) => setPacks(resp.packs))
+      .catch((err: unknown) =>
+        setError(err instanceof Error ? err.message : "Failed to load packs"),
+      )
+      .finally(() => setLoading(false));
+  }, [agentFetch]);
+
+  const firstParty = useMemo(() => packs.filter((p) => p.origin === "first_party"), [packs]);
+  const user = useMemo(() => packs.filter((p) => p.origin === "user"), [packs]);
+
+  if (loading) {
+    return (
+      <div className="flex h-24 items-center justify-center text-sm text-secondary">
+        Loading packs…
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="rounded-lg border border-red-500/25 bg-red-500/[0.06] px-3 py-2 text-xs text-red-600">
+        {error}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      <p className="text-xs leading-relaxed text-secondary">
+        Installed packs and what each contributes. A pack bundles rules,
+        behaviors, tools, and more; expand one to see its contents. Disabled
+        packs contribute nothing this turn.
+      </p>
+
+      {user.length > 0 ? (
+        <PackGroup title="Your packs" packs={user} />
+      ) : null}
+      <PackGroup title="First-party" packs={firstParty} />
+
+      {packs.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-black/[0.10] bg-gray-50/80 px-4 py-6 text-center text-xs text-secondary">
+          No packs installed.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function PackGroup({ title, packs }: { title: string; packs: PackInfo[] }): React.ReactElement | null {
+  if (packs.length === 0) return null;
+  return (
+    <div className="space-y-2">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+        {title} ({packs.length})
+      </p>
+      {packs.map((pack) => (
+        <PackCard key={pack.packId} pack={pack} />
+      ))}
+    </div>
+  );
+}
+
+function PackCard({ pack }: { pack: PackInfo }): React.ReactElement {
+  const groups = groupProvides(pack.provides);
+  return (
+    <details className="rounded-xl border border-black/[0.06] bg-white px-4 py-3">
+      <summary className="flex cursor-pointer items-center gap-2">
+        <Layers className="h-4 w-4 shrink-0 text-primary" />
+        <span className="truncate text-sm font-semibold text-foreground">{pack.displayName}</span>
+        {pack.enabled ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
+            <Check className="h-3 w-3" /> enabled
+          </span>
+        ) : (
+          <span className="rounded-full bg-black/5 px-2 py-0.5 text-[10px] font-medium text-secondary">
+            disabled
+          </span>
+        )}
+        <span className="ml-auto shrink-0 text-[11px] text-secondary/70">
+          {pack.provides.length} item{pack.provides.length === 1 ? "" : "s"}
+        </span>
+      </summary>
+      <p className="mt-1 font-mono text-[10px] text-secondary/70">{pack.packId}</p>
+      {pack.description ? (
+        <p className="mt-1 text-xs leading-relaxed text-secondary">{pack.description}</p>
+      ) : null}
+      {groups.length > 0 ? (
+        <div className="mt-3 space-y-2">
+          {groups.map(([cat, entries]) => (
+            <div key={cat}>
+              <p className="text-[11px] font-semibold text-foreground">
+                {cat} <span className="text-secondary/60">({entries.length})</span>
+              </p>
+              <div className="mt-1 flex flex-wrap gap-1">
+                {entries.map((e) => (
+                  <span
+                    key={`${e.type}:${e.ref}`}
+                    title={e.type}
+                    className="rounded border border-secondary/15 bg-secondary/[0.04] px-1.5 py-0.5 font-mono text-[10px] text-secondary/80"
+                  >
+                    {e.ref}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-2 text-xs text-secondary/70">This pack contributes nothing directly.</p>
+      )}
+    </details>
+  );
+}
