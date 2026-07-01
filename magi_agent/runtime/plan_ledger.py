@@ -26,8 +26,6 @@ wiring only when ``MAGI_PLAN_LEDGER_DURABLE_ENABLED`` is ON.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 import os
 import re
@@ -37,6 +35,7 @@ from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from magi_agent.ops.safety import canonical_digest
 from magi_agent.tools.todo_toolhost import _VALID_TODO_STATUSES, _normalize_todos
 
 
@@ -101,13 +100,13 @@ def _coerce_items(todos: object) -> tuple[TodoItem, ...]:
 
 
 def _snapshot_digest(items: tuple[TodoItem, ...]) -> str:
-    payload = json.dumps(
-        [{"content": item.content, "status": item.status} for item in items],
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
+    # Content-address via the single canonical helper (C-5, ops/safety.py) rather
+    # than a forked json.dumps + sha256 (guarded by test_no_forked_digest). The
+    # ordered item list is wrapped in a mapping since canonical_digest takes a
+    # Mapping; the digest carries the same "sha256:" prefix shape.
+    return canonical_digest(
+        {"items": [{"content": item.content, "status": item.status} for item in items]}
     )
-    return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 class PlanLedgerStore:
