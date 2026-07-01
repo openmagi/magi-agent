@@ -1778,7 +1778,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         scope="public",
         stage="stage2",
     ),
-    _b(
+    _pb(
         "MAGI_CUSTOMIZE_NL_MODE_COMPILER_ENABLED",
         summary=(
             "Enable the POST /v1/app/modes/compile endpoint: an NL → agent-mode "
@@ -1792,8 +1792,9 @@ FLAGS: tuple[FlagSpec, ...] = (
             "activates by hitting PUT /v1/app/modes/{id}. Registration-time "
             "only (never on the runtime hot path). Requires a configured "
             "provider/key; fail-open (returns ok=False) when no model is "
-            "available. Strict default-OFF; lab opts in via "
-            "LAB_EXPERIMENTAL_FLAGS."
+            "available. Profile-aware default-ON (this is a capability, not a "
+            "safety floor): ON in the normal/full profile, OFF only under the "
+            "quiet safe/eval/minimal profiles; opt out anywhere with '0'."
         ),
         scope="public",
         stage="stage2",

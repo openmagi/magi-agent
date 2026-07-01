@@ -99,14 +99,16 @@ def _is_nl_rule_compiler_enabled() -> bool:
 def _is_nl_mode_compiler_enabled() -> bool:
     """Read ``MAGI_CUSTOMIZE_NL_MODE_COMPILER_ENABLED`` defensively (PR-U3.4).
 
-    Gates ``POST /v1/app/modes/compile``: the NL → agent-mode compiler.
-    Mirrors the NL-rule compiler gate: strict default-OFF, kill-switch, lab
-    opts in. Registration-time only; fail-open when no model is available.
+    Gates ``POST /v1/app/modes/compile``: the NL → agent-mode compiler. This is
+    a fail-open capability (not a safety floor), so it is profile-aware
+    default-ON: ON in the normal/full profile, OFF only under the quiet
+    safe/eval/minimal profiles, and opt-out anywhere with ``0``.
+    Registration-time only; fail-open when no model is available.
     """
     try:
-        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+        from magi_agent.config.flags import flag_profile_bool  # noqa: PLC0415
 
-        return flag_bool("MAGI_CUSTOMIZE_NL_MODE_COMPILER_ENABLED")
+        return flag_profile_bool("MAGI_CUSTOMIZE_NL_MODE_COMPILER_ENABLED")
     except Exception:  # noqa: BLE001
         return False
 

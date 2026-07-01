@@ -1,7 +1,7 @@
 """PR-U3.4: HTTP route tests for the NL → agent-mode compile endpoint.
 
-Route: POST /v1/app/modes/compile  (default-OFF gated by
-MAGI_CUSTOMIZE_NL_MODE_COMPILER_ENABLED). Auth ALWAYS fires before the flag
+Route: POST /v1/app/modes/compile  (profile-aware default-ON; opt out with
+MAGI_CUSTOMIZE_NL_MODE_COMPILER_ENABLED=0). Auth ALWAYS fires before the flag
 check: an unauthenticated probe must never reveal flag state.
 """
 
@@ -89,21 +89,49 @@ def _client(*, with_token: bool = True) -> TestClient:
     return client
 
 
+def _disable(monkeypatch) -> None:
+    # The flag is profile-aware default-ON, so "disabled" means an explicit
+    # opt-out ("0"), which wins in every profile.
+    monkeypatch.setenv("MAGI_CUSTOMIZE_NL_MODE_COMPILER_ENABLED", "0")
+
+
 def test_route_requires_auth_even_when_flag_off(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
-    monkeypatch.delenv("MAGI_CUSTOMIZE_NL_MODE_COMPILER_ENABLED", raising=False)
+    _disable(monkeypatch)
     resp = _client(with_token=False).post(
         "/v1/app/modes/compile", json={"nlText": "a reviewer"}
     )
     assert resp.status_code == 401
 
 
-def test_route_disabled_when_flag_off(tmp_path, monkeypatch) -> None:
+def test_route_disabled_when_explicitly_opted_out(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
-    monkeypatch.delenv("MAGI_CUSTOMIZE_NL_MODE_COMPILER_ENABLED", raising=False)
+    _disable(monkeypatch)
     resp = _client().post("/v1/app/modes/compile", json={"nlText": "a reviewer"})
     assert resp.status_code == 200
     assert resp.json() == {"ok": False, "error": "nl-mode compiler disabled"}
+
+
+def test_route_default_on_in_full_profile(tmp_path, monkeypatch) -> None:
+    # Profile-aware default-ON: with the flag UNSET in the normal/full profile
+    # the endpoint is live (no explicit opt-in needed). Verifies the ON path.
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
+    monkeypatch.setenv("MAGI_RUNTIME_PROFILE", "full")
+    monkeypatch.delenv("MAGI_CUSTOMIZE_NL_MODE_COMPILER_ENABLED", raising=False)
+
+    import magi_agent.transport.customize as customize_transport
+
+    monkeypatch.setattr(
+        customize_transport,
+        "_resolve_nl_mode_compile_factory",
+        lambda body: _factory_for(_VALID_RESPONSE),
+    )
+    resp = _client().post("/v1/app/modes/compile", json={"nlText": "a reviewer"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    # Not the disabled response: the compiler actually ran.
+    assert body["ok"] is True
+    assert body["draft"]["displayName"] == "Careful reviewer"
 
 
 def test_route_rejects_missing_nl_text(tmp_path, monkeypatch) -> None:
