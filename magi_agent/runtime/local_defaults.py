@@ -117,6 +117,27 @@ LOCAL_FULL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     "MAGI_DURABLE_STARTUP_RECOVERY_ENABLED": "1",
     # The durable work-queue dispatcher tick loop that re-runs reclaimed tasks.
     "MAGI_WORK_QUEUE_EXECUTOR_ENABLED": "1",
+    # WS3 PR3c: durable cross-turn plan/todo ledger + evidence-first goal
+    # completion, activated for the full local (self-host) profile.
+    # MAGI_PLAN_LEDGER_DURABLE_ENABLED appends each TodoWrite full-snapshot to
+    # <workspace_root>/.magi/durable/plan_ledger/<session_id>.jsonl and re-seeds
+    # the in-memory todo list on the next per-turn handler-set build, so a
+    # multi-step plan survives turns and process restarts (the index half stays
+    # a no-op until WS1's durable store is injected).
+    # MAGI_GOAL_COMPLETION_EVIDENCE_FIRST_ENABLED activates the deterministic
+    # pre-judge resolver: an all-complete durable ledger short-circuits to
+    # ``done`` and a clean stop short of verifiable completion emits an honest
+    # ``goal_paused`` (SEAM 2, hoisted outside the goal-loop guard, so it is
+    # reachable with the lab judge loop OFF and adds ZERO model calls).
+    # MAGI_GOAL_LOOP_ENABLED is deliberately NOT seeded here: promoting the
+    # cost-bearing judge continuation loop from lab (LAB_EXPERIMENTAL_FLAGS) to
+    # the full default changes per-turn latency/cost and is a separate decision,
+    # not part of WS3. MAGI_GOAL_NUDGE_REQUIRED_EVIDENCE stays unset globally so
+    # free-form chat is never forced to provide evidence (it is recipe-scoped).
+    # Safe / eval / off profiles keep all WS3 flags OFF; the registry defaults
+    # stay default-OFF so a fresh import is byte-identical.
+    "MAGI_PLAN_LEDGER_DURABLE_ENABLED": "1",
+    "MAGI_GOAL_COMPLETION_EVIDENCE_FIRST_ENABLED": "1",
     # PR-04-PR2: --resume/--continue rehydration. Stage-1 OFF ("0") safety net;
     # depends on the session-log write path above, so a later release stages both
     # on together.
