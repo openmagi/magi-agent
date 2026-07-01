@@ -7,16 +7,24 @@ const src = readFileSync(
 );
 
 describe("CustomizeHub — Policy unification (PR-E1)", () => {
-  it("keeps the rules / guidance / tools / recipes / hooks sub-nav (deep-link compat)", () => {
+  it("keeps the rules / modes / tools / behaviors / recipes / hooks sub-nav (deep-link compat)", () => {
     expect(src).toContain('"rules"');
-    expect(src).toContain('"guidance"');
     expect(src).toContain('"tools"');
     expect(src).toContain('"recipes"');
     expect(src).toContain('"hooks"');
+    // Guidance merged into the capability "behaviors" tab (PR-U2); it renders
+    // GuidancePanel + BehaviorsPanel under one section.
+    expect(src).toContain('"behaviors"');
+    expect(src).toContain("GuidancePanel");
+    expect(src).toContain("BehaviorsPanel");
   });
 
-  it("renames the Rules section label to 'Policies' (unified terminology)", () => {
-    expect(src).toContain('label: "Policies"');
+  it("labels the enforcement section 'Rules' and the pack section 'Packs' (region terminology)", () => {
+    expect(src).toContain('label: "Rules"');
+    expect(src).toContain('label: "Packs"');
+    // the section ids stay stable so deep-links / routes are unaffected
+    expect(src).toContain('id: "rules"');
+    expect(src).toContain('id: "recipes"');
   });
 
   it("mounts the unified PoliciesTable, Reusable Evidence + Conditions sub-tabs", () => {
