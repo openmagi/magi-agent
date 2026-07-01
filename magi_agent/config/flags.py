@@ -299,6 +299,18 @@ FLAGS: tuple[FlagSpec, ...] = (
             "unexpected ref leakage) without redeploying a debug wheel."
         ),
     ),
+    _b(
+        "MAGI_CHILD_BASH_SANDBOX_ENABLED",
+        summary=(
+            "Expose a sandboxed Bash tool to the child readonly toolset. PR-N "
+            "excluded Bash from the child toolset because the parent gate5b "
+            "Bash inherits provider keys and workspace-write authority; this "
+            "flag opts back in behind a curated command allowlist, a per-turn "
+            "tempdir cwd, env-key stripping (no MAGI_/OPENAI_/ANTHROPIC_/"
+            "GEMINI_ leakage), and a 30s wall-clock timeout. Strict default-"
+            "OFF: OFF keeps the child readonly toolset byte-identical to PR-N."
+        ),
+    ),
     FlagSpec(
         name="MAGI_TRACE_LOG_PATH",
         default="",
@@ -660,7 +672,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_RECIPE_AS_CODE_ENABLED",
         summary=(
             "Activate code-computed recipe packs: a recipe provides-entry may "
-            "carry spec_callable=\"module.path:provide_recipe\" whose callable "
+            'carry spec_callable="module.path:provide_recipe" whose callable '
             "returns a RecipePackManifest (or dict). OFF drops such entries at "
             "load time (callable never imported, discovery byte-identical). ON "
             "imports + invokes the callable ONCE at registration, then applies "
@@ -733,8 +745,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         scope="public",
         stage="stage1",
         summary=(
-            "Per-call wall-clock timeout (ms) for the PythonExec tool; "
-            "clamped to 1000-120000."
+            "Per-call wall-clock timeout (ms) for the PythonExec tool; clamped to 1000-120000."
         ),
         kind="int",
     ),
@@ -744,8 +755,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         scope="public",
         stage="stage1",
         summary=(
-            "Head+tail output cap per stream (bytes) for PythonExec results; "
-            "clamped to 1024-65536."
+            "Head+tail output cap per stream (bytes) for PythonExec results; clamped to 1024-65536."
         ),
         kind="int",
     ),
@@ -1059,8 +1069,8 @@ FLAGS: tuple[FlagSpec, ...] = (
     _b(
         "MAGI_PROMPT_REDFLAGS_ENABLED",
         summary=(
-            "Append the <red_flags> anti-rationalization prompt block (\"this "
-            "thought means stop and correct course\" table) in "
+            'Append the <red_flags> anti-rationalization prompt block ("this '
+            'thought means stop and correct course" table) in '
             "build_cli_instruction."
         ),
     ),
@@ -2046,8 +2056,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         scope="public",
         stage="stage2",
         summary=(
-            "Working steps between facts surveys (>= 1; a non-positive value "
-            "disables the control)."
+            "Working steps between facts surveys (>= 1; a non-positive value disables the control)."
         ),
         kind="int",
     ),
@@ -2432,7 +2441,6 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
-
     # --- Document agentic authoring (I-4 batch 3) ---------------------------
     FlagSpec(
         name="MAGI_DOCUMENT_AGENTIC_MODEL",
@@ -2463,10 +2471,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         default=90,
         scope="public",
         stage="stage1",
-        summary=(
-            "litellm ``timeout`` (seconds) for the agentic document writer "
-            "(default 90)."
-        ),
+        summary=("litellm ``timeout`` (seconds) for the agentic document writer (default 90)."),
         kind="int",
     ),
     # --- Work-queue store paths (I-4 batch 3) -------------------------------
@@ -2529,10 +2534,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         default=2,
         scope="public",
         stage="stage1",
-        summary=(
-            "Maximum suppress-and-retry attempts for the withholding "
-            "buffer (default 2)."
-        ),
+        summary=("Maximum suppress-and-retry attempts for the withholding buffer (default 2)."),
         kind="int",
     ),
     _b(
@@ -2672,10 +2674,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         default="168.0",
         scope="public",
         stage="stage1",
-        summary=(
-            "Hours between skill-curator runs, parsed as a float "
-            "(default 168.0 = 7 days)."
-        ),
+        summary=("Hours between skill-curator runs, parsed as a float (default 168.0 = 7 days)."),
         kind="str",
     ),
     FlagSpec(
@@ -2916,18 +2915,12 @@ FLAGS: tuple[FlagSpec, ...] = (
         default="",
         scope="public",
         stage="stage2",
-        summary=(
-            "Override for the observability home directory. Empty uses "
-            "``<cwd>/.openmagi``."
-        ),
+        summary=("Override for the observability home directory. Empty uses ``<cwd>/.openmagi``."),
         kind="str",
     ),
     _b(
         "MAGI_LEDGER_ORCHESTRATOR_ENABLED",
-        summary=(
-            "Enable the ledger-orchestrator recipe seam. Default-OFF "
-            "(GAIA benchmark code)."
-        ),
+        summary=("Enable the ledger-orchestrator recipe seam. Default-OFF (GAIA benchmark code)."),
     ),
     _b(
         "MAGI_EXECUTION_TRACE",
@@ -3220,10 +3213,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         default=False,
         scope="hosted",
         stage="stage1",
-        summary=(
-            "Hosted ADK toolhost attachment master switch. Default-OFF; "
-            "hosted-only."
-        ),
+        summary=("Hosted ADK toolhost attachment master switch. Default-OFF; hosted-only."),
         kind="bool",
     ),
     FlagSpec(
@@ -3231,10 +3221,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         default=False,
         scope="hosted",
         stage="stage1",
-        summary=(
-            "Hosted toolhost live-tool mutation seam. Default-OFF; "
-            "hosted-only."
-        ),
+        summary=("Hosted toolhost live-tool mutation seam. Default-OFF; hosted-only."),
         kind="bool",
     ),
     # I-1: hosted security-posture + context-continuity master switches.
@@ -3243,10 +3230,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         default=False,
         scope="hosted",
         stage="stage1",
-        summary=(
-            "Hosted security-posture preflight check activation. "
-            "Default-OFF; hosted-only."
-        ),
+        summary=("Hosted security-posture preflight check activation. Default-OFF; hosted-only."),
         kind="bool",
     ),
     FlagSpec(
@@ -3254,10 +3238,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         default=False,
         scope="hosted",
         stage="stage1",
-        summary=(
-            "Hosted context-continuity ladder activation. Default-OFF; "
-            "hosted-only."
-        ),
+        summary=("Hosted context-continuity ladder activation. Default-OFF; hosted-only."),
         kind="bool",
     ),
     # I-1: hosted gate3a recorded-replay master switches.
@@ -3266,10 +3247,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         default=False,
         scope="hosted",
         stage="stage1",
-        summary=(
-            "Hosted gate3a recorded-replay bundle ingestion. Default-OFF; "
-            "hosted-only."
-        ),
+        summary=("Hosted gate3a recorded-replay bundle ingestion. Default-OFF; hosted-only."),
         kind="bool",
     ),
     FlagSpec(
@@ -3277,10 +3255,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         default=False,
         scope="hosted",
         stage="stage1",
-        summary=(
-            "Hosted gate3a recorded-replay allow-model-calls seam. "
-            "Default-OFF; hosted-only."
-        ),
+        summary=("Hosted gate3a recorded-replay allow-model-calls seam. Default-OFF; hosted-only."),
         kind="bool",
     ),
     # I-1: hosted runtime-authority request flags. Both are operator
@@ -3347,8 +3322,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         scope="hosted",
         stage="stage1",
         summary=(
-            "Hosted gate5b user-visible canary chat-route activation. "
-            "Default-OFF; hosted-only."
+            "Hosted gate5b user-visible canary chat-route activation. Default-OFF; hosted-only."
         ),
         kind="bool",
     ),
@@ -3369,8 +3343,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         scope="hosted",
         stage="stage1",
         summary=(
-            "Hosted gate2 sandbox-canary workspace chat-route activation. "
-            "Default-OFF; hosted-only."
+            "Hosted gate2 sandbox-canary workspace chat-route activation. Default-OFF; hosted-only."
         ),
         kind="bool",
     ),
@@ -3380,8 +3353,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         scope="hosted",
         stage="stage1",
         summary=(
-            "Hosted gate2 sandbox-canary selected-provider routing seam. "
-            "Default-OFF; hosted-only."
+            "Hosted gate2 sandbox-canary selected-provider routing seam. Default-OFF; hosted-only."
         ),
         kind="bool",
     ),
@@ -3873,10 +3845,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         default="",
         scope="hosted",
         stage="stage1",
-        summary=(
-            "Hosted gate8 selected-authority environment label. Default-"
-            "empty; hosted-only."
-        ),
+        summary=("Hosted gate8 selected-authority environment label. Default-empty; hosted-only."),
         kind="str",
     ),
     FlagSpec(
@@ -3896,8 +3865,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         scope="hosted",
         stage="stage1",
         summary=(
-            "Hosted gate5b user-visible canary environment label. "
-            "Default-empty; hosted-only."
+            "Hosted gate5b user-visible canary environment label. Default-empty; hosted-only."
         ),
         kind="str",
     ),
@@ -3928,10 +3896,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         default="",
         scope="hosted",
         stage="stage1",
-        summary=(
-            "Hosted gate2 sandbox-canary environment label. Default-"
-            "empty; hosted-only."
-        ),
+        summary=("Hosted gate2 sandbox-canary environment label. Default-empty; hosted-only."),
         kind="str",
     ),
     FlagSpec(
@@ -4084,10 +4049,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         default=8,
         scope="hosted",
         stage="stage1",
-        summary=(
-            "Gate1a read-only toolhost per-turn tool-call cap. Hosted-"
-            "only; default 8."
-        ),
+        summary=("Gate1a read-only toolhost per-turn tool-call cap. Hosted-only; default 8."),
         kind="int",
     ),
     FlagSpec(
@@ -4095,10 +4057,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         default=4096,
         scope="hosted",
         stage="stage1",
-        summary=(
-            "Gate1a read-only toolhost per-tool output byte cap. Hosted-"
-            "only; default 4096."
-        ),
+        summary=("Gate1a read-only toolhost per-tool output byte cap. Hosted-only; default 4096."),
         kind="int",
     ),
     FlagSpec(
@@ -4117,10 +4076,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         default=16,
         scope="hosted",
         stage="stage1",
-        summary=(
-            "Gate5b full-toolhost per-turn tool-call cap. Hosted-only; "
-            "default 16."
-        ),
+        summary=("Gate5b full-toolhost per-turn tool-call cap. Hosted-only; default 16."),
         kind="int",
     ),
     FlagSpec(
@@ -4128,10 +4084,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         default=8192,
         scope="hosted",
         stage="stage1",
-        summary=(
-            "Gate5b full-toolhost per-tool output byte cap. Hosted-only; "
-            "default 8192."
-        ),
+        summary=("Gate5b full-toolhost per-tool output byte cap. Hosted-only; default 8192."),
         kind="int",
     ),
     FlagSpec(
@@ -4140,8 +4093,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         scope="hosted",
         stage="stage1",
         summary=(
-            "Gate5b full-toolhost shell-command timeout (milliseconds). "
-            "Hosted-only; default 5000."
+            "Gate5b full-toolhost shell-command timeout (milliseconds). Hosted-only; default 5000."
         ),
         kind="int",
     ),
@@ -4380,9 +4332,11 @@ def flag_int(name: str, *, env: Mapping[str, str] | None = None) -> int | None:
     if spec.kind != "int":
         raise TypeError(f"flag {name!r} has kind {spec.kind!r}, not 'int'")
     raw = _resolve_env(env).get(name)
-    default = spec.default if isinstance(spec.default, int) and not isinstance(
-        spec.default, bool
-    ) else None
+    default = (
+        spec.default
+        if isinstance(spec.default, int) and not isinstance(spec.default, bool)
+        else None
+    )
     if raw is None:
         return default
     try:

@@ -93,11 +93,20 @@ def resolve_child_toolset_profile(
     return "none"
 
 
-def toolset_allowlist(profile: ChildToolsetProfile) -> tuple[str, ...] | None:
+def toolset_allowlist(
+    profile: ChildToolsetProfile,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> tuple[str, ...] | None:
     """Map a profile to a tool-name allowlist used to FILTER the core toolset.
 
     * ``none``     → ``()`` (empty allowlist → no tools are forwarded).
-    * ``readonly`` → :data:`READONLY_TOOL_NAMES` (filter to inspection tools).
+    * ``readonly`` → :data:`READONLY_TOOL_NAMES`, PLUS ``"Bash"`` when the child
+                     Bash sandbox opt-in (``MAGI_CHILD_BASH_SANDBOX_ENABLED``)
+                     is on. The module-level constant stays static so PR-N's
+                     pinning tests (``Bash not in READONLY_TOOL_NAMES``) still
+                     hold; the expansion happens at read time so the flag-OFF
+                     path is byte-identical to before.
     * ``full``     → ``None`` sentinel meaning "no name filter" (forward the
                      whole core toolset). Authorisation of ``full`` is the
                      caller's responsibility (doc 09 permissions).
@@ -105,6 +114,12 @@ def toolset_allowlist(profile: ChildToolsetProfile) -> tuple[str, ...] | None:
     Any unrecognised profile is treated as ``none`` (fail-closed).
     """
     if profile == "readonly":
+        from magi_agent.runtime.child_bash import (  # noqa: PLC0415
+            child_bash_sandbox_enabled,
+        )
+
+        if child_bash_sandbox_enabled(env):
+            return READONLY_TOOL_NAMES + ("Bash",)
         return READONLY_TOOL_NAMES
     if profile == "full":
         return None
