@@ -1,3 +1,5 @@
+import { UNRESOLVED_MODEL_SENTINEL } from "@/chat-core";
+
 import { ChatViewClient } from "../chat-view-client";
 
 export function generateStaticParams() {
@@ -16,7 +18,7 @@ export default async function ChatChannelPage({ params }: ChatChannelPageProps) 
       botId="local"
       botName="Local Agent"
       botStatus="active"
-      modelSelection="claude-sonnet-4-20250514"
+      modelSelection={UNRESOLVED_MODEL_SENTINEL}
       bots={[]}
       maxBots={1}
       initialChannel={channel}
