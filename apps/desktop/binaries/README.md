@@ -33,6 +33,10 @@ pyinstaller \
   --collect-all litellm \
   --collect-all rdflib \
   --collect-all pyshacl \
+  --collect-all tiktoken \
+  --collect-submodules tiktoken_ext \
+  --hidden-import tiktoken_ext.openai_public \
+  --copy-metadata tiktoken \
   --hidden-import uvicorn \
   <entrypoint that calls magi_agent.main:main>
 ```
