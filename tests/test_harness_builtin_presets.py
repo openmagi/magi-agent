@@ -107,7 +107,11 @@ def test_verifier_and_prompt_injector_deltas_are_represented_as_metadata() -> No
     assert "configured-policy" in response_language.scope_hints
 
     assert coding_context.hook_points == ("beforeLLMCall",)
-    assert coding_context.blocking is True
+    assert coding_context.blocking is False
+    assert coding_context.effect == "inject"
+    assert coding_context.region == "capability"
+    assert verifier.effect == "check"
+    assert verifier.region == "enforcement"
     assert coding_context.fail_open is True
     assert coding_context.timeout_ms == 10_000
     assert {
@@ -119,6 +123,23 @@ def test_verifier_and_prompt_injector_deltas_are_represented_as_metadata() -> No
     }
     assert coding_context.config_gates == ("repo-map", "coding-context", "focus-chain")
     assert coding_context.env_gates == ()
+
+
+def test_inject_capability_presets_cannot_be_blocking() -> None:
+    coding_context = builtin_preset_by_key("coding-context")
+    assert coding_context.effect == "inject"
+    assert coding_context.region == "capability"
+    # flipping a capability (inject) preset to blocking must be rejected by the
+    # effect-partition validator (a capability preset can never deny a turn).
+    with pytest.raises(ValidationError):
+        coding_context.model_copy(update={"blocking": True})
+
+
+def test_check_presets_are_enforcement_region() -> None:
+    for key in ("coding-verification", "secret-exposure", "fact-grounding", "pre-refusal"):
+        preset = builtin_preset_by_key(key)
+        assert preset.effect == "check"
+        assert preset.region == "enforcement"
 
 
 def _hook_contributions_by_name(key: str) -> dict[str, object]:
@@ -135,7 +156,7 @@ def test_coding_context_represents_focus_chain_gate_per_hook_only() -> None:
 
     repo_map = hooks["repo-map"]
     assert repo_map.hook_points == ("beforeLLMCall",)
-    assert repo_map.blocking is True
+    assert repo_map.blocking is False
     assert repo_map.fail_open is True
     assert repo_map.timeout_ms == 12_000
     assert repo_map.env_gates == ("CORE_AGENT_REPO_MAP",)
@@ -145,7 +166,7 @@ def test_coding_context_represents_focus_chain_gate_per_hook_only() -> None:
 
     coding_context = hooks["coding-context"]
     assert coding_context.hook_points == ("beforeLLMCall",)
-    assert coding_context.blocking is True
+    assert coding_context.blocking is False
     assert coding_context.fail_open is True
     assert coding_context.timeout_ms == 10_000
     assert coding_context.env_gates == ("CORE_AGENT_CODING_CONTEXT",)
@@ -154,7 +175,7 @@ def test_coding_context_represents_focus_chain_gate_per_hook_only() -> None:
 
     focus_chain = hooks["focus-chain"]
     assert focus_chain.hook_points == ("beforeLLMCall",)
-    assert focus_chain.blocking is True
+    assert focus_chain.blocking is False
     assert focus_chain.fail_open is True
     assert focus_chain.timeout_ms == 2_000
     assert focus_chain.env_gates == ("MAGI_FOCUS_CHAIN",)

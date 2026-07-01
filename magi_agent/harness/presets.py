@@ -47,6 +47,13 @@ class BuiltinHarnessPreset(BaseModel):
     key: str
     category: PresetCategory
     source: PresetSource = "builtin"
+    # Enforcement/capability partition axis. An ``inject`` preset provides context
+    # (prompt/tool) and cannot deny a turn -> capability region; a ``check`` preset
+    # verifies/gates -> enforcement region. This is the missing discriminator:
+    # blocking + hook_points alone cannot separate coding-context (inject, beforeLLMCall)
+    # from pre-refusal (check, beforeLLMCall). See
+    # docs/plans/2026-06-30-magi-mode-pack-component-model.md.
+    effect: Literal["inject", "check"] = Field(default="check")
     default_on: bool = Field(alias="defaultOn")
     opt_out: bool = Field(alias="optOut")
     hard_safety: bool = Field(default=False, alias="hardSafety")
@@ -77,6 +84,35 @@ class BuiltinHarnessPreset(BaseModel):
             raise ValueError("hard-safety presets must be security-critical")
         return self
 
+    @property
+    def region(self) -> Literal["enforcement", "capability"]:
+        """Derived enforcement/capability region: injectors provide capability,
+        checks/gates enforce policy. Partitioned by ``effect``, NOT by ``blocking``
+        (an audit check is non-blocking yet still enforcement).
+
+        NOTE: this "capability" is the enforcement-vs-capability control region and
+        is DISTINCT from ``customize.preset_map.is_user_rule_capability`` /
+        ``_USER_RULE_CAPABILITY_PRESETS`` (a separate user-authoring axis, e.g.
+        coding-workspace-lock). They share the word but classify on different axes;
+        ``coding-context`` is region=capability here but not a user-rule-capability.
+        """
+        return "capability" if self.effect == "inject" else "enforcement"
+
+    @model_validator(mode="after")
+    def inject_capability_presets_cannot_block(self) -> Self:
+        # A capability (inject) preset supplies context/tools; it cannot deny a turn
+        # and is never hard-safety. Enforcement (deny/gate) lives in check presets.
+        if self.effect == "inject":
+            if self.blocking:
+                raise ValueError("inject (capability) presets cannot be blocking")
+            if self.hard_safety:
+                raise ValueError("inject (capability) presets cannot be hard-safety")
+            if any(contribution.blocking for contribution in self.hook_contributions):
+                raise ValueError(
+                    "inject (capability) preset hook contributions cannot be blocking"
+                )
+        return self
+
     def model_copy(self, *, update: dict[str, Any] | None = None, deep: bool = False) -> Self:
         data = self.model_dump()
         if update:
@@ -88,6 +124,7 @@ def _preset(
     key: str,
     category: PresetCategory,
     *,
+    effect: Literal["inject", "check"] = "check",
     default_on: bool = True,
     opt_out: bool = True,
     hard_safety: bool = False,
@@ -109,6 +146,7 @@ def _preset(
     return BuiltinHarnessPreset(
         key=key,
         category=category,
+        effect=effect,
         default_on=default_on,
         opt_out=opt_out,
         hard_safety=hard_safety,
@@ -206,8 +244,14 @@ _BUILTIN_PRESETS: tuple[BuiltinHarnessPreset, ...] = tuple(
             _preset(
                 "coding-context",
                 PresetCategory.CODING,
+                # Prompt injector (repo-map / workspace summary), NOT a gate: it supplies
+                # context before the model call and can never deny a turn. The live runtime
+                # (runtime/coding_context.py) already returns a soft string, fail-safe to "".
+                # So it is capability (effect=inject) and MUST be non-blocking; blocking=True
+                # here was inaccurate metadata (docs/hook-points.md: blocking = "can deny").
+                effect="inject",
                 hook_points=("beforeLLMCall",),
-                blocking=True,
+                blocking=False,
                 fail_open=True,
                 timeout_ms=10_000,
                 hook_timeouts_ms={"repo-map": 12_000, "coding-context": 10_000, "focus-chain": 2_000},
@@ -216,7 +260,7 @@ _BUILTIN_PRESETS: tuple[BuiltinHarnessPreset, ...] = tuple(
                     _hook(
                         "repo-map",
                         ("beforeLLMCall",),
-                        blocking=True,
+                        blocking=False,
                         fail_open=True,
                         timeout_ms=12_000,
                         env_gates=("CORE_AGENT_REPO_MAP",),
@@ -227,7 +271,7 @@ _BUILTIN_PRESETS: tuple[BuiltinHarnessPreset, ...] = tuple(
                     _hook(
                         "coding-context",
                         ("beforeLLMCall",),
-                        blocking=True,
+                        blocking=False,
                         fail_open=True,
                         timeout_ms=10_000,
                         env_gates=("CORE_AGENT_CODING_CONTEXT",),
@@ -237,7 +281,7 @@ _BUILTIN_PRESETS: tuple[BuiltinHarnessPreset, ...] = tuple(
                     _hook(
                         "focus-chain",
                         ("beforeLLMCall",),
-                        blocking=True,
+                        blocking=False,
                         fail_open=True,
                         timeout_ms=2_000,
                         env_gates=("MAGI_FOCUS_CHAIN",),
