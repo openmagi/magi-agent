@@ -6,6 +6,29 @@ const src = readFileSync(
   "utf8",
 );
 
+describe("AuthorWizard: PR-U3.2 plain-language step titles (rule-centric, jargon-free)", () => {
+  it("frames the step headings as a Rule, not a 'policy', and hides the 'fire' jargon", () => {
+    // The wizard is the Rules-tab guided flow; step titles use plain,
+    // rule-centric language rather than the internal policy/lifecycle/fire
+    // vocabulary.
+    expect(src).toContain("When should this rule run?");
+    expect(src).toContain("What should it check?");
+    expect(src).toContain("What happens when it matches?");
+    expect(src).toContain("Name your rule");
+    // The old policy/fire phrasings must be gone from the visible headings.
+    expect(src).not.toContain("When should this policy fire?");
+    expect(src).not.toContain("What should the policy do?");
+    expect(src).not.toContain("Name your policy");
+  });
+
+  it("relabels the trigger fieldset legend to plain 'When it runs'", () => {
+    expect(src).toContain("When it runs");
+    // The old "Lifecycle event" legend text must be gone (it appeared only as
+    // this legend in the source).
+    expect(src).not.toContain("Lifecycle event");
+  });
+});
+
 describe("AuthorWizard — variable-length policy authoring (F1.5 + F-UX3)", () => {
   it("declares step plan as a constant 6 steps for all lifecycles (F-UX3 collapse)", () => {
     // PR-F-UX3 — F1.5's standalone Target step was collapsed back into the
@@ -94,7 +117,9 @@ describe("AuthorWizard — variable-length policy authoring (F1.5 + F-UX3)", () 
     // F-UX3 adds the Tool target sub-fieldset to the existing
     // lifecycle + scope pair. The fieldset count is 3 in the source.
     expect(src.match(/<fieldset/g)?.length).toBe(3);
-    expect(src).toContain("Lifecycle event");
+    // PR-U3.2: legend reframed from the internal "Lifecycle event" jargon to
+    // the plain "When it runs"; scope + tool-target legends are unchanged.
+    expect(src).toContain("When it runs");
     expect(src).toContain("Turn scope");
     expect(src).toContain("Tool target");
   });

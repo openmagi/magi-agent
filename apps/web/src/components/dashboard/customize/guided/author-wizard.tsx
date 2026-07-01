@@ -1155,12 +1155,12 @@ function LifecyclePickerSearch({
   }, [value, onQueryChange]);
   return (
     <label className="block">
-      <span className="sr-only">Search lifecycle events</span>
+      <span className="sr-only">Search when-it-runs options</span>
       <input
         type="search"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder="Search lifecycle events (e.g. tool, compaction, session)"
+        placeholder="Search (e.g. tool, compaction, session)"
         data-testid="lifecycle-picker-search"
         className="w-full rounded-lg border border-black/[0.08] bg-white px-3 py-2 text-sm text-foreground placeholder:text-secondary/60 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
       />
@@ -1342,17 +1342,17 @@ function TriggerStep({
   return (
     <div className="space-y-5">
       <div className="space-y-2">
-        <h2 className="text-lg font-bold text-foreground">When should this policy fire?</h2>
+        <h2 className="text-lg font-bold text-foreground">When should this rule run?</h2>
         <p className="text-xs text-secondary">
-          Three axes: <em>when</em> in the agent's lifecycle, <em>on which
-          kind of turn</em>, and (for tool-bearing lifecycles)
-          <em> which tool(s)</em>. Pick one of each.
+          Three choices: <em>when</em> it runs, <em>on which kind of turn</em>,
+          and (when it watches a tool) <em>which tool(s)</em>. Pick one of
+          each.
         </p>
       </div>
 
       <fieldset className="space-y-3">
         <legend className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
-          Lifecycle event
+          When it runs
         </legend>
         <LifecyclePickerSearch onQueryChange={setSearchQuery} />
         {searching ? (
@@ -1407,7 +1407,7 @@ function TriggerStep({
             Tool target
           </legend>
           <p className="text-xs text-secondary">
-            Which tool(s) does this policy apply to? Apply to every tool call,
+            Which tool(s) does this rule apply to? Apply to every tool call,
             or narrow to a specific tool.
           </p>
           <RadioCard
@@ -1957,10 +1957,10 @@ function ConditionKindStep({
   const kinds = availableConditionKinds(draft.lifecycle, draft.toolTarget);
   return (
     <div className="space-y-3">
-      <h2 className="text-lg font-bold text-foreground">Under what condition does it fire?</h2>
+      <h2 className="text-lg font-bold text-foreground">What should it check?</h2>
       <p className="text-xs text-secondary">
-        Pick a check that triggers the action. Options not valid for your
-        lifecycle and tool target are hidden.
+        Pick the check that triggers the action. Options that don't apply to
+        the when-it-runs and tool choices above are hidden.
       </p>
       <div className="space-y-2">
         {kinds.map((kind) => {
@@ -3568,10 +3568,11 @@ function ArchetypeStep({
   const trigger = triggerEventPhrase(draft, refOptions);
   return (
     <div className="space-y-3">
-      <h2 className="text-lg font-bold text-foreground">What should the policy do?</h2>
+      <h2 className="text-lg font-bold text-foreground">What happens when it matches?</h2>
       <p className="text-xs text-secondary">
         <strong className="font-semibold text-foreground">{trigger}</strong>
-        , do this. Options not valid for the chosen lifecycle are hidden.
+        , do this. Options that don't apply to your when-it-runs choice are
+        hidden.
       </p>
       <div className="space-y-2">
         {ids.map((id) => {
@@ -3629,14 +3630,14 @@ function NameStep({
 
   return (
     <div className="space-y-3">
-      <h2 className="text-lg font-bold text-foreground">Name your policy</h2>
+      <h2 className="text-lg font-bold text-foreground">Name your rule</h2>
       <p className="text-xs text-secondary">
-        Shown in the policies list and audit logs.
+        Shown in the rules list and audit logs.
       </p>
       <TextField
         value={draft.ruleId}
         onChange={onChange}
-        label="Policy ID"
+        label="Rule ID"
         placeholder={defaultIdHint(draft)}
       />
       <div className="flex items-center justify-between gap-2">
@@ -3862,11 +3863,11 @@ function ReviewStep({
     <div className="space-y-3">
       <h2 className="text-lg font-bold text-foreground">Review</h2>
       <p className="text-xs text-secondary">
-        Saving applies the policy to the runtime immediately.
+        Saving applies the rule to the runtime immediately.
       </p>
       <div className="rounded-xl border border-black/[0.06] bg-[var(--glass-regular-bg)] backdrop-blur-xl p-4">
         <div className="flex items-center gap-2">
-          <p className="text-sm font-semibold text-foreground">What this policy does</p>
+          <p className="text-sm font-semibold text-foreground">What this rule does</p>
           <TrustBadge trustClass={trust} />
         </div>
         <p className="mt-1 text-xs leading-relaxed text-foreground">
