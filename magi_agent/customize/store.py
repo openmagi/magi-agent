@@ -47,6 +47,15 @@ DEFAULT_OVERRIDES: dict[str, Any] = {
     # leaves the env flag untouched. Empty by default so OFF is byte-identical.
     # Catalog + projection live in ``customize.control_plane_overrides``.
     "control_plane": {},
+    # Agent MODES (postures): explicit, user-selected, session-sticky. Each mode =
+    # system prompt + tool allow/deny DELTA from bot-default + scoped policy ids.
+    # DISTINCT from ``verification.modes`` (per-preset enforcement mode). Typed model
+    # + CRUD live in ``customize.modes``; NOT consumed by the runtime yet (storage
+    # only). Empty by default so OFF is byte-identical. Keyed ``agent_modes`` (NOT
+    # ``modes``) to avoid lexical collision with ``verification.modes`` above.
+    "agent_modes": {},
+    # Last-selected mode id (session-sticky). None ⇒ the bot default mode.
+    "active_agent_mode": None,
 }
 
 _USER_RULES_MAX = 20_000
@@ -109,6 +118,18 @@ def _normalize(data: dict[str, Any]) -> dict[str, Any]:
             for key, value in control_plane.items()
             if isinstance(key, str) and isinstance(value, bool)
         }
+    # Agent modes: light structural filter here (id->dict); the typed AgentMode
+    # validation lives in ``customize.modes`` (get/list skip malformed entries).
+    modes_raw = data.get("agent_modes")
+    if isinstance(modes_raw, dict):
+        merged["agent_modes"] = {
+            key: value
+            for key, value in modes_raw.items()
+            if isinstance(key, str) and isinstance(value, dict)
+        }
+    active_mode = data.get("active_agent_mode")
+    if isinstance(active_mode, str) and active_mode.strip():
+        merged["active_agent_mode"] = active_mode
     return merged
 
 
