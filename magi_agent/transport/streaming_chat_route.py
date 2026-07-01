@@ -870,6 +870,15 @@ def register_streaming_chat_routes(
         cwd = flag_str("MAGI_AGENT_WORKSPACE") or os.getcwd()
         full_access = _local_full_access(runtime) or _hosted_full_access(runtime)
         permission_mode = "bypassPermissions" if full_access else "default"
+        # An active mode may TIGHTEN (never loosen) the permission posture.
+        from magi_agent.customize.modes import (  # noqa: PLC0415
+            active_permission_mode as _active_permission_mode,
+            capped_permission_mode as _capped_permission_mode,
+        )
+
+        permission_mode = _capped_permission_mode(
+            _active_permission_mode(), permission_mode
+        )
         runner_policy_routing_enabled = (
             local_runner_policy_routing_enabled_from_env() if full_access else None
         )

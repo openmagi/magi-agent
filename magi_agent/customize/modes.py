@@ -36,6 +36,22 @@ _MAX_PROMPT = 20_000
 _MAX_LIST = 256
 _MAX_MODES = 256
 
+# Restrictiveness rank (higher = more human approvals required). A mode may only
+# raise restrictiveness above the deployment baseline (tighten-only, consistent
+# with mode scoping); it can never loosen approvals. Hard-safety denies are
+# never bypassed by any permission mode regardless of this field. This map is
+# the SINGLE source of the valid permission-mode set (mirror of
+# ``cli.permissions.PermissionMode``, hardcoded to keep this module import-light).
+_PERMISSION_MODE_RANK = {
+    "bypassPermissions": 0,
+    "acceptEdits": 1,
+    "smartApprove": 2,
+    "default": 3,
+}
+# Permission modes a mode may carry (derived from the rank map so the two can
+# never drift). ``None`` = the mode does not override the deployment posture.
+_VALID_PERMISSION_MODES = frozenset(_PERMISSION_MODE_RANK)
+
 _MODEL_CONFIG = ConfigDict(
     frozen=True, populate_by_name=True, extra="forbid", validate_default=True
 )
@@ -77,6 +93,7 @@ class AgentMode(BaseModel):
     system_prompt: str = Field(default="", alias="systemPrompt")
     tool_delta: ToolDelta = Field(default_factory=ToolDelta, alias="toolDelta")
     scoped_policy_ids: tuple[str, ...] = Field(default=(), alias="scopedPolicyIds")
+    permission_mode: str | None = Field(default=None, alias="permissionMode")
 
     @field_validator("mode_id")
     @classmethod
@@ -104,6 +121,17 @@ class AgentMode(BaseModel):
     @classmethod
     def _validate_policies(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return _dedupe_valid(value, _POLICY_RE, "scopedPolicyIds")
+
+    @field_validator("permission_mode")
+    @classmethod
+    def _validate_permission_mode(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if value not in _VALID_PERMISSION_MODES:
+            raise ValueError(
+                f"permissionMode must be one of {sorted(_VALID_PERMISSION_MODES)} or null"
+            )
+        return value
 
     def to_payload(self) -> dict:
         return self.model_dump(by_alias=True, mode="json")
@@ -181,10 +209,46 @@ def set_active_mode(mode_id: str | None, path: Path | None = None) -> None:
     save_overrides(overrides, path)
 
 
+def active_permission_mode(path: Path | None = None) -> str | None:
+    """The active mode's ``permission_mode`` for this turn, resolved like the
+    other mode seams (per-turn selection wins over the sticky default). ``None``
+    when no mode is active, the mode sets no permission_mode, or on any error
+    (fail-soft ⇒ the caller keeps its deployment baseline)."""
+    try:
+        from magi_agent.runtime.per_turn_agent_mode_context import (
+            current_per_turn_agent_mode,
+        )
+
+        mode_id = current_per_turn_agent_mode() or active_mode_id(path)
+        if not mode_id:
+            return None
+        mode = get_mode(mode_id, path)
+        return mode.permission_mode if mode else None
+    except Exception:
+        return None
+
+
+def capped_permission_mode(mode_value: str | None, baseline: str) -> str:
+    """Effective per-turn permission mode: a mode may only make approvals MORE
+    restrictive than ``baseline`` (tighten-only, consistent with mode scoping),
+    never looser. Returns ``baseline`` when ``mode_value`` is unset, invalid, or
+    would loosen. Hard-safety denies are unaffected by any permission mode."""
+    if not mode_value or mode_value not in _PERMISSION_MODE_RANK:
+        return baseline
+    base_rank = _PERMISSION_MODE_RANK.get(baseline)
+    if base_rank is None:
+        return baseline  # unknown baseline → never override
+    if _PERMISSION_MODE_RANK[mode_value] > base_rank:
+        return mode_value
+    return baseline
+
+
 __all__ = [
     "AgentMode",
     "ToolDelta",
     "active_mode_id",
+    "active_permission_mode",
+    "capped_permission_mode",
     "delete_mode",
     "get_mode",
     "list_modes",
