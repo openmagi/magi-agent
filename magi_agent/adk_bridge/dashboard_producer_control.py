@@ -90,14 +90,36 @@ class DashboardProducerControl(BaseLoopControl):
                 or "cli-session"
             )
 
+            # PR-D3: an active mode may force-activate a dashboard check for this
+            # turn via its scoped_policy_ids (even if the check is globally
+            # disabled). Resolved once; validated per-base against that base's
+            # real checks so an unknown scoped id simply never matches. Gated by
+            # is_dashboard_pack_authoring_enabled() above, so force-include never
+            # bypasses the operator flag. Empty when no mode is active.
+            from magi_agent.customize.scoped_policy import (  # noqa: PLC0415
+                active_scoped_policy_ids,
+                resolve_scoped_policy_overlay,
+            )
+
+            _scoped_policy_ids = active_scoped_policy_ids()
+
             for base in self._search_bases():
                 pack_root = Path(base) / DASHBOARD_PACK_DIR_NAME
                 sidecar = pack_root / "dashboard-checks.json"
                 if not sidecar.exists():
                     continue
                 checks = self._load_checks(sidecar, pack_root, read_sidecar)
+                forced_check_ids: frozenset[str] = frozenset()
+                if _scoped_policy_ids:
+                    forced_check_ids = frozenset(
+                        resolve_scoped_policy_overlay(
+                            _scoped_policy_ids,
+                            custom_rules=(),
+                            dashboard_check_ids={c.id for c in checks},
+                        ).dashboard_check_ids
+                    )
                 for check in checks:
-                    if not check.enabled:
+                    if not (check.enabled or check.id in forced_check_ids):
                         continue
                     if check.trigger.tool != tool_name:
                         continue
