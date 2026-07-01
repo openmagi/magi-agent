@@ -63,8 +63,8 @@ describe("CustomizeHub — Policy unification (PR-E1)", () => {
     expect(src).toContain("deleteSeamSpecApi");
   });
 
-  it("renames the Add button to 'Add policy' (matches the unified concept)", () => {
-    expect(src).toContain("Add policy");
+  it("PR-U3.1: names the Rules-tab add button 'Add rule' (region-aligned)", () => {
+    expect(src).toContain("Add rule");
   });
 
   it("keeps the legacy CustomRulesSection / CustomChecksSection / SeamBuilderPanel reachable under raw_authoring", () => {
@@ -74,7 +74,7 @@ describe("CustomizeHub — Policy unification (PR-E1)", () => {
   });
 
   it("hides the unified list while authoring so the page is focused", () => {
-    expect(src).toContain("List hidden while adding a policy");
+    expect(src).toContain("List hidden while adding a rule");
   });
 
   it("registers the PR-F7 Budgets sub-tab (id, label, icon, panel mount)", () => {

@@ -27,6 +27,24 @@ describe("AddPolicyModePicker — 3-mode entry (NL / Guided / Raw)", () => {
 
   it("ships an X cancel control via onCancel", () => {
     expect(src).toContain("onCancel");
-    expect(src).toContain('aria-label="Close add policy picker"');
+    expect(src).toContain('aria-label="Close add rule picker"');
+  });
+
+  it("PR-U3.1: frames the entry as a Rule and states the enforcement region", () => {
+    // The header names the region-aligned unit ("rule") and what a rule does
+    // (block / ask / audit) rather than the generic "policy" umbrella.
+    expect(src).toContain("How do you want to add this rule?");
+    expect(src).toContain("block a turn or a tool");
+  });
+
+  it("PR-U3.1: does not leak the internal primitive vocabulary into the copy", () => {
+    // Regression guards against the old implementation-chip vocabulary. The
+    // `routedKind` compiler label and the `backing` chip were the live leaks
+    // this PR removed; `SeamSpec`/`firesAt` are guarded too so a future edit
+    // can't reintroduce primitive names into this operator-facing picker.
+    expect(src).not.toContain("routedKind");
+    expect(src).not.toContain("SeamSpec");
+    expect(src).not.toContain("firesAt");
+    expect(src).not.toMatch(/backing/);
   });
 });
