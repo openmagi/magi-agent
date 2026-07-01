@@ -9,13 +9,15 @@ A *mode* is an explicit, user-selected, session-sticky posture. It defines:
 DISTINCT from ``verification.modes`` (a per-preset enforcement mode:
 deterministic/audit). This module owns the posture concept.
 
-Runtime consumption (incremental): the active mode's ``system_prompt`` IS
-injected into the assembled system prompt (``runtime.message_builder
-._agent_mode_block``), and ``tool_delta.exclude`` IS applied at the local
-runner-build seam (``cli.wiring._agent_mode_excluded_tool_names`` narrows the
-exposed toolset — exclude-only, inherently safe). Still storage-only:
-``tool_delta.include`` (re-enabling a default-off tool — needs the universal
-hard-safety cap) and ``scoped_policy_ids`` (needs the policy resolver).
+Runtime consumption: the active mode's ``system_prompt`` IS injected into the
+assembled system prompt (``runtime.message_builder._agent_mode_block``); its
+``tool_delta`` IS applied at the local runner-build seam (``cli.wiring``) —
+``exclude`` narrows the exposed toolset (inherently safe), and ``include``
+re-enables a default-off tool within a property-based hard-safety cap
+(``_mode_include_allows_manifest``: never execute/net/computer/dangerous;
+``exclude`` wins over ``include``). Still storage-only: ``scoped_policy_ids``
+(needs a per-turn policy resolver — no such seam exists yet, so it is a
+design-first follow-up, not applied here).
 See clawy docs/plans/2026-06-30-magi-mode-pack-component-model.md (mode design).
 """
 from __future__ import annotations
