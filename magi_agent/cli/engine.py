@@ -2674,9 +2674,12 @@ class MagiEngineDriver:
                     # PR4 goal-nudge: at the clean-break path, check whether a
                     # nudge re-invocation is warranted before breaking.
                     if goal_nudge is not None and nudges_used < goal_nudge.max_nudges:
+                        # Collect ONCE so the (WS6 PR6c) enrichment below reads
+                        # exactly the evidence records the gate decision read.
+                        nudge_evidence_records = self._collect_evidence(turn_id)
                         if not _goal_is_met(
                             goal_nudge,
-                            evidence_records=self._collect_evidence(turn_id),
+                            evidence_records=nudge_evidence_records,
                         ):
                             if goal_nudge.mode == "goal" and goal_check_pending:
                                 # Latch has already fired once since the last
@@ -2700,14 +2703,26 @@ class MagiEngineDriver:
                                 ),
                                 harnessState=effective_harness_state,
                             )
+                            # WS6 PR6c: terminal-free enrichment of the EXISTING
+                            # goal_nudge status payload with evidence-reason
+                            # fields (default-OFF; inert until WS3). The
+                            # ``continue``-to-re-invoke control flow below is
+                            # preserved EXACTLY (no terminal, no text_delta)
+                            # suffix is added on this path.
+                            nudge_status_payload: dict[str, object] = {
+                                "type": "goal_nudge",
+                                "mode": goal_nudge.mode,
+                                "nudge": nudges_used,
+                                "max": goal_nudge.max_nudges,
+                            }
+                            self._enrich_goal_nudge_status(
+                                nudge_status_payload,
+                                goal_nudge,
+                                evidence_records=nudge_evidence_records,
+                            )
                             yield RuntimeEvent(
                                 type="status",
-                                payload={
-                                    "type": "goal_nudge",
-                                    "mode": goal_nudge.mode,
-                                    "nudge": nudges_used,
-                                    "max": goal_nudge.max_nudges,
-                                },
+                                payload=nudge_status_payload,
                                 turn_id=turn_id,
                             )
                             continue  # re-invoke run_async (genuine new model call)
@@ -3419,6 +3434,55 @@ class MagiEngineDriver:
             session_id=session_id,
             turn_id=turn_id,
         )
+
+    def _enrich_goal_nudge_status(
+        self,
+        payload: dict[str, object],
+        nudge: "GoalNudge",
+        *,
+        evidence_records: tuple[object, ...],
+    ) -> None:
+        """WS6 PR6c: enrich the goal_nudge continue status with evidence reasons.
+
+        When ``MAGI_EVIDENCE_HEDGE_ON_GUESS_ENABLED`` is ON, add transport-safe
+        ``missingValidators``/``requirementLabels``/``reasonCodes`` (derived from
+        the SAME evidence records the goal_nudge gate read) so the client sees
+        WHY the turn continued. Mutates ``payload`` in place.
+
+        Terminal-free and side-effect-light: this NEVER changes the
+        continue/re-invoke control flow and NEVER adds a reserved
+        ``text``/``content``/``delta`` key (MINOR-1 transport collision guard).
+        Strict default-OFF and fail-open: when the flag is unset, or anything
+        faults, the payload is left byte-identical to today. Inert until WS3
+        enables goal_nudge and sets ``required_evidence``.
+        """
+        import os  # noqa: PLC0415
+
+        try:
+            from magi_agent.config.env import (  # noqa: PLC0415
+                parse_evidence_hedge_on_guess_enabled,
+            )
+
+            if not parse_evidence_hedge_on_guess_enabled(os.environ):
+                return
+            from magi_agent.runtime.goal_nudge import (  # noqa: PLC0415
+                goal_nudge_evidence_reasons,
+            )
+
+            reasons = goal_nudge_evidence_reasons(
+                nudge, evidence_records=evidence_records
+            )
+            if not reasons.requirement_labels:
+                return
+            payload["missingValidators"] = list(reasons.missing_validators)
+            payload["requirementLabels"] = list(reasons.requirement_labels)
+            payload["reasonCodes"] = list(reasons.reason_codes)
+        except Exception:
+            # Fail-open: enrichment is best-effort; never wedge the nudge loop.
+            logger.debug(
+                "goal_nudge evidence-reason enrichment failed; status left unenriched",
+                exc_info=True,
+            )
 
     def _collect_evidence(self, turn_id: str) -> tuple[object, ...]:
         """Return evidence records for the given turn.
