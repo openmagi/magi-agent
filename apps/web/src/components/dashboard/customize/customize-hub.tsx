@@ -48,6 +48,8 @@ import type {
   VerificationBudgets,
 } from "@/lib/customize-api";
 import { useAgentFetch } from "@/lib/local-api";
+import { getModes } from "@/lib/agent-modes-api";
+import type { AgentMode } from "@/chat-core";
 import { AddRulePicker, type AddRuleChoice } from "./add-rule-modal";
 import { AddPolicyModePicker, type AddPolicyMode } from "./add-policy-mode-picker";
 import { GuidedWizard } from "./guided-wizard";
@@ -726,6 +728,16 @@ function RulesSectionMount({
   const [dashboardChecks, setDashboardChecks] = useState<DashboardCheck[]>([]);
   const [dashboardBusy, setDashboardBusy] = useState(false);
 
+  // PR-U4a: modes, for the reverse "scoped in N modes" indicator on each rule
+  // row. The forward direction (which rules a mode scopes) lives in the Modes
+  // editor's scoped-rule picker; this shows the same relationship from Rules.
+  const [modes, setModes] = useState<AgentMode[]>([]);
+  useEffect(() => {
+    getModes(agentFetch)
+      .then((resp) => setModes(resp.modes))
+      .catch(() => setModes([])); // modes endpoint unavailable = no badges
+  }, [agentFetch]);
+
   const reloadDashboardChecks = useCallback(() => {
     getDashboardChecks(agentFetch)
       .then((resp) => setDashboardChecks(resp.checks))
@@ -776,6 +788,18 @@ function RulesSectionMount({
       }),
     [data, customRules, presetOverrides, dashboardChecks],
   );
+  // PR-U4a: policy id maps to the display names of the modes that scope it. Modes'
+  // scopedPolicyIds use the same prefixed ids as the unified policy index, so
+  // the join is a direct id match.
+  const scopedInModes = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    for (const mode of modes) {
+      for (const id of mode.scopedPolicyIds) {
+        (map[id] ??= []).push(mode.displayName);
+      }
+    }
+    return map;
+  }, [modes]);
   const evidenceTypes = useMemo(() => extractEvidenceTypes(policies), [policies]);
   const conditions = useMemo(() => extractNamedConditions(policies), [policies]);
   // PR-F-UX5 — built-in verdict primitives sourced from catalog.judgmentMenu.
@@ -969,6 +993,7 @@ function RulesSectionMount({
               onToggleDashboardCheck={handleToggleDashboardCheck}
               onDeleteDashboardCheck={handleDeleteDashboardCheck}
               onDeleteSeamSpec={handleDeleteSeamSpec}
+              scopedInModes={scopedInModes}
             />
           ) : null}
           {subTab === "evidence" ? (

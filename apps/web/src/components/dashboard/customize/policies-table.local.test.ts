@@ -52,4 +52,14 @@ describe("PoliciesTable — unified policy surface (PR-E1)", () => {
     expect(src).toContain("p.description");
     expect(src).toContain("p.condition.summary");
   });
+
+  it("PR-U4a: renders a 'scoped in N modes' reverse-cross-link badge", () => {
+    // The badge only appears when the policy id is present in scopedInModes.
+    expect(src).toContain("scopedInModes");
+    expect(src).toContain("scopedModes");
+    expect(src).toContain("scoped in ");
+    expect(src).toContain("scopedInModes?.[p.id]");
+    // Threaded through the Group so both origin sections show it.
+    expect(src).toContain("scopedInModes={scopedInModes}");
+  });
 });

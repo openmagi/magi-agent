@@ -39,6 +39,11 @@ export interface PoliciesTableProps {
   onDeleteDashboardCheck: (id: string) => void;
   onDeleteSeamSpec: (specId: string) => void;
   onEdit?: (policy: Policy) => void;
+  /** PR-U4a reverse cross-link: policy id maps to the display names of the modes
+   * that scope it. Rows whose id is present show a "scoped in N modes" badge so the
+   * operator can see, from the Rules tab, which stances force a rule on (the
+   * forward direction lives in the Modes editor's scoped-rule picker). */
+  scopedInModes?: Readonly<Record<string, ReadonlyArray<string>>>;
 }
 
 
@@ -70,6 +75,7 @@ export function PoliciesTable({
   onDeleteDashboardCheck,
   onDeleteSeamSpec,
   onEdit,
+  scopedInModes,
 }: PoliciesTableProps): React.ReactElement {
   const [originFilter, setOriginFilter] = useState<OriginFilter>(null);
   const [scopeFilter, setScopeFilter] = useState<string | null>(null);
@@ -211,6 +217,7 @@ export function PoliciesTable({
           onDeleteDashboardCheck={onDeleteDashboardCheck}
           onDeleteSeamSpec={onDeleteSeamSpec}
           onEdit={onEdit}
+          scopedInModes={scopedInModes}
           defaultOpen
         />
       ) : null}
@@ -227,6 +234,7 @@ export function PoliciesTable({
           onDeleteDashboardCheck={onDeleteDashboardCheck}
           onDeleteSeamSpec={onDeleteSeamSpec}
           onEdit={onEdit}
+          scopedInModes={scopedInModes}
           defaultOpen={userPolicies.length === 0}
         />
       ) : null}
@@ -314,6 +322,7 @@ function Group({
   onDeleteDashboardCheck,
   onDeleteSeamSpec,
   onEdit,
+  scopedInModes,
 }: GroupProps): React.ReactElement {
   const [open, setOpen] = useState(defaultOpen);
   return (
@@ -356,6 +365,7 @@ function Group({
               onDeleteDashboardCheck={onDeleteDashboardCheck}
               onDeleteSeamSpec={onDeleteSeamSpec}
               onEdit={onEdit}
+              scopedModes={scopedInModes?.[p.id]}
             />
           ))}
         </div>
@@ -376,6 +386,7 @@ function PolicyRowView({
   onDeleteDashboardCheck,
   onDeleteSeamSpec,
   onEdit,
+  scopedModes,
 }: {
   policy: Policy;
   pending: boolean;
@@ -387,6 +398,7 @@ function PolicyRowView({
   onDeleteDashboardCheck: (id: string) => void;
   onDeleteSeamSpec: (specId: string) => void;
   onEdit?: (policy: Policy) => void;
+  scopedModes?: ReadonlyArray<string>;
 }): React.ReactElement {
   const checked = policy.state === "enabled" || policy.state === "always-on";
   const handleToggle = (next: boolean) => {
@@ -434,6 +446,14 @@ function PolicyRowView({
           >
             {SOURCE_LABEL[policy.source]}
           </span>
+          {scopedModes && scopedModes.length > 0 ? (
+            <span
+              title={`Forced on in this mode${scopedModes.length === 1 ? "" : "s"}: ${scopedModes.join(", ")}`}
+              className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary"
+            >
+              scoped in {scopedModes.length} mode{scopedModes.length === 1 ? "" : "s"}
+            </span>
+          ) : null}
         </div>
         {policy.description ? (
           <p className="mt-0.5 truncate text-[11px] text-secondary/80">
