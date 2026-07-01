@@ -400,6 +400,15 @@ fn open_dashboard_window(handle: &tauri::AppHandle, port: u16) {
         .title("Open Magi")
         .inner_size(1280.0, 860.0)
         .min_inner_size(960.0, 600.0)
+        // Default the dashboard UI language to English in the desktop app. The
+        // dashboard i18n reads localStorage["magi-locale"] first, then falls back
+        // to the OS locale, so on a non-English Mac it would otherwise open in the
+        // OS language. Only set it when unset, so a user's in-app language choice
+        // is still respected.
+        .initialization_script(
+            "try{if(!window.localStorage.getItem('magi-locale')){\
+             window.localStorage.setItem('magi-locale','en');}}catch(e){}",
+        )
         .on_navigation(move |target| match classify(target.as_str(), port) {
             UrlClass::InApp => true,
             UrlClass::External => {
