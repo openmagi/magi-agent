@@ -47,32 +47,46 @@ def _load_quarantine(manifest: Path) -> dict[str, str]:
 
 
 @pytest.fixture(autouse=True)
-def _reset_process_global_sinks() -> "object":
-    """Reset the process-global observability + transcript sink registries after
-    every test, repo-wide.
+def _hermetic_test_state() -> "object":
+    """Repo-wide per-test hermeticity shield (root conftest so it also covers the
+    ``magi_agent/cli/tests`` subtree that ``tests/conftest.py`` does not reach).
 
-    Both ``observability.runtime_sink`` and ``observability.transcript`` keep a
-    module-level ``_active_sink``. A test that registers an observability or
-    session-transcript sink (a path now reachable by default since the runtime
-    tier defaults to ``lab``) and does not clear it leaks that sink into later
-    tests: build_headless_runtime folds the leaked sink into a ``combine_sinks``
-    fanout, so unrelated headless/engine tests then emit every event twice
-    (doubled output, ``captured == 2``). This lives in the ROOT conftest so it
-    also covers the ``magi_agent/cli/tests`` subtree that ``tests/conftest.py``
-    does not reach. Idempotent with the observability-dir fixture that already
-    resets the runtime sink.
+    Two leak classes surfaced once the runtime tier defaults to ``lab`` (a
+    broader flat-flag set reaches ``os.environ`` via ``setdefault`` on any test
+    that drives the CLI/serve dispatch, and more code paths register sinks):
+
+    1. os.environ pollution. A test that mutates the process env directly, or
+       whose CLI dispatch ``setdefault``s the lab flag set, leaks keys that
+       monkeypatch cannot restore (it only tracks keys it set itself). Later
+       tests that assert a flag OFF, or that resume/re-invoke a turn, then break
+       (doubled output, ``captured == 2``, ``blocked == 2``). Snapshot the env
+       before the test and restore it verbatim afterwards, reverting ANY change.
+
+    2. Process-global sink registries (``observability.runtime_sink`` /
+       ``observability.transcript``). A leaked active sink is folded into a
+       ``combine_sinks`` fanout by build_headless_runtime, doubling emitted
+       events. Clear both after every test (idempotent with the
+       observability-dir fixture that resets the runtime sink).
     """
-    yield
-    import importlib
+    import os
 
-    for module_name, setter in (
-        ("magi_agent.observability.transcript", "set_active_transcript_sink"),
-        ("magi_agent.observability.runtime_sink", "set_active_sink"),
-    ):
-        try:
-            getattr(importlib.import_module(module_name), setter)(None)
-        except Exception:
-            pass
+    _env_snapshot = dict(os.environ)
+    try:
+        yield
+    finally:
+        if dict(os.environ) != _env_snapshot:
+            os.environ.clear()
+            os.environ.update(_env_snapshot)
+        import importlib
+
+        for module_name, setter in (
+            ("magi_agent.observability.transcript", "set_active_transcript_sink"),
+            ("magi_agent.observability.runtime_sink", "set_active_sink"),
+        ):
+            try:
+                getattr(importlib.import_module(module_name), setter)(None)
+            except Exception:
+                pass
 
 
 def pytest_collection_modifyitems(
