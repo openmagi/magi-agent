@@ -12,6 +12,8 @@ prompt style. Good customization is explicit, testable, and easy to disable.
 - Tool policy controls what the model may ask the runtime to do.
 - Contracts describe what evidence must exist before a run can claim success.
 - Model profiles describe model capability rather than brand preference.
+- [Modes](modes.md) are saved agent postures — a system prompt plus a tool
+  scope — that you switch on per turn from the chat composer.
 
 ## Skills
 
