@@ -80,6 +80,7 @@ graph LR
     coding --> meta_orchestration
     composio --> config
     composio --> ops
+    composio --> plugins
     composio --> security
     computer --> cli
     computer --> config
@@ -719,7 +720,7 @@ graph LR
 | config.py | — | credential_vocab, flags | cli/app.py, cli/wiring.py, composio/__init__.py, composio/health.py, composio/mcp.py, transport/health.py, transport/integrations.py |
 | connections.py | Composio connection management used by the dashboard Integrations tab. | — | — |
 | health.py | — | config, mcp, redaction | cli/app.py, transport/health.py |
-| mcp.py | — | broker, config, redaction | cli/wiring.py, composio/__init__.py, composio/health.py |
+| mcp.py | — | broker, config, mcp_resilience, redaction | cli/wiring.py, composio/__init__.py, composio/health.py |
 | redaction.py | — | safety | cli/headless.py, composio/health.py, composio/mcp.py, transport/sse.py |
 
 ### computer/
@@ -1400,7 +1401,7 @@ graph LR
 | manager.py | — | manifest | plugins/audit.py, plugins/tool_projection.py, runtime/openmagi_runtime.py, transport/plugins.py |
 | manifest.py | — | sandbox_policy | connectors/marketplace.py, plugins/__init__.py, plugins/audit.py, plugins/manager.py, plugins/native_catalog.py, plugins/sandbox_policy.py, plugins/tool_projection.py |
 | mcp_adapter.py | — | manifest, mcp_resilience, output_budget, provider_receipts, result, schema_projection | cli/commands/mcp_commands.py, cli/tests/test_slash_p2_mcp.py |
-| mcp_resilience.py | Reusable MCP resilience primitive (timeout / bounded reconnect / circuit breaker). | — | config/env.py, plugins/mcp_adapter.py |
+| mcp_resilience.py | Reusable MCP resilience primitive (timeout / bounded reconnect / circuit breaker). | — | composio/mcp.py, config/env.py, plugins/mcp_adapter.py |
 | native_catalog.py | — | manifest | runtime/openmagi_runtime.py |
 | sandbox_policy.py | — | manifest | connectors/marketplace.py, plugins/__init__.py, plugins/manifest.py |
 | shell_testrun_safe_subset.py | — | — | — |

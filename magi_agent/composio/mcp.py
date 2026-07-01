@@ -1,15 +1,25 @@
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from hashlib import sha256
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from magi_agent.composio.config import ComposioConfig
 from magi_agent.composio.redaction import redact_composio_text
+from magi_agent.plugins.mcp_resilience import (
+    CircuitBreakerRegistry,
+    McpResiliencePolicy,
+    McpServerUnreachable,
+    REASON_CIRCUIT_OPEN,
+    REASON_NEEDS_REAUTH,
+    REASON_SERVER_UNREACHABLE,
+    async_call_with_resilience,
+)
 
 _MISSING_PACKAGE_PREVIEW = "install the composio optional extra to enable integrations"
 _ERROR_PREVIEW_LIMIT = 240
@@ -33,6 +43,12 @@ class ComposioToolsetBundle(BaseModel):
     reason: str | None = None
     toolsets: tuple[Any, ...] = Field(default=(), exclude=True, repr=False)
     mcp_server_label: str = Field(default="composio", alias="mcpServerLabel")
+    # Per-ENDPOINT breaker key: a stable ``sha256(mcp_url)`` digest (never the raw
+    # URL, which carries the per-user secret). Load-bearing: ``mcp_server_label``
+    # defaults to ``"composio"`` for every server, so keying the breaker on it
+    # would collapse all composio endpoints to one shared breaker. Defaults to
+    # ``None`` (unset) so OFF callers are unchanged.
+    server_ref: str | None = Field(default=None, alias="serverRef")
     last_error_class: str | None = Field(default=None, alias="lastErrorClass")
     last_error_preview: str | None = Field(default=None, alias="lastErrorPreview")
 
@@ -105,10 +121,15 @@ def build_composio_toolset_bundle(
             tool_name_prefix="composio",
             require_confirmation=False,
         )
+        # Per-ENDPOINT breaker key. The raw URL carries the per-user secret, so
+        # we carry only a stable one-way digest (see §1.2 CORRECTION 2 of the
+        # WS9 design): never mcp_server_label, which is the constant "composio".
+        server_ref = _server_ref_for_mcp_url(mcp_url)
         return ComposioToolsetBundle(
             active=True,
             status="ready",
             toolsets=(toolset,),
+            serverRef=server_ref,
         )
     except ImportError as exc:
         return ComposioToolsetBundle(
@@ -224,6 +245,57 @@ def guarded_toolset_receipt_ledger(toolset: object) -> ComposioReceiptLedger | N
     return ledger if isinstance(ledger, ComposioReceiptLedger) else None
 
 
+def _server_ref_for_mcp_url(mcp_url: str) -> str:
+    """Stable per-endpoint breaker key derived from the live ``mcp_url``.
+
+    A one-way ``sha256`` digest (truncated), NEVER the raw URL: the URL carries
+    the per-user secret. Two distinct endpoints yield distinct digests so their
+    circuit breakers are isolated (see §1.2 CORRECTION 2 of the WS9 design).
+    """
+    return sha256(mcp_url.encode("utf-8")).hexdigest()[:16]
+
+
+# Conservative auth-signal regex (case-insensitive). Anything that does NOT match
+# (and has no 401/403 status) is treated as retryable transport, so a flaky
+# network never shows a misleading "reconnect your account" message.
+_AUTH_MESSAGE_RE = re.compile(
+    r"oauth|unauthor|forbidden|invalid_grant|token",
+    re.IGNORECASE,
+)
+
+
+class _ComposioAuthError(Exception):
+    """Internal: a guarded composio call failed with an auth-class error.
+
+    Raised inside the resilience wrapper so the (typed) non-retryable auth path
+    of :func:`async_call_with_resilience` fires; the wrapper then maps it to a
+    ``mcp_needs_reauth`` structured result for the model.
+    """
+
+    def __init__(self, original: BaseException) -> None:
+        super().__init__(str(original))
+        self.original = original
+
+
+def _classify_mcp_exception(exc: BaseException) -> Literal["auth", "transport"]:
+    """Classify an ADK/composio exception as ``auth`` or ``transport``.
+
+    ``auth`` only for a clear signal (HTTP 401/403, or an auth-message regex
+    hit); everything ambiguous is conservatively ``transport`` (retryable).
+    """
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        status = getattr(exc, "status", None)
+    if status in (401, 403):
+        return "auth"
+    response = getattr(exc, "response", None)
+    if response is not None and getattr(response, "status_code", None) in (401, 403):
+        return "auth"
+    if _AUTH_MESSAGE_RE.search(str(exc)):
+        return "auth"
+    return "transport"
+
+
 class _DispatcherGuardedTool:
     """Wraps an ADK MCP tool so each call first clears the hard-safety arbiter.
 
@@ -244,12 +316,21 @@ class _DispatcherGuardedTool:
         mode: str,
         context_factory: Callable[..., Any],
         receipt_ledger: ComposioReceiptLedger,
+        resilience: McpResiliencePolicy | None = None,
+        server_ref: str | None = None,
+        registry: CircuitBreakerRegistry | None = None,
     ) -> None:
         self._inner = inner
         self._arbiter = arbiter
         self._mode = mode
         self._context_factory = context_factory
         self._receipt_ledger = receipt_ledger
+        # Resilience (timeout / bounded reconnect / per-endpoint breaker) is
+        # default-OFF: when ``resilience`` is None or disabled the allow path is
+        # the exact byte-identical inner await.
+        self._resilience = resilience
+        self._server_ref = server_ref
+        self._registry = registry
         self.name = getattr(inner, "name", "composio-tool")
 
     def __getattr__(self, item: str) -> Any:
@@ -293,7 +374,62 @@ class _DispatcherGuardedTool:
                 "reason": decision.reason,
                 "metadata": dict(decision.metadata),
             }
-        return await self._inner.run_async(args=args, tool_context=tool_context)
+        resilience = self._resilience
+        if resilience is None or not resilience.enabled:
+            # Byte-identical OFF path: the exact same inner await as before.
+            return await self._inner.run_async(args=args, tool_context=tool_context)
+        return await self._run_with_resilience(resilience, args, tool_context)
+
+    async def _run_with_resilience(
+        self,
+        resilience: McpResiliencePolicy,
+        args: dict[str, object],
+        tool_context: object,
+    ) -> Any:
+        """Allow path wrapped in timeout / bounded reconnect / breaker (ON path).
+
+        On ``McpServerUnreachable`` (attempts exhausted or breaker-open) or an
+        auth-class failure we RETURN a structured error dict (same shape as the
+        deny short-circuit) so the model sees an actionable result instead of a
+        crashed turn. The receipt was already appended before this call, so the
+        audit trail is preserved on failure.
+        """
+        registry = self._registry or CircuitBreakerRegistry.default()
+        server_ref = self._server_ref or self.name
+
+        async def _guarded_inner() -> Any:
+            try:
+                return await self._inner.run_async(
+                    args=args, tool_context=tool_context
+                )
+            except _ComposioAuthError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - classify auth vs transport
+                if _classify_mcp_exception(exc) == "auth":
+                    raise _ComposioAuthError(exc) from exc
+                raise
+
+        try:
+            return await async_call_with_resilience(
+                resilience,
+                registry,
+                server_ref,
+                _guarded_inner,
+                auth_error_types=(_ComposioAuthError,),
+            )
+        except _ComposioAuthError:
+            return self._resilience_error("error", REASON_NEEDS_REAUTH)
+        except McpServerUnreachable as exc:
+            reason = exc.reason_code or REASON_SERVER_UNREACHABLE
+            return self._resilience_error("error", reason)
+
+    def _resilience_error(self, status: str, reason: str) -> dict[str, object]:
+        return {
+            "status": status,
+            "error": reason,
+            "reason": reason,
+            "tool": self.name,
+        }
 
 
 class _DispatcherGuardedToolset:
@@ -313,6 +449,9 @@ class _DispatcherGuardedToolset:
         mode: str,
         context_factory: Callable[..., Any],
         receipt_ledger: ComposioReceiptLedger,
+        resilience: McpResiliencePolicy | None = None,
+        server_ref: str | None = None,
+        registry: CircuitBreakerRegistry | None = None,
     ) -> None:
         self._inner = inner
         self._arbiter = arbiter
@@ -321,6 +460,9 @@ class _DispatcherGuardedToolset:
         # Public so the runner / callers can audit guarded composio calls via
         # ``guarded_toolset_receipt_ledger``.
         self.receipt_ledger = receipt_ledger
+        self._resilience = resilience
+        self._server_ref = server_ref
+        self._registry = registry
 
     def __getattr__(self, item: str) -> Any:
         return getattr(self._inner, item)
@@ -334,6 +476,9 @@ class _DispatcherGuardedToolset:
                 mode=self._mode,
                 context_factory=self._context_factory,
                 receipt_ledger=self.receipt_ledger,
+                resilience=self._resilience,
+                server_ref=self._server_ref,
+                registry=self._registry,
             )
             for tool in tools
         ]
@@ -347,6 +492,8 @@ def attach_composio_toolsets_through_dispatcher(
     mode: str,
     context_factory: Callable[..., Any],
     receipt_ledger: ComposioReceiptLedger | None = None,
+    resilience: McpResiliencePolicy | None = None,
+    registry: CircuitBreakerRegistry | None = None,
 ) -> bool:
     """Attach composio toolsets to *runner* with dispatcher hard-safety guards.
 
@@ -367,6 +514,13 @@ def attach_composio_toolsets_through_dispatcher(
 
     ledger = receipt_ledger if receipt_ledger is not None else ComposioReceiptLedger()
 
+    # Per-ENDPOINT breaker key off the bundle (a sha256(mcp_url) digest), NOT the
+    # mcp_server_label constant. Only materialise a shared registry when
+    # resilience is actually ON so the OFF path is byte-identical.
+    resilience_registry: CircuitBreakerRegistry | None = None
+    if resilience is not None and resilience.enabled:
+        resilience_registry = registry or CircuitBreakerRegistry.default()
+
     guarded = ComposioToolsetBundle(
         active=bundle.active,
         status=bundle.status,
@@ -378,10 +532,14 @@ def attach_composio_toolsets_through_dispatcher(
                 mode=mode,
                 context_factory=context_factory,
                 receipt_ledger=ledger,
+                resilience=resilience,
+                server_ref=bundle.server_ref,
+                registry=resilience_registry,
             )
             for toolset in bundle.toolsets
         ),
         mcpServerLabel=bundle.mcp_server_label,
+        serverRef=bundle.server_ref,
     )
     return attach_composio_toolsets_to_runner(runner, guarded)
 

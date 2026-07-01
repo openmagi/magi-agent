@@ -27,7 +27,9 @@ that precondition, per the design.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import asyncio
+import inspect
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 import threading
 import time
@@ -296,6 +298,81 @@ def call_with_resilience(
             # would otherwise leave the breaker stuck half-open, denying every
             # future call. Record a failure (which re-arms the breaker and
             # clears the latch) before propagating.
+            registry.record_failure(server_ref, policy, now_ns=clock())
+            raise
+        else:
+            registry.record_success(server_ref)
+            return result
+
+    registry.record_failure(server_ref, policy, now_ns=clock())
+    raise McpServerUnreachable(
+        f"mcp server unreachable after {policy.reconnect_max_attempts} attempts",
+        reason_code=REASON_SERVER_UNREACHABLE,
+    ) from last_exc
+
+
+async def async_call_with_resilience(
+    policy: McpResiliencePolicy,
+    registry: CircuitBreakerRegistry,
+    server_ref: str,
+    coro_factory: Callable[[], Awaitable[Any]],
+    *,
+    reconnect: Callable[[str], Any] | None = None,
+    auth_error_types: tuple[type[BaseException], ...] = (),
+    clock: Callable[[], int] = time.monotonic_ns,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> Any:
+    """Async twin of :func:`call_with_resilience` (shares the SAME breaker).
+
+    Reuses the exact :class:`CircuitBreakerRegistry` state machine
+    (``allow`` / ``record_success`` / ``record_failure``); only the timeout and
+    sleep mechanism differ. The per-attempt deadline is a REAL socket timeout via
+    :func:`asyncio.wait_for` (not the sync thread-pool bound) and backoff is via
+    :func:`asyncio.sleep`. ``coro_factory`` must return a FRESH awaitable on each
+    call so a retried attempt re-issues the underlying request.
+
+    When ``policy.enabled`` is False this awaits ``coro_factory()`` exactly once
+    and propagates any exception unchanged (byte-identical pass-through). The same
+    ``BaseException``-clears-the-latch safety as the sync twin applies: a
+    non-``Exception`` escape (``CancelledError`` / ``KeyboardInterrupt`` /
+    ``SystemExit``) records a breaker failure (clearing any in-flight half-open
+    latch) before propagating, so the breaker never sticks half-open.
+    """
+    if not policy.enabled:
+        return await coro_factory()
+
+    admitted, deny_reason = registry.allow(server_ref, policy, now_ns=clock())
+    if not admitted:
+        raise McpServerUnreachable(reason_code=deny_reason or REASON_CIRCUIT_OPEN)
+
+    timeout_s = policy.call_timeout_ms / 1000.0
+    last_exc: BaseException | None = None
+    for attempt in range(1, policy.reconnect_max_attempts + 1):
+        try:
+            result = await asyncio.wait_for(coro_factory(), timeout_s)
+        except auth_error_types as exc:
+            # Auth will not fix itself by retrying; record + re-raise.
+            registry.record_failure(server_ref, policy, now_ns=clock())
+            raise exc
+        except Exception as exc:  # noqa: BLE001 - retryable transport (incl TimeoutError)
+            last_exc = exc
+            if attempt < policy.reconnect_max_attempts:
+                backoff_ms = min(
+                    policy.reconnect_backoff_base_ms * (2 ** (attempt - 1)),
+                    policy.reconnect_backoff_cap_ms,
+                )
+                await sleep(backoff_ms / 1000.0)
+                if reconnect is not None:
+                    maybe = reconnect(server_ref)
+                    if inspect.isawaitable(maybe):
+                        await maybe
+                continue
+            break
+        except BaseException:
+            # CancelledError / KeyboardInterrupt / SystemExit while a half-open
+            # trial holds the in-flight latch would otherwise leave the breaker
+            # stuck half-open. Record a failure (re-arms + clears the latch)
+            # before propagating, mirroring the sync twin.
             registry.record_failure(server_ref, policy, now_ns=clock())
             raise
         else:
