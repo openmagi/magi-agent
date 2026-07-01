@@ -9,8 +9,12 @@ A *mode* is an explicit, user-selected, session-sticky posture. It defines:
 DISTINCT from ``verification.modes`` (a per-preset enforcement mode:
 deterministic/audit). This module owns the posture concept.
 
-Storage only: nothing in the runtime consumes these yet. Runtime wiring
-(feeding ``hook_scope_context`` / ``task_profile`` at resolution) is a follow-up.
+Runtime consumption (incremental): the active mode's ``system_prompt`` IS now
+injected into the assembled system prompt via
+``runtime.message_builder._agent_mode_block`` (soft/posture axis). The
+``tool_delta`` and ``scoped_policy_ids`` are still storage-only pending their
+apply seams (tool_delta needs the universal hard-safety cap; scoped policies
+need the policy resolver) — feeding ``hook_scope_context`` / ``task_profile``.
 See clawy docs/plans/2026-06-30-magi-mode-pack-component-model.md (mode design).
 """
 from __future__ import annotations
