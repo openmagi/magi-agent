@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ListChecks, RefreshCw, RotateCcw, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/ui/glass-card";
@@ -10,13 +10,14 @@ import { Select } from "@/components/ui/select";
 import type { SelectOption } from "@/components/ui/select";
 import { useAgentFetch } from "@/lib/local-api";
 import {
+  computePollDelayMs,
   fetchTasks,
   fetchEvents,
   fetchRuns,
   groupTasksByStatus,
   STATUS_COLUMNS,
 } from "@/lib/work-queue-api";
-import type { WorkQueueTask, WorkQueueEvent, WorkQueueRun } from "@/lib/work-queue-api";
+import type { PollInterval, WorkQueueTask, WorkQueueEvent, WorkQueueRun } from "@/lib/work-queue-api";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -24,6 +25,13 @@ import type { WorkQueueTask, WorkQueueEvent, WorkQueueRun } from "@/lib/work-que
 
 const CORE_STATUS_COLUMNS = ["triage", "todo", "ready", "running", "completed", "blocked", "failed"] as const;
 type CoreStatusColumn = (typeof CORE_STATUS_COLUMNS)[number];
+
+const POLL_INTERVAL_OPTIONS: SelectOption[] = [
+  { value: "5s", label: "Live 5s" },
+  { value: "10s", label: "Live 10s" },
+  { value: "30s", label: "Live 30s" },
+  { value: "off", label: "Paused" },
+];
 
 const STATUS_FILTER_OPTIONS: SelectOption[] = [
   { value: "all", label: "All statuses" },
@@ -341,8 +349,11 @@ export default function WorkQueuePage(): React.ReactElement {
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedTask, setSelectedTask] = useState<WorkQueueTask | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [pollInterval, setPollInterval] = useState<PollInterval>("5s");
+  const loadingRef = useRef(false);
 
   const loadTasks = useCallback(async (): Promise<void> => {
+    loadingRef.current = true;
     setLoading(true);
     setError(null);
     setDisabled(false);
@@ -362,12 +373,29 @@ export default function WorkQueuePage(): React.ReactElement {
       setTasks([]);
     } finally {
       setLoading(false);
+      loadingRef.current = false;
     }
   }, [agentFetch, statusFilter]);
 
   useEffect(() => {
     void loadTasks();
   }, [loadTasks]);
+
+  // Auto-refresh polling. Three short-circuits keep this safe:
+  //   (1) pollInterval === "off"   -> no setInterval
+  //   (2) modalOpen                -> parent-list poll paused while the detail modal is open
+  //   (3) loadingRef.current       -> skip ticks while a prior fetch is still in flight
+  // The clearInterval cleanup ensures no leaked timers across re-renders or unmount.
+  useEffect(() => {
+    if (pollInterval === "off" || modalOpen) return;
+    const delay = computePollDelayMs(pollInterval);
+    if (delay == null) return;
+    const id = setInterval(() => {
+      if (loadingRef.current) return;
+      void loadTasks();
+    }, delay);
+    return () => clearInterval(id);
+  }, [pollInterval, modalOpen, loadTasks]);
 
   function openTaskModal(task: WorkQueueTask): void {
     setSelectedTask(task);
@@ -410,6 +438,14 @@ export default function WorkQueuePage(): React.ReactElement {
               value={statusFilter}
               onChange={setStatusFilter}
               aria-label="Filter by status"
+            />
+          </div>
+          <div className="w-32">
+            <Select
+              options={POLL_INTERVAL_OPTIONS}
+              value={pollInterval}
+              onChange={(v) => setPollInterval(v as PollInterval)}
+              aria-label="Auto-refresh interval"
             />
           </div>
           <Button variant="secondary" size="sm" onClick={() => { void loadTasks(); }} disabled={loading}>
