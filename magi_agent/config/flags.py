@@ -274,6 +274,20 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_EMPTY_RESPONSE_ESCALATION_ENABLED",
+        stage="stage2",
+        summary=(
+            "WS5 PR5b escalation: when the master empty-response recovery flag "
+            "is ON and every attempt stays empty, do one bounded second "
+            "recovery whose final message asks the model to produce an answer "
+            "OR state what is blocking it; if still empty, stream a "
+            "deterministic blocked notice (an explicit non-answer) so the turn "
+            "ends honestly instead of completing blank. Default-OFF in the "
+            "registry; inert unless MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED is "
+            "also ON. The full self-host profile and lab opt in."
+        ),
+    ),
+    _b(
         "MAGI_CHILD_RUNNER_EMPTY_DEBUG",
         summary=(
             "Default-OFF operator-opt-in diagnostic. When truthy, the child "

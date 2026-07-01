@@ -410,12 +410,17 @@ def parse_output_continuation_env(env: Mapping[str, str]) -> OutputContinuationE
 # convention, because the corrective messages persist in session history.
 EMPTY_RESPONSE_RECOVERY_ENABLED_ENV = "MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED"
 EMPTY_RESPONSE_MAX_RECOVERIES_ENV = "MAGI_EMPTY_RESPONSE_MAX_RECOVERIES"
+# WS5 PR5b: opt into a bounded second corrective attempt + an honest blocked
+# notice. Strict truthy opt-in, same family as the master flag; inert unless the
+# master recovery flag is also ON.
+EMPTY_RESPONSE_ESCALATION_ENABLED_ENV = "MAGI_EMPTY_RESPONSE_ESCALATION_ENABLED"
 
 
 @dataclass(frozen=True)
 class EmptyResponseRecoveryEnv:
     enabled: bool = False
     max_recoveries: int = 1
+    escalate: bool = False
 
 
 def parse_empty_response_recovery_env(
@@ -425,10 +430,19 @@ def parse_empty_response_recovery_env(
     from .flags import flag_bool  # noqa: PLC0415
 
     enabled = flag_bool(EMPTY_RESPONSE_RECOVERY_ENABLED_ENV, env=env)
-    max_recoveries = _int_env(env, EMPTY_RESPONSE_MAX_RECOVERIES_ENV, 1)
+    escalate = flag_bool(EMPTY_RESPONSE_ESCALATION_ENABLED_ENV, env=env)
+    # Under escalation the default max becomes 2. ``_int_env`` returns the
+    # passed default ONLY when the key is absent, so an operator who sets
+    # MAGI_EMPTY_RESPONSE_MAX_RECOVERIES always wins (including an explicit =1),
+    # while an unset operator gets 2 under escalation and 1 without it.
+    max_recoveries = _int_env(
+        env, EMPTY_RESPONSE_MAX_RECOVERIES_ENV, 2 if escalate else 1
+    )
     if max_recoveries < 1:
         raise RuntimeEnvError(f"{EMPTY_RESPONSE_MAX_RECOVERIES_ENV} must be >= 1")
-    return EmptyResponseRecoveryEnv(enabled=enabled, max_recoveries=max_recoveries)
+    return EmptyResponseRecoveryEnv(
+        enabled=enabled, max_recoveries=max_recoveries, escalate=escalate
+    )
 
 
 # Single source of truth for the live context-compaction activation flags.
