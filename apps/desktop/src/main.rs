@@ -260,8 +260,11 @@ are much faster.</p>\
 
 fn main() {
     let single_instance = tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-        // A second launch just focuses the existing window.
-        if let Some(win) = app.get_webview_window("main") {
+        // A second launch just focuses the existing window (dashboard or loading).
+        if let Some(win) = app
+            .get_webview_window("main")
+            .or_else(|| app.get_webview_window("loading"))
+        {
             let _ = win.set_focus();
         }
     });
@@ -318,56 +321,25 @@ fn main() {
                 }
             }
 
-            // 3. Show the single main window immediately (loading page), with the
-            //    navigation guards installed up front. We NEVER close and recreate
-            //    this window: closing it fires WindowEvent::Destroyed, which the
-            //    handler treats as "app is exiting" and kills the serve child. So
-            //    on readiness we navigate THIS window to the dashboard instead of
-            //    rebuilding it, which keeps the runtime alive.
-            let guard_handle = handle.clone();
-            let new_window_handle = handle.clone();
-            let loading =
-                WebviewWindowBuilder::new(&handle, "main", WebviewUrl::App("about:blank".into()))
-                    .title("Open Magi")
-                    .inner_size(1280.0, 860.0)
-                    .min_inner_size(960.0, 600.0)
-                    .on_navigation(move |target| {
-                        let t = target.as_str();
-                        // Our own loading / error page is written into about:blank.
-                        if t == "about:blank" || t.starts_with("about:") {
-                            return true;
-                        }
-                        match classify(t, port) {
-                            UrlClass::InApp => true,
-                            UrlClass::External => {
-                                use tauri_plugin_opener::OpenerExt;
-                                let _ = guard_handle.opener().open_url(t, None::<&str>);
-                                false
-                            }
-                            UrlClass::Invalid => false,
-                        }
-                    })
-                    // Guard window.open / target=_blank / programmatic new webviews:
-                    // deny every new window (single-window shell) and route the URL
-                    // through the same policy. Fail-closed.
-                    .on_new_window(move |requested, _features| {
-                        match classify(requested.as_str(), port) {
-                            UrlClass::External => {
-                                use tauri_plugin_opener::OpenerExt;
-                                let _ = new_window_handle
-                                    .opener()
-                                    .open_url(requested.as_str(), None::<&str>);
-                            }
-                            UrlClass::InApp => {
-                                if let Some(main) = new_window_handle.get_webview_window("main") {
-                                    let _ = main.navigate(requested.clone());
-                                }
-                            }
-                            UrlClass::Invalid => {}
-                        }
-                        NewWindowResponse::Deny
-                    })
-                    .build()?;
+            // 3. Show a lightweight loading window immediately (label "loading"),
+            //    then poll readiness off the main thread. On readiness we create
+            //    the real dashboard window (label "main") pointed straight at the
+            //    dashboard URL and close the loading window. We deliberately do
+            //    NOT navigate the loading window to the dashboard: navigating a
+            //    document.write'd about:blank webview does not reliably repaint
+            //    (the resources load but the view stays on the loading page), so
+            //    a window born at the dashboard URL is used instead. The child is
+            //    killed only when the "main" window is destroyed (see below), so
+            //    closing the loading window does not stop the runtime.
+            let loading = WebviewWindowBuilder::new(
+                &handle,
+                "loading",
+                WebviewUrl::App("about:blank".into()),
+            )
+            .title("Open Magi")
+            .inner_size(1280.0, 860.0)
+            .min_inner_size(960.0, 600.0)
+            .build()?;
             let _ = loading.eval(format!(
                 "document.open();document.write({});document.close();",
                 serde_json::to_string(loading_page()).unwrap_or_else(|_| "''".into())
@@ -376,7 +348,7 @@ fn main() {
             std::thread::spawn(move || {
                 let phase = wait_until_ready(port);
                 match phase {
-                    Phase::Ready => navigate_to_dashboard(&handle, port),
+                    Phase::Ready => open_dashboard_window(&handle, port),
                     Phase::Failed(reason) => show_error(&handle, &reason),
                     // wait_until_ready only returns terminal phases.
                     _ => show_error(&handle, "unexpected startup state"),
@@ -386,10 +358,14 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Kill the child when the main window is destroyed / app exits.
+            // The dashboard runs in the "main" window; kill the child only when
+            // THAT window is destroyed (the user closed the app). The transient
+            // "loading" window closing during the handoff must not stop serve.
             if let tauri::WindowEvent::Destroyed = event {
-                if let Some(state) = window.try_state::<ServeProcess>() {
-                    state.shutdown();
+                if window.label() == "main" {
+                    if let Some(state) = window.try_state::<ServeProcess>() {
+                        state.shutdown();
+                    }
                 }
             }
         })
@@ -404,12 +380,12 @@ fn main() {
         });
 }
 
-/// Navigate the existing (already guarded) main window to the dashboard. We do
-/// NOT close and rebuild the window: closing it fires WindowEvent::Destroyed,
-/// which the handler treats as the app exiting and kills the serve child, so the
-/// rebuilt window would load a dead server. The navigation guard installed when
-/// the loading window was created applies to this navigation as well.
-fn navigate_to_dashboard(handle: &tauri::AppHandle, port: u16) {
+/// Create the dashboard window (label "main") pointed straight at the dashboard
+/// URL, install the navigation guards, then close the transient loading window.
+/// A window born at the target URL repaints reliably, unlike navigating a
+/// document.write'd about:blank webview. The child is killed when this "main"
+/// window is destroyed, so closing "loading" right after is safe.
+fn open_dashboard_window(handle: &tauri::AppHandle, port: u16) {
     let dashboard = format!("http://127.0.0.1:{port}/dashboard");
     let url = match dashboard.parse() {
         Ok(u) => u,
@@ -418,13 +394,51 @@ fn navigate_to_dashboard(handle: &tauri::AppHandle, port: u16) {
             return;
         }
     };
-    match handle.get_webview_window("main") {
-        Some(win) => {
-            if let Err(e) = win.navigate(url) {
-                show_error(handle, &format!("could not load the dashboard: {e}"));
+    let guard_handle = handle.clone();
+    let new_window_handle = handle.clone();
+    let built = WebviewWindowBuilder::new(handle, "main", WebviewUrl::External(url))
+        .title("Open Magi")
+        .inner_size(1280.0, 860.0)
+        .min_inner_size(960.0, 600.0)
+        .on_navigation(move |target| match classify(target.as_str(), port) {
+            UrlClass::InApp => true,
+            UrlClass::External => {
+                use tauri_plugin_opener::OpenerExt;
+                let _ = guard_handle
+                    .opener()
+                    .open_url(target.as_str(), None::<&str>);
+                false
+            }
+            UrlClass::Invalid => false,
+        })
+        // Guard window.open / target=_blank / programmatic new webviews: deny
+        // every new window (single-window shell) and route the URL through the
+        // same policy. Fail-closed.
+        .on_new_window(move |requested, _features| {
+            match classify(requested.as_str(), port) {
+                UrlClass::External => {
+                    use tauri_plugin_opener::OpenerExt;
+                    let _ = new_window_handle
+                        .opener()
+                        .open_url(requested.as_str(), None::<&str>);
+                }
+                UrlClass::InApp => {
+                    if let Some(main) = new_window_handle.get_webview_window("main") {
+                        let _ = main.navigate(requested.clone());
+                    }
+                }
+                UrlClass::Invalid => {}
+            }
+            NewWindowResponse::Deny
+        })
+        .build();
+    match built {
+        Ok(_) => {
+            if let Some(loading) = handle.get_webview_window("loading") {
+                let _ = loading.close();
             }
         }
-        None => show_error(handle, "internal: main window was not available"),
+        Err(e) => show_error(handle, &format!("could not open the dashboard window: {e}")),
     }
 }
 
@@ -435,12 +449,16 @@ fn show_error(handle: &tauri::AppHandle, reason: &str) {
         "document.open();document.write({});document.close();",
         serde_json::to_string(&html).unwrap_or_else(|_| "''".into())
     );
-    if let Some(win) = handle.get_webview_window("main") {
-        let _ = win.eval(&script);
-        return;
+    // Render into whichever window is currently up: the "loading" window during
+    // startup, or the "main" window once the dashboard is open.
+    for label in ["loading", "main"] {
+        if let Some(win) = handle.get_webview_window(label) {
+            let _ = win.eval(&script);
+            return;
+        }
     }
     if let Ok(win) =
-        WebviewWindowBuilder::new(handle, "main", WebviewUrl::App("about:blank".into()))
+        WebviewWindowBuilder::new(handle, "loading", WebviewUrl::App("about:blank".into()))
             .title("Open Magi")
             .inner_size(1280.0, 860.0)
             .build()
