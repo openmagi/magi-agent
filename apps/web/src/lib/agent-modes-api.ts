@@ -1,5 +1,5 @@
 /**
- * Agent-mode (posture) CRUD client — thin wrappers over `/v1/app/modes`.
+ * Agent-mode (posture) CRUD client: thin wrappers over `/v1/app/modes`.
  *
  * A *mode* is a user-authored posture: a soft system prompt + a tool allow/deny
  * delta + scoped policy ids. These endpoints are served by the local runtime
@@ -11,6 +11,7 @@
  *   PUT    /v1/app/modes/{id}       → { mode, modes, activeMode }   (400 on invalid)
  *   DELETE /v1/app/modes/{id}       → { modes, activeMode }
  *   POST   /v1/app/modes/active     → { activeMode }                (404 on unknown)
+ *   POST   /v1/app/modes/compile    → { ok, draft?, explanation?, warnings? } | { ok:false, error }
  */
 
 import type { AgentMode } from "@/chat-core";
@@ -23,7 +24,7 @@ export interface ModesListResponse {
 }
 
 /** Body accepted by PUT. The path `{id}` is authoritative for the mode id, so
- * this intentionally omits `id` — the caller passes it as the path segment. */
+ * this intentionally omits `id`: the caller passes it as the path segment. */
 export interface AgentModeInput {
   displayName: string;
   systemPrompt?: string;
@@ -34,6 +35,45 @@ export interface AgentModeInput {
 
 async function parseJson<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
+}
+
+/** The mode-shaped draft the NL compiler returns (no `id`: the caller derives
+ * it on save). Mirrors {@link AgentModeInput} plus a required displayName. */
+export interface ModeCompileDraft {
+  displayName: string;
+  systemPrompt: string;
+  toolDelta: { exclude: string[]; include: string[] };
+  scopedPolicyIds: string[];
+  permissionMode: string | null;
+}
+
+export type ModeCompileResponse =
+  | { ok: true; draft: ModeCompileDraft; explanation: string; warnings: string[] }
+  | { ok: false; error: string; draft?: null };
+
+/** PR-U3.4: NL → mode draft compile preview (registration-time only; never
+ * activates a mode). Returns `{ ok:false, error }` when the compiler is
+ * disabled or no model is configured (fail-open); the caller shows the manual
+ * form in that case. `scopablePolicyIds` grounds the draft on the operator's
+ * own rules so the model does not invent ids. */
+export async function compileMode(
+  fetch: Fetcher,
+  args: { nlText: string; scopablePolicyIds?: string[] },
+): Promise<ModeCompileResponse> {
+  const res = await fetch("/v1/app/modes/compile", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      nlText: args.nlText,
+      scopablePolicyIds: args.scopablePolicyIds ?? [],
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const reason = (body as { error?: string }).error ?? `http_${res.status}`;
+    return { ok: false, error: reason };
+  }
+  return parseJson<ModeCompileResponse>(res);
 }
 
 export async function getModes(fetch: Fetcher): Promise<ModesListResponse> {

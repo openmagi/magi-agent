@@ -16,15 +16,17 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Layers, Plus, Trash2, Pencil, Check } from "lucide-react";
+import { Layers, Plus, Trash2, Pencil, Check, Sparkles } from "lucide-react";
 
 import { useAgentFetch } from "@/lib/local-api";
 import {
+  compileMode,
   deleteMode,
   getModes,
   putMode,
   setActiveMode,
   type AgentModeInput,
+  type ModeCompileDraft,
 } from "@/lib/agent-modes-api";
 import { useCustomize } from "@/lib/customize-api";
 import { getDashboardChecks, type DashboardCheck } from "@/lib/packs-dashboard-api";
@@ -75,6 +77,20 @@ const EMPTY_EDITOR: EditorState = {
   permissionMode: "",
 };
 
+/** PR-U3.4: drop an NL-compiled draft into the editable editor (create path).
+ * The compiler never returns an id; the user reviews + names, then saves. */
+function editorFromDraft(draft: ModeCompileDraft): EditorState {
+  return {
+    modeId: null,
+    displayName: draft.displayName,
+    systemPrompt: draft.systemPrompt,
+    exclude: draft.toolDelta.exclude.join("\n"),
+    include: draft.toolDelta.include.join("\n"),
+    scopedPolicyIds: draft.scopedPolicyIds.join("\n"),
+    permissionMode: draft.permissionMode ?? "",
+  };
+}
+
 export function ModesPanel({ botId }: { botId: string }): React.JSX.Element {
   const agentFetch = useAgentFetch();
   const [modes, setModes] = useState<AgentMode[]>([]);
@@ -83,6 +99,10 @@ export function ModesPanel({ botId }: { botId: string }): React.JSX.Element {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
+  // PR-U3.4: NL "describe a mode" compose surface + the warnings the compiler
+  // surfaced (dropped tools/ids, capped permission mode) for the current draft.
+  const [composing, setComposing] = useState(false);
+  const [draftWarnings, setDraftWarnings] = useState<string[]>([]);
 
   // Scopable-policy picker source: the user-authored custom rules + dashboard
   // checks, keyed by the resolver's prefixed id. Reuses the dashboard's unified
@@ -178,6 +198,7 @@ export function ModesPanel({ botId }: { botId: string }): React.JSX.Element {
         setModes(res.modes);
         setActive(res.activeMode);
         setEditor(null);
+        setDraftWarnings([]);
       })
       .catch((err: unknown) =>
         setError(err instanceof Error ? err.message : "Failed to save mode"),
@@ -238,11 +259,48 @@ export function ModesPanel({ botId }: { botId: string }): React.JSX.Element {
         </div>
       ) : null}
 
-      {editor === null ? (
-        <div className="flex justify-end">
+      {editor !== null ? (
+        <ModeEditor
+          editor={editor}
+          busy={busy}
+          warnings={draftWarnings}
+          policyOptions={policyOptions}
+          policiesLoading={policiesLoading}
+          onChange={setEditor}
+          onSave={handleSave}
+          onCancel={() => {
+            setEditor(null);
+            setDraftWarnings([]);
+          }}
+        />
+      ) : composing ? (
+        <ModeCompose
+          agentFetch={agentFetch}
+          scopablePolicyIds={policyOptions.map((o) => o.id)}
+          onDrafted={(draft, warnings) => {
+            setEditor(editorFromDraft(draft));
+            setDraftWarnings(warnings);
+            setComposing(false);
+          }}
+          onCancel={() => setComposing(false)}
+        />
+      ) : (
+        <div className="flex justify-end gap-2">
           <button
             type="button"
-            onClick={() => setEditor({ ...EMPTY_EDITOR })}
+            onClick={() => setComposing(true)}
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-white px-3 py-1.5 text-xs font-semibold text-primary shadow-sm hover:bg-primary/[0.04] disabled:opacity-50"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            Describe a mode
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setEditor({ ...EMPTY_EDITOR });
+              setDraftWarnings([]);
+            }}
             disabled={busy}
             className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-primary/90 disabled:opacity-50"
           >
@@ -250,16 +308,6 @@ export function ModesPanel({ botId }: { botId: string }): React.JSX.Element {
             New mode
           </button>
         </div>
-      ) : (
-        <ModeEditor
-          editor={editor}
-          busy={busy}
-          policyOptions={policyOptions}
-          policiesLoading={policiesLoading}
-          onChange={setEditor}
-          onSave={handleSave}
-          onCancel={() => setEditor(null)}
-        />
       )}
 
       {/* Active-mode selector */}
@@ -323,7 +371,10 @@ export function ModesPanel({ botId }: { botId: string }): React.JSX.Element {
               <div className="flex shrink-0 items-center gap-1">
                 <button
                   type="button"
-                  onClick={() => setEditor(editorFromMode(mode))}
+                  onClick={() => {
+                    setEditor(editorFromMode(mode));
+                    setDraftWarnings([]);
+                  }}
                   disabled={busy}
                   aria-label={`Edit mode ${mode.displayName}`}
                   className="rounded-lg p-1.5 text-secondary hover:bg-black/[0.04] hover:text-foreground disabled:opacity-50"
@@ -380,6 +431,7 @@ function ActivePill({
 function ModeEditor({
   editor,
   busy,
+  warnings = [],
   policyOptions,
   policiesLoading,
   onChange,
@@ -388,6 +440,7 @@ function ModeEditor({
 }: {
   editor: EditorState;
   busy: boolean;
+  warnings?: string[];
   policyOptions: ScopablePolicyOption[];
   policiesLoading: boolean;
   onChange: (next: EditorState) => void;
@@ -421,6 +474,17 @@ function ModeEditor({
           strict approvals are. You pick it per turn in the chat composer.
         </p>
       )}
+
+      {warnings.length > 0 ? (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/[0.06] px-3 py-2 text-xs text-amber-800">
+          <p className="font-semibold">We adjusted the draft:</p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4">
+            {warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       <div>
         <label className={labelCls} htmlFor="mode-display-name">
@@ -578,6 +642,100 @@ function ModeEditor({
         >
           <Check className="h-3.5 w-3.5" />
           Save mode
+        </button>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * ModeCompose (PR-U3.4): the "describe a mode" natural-language surface.
+ *
+ * The operator types the stance in plain words; the backend NL→mode compiler
+ * drafts a full mode which we hand to :func:`ModeEditor` (via ``onDrafted``)
+ * for review before saving. Nothing is activated here. When the compiler is
+ * disabled on the deployment (flag-off / no model) the compile fails soft and
+ * we point the operator at the manual "New mode" form.
+ */
+function ModeCompose({
+  agentFetch,
+  scopablePolicyIds,
+  onDrafted,
+  onCancel,
+}: {
+  agentFetch: (path: string, init?: RequestInit) => Promise<Response>;
+  scopablePolicyIds: string[];
+  onDrafted: (draft: ModeCompileDraft, warnings: string[]) => void;
+  onCancel: () => void;
+}): React.ReactElement {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const draft = useCallback(() => {
+    const nlText = text.trim();
+    if (!nlText) return;
+    setBusy(true);
+    setError(null);
+    compileMode(agentFetch, { nlText, scopablePolicyIds })
+      .then((res) => {
+        if (res.ok) {
+          onDrafted(res.draft, res.warnings);
+          return;
+        }
+        setError(
+          res.error === "nl-mode compiler disabled"
+            ? "Natural-language drafting isn't enabled on this deployment. Use \"New mode\" to author by hand."
+            : res.error === "compiler unavailable"
+              ? "No model is configured for drafting. Use \"New mode\" to author by hand."
+              : `Couldn't draft a mode: ${res.error}`,
+        );
+      })
+      .catch((err: unknown) =>
+        setError(err instanceof Error ? err.message : "Couldn't draft a mode"),
+      )
+      .finally(() => setBusy(false));
+  }, [agentFetch, onDrafted, scopablePolicyIds, text]);
+
+  return (
+    <section className="space-y-3 rounded-xl border border-primary/20 bg-primary/[0.02] px-4 py-4">
+      <div className="flex items-center gap-2">
+        <Sparkles className="h-4 w-4 text-primary" />
+        <h3 className="text-sm font-bold text-foreground">Describe a mode</h3>
+      </div>
+      <p className="text-xs leading-relaxed text-secondary">
+        Say what stance you want in plain words. We draft a mode (behavior +
+        tools + rules + approvals) for you to review and edit before saving.
+      </p>
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={3}
+        placeholder="e.g. A careful read-only reviewer that explains findings and cites sources, and never edits files."
+        className="w-full resize-y rounded-lg border border-black/[0.10] bg-white px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
+      />
+      {error ? (
+        <p className="rounded-lg border border-amber-500/30 bg-amber-500/[0.06] px-3 py-2 text-xs text-amber-800">
+          {error}
+        </p>
+      ) : null}
+      <div className="flex items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={busy}
+          className="rounded-lg px-3 py-1.5 text-xs font-medium text-secondary hover:bg-black/[0.04] disabled:opacity-50"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={draft}
+          disabled={busy || !text.trim()}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-primary/90 disabled:opacity-50"
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          {busy ? "Drafting…" : "Draft mode"}
         </button>
       </div>
     </section>

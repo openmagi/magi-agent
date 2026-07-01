@@ -1779,6 +1779,26 @@ FLAGS: tuple[FlagSpec, ...] = (
         stage="stage2",
     ),
     _b(
+        "MAGI_CUSTOMIZE_NL_MODE_COMPILER_ENABLED",
+        summary=(
+            "Enable the POST /v1/app/modes/compile endpoint: an NL → agent-mode "
+            "compiler that drafts a full mode (soft systemPrompt + toolDelta "
+            "exclude/include + scopedPolicyIds + permissionMode) from a "
+            "plain-language stance description. Grounds the draft on the live "
+            "tool catalog + the caller's scopable rule ids and honest-degrades "
+            "(drops unknown tools/ids, caps permissionMode so a mode can never "
+            "loosen the deployment baseline). Returns a structured draft + "
+            "warnings for the operator to review in the Mode editor; the caller "
+            "activates by hitting PUT /v1/app/modes/{id}. Registration-time "
+            "only (never on the runtime hot path). Requires a configured "
+            "provider/key; fail-open (returns ok=False) when no model is "
+            "available. Strict default-OFF; lab opts in via "
+            "LAB_EXPERIMENTAL_FLAGS."
+        ),
+        scope="public",
+        stage="stage2",
+    ),
+    _b(
         "MAGI_CUSTOMIZE_NL_INTERVIEW_MODE_ENABLED",
         summary=(
             "PR-F-UX6: turn the NL compose surface from a one-shot parser into "
