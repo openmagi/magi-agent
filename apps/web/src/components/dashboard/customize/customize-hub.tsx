@@ -25,7 +25,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ShieldCheck, Wrench, Layers, Webhook, Wand2, Plus, SlidersHorizontal, Gauge, Drama } from "lucide-react";
+import { ShieldCheck, Wrench, Layers, Webhook, Plus, SlidersHorizontal, Gauge, Drama } from "lucide-react";
 import {
   useCustomize,
   patchToolOverride,
@@ -84,7 +84,6 @@ import {
 
 export type CustomizeSection =
   | "rules"
-  | "guidance"
   | "modes"
   | "tools"
   | "behaviors"
@@ -106,13 +105,6 @@ const SECTIONS: ReadonlyArray<{
       "Enforcement: rules that gate the agent (block / audit / require). Built-in + your own, same shape, same controls. Toggles here set the GLOBAL default for every turn; to apply a rule only in a specific stance, scope it in Modes.",
   },
   {
-    id: "guidance",
-    label: "Guidance",
-    icon: <Wand2 className="h-4 w-4" />,
-    description:
-      "Capability (soft): prompt instructions injected into the system prompt every turn. The model is asked to follow them but is not forced to; never blocks.",
-  },
-  {
     id: "modes",
     label: "Modes",
     icon: <Drama className="h-4 w-4" />,
@@ -130,7 +122,7 @@ const SECTIONS: ReadonlyArray<{
     label: "Behaviors",
     icon: <SlidersHorizontal className="h-4 w-4" />,
     description:
-      "Capability (soft): in-context runtime behaviors (periodic facts survey, goal nudge, tool-synthesis nudge, empty-response recovery) that nudge or help the agent but never block. Seeded ON by the lab/dogfood profile; a toggle here overrides that.",
+      "Capability (soft): things that nudge or help the agent but never block. Your freeform guidance plus the built-in in-context behaviors (facts survey, goal nudge, tool-synthesis nudge, empty-response recovery).",
   },
   {
     id: "budgets",
@@ -593,12 +585,40 @@ export function CustomizeHub({
           />
         ) : null}
 
-        {section === "guidance" ? (
-          <GuidancePanel
-            userRules={userRules}
-            rulesSaving={rulesSaving}
-            onSaveRules={handleSaveRules}
-          />
+        {section === "behaviors" ? (
+          <div className="space-y-8">
+            <section className="space-y-3">
+              <div>
+                <h3 className="text-sm font-bold text-foreground">Your guidance</h3>
+                <p className="mt-0.5 text-xs leading-relaxed text-secondary">
+                  Soft prompt instructions injected into the system prompt every
+                  turn. The model is asked to follow them but is never forced to.
+                </p>
+              </div>
+              <GuidancePanel
+                userRules={userRules}
+                rulesSaving={rulesSaving}
+                onSaveRules={handleSaveRules}
+              />
+            </section>
+            <section className="space-y-3">
+              <div>
+                <h3 className="text-sm font-bold text-foreground">Built-in behaviors</h3>
+                <p className="mt-0.5 text-xs leading-relaxed text-secondary">
+                  In-context nudges and recovery (facts survey, goal nudge,
+                  tool-synthesis nudge, empty-response recovery). Seeded ON by the
+                  lab/dogfood profile; a toggle here overrides that. Never blocks.
+                </p>
+              </div>
+              <BehaviorsPanel
+                behaviors={data.catalog.controlPlane ?? []}
+                overrides={behaviorOverrides}
+                onToggle={handleToggleBehavior}
+                pendingIds={behaviorPending}
+                error={behaviorError}
+              />
+            </section>
+          </div>
         ) : null}
 
         {section === "modes" ? <ModesPanel botId={botId} /> : null}
@@ -613,15 +633,6 @@ export function CustomizeHub({
           />
         ) : null}
 
-        {section === "behaviors" ? (
-          <BehaviorsPanel
-            behaviors={data.catalog.controlPlane ?? []}
-            overrides={behaviorOverrides}
-            onToggle={handleToggleBehavior}
-            pendingIds={behaviorPending}
-            error={behaviorError}
-          />
-        ) : null}
 
         {section === "budgets" ? (
           <BudgetsTab
