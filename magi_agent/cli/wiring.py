@@ -582,6 +582,13 @@ def _build_default_runner(
     local_tool_evidence = LocalToolEvidenceCollector(
         general_automation_receipts=general_automation_receipts,
     )
+    # WS3 PR3a: capture the per-turn TodoWriteHandlerSet (with its durable
+    # ledger sink already attached + restored inside the build below) so it can
+    # be threaded onto the runner as an attribute, mirroring
+    # ``local_tool_evidence_collector``. Empty (so ``None`` below) when the
+    # durable-ledger flag is OFF or when a caller supplies ``tools`` directly
+    # (child-agent containment), keeping those paths byte-identical.
+    plan_ledger_capture: list[object] = []
     effective_tools = (
         tools
         if tools is not None
@@ -594,8 +601,10 @@ def _build_default_runner(
             general_automation_receipts=general_automation_receipts,
             local_tool_evidence_collector=local_tool_evidence,
             agent_event_emitter=agent_event_emitter,
+            plan_ledger_capture=plan_ledger_capture,
         )
     )
+    plan_ledger_handler_set = plan_ledger_capture[0] if plan_ledger_capture else None
     try:
         return build_cli_model_runner(
             config,
@@ -612,6 +621,7 @@ def _build_default_runner(
             learning_live_readiness=learning_live_readiness,
             general_automation_receipts=general_automation_receipts,
             local_tool_evidence_collector=local_tool_evidence,
+            plan_ledger_handler_set=plan_ledger_handler_set,
             pinned_recipe_pack_ids=pinned_recipe_pack_ids,
             agent_event_emitter=agent_event_emitter,
         )
@@ -631,6 +641,7 @@ def _build_first_party_adk_tools(
     general_automation_receipts: object | None = None,
     local_tool_evidence_collector: object | None = None,
     agent_event_emitter: Callable[..., object] | None = None,
+    plan_ledger_capture: list[object] | None = None,
 ) -> list[object]:
     """Build default first-party local ADK tools for the CLI real runner.
 
@@ -673,6 +684,30 @@ def _build_first_party_adk_tools(
         bot_id="local-cli",
         user_id="cli",
     )
+
+    # WS3 PR3a: attach the durable plan-ledger sink to the freshly-bound
+    # TodoWriteHandlerSet AND re-seed its in-memory todos from the JSONL last
+    # line (the Critical #1 cross-turn restore), on the LIVE per-turn build.
+    # ``session_id`` is a parameter and ``workspace_root`` is in local scope, so
+    # both identifiers the restore needs are already here. Default-OFF: when the
+    # flag is unset this whole block is skipped and the handler set is
+    # byte-identical to today (empty ``_todos``, no sink, no JSONL read). The
+    # handler set is surfaced to ``_build_default_runner`` via the capture list
+    # so it can be threaded onto the runner as an attribute (section 5.1/5.2).
+    from magi_agent.config.env import is_plan_ledger_durable_enabled  # noqa: PLC0415
+
+    if is_plan_ledger_durable_enabled():
+        from magi_agent.runtime.plan_ledger import PlanLedgerStore  # noqa: PLC0415
+        from magi_agent.tools.todo_toolhost import (  # noqa: PLC0415
+            get_todo_write_handler_set,
+        )
+
+        plan_ledger_handler_set = get_todo_write_handler_set(registry)
+        if plan_ledger_handler_set is not None:
+            plan_ledger_handler_set.set_ledger_sink(PlanLedgerStore(workspace_root))
+            plan_ledger_handler_set.restore_into(session_id)
+            if plan_ledger_capture is not None:
+                plan_ledger_capture.append(plan_ledger_handler_set)
 
     from magi_agent.config.env import file_tools_enabled  # noqa: PLC0415
 
@@ -968,6 +1003,18 @@ def _local_tool_evidence_collector(runner: object) -> object | None:
     except Exception:
         return None
     return LocalToolEvidenceCollector(general_automation_receipts=store)
+
+
+def _plan_ledger_handler_set(runner: object) -> object | None:
+    """Read the per-turn ``TodoWriteHandlerSet`` back off the runner.
+
+    Mirrors ``_local_tool_evidence_collector``: the handler set (with its
+    durable ledger sink attached + restored) is surfaced as a runner attribute
+    by ``build_cli_model_runner`` (Design: WS3 PR3a, section 5.1). Returns
+    ``None`` for stub / caller-supplied-tools / child-containment runners and
+    when the durable-ledger flag is OFF (degrade-to-OFF, byte-identical).
+    """
+    return getattr(runner, "plan_ledger_handler_set", None)
 
 
 def _context_lookup(value: object, key: str) -> object | None:

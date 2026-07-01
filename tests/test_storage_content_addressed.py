@@ -147,6 +147,7 @@ def test_runtime_metadata_index_covers_required_runtime_collections_without_raw_
         "eval_observations",
         "delivery_action_receipts",
         "credential_lease_metadata",
+        "plan_ledger",
     }
     store = InMemoryDurableStore()
 
