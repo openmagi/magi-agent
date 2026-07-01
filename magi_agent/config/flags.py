@@ -2320,9 +2320,13 @@ FLAGS: tuple[FlagSpec, ...] = (
     _b(
         "MAGI_CONTEXT_PROACTIVE_RECOVERY_ENABLED",
         summary=(
-            "Enable proactive context recovery (compaction triggered "
-            "before the model errors out on context). Honored only when "
-            "``MAGI_CONTEXT_MGMT_ENABLED`` is ON."
+            "Enable proactive context recovery (tier-6 collapse-drain + tier-7 "
+            "reactive-compact applied at CRITICAL before the model errors out on "
+            "context). Dual-master: honored by the dormant ContextManagementHook "
+            "when ``MAGI_CONTEXT_MGMT_ENABLED`` is ON, AND by the live "
+            "MagiContextCompactionPlugin when ``MAGI_CONTEXT_COMPACTION_ENABLED`` "
+            "is ON. Threshold via ``MAGI_CONTEXT_CRITICAL_THRESHOLD`` (default "
+            "0.90 of the model window)."
         ),
     ),
     FlagSpec(

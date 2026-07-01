@@ -30,6 +30,12 @@ LOCAL_FULL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     # Inert unless the recovery flag above is also ON.
     "MAGI_EMPTY_RESPONSE_ESCALATION_ENABLED": "1",
     "MAGI_CONTEXT_COMPACTION_ENABLED": "1",
+    # WS4 PR4b: the live MagiContextCompactionPlugin honors this when
+    # MAGI_CONTEXT_COMPACTION_ENABLED is ON, applying tier-6 collapse-drain and
+    # tier-7 reactive-compact at CRITICAL so a long session does not wedge on
+    # context overflow (the cost-free reliability safety net; tier-7 defaults to
+    # the hermetic stub summarizer).
+    "MAGI_CONTEXT_PROACTIVE_RECOVERY_ENABLED": "1",
     "MAGI_MAX_STEPS_BRAKE_ENABLED": "1",
     # WS9 PR9c: MCP connection resilience (caller-bounded timeout + per-endpoint
     # circuit breaker + bounded reconnect) for the live composio dispatcher seam.

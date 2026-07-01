@@ -185,6 +185,32 @@ jobs:
           tests/test_channel_poll_resilience.py
           tests/test_telegram_live_provider.py
 
+  ws4-context-onpath:
+    # WS4 PR4b: mandatory ON-path job (flag-promotion rule, ref #641). Runs the
+    # WS4 proactive-context-recovery suite with the live-plugin flags ON in a
+    # hermetic env-cleared run so an exported MAGI_* / provider key cannot give a
+    # false green. Tier-7 uses the hermetic stub summarizer (no model call).
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install Python
+        run: uv python install 3.12
+      - name: Sync deps (dev + cli extras)
+        run: uv sync --python 3.12 --extra dev --extra cli
+      - name: WS4 proactive context recovery (ON-path, hermetic, env-cleared)
+        run: >
+          env -i HOME="$HOME" PATH="$PATH"
+          MAGI_CONFIG="${{ runner.temp }}/magi-ci-config.toml"
+          MAGI_CONTEXT_PROACTIVE_RECOVERY_ENABLED=1
+          MAGI_CONTEXT_COMPACTION_ENABLED=1
+          uv run --no-sync pytest -q
+          tests/test_context_compaction_proactive.py
+          tests/test_ws4_proactive_activation.py
+
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
