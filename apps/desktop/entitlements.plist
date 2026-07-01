@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  App entitlements for the "Open Magi" Tauri shell (the outer .app).
+
+  This is the Rust/WKWebView host process. It is deliberately MINIMAL: an empty
+  entitlements dictionary under the Hardened Runtime, i.e. the shell requests NO
+  security exceptions for itself.
+
+  Why empty and not the sidecar's exceptions:
+    - The JIT / unsigned-executable-memory / library-validation exceptions are
+      needed by the frozen-Python child process, NOT by this shell. Those
+      exceptions apply per-process, and the sidecar is a separately signed
+      executable with its own entitlements (see entitlements.sidecar.plist), so
+      the shell does not need to inherit or relax anything to launch it.
+    - WKWebView runs page JavaScript in a separate system-provided WebContent
+      process with its own entitlements; the shell itself does not JIT.
+    - Keeping this file empty preserves the strongest Hardened Runtime posture
+      for the shell that Gatekeeper / notarization will accept.
+
+  Referenced by tauri.conf.json -> bundle.macOS.entitlements. Tauri applies it
+  when it signs the outer .app during `cargo tauri build`.
+-->
+<plist version="1.0">
+  <dict/>
+</plist>
