@@ -41,6 +41,12 @@
       "group": "Configure"
     },
     {
+      "slug": "modes",
+      "title": "Modes",
+      "path": "docs/modes.md",
+      "group": "Configure"
+    },
+    {
       "slug": "runtime",
       "title": "Runtime",
       "path": "docs/runtime.md",
