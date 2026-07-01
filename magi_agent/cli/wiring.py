@@ -249,10 +249,10 @@ def _agent_mode_excluded_tool_names() -> frozenset[str]:
     Resolved consistently with the system-prompt block: an explicit per-turn
     selection wins over the operator's stored sticky default. Returns an empty
     set when no mode is active, the mode is unknown, or on any error (fail-soft
-    ⇒ byte-identical). PR-4d is EXCLUDE-ONLY: a mode may only NARROW the toolset
-    (inherently safe — it can never enable a tool). The ``include`` half
-    (re-enabling a default-off tool) needs the universal hard-safety cap and is
-    a follow-up; it is intentionally NOT applied here.
+    ⇒ byte-identical). A mode may NARROW the toolset via ``exclude`` (inherently
+    safe — it can only remove) and WIDEN it via ``include`` within the
+    property-based hard-safety cap (see ``_agent_mode_included_tool_names``);
+    ``exclude`` wins over ``include`` for the same name.
     """
     try:
         from magi_agent.customize.modes import active_mode_id, get_mode
@@ -267,6 +267,93 @@ def _agent_mode_excluded_tool_names() -> frozenset[str]:
         if mode is None:
             return frozenset()
         return frozenset(mode.tool_delta.exclude)
+    except Exception:
+        return frozenset()
+
+
+# Permission + side-effect classes a mode's ``include`` MAY re-enable. Modelled
+# as ALLOWLISTS (not denylists) so a future permission/side-effect class fails
+# closed — a mode can only ever widen the toolset toward low-blast-radius tools.
+# ``read`` (inspect) and ``write`` (local-workspace mutation) are admitted;
+# ``execute`` (Bash/TestRun/PythonExec), ``net`` (outbound egress), ``computer``
+# (ComputerTask), and ``meta`` (tool/runtime management — unbounded blast radius)
+# are NOT. Side effects are capped at ``none`` / ``local_workspace``; anything
+# that spawns a process (``local_process``) or reaches outside the workspace
+# (``external`` / ``local_and_external``) is refused. The runtime approval gate
+# still governs these at call time, so this cap is defense-in-depth that keeps
+# them out of the advertised set entirely rather than the only guard.
+_MODE_INCLUDE_ALLOWED_PERMISSIONS: frozenset[str] = frozenset({"read", "write"})
+_MODE_INCLUDE_ALLOWED_SIDE_EFFECTS: frozenset[str] = frozenset(
+    {"none", "local_workspace"}
+)
+
+
+def _mode_include_allows_manifest(manifest: object, *, mode: "RuntimeMode") -> bool:
+    """Property-based hard-safety cap for ``tool_delta.include`` (PR-A).
+
+    A mode may re-enable a default-OFF tool only when it is genuinely
+    low-blast-radius: available in the current runtime mode, not ``dangerous``,
+    and in the permission + side-effect ALLOWLISTS above. Bash / PythonExec /
+    ComputerTask / network-egress / process-spawning / meta tools are refused no
+    matter what a mode declares. Fail-CLOSED: a manifest missing an expected
+    attribute (or any error) is refused, so an odd/partial manifest — or a tool
+    carrying a permission/side-effect class introduced after this code — never
+    widens the toolset.
+    """
+    try:
+        if mode not in tuple(getattr(manifest, "available_in_modes", ()) or ()):
+            return False
+        if bool(getattr(manifest, "dangerous", True)):
+            return False
+        if getattr(manifest, "permission", "execute") not in _MODE_INCLUDE_ALLOWED_PERMISSIONS:
+            return False
+        if (
+            getattr(manifest, "side_effect_class", "external")
+            not in _MODE_INCLUDE_ALLOWED_SIDE_EFFECTS
+        ):
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def _agent_mode_included_tool_names(registry: object, *, mode: "RuntimeMode") -> frozenset[str]:
+    """Tool names the active agent MODE re-enables for this turn (PR-A).
+
+    Applies the property-based hard-safety cap (:func:`_mode_include_allows_manifest`):
+    a mode may only widen the toolset toward low-blast-radius tools; the
+    execute/net/computer/dangerous classes are refused. ``exclude`` wins over
+    ``include`` for the same name. Only registered tools with a bound handler
+    are admitted (an include naming an unknown/handler-less tool is dropped).
+    Resolved like the exclude / system-prompt seams (per-turn selection wins
+    over the sticky default). Fail-soft empty on any error (byte-identical).
+    """
+    try:
+        from magi_agent.customize.modes import active_mode_id, get_mode
+        from magi_agent.runtime.per_turn_agent_mode_context import (
+            current_per_turn_agent_mode,
+        )
+
+        mode_id = current_per_turn_agent_mode() or active_mode_id()
+        if not mode_id:
+            return frozenset()
+        agent_mode = get_mode(mode_id)
+        if agent_mode is None:
+            return frozenset()
+        excluded = set(agent_mode.tool_delta.exclude)
+        allowed: set[str] = set()
+        resolve = getattr(registry, "resolve_registration", None)
+        if not callable(resolve):
+            return frozenset()
+        for name in agent_mode.tool_delta.include:
+            if name in excluded:
+                continue  # exclude wins over include for the same name
+            registration = resolve(name)
+            if registration is None or getattr(registration, "handler", None) is None:
+                continue
+            if _mode_include_allows_manifest(registration.manifest, mode=mode):
+                allowed.add(name)
+        return frozenset(allowed)
     except Exception:
         return frozenset()
 
@@ -828,6 +915,21 @@ def _build_first_party_adk_tools(
         first_party_activity_collector=local_tool_evidence_collector,
         first_party_evidence_refs=enabled_first_party_activity_refs(),
     )
+    # PR-A: an active agent mode may WIDEN the toolset by re-enabling a
+    # default-OFF tool via ``tool_delta.include`` — but only within the
+    # property-based hard-safety cap (never execute/net/computer/dangerous).
+    # Enable the admitted tools on this per-build registry BEFORE the advertised
+    # set is computed so they flow through the normal ``list_available`` path and
+    # get real ADK tools built; the exclude filter below still wins for any name
+    # in both halves. The registry is freshly built per turn (serve rebuilds with
+    # the per-turn ContextVar set), so this mutation is turn-local. Byte-identical
+    # when no mode is active / the mode has no admissible includes.
+    for _include_name in _agent_mode_included_tool_names(registry, mode=mode):
+        try:
+            registry.enable(_include_name)
+        except Exception:
+            pass
+
     # Only advertise tools that actually have an execution handler bound. A
     # manifest with no handler can never be dispatched, so exposing it would
     # advertise a capability the runtime cannot deliver. (Handler-less catalog
