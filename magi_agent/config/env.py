@@ -589,6 +589,18 @@ _COMPACTION_SUMMARY_MAX_FAILURES_DEFAULT = 3
 # OFF => byte-identical to Phase-4.
 COMPACTION_MANUAL_ENABLED_ENV = "MAGI_COMPACTION_MANUAL_ENABLED"
 
+# WS4: proactive context recovery (tiers 6-7) for the LIVE plugin. Strict
+# default-OFF (NOT profile-aware). When ON and MAGI_CONTEXT_COMPACTION_ENABLED is
+# ALSO ON, the plugin escalates at the apply_before_model seam (after the existing
+# tail-drop) whenever the final outgoing contents still exceed crit*W: collapse-
+# drain (tier 6) -> reactive-compact (tier 7) -> deterministic-truncation fail-safe.
+# OFF => byte-identical to the existing tail-drop path. The threshold reuses the
+# same MAGI_CONTEXT_CRITICAL_THRESHOLD env the dormant hook reads so there is one
+# critical-threshold name across both subsystems.
+PROACTIVE_RECOVERY_ENABLED_ENV = "MAGI_CONTEXT_PROACTIVE_RECOVERY_ENABLED"
+CONTEXT_CRITICAL_THRESHOLD_ENV = "MAGI_CONTEXT_CRITICAL_THRESHOLD"
+_COMPACTION_CRITICAL_PCT_DEFAULT = 0.90
+
 
 @dataclass(frozen=True)
 class ContextCompactionEnv:
@@ -607,6 +619,8 @@ class ContextCompactionEnv:
     anchored_summary_enabled: bool = False
     summary_max_failures: int = _COMPACTION_SUMMARY_MAX_FAILURES_DEFAULT
     manual_enabled: bool = False
+    proactive_recovery_enabled: bool = False
+    proactive_critical_pct: float = _COMPACTION_CRITICAL_PCT_DEFAULT
 
 
 def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv:
@@ -696,6 +710,19 @@ def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv
     # matching the summarize / real-tokens / tool-prune master switches above).
     # I-1: route through the typed flag registry (imported above).
     manual_enabled = flag_bool(COMPACTION_MANUAL_ENABLED_ENV, env=env)
+    # WS4: strict default-OFF proactive recovery (tiers 6-7) for the live plugin.
+    # I-1: route the master through the typed flag registry (imported above), the
+    # critical-pct through ``_float_env`` (same env name as the dormant hook).
+    proactive_recovery_enabled = flag_bool(PROACTIVE_RECOVERY_ENABLED_ENV, env=env)
+    proactive_critical_pct = _float_env(
+        env,
+        CONTEXT_CRITICAL_THRESHOLD_ENV,
+        _COMPACTION_CRITICAL_PCT_DEFAULT,
+    )
+    if not (0.0 < proactive_critical_pct <= 1.0):
+        raise RuntimeEnvError(
+            f"{CONTEXT_CRITICAL_THRESHOLD_ENV} must be in the range (0, 1]"
+        )
     return ContextCompactionEnv(
         enabled=enabled,
         token_threshold=token_threshold,
@@ -712,6 +739,8 @@ def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv
         anchored_summary_enabled=anchored_summary_enabled,
         summary_max_failures=summary_max_failures,
         manual_enabled=manual_enabled,
+        proactive_recovery_enabled=proactive_recovery_enabled,
+        proactive_critical_pct=proactive_critical_pct,
     )
 
 

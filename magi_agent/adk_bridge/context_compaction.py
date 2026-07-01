@@ -101,6 +101,19 @@ REAL_PROMPT_TOKENS_STATE_KEY = "magi_compaction_real_prompt_tokens"
 ANCHOR_SUMMARY_STATE_KEY = "magi_compaction_anchor_summary"
 SUMMARY_FAILURE_COUNT_STATE_KEY = "magi_compaction_summary_failure_count"
 
+# WS4: the PROACTIVE recovery (tiers 6-7) tier-7 summarizer-failure count. NOTE:
+# unlike the G6 counter it does NOT reset on a successful summary, so it is
+# CUMULATIVE per session (a reset-on-success to fully mirror G6 is a follow-up for
+# when a real summarizer replaces the default hermetic stub, which never raises).
+# This is INDEPENDENT of ``SUMMARY_FAILURE_COUNT_STATE_KEY`` (G6): the G6
+# counter is gated by ``_summarize_enabled`` and stays 0 when summarize is OFF,
+# which the proactive path requires (it does not co-enable G1/G6). Persisted on
+# the same delta-backed ``callback_context.state`` seam so a tier-7 failure on one
+# turn trips the breaker on a later turn.
+PROACTIVE_SUMMARY_FAILURE_COUNT_STATE_KEY = (
+    "magi_compaction_proactive_summary_failure_count"
+)
+
 # G5: leading marker on the injected summary Content (built in
 # ``_build_summary_head``). Shared so the injection and the dropped-prefix
 # anchor-recognition stay in sync; any change here updates both sites.
@@ -181,6 +194,8 @@ class MagiContextCompactionPlugin(BasePlugin):
         anchored_summary_enabled: bool = False,
         summary_max_failures: int = 3,
         manual_enabled: bool = False,
+        proactive_recovery_enabled: bool = False,
+        proactive_critical_pct: float = 0.90,
     ) -> None:
         super().__init__(name)
         if token_threshold < 1:
@@ -201,6 +216,8 @@ class MagiContextCompactionPlugin(BasePlugin):
             raise ValueError("summary_timeout must be > 0")
         if summary_max_failures < 0:
             raise ValueError("summary_max_failures must be >= 0")
+        if proactive_recovery_enabled and not (0.0 < proactive_critical_pct <= 1.0):
+            raise ValueError("proactive_critical_pct must be in the range (0, 1]")
         self.token_threshold = token_threshold
         self.tail_events = tail_events
         self.event_count_threshold = event_count_threshold
@@ -253,6 +270,26 @@ class MagiContextCompactionPlugin(BasePlugin):
         # finally, so there is no cross-turn instance leakage.
         self._pending_real_prompt_tokens: int | None = None
         self._pending_model: str | None = None
+        # WS4: proactive recovery (tiers 6-7). Default-OFF; when OFF the
+        # ``apply_before_model`` gate is never called and ``before_model_callback``
+        # never reads/writes the proactive breaker state (byte-identical).
+        self._proactive_recovery_enabled = bool(proactive_recovery_enabled)
+        self._proactive_critical_pct = proactive_critical_pct
+        # READ-side stash of the prior turn's proactive failure count (mirrors the
+        # G6 ``_pending_summary_failures`` split). PRODUCE-side flag is set when the
+        # tier-7 summarizer raises this turn; ``before_model_callback`` persists the
+        # incremented count AFTER ``apply_before_model`` returns (it holds the
+        # callback_context handle; the gate does not).
+        self._pending_proactive_summary_failures: int = 0
+        self._produced_proactive_summary_failed: bool = False
+        # Optional injectable tier-7 caller (tests inject a raising/counting stub).
+        # When None the proactive path builds a deterministic ``StubLLMCompactCaller``
+        # (no network) so the ON path is hermetic; a real summarizer model is a
+        # separate sign-off-gated activation, not part of this default-OFF wiring.
+        self._proactive_llm_caller: Any | None = None
+        # SC-7 telemetry: the last proactive tier that fired (collapse/compact/
+        # failsafe) plus before/after token counts, exposed for tests/observability.
+        self._last_proactive_record: dict[str, Any] | None = None
         self._boundary = ContextLifecycleBoundary()
         # Lazily-built, then cached: the boundary only needs a constant local-fake
         # session_service + session + QueryState for its decision path. Building
@@ -329,6 +366,20 @@ class MagiContextCompactionPlugin(BasePlugin):
             self._produced_summary = None
             self._produced_summary_failed = False
 
+        # WS4 READ: when proactive recovery is ON, read the prior turn's proactive
+        # tier-7 failure count off the (delta-backed) state and reset the
+        # PRODUCE-side flag. This mirrors the G6 split exactly and is the ONLY frame
+        # with the ``callback_context`` handle (``apply_before_model`` has none).
+        # Guarded so flag-OFF NEVER touches state (SC-5 byte-identity).
+        if self._proactive_recovery_enabled:
+            self._pending_proactive_summary_failures = (
+                _read_proactive_summary_failures(callback_context)
+            )
+            self._produced_proactive_summary_failed = False
+        else:
+            self._pending_proactive_summary_failures = 0
+            self._produced_proactive_summary_failed = False
+
         ctx = ControlPlaneContext.minimal(compaction=CompactionCapability(self))
         result = await self.apply_before_model(ctx, llm_request=llm_request)
 
@@ -353,6 +404,23 @@ class MagiContextCompactionPlugin(BasePlugin):
                         )
                     },
                 )
+
+        # WS4 WRITE: persist the proactive tier-7 failure increment so the next
+        # turn's READ trips the breaker after ``summary_max_failures`` consecutive
+        # failures. Under the SAME default-OFF guard as the G6 WRITE above, so
+        # flag-OFF leaves state untouched (SC-5).
+        if (
+            self._proactive_recovery_enabled
+            and self._produced_proactive_summary_failed
+        ):
+            _write_compaction_state(
+                callback_context,
+                {
+                    PROACTIVE_SUMMARY_FAILURE_COUNT_STATE_KEY: (
+                        self._pending_proactive_summary_failures + 1
+                    )
+                },
+            )
         return result
 
     async def after_model_callback(
@@ -400,7 +468,142 @@ class MagiContextCompactionPlugin(BasePlugin):
         """
         cap = getattr(ctx, "compaction", None) or CompactionCapability(self)
         await cap.trim(llm_request)
+        # WS4 gate: runs on EVERY ``_trim_request`` exit path (including the
+        # ``<= tail_events`` early-return and the two no-compact ``return None``
+        # paths), because it sees the FINAL ``llm_request.contents`` here at the
+        # apply_before_model seam. Flag-OFF skips it entirely (byte-identical).
+        if self._proactive_recovery_enabled:
+            await self._maybe_proactive_recover(llm_request)
         return None
+
+    async def _maybe_proactive_recover(self, llm_request: Any) -> None:
+        """Token gate: escalate when the final contents still exceed ``crit*W``.
+
+        Owns its OWN try/except because it runs OUTSIDE ``_trim_request``'s
+        fail-open try (the gate is one frame up, in ``apply_before_model``). On any
+        unexpected failure the contents are left at the post-``cap.trim()`` state
+        (fail-open, no worse than today). Resolves the model DIRECTLY (never reads
+        ``self._pending_model``, which is None here: it is cleared in
+        ``_trim_request``'s finally and only ever set under the real-token path).
+        """
+        try:
+            contents = list(getattr(llm_request, "contents", None) or [])
+            if not contents:
+                return None
+            model = _resolve_model_id(llm_request)
+            budget = int(_window_for_model(model) * self._proactive_critical_pct)
+            if budget < 1:
+                return None
+            if _estimate_contents_tokens(contents) <= budget:
+                # Under CRITICAL: no escalation, no strategy construction (SC-6).
+                return None
+            await self._proactive_recover(llm_request, budget, model)
+        except Exception:
+            # The new seam is outside ``_trim_request``'s try, so guard it here.
+            return None
+        return None
+
+    async def _proactive_recover(
+        self, llm_request: Any, budget: int, model: str | None
+    ) -> None:
+        """Tiers 6-7 escalation: collapse-drain -> reactive-compact -> fail-safe.
+
+        Each strategy is invoked AT MOST ONCE per model turn by construction (one
+        call each in this body); that single-invocation is what bounds cost (SC-6),
+        not ``RecoveryAttemptState`` (dormant here because no ``state`` is passed).
+        Decoupled from ``MAGI_ERROR_RECOVERY_ENABLED`` on purpose: that flag governs
+        the REACTIVE error-recovery plugin; the proactive path owns its own config.
+        """
+        from magi_agent.runtime.error_recovery.strategies.collapse_drain import (
+            CollapseDrainStrategy,
+        )
+        from magi_agent.runtime.error_recovery.strategies.reactive_compact import (
+            ReactiveCompactStrategy,
+            StubLLMCompactCaller,
+        )
+        from magi_agent.runtime.error_recovery.types import ErrorRecoveryConfig
+
+        before = _estimate_contents_tokens(list(llm_request.contents))
+        cfg = ErrorRecoveryConfig(recovery_enabled=True, max_collapse_fraction=0.2)
+        contents: list[Any] = list(llm_request.contents)
+
+        # Tier 6: collapse-drain (drop oldest MIDDLE rounds, keep first + last).
+        res6 = await CollapseDrainStrategy(cfg).recover(
+            _make_proactive_recovery_context(contents_to_msgs(contents))
+        )
+        if res6.success and res6.modified_messages is not None:
+            cand = msgs_to_contents(res6.modified_messages, original=contents)
+            if _estimate_contents_tokens(cand) <= budget:
+                llm_request.contents = cand
+                self._record_proactive_tier("collapse", before, cand)
+                return None
+            contents = cand  # keep the partial reduction, continue to tier 7
+
+        # Tier 7: reactive-compact (synthetic summary + last message). The breaker
+        # is checked FIRST: if the prior-turn count (stashed by the READ seam) is at
+        # the cap, skip the LLM call entirely and go straight to the fail-safe (E7).
+        if self._pending_proactive_summary_failures < self._summary_breaker_max:
+            raised = {"value": False}
+
+            class _RecordingCaller:
+                def __init__(self, inner: Any) -> None:
+                    self._inner = inner
+
+                async def compact(self, messages_text: str, prompt: str) -> str:
+                    try:
+                        return await self._inner.compact(messages_text, prompt)
+                    except Exception:
+                        raised["value"] = True
+                        raise
+
+            inner_caller = self._proactive_llm_caller or StubLLMCompactCaller()
+            caller = _RecordingCaller(inner_caller)
+            res7 = await ReactiveCompactStrategy(cfg, caller).recover(
+                _make_proactive_recovery_context(contents_to_msgs(contents))
+            )
+            if res7.success and res7.modified_messages is not None:
+                cand = msgs_to_contents(res7.modified_messages, original=contents)
+                if _estimate_contents_tokens(cand) <= budget:
+                    llm_request.contents = cand
+                    self._record_proactive_tier("compact", before, cand)
+                    return None
+                contents = cand
+            elif raised["value"]:
+                # A real summarizer FAILURE (not a <2-msg no-op): set the
+                # PRODUCE-side flag; ``before_model_callback`` persists the
+                # incremented count after ``apply_before_model`` returns.
+                self._produced_proactive_summary_failed = True
+
+        # Fail-safe: deterministic truncation with continuity (always reduces or is
+        # provably minimal, never raises).
+        cand = deterministic_truncate(contents, budget, model)
+        llm_request.contents = cand
+        self._record_proactive_tier("failsafe", before, cand)
+        return None
+
+    def _record_proactive_tier(
+        self, tier: str, tokens_before: int, contents: list[Any]
+    ) -> None:
+        """Record which proactive tier fired + tokens freed (SC-7).
+
+        Plain string keys (``proactive_collapse_applied`` / ``proactive_compact_
+        applied`` / ``proactive_failsafe_applied``) for continuity with the dormant
+        hook's vocabulary; no ``PipelineResult`` object is constructed on the live
+        path. Exposed on the instance and logged at debug for observability.
+        """
+        tokens_after = _estimate_contents_tokens(contents)
+        self._last_proactive_record = {
+            "tier": tier,
+            "tokens_before": tokens_before,
+            "tokens_after": tokens_after,
+            "tokens_freed": max(0, tokens_before - tokens_after),
+        }
+        logger.debug(
+            "proactive_%s_applied tokens_before=%d tokens_after=%d",
+            tier,
+            tokens_before,
+            tokens_after,
+        )
 
     async def _trim_request(self, llm_request: Any) -> None:
         """Decision + tail-trim body, lifted verbatim from the pre-migration
@@ -1548,6 +1751,285 @@ def _adjust_split_to_avoid_orphan_response(contents: list[Any], split_index: int
     return idx
 
 
+def _read_proactive_summary_failures(callback_context: Any) -> int:
+    """Read the proactive tier-7 cumulative-failure count off the state.
+
+    Duck-typed and fail-open (mirrors :func:`_read_summary_failures`): a missing /
+    odd value yields ``0`` (breaker not tripped). ``bool`` is rejected (an ``int``
+    subclass). Never raises. Reads the INDEPENDENT
+    :data:`PROACTIVE_SUMMARY_FAILURE_COUNT_STATE_KEY`, never the G6 key.
+    """
+    try:
+        state = getattr(callback_context, "state", None)
+        if state is None:
+            return 0
+        getter = getattr(state, "get", None)
+        value = (
+            getter(PROACTIVE_SUMMARY_FAILURE_COUNT_STATE_KEY)
+            if callable(getter)
+            else None
+        )
+        if isinstance(value, bool):
+            return 0
+        if isinstance(value, int) and value >= 0:
+            return value
+        return 0
+    except Exception:
+        return 0
+
+
+def _estimate_contents_tokens(contents: list[Any]) -> int:
+    """Sum the best-effort token estimate over a list of ADK ``Content`` objects.
+
+    Reuses :func:`_content_token_estimate` so the proactive gate's utilization
+    re-check matches the budget basis used everywhere else in the plugin.
+    """
+    return sum(_content_token_estimate(content) for content in contents)
+
+
+def _make_proactive_recovery_context(messages: list[dict[str, Any]]) -> Any:
+    """Wrap adapter messages into a ``RecoveryContext`` for the reused strategies.
+
+    Re-implemented inline (8 pure lines) rather than imported from the dormant
+    ``context/hook.py`` so the live path does not depend on that module (a future
+    hook cleanup must not be able to break this path).
+    """
+    from magi_agent.runtime.error_recovery.types import (
+        ErrorKind,
+        RecoverableError,
+        RecoveryContext,
+    )
+
+    return RecoveryContext(
+        error=RecoverableError(
+            kind=ErrorKind.PROMPT_TOO_LONG,
+            original_error="proactive_context_management",
+        ),
+        messages=messages,
+        session_key="proactive",
+        turn_id="proactive",
+    )
+
+
+def _content_strategy_role(content: Any) -> str:
+    """Classify an ADK ``Content`` into a strategy round-role (§3.7 Impedance 1).
+
+    A ``function_response`` Content is tagged ``"tool"`` (NOT ``"user"``) so it
+    does NOT start a new round and groups with its originating call; a Content with
+    a ``function_call`` or ADK ``role == "model"`` is ``"assistant"``; only a real
+    user-text turn (ADK ``role == "user"`` with no function parts) is ``"user"``
+    (the sole thing that starts a round). This is the convention the strategies'
+    ``_partition_into_rounds`` (and the tier67 test fixtures) already expect.
+    """
+    parts = getattr(content, "parts", None) or []
+    if any(getattr(p, "function_response", None) is not None for p in parts):
+        return "tool"
+    if any(getattr(p, "function_call", None) is not None for p in parts):
+        return "assistant"
+    if getattr(content, "role", None) == "user":
+        return "user"
+    return "assistant"
+
+
+def _render_content_text(content: Any) -> str:
+    """Render an ADK ``Content`` to a JSON-native plain string for the strategies.
+
+    Text parts contribute their text; function_call parts render a concise
+    ``[tool_call <name>]`` descriptor; function_response parts render
+    ``[tool_result <name>]: <payload>``. The result is a plain ``str`` so
+    ``json.dumps(..., default=str)`` inside ``ReactiveCompactStrategy`` never has
+    to coerce a non-native object (§3.7 Impedance 3). Never raises.
+    """
+    chunks: list[str] = []
+    for part in getattr(content, "parts", None) or []:
+        text = getattr(part, "text", None)
+        if isinstance(text, str) and text:
+            chunks.append(text)
+            continue
+        fc = getattr(part, "function_call", None)
+        if fc is not None:
+            chunks.append(f"[tool_call {getattr(fc, 'name', '') or ''}]")
+            continue
+        fr = getattr(part, "function_response", None)
+        if fr is not None:
+            name = getattr(fr, "name", "") or ""
+            payload = _serialize_response_payload(getattr(fr, "response", None))
+            chunks.append(f"[tool_result {name}]: {payload}")
+            continue
+    return "\n".join(chunks)
+
+
+def contents_to_msgs(contents: list[Any]) -> list[dict[str, Any]]:
+    """Adapt ADK ``Content`` list -> strategy ``list[dict]`` with round-role remap.
+
+    Each emitted dict is ``{"role": <strategy-role>, "content": <rendered str>,
+    "_orig_index": i}``. EVERY dict carries ``_orig_index`` (so the only dict
+    lacking it downstream is a strategy-synthesized summary), and the role is the
+    strategy round-role from :func:`_content_strategy_role`, NOT the raw ADK role,
+    so ``_partition_into_rounds`` keeps each call+response inside one round.
+    """
+    return [
+        {
+            "role": _content_strategy_role(content),
+            "content": _render_content_text(content),
+            "_orig_index": index,
+        }
+        for index, content in enumerate(contents)
+    ]
+
+
+def _function_call_ids(content: Any) -> set[str]:
+    ids: set[str] = set()
+    for part in getattr(content, "parts", None) or []:
+        fc = getattr(part, "function_call", None)
+        if fc is not None:
+            fc_id = getattr(fc, "id", None)
+            if isinstance(fc_id, str) and fc_id:
+                ids.add(fc_id)
+    return ids
+
+
+def _function_call_names(content: Any) -> set[str]:
+    names: set[str] = set()
+    for part in getattr(content, "parts", None) or []:
+        fc = getattr(part, "function_call", None)
+        if fc is not None:
+            name = getattr(fc, "name", None)
+            if isinstance(name, str) and name:
+                names.add(name)
+    return names
+
+
+def _repair_orphans_nonprefix(kept: list[Any]) -> list[Any]:
+    """Full orphan-pair scan over a NON-CONTIGUOUS kept list (§3.7 Impedance 2).
+
+    Unlike :func:`_adjust_split_to_avoid_orphan_response` (sound only for a
+    contiguous prefix cut), this drops any kept Content whose ``function_response``
+    has no matching ``function_call`` ANYWHERE in the kept list, which is the
+    property SC-2 needs once collapse-drain has deleted interior (middle) rounds.
+    Matching is id-based with a name-based positional fallback when ids are absent.
+    Never raises.
+    """
+    try:
+        call_ids: set[str] = set()
+        call_names: set[str] = set()
+        for content in kept:
+            call_ids |= _function_call_ids(content)
+            call_names |= _function_call_names(content)
+        out: list[Any] = []
+        for content in kept:
+            orphan = False
+            for part in getattr(content, "parts", None) or []:
+                fr = getattr(part, "function_response", None)
+                if fr is None:
+                    continue
+                rid = getattr(fr, "id", None)
+                if isinstance(rid, str) and rid:
+                    if rid not in call_ids:
+                        orphan = True
+                        break
+                else:
+                    rname = getattr(fr, "name", None)
+                    if isinstance(rname, str) and rname and rname not in call_names:
+                        orphan = True
+                        break
+            if orphan:
+                continue
+            out.append(content)
+        return out
+    except Exception:
+        return list(kept)
+
+
+def msgs_to_contents(msgs: list[dict[str, Any]], *, original: list[Any]) -> list[Any]:
+    """Rebuild the ADK ``Content`` list from adapter messages (§3.7 / §3.8).
+
+    A dict WITH ``_orig_index`` reuses the original ``types.Content`` (lossless); a
+    dict WITHOUT ``_orig_index`` (only a strategy-synthesized summary) is
+    MATERIALIZED into a fresh user-role text Content so the compressed history is
+    not discarded. The rebuilt list then runs :func:`_repair_orphans_nonprefix` so
+    every kept ``function_response`` has its ``function_call`` present.
+    """
+    from google.genai import types  # noqa: PLC0415
+
+    kept: list[Any] = []
+    for msg in msgs:
+        idx = msg.get("_orig_index")
+        if isinstance(idx, int) and not isinstance(idx, bool) and 0 <= idx < len(
+            original
+        ):
+            kept.append(original[idx])
+            continue
+        text = msg.get("content")
+        kept.append(
+            types.Content(
+                role="user",
+                parts=[types.Part(text=str(text) if text is not None else "")],
+            )
+        )
+    return _repair_orphans_nonprefix(kept)
+
+
+def deterministic_truncate(
+    contents: list[Any], budget: int, model: str | None
+) -> list[Any]:
+    """Guaranteed-reduction fail-safe: keep the first round + a budgeted tail.
+
+    Keeps the first round intact, walks the tail backward accumulating estimated
+    tokens until ``budget`` is reached, drops the middle, and inserts a single
+    user-role continuity marker at the drop point (SC-4). The marker is merged/
+    skipped when an ADK ``role == "user"`` Content already borders the seam (a real
+    user turn OR a function_response, both ADK-user) so it never creates a
+    two-consecutive-user shape some providers reject (E16). Pure list slicing, so a
+    failure is not expected; wrapped to return the input unchanged on any error
+    (SC-3). Always returns ``<= len(contents)``.
+    """
+    from google.genai import types  # noqa: PLC0415
+
+    try:
+        if len(contents) <= 1:
+            return list(contents)
+        first_round_end = len(contents)
+        for index in range(1, len(contents)):
+            if _content_strategy_role(contents[index]) == "user":
+                first_round_end = index
+                break
+        head = list(contents[:first_round_end])
+        tail_candidates = list(contents[first_round_end:])
+        if not tail_candidates:
+            return _repair_orphans_nonprefix(head)  # single round: already minimal
+        acc = sum(_content_token_estimate(content) for content in head)
+        kept_tail: list[Any] = []
+        for content in reversed(tail_candidates):
+            estimate = _content_token_estimate(content)
+            if kept_tail and acc + estimate > budget:
+                break
+            kept_tail.insert(0, content)
+            acc += estimate
+        if not kept_tail:
+            kept_tail = [tail_candidates[-1]]
+        if len(kept_tail) < len(tail_candidates):
+            first_kept_user = getattr(kept_tail[0], "role", None) == "user"
+            last_head_user = bool(head) and getattr(head[-1], "role", None) == "user"
+            if first_kept_user or last_head_user:
+                rebuilt = head + kept_tail
+            else:
+                marker = types.Content(
+                    role="user",
+                    parts=[
+                        types.Part(
+                            text="[older context truncated to fit the model window]"
+                        )
+                    ],
+                )
+                rebuilt = head + [marker] + kept_tail
+        else:
+            rebuilt = head + kept_tail
+        return _repair_orphans_nonprefix(rebuilt)
+    except Exception:
+        return list(contents)
+
+
 def build_context_compaction_plugin(
     *,
     enabled: bool,
@@ -1565,6 +2047,8 @@ def build_context_compaction_plugin(
     anchored_summary_enabled: bool = False,
     summary_max_failures: int = 3,
     manual_enabled: bool = False,
+    proactive_recovery_enabled: bool = False,
+    proactive_critical_pct: float = 0.90,
 ) -> MagiContextCompactionPlugin | None:
     """Return a configured plugin, or ``None`` when the feature is disabled.
 
@@ -1590,17 +2074,23 @@ def build_context_compaction_plugin(
         anchored_summary_enabled=anchored_summary_enabled,
         summary_max_failures=summary_max_failures,
         manual_enabled=manual_enabled,
+        proactive_recovery_enabled=proactive_recovery_enabled,
+        proactive_critical_pct=proactive_critical_pct,
     )
 
 
 __all__ = [
     "ANCHOR_SUMMARY_STATE_KEY",
     "CONTEXT_COMPACTION_PLUGIN_NAME",
+    "PROACTIVE_SUMMARY_FAILURE_COUNT_STATE_KEY",
     "REAL_PROMPT_TOKENS_STATE_KEY",
     "SUMMARY_FAILURE_COUNT_STATE_KEY",
     "CompactionCapability",
     "MagiContextCompactionPlugin",
     "build_context_compaction_plugin",
+    "contents_to_msgs",
+    "deterministic_truncate",
+    "msgs_to_contents",
 ]
 
 # Exported for tests asserting the placeholder shape; not part of the public API.
