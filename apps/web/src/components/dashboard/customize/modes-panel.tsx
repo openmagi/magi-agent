@@ -218,10 +218,10 @@ export function ModesPanel({ botId }: { botId: string }): React.JSX.Element {
         can={[
           { text: <>A soft <strong>system prompt</strong> the model follows this turn</> },
           { text: <>A <strong>tool delta</strong>: narrow (exclude) or safely widen (include)</> },
-          { text: <>Scope <strong>policies</strong> to fire only in this mode (additive)</> },
+          { text: <>Scope <strong>rules</strong> to fire only in this mode (additive)</> },
         ]}
         cannot={[
-          { text: <>Loosen a global policy: scoping only ever tightens a turn</> },
+          { text: <>Loosen a global rule: scoping only ever tightens a turn</> },
           { text: <>Re-enable a dangerous tool (Bash/exec/net) via <code>include</code></> },
         ]}
         note={
@@ -316,8 +316,8 @@ export function ModesPanel({ botId }: { botId: string }): React.JSX.Element {
                   </p>
                 ) : null}
                 <p className="mt-1 text-[11px] leading-relaxed text-secondary/80">
-                  {mode.toolDelta.exclude.length} excluded · {mode.toolDelta.include.length} included ·{" "}
-                  {mode.scopedPolicyIds.length} scoped {mode.scopedPolicyIds.length === 1 ? "policy" : "policies"}
+                  {mode.toolDelta.exclude.length} off · {mode.toolDelta.include.length} on ·{" "}
+                  {mode.scopedPolicyIds.length} scoped {mode.scopedPolicyIds.length === 1 ? "rule" : "rules"}
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-1">
@@ -414,9 +414,17 @@ function ModeEditor({
         </h3>
       </div>
 
+      {editor.modeId ? null : (
+        <p className="text-xs leading-relaxed text-secondary">
+          Describe the stance you want the agent to take. A mode bundles how it
+          should behave, which tools are on or off, which rules apply, and how
+          strict approvals are. You pick it per turn in the chat composer.
+        </p>
+      )}
+
       <div>
         <label className={labelCls} htmlFor="mode-display-name">
-          Display name
+          Name this stance
         </label>
         <input
           id="mode-display-name"
@@ -435,22 +443,23 @@ function ModeEditor({
 
       <div>
         <label className={labelCls} htmlFor="mode-system-prompt">
-          System prompt (soft)
+          How the agent should behave{" "}
+          <span className="normal-case text-secondary/60">(guidance, not a hard rule)</span>
         </label>
         <textarea
           id="mode-system-prompt"
           value={editor.systemPrompt}
           onChange={(e) => set("systemPrompt", e.target.value)}
           rows={4}
-          placeholder="Injected into the system prompt this turn. The model is asked to follow it."
+          placeholder="e.g. Act as a careful read-only reviewer. Explain findings and cite sources; do not modify files."
           className={`${inputCls} resize-y font-mono text-xs`}
         />
       </div>
 
       <div>
         <label className={labelCls} htmlFor="mode-permission">
-          Permission mode{" "}
-          <span className="normal-case text-secondary/60">(can only tighten approvals)</span>
+          How strict are approvals?{" "}
+          <span className="normal-case text-secondary/60">(a mode can only tighten, never loosen)</span>
         </label>
         <select
           id="mode-permission"
@@ -473,20 +482,20 @@ function ModeEditor({
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <label className={labelCls} htmlFor="mode-exclude">
-            Exclude tools
+            Turn tools off
           </label>
           <textarea
             id="mode-exclude"
             value={editor.exclude}
             onChange={(e) => set("exclude", e.target.value)}
             rows={3}
-            placeholder="One per line: turns a default-ON tool off"
+            placeholder="One per line: turns a default-ON tool off in this mode"
             className={`${inputCls} resize-y font-mono text-xs`}
           />
         </div>
         <div>
           <label className={labelCls} htmlFor="mode-include">
-            Include tools{" "}
+            Turn extra tools on{" "}
             <span className="normal-case text-secondary/60">(re-enable a default-off tool)</span>
           </label>
           <textarea
@@ -502,9 +511,9 @@ function ModeEditor({
 
       <div>
         <label className={labelCls}>
-          Scoped policies{" "}
+          Rules active in this mode{" "}
           <span className="normal-case text-secondary/60">
-            (active only in this mode: additive, tightens the turn)
+            (additive: they fire on top of the global defaults, only while this mode is active)
           </span>
         </label>
         {policyOptions.length > 0 ? (
@@ -529,12 +538,12 @@ function ModeEditor({
           </div>
         ) : policiesLoading ? (
           <p className="mt-1 rounded-lg border border-dashed border-black/[0.10] bg-gray-50/60 px-3 py-2 text-xs text-secondary">
-            Loading policies…
+            Loading rules…
           </p>
         ) : (
           <p className="mt-1 rounded-lg border border-dashed border-black/[0.10] bg-gray-50/60 px-3 py-2 text-xs text-secondary">
-            No user-authored policies yet. Create one under{" "}
-            <strong>Policies</strong>, then scope it to this mode.
+            No rules of your own yet. Create one under <strong>Rules</strong>,
+            then scope it to this mode.
           </p>
         )}
         <details className="mt-2">
