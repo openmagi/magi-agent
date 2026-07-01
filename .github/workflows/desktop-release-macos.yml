@@ -80,6 +80,10 @@ jobs:
             --collect-all litellm \
             --collect-all rdflib \
             --collect-all pyshacl \
+            --collect-all tiktoken \
+            --collect-submodules tiktoken_ext \
+            --hidden-import tiktoken_ext.openai_public \
+            --copy-metadata tiktoken \
             "$DESKTOP_DIR/packaging/sidecar_entry.py"
           rm -rf "$SIDECAR_TREE"
           mkdir -p "$(dirname "$SIDECAR_TREE")"
