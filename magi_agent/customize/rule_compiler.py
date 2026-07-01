@@ -332,6 +332,13 @@ _COMPILE_SYSTEM_INSTRUCTION_TMPL = (
     "be expressed as a single-field predicate or a cross-record cardinality "
     "claim. Only fall back to shacl_constraint for multi-shape / advanced "
     "SHACL the structured IR cannot express.\n\n"
+    "The ``scope`` field classifies the KIND of task turn a rule applies to "
+    "(always, coding, research, delivery, memory, task) — it is NOT the user's "
+    "agent MODE. If the policy says it should apply only in some named agent "
+    "mode (a saved posture the user selects), still choose the closest task "
+    "``scope`` (or ``always``): attaching a policy to a specific agent mode is "
+    "done separately in the Modes surface, not by this rule. Never invent a "
+    "scope value outside the list above.\n\n"
     "If the policy is ambiguous (multiple kinds would plausibly fit, "
     "the target preset is unclear, or the scope is missing), instead "
     'return {{"questions": ["...", "..."]}} with AT MOST 2 focused '
