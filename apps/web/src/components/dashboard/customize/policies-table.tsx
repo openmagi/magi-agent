@@ -131,7 +131,7 @@ export function PoliciesTable({
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         placeholder="Search by name, description, or condition…"
-        aria-label="Search policies"
+        aria-label="Search rules"
         className="w-full rounded-lg border border-black/[0.08] bg-white px-3 py-1.5 text-xs text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
       />
 
@@ -206,7 +206,7 @@ export function PoliciesTable({
 
       {userPolicies.length > 0 ? (
         <Group
-          title="Your policies"
+          title="Your rules"
           rows={userPolicies}
           pendingPresets={pendingPresets}
           busy={busy}
@@ -240,7 +240,7 @@ export function PoliciesTable({
       ) : null}
       {visible.length === 0 ? (
         <p className="rounded-xl border border-dashed border-black/[0.10] bg-gray-50/80 px-4 py-6 text-center text-xs leading-relaxed text-secondary">
-          No policies match this filter.
+          No rules match this filter.
         </p>
       ) : null}
     </div>

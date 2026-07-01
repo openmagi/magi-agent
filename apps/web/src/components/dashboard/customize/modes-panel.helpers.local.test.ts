@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseList, selectedScopedIds, slugifyModeId, toggleScopedId } from "./modes-panel.helpers";
+import { parseList, selectedScopedIds, slugifyModeId, toggleListItem, toggleScopedId } from "./modes-panel.helpers";
 
 /** Backend id contract: `magi_agent/customize/modes.py` `_MODE_ID_RE`. */
 const MODE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
@@ -113,5 +113,15 @@ describe("scoped-policy list helpers", () => {
     const raw = "custom_rule:a";
     const back = toggleScopedId(toggleScopedId(raw, "dashboard_check:b"), "dashboard_check:b");
     expect(selectedScopedIds(back)).toEqual(selectedScopedIds(raw));
+  });
+
+  it("toggleListItem is the generic toggle used by the mode tool picker", () => {
+    // PR-P1: tool names round-trip through the same newline-list mechanism.
+    expect(toggleListItem("", "WebFetch")).toBe("WebFetch");
+    expect(toggleListItem("WebFetch", "WebFetch")).toBe("");
+    // Preserves peers.
+    expect(new Set(parseList(toggleListItem("FileRead\nWebFetch", "WebFetch")))).toEqual(
+      new Set(["FileRead"]),
+    );
   });
 });

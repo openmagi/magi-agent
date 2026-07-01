@@ -47,8 +47,16 @@ export function selectedScopedIds(raw: string): Set<string> {
  * ``seam_spec:`` or a since-deleted policy) is preserved. Returns the rewritten
  * newline-joined string. */
 export function toggleScopedId(raw: string, id: string): string {
-  const set = selectedScopedIds(raw);
-  if (set.has(id)) set.delete(id);
-  else set.add(id);
+  return toggleListItem(raw, id);
+}
+
+/** Generic: toggle one entry in a newline/comma list string. Adds when absent,
+ * removes when present; every OTHER entry (including ones not shown in a picker)
+ * is preserved. Used by the mode tool picker (exclude/include) and the
+ * scoped-rule picker. Returns the rewritten newline-joined string. */
+export function toggleListItem(raw: string, item: string): string {
+  const set = new Set(parseList(raw));
+  if (set.has(item)) set.delete(item);
+  else set.add(item);
   return [...set].join("\n");
 }
