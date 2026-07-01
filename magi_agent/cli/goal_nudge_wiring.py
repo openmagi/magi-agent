@@ -26,7 +26,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 
-from magi_agent.config.env import is_goal_nudge_enabled
+from magi_agent.config.env import is_goal_nudge_enabled, read_goal_required_evidence
 from magi_agent.runtime.goal_nudge import GoalNudge
 
 __all__ = ["build_goal_nudge_from_env"]
@@ -56,11 +56,25 @@ def build_goal_nudge_from_env(
 
     goal = (source.get(_GOAL_ENV) or "").strip() or _DEFAULT_GOAL
 
+    # Reader 1 (WS3 PR3b, the legacy subsystem-A reader). Parse
+    # MAGI_GOAL_NUDGE_REQUIRED_EVIDENCE so an operator who DOES enable subsystem
+    # A in lab gets an evidence-backed nudge. This whole function is behind the
+    # is_goal_nudge_enabled early-return above, so this reader is DEAD under the
+    # "full" profile (the nudge gate is never seeded there); the "full"-profile
+    # evidence path is Reader 2 in cli/wiring.py (section 4.5). The tuple MUST be
+    # threaded into BOTH GoalNudge return sites or the fallback path drops it.
+    required_evidence = read_goal_required_evidence(source)
+
     raw_max = (source.get(_MAX_ENV) or "").strip()
     try:
         max_nudges = int(raw_max)
         if max_nudges < 0:
             raise ValueError
-        return GoalNudge(goal=goal, mode=mode, max_nudges=max_nudges)
+        return GoalNudge(
+            goal=goal,
+            mode=mode,
+            max_nudges=max_nudges,
+            required_evidence=required_evidence,
+        )
     except ValueError:
-        return GoalNudge(goal=goal, mode=mode)
+        return GoalNudge(goal=goal, mode=mode, required_evidence=required_evidence)

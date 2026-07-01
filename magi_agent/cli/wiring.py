@@ -364,6 +364,36 @@ def build_headless_runtime(
         if local_tool_evidence is None
         else getattr(local_tool_evidence, "collect_for_turn", None)
     )
+    # WS3 PR3b: evidence-first goal-completion DI. Each value resolves to its
+    # byte-identical OFF state when the flags are unset, so the engine is
+    # constructed exactly as pre-WS3.
+    from magi_agent.config.env import (  # noqa: PLC0415
+        is_goal_completion_evidence_first_enabled,
+        is_plan_ledger_durable_enabled,
+        read_goal_required_evidence,
+    )
+
+    evidence_first = is_goal_completion_evidence_first_enabled()
+    # plan_ledger_reader reads the durable todo snapshot off the runner-attribute
+    # handler set surfaced by PR3a (section 5.1). ``None`` for stub /
+    # caller-supplied-tools / child-containment runners and when the durable
+    # flag is OFF (degrade-to-OFF, byte-identical).
+    plan_ledger_handler_set = (
+        _plan_ledger_handler_set(effective_runner)
+        if is_plan_ledger_durable_enabled()
+        else None
+    )
+    plan_ledger_reader: Callable[[str], Sequence[object]] | None = (
+        plan_ledger_handler_set.snapshot_for
+        if plan_ledger_handler_set is not None
+        else None
+    )
+    # Reader 2 (section 4.5): the INDEPENDENT required-evidence reader, gated
+    # ONLY on is_goal_completion_evidence_first_enabled, NEVER on the nudge gate,
+    # so the SEAM-2 evidence ``pause`` is reachable under the "full" profile.
+    goal_required_evidence = (
+        read_goal_required_evidence() if evidence_first else ()
+    )
     engine = MagiEngineDriver(
         runner=effective_runner,
         recovery=build_engine_recovery_policy(),
@@ -401,6 +431,12 @@ def build_headless_runtime(
         # for the turn; absent that, this argument is dormant and streaming
         # behavior is byte-identical to pre-PR-C.
         goal_loop_judge_factory=_build_goal_loop_judge_factory(),
+        # WS3 PR3b: evidence-first goal completion. OFF (default) -> evidence_first
+        # False + reader None + required_evidence () -> all three _drive seams are
+        # inert and streaming is byte-identical to pre-WS3.
+        evidence_first=evidence_first,
+        plan_ledger_reader=plan_ledger_reader,
+        required_evidence=goal_required_evidence,
     )
 
     # (C) Permission gate — default stays sink-less and therefore fail-safe on

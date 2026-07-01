@@ -337,6 +337,21 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_GOAL_COMPLETION_EVIDENCE_FIRST_ENABLED",
+        summary=(
+            "Enable evidence-first goal completion (WS3 PR3b): before the "
+            "existing LLM goal-loop judge, resolve_pre_judge_outcome decides "
+            "completion from the durable todo ledger plus (when declared via "
+            "MAGI_GOAL_NUDGE_REQUIRED_EVIDENCE) the FinalOutputGate, short-"
+            "circuiting an all-complete ledger to done with no model call and "
+            "routing a hard evidence failure or a clean stop short of confirmed "
+            "completion to a user-visible goal_paused status instead of letting "
+            "it masquerade as success (strict default-OFF; OFF builds the engine "
+            "with evidence_first=False so all three seams are inert and _drive is "
+            "byte-identical to pre-WS3)."
+        ),
+    ),
+    _b(
         "MAGI_CHANNEL_LIVE_DISCORD",
         stage="stage3",
         summary=(
