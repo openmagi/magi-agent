@@ -101,6 +101,10 @@ pyinstaller \
   --collect-all litellm \
   --collect-all rdflib \
   --collect-all pyshacl \
+  --collect-all tiktoken \
+  --collect-submodules tiktoken_ext \
+  --hidden-import tiktoken_ext.openai_public \
+  --copy-metadata tiktoken \
   --hidden-import uvicorn \
   <entrypoint that calls magi_agent.main:main>
 ```
@@ -130,12 +134,108 @@ So the bundled tree is optional for Homebrew users: if `magi-agent` is already o
 resource tree needs to ship. The bundled tree exists for users who want a single
 double-clickable app with no separate install.
 
-## Signing and notarization
+## Release (macOS)
+
+The macOS release is automated by
+`.github/workflows/desktop-release-macos.yml` (runs on `macos-14`, arm64). It
+builds the PyInstaller sidecar, deep-signs it, then runs `cargo tauri build`
+which signs + notarizes the app, and publishes a signed+stapled `.dmg` plus an
+`.app.tar.gz`.
+
+### Cut a release
+
+```
+git tag desktop-v0.1.0
+git push origin desktop-v0.1.0
+```
+
+The tag (`desktop-v*`) triggers the workflow; you can also run it manually via
+`workflow_dispatch` (a manual run builds + uploads artifacts but does not
+publish a GitHub Release). Keep the tag version in sync with `version` in
+`tauri.conf.json`.
+
+### Required GitHub secrets
+
+| Secret | What it is |
+| --- | --- |
+| `APPLE_CERTIFICATE` | base64 of the "Developer ID Application" `.p12` (`base64 -i cert.p12`) |
+| `APPLE_CERTIFICATE_PASSWORD` | password used when exporting that `.p12` |
+| `APPLE_SIGNING_IDENTITY` | e.g. `Developer ID Application: Your Name (TEAMID)` |
+| `APPLE_ID` | Apple ID email used for notarization |
+| `APPLE_PASSWORD` | app-specific password for that Apple ID |
+| `APPLE_TEAM_ID` | 10-char Apple Developer Team ID |
+| `KEYCHAIN_PASSWORD` | any random string; unlocks the temporary CI keychain |
+
+Notarization needs a paid Apple Developer account. No secret value is ever
+printed and the temporary keychain is created in the runner temp dir.
+
+### Why the sidecar is deep-signed BEFORE `cargo tauri build`
+
+Apple notarization requires EVERY nested Mach-O to be individually signed with
+the Developer ID, timestamped, and under the Hardened Runtime. That includes the
+`magi` executable and every `.dylib`/`.so` under
+`Resources/magi/_internal/`. Tauri copies `bundle.resources` (our
+`binaries/magi` onedir) into the app but does NOT recurse into a resource tree
+to sign it (it only signs the main binary, configured frameworks, and
+`externalBin`). So the pipeline runs `packaging/deep-sign-sidecar.sh` first,
+which signs the tree **inside-out** (every nested dylib/so, then the `magi`
+executable last, per Apple's inside-out rule) with
+`codesign --force --options runtime --timestamp --entitlements entitlements.sidecar.plist --sign "$APPLE_SIGNING_IDENTITY"`.
+Tauri then signs the outer `.app`, sealing the already-signed tree, and
+notarizes + staples it.
+
+Signing is driven by env: `tauri.conf.json` leaves `signingIdentity` unset, so
+the CLI reads `APPLE_SIGNING_IDENTITY` from the environment; nothing in this
+repo embeds a signing secret or identity string.
+
+### Entitlements rationale
+
+Two files, both valid plists:
+
+- `entitlements.plist` (the app, referenced by `tauri.conf.json`) is an EMPTY
+  dictionary: the Rust/WKWebView shell requests no Hardened Runtime exceptions.
+- `entitlements.sidecar.plist` (the frozen-Python child) grants exactly three
+  exceptions, applied only to the sidecar process during deep-signing:
+  - `com.apple.security.cs.allow-jit` - CPython/native deps allocate executable
+    memory.
+  - `com.apple.security.cs.allow-unsigned-executable-memory` - PyInstaller's
+    bootloader executes the interpreter from unsigned memory pages.
+  - `com.apple.security.cs.disable-library-validation` - the `_internal` tree
+    loads many dylibs and `dlopen()`s plugins at runtime.
+
+  These are the standard, unavoidable set for shipping a notarized frozen-Python
+  binary under the Hardened Runtime. They relax memory-integrity and
+  library-provenance guarantees for the SIDECAR process only; the shell keeps
+  the full Hardened Runtime and the runtime binds loopback only.
+
+### How the `.dmg` is produced
+
+The workflow prefers the tauri-built `.dmg`. Because tauri's dmg step
+(`bundle_dmg`, AppleScript) can be flaky in headless CI, if no tauri dmg is
+present it falls back to `hdiutil create` from the signed, notarized, stapled
+`.app` plus an `/Applications` symlink. Either way the final dmg is normalized
+to `Open-Magi_<version>_aarch64.dmg`, then notarized (`xcrun notarytool submit
+--wait`) and stapled (`xcrun stapler staple`) so the download itself passes
+offline Gatekeeper.
+
+### Homebrew cask
+
+`dist/homebrew/open-magi.rb` is the cask (source of truth). After the first
+release, pin its `sha256` and copy it into the tap repo
+`openmagi/homebrew-tap` under `Casks/`. See `dist/homebrew/README.md` for the
+exact digest-and-copy steps. Then:
+
+```
+brew install --cask openmagi/tap/open-magi
+```
+
+## Signing and notarization (local)
 
 Code signing (macOS notarization, Windows Authenticode) is a release-pipeline
-step, not a local-build concern. Configure the signing identity and notarization
-credentials in CI and pass them to `cargo tauri build`; nothing in this repo
-embeds any signing secret.
+step, not a local-build concern. `cargo tauri build` locally produces an
+ad-hoc-signed app (no identity), which launches on the build machine but is not
+distributable. Configure the secrets above in CI for a distributable build;
+nothing in this repo embeds any signing secret.
 
 ## Security posture
 

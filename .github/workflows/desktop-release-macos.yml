@@ -1,0 +1,301 @@
+# Build, sign, notarize and publish the "Open Magi" macOS desktop app (arm64).
+#
+# ============================================================================
+# REQUIRED GitHub SECRETS (Settings -> Secrets and variables -> Actions):
+#
+#   APPLE_CERTIFICATE           base64 of the "Developer ID Application" .p12
+#                               (export from Keychain, then: base64 -i cert.p12)
+#   APPLE_CERTIFICATE_PASSWORD  password used when exporting that .p12
+#   APPLE_SIGNING_IDENTITY      the identity name, e.g.
+#                               "Developer ID Application: Your Name (TEAMID)"
+#   APPLE_ID                    Apple ID email used for notarization
+#   APPLE_PASSWORD              app-specific password for that Apple ID
+#                               (appleid.apple.com -> App-Specific Passwords)
+#   APPLE_TEAM_ID               10-char Apple Developer Team ID
+#   KEYCHAIN_PASSWORD           any random string; unlocks the temp CI keychain
+#
+# Notarization needs a paid Apple Developer account. No secret value is ever
+# printed; the temp keychain is created in the runner temp dir and discarded.
+# ============================================================================
+
+name: desktop-release-macos
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "desktop-v*"
+
+concurrency:
+  group: desktop-release-macos-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build + sign + notarize (macos arm64)
+    runs-on: macos-14
+    timeout-minutes: 90
+    env:
+      DESKTOP_DIR: apps/desktop
+      SIDECAR_TREE: apps/desktop/binaries/magi
+      # PyInstaller onedir output lands here, then we move it into SIDECAR_TREE.
+      PYI_DIST: ${{ github.workspace }}/dist_sidecar
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ----------------------------------------------------------------------
+      # 1) Build the PyInstaller onedir sidecar into apps/desktop/binaries/magi
+      # ----------------------------------------------------------------------
+      - name: Set up uv + Python 3.12
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Sync runtime deps (serve runtime)
+        # Base deps already include fastapi/uvicorn/litellm/rdflib/pyshacl, which
+        # is everything the serve runtime needs. No extras required.
+        run: uv sync --python 3.12
+
+      - name: Build sidecar (PyInstaller onedir)
+        run: |
+          set -euo pipefail
+          uv run --with pyinstaller pyinstaller \
+            --noconfirm \
+            --onedir \
+            --name magi \
+            --distpath "$PYI_DIST" \
+            --collect-data magi_agent \
+            --collect-submodules magi_agent \
+            --hidden-import uvicorn \
+            --hidden-import uvicorn.logging \
+            --hidden-import uvicorn.protocols \
+            --collect-all litellm \
+            --collect-all rdflib \
+            --collect-all pyshacl \
+            --collect-all tiktoken \
+            --collect-submodules tiktoken_ext \
+            --hidden-import tiktoken_ext.openai_public \
+            --copy-metadata tiktoken \
+            "$DESKTOP_DIR/packaging/sidecar_entry.py"
+          rm -rf "$SIDECAR_TREE"
+          mkdir -p "$(dirname "$SIDECAR_TREE")"
+          mv "$PYI_DIST/magi" "$SIDECAR_TREE"
+          test -f "$SIDECAR_TREE/magi"
+          echo "sidecar onedir size:"
+          du -sh "$SIDECAR_TREE"
+
+      # ----------------------------------------------------------------------
+      # 2) Import the Developer ID certificate into a temporary keychain
+      # ----------------------------------------------------------------------
+      - name: Import signing certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/desktop-signing.keychain-db"
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+
+          echo -n "$APPLE_CERTIFICATE" | base64 --decode -o "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security import "$CERT_PATH" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Put our keychain first in the search list so codesign / tauri find
+          # the identity, but keep the login keychain available too.
+          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain-db
+
+          rm -f "$CERT_PATH"
+          echo "available signing identities:"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+      # ----------------------------------------------------------------------
+      # 3) Deep-sign the sidecar tree INSIDE-OUT, before tauri bundles it.
+      #    tauri copies bundle.resources but does not recurse to sign them.
+      # ----------------------------------------------------------------------
+      - name: Deep-sign sidecar (inside-out, hardened runtime)
+        working-directory: apps/desktop
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          bash packaging/deep-sign-sidecar.sh \
+            binaries/magi \
+            entitlements.sidecar.plist
+
+      # ----------------------------------------------------------------------
+      # 4) Rust + tauri-cli
+      # ----------------------------------------------------------------------
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop
+
+      - name: Cache tauri-cli
+        id: cache-tauri
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-tauri
+          key: cargo-tauri-v2-${{ runner.os }}-arm64
+
+      - name: Install tauri-cli
+        if: steps.cache-tauri.outputs.cache-hit != 'true'
+        run: cargo install tauri-cli --version '^2' --locked
+
+      # ----------------------------------------------------------------------
+      # 5) Build + sign + notarize the .app (and attempt the .dmg) via tauri.
+      #    APPLE_SIGNING_IDENTITY drives signing (config leaves it unset so env
+      #    wins). APPLE_ID/PASSWORD/TEAM_ID trigger notarization + stapling of
+      #    the .app. continue-on-error tolerates ONLY a flaky dmg substep; the
+      #    .app is signed/notarized/stapled before dmg bundling, so if the app
+      #    phase failed the app won't exist and the next step fails the job.
+      # ----------------------------------------------------------------------
+      - name: cargo tauri build (app + dmg)
+        id: tauri_build
+        working-directory: apps/desktop
+        continue-on-error: true
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: cargo tauri build --target aarch64-apple-darwin --bundles app dmg
+
+      - name: Locate the signed .app
+        id: locate_app
+        working-directory: apps/desktop
+        run: |
+          set -euo pipefail
+          APP_PATH="$(find target/aarch64-apple-darwin/release/bundle/macos \
+            -maxdepth 1 -name '*.app' -print -quit)"
+          if [ -z "$APP_PATH" ]; then
+            echo "::error::tauri did not produce a signed .app; the app phase failed."
+            exit 1
+          fi
+          echo "app_path=apps/desktop/$APP_PATH" >> "$GITHUB_OUTPUT"
+          echo "found app: $APP_PATH"
+          echo "verifying notarization/hardened-runtime seal:"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+
+      # ----------------------------------------------------------------------
+      # 6) Resolve the .dmg: prefer tauri's, else build one with hdiutil.
+      #    The tauri dmg step (bundle_dmg AppleScript) can be flaky in headless
+      #    CI; hdiutil is deterministic and needs no Finder/AppleScript.
+      # ----------------------------------------------------------------------
+      - name: Resolve or build the .dmg
+        id: dmg
+        working-directory: apps/desktop
+        run: |
+          set -euo pipefail
+          # Canonical version for the release asset name and the Homebrew cask
+          # url: strip the `desktop-v` tag prefix; fall back to the app version
+          # for manual (workflow_dispatch) runs, which do not publish a release.
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#desktop-v}"
+          else
+            VERSION="0.1.0"
+          fi
+          DMG_DIR="target/aarch64-apple-darwin/release/bundle/dmg"
+          CANONICAL="$DMG_DIR/Open-Magi_${VERSION}_aarch64.dmg"
+
+          APP_PATH="$(find target/aarch64-apple-darwin/release/bundle/macos \
+            -maxdepth 1 -name '*.app' -print -quit)"
+          TAURI_DMG="$(find "$DMG_DIR" -maxdepth 1 -name '*.dmg' -print -quit || true)"
+
+          mkdir -p "$DMG_DIR"
+          if [ -n "$TAURI_DMG" ]; then
+            echo "using tauri-built dmg: $TAURI_DMG"
+            [ "$TAURI_DMG" != "$CANONICAL" ] && mv "$TAURI_DMG" "$CANONICAL"
+          else
+            echo "tauri dmg absent; building with hdiutil fallback"
+            STAGE="$RUNNER_TEMP/dmg-stage"
+            rm -rf "$STAGE"; mkdir -p "$STAGE"
+            cp -R "$APP_PATH" "$STAGE/"
+            ln -s /Applications "$STAGE/Applications"
+            hdiutil create \
+              -volname "Open Magi" \
+              -srcfolder "$STAGE" \
+              -ov -format UDZO \
+              "$CANONICAL"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "dmg_path=apps/desktop/$CANONICAL" >> "$GITHUB_OUTPUT"
+          echo "dmg_name=$(basename "$CANONICAL")" >> "$GITHUB_OUTPUT"
+
+      # ----------------------------------------------------------------------
+      # 7) Notarize + staple the final .dmg (the .app inside is already
+      #    stapled by tauri, but stapling the dmg makes the download itself
+      #    pass offline Gatekeeper). Idempotent for both dmg sources.
+      # ----------------------------------------------------------------------
+      - name: Notarize + staple the .dmg
+        working-directory: apps/desktop
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          DMG_PATH: ${{ steps.dmg.outputs.dmg_path }}
+        run: |
+          set -euo pipefail
+          # DMG_PATH (from the previous step) is repo-relative; resolve absolute.
+          DMG="${GITHUB_WORKSPACE}/${DMG_PATH}"
+          xcrun notarytool submit "$DMG" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$DMG"
+          xcrun stapler validate "$DMG"
+
+      # ----------------------------------------------------------------------
+      # 8) Package + upload
+      # ----------------------------------------------------------------------
+      - name: Package .app.tar.gz
+        id: app_tar
+        run: |
+          set -euo pipefail
+          APP_PATH="${GITHUB_WORKSPACE}/${{ steps.locate_app.outputs.app_path }}"
+          OUT="${GITHUB_WORKSPACE}/Open-Magi_aarch64.app.tar.gz"
+          tar -C "$(dirname "$APP_PATH")" -czf "$OUT" "$(basename "$APP_PATH")"
+          echo "app_tar=$OUT" >> "$GITHUB_OUTPUT"
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-magi-macos-arm64
+          path: |
+            ${{ steps.dmg.outputs.dmg_path }}
+            ${{ steps.app_tar.outputs.app_tar }}
+          if-no-files-found: error
+
+      - name: Publish release assets
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.dmg.outputs.dmg_path }}
+            ${{ steps.app_tar.outputs.app_tar }}
+          fail_on_unmatched_files: true
