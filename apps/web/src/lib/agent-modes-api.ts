@@ -29,6 +29,7 @@ export interface AgentModeInput {
   systemPrompt?: string;
   toolDelta?: { exclude?: string[]; include?: string[] };
   scopedPolicyIds?: string[];
+  permissionMode?: string | null;
 }
 
 async function parseJson<T>(res: Response): Promise<T> {

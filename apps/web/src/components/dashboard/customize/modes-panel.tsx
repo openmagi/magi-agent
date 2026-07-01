@@ -49,6 +49,8 @@ interface EditorState {
   exclude: string;
   include: string;
   scopedPolicyIds: string;
+  /** "" = inherit the deployment posture (stored as null). */
+  permissionMode: string;
 }
 
 function editorFromMode(mode: AgentMode): EditorState {
@@ -59,6 +61,7 @@ function editorFromMode(mode: AgentMode): EditorState {
     exclude: mode.toolDelta.exclude.join("\n"),
     include: mode.toolDelta.include.join("\n"),
     scopedPolicyIds: mode.scopedPolicyIds.join("\n"),
+    permissionMode: mode.permissionMode ?? "",
   };
 }
 
@@ -69,6 +72,7 @@ const EMPTY_EDITOR: EditorState = {
   exclude: "",
   include: "",
   scopedPolicyIds: "",
+  permissionMode: "",
 };
 
 export function ModesPanel({ botId }: { botId: string }): React.JSX.Element {
@@ -165,6 +169,7 @@ export function ModesPanel({ botId }: { botId: string }): React.JSX.Element {
         include: parseList(editor.include),
       },
       scopedPolicyIds: parseList(editor.scopedPolicyIds),
+      permissionMode: editor.permissionMode || null,
     };
     setBusy(true);
     setError(null);
@@ -440,6 +445,29 @@ function ModeEditor({
           placeholder="Injected into the system prompt this turn. The model is asked to follow it."
           className={`${inputCls} resize-y font-mono text-xs`}
         />
+      </div>
+
+      <div>
+        <label className={labelCls} htmlFor="mode-permission">
+          Permission mode{" "}
+          <span className="normal-case text-secondary/60">(can only tighten approvals)</span>
+        </label>
+        <select
+          id="mode-permission"
+          value={editor.permissionMode}
+          onChange={(e) => set("permissionMode", e.target.value)}
+          className={`${inputCls} cursor-pointer`}
+        >
+          <option value="">Inherit (deployment default)</option>
+          <option value="default">default (prompt for every mutation)</option>
+          <option value="smartApprove">smartApprove (LLM judges each)</option>
+          <option value="acceptEdits">acceptEdits (auto-allow edits)</option>
+          <option value="bypassPermissions">bypassPermissions (auto-allow all)</option>
+        </select>
+        <p className="mt-1 text-[11px] leading-relaxed text-secondary/70">
+          A mode may only make approvals more restrictive than the deployment
+          baseline, never looser. Hard-safety denies always apply regardless.
+        </p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
