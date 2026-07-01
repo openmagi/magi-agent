@@ -4,6 +4,7 @@
 export * from "./accepted-injections";
 export * from "./active-snapshot";
 export * from "./agent-activity";
+export * from "./agent-mode";
 export * from "./assistant-dedupe";
 export * from "./attachment-marker";
 export * from "./attachments";

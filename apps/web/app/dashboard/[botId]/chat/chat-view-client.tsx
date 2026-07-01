@@ -59,6 +59,7 @@ import type {
   ServerMessage,
 } from "@/chat-core";
 import { useKbDocs } from "@/hooks/use-kb-docs";
+import { useAgentModes } from "@/hooks/use-agent-modes";
 import { MAX_QUEUED_MESSAGES, getStreamingSendMode } from "@/chat-core";
 
 import {
@@ -251,6 +252,11 @@ export function ChatViewClient({
   const [customSkills, setCustomSkills] = useState<ChatInputCustomSkill[]>([]);
   const [reasoningEffort, setReasoningEffort] =
     useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
+  // Active agent-mode id (posture) for the composer. "" = bot default. Seeded
+  // once from the server's sticky activeMode (see effect below), then owned by
+  // the user's selection for the rest of the session.
+  const [agentMode, setAgentMode] = useState<string>("");
+  const agentModeSeededRef = useRef(false);
   const [refreshing, setRefreshing] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showTelegramGuide, setShowTelegramGuide] = useState(false);
@@ -271,6 +277,22 @@ export function ChatViewClient({
 
   // --- KB Context Picker ---
   const { collections: kbCollections, allDocs: kbAllDocs, loading: kbLoading, refreshing: kbRefreshing, refresh: kbRefresh } = useKbDocs(botId);
+  const { modes: availableModes, activeMode: stickyAgentMode } = useAgentModes(botId);
+  // Re-arm the seed and drop any carried-over selection when the bot changes,
+  // so each bot reflects its own sticky mode (the [botId] route is reused
+  // across bots in the hosted multi-bot dashboard without remounting).
+  useEffect(() => {
+    agentModeSeededRef.current = false;
+    setAgentMode("");
+  }, [botId]);
+  // Reflect the stored sticky mode in the composer once, without clobbering a
+  // selection the user has already made this session.
+  useEffect(() => {
+    if (!agentModeSeededRef.current && stickyAgentMode) {
+      setAgentMode(stickyAgentMode);
+      agentModeSeededRef.current = true;
+    }
+  }, [stickyAgentMode]);
   const {
     files: workspaceFiles,
     loading: workspaceLoading,
@@ -929,6 +951,7 @@ export function ChatViewClient({
             model: turnModel,
             ...(sendOptions?.goalMode ? { goalMode: true } : {}),
             ...(sendOptions?.reasoningEffort ? { reasoningEffort: sendOptions.reasoningEffort } : {}),
+            ...(sendOptions?.agentMode ? { agentMode: sendOptions.agentMode } : {}),
             replyTo: activeReply ?? undefined,
             onDelta: (delta) => {
               if (!isCurrentBot()) return;
@@ -1434,6 +1457,7 @@ export function ChatViewClient({
             ? { explicitRecipeSelection: sendOptions.explicitRecipeSelection }
             : {}),
           ...(sendOptions?.reasoningEffort ? { reasoningEffort: sendOptions.reasoningEffort } : {}),
+          ...(sendOptions?.agentMode ? { agentMode: sendOptions.agentMode } : {}),
           ...(activeReply ? { replyTo: activeReply } : {}),
           ...(messageKbDocs.length > 0 ? { kbDocs: messageKbDocs } : {}),
         };
@@ -1473,13 +1497,14 @@ export function ChatViewClient({
         next.replyTo ?? null,
         queuedKbDocs,
         next.modelOverride,
-        next.goalMode || next.explicitRecipeSelection || next.reasoningEffort
+        next.goalMode || next.explicitRecipeSelection || next.reasoningEffort || next.agentMode
           ? {
               ...(next.goalMode ? { goalMode: true } : {}),
               ...(next.explicitRecipeSelection
                 ? { explicitRecipeSelection: next.explicitRecipeSelection }
                 : {}),
               ...(next.reasoningEffort ? { reasoningEffort: next.reasoningEffort } : {}),
+              ...(next.agentMode ? { agentMode: next.agentMode } : {}),
             }
           : undefined,
       ).catch((err) => {
@@ -2291,6 +2316,9 @@ export function ChatViewClient({
               )}
               reasoningEffort={reasoningEffort}
               onReasoningEffortChange={setReasoningEffort}
+              availableModes={availableModes}
+              agentMode={agentMode}
+              onAgentModeChange={setAgentMode}
               composerAccessory={
                 <ChatModelPicker
                   botId={botId}

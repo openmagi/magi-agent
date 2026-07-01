@@ -25,7 +25,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ShieldCheck, Wrench, Layers, Webhook, Wand2, Plus, SlidersHorizontal, Gauge } from "lucide-react";
+import { ShieldCheck, Wrench, Layers, Webhook, Wand2, Plus, SlidersHorizontal, Gauge, Drama } from "lucide-react";
 import {
   useCustomize,
   patchToolOverride,
@@ -60,6 +60,7 @@ import { CustomToolPanel } from "./custom-tool-modal";
 import { BehaviorsPanel } from "./behaviors-panel";
 import { BudgetsTab } from "./budgets-tab";
 import { GuidancePanel } from "./guidance-panel";
+import { ModesPanel } from "./modes-panel";
 import { PageHint } from "./page-hint";
 import { PoliciesTable } from "./policies-table";
 import { ReusableEvidenceTab } from "./reusable-evidence-tab";
@@ -84,6 +85,7 @@ import {
 export type CustomizeSection =
   | "rules"
   | "guidance"
+  | "modes"
   | "tools"
   | "behaviors"
   | "budgets"
@@ -109,6 +111,13 @@ const SECTIONS: ReadonlyArray<{
     icon: <Wand2 className="h-4 w-4" />,
     description:
       "Soft prompt instructions injected into the system prompt every turn. The model is asked to follow them but is not forced to.",
+  },
+  {
+    id: "modes",
+    label: "Modes",
+    icon: <Drama className="h-4 w-4" />,
+    description:
+      "Saved agent postures. A mode carries a soft system prompt + a tool allow/deny delta; pick one in the chat composer to apply it per turn. The active mode here is the sticky default the composer starts on.",
   },
   {
     id: "tools",
@@ -590,6 +599,8 @@ export function CustomizeHub({
             onSaveRules={handleSaveRules}
           />
         ) : null}
+
+        {section === "modes" ? <ModesPanel botId={botId} /> : null}
 
         {section === "tools" ? (
           <CustomToolPanel

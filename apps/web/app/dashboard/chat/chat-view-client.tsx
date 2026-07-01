@@ -27,6 +27,7 @@ import { setChatTokenGetter } from "@/lib/chat/chat-client";
 import { setAttachmentTokenGetter } from "@/chat-core";
 import { getNextChannelAfterDeletion } from "@/chat-core";
 import { useE2EE } from "@/lib/chat/use-e2ee";
+import { useAgentModes } from "@/hooks/use-agent-modes";
 import { mergeChatHistoryPage } from "@/chat-core";
 import { persistUserHistoryMessage } from "@/chat-core";
 import {
@@ -207,6 +208,10 @@ export function ChatViewClient({
   const [customSkills, setCustomSkills] = useState<ChatInputCustomSkill[]>([]);
   const [reasoningEffort, setReasoningEffort] =
     useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
+  // Active agent-mode id (posture) for the composer. "" = bot default. Seeded
+  // once from the server's sticky activeMode, then owned by the user's choice.
+  const [agentMode, setAgentMode] = useState<string>("");
+  const agentModeSeededRef = useRef(false);
   const [refreshing, setRefreshing] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showTelegramGuide, setShowTelegramGuide] = useState(false);
@@ -250,6 +255,20 @@ export function ChatViewClient({
     [botId, serverBackedChannelModelSelection],
   );
   const isCurrentBot = useCallback(() => useChatStore.getState().botId === botId, [botId]);
+
+  const { modes: availableModes, activeMode: stickyAgentMode } = useAgentModes(botId);
+  // Re-arm the seed and drop any carried-over selection when the bot changes,
+  // so each bot reflects its own sticky mode.
+  useEffect(() => {
+    agentModeSeededRef.current = false;
+    setAgentMode("");
+  }, [botId]);
+  useEffect(() => {
+    if (!agentModeSeededRef.current && stickyAgentMode) {
+      setAgentMode(stickyAgentMode);
+      agentModeSeededRef.current = true;
+    }
+  }, [stickyAgentMode]);
 
   const handleUploadUpdate = useCallback((update: PendingKbUpload) => {
     setUploadStates((prev) => ({
@@ -743,6 +762,7 @@ export function ChatViewClient({
             model: turnModel,
             ...(sendOptions?.goalMode ? { goalMode: true } : {}),
             ...(sendOptions?.reasoningEffort ? { reasoningEffort: sendOptions.reasoningEffort } : {}),
+            ...(sendOptions?.agentMode ? { agentMode: sendOptions.agentMode } : {}),
             onDelta: (delta) => {
               if (!isCurrentBot()) return;
               const s = useChatStore.getState().channelStates[channel];
@@ -1171,6 +1191,7 @@ export function ChatViewClient({
             ? { explicitRecipeSelection: sendOptions.explicitRecipeSelection }
             : {}),
           ...(sendOptions?.reasoningEffort ? { reasoningEffort: sendOptions.reasoningEffort } : {}),
+          ...(sendOptions?.agentMode ? { agentMode: sendOptions.agentMode } : {}),
           ...(uploadedKbDocs.length > 0 ? { kbDocs: uploadedKbDocs } : {}),
         };
         const ok = state.enqueueMessage(channel, queued, { botId });
@@ -1199,13 +1220,14 @@ export function ChatViewClient({
         next.content,
         next.kbDocs ?? [],
         next.modelOverride,
-        next.goalMode || next.explicitRecipeSelection || next.reasoningEffort
+        next.goalMode || next.explicitRecipeSelection || next.reasoningEffort || next.agentMode
           ? {
               ...(next.goalMode ? { goalMode: true } : {}),
               ...(next.explicitRecipeSelection
                 ? { explicitRecipeSelection: next.explicitRecipeSelection }
                 : {}),
               ...(next.reasoningEffort ? { reasoningEffort: next.reasoningEffort } : {}),
+              ...(next.agentMode ? { agentMode: next.agentMode } : {}),
             }
           : undefined,
       ).catch((err) => {
@@ -1952,6 +1974,9 @@ export function ChatViewClient({
               )}
               reasoningEffort={reasoningEffort}
               onReasoningEffortChange={setReasoningEffort}
+              availableModes={availableModes}
+              agentMode={agentMode}
+              onAgentModeChange={setAgentMode}
               composerAccessory={
                 <ChatModelPicker
                   botId={botId}

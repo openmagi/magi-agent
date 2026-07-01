@@ -1122,6 +1122,11 @@ export interface SendMessageOptions {
    *  honored by models whose provider supports it. Backend wiring lands in
    *  `chat_routes.py` (OSS) and `chat-proxy` (hosted) follow-ups. */
   reasoningEffort?: ReasoningEffort;
+  /** Active agent-mode id (posture). Sent as the per-turn `agentMode` field;
+   *  the runtime resolves it into the system prompt + tool delta
+   *  (`chat_routes.py` → `per_turn_agent_mode_context`). Omitted when the user
+   *  has no mode selected (bot default). */
+  agentMode?: string;
   /** If set, the newest user message is a reply to this target. */
   replyTo?: ReplyTo;
   onDelta: (text: string) => void;
@@ -1375,6 +1380,7 @@ export async function sendMessage(
     model = "auto",
     goalMode,
     reasoningEffort,
+    agentMode,
     replyTo,
     onDelta,
     onThinkingDelta,
@@ -2345,6 +2351,7 @@ export async function sendMessage(
     stream: true,
     ...(goalMode ? { goalMode: true } : {}),
     ...(reasoningEffort ? { reasoningEffort } : {}),
+    ...(agentMode ? { agentMode } : {}),
     ...(replyTo ? { replyTo } : {}),
   };
   const baseHeaders = {
@@ -2607,7 +2614,7 @@ async function sendMessageNonStreaming(
   messages: Pick<ChatMessage, "role" | "content">[],
   options: SendMessageOptions,
 ): Promise<void> {
-  const { model = "auto", goalMode, reasoningEffort, replyTo, onDelta, onDone, onError, signal } = options;
+  const { model = "auto", goalMode, reasoningEffort, agentMode, replyTo, onDelta, onDone, onError, signal } = options;
   const visibleText = createStreamingTextSmoother(onDelta);
 
   try {
@@ -2631,6 +2638,7 @@ async function sendMessageNonStreaming(
         ...(isLocalBot(botId) ? { sessionId: sessionKey } : {}),
         ...(goalMode ? { goalMode: true } : {}),
         ...(reasoningEffort ? { reasoningEffort } : {}),
+        ...(agentMode ? { agentMode } : {}),
         ...(replyTo ? { replyTo } : {}),
       }),
       signal,
