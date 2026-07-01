@@ -850,7 +850,7 @@ function RulesSectionMount({
             className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-primary/90"
           >
             <Plus className="h-3.5 w-3.5" />
-            Add policy
+            Add rule
           </button>
         ) : null}
       </div>
@@ -865,7 +865,7 @@ function RulesSectionMount({
       {addState.phase === "nl" ? (
         <section className="space-y-2">
           <AuthoringHeader
-            label="Natural language"
+            label="Describe it"
             onPickDifferent={() => setAddState({ phase: "picking_mode" })}
             onClose={() => setAddState({ phase: "idle" })}
           />
@@ -906,7 +906,7 @@ function RulesSectionMount({
       {addState.phase === "raw_picking" ? (
         <section className="space-y-2">
           <AuthoringHeader
-            label="Advanced — pick a rule kind"
+            label="Advanced: pick a rule kind"
             onPickDifferent={() => setAddState({ phase: "picking_mode" })}
             onClose={() => setAddState({ phase: "idle" })}
           />
@@ -922,7 +922,7 @@ function RulesSectionMount({
       {addState.phase === "raw_authoring" ? (
         <section className="space-y-2">
           <AuthoringHeader
-            label={`Advanced — ${LABEL_FOR_CHOICE[addState.choice]}`}
+            label={`Advanced: ${LABEL_FOR_CHOICE[addState.choice]}`}
             onPickDifferent={() => setAddState({ phase: "raw_picking" })}
             onClose={() => setAddState({ phase: "idle" })}
           />
@@ -983,7 +983,7 @@ function RulesSectionMount({
         </>
       ) : (
         <div className="rounded-xl border border-dashed border-black/[0.08] bg-gray-50/60 px-4 py-3 text-xs text-secondary">
-          List hidden while adding a policy. Cancel above to return.
+          List hidden while adding a rule. Cancel above to return.
         </div>
       )}
     </div>
