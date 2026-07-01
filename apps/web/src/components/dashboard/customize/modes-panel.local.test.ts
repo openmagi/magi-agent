@@ -33,3 +33,32 @@ describe("ModesPanel: PR-U3.3 intent-first, plain-language mode composer", () =>
     expect(src).toContain("Create one under <strong>Rules</strong>");
   });
 });
+
+describe("ModesPanel: PR-U3.4 conversational NL → mode composer", () => {
+  it("offers a 'Describe a mode' entry alongside 'New mode'", () => {
+    expect(src).toContain("Describe a mode");
+    expect(src).toContain("New mode");
+    expect(src).toContain("setComposing(true)");
+  });
+
+  it("compiles via compileMode and drops the draft into the editor for review", () => {
+    expect(src).toContain("compileMode");
+    // The NL surface never activates a mode: it hands the draft to the editor.
+    expect(src).toContain("editorFromDraft(draft)");
+    expect(src).toMatch(/onDrafted=\{\(draft, warnings\) =>/);
+  });
+
+  it("grounds the compile on the operator's scopable rule ids", () => {
+    expect(src).toContain("scopablePolicyIds={policyOptions.map((o) => o.id)}");
+  });
+
+  it("surfaces compiler warnings (dropped tools/ids, capped permission) in the editor", () => {
+    expect(src).toContain("We adjusted the draft:");
+    expect(src).toContain("warnings.length > 0");
+  });
+
+  it("fails soft when the compiler is disabled (points at the manual form)", () => {
+    expect(src).toContain('res.error === "nl-mode compiler disabled"');
+    expect(src).toContain("author by hand");
+  });
+});

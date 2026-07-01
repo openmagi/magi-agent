@@ -387,6 +387,13 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     # opt in for lab. Without this the dashboard "Compile" button returns
     # ``nl-rule compiler disabled`` even though the user already has the UI.
     "MAGI_CUSTOMIZE_NL_RULE_COMPILER_ENABLED",
+    # PR-U3.4 Customize NL → agent-mode compiler endpoint. Registration-time
+    # only (never on the hot path) and fail-open when no provider key is
+    # configured, so safe to opt in for lab. Without this the Modes "Describe
+    # a mode" button returns ``nl-mode compiler disabled`` even though the user
+    # already has the UI. Registry default stays OFF so a fresh install /
+    # hosted serve preserve the manual form path until the operator opts in.
+    "MAGI_CUSTOMIZE_NL_MODE_COMPILER_ENABLED",
     # PR-F-UX6 interview-driven NL authoring + hybrid primitive proposals.
     # Registration-time only (never on the hot path) and fail-open when no
     # provider key is configured, so safe to dogfood in lab. Without this the

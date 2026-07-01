@@ -96,6 +96,39 @@ def _is_nl_rule_compiler_enabled() -> bool:
         return False
 
 
+def _is_nl_mode_compiler_enabled() -> bool:
+    """Read ``MAGI_CUSTOMIZE_NL_MODE_COMPILER_ENABLED`` defensively (PR-U3.4).
+
+    Gates ``POST /v1/app/modes/compile``: the NL → agent-mode compiler.
+    Mirrors the NL-rule compiler gate: strict default-OFF, kill-switch, lab
+    opts in. Registration-time only; fail-open when no model is available.
+    """
+    try:
+        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+        return flag_bool("MAGI_CUSTOMIZE_NL_MODE_COMPILER_ENABLED")
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _resolve_nl_mode_compile_factory(body: dict) -> Any:
+    """Resolve the NL→mode compiler model factory.
+
+    Test injection via ``body["_modeModelFactory"]``; otherwise the shared
+    production SHACL-compiler model factory (same registration-time model the
+    NL-rule compiler uses).
+    """
+    if isinstance(body, dict):
+        factory = body.get("_modeModelFactory")
+        if callable(factory):
+            return factory
+    from magi_agent.customize.shacl_compiler import (  # noqa: PLC0415
+        _production_shacl_compiler_model_factory,
+    )
+
+    return _production_shacl_compiler_model_factory()
+
+
 def _is_nl_interview_mode_enabled() -> bool:
     """Read ``MAGI_CUSTOMIZE_NL_INTERVIEW_MODE_ENABLED`` defensively (PR-F-UX6).
 
@@ -362,6 +395,93 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             # Do not echo the caller-supplied id back in the response.
             return JSONResponse(status_code=404, content={"error": "unknown_mode"})
         return JSONResponse(content={"activeMode": active_mode_id()})
+
+    @app.post("/v1/app/modes/compile")
+    async def compile_agent_mode(request: Request) -> JSONResponse:
+        """PR-U3.4: NL → agent-mode draft compile preview.
+
+        Registration-time only. Drafts a full mode (system prompt + tool delta
+        + scoped rules + permission mode) from a plain-language stance
+        description for the operator to review in the Mode editor. Grounds the
+        draft on the live tool catalog + the caller-supplied scopable rule ids,
+        and honest-degrades (drops unknowns, caps permission mode) so the draft
+        is always a structurally valid mode. Never activates anything: the
+        caller saves via ``PUT /v1/app/modes/{id}``.
+        """
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+
+        if not _is_nl_mode_compiler_enabled():
+            return JSONResponse(
+                content={"ok": False, "error": "nl-mode compiler disabled"},
+                status_code=200,
+            )
+
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        if not isinstance(body, dict):
+            return JSONResponse(status_code=400, content={"error": "object_required"})
+
+        nl_text = body.get("nlText")
+        if not isinstance(nl_text, str) or not nl_text.strip():
+            return JSONResponse(status_code=400, content={"error": "nlText_required"})
+        # Byte cap for parity with the sibling compile routes (multibyte-safe).
+        if len(nl_text.encode()) > _MAX_NL_TEXT_BYTES:
+            return JSONResponse(status_code=400, content={"error": "nlText_too_large"})
+
+        # Available tools: authoritative from the live catalog. Scopable rule
+        # ids: the caller's unified custom_rule/dashboard_check ids (grounding
+        # only; save-time validation is authoritative). This route is one-shot
+        # (no priorTurns): the compose surface never sends prior turns, so we do
+        # not accept them (avoids an unbounded, unfenced LLM input).
+        try:
+            catalog = build_catalog(runtime)
+            available_tools = [
+                str(t.get("name"))
+                for t in catalog.get("tools", [])
+                if isinstance(t, dict) and t.get("name")
+            ]
+        except Exception:  # noqa: BLE001
+            available_tools = []
+        scopable = body.get("scopablePolicyIds")
+        scopable_ids = (
+            [str(p) for p in scopable if isinstance(p, str)]
+            if isinstance(scopable, list)
+            else []
+        )
+
+        from magi_agent.customize.mode_compiler import compile_nl_to_mode  # noqa: PLC0415
+        from magi_agent.customize.modes import active_permission_mode  # noqa: PLC0415
+
+        baseline = active_permission_mode() or "default"
+
+        try:
+            result = await asyncio.wait_for(
+                compile_nl_to_mode(
+                    nl_text,
+                    model_factory=_resolve_nl_mode_compile_factory(body),
+                    available_tools=available_tools,
+                    scopable_policy_ids=scopable_ids,
+                    baseline_permission_mode=baseline,
+                ),
+                timeout=_LLM_CALL_TIMEOUT_S,
+            )
+        except TimeoutError:
+            return JSONResponse(
+                content={"ok": False, "error": "compile timed out", "draft": None},
+                status_code=200,
+            )
+        except Exception:  # noqa: BLE001
+            # Do not echo raw exception text to the client (parity with the
+            # sibling routes' structured errors).
+            return JSONResponse(
+                content={"ok": False, "error": "compile failed", "draft": None},
+                status_code=200,
+            )
+        return JSONResponse(content=result, status_code=200)
 
     @app.get("/v1/app/customize/evidence/live-catalog")
     async def get_live_catalog(request: Request) -> JSONResponse:
