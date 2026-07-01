@@ -405,6 +405,12 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     "MAGI_PERSISTENT_PYTHON_ENABLED",
     "MAGI_RECIPE_ROUTING_LLM_ENABLED",
     "MAGI_RESEARCH_FACT_GUIDANCE_ENABLED",
+    # WS6 PR6a: soft research-governance notice (promote the hard research
+    # pre-final refuse to an appended could-not-verify notice). Lab-only
+    # activation; registry default stays OFF so a fresh install / hosted serve
+    # keeps the existing hard-refuse behavior. Paired with the already-lab-ON
+    # MAGI_FACT_GROUNDING_VERIFICATION_ENABLED so lab hedges instead of refusing.
+    "MAGI_RESEARCH_GOVERNANCE_SOFT_BLOCK_ENABLED",
     "MAGI_SERVE_EVIDENCE_ENABLED",
     "MAGI_SESSION_TRANSCRIPT_ENABLED",
     # SHACL rule compiler: turns customize raw.ttl / natural-language rules into
