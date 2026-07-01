@@ -368,7 +368,7 @@ graph LR
 | anthropic_cache_model.py | Cache-aware Anthropic (Claude) model for the ADK runner boundary — PR11. | env | cli/real_runner.py, prompt/injection.py, runtime/model_factory.py |
 | artifact_service.py | — | — | — |
 | callback_adapter.py | — | bus, context, manifest, resolved | — |
-| context_compaction.py | Live context-compaction wiring for the ADK Runner (PR13). | auto_compact, context, context_lifecycle, lifecycle_audit, lifecycle_shell_command_control, manual_compaction_context, protected_tools, providers, query_state, readonly_classifier, session_service, token_estimation, token_tracker, transcript_render, usage_metadata, wiring | adk_bridge/control_plane.py |
+| context_compaction.py | Live context-compaction wiring for the ADK Runner (PR13). | auto_compact, collapse_drain, context, context_lifecycle, lifecycle_audit, lifecycle_shell_command_control, manual_compaction_context, protected_tools, providers, query_state, reactive_compact, readonly_classifier, session_service, token_estimation, token_tracker, transcript_render, types, usage_metadata, wiring | adk_bridge/control_plane.py |
 | control_plane.py | ADK loop control-plane abstraction (PR2, goose-parity). | _truthy, constraint_reinjection, context, context_compaction, edit_retry_reflection, env, facts_replan_control, flags, fork_runner, gemini_content_ordering, lifecycle_llm_call_control, lifecycle_session_control, lifecycle_shell_command_control, manifest, registries, resilience_plugin, schema_feedback, self_review, tool_exception_reflection, tool_synthesis, tool_synthesis_nudge, turn_policy | adk_bridge/dashboard_producer_control.py, adk_bridge/facts_replan_control.py, adk_bridge/lifecycle_llm_call_control.py, adk_bridge/lifecycle_session_control.py, adk_bridge/lifecycle_shell_command_control.py, adk_bridge/local_runner.py, adk_bridge/schema_feedback.py, cli/real_runner.py, cli/tests/test_real_runner.py, customize/after_tool_gate.py, firstparty/packs/control_plane_default/impl.py, packs/context.py, packs/registries.py, transport/gate5b_governance.py |
 | dashboard_producer_control.py | Deny-on-present after-tool producer for dashboard-authored custom checks. | control_plane, dashboard_authored, discovery, env, types | cli/real_runner.py |
 | edit_retry_reflection.py | Edit-failure reflection / retry wiring for the live ADK Runner. | context, retry_repair_policies, turn_utilities | adk_bridge/control_plane.py, adk_bridge/schema_feedback.py, adk_bridge/tool_exception_reflection.py |
@@ -1674,7 +1674,7 @@ graph LR
 | __init__.py | — | classifier, engine, reactive_compact, types | adk_bridge/resilience_plugin.py, cli/engine.py, cli/tests/test_engine_recovery.py |
 | classifier.py | — | types | runtime/error_recovery/__init__.py |
 | engine.py | — | strategies, types | adk_bridge/resilience_plugin.py, runtime/error_recovery/__init__.py |
-| types.py | — | flags, types | context/hook.py, runtime/error_recovery/__init__.py, runtime/error_recovery/classifier.py, runtime/error_recovery/engine.py, runtime/error_recovery/strategies/collapse_drain.py, runtime/error_recovery/strategies/media_removal.py, runtime/error_recovery/strategies/output_escalation.py, runtime/error_recovery/strategies/rate_limit.py, runtime/error_recovery/strategies/reactive_compact.py, runtime/error_recovery/strategies/recovery_message.py |
+| types.py | — | flags, types | adk_bridge/context_compaction.py, context/hook.py, runtime/error_recovery/__init__.py, runtime/error_recovery/classifier.py, runtime/error_recovery/engine.py, runtime/error_recovery/strategies/collapse_drain.py, runtime/error_recovery/strategies/media_removal.py, runtime/error_recovery/strategies/output_escalation.py, runtime/error_recovery/strategies/rate_limit.py, runtime/error_recovery/strategies/reactive_compact.py, runtime/error_recovery/strategies/recovery_message.py |
 
 ### runtime/error_recovery/strategies/
 
@@ -1682,11 +1682,11 @@ graph LR
 |---|---|---|---|
 | __init__.py | — | collapse_drain, media_removal, output_escalation, rate_limit, reactive_compact, recovery_message | adk_bridge/resilience_plugin.py, runtime/error_recovery/engine.py |
 | _token_utils.py | — | token_estimation | runtime/error_recovery/strategies/collapse_drain.py, runtime/error_recovery/strategies/reactive_compact.py |
-| collapse_drain.py | — | _token_utils, types | context/hook.py, runtime/error_recovery/strategies/__init__.py |
+| collapse_drain.py | — | _token_utils, types | adk_bridge/context_compaction.py, context/hook.py, runtime/error_recovery/strategies/__init__.py |
 | media_removal.py | — | types | runtime/error_recovery/strategies/__init__.py |
 | output_escalation.py | — | types | runtime/error_recovery/strategies/__init__.py |
 | rate_limit.py | — | types | cli/tests/test_engine_recovery.py, runtime/error_recovery/strategies/__init__.py |
-| reactive_compact.py | — | _token_utils, types | context/hook.py, runtime/error_recovery/__init__.py, runtime/error_recovery/strategies/__init__.py |
+| reactive_compact.py | — | _token_utils, types | adk_bridge/context_compaction.py, context/hook.py, runtime/error_recovery/__init__.py, runtime/error_recovery/strategies/__init__.py |
 | recovery_message.py | — | types | runtime/error_recovery/strategies/__init__.py |
 
 ### sandbox/
