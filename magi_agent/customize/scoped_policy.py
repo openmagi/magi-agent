@@ -1,10 +1,11 @@
 """Mode ``scoped_policy_ids`` → per-turn policy overlay (resolver only; inert).
 
 A mode's ``scoped_policy_ids`` activate user-authored policies **only while that
-mode is active**. This module resolves those ids into a bucketed overlay. It has
-**no consumer yet** — the pre-final gate / tool-time gate / dashboard producer
-force-include lands in follow-up PRs — so importing/using this module is
-byte-identical to today.
+mode is active**. This module resolves those ids into a bucketed overlay. The
+pre-final gate consumes it via :func:`scoped_prefinal_validator_refs` (PR-D2);
+the tool-time gate + dashboard producer force-include land in PR-D3. Everything
+is gated by the same flags as the enabled-rule passes and is empty when no mode
+is active, so an inactive-mode / flags-off runtime is byte-identical to today.
 
 Namespace (the dashboard's prefixed unified ids; ``_POLICY_RE`` in
 ``customize/modes.py`` already permits ``:``):
@@ -44,6 +45,7 @@ __all__ = [
     "ScopedPolicyOverlay",
     "active_scoped_policy_ids",
     "resolve_scoped_policy_overlay",
+    "scoped_prefinal_validator_refs",
 ]
 
 # Namespaces that resolve to a live runtime ref in v1.
@@ -182,5 +184,50 @@ def active_scoped_policy_ids() -> tuple[str, ...]:
         if mode is None:
             return ()
         return tuple(mode.scoped_policy_ids)
+    except Exception:
+        return ()
+
+
+def scoped_prefinal_validator_refs() -> tuple[str, ...]:
+    """The active mode's scoped deterministic-ref validator refs for this turn.
+
+    PR-D2 consumption bridge for the pre-final gate: loads the customize policy
+    (the source of ``custom_rules``), resolves the active mode's overlay, and
+    returns its ``prefinal_validator_refs`` so the caller can union them into the
+    pre-final ``required_validators``.
+
+    Gated by the SAME flags as the enabled-deterministic-ref pass
+    (``_apply_customize_verification``): ``MAGI_CUSTOMIZE_VERIFICATION_ENABLED``
+    AND ``MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED``. Force-include never bypasses an
+    operator flag, so this returns ``()`` (byte-identical) when either is off, on
+    any error, or when no mode is active. Dashboard checks are consumed
+    separately (PR-D3), so an empty dashboard-check set is passed here.
+    """
+    try:
+        from magi_agent.config.flags import flag_profile_bool  # noqa: PLC0415
+
+        if not (
+            flag_profile_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED")
+            and flag_profile_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED")
+        ):
+            return ()
+        # Early-out before loading the customize policy: when no mode is active
+        # (the common case) there is nothing to force-include, so we avoid a
+        # per-turn overrides read on the hot pre-final path.
+        scoped_ids = active_scoped_policy_ids()
+        if not scoped_ids:
+            return ()
+        from magi_agent.customize.store import load_overrides  # noqa: PLC0415
+        from magi_agent.customize.verification_policy import (  # noqa: PLC0415
+            CustomizeVerificationPolicy,
+        )
+
+        policy = CustomizeVerificationPolicy.from_overrides(load_overrides())
+        overlay = resolve_scoped_policy_overlay(
+            scoped_ids,
+            custom_rules=policy.custom_rules,
+            dashboard_check_ids=(),
+        )
+        return overlay.prefinal_validator_refs
     except Exception:
         return ()
