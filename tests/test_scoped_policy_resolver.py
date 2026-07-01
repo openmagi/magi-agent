@@ -285,3 +285,105 @@ def test_scoped_prefinal_only_custom_rules_flag_off_is_empty(
     upsert_mode(_mode("research", ["custom_rule:cr1"]))
     set_active_mode("research")
     assert scoped_prefinal_validator_refs() == ()
+
+
+# --- PR-D3 tool-time consumption (tool_perm force-include) --------------------
+
+from magi_agent.customize.tool_perm import matched_decision  # noqa: E402
+from magi_agent.customize.verification_policy import (  # noqa: E402
+    CustomizeVerificationPolicy,
+)
+
+
+def _tool_perm_rule(rule_id: str, *, tool: str, enabled: bool, scope: str = "always") -> dict:
+    return {
+        "id": rule_id,
+        "scope": scope,
+        "enabled": enabled,
+        "what": {"kind": "tool_perm", "payload": {"match": {"tool": tool}, "decision": "deny"}},
+        "firesAt": "before_tool_use",
+        "action": "block",
+    }
+
+
+def test_enabled_tool_perm_rules_force_include_disabled():
+    policy = CustomizeVerificationPolicy.from_overrides(
+        {"verification": {"custom_rules": [_tool_perm_rule("tp1", tool="Danger", enabled=False)]}}
+    )
+    assert policy.enabled_tool_perm_rules() == []  # disabled → absent
+    forced = policy.enabled_tool_perm_rules(force_include_ids={"tp1"})
+    assert [r["id"] for r in forced] == ["tp1"]  # force-included
+
+
+def test_enabled_tool_perm_rules_force_include_still_scope_filtered():
+    policy = CustomizeVerificationPolicy.from_overrides(
+        {
+            "verification": {
+                "custom_rules": [
+                    _tool_perm_rule("tp1", tool="Danger", enabled=False, scope="coding")
+                ]
+            }
+        }
+    )
+    # forced but scope=coding → filtered out on a research turn
+    assert policy.enabled_tool_perm_rules(current_scope="research", force_include_ids={"tp1"}) == []
+    assert [
+        r["id"]
+        for r in policy.enabled_tool_perm_rules(current_scope="coding", force_include_ids={"tp1"})
+    ] == ["tp1"]
+
+
+def test_matched_decision_force_includes_scoped_disabled_rule(
+    customize_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", "1")
+    set_custom_rule(_tool_perm_rule("tp1", tool="Danger", enabled=False))  # globally off
+    # No mode → disabled rule stays inert.
+    assert matched_decision(tool_name="Danger", arguments={}) is None
+    # Mode scoping the rule → force-active → deny.
+    upsert_mode(_mode("locked", ["custom_rule:tp1"]))
+    set_active_mode("locked")
+    assert matched_decision(tool_name="Danger", arguments={}) == ("deny", "tp1")
+
+
+def test_matched_decision_scoped_flag_off_is_inert(
+    customize_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", "0")  # explicit off
+    set_custom_rule(_tool_perm_rule("tp1", tool="Danger", enabled=False))
+    upsert_mode(_mode("locked", ["custom_rule:tp1"]))
+    set_active_mode("locked")
+    assert matched_decision(tool_name="Danger", arguments={}) is None
+
+
+def test_forced_rule_never_shadows_enabled_rule():
+    # An enabled deny rule ordered AFTER a force-included ask rule (in authoring
+    # order) must still win: force-include is strictly additive, never a
+    # downgrade. enabled candidates are ordered before forced-only ones.
+    ask_rule = {
+        "id": "forced_ask",
+        "scope": "always",
+        "enabled": False,
+        "what": {"kind": "tool_perm", "payload": {"match": {"tool": "T"}, "decision": "ask"}},
+        "firesAt": "before_tool_use",
+        "action": "block",
+    }
+    deny_rule = _tool_perm_rule("enabled_deny", tool="T", enabled=True)
+    policy = CustomizeVerificationPolicy.from_overrides(
+        {"verification": {"custom_rules": [ask_rule, deny_rule]}}  # ask authored first
+    )
+    ordered = policy.enabled_tool_perm_rules(force_include_ids={"forced_ask"})
+    # enabled deny comes first despite being authored second → first-match = deny.
+    assert [r["id"] for r in ordered] == ["enabled_deny", "forced_ask"]
+
+
+def test_enabled_tool_perm_rules_byte_identical_without_forced():
+    # Empty force_include_ids → identical to the historic enabled-only list.
+    rules = [
+        _tool_perm_rule("a", tool="A", enabled=True),
+        _tool_perm_rule("b", tool="B", enabled=False),
+    ]
+    policy = CustomizeVerificationPolicy.from_overrides({"verification": {"custom_rules": rules}})
+    assert [r["id"] for r in policy.enabled_tool_perm_rules()] == ["a"]

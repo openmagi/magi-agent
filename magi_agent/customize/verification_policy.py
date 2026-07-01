@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -130,7 +131,10 @@ class CustomizeVerificationPolicy:
         return refs
 
     def enabled_tool_perm_rules(
-        self, *, current_scope: str | None = None
+        self,
+        *,
+        current_scope: str | None = None,
+        force_include_ids: Collection[str] = (),
     ) -> list[dict[str, Any]]:
         """Enabled ``tool_perm`` custom rules (P2 before-tool-use deny/ask).
 
@@ -140,16 +144,35 @@ class CustomizeVerificationPolicy:
         multi-scope match-any). When ``current_scope`` is ``None`` the historic
         scope-blind list is returned so legacy call sites keep working.
 
+        ``force_include_ids`` (PR-D3): rule ids an active mode force-activates via
+        its ``scoped_policy_ids``. A ``tool_perm`` rule whose id is in this set is
+        a candidate even when its own ``enabled`` flag is off (scoping activates
+        it for the turn); the ``scope`` filter still applies. Force-included
+        (disabled) rules are ordered AFTER all enabled rules so a scoped rule can
+        never shadow an enabled one under the caller's first-match-wins semantics
+        (force-include is strictly additive, never a downgrade). When
+        ``force_include_ids`` is empty this is byte-identical to the historic
+        enabled-only list.
+
         Defensive: a rule with a missing or non-vocabulary ``scope`` is treated
         as ``always`` so a corrupt persisted rule does not silently vanish.
         """
-        candidates = [
+        forced = set(force_include_ids)
+
+        def _is_tool_perm(rule: dict[str, Any]) -> bool:
+            return isinstance(rule.get("what"), dict) and rule["what"].get("kind") == "tool_perm"
+
+        enabled_candidates = [
+            rule for rule in self.custom_rules if rule.get("enabled", False) and _is_tool_perm(rule)
+        ]
+        forced_only = [
             rule
             for rule in self.custom_rules
-            if rule.get("enabled", False)
-            and isinstance(rule.get("what"), dict)
-            and rule["what"].get("kind") == "tool_perm"
+            if not rule.get("enabled", False)
+            and rule.get("id") in forced
+            and _is_tool_perm(rule)
         ]
+        candidates = [*enabled_candidates, *forced_only]
         if current_scope is None:
             return candidates
         return [rule for rule in candidates if _rule_scope_matches(rule, current_scope)]

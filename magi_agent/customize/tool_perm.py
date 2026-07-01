@@ -157,7 +157,25 @@ def matched_decision(
         from magi_agent.customize.verification_policy import CustomizeVerificationPolicy
 
         policy = CustomizeVerificationPolicy.from_overrides(load_overrides())
-        for rule in policy.enabled_tool_perm_rules(current_scope=current_scope):
+        # PR-D3: an active mode may force-activate a tool_perm rule for this turn
+        # via its scoped_policy_ids (even if the rule is globally disabled). Same
+        # flag gate as above, so force-include never bypasses an operator flag.
+        from magi_agent.customize.scoped_policy import (  # noqa: PLC0415
+            active_scoped_policy_ids,
+            resolve_scoped_policy_overlay,
+        )
+
+        _scoped = active_scoped_policy_ids()
+        _force_ids = (
+            resolve_scoped_policy_overlay(
+                _scoped, custom_rules=policy.custom_rules, dashboard_check_ids=()
+            ).tool_perm_rule_ids
+            if _scoped
+            else ()
+        )
+        for rule in policy.enabled_tool_perm_rules(
+            current_scope=current_scope, force_include_ids=_force_ids
+        ):
             payload = rule.get("what", {}).get("payload", {})
             match = payload.get("match")
             if not isinstance(match, dict):
