@@ -2997,14 +2997,19 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     # PR-R: soft-fail unknown-tool as a tool_result so the model can retry.
-    # Default-ON because the retry pool is bounded by the toolset the runtime
-    # already advertises (unknown tool -> corrective dict lists the exposed
-    # tools; model must pick one of THOSE, cannot escalate authority), and the
-    # corrective error text is information-identical to what ADK already
-    # raises today (no new public info). Opt out via =0.
-    _b(
+    # Profile-aware default-ON (``_pb`` / ``flag_profile_bool``): ON in the
+    # full runtime profile, OFF under ``MAGI_RUNTIME_PROFILE`` in
+    # ``safe``/``eval``/``minimal``/``conservative``/``off`` so the safe
+    # profile still yields an empty loop-resilience plane (mirrors
+    # ``MAGI_EDIT_FUZZY_MATCH_ENABLED`` / ``MAGI_EDIT_FORMAT_ON_WRITE_ENABLED``).
+    # The retry pool is bounded by the toolset the runtime already advertises
+    # (unknown tool -> corrective dict lists the exposed tools; model must
+    # pick one of THOSE, cannot escalate authority), and the corrective error
+    # text is information-identical to what ADK already raises today (no new
+    # public info). Opt out on the full profile via ``=0``; opt IN under safe
+    # via an explicit ``=1``.
+    _pb(
         "MAGI_TOOL_NOT_FOUND_SOFT_FAIL",
-        default=True,
         summary=(
             "Convert Google ADK's ``ValueError('Tool '<name>' not found. "
             "Available tools: ...')`` raise into a model-visible corrective "
@@ -3013,7 +3018,9 @@ FLAGS: tuple[FlagSpec, ...] = (
             "next iteration instead of the child turn dying with "
             "llm_call_exception. Bounded per-invocation attempt budget "
             "(``MAGI_TOOL_NOT_FOUND_SOFT_FAIL_MAX_ATTEMPTS`` default 3) so a "
-            "hallucination loop still terminates. Default-ON."
+            "hallucination loop still terminates. Default-ON in the full "
+            "runtime profile, OFF under ``MAGI_RUNTIME_PROFILE`` in "
+            "safe/eval/minimal/conservative/off."
         ),
     ),
     _b(

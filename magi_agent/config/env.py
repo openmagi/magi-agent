@@ -270,16 +270,20 @@ class ToolNotFoundSoftFailEnv:
 def parse_tool_not_found_soft_fail_env(
     env: Mapping[str, str],
 ) -> ToolNotFoundSoftFailEnv:
-    """Resolve the tool-not-found soft-fail policy from ``env`` (default-ON).
+    """Resolve the tool-not-found soft-fail policy from ``env`` (profile-aware default-ON).
 
-    Mirrors :func:`parse_tool_exception_reflection_env`: ``flag_bool`` for the
-    gate, ``_int_env`` for the numeric (read only when enabled). Out-of-range
-    numeric raises ``RuntimeEnvError`` at parse so an operator fails loud at
-    startup; a malformed numeric on an OFF runtime never raises.
+    Delegates to :func:`flag_profile_bool` so the gate is ON in the full
+    runtime profile but OFF under ``MAGI_RUNTIME_PROFILE`` in
+    ``safe``/``eval``/``minimal``/``conservative``/``off`` (mirrors
+    ``parse_edit_format_on_write_env``); an explicit ``=1`` opts in under
+    those profiles and an explicit ``=0`` opts out under the full profile.
+    ``_int_env`` reads the numeric only when enabled: an out-of-range value
+    raises ``RuntimeEnvError`` at parse so an operator fails loud at startup,
+    while a malformed numeric on an OFF runtime never raises.
     """
-    from .flags import flag_bool  # noqa: PLC0415
+    from .flags import flag_profile_bool  # noqa: PLC0415
 
-    enabled = flag_bool(TOOL_NOT_FOUND_SOFT_FAIL_ENV, env=env)
+    enabled = flag_profile_bool(TOOL_NOT_FOUND_SOFT_FAIL_ENV, env=env)
     max_attempts = _int_env(
         env,
         TOOL_NOT_FOUND_SOFT_FAIL_MAX_ATTEMPTS_ENV,
