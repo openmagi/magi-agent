@@ -70,7 +70,7 @@ openmagi	magi_agent/channels/runtime_boundary.py	2
 openmagi	magi_agent/channels/telegram_adapter.py	4
 openmagi	magi_agent/channels/telegram_boundary.py	3
 openmagi	magi_agent/cli/commands/builtins.py	2
-openmagi	magi_agent/cli/engine.py	18
+openmagi	magi_agent/cli/engine.py	20
 openmagi	magi_agent/cli/real_runner.py	1
 openmagi	magi_agent/cli/session_log.py	2
 openmagi	magi_agent/cli/tests/test_commands.py	4
@@ -90,7 +90,7 @@ openmagi	magi_agent/cli/tests/test_tool_runtime.py	2
 openmagi	magi_agent/cli/tool_runtime.py	1
 openmagi	magi_agent/cli/wiring.py	2
 openmagi	magi_agent/composio/config.py	2
-openmagi	magi_agent/config/env.py	3
+openmagi	magi_agent/config/env.py	4
 openmagi	magi_agent/config/flags.py	4
 openmagi	magi_agent/config/models.py	1
 openmagi	magi_agent/connectors/credential_lease.py	6
