@@ -398,25 +398,6 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             return JSONResponse(status_code=404, content={"error": "unknown_mode"})
         return JSONResponse(content={"activeMode": active_mode_id()})
 
-    @app.get("/v1/app/prebuilt-components")
-    async def list_prebuilt_components(request: Request) -> JSONResponse:
-        """PR-P4: read-only list of always-on kernel components (read-before-write,
-        path safety, receipts, ...) that gate every turn but were invisible in the
-        dashboard. Descriptive only; never mutates.
-        """
-        unauthorized = _unauthorized_response(request, runtime)
-        if unauthorized is not None:
-            return unauthorized
-        from magi_agent.customize.prebuilt_components import (  # noqa: PLC0415
-            prebuilt_components_view,
-        )
-
-        try:
-            components = prebuilt_components_view()
-        except Exception:  # noqa: BLE001
-            components = []
-        return JSONResponse(content={"components": components})
-
     @app.get("/v1/app/packs")
     async def list_installed_packs(request: Request) -> JSONResponse:
         """PR-P3: read-only inventory of installed packs + what each provides.
