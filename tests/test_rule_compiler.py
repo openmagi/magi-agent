@@ -416,3 +416,16 @@ async def test_orchestrator_surfaces_schema_issues_when_draft_fails_validation()
     # imaginary-scope is not in the SCOPES allow-list — validate_custom_rule
     # MUST flag it deterministically.
     assert any("scope must be one of" in i for i in out["schemaIssues"])
+
+
+def test_compile_system_instruction_clarifies_scope_vs_agent_mode():
+    # The rule compiler authors a rule's turn-type `scope`, which shares names
+    # (coding/research/…) with agent MODES. The prompt must clarify they are
+    # distinct so "only in <mode>" is not miscompiled into a scope value, and
+    # must still format cleanly with the nonce (no unescaped braces).
+    from magi_agent.customize.rule_compiler import _COMPILE_SYSTEM_INSTRUCTION_TMPL
+
+    rendered = _COMPILE_SYSTEM_INSTRUCTION_TMPL.format(nonce="test-nonce")
+    assert "test-nonce" in rendered
+    assert "NOT the user's" in rendered and "agent MODE" in rendered
+    assert "Modes surface" in rendered
