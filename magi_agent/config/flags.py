@@ -1573,6 +1573,32 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_EVIDENCE_HEDGE_ON_GUESS_ENABLED",
+        stage="stage2",
+        summary=(
+            "Convert the hard pre-final evidence-gate refuse into a SOFT, "
+            "user-visible hedge/flag notice appended after the already-streamed "
+            "answer for in-scope research/contract recipes whose missing "
+            "validator/evidence set is non-empty (e.g. a fact-grounding 'guess' "
+            "verdict, or the satisfier-less citation_support). The pair of "
+            "MAGI_FACT_GROUNDING_VERIFICATION_ENABLED so lab hedges instead of "
+            "refusing. Strict default-OFF and inert unless explicitly set; "
+            "lab-only activation, never a hard block."
+        ),
+    ),
+    _b(
+        "MAGI_FINAL_OUTPUT_GATE_LOCAL_ENABLED",
+        stage="stage2",
+        summary=(
+            "Enable the otherwise-disabled live-finalizer FinalOutputGate for "
+            "opted-in recipes on the engine path: when ON the gate evaluates "
+            "live instead of short-circuiting to 'skipped'. Does NOT govern the "
+            "goal_nudge completion tie (which hardcodes its own enabled config). "
+            "Strict default-OFF and inert unless explicitly set; lab-only "
+            "activation."
+        ),
+    ),
+    _b(
         "MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED",
         stage="stage2",
         summary=(

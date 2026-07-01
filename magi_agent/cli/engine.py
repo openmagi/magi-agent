@@ -915,6 +915,15 @@ _RESEARCH_SOFT_NOTICE_TEXT = (
     "against the opened sources. Treat the unverified statements with caution "
     "and confirm them before relying on them."
 )
+# Net-new WS6 PR6b code: the fixed-format trailing hedge notice appended after
+# the answer when an in-scope research/contract turn could not be grounded
+# against the collected evidence. Module-level constant for test stability.
+# No em-dashes.
+_EVIDENCE_HEDGE_NOTICE_TEXT = (
+    "\n\n[Verification notice] Magi could not ground some specific values in this "
+    "answer against the collected evidence. Treat the unverified figures as "
+    "uncertain and confirm them before relying on them."
+)
 
 
 def _is_research_recipe_scope(
@@ -3137,24 +3146,34 @@ class MagiEngineDriver:
                 and _coding_repair_loop_enabled()
             )
             if not should_repair:
-                # WS6 PR6a: convert the hard research pre-final refuse into a
-                # SOFT appended notice (research governance -> local_block_intent)
-                # when an in-scope research recipe blocked under the flag. The
-                # already-streamed answer is kept; only a trailing notice is
-                # appended. Skipped (existing hard refuse runs) when the flag is
-                # OFF, the recipe is out of scope, or a repair-suppressed turn
-                # discarded its answer (MINOR-2). Fail-open inside the helper.
+                # WS6 PR6a/PR6b: convert the hard pre-final refuse into a SOFT
+                # appended notice (research-governance notice OR evidence hedge,
+                # one seam two reason families) when an in-scope research/contract
+                # recipe blocked under the relevant flag. The already-streamed
+                # answer is kept; only a trailing notice SUFFIX is appended.
+                # Skipped (existing hard refuse runs) when the flags are OFF, the
+                # recipe is out of scope, the missing set is empty, or a
+                # repair-suppressed turn discarded its answer (MINOR-2). Fail-open
+                # inside the seam.
                 if not repair_output_suppressed:
-                    soft_notice_events = self._research_governance_soft_notice(
+                    soft_consequence = self._apply_soft_verification_consequence(
                         turn_id=turn_id,
                         session_id=session_id,
                         final_text=emitted_text,
                         pre_final_gate=pre_final_gate,
                         live_selected_pack_ids=live_selected,
                     )
-                    if soft_notice_events is not None:
-                        for soft_event in soft_notice_events:
-                            yield soft_event
+                    if soft_consequence is not None:
+                        notice_suffix_text, status_event = soft_consequence
+                        yield status_event
+                        yield RuntimeEvent(
+                            type="token",
+                            payload={
+                                "type": "text_delta",
+                                "delta": notice_suffix_text,
+                            },
+                            turn_id=turn_id,
+                        )
                         yield EngineResult(  # type: ignore[misc]
                             terminal=Terminal.completed,
                             usage=usage,
@@ -4898,7 +4917,7 @@ class MagiEngineDriver:
             logger.debug("fact-grounding satisfier failed", exc_info=True)
             return []
 
-    def _research_governance_soft_notice(
+    def _apply_soft_verification_consequence(
         self,
         *,
         turn_id: str,
@@ -4906,35 +4925,47 @@ class MagiEngineDriver:
         final_text: str,
         pre_final_gate: Mapping[str, object],
         live_selected_pack_ids: Sequence[str] = (),
-    ) -> tuple[RuntimeEvent, ...] | None:
-        """Resolve a hard research block into a SOFT appended could-not-verify
-        notice, or ``None`` to fall through to the existing hard refuse.
+    ) -> tuple[str, RuntimeEvent] | None:
+        """Resolve a hard pre-final block into a SOFT appended notice, or
+        ``None`` to fall through to the existing hard refuse.
 
-        Design: WS6 deterministic-verification activation, PR6a. Behind the
-        strict default-OFF ``MAGI_RESEARCH_GOVERNANCE_SOFT_BLOCK_ENABLED`` flag.
-        Fires only when (a) the flag is ON, (b) the assembled recipe opted into
-        the research evidence contract, and (c) the gate decision is ``block``
-        with a NON-EMPTY missing validator/evidence set. The reason-discrimination
-        is label-agnostic (it does NOT key on a specific label), because
-        ``openmagi.research`` blocks on the satisfier-less ``citation_support``
-        whether or not ``fact_grounding`` is also unmet (the design 1a correction).
+        Design: WS6 deterministic-verification activation, PR6a + PR6b. ONE seam,
+        TWO reason families behind their own strict default-OFF flags:
 
-        Returns the status + trailing ``text_delta`` notice events to yield (the
-        caller then yields ``Terminal.completed``), or ``None`` when the soft
-        consequence does not apply. The live ``turn_id``/cited refs are NORMALIZED
-        before the research gate request is constructed (design 3.3 / 3.6), so a
-        digit/hex ``turn_id`` or raw URL refs never raise into the fail-open wrap.
-        Fail-open: any internal fault returns ``None`` (existing behavior), never
-        a wedge.
+        * research-governance notice (PR6a,
+          ``MAGI_RESEARCH_GOVERNANCE_SOFT_BLOCK_ENABLED``): a
+          ``research_governance_notice`` status enriched with the richer research
+          final-gate reason codes;
+        * evidence hedge (PR6b, ``MAGI_EVIDENCE_HEDGE_ON_GUESS_ENABLED``): an
+          ``evidence_hedge_applied`` status carrying the fact-grounding verdict /
+          full missing validator set.
+
+        Fires only when at least one flag is ON, the assembled recipe opted into
+        the research/contract evidence contract, and the gate decision is
+        ``block`` with a NON-EMPTY missing validator/evidence set. The
+        reason-discrimination is label-agnostic (it does NOT key on a specific
+        label), because ``openmagi.research`` blocks on the satisfier-less
+        ``citation_support`` whether or not ``fact_grounding`` is also unmet (the
+        design 1a correction).
+
+        Returns ``(notice_suffix_text, status_event)`` to yield (the caller emits
+        the status event, then a single ``text_delta`` carrying the suffix, then
+        ``Terminal.completed``), or ``None`` when no soft consequence applies.
+        Fail-open: any internal fault returns ``None`` (existing hard behavior),
+        never a wedge. When OFF (neither flag set) it returns ``None`` before any
+        scope work, so the OFF path is byte-identical to today.
         """
         import os  # noqa: PLC0415
 
         try:
             from magi_agent.config.env import (  # noqa: PLC0415
+                parse_evidence_hedge_on_guess_enabled,
                 parse_research_governance_soft_block_enabled,
             )
 
-            if not parse_research_governance_soft_block_enabled(os.environ):
+            research_on = parse_research_governance_soft_block_enabled(os.environ)
+            hedge_on = parse_evidence_hedge_on_guess_enabled(os.environ)
+            if not (research_on or hedge_on):
                 return None
             assembly = self._runner_policy_assembly
             if assembly is None:
@@ -4954,49 +4985,148 @@ class MagiEngineDriver:
             if not (missing_validators or missing_evidence):
                 return None
 
-            # Evaluate the richer research final gate over NORMALIZED ids/refs to
-            # enrich the notice with deterministic reason codes. A construction
-            # ValueError would be a wiring bug (un-normalized input), not a
-            # runtime condition; the builder normalizes upstream so it cannot
-            # raise into this fail-open wrap.
-            from magi_agent.research.live_research_final_gate import (  # noqa: PLC0415
-                evaluate_live_research_final_gate,
-            )
-
-            result = evaluate_live_research_final_gate(
-                contract_id=_RESEARCH_SOFT_NOTICE_CONTRACT_ID,
-                turn_id=turn_id,
-                session_id=session_id,
-                final_text=final_text,
-                evidence_records=self._collect_evidence(turn_id),
-            )
-            reason_codes = list(result.reason_codes) if result.block_intent else []
-            cited_without_source = list(result.output_link_digests)
-
-            status_payload: dict[str, object] = {
-                "type": "research_governance_notice",
-                "turnId": turn_id,
-                "mode": "local_block_intent",
-                "reasonCodes": reason_codes,
-                "missingValidators": missing_validators,
-                "citedWithoutSource": cited_without_source,
-                "noticeAppended": True,
-            }
-            status_event = RuntimeEvent(
-                type="status", payload=status_payload, turn_id=turn_id
-            )
-            notice_event = RuntimeEvent(
-                type="token",
-                payload={"type": "text_delta", "delta": _RESEARCH_SOFT_NOTICE_TEXT},
-                turn_id=turn_id,
-            )
-            return (status_event, notice_event)
+            # Reason family 1: research-governance notice (PR6a). Preferred when
+            # its flag is ON (it surfaces the richer research final-gate reason
+            # codes for a research turn).
+            if research_on:
+                try:
+                    built = self._build_research_governance_notice(
+                        turn_id=turn_id,
+                        session_id=session_id,
+                        final_text=final_text,
+                        missing_validators=missing_validators,
+                    )
+                except Exception:
+                    # Independent fail-open per family: a research-notice fault must
+                    # NOT deny the hedge family its attempt (fall through to family
+                    # 2, not straight to the hard refuse).
+                    logger.debug(
+                        "research-governance soft notice failed; trying hedge family",
+                        exc_info=True,
+                    )
+                    built = None
+                if built is not None:
+                    return built
+            # Reason family 2: evidence hedge (PR6b).
+            if hedge_on:
+                built = self._build_evidence_hedge_notice(
+                    turn_id=turn_id,
+                    final_text=final_text,
+                    missing_validators=missing_validators,
+                )
+                if built is not None:
+                    return built
+            return None
         except Exception:
             logger.debug(
-                "research-governance soft notice failed; falling through to hard branch",
+                "soft verification consequence failed; falling through to hard branch",
                 exc_info=True,
             )
             return None
+
+    def _build_research_governance_notice(
+        self,
+        *,
+        turn_id: str,
+        session_id: str,
+        final_text: str,
+        missing_validators: Sequence[str],
+    ) -> tuple[str, RuntimeEvent] | None:
+        """Build the PR6a research-governance soft notice ``(suffix, status)``.
+
+        Evaluates the richer research final gate over NORMALIZED ids/refs to
+        enrich the notice with deterministic reason codes. A construction
+        ``ValueError`` would be a wiring bug (un-normalized input), not a runtime
+        condition; the builder normalizes the live ``turn_id``/cited refs upstream
+        (design 3.3 / 3.6) so a digit/hex ``turn_id`` or raw URL refs never raise
+        into the seam's fail-open wrap.
+        """
+        from magi_agent.research.live_research_final_gate import (  # noqa: PLC0415
+            evaluate_live_research_final_gate,
+        )
+
+        result = evaluate_live_research_final_gate(
+            contract_id=_RESEARCH_SOFT_NOTICE_CONTRACT_ID,
+            turn_id=turn_id,
+            session_id=session_id,
+            final_text=final_text,
+            evidence_records=self._collect_evidence(turn_id),
+        )
+        reason_codes = list(result.reason_codes) if result.block_intent else []
+        cited_without_source = list(result.output_link_digests)
+
+        status_payload: dict[str, object] = {
+            "type": "research_governance_notice",
+            "turnId": turn_id,
+            "mode": "local_block_intent",
+            "reasonCodes": reason_codes,
+            "missingValidators": list(missing_validators),
+            "citedWithoutSource": cited_without_source,
+            "noticeAppended": True,
+        }
+        status_event = RuntimeEvent(
+            type="status", payload=status_payload, turn_id=turn_id
+        )
+        return (_RESEARCH_SOFT_NOTICE_TEXT, status_event)
+
+    def _build_evidence_hedge_notice(
+        self,
+        *,
+        turn_id: str,
+        final_text: str,
+        missing_validators: Sequence[str],
+    ) -> tuple[str, RuntimeEvent] | None:
+        """Build the PR6b evidence-hedge soft notice ``(suffix, status)``.
+
+        When ``fact_grounding`` is in the unmet set, runs the deterministic
+        ``FactGroundingEvidenceProducer`` to obtain the ``guess`` verdict and its
+        ``extracted_value``. The extracted value is SANITIZED via
+        ``_safe_public_ref`` (which RETURNS an audit-safe ``ref:<digest>`` for
+        any unsafe input and never raises), so a path/secret marker is never
+        emitted verbatim. ``_reject_private_text`` (which RAISES) is deliberately
+        NOT called inline, so its ``ValueError`` can never propagate into the soft
+        branch and degrade to the hard refuse (design 3.6 / MINOR-4). When the
+        unmet set has no ``fact_grounding`` label (e.g. ``citation_support`` only)
+        the verdict is ``None`` and ``extractedValue`` is omitted.
+        """
+        from magi_agent.evidence.claim_grounding import (  # noqa: PLC0415
+            FACT_GROUNDING_REQUIREMENT_LABEL,
+            FactGroundingEvidenceProducer,
+        )
+        from magi_agent.evidence.research_final_gate import (  # noqa: PLC0415
+            _safe_public_ref,
+        )
+
+        verdict_value: str | None = None
+        extracted_value: str | None = None
+        if FACT_GROUNDING_REQUIREMENT_LABEL in set(missing_validators):
+            verdict = FactGroundingEvidenceProducer().evaluate(
+                final_text=final_text,
+                evidence_records=self._collect_evidence(turn_id),
+            )
+            if not verdict.grounded:
+                verdict_value = "guess"
+                if verdict.extracted_value is not None:
+                    # _safe_public_ref returns a digest for unsafe input and never
+                    # raises -> never the raw secret, never a propagating error.
+                    extracted_value = _safe_public_ref(str(verdict.extracted_value))
+
+        requirement_labels = list(dict.fromkeys(missing_validators))
+        status_payload: dict[str, object] = {
+            "type": "evidence_hedge_applied",
+            "turnId": turn_id,
+            "mode": "local_block_intent",
+            "verdict": verdict_value,
+            "missingValidators": list(missing_validators),
+            "requirementLabels": requirement_labels,
+            "hedgeApplied": True,
+        }
+        if extracted_value is not None:
+            status_payload["extractedValue"] = extracted_value
+        status_event = RuntimeEvent(
+            type="status", payload=status_payload, turn_id=turn_id
+        )
+        return (_EVIDENCE_HEDGE_NOTICE_TEXT, status_event)
 
     def _source_ledger_matched_requirement_refs(
         self,

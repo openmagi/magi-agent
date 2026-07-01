@@ -379,8 +379,18 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     # history — fine in production but the wrong default for lab where
     # the alternative is a frontend fallback banner. Lab opts in.
     "MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED",
+    # WS6 PR6b: convert the hard fact-grounding/contract pre-final refuse into an
+    # appended hedge notice. Lab-only activation; registry default stays OFF.
+    # PAIRED with MAGI_FACT_GROUNDING_VERIFICATION_ENABLED below (see the pairing
+    # guard apply_evidence_hedge_pairing_guard) so the verification flag is never
+    # in effect without this hedge flag, i.e. lab hedges instead of hard-refusing.
+    "MAGI_EVIDENCE_HEDGE_ON_GUESS_ENABLED",
     "MAGI_FACTS_REPLAN_ENABLED",
     "MAGI_FACT_GROUNDING_VERIFICATION_ENABLED",
+    # WS6 PR6b: enable the otherwise-disabled live-finalizer FinalOutputGate for
+    # opted-in recipes on the engine path (gate evaluates live, not "skipped").
+    # Lab-only activation; registry default stays OFF.
+    "MAGI_FINAL_OUTPUT_GATE_LOCAL_ENABLED",
     "MAGI_FILE_DELIVERY_LIVE_ENABLED",
     "MAGI_FORMAT_ADHERENCE_ENABLED",
     "MAGI_GATE5B_GOVERNANCE_ENABLED",
@@ -482,6 +492,41 @@ def apply_lab_runtime_defaults(environ: MutableMapping[str, str]) -> None:
         return
     for key, value in LAB_RUNTIME_ENV_DEFAULTS.items():
         environ.setdefault(key, value)
+    # WS6 PR6b pairing invariant (lab-scoped): the fact-grounding verification
+    # flag is already seeded "1" above (it is in LAB_EXPERIMENTAL_FLAGS), and
+    # without the hedge flag the existing hard pre_final_evidence_gate_blocked
+    # refuse is user-visible. Pair them so lab hedges instead of refusing. This
+    # also catches an operator who hand-set the verification flag without the
+    # hedge flag (the standalone misconfig). setdefault semantics: an explicit
+    # MAGI_EVIDENCE_HEDGE_ON_GUESS_ENABLED=0 still wins.
+    apply_evidence_hedge_pairing_guard(environ)
+
+
+def apply_evidence_hedge_pairing_guard(environ: MutableMapping[str, str]) -> None:
+    """Pair the fact-grounding verification flag with the WS6 hedge flag.
+
+    Design: WS6 deterministic-verification activation, PR6b (pairing invariant).
+    ``MAGI_FACT_GROUNDING_VERIFICATION_ENABLED`` leaves ``fact_grounding``
+    unsatisfied on a guess so the pre-final gate blocks; without
+    ``MAGI_EVIDENCE_HEDGE_ON_GUESS_ENABLED`` that block surfaces as the hard
+    ``pre_final_evidence_gate_blocked`` refuse (the wrong tone). This guard
+    ensures the hedge flag is in effect whenever the verification flag is, by
+    ``setdefault``-seeding the hedge flag to ``"1"`` when the verification flag
+    is truthy and the hedge flag has not been set. An explicit operator
+    ``MAGI_EVIDENCE_HEDGE_ON_GUESS_ENABLED=0`` still wins (the key is present),
+    so this never overrides a deliberate opt-out. It never activates anything
+    when the verification flag is off (a fresh install / hosted serve is
+    untouched).
+    """
+    from magi_agent.config.env import (
+        parse_fact_grounding_verification_enabled,
+    )
+
+    if (
+        parse_fact_grounding_verification_enabled(environ)
+        and "MAGI_EVIDENCE_HEDGE_ON_GUESS_ENABLED" not in environ
+    ):
+        environ["MAGI_EVIDENCE_HEDGE_ON_GUESS_ENABLED"] = "1"
 
 
 def apply_local_eval_runtime_defaults(environ: MutableMapping[str, str]) -> None:

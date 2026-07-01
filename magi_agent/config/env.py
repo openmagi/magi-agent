@@ -3388,6 +3388,54 @@ def parse_research_governance_soft_block_enabled(env: Mapping[str, str]) -> bool
     return flag_bool("MAGI_RESEARCH_GOVERNANCE_SOFT_BLOCK_ENABLED", env=env)
 
 
+def parse_evidence_hedge_on_guess_enabled(env: Mapping[str, str]) -> bool:
+    """MAGI_EVIDENCE_HEDGE_ON_GUESS_ENABLED: soft evidence-hedge gate.
+
+    Design: WS6 deterministic-verification activation, PR6b. When an in-scope
+    research/contract recipe's pre-final evidence gate would BLOCK with a
+    non-empty missing validator/evidence set (e.g. a ``guess`` fact-grounding
+    verdict, or the satisfier-less ``citation_support`` on ``openmagi.research``),
+    the engine appends a trailing hedge/flag notice after the already-streamed
+    answer instead of yielding the hard ``pre_final_evidence_gate_blocked``
+    terminal, then completes normally. It is the pair of
+    ``MAGI_FACT_GROUNDING_VERIFICATION_ENABLED``: that flag leaves
+    ``fact_grounding`` unsatisfied on a guess (so the gate blocks), and this flag
+    converts the block consequence from the hard refuse to the soft append.
+
+    This is a **strict default-OFF** gate: it never defaults ON in any runtime
+    profile and only flips for an explicit truthy value, so flag-OFF behavior
+    stays byte-identical to ``main`` (the existing hard refuse is preserved). It
+    is activated in the experimental ``lab`` profile only (via
+    ``LAB_EXPERIMENTAL_FLAGS``); default self-host (``full``) and hosted keep it
+    unset until a measured false-block budget and sign-off.
+    """
+    from .flags import flag_bool
+
+    return flag_bool("MAGI_EVIDENCE_HEDGE_ON_GUESS_ENABLED", env=env)
+
+
+def parse_final_output_gate_local_enabled(env: Mapping[str, str]) -> bool:
+    """MAGI_FINAL_OUTPUT_GATE_LOCAL_ENABLED: local-finalizer FinalOutputGate gate.
+
+    Design: WS6 deterministic-verification activation, PR6b. Enables the
+    otherwise-disabled live-finalizer
+    :class:`~magi_agent.evidence.final_output_gate.FinalOutputGate` for opted-in
+    recipes on the engine path: when ON the gate evaluates live (``gate_is_live``
+    True) instead of short-circuiting to ``skipped``. It does NOT govern the
+    ``runtime.goal_nudge.goal_is_met`` completion tie, which already hardcodes an
+    ``enabled=True`` config of its own.
+
+    This is a **strict default-OFF** gate: it never defaults ON in any runtime
+    profile and only flips for an explicit truthy value, so flag-OFF behavior
+    stays byte-identical to ``main`` (the gate stays ``skipped``). It is
+    activated in the experimental ``lab`` profile only (via
+    ``LAB_EXPERIMENTAL_FLAGS``).
+    """
+    from .flags import flag_bool
+
+    return flag_bool("MAGI_FINAL_OUTPUT_GATE_LOCAL_ENABLED", env=env)
+
+
 def parse_answer_quality_verification_enabled(env: Mapping[str, str]) -> bool:
     """MAGI_VERIFY_ANSWER_QUALITY — LLM answer-quality pre-final gate.
 
