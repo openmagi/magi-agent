@@ -99,9 +99,7 @@ def test_boundary_passes_spawn_cap_to_real_local_child_runner(monkeypatch) -> No
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_turn_toolset_unaffected_by_none_spawn_cap(
-    monkeypatch, tmp_path
-) -> None:
+def test_resolve_turn_toolset_unaffected_by_none_spawn_cap(monkeypatch, tmp_path) -> None:
     """With spawn_cap=None (default), _resolve_turn_toolset returns the same
     tool set as before Seam 2b — guarding the byte-identical claim.
 
@@ -128,7 +126,11 @@ def test_resolve_turn_toolset_unaffected_by_none_spawn_cap(
     tools, collector = runner._resolve_turn_toolset("child-session-t4")
 
     assert collector is not None
+    # PR-N added Calculation as pure-deterministic default tool.
+    # Readonly still means no fs/net side effects; Calculation is a pure
+    # expression evaluator and belongs in the default child toolset.
     assert {str(tool.name) for tool in tools} == {
+        "Calculation",
         "FileRead",
         "Glob",
         "Grep",

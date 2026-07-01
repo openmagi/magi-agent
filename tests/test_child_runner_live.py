@@ -336,9 +336,7 @@ def test_operator_allowlist_routes_model_absent_from_registry(monkeypatch) -> No
     fake = _FakeRunner()
     runner = RealLocalChildRunner(provider_config=_provider_config(), runner=fake)
 
-    output = asyncio.run(
-        runner.run_child(_request(provider="anthropic", model="claude-opus-4-8"))
-    )
+    output = asyncio.run(runner.run_child(_request(provider="anthropic", model="claude-opus-4-8")))
 
     assert output["status"] == "completed"
     assert fake.calls == 1
@@ -368,9 +366,7 @@ def test_operator_allowlist_match_is_casefolded(monkeypatch) -> None:
     fake = _FakeRunner()
     runner = RealLocalChildRunner(provider_config=_provider_config(), runner=fake)
 
-    output = asyncio.run(
-        runner.run_child(_request(provider="anthropic", model="claude-opus-4-8"))
-    )
+    output = asyncio.run(runner.run_child(_request(provider="anthropic", model="claude-opus-4-8")))
 
     assert output["status"] == "completed"
     assert fake.calls == 1
@@ -675,11 +671,17 @@ def test_readonly_child_toolset_does_not_build_full_local_handlers(
     tools, collector = runner._resolve_turn_toolset("child-session-readonly")
 
     assert collector is not None
+    # PR-N (Kevin 0.1.91 SOTA-spawn debug): ``Calculation`` joined the readonly
+    # allowlist as a pure, deterministic, side-effect-free helper so spawn
+    # children that try to use a tool for arithmetic stop crashing with
+    # ``Tool 'Calculation' not found``. Source-inspection tools (the original
+    # four) still surface unchanged.
     assert {str(tool.name) for tool in tools} == {
         "FileRead",
         "Glob",
         "Grep",
         "GitDiff",
+        "Calculation",
     }
 
 
