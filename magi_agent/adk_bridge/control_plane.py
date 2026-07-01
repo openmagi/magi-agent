@@ -1725,7 +1725,7 @@ def build_loop_resilience_controls(
     tool_not_found_env = parse_tool_not_found_soft_fail_env(env)
     tool_not_found_plugin = build_tool_not_found_soft_fail_plugin(
         enabled=tool_not_found_env.enabled,
-        max_attempts=tool_not_found_env.max_attempts,
+        attempt_cap=tool_not_found_env.attempt_cap,
     )
     if tool_not_found_plugin is not None:
         controls.append(_ToolNotFoundSoftFailLoopControl(tool_not_found_plugin))

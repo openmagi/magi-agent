@@ -13,6 +13,37 @@ OpenCode all soft-fail unknown-tool: the model sees a tool_result with the
 error text plus the list of available tools, and the next iteration picks a
 valid tool from that list.
 
+Retry policy: delegated, not hard-coded
+---------------------------------------
+Kevin's follow-up direction (post 0.1.97):
+
+    "단순히 툴 실패시 n회 재시도 이런식의 하드룰보다는 모델에게
+    flexibility를 보장하는 근본적인 솔루션으로 하는게 좋을듯"
+
+So this plugin no longer imposes a per-invocation "n retries then hard-fail"
+cap. Every unknown-tool call is surfaced to the model as a corrective
+tool_result carrying the available-tools list. Retry policy is delegated to:
+
+* the MODEL (it can try a different tool, generate text, or ask a
+  follow-up on the next iteration), and
+* the runtime's TURN-LEVEL iteration cap (``max_iterations`` / turn budget /
+  ``max_tokens`` etc.), which is the existing runaway backstop.
+
+Reference parity: Claude Code, OpenAI Agents SDK, and OpenCode do not impose
+a per-tool retry cap either; they rely on the same turn-level backstop and
+let the model decide when to stop trying.
+
+Operator escape hatch (opt-in, not default-behavior)
+----------------------------------------------------
+An operator who wants a self-imposed limit can set
+``MAGI_TOOL_NOT_FOUND_ATTEMPT_CAP=N`` (N >= 1). When and only when that env
+is explicitly set, the plugin enforces a per-invocation cap of N. Once the
+cap is exceeded the plugin returns ``None`` and ADK re-raises the original
+``ValueError``; PR-3's child-runner containment then surfaces the terminal
+event with :data:`TOOL_NOT_FOUND_RETRY_EXHAUSTED_CODE`. The default is
+``cap == 0``, interpreted as UNLIMITED: the plugin never returns ``None``
+for the ADK unknown-tool shape unless the operator has explicitly opted in.
+
 Live integration point
 ----------------------
 Same seam as :mod:`magi_agent.adk_bridge.tool_exception_reflection` and
@@ -34,23 +65,24 @@ Behavior contract
   message shape as a defensive fallback). Every other raise returns ``None``
   so the generic tool-exception reflection plugin keeps first crack on real
   raises.
-* Under budget: returns a marker dict with ``error_code="tool_not_found"``,
-  the requested tool name, and the available-tools list parsed from ADK's
-  own error text. The model reads the dict on the next LLM call and can
-  pick a valid tool from the list.
-* At/over budget (attempt > ``max_attempts``): returns ``None`` so ADK
-  re-raises the original ``ValueError``. Today's abort behavior is
-  restored, bounding how many hallucination-loop iterations a stuck model
-  can consume. The child-runner containment (PR-3 governed collector) then
-  surfaces the terminal event with the distinct
-  :data:`TOOL_NOT_FOUND_RETRY_EXHAUSTED_CODE`.
+* Default (``attempt_cap == 0`` = unlimited): every unknown-tool call
+  becomes a corrective dict with ``error_code="tool_not_found"``, the
+  requested tool name, and the available-tools list parsed from ADK's own
+  error text. The plugin never returns ``None`` for the ADK unknown-tool
+  shape; retry decisions belong to the model + the turn-level cap.
+* Operator opt-in (``attempt_cap >= 1``): under budget returns the
+  corrective dict; at/over budget returns ``None`` so ADK re-raises. Only
+  in this explicitly opted-in path does
+  :data:`TOOL_NOT_FOUND_RETRY_EXHAUSTED_CODE` surface as the terminal
+  error_code.
 * Fail-open: any internal exception in the callback returns ``None``
   (original behavior). Only ``Exception`` is caught. ``BaseException``
   (e.g. ``asyncio.CancelledError``) always propagates.
 
-Flag ownership: ``MAGI_TOOL_NOT_FOUND_SOFT_FAIL`` (default-ON, strict
-truthy, profile-independent) and ``MAGI_TOOL_NOT_FOUND_SOFT_FAIL_MAX_ATTEMPTS``
-are parsed in :mod:`magi_agent.config.env`; callers pass resolved values to
+Flag ownership: ``MAGI_TOOL_NOT_FOUND_SOFT_FAIL`` (default-ON, profile-aware)
+is the on/off switch; the numeric ``MAGI_TOOL_NOT_FOUND_ATTEMPT_CAP`` is an
+opt-in escape hatch and defaults to ``0`` (unlimited). Both are parsed in
+:mod:`magi_agent.config.env`; callers pass resolved values to
 :func:`build_tool_not_found_soft_fail_plugin`.
 
 Why default-ON is safe
@@ -59,7 +91,8 @@ The retry pool is bounded by the toolset the runtime already advertises to
 the model (unknown tool -> corrective dict lists the exposed tools; model
 must pick one of THOSE, so it cannot escalate authority). The corrective
 error text is identical in information to what ADK already raises today, so
-no new public information is surfaced.
+no new public information is surfaced. Runaway iteration is bounded by the
+runtime's existing turn-level cap, not by this plugin.
 """
 
 from __future__ import annotations
@@ -93,11 +126,18 @@ TOOL_NOT_FOUND_SOFT_FAIL_RESPONSE_TYPE = "MAGI_TOOL_NOT_FOUND_SOFT_FAIL"
 # Public error_code the model / caller / trace sees on the corrective dict.
 TOOL_NOT_FOUND_ERROR_CODE = "tool_not_found"
 
-# Terminal error_code the child-runner containment surfaces when the plugin
-# returns None (budget exhausted) and ADK re-raises. Constant exposed here so
-# the child-runner boundary can label the terminal engine_trace event
-# distinctly instead of a generic ``llm_call_exception``.
+# Terminal error_code the child-runner containment surfaces when an operator
+# has explicitly opted in to a numeric cap via ``MAGI_TOOL_NOT_FOUND_ATTEMPT_CAP``
+# and the cap has been exhausted (plugin returns None, ADK re-raises). Not
+# reachable in the default (unlimited) configuration; kept as a distinct label
+# so a wrapping trace can distinguish operator-imposed exhaustion from a
+# generic ``llm_call_exception``.
 TOOL_NOT_FOUND_RETRY_EXHAUSTED_CODE = "child_llm_unknown_tool_retry_exhausted"
+
+# Sentinel used by :func:`build_tool_not_found_soft_fail_plugin` to represent
+# "operator did not opt in to a numeric cap"; the plugin then never terminates
+# the corrective path itself.
+_UNLIMITED_ATTEMPT_CAP = 0
 
 _GLOBAL_SCOPE_KEY = "__magi_tool_not_found_soft_fail_global__"
 
@@ -126,9 +166,15 @@ class MagiToolNotFoundSoftFailPlugin(BasePlugin):
     """ADK plugin that converts the unknown-tool ValueError into a corrective
     tool_result so the model can pick a valid tool on the next iteration.
 
+    Retry policy is delegated to the model + the turn-level iteration cap the
+    runtime already enforces. This plugin does NOT impose a per-tool retry
+    cap by default. An operator may opt in to a per-invocation cap via
+    ``MAGI_TOOL_NOT_FOUND_ATTEMPT_CAP=N`` (surfaced here as ``attempt_cap=N``,
+    N >= 1); ``attempt_cap == 0`` means unlimited (the default).
+
     Attempt counters are keyed by ``(scope_key, tool_name)`` (the scope key
-    is the ADK invocation id) so the budget is enforced per turn and never
-    grows unbounded across turns (swept by :meth:`after_run_callback`).
+    is the ADK invocation id) so an opt-in cap is enforced per turn and
+    never grows unbounded across turns (swept by :meth:`after_run_callback`).
 
     Phase 5 / S-C: the per-invocation attempt counters live in a runtime-owned
     :class:`PerInvocationState` rather than a private dict, mirroring the
@@ -138,13 +184,13 @@ class MagiToolNotFoundSoftFailPlugin(BasePlugin):
     def __init__(
         self,
         *,
-        max_attempts: int,
+        attempt_cap: int = _UNLIMITED_ATTEMPT_CAP,
         name: str = TOOL_NOT_FOUND_SOFT_FAIL_PLUGIN_NAME,
     ) -> None:
         super().__init__(name)
-        if max_attempts < 1:
-            raise ValueError("max_attempts must be >= 1")
-        self.max_attempts = max_attempts
+        if attempt_cap < 0:
+            raise ValueError("attempt_cap must be >= 0 (0 = unlimited)")
+        self.attempt_cap = attempt_cap
         # Runtime-owned per-invocation state (the ONE owner of the mutable
         # attempt counters). Same pattern as the sibling reflection plugins.
         self._default_state = PerInvocationState()
@@ -200,10 +246,14 @@ class MagiToolNotFoundSoftFailPlugin(BasePlugin):
             state_name = scoped_state_name(TOOL_NOT_FOUND_STATE_NAMESPACE, requested)
             attempt = state.get_scoped(scope_key, state_name, default=0) + 1
             state.set_scoped(scope_key, state_name, attempt)
-            if attempt > self.max_attempts:
-                # Budget exhausted -> None so ADK re-raises the original
-                # ValueError. PR-3's child-runner containment then surfaces
-                # the terminal event distinctly via
+            # Operator-opt-in cap (``attempt_cap >= 1``). In the default
+            # unlimited config (``attempt_cap == 0``) the plugin never
+            # terminates the corrective path; the runtime's turn-level
+            # iteration cap is the runaway backstop.
+            if self.attempt_cap > 0 and attempt > self.attempt_cap:
+                # Operator-imposed budget exhausted -> None so ADK re-raises
+                # the original ValueError. PR-3's child-runner containment
+                # then surfaces the terminal event distinctly via
                 # TOOL_NOT_FOUND_RETRY_EXHAUSTED_CODE.
                 return None
             available_text = ", ".join(available) if available else "(none)"
@@ -211,7 +261,7 @@ class MagiToolNotFoundSoftFailPlugin(BasePlugin):
                 requested=requested,
                 available_text=available_text,
             )
-            return {
+            payload: dict[str, Any] = {
                 "response_type": TOOL_NOT_FOUND_SOFT_FAIL_RESPONSE_TYPE,
                 "status": "error",
                 "error_code": TOOL_NOT_FOUND_ERROR_CODE,
@@ -219,8 +269,12 @@ class MagiToolNotFoundSoftFailPlugin(BasePlugin):
                 "requested_tool": requested,
                 "available_tools": list(available),
                 "retry_attempt": attempt,
-                "max_attempts": self.max_attempts,
             }
+            # Only advertise ``attempt_cap`` on the payload when the operator
+            # explicitly opted in; the default unlimited path stays clean.
+            if self.attempt_cap > 0:
+                payload["attempt_cap"] = self.attempt_cap
+            return payload
         except Exception:  # noqa: BLE001 fail-open
             return None
 
@@ -289,17 +343,25 @@ def _scope_key(tool_context: Any) -> str:
 def build_tool_not_found_soft_fail_plugin(
     *,
     enabled: bool,
-    max_attempts: int,
+    attempt_cap: int = _UNLIMITED_ATTEMPT_CAP,
 ) -> MagiToolNotFoundSoftFailPlugin | None:
     """Return a configured plugin, or ``None`` when the feature is disabled.
 
-    The flag / budget are owned by :mod:`magi_agent.config.env` (single
-    source of truth); callers pass the resolved values here so this module
-    stays import-light and free of env-parsing concerns.
+    ``attempt_cap == 0`` (the default) means unlimited: the plugin never
+    hard-fails the corrective path; retry policy is delegated to the model
+    plus the runtime's turn-level iteration cap.
+
+    ``attempt_cap >= 1`` opts in to an operator-imposed per-invocation
+    cap; once exceeded the plugin returns ``None`` and ADK re-raises the
+    original ``ValueError``.
+
+    The flag / cap are owned by :mod:`magi_agent.config.env` (single source
+    of truth); callers pass the resolved values here so this module stays
+    import-light and free of env-parsing concerns.
     """
     if not enabled:
         return None
-    return MagiToolNotFoundSoftFailPlugin(max_attempts=max_attempts)
+    return MagiToolNotFoundSoftFailPlugin(attempt_cap=attempt_cap)
 
 
 __all__ = [

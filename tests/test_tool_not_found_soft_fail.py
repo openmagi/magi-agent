@@ -13,23 +13,30 @@ OpenCode all soft-fail unknown-tool: the tool_use returns a "Tool 'X' does not
 exist; available: [...]" tool_result and the model picks a valid tool from
 that list on the next iteration.
 
-This plugin converts the ADK raise into a model-visible corrective dict
-(same seam the edit-retry and generic tool-exception reflection plugins
-already use: ``on_tool_error_callback`` fired inside ADK's
-``_execute_single_function_call_async`` when ``_get_tool`` raises).
+Retry-policy shift (post 0.1.97)
+--------------------------------
+Kevin follow-up direction: "단순히 툴 실패시 n회 재시도 이런식의 하드룰보다는
+모델에게 flexibility를 보장하는 근본적인 솔루션으로 하는게 좋을듯."
 
-Behavior contract:
+So the plugin no longer imposes a per-invocation "n retries then hard-fail"
+cap by default. Every unknown-tool call surfaces as a corrective tool_result;
+retry policy is delegated to the model + the runtime's existing turn-level
+iteration cap. An operator may opt in to a numeric cap via
+``MAGI_TOOL_NOT_FOUND_ATTEMPT_CAP=N`` (N >= 1); default ``0`` means unlimited.
+
+Behavior contract exercised here:
 
 * Only handles the ADK ``Tool '<name>' not found`` shape (matched on the
   placeholder tool ADK builds: ``description == "Tool not found"``, or on the
   ``ValueError`` message shape). Every other raise returns ``None`` so the
   generic tool-exception reflection plugin gets first crack.
-* Under budget: returns a marker dict with ``error_code="tool_not_found"``,
-  the requested tool name, and the available tools list parsed from ADK's
-  own error text.
-* At/over budget: returns ``None`` so ADK re-raises the original
-  ``ValueError`` (today's abort). PR-3's containment still catches the
-  pathological loop.
+* Default (unlimited): every unknown-tool call becomes a corrective dict
+  with ``error_code="tool_not_found"`` and the available-tools list; the
+  plugin never returns ``None`` for the ADK unknown-tool shape.
+* Operator opt-in (``attempt_cap >= 1``): under budget returns the
+  corrective dict; at/over budget returns ``None`` so ADK re-raises the
+  original ``ValueError``. PR-3's containment then surfaces the terminal
+  event with the distinct exhausted error_code.
 * Flag ``MAGI_TOOL_NOT_FOUND_SOFT_FAIL`` is default-ON. Safe because the
   retry pool is bounded by the tools the runtime already advertises to the
   model, and the error text is already surfaced by ADK (no new public
@@ -124,7 +131,7 @@ def _reflect(
 def test_unknown_tool_returns_tool_result_not_raise() -> None:
     """Kevin's core fix: instead of ADK re-raising the ValueError, the plugin
     hands back a structured tool_result the model can consume."""
-    plugin = MagiToolNotFoundSoftFailPlugin(max_attempts=3)
+    plugin = MagiToolNotFoundSoftFailPlugin()
 
     result = _reflect(
         plugin,
@@ -149,10 +156,12 @@ def test_unknown_tool_returns_tool_result_not_raise() -> None:
         "Glob",
         "Grep",
     ]
-    # Retry-budget bookkeeping is exposed for observability parity with the
-    # existing edit-retry / tool-exception reflection responses.
+    # Retry-attempt is still exposed for observability; the operator-imposed
+    # cap key is only present when the operator explicitly opted in.
     assert result["retry_attempt"] == 1
-    assert result["max_attempts"] == 3
+    assert "attempt_cap" not in result, (
+        "the default unlimited configuration must NOT advertise a numeric cap"
+    )
     # The guidance text names the requested tool AND spells out the choices,
     # so the model has everything it needs on the very next iteration.
     message = result["error_message"]
@@ -182,7 +191,7 @@ def test_unknown_tool_lets_model_pick_valid_tool_next_iteration() -> None:
         name, proving the plugin is stateless across tool names within the
         same budget.
     """
-    plugin = MagiToolNotFoundSoftFailPlugin(max_attempts=3)
+    plugin = MagiToolNotFoundSoftFailPlugin()
     ctx = _FakeCtx("inv-two-iter")
 
     first = _reflect(
@@ -214,37 +223,120 @@ def test_unknown_tool_lets_model_pick_valid_tool_next_iteration() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 3. Retry cap: repeated unknown-tool eventually terminates                    #
+# 3. Default = unlimited: repeated unknown-tool never hard-fails               #
 # --------------------------------------------------------------------------- #
 
 
-def test_repeated_unknown_tool_stops_at_retry_cap() -> None:
-    """A hallucination loop that keeps requesting unknown tools must
-    terminate. Under budget → corrective dicts. At/over budget → the plugin
-    returns None so ADK re-raises the original ValueError, and the invoker
-    surfaces a distinct terminal error_code."""
-    plugin = MagiToolNotFoundSoftFailPlugin(max_attempts=2)
-    ctx = _FakeCtx("inv-loop")
-
+def test_repeated_unknown_tool_never_hard_fails_by_default() -> None:
+    """Kevin's direction: no hard-coded n-retry cap. In the default
+    unlimited configuration (``attempt_cap == 0``), a model that keeps
+    requesting an unknown tool 100 times MUST receive a corrective
+    tool_result every single time; the plugin must never return ``None``
+    for the ADK unknown-tool shape and must never let ADK re-raise. The
+    turn-level iteration cap the runtime already enforces is the runaway
+    backstop, not this plugin."""
+    plugin = MagiToolNotFoundSoftFailPlugin()
+    ctx = _FakeCtx("inv-unlimited")
     err = _adk_unknown_tool_error("Bash", ("Calculation",))
-    first = _reflect(plugin, tool=_AdkPlaceholderTool("Bash"), tool_context=ctx, error=err)
-    second = _reflect(plugin, tool=_AdkPlaceholderTool("Bash"), tool_context=ctx, error=err)
-    third = _reflect(plugin, tool=_AdkPlaceholderTool("Bash"), tool_context=ctx, error=err)
 
-    assert first is not None and first["retry_attempt"] == 1
-    assert second is not None and second["retry_attempt"] == 2
-    # Budget exhausted → None so ADK re-raises the original ValueError. PR-3's
-    # child-runner containment then converts that raise into the terminal
-    # error trace with the distinct exhausted code.
-    assert third is None, "attempt max+1 must return None so ADK re-raises"
+    results = [
+        _reflect(
+            plugin,
+            tool=_AdkPlaceholderTool("Bash"),
+            tool_context=ctx,
+            error=err,
+        )
+        for _ in range(100)
+    ]
 
+    for index, result in enumerate(results, start=1):
+        assert result is not None, (
+            f"iteration {index}: default unlimited path must never return "
+            "None for the ADK unknown-tool shape"
+        )
+        assert result["response_type"] == TOOL_NOT_FOUND_SOFT_FAIL_RESPONSE_TYPE
+        assert result["error_code"] == TOOL_NOT_FOUND_ERROR_CODE
+        # The default path must NEVER expose the exhausted terminal code as
+        # a status; that code is reserved for the operator-opt-in cap path.
+        assert result.get("error_code") != TOOL_NOT_FOUND_RETRY_EXHAUSTED_CODE
+        assert result["retry_attempt"] == index
+        assert "attempt_cap" not in result
+
+
+# --------------------------------------------------------------------------- #
+# 4. Operator opt-in cap fires at the configured N                             #
+# --------------------------------------------------------------------------- #
+
+
+def test_operator_can_opt_in_to_attempt_cap() -> None:
+    """With ``MAGI_TOOL_NOT_FOUND_ATTEMPT_CAP=5`` explicitly set the plugin
+    enforces a per-invocation cap of 5: iterations 1..5 return corrective
+    dicts, iteration 6 returns ``None`` so ADK re-raises. Without the env
+    (default ``0``) the cap does not fire at all, even after 100 calls."""
+
+    # With the env explicitly set, cap fires at 5.
+    env_capped = parse_tool_not_found_soft_fail_env({"MAGI_TOOL_NOT_FOUND_ATTEMPT_CAP": "5"})
+    assert env_capped.enabled is True
+    assert env_capped.attempt_cap == 5
+
+    capped_plugin = build_tool_not_found_soft_fail_plugin(
+        enabled=env_capped.enabled, attempt_cap=env_capped.attempt_cap
+    )
+    assert capped_plugin is not None
+    ctx_capped = _FakeCtx("inv-capped")
+    err = _adk_unknown_tool_error("Bash", ("Calculation",))
+    capped_results = [
+        _reflect(
+            capped_plugin,
+            tool=_AdkPlaceholderTool("Bash"),
+            tool_context=ctx_capped,
+            error=err,
+        )
+        for _ in range(6)
+    ]
+    for index in range(5):
+        assert capped_results[index] is not None
+        assert capped_results[index]["retry_attempt"] == index + 1
+        # Operator explicitly opted in -> payload advertises the cap.
+        assert capped_results[index]["attempt_cap"] == 5
+    assert capped_results[5] is None, (
+        "operator-imposed cap of 5 must fire on the 6th call (returns None so ADK re-raises)"
+    )
     # And the plugin exposes the exhausted-code constant so the child runner
     # (or any wrapping trace) can label the terminal event distinctly.
     assert TOOL_NOT_FOUND_RETRY_EXHAUSTED_CODE == "child_llm_unknown_tool_retry_exhausted"
 
+    # Without the env, the fake model can call 100 times with no cap.
+    env_default = parse_tool_not_found_soft_fail_env({})
+    assert env_default.enabled is True
+    assert env_default.attempt_cap == 0, (
+        "MAGI_TOOL_NOT_FOUND_ATTEMPT_CAP must default to 0 (unlimited) so "
+        "retry policy is delegated to the model + the turn-level cap"
+    )
+    unlimited_plugin = build_tool_not_found_soft_fail_plugin(
+        enabled=env_default.enabled, attempt_cap=env_default.attempt_cap
+    )
+    assert unlimited_plugin is not None
+    ctx_unlimited = _FakeCtx("inv-unlimited-opt")
+    unlimited_results = [
+        _reflect(
+            unlimited_plugin,
+            tool=_AdkPlaceholderTool("Bash"),
+            tool_context=ctx_unlimited,
+            error=err,
+        )
+        for _ in range(100)
+    ]
+    for index, result in enumerate(unlimited_results, start=1):
+        assert result is not None, (
+            f"iteration {index}: without the opt-in env the plugin must "
+            "never return None for the ADK unknown-tool shape"
+        )
+        assert "attempt_cap" not in result
+
 
 # --------------------------------------------------------------------------- #
-# 4. Flag OFF: hard-fail preserved byte-identical                              #
+# 5. Flag OFF: hard-fail preserved byte-identical                              #
 # --------------------------------------------------------------------------- #
 
 
@@ -256,7 +348,7 @@ def test_flag_off_preserves_hard_fail_byte_identical() -> None:
     assert env_off.enabled is False
     assert (
         build_tool_not_found_soft_fail_plugin(
-            enabled=env_off.enabled, max_attempts=env_off.max_attempts
+            enabled=env_off.enabled, attempt_cap=env_off.attempt_cap
         )
         is None
     )
@@ -277,22 +369,22 @@ def test_flag_explicit_on_matches_default() -> None:
     env_on = parse_tool_not_found_soft_fail_env({"MAGI_TOOL_NOT_FOUND_SOFT_FAIL": "1"})
     assert env_on.enabled is True
     plugin = build_tool_not_found_soft_fail_plugin(
-        enabled=env_on.enabled, max_attempts=env_on.max_attempts
+        enabled=env_on.enabled, attempt_cap=env_on.attempt_cap
     )
     assert isinstance(plugin, MagiToolNotFoundSoftFailPlugin)
 
 
 # --------------------------------------------------------------------------- #
-# 5. Hard-fail path: available tools remain in the raised error                #
+# 6. Hard-fail path: available tools remain in the raised error                #
 # --------------------------------------------------------------------------- #
 
 
 def test_hard_fail_available_tools_still_listed_in_error() -> None:
-    """When the plugin returns None (budget exhausted OR flag OFF), the
-    original ValueError propagates. The test verifies the plugin never
+    """When the plugin returns None (operator cap exhausted OR flag OFF),
+    the original ValueError propagates. The test verifies the plugin never
     rewrites or hides the ADK error text: the operator/log still sees the
     full ``Available tools: ...`` list."""
-    plugin = MagiToolNotFoundSoftFailPlugin(max_attempts=1)
+    plugin = MagiToolNotFoundSoftFailPlugin(attempt_cap=1)
     ctx = _FakeCtx("inv-hard")
 
     err = _adk_unknown_tool_error("Bash", ("Calculation", "FileRead", "GitDiff"))
@@ -313,7 +405,7 @@ def test_hard_fail_available_tools_still_listed_in_error() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 6. Non-unknown-tool raises pass through untouched                            #
+# 7. Non-unknown-tool raises pass through untouched                            #
 # --------------------------------------------------------------------------- #
 
 
@@ -323,7 +415,7 @@ def test_non_unknown_tool_error_returns_none() -> None:
     edit-retry plugin) gets first crack. This keeps ordering strictly
     additive: soft-fail wins for its specific shape, everyone else is
     untouched."""
-    plugin = MagiToolNotFoundSoftFailPlugin(max_attempts=3)
+    plugin = MagiToolNotFoundSoftFailPlugin()
     ctx = _FakeCtx("inv-passthru")
 
     # A real tool with a genuine runtime raise: plugin ignores it.
@@ -350,12 +442,14 @@ def test_non_unknown_tool_error_returns_none() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 7. Retry budget is scoped per invocation (not global across turns)           #
+# 8. Opt-in cap is scoped per invocation (not global across turns)             #
 # --------------------------------------------------------------------------- #
 
 
 def test_retry_budget_is_per_invocation() -> None:
-    plugin = MagiToolNotFoundSoftFailPlugin(max_attempts=1)
+    """When the operator opts in to a cap, the counter is scoped per
+    invocation so it never leaks across turns."""
+    plugin = MagiToolNotFoundSoftFailPlugin(attempt_cap=1)
 
     err = _adk_unknown_tool_error("Bash", ("Calculation",))
     first_turn_a = _reflect(
@@ -370,14 +464,14 @@ def test_retry_budget_is_per_invocation() -> None:
     )
 
     assert first_turn_a is not None
-    assert second_turn_a is None, "inv-A exhausted its budget of 1"
-    assert first_turn_b is not None, "inv-B budget is independent"
+    assert second_turn_a is None, "inv-A exhausted its opt-in cap of 1"
+    assert first_turn_b is not None, "inv-B cap is independent"
 
 
 def test_after_run_callback_sweeps_finished_invocation() -> None:
     """``after_run_callback`` clears the finished invocation's counters so
     the plugin cannot grow unbounded across turns."""
-    plugin = MagiToolNotFoundSoftFailPlugin(max_attempts=2)
+    plugin = MagiToolNotFoundSoftFailPlugin(attempt_cap=2)
     ctx = _FakeCtx("inv-sweep")
 
     err = _adk_unknown_tool_error("Bash", ("Calculation",))
@@ -386,33 +480,43 @@ def test_after_run_callback_sweeps_finished_invocation() -> None:
 
     _run(plugin.after_run_callback(invocation_context=SimpleNamespace(invocation_id="inv-sweep")))
 
-    # After sweep, budget resets.
+    # After sweep, the counter resets.
     after = _reflect(plugin, tool=_AdkPlaceholderTool("Bash"), tool_context=ctx, error=err)
     assert after is not None and after["retry_attempt"] == 1
 
 
 # --------------------------------------------------------------------------- #
-# 8. Builder / plugin construction                                             #
+# 9. Builder / plugin construction                                             #
 # --------------------------------------------------------------------------- #
 
 
 def test_builder_returns_none_when_disabled() -> None:
-    assert build_tool_not_found_soft_fail_plugin(enabled=False, max_attempts=3) is None
+    assert build_tool_not_found_soft_fail_plugin(enabled=False) is None
+    # Explicit cap is also inert while the master switch is off.
+    assert build_tool_not_found_soft_fail_plugin(enabled=False, attempt_cap=3) is None
 
 
-def test_builder_returns_plugin_when_enabled() -> None:
-    plugin = build_tool_not_found_soft_fail_plugin(enabled=True, max_attempts=4)
+def test_builder_returns_plugin_when_enabled_default_unlimited() -> None:
+    """Default (no ``attempt_cap`` kwarg) means unlimited: the plugin builds
+    with ``attempt_cap == 0`` and never terminates the corrective path."""
+    plugin = build_tool_not_found_soft_fail_plugin(enabled=True)
     assert isinstance(plugin, MagiToolNotFoundSoftFailPlugin)
-    assert plugin.max_attempts == 4
+    assert plugin.attempt_cap == 0
 
 
-def test_plugin_rejects_invalid_budget() -> None:
+def test_builder_returns_plugin_when_enabled_with_opt_in_cap() -> None:
+    plugin = build_tool_not_found_soft_fail_plugin(enabled=True, attempt_cap=4)
+    assert isinstance(plugin, MagiToolNotFoundSoftFailPlugin)
+    assert plugin.attempt_cap == 4
+
+
+def test_plugin_rejects_negative_cap() -> None:
     with pytest.raises(ValueError):
-        MagiToolNotFoundSoftFailPlugin(max_attempts=0)
+        MagiToolNotFoundSoftFailPlugin(attempt_cap=-1)
 
 
 # --------------------------------------------------------------------------- #
-# 9. Wiring: build_loop_resilience_controls includes the soft-fail control     #
+# 10. Wiring: build_loop_resilience_controls includes the soft-fail control    #
 # --------------------------------------------------------------------------- #
 
 

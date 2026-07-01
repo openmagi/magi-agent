@@ -3016,10 +3016,13 @@ FLAGS: tuple[FlagSpec, ...] = (
             "tool_result carrying the requested tool name plus the parsed "
             "available-tools list, so the model can pick a valid tool on the "
             "next iteration instead of the child turn dying with "
-            "llm_call_exception. Bounded per-invocation attempt budget "
-            "(``MAGI_TOOL_NOT_FOUND_SOFT_FAIL_MAX_ATTEMPTS`` default 3) so a "
-            "hallucination loop still terminates. Default-ON in the full "
-            "runtime profile, OFF under ``MAGI_RUNTIME_PROFILE`` in "
+            "llm_call_exception. Retry policy is delegated to the model plus "
+            "the runtime's turn-level iteration cap (Claude Code / OpenAI "
+            "Agents SDK / OpenCode parity); no per-tool retry cap is imposed "
+            "by default. Operators may opt in to a per-invocation cap via "
+            "``MAGI_TOOL_NOT_FOUND_ATTEMPT_CAP=N`` (N >= 1); default ``0`` "
+            "means unlimited. Default-ON in the full runtime profile, OFF "
+            "under ``MAGI_RUNTIME_PROFILE`` in "
             "safe/eval/minimal/conservative/off."
         ),
     ),
