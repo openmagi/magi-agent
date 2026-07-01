@@ -35,6 +35,10 @@ LOCAL_FULL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     # circuit breaker + bounded reconnect) for the live composio dispatcher seam.
     # Pure in-memory, accuracy-neutral, so it is safe in the full profile.
     "MAGI_MCP_RESILIENCE_ENABLED": "1",
+    # WS8 PR8a-3: Telegram inbound poll resilience (full-jitter backoff +
+    # per-watcher circuit breaker + one-shot persistent-failure notice). Pure
+    # in-memory, no persistence, so it is operationally safe in the full profile.
+    "MAGI_TELEGRAM_POLL_RESILIENCE_ENABLED": "1",
     "MAGI_SELF_REVIEW_ENABLED": "1",
     "MAGI_SELF_REVIEW_SHADOW": "0",
     "MAGI_SELF_REVIEW_PIPELINE_ENABLED": "1",
