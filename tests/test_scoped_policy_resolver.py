@@ -232,3 +232,56 @@ def test_dashboard_and_tool_perm_dedupe_within_bucket():
     )
     assert overlay.dashboard_check_ids == ("a",)
     assert overlay.tool_perm_rule_ids == ("tp",)
+
+
+# --- PR-D2 pre-final consumption bridge (scoped_prefinal_validator_refs) ------
+
+from magi_agent.customize.scoped_policy import scoped_prefinal_validator_refs  # noqa: E402
+from magi_agent.customize.store import set_custom_rule  # noqa: E402
+
+
+def _enable_customize_flags(mp: pytest.MonkeyPatch) -> None:
+    mp.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "1")
+    mp.setenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", "1")
+
+
+def test_scoped_prefinal_flags_off_is_empty(
+    customize_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # These customize flags are profile-aware default-ON; an explicit "0" wins.
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "0")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", "0")
+    set_custom_rule(_det_rule("cr1", enabled=False))
+    upsert_mode(_mode("research", ["custom_rule:cr1"]))
+    set_active_mode("research")
+    assert scoped_prefinal_validator_refs() == ()
+
+
+def test_scoped_prefinal_force_includes_disabled_rule_ref(
+    customize_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _enable_customize_flags(monkeypatch)
+    # Globally DISABLED deterministic_ref rule — scoping force-activates it.
+    set_custom_rule(_det_rule("cr1", enabled=False))
+    upsert_mode(_mode("research", ["custom_rule:cr1"]))
+    set_active_mode("research")
+    assert scoped_prefinal_validator_refs() == (_KNOWN_REF,)
+
+
+def test_scoped_prefinal_no_active_mode_is_empty(
+    customize_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _enable_customize_flags(monkeypatch)
+    set_custom_rule(_det_rule("cr1"))
+    assert scoped_prefinal_validator_refs() == ()
+
+
+def test_scoped_prefinal_only_custom_rules_flag_off_is_empty(
+    customize_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", "0")
+    set_custom_rule(_det_rule("cr1", enabled=False))
+    upsert_mode(_mode("research", ["custom_rule:cr1"]))
+    set_active_mode("research")
+    assert scoped_prefinal_validator_refs() == ()

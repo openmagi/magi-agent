@@ -4604,8 +4604,20 @@ class MagiEngineDriver:
                         )
             except Exception:  # noqa: BLE001
                 extra_validators, extra_evidence = (), ()
+        # PR-D2: an active mode may force-require additional deterministic-ref
+        # validators for this turn via its scoped_policy_ids (a policy that is
+        # otherwise globally off). Resolved here at the universal per-turn
+        # pre-final choke point so it applies regardless of how the assembly was
+        # built. Flag-gated + empty when no mode is active ⇒ byte-identical.
+        from magi_agent.customize.scoped_policy import (  # noqa: PLC0415
+            scoped_prefinal_validator_refs,
+        )
+
+        _scoped_validator_refs = scoped_prefinal_validator_refs()
         effective_required_validators = tuple(
-            dict.fromkeys((*assembly.required_validators, *extra_validators))
+            dict.fromkeys(
+                (*assembly.required_validators, *extra_validators, *_scoped_validator_refs)
+            )
         )
         effective_required_evidence = tuple(
             dict.fromkeys((*assembly.evidence_requirements, *extra_evidence))
