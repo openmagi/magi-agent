@@ -515,10 +515,23 @@ async def _local_adk_chat_sse(
                     },
                 },
             )
+        # An active mode may TIGHTEN the turn's permission posture (e.g. a
+        # "review" mode → default/smartApprove even on the YOLO serve baseline).
+        # capped_permission_mode only ever raises restrictiveness above the
+        # baseline, never loosens; hard-safety denies are unaffected regardless.
+        from magi_agent.customize.modes import (  # noqa: PLC0415
+            active_permission_mode as _active_permission_mode,
+            capped_permission_mode as _capped_permission_mode,
+        )
+
+        _effective_permission_mode = _capped_permission_mode(
+            _active_permission_mode(), _LOCAL_SERVE_PERMISSION_MODE
+        )
         headless = build_headless_runtime(
             cwd=workspace_root,
-            # A-8: explicit, audited local-serve YOLO opt-in (see module constant).
-            permission_mode=_LOCAL_SERVE_PERMISSION_MODE,
+            # A-8: explicit, audited local-serve YOLO opt-in (see module constant),
+            # tightened by the active mode's permission_mode when set.
+            permission_mode=_effective_permission_mode,
             session_id=session_id,
             model=model_override,
             runner_policy_routing_enabled=local_runner_policy_routing_enabled_from_env(),
@@ -548,8 +561,8 @@ async def _local_adk_chat_sse(
             # runtime above. Although ``runtime=headless`` means ``_build_runtime``
             # is not invoked here, set the field explicitly so the serve TurnContext
             # never silently relies on the deny/ask default — the serve policy choice
-            # is visible on the context too.
-            permission_mode=_LOCAL_SERVE_PERMISSION_MODE,
+            # (mode-tightened) is visible on the context too.
+            permission_mode=_effective_permission_mode,
         )
         stream = run_governed_turn(ctx, runtime=headless)
         # Accumulate the assistant text + a tool-use signal so the turn-end
