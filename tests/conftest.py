@@ -20,6 +20,15 @@ def pytest_configure(config: pytest.Config) -> None:
     # env leaked by profile-applying tests must not add audit frames to
     # unrelated projection tests. Audit tests opt in via monkeypatch.setenv.
     os.environ.setdefault("MAGI_RESEARCH_GOVERNANCE_MODE", "off")
+    # WS2 PR2a: the memory MASTER (MAGI_MEMORY_ENABLED) is now setdefault-ON by
+    # the full-profile overlay + the CLI memory bootstrap. A test that runs that
+    # bootstrap against os.environ leaks the master ON, and because the master
+    # CASCADES the memory sub-flags (recall / projection / qmd) ON, the many
+    # "gate off by default" tests (which only clear their own sub-flag) would
+    # then see the subsystem live. Pin the master OFF here at configure time so
+    # every leaker's setdefault is a no-op; tests that exercise memory-ON
+    # behavior opt in explicitly via monkeypatch.setenv (which still wins).
+    os.environ.setdefault("MAGI_MEMORY_ENABLED", "0")
 
 
 @pytest.hookimpl(tryfirst=True)

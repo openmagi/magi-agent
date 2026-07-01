@@ -190,6 +190,7 @@ openmagi	magi_agent/runtime/local_defaults.py	2
 openmagi	magi_agent/runtime/message_builder.py	1
 openmagi	magi_agent/runtime/no_agent_watchdog.py	3
 openmagi	magi_agent/runtime/openmagi_runtime.py	4
+openmagi	magi_agent/runtime/plan_ledger.py	2
 openmagi	magi_agent/runtime/provider_execution.py	2
 openmagi	magi_agent/runtime/provider_receipts.py	1
 openmagi	magi_agent/runtime/public_events.py	1
