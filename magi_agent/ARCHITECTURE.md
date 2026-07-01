@@ -819,7 +819,7 @@ graph LR
 | field_constraint_compiler.py | Deterministic SHACL-shape synthesizer for the ``field_constraint`` IR. | shacl_compiler, shacl_ontology, types | customize/rule_compiler.py, transport/customize.py |
 | lifecycle_audit.py | Customize Tier 2 lifecycle audit gates (PR-F-UX1). | criterion_engine, flags, shell_check, shell_command, store, verification_policy | (root)/facades.py, adk_bridge/context_compaction.py, adk_bridge/lifecycle_llm_call_control.py, adk_bridge/lifecycle_session_control.py, adk_bridge/lifecycle_shell_command_control.py, artifacts/file_delivery.py, missions/work_queue/driver.py, runtime/governed_turn.py |
 | live_catalog.py | Live evidence-catalog view (PR-F2). | ledger_store, shacl_compiler, store, what_menu | transport/customize.py |
-| modes.py | Agent MODES (postures) — typed model + customize.json CRUD. | store | cli/wiring.py, runtime/message_builder.py, transport/customize.py |
+| modes.py | Agent MODES (postures) — typed model + customize.json CRUD. | store | cli/wiring.py, customize/scoped_policy.py, runtime/message_builder.py, transport/customize.py |
 | nl_compiler_interactive.py | Conversational policy compiler — turn-by-turn multi-step variant. | custom_rules, rule_compiler | transport/customize.py |
 | output_rewrite.py | F-MUT2 — ``output_rewrite`` custom_rule kind. | result | (root)/facades.py, customize/custom_rules.py |
 | preset_map.py | Canonical preset id → runtime-seam map for the Customize verification tab. | scope, seam_apply, seam_spec | cli/real_runner.py, customize/catalog.py, customize/seam_apply.py, customize/seam_compiler.py, customize/seam_spec.py |
@@ -828,6 +828,7 @@ graph LR
 | runtime_fields.py | Runtime-fields derivation for the wizard's variable chip picker (F-UX2 / F8). | shacl_compiler, tool_perm | transport/customize.py |
 | runtime_gate.py | Runtime-side query for Customize verification preset state. | flags, store, verification_policy | cli/engine.py, customize/what_menu.py |
 | scope.py | Single source of truth for scope vocabulary + task-type → scope mapping. | — | customize/preset_map.py, customize/verification_policy.py |
+| scoped_policy.py | Mode ``scoped_policy_ids`` → per-turn policy overlay (resolver only; inert). | modes, per_turn_agent_mode_context, what_menu | — |
 | seam_apply.py | Apply a :class:`SeamSpec` IR to the static :data:`PRESET_SEAMS` catalog. | preset_map, seam_spec | customize/preset_map.py |
 | seam_compiler.py | NL → SeamSpec compiler — registration-time only, fail-open everywhere. | preset_map, seam_spec, shacl_compiler | transport/customize.py |
 | seam_spec.py | SeamSpec — declarative PresetSeam mutation IR for the NL rule builder. | preset_map | customize/preset_map.py, customize/rule_compiler.py, customize/seam_apply.py, customize/seam_compiler.py, transport/customize.py |
@@ -838,7 +839,7 @@ graph LR
 | store.py | — | flags | (root)/facades.py, (root)/main.py, cli/app.py, cli/engine.py, cli/real_runner.py, cli/tests/test_document_coverage_seam_wiring.py, customize/__init__.py, customize/after_tool_gate.py, customize/lifecycle_audit.py, customize/live_catalog.py, customize/modes.py, customize/runtime_gate.py, customize/tool_perm.py, runtime/child_runner_live.py, runtime/governed_turn.py, runtime/message_builder.py, runtime/openmagi_runtime.py, transport/customize.py |
 | tool_perm.py | Custom tool-permission rule matching (P2). | flags, store, verification_policy | customize/runtime_fields.py, tools/permission.py |
 | verification_policy.py | — | scope | (root)/facades.py, cli/engine.py, cli/real_runner.py, customize/after_tool_gate.py, customize/apply.py, customize/budgets_apply.py, customize/lifecycle_audit.py, customize/runtime_gate.py, customize/tool_perm.py, runtime/child_runner_live.py, runtime/governed_turn.py, runtime/message_builder.py |
-| what_menu.py | WHAT-menu for deterministic custom rules. | flags, runtime_gate | cli/real_runner.py, customize/catalog.py, customize/custom_rules.py, customize/live_catalog.py |
+| what_menu.py | WHAT-menu for deterministic custom rules. | flags, runtime_gate | cli/real_runner.py, customize/catalog.py, customize/custom_rules.py, customize/live_catalog.py, customize/scoped_policy.py |
 
 ### discovery/
 
@@ -1630,7 +1631,7 @@ graph LR
 | no_agent_watchdog.py | — | safety | runtime/events.py |
 | openmagi_runtime.py | — | apply, base, catalog, core_toolhost, env, manager, memory_write_wiring, models, native_catalog, persistent_python_toolhost, primitives, profiles, registry, store, todo_toolhost, tool, tool_projection | (root)/app.py, (root)/main.py, cli/tests/test_model_picker_wire.py, cli/wiring.py, transport/app_api.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/control_requests.py, transport/credentials.py, transport/customize.py, transport/gate2_sandbox_canary.py, transport/generation_request.py, transport/health.py, transport/integrations.py, transport/learning_dashboard.py, transport/plugins.py, transport/product_admin.py, transport/shadow_invocations.py, transport/tools.py, transport/web_dashboard.py |
 | output_continuation.py | Output continuation — resume a deliverable that hit the model's per-response | — | cli/engine.py, cli/tests/test_engine_output_continuation.py, cli/tests/test_engine_usage.py, shadow/gate5b4c3_live_runner_boundary.py |
-| per_turn_agent_mode_context.py | Per-turn ``ContextVar`` carrying the request-selected agent MODE id. | — | cli/wiring.py, runtime/message_builder.py, transport/chat_routes.py |
+| per_turn_agent_mode_context.py | Per-turn ``ContextVar`` carrying the request-selected agent MODE id. | — | cli/wiring.py, customize/scoped_policy.py, runtime/message_builder.py, transport/chat_routes.py |
 | per_turn_goal_loop_context.py | Per-turn ``ContextVar`` carrying the active :class:`GoalLoopPolicy`. | goal_loop_policy | cli/engine.py, transport/chat_routes.py |
 | phase_routing.py | — | model_tiers, reliability_budget | recipes/materializer.py, recipes/phase_routing_defaults.py |
 | plan_ledger.py | Durable plan/todo ledger: append-only JSONL content log + WS1-gated index. | durable_store, safety, todo_toolhost | cli/wiring.py, tools/todo_toolhost.py |
