@@ -24,6 +24,7 @@ from .transport.customize import register_customize_routes
 from .transport.packs_dashboard import register_dashboard_pack_routes
 from .transport.credentials import register_credentials_routes
 from .transport.integrations import register_integrations_routes
+from .transport.composio_broker import register_composio_broker_routes
 from magi_agent.observability import register_observability, register_session_transcript
 from magi_agent.missions.work_queue.board_api import register_work_queue_board
 from magi_agent.egress_proxy.config import EgressProxyConfig
@@ -131,6 +132,11 @@ def create_app(runtime: OpenMagiRuntime) -> FastAPI:
     # vault admin API are wired.
     register_credentials_routes(app, runtime)
     register_integrations_routes(app, runtime)
+    # Default-OFF: registers the platform Composio-broker endpoints only when
+    # MAGI_COMPOSIO_BROKER_ENABLED is truthy (the broker deployment), so the
+    # normal app surface is byte-identical. Lets self-hosted runtimes use
+    # Composio via our master key with no key of their own.
+    register_composio_broker_routes(app)
     register_app_api_routes(app, runtime)
     register_plugin_admin_routes(app, runtime)
     register_dashboard_routes(app, runtime)
