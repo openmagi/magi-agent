@@ -1800,12 +1800,11 @@ def test_hosted_stream_counter_receipt_critic_equivalence_with_completions(
         return None
 
     monkeypatch.setattr(
-        chat_routes_module,
-        "_schedule_runtime_direct_usage_receipt",
+        "magi_agent.transport.gate5b_serving._schedule_runtime_direct_usage_receipt",
         fake_schedule_receipt,
     )
-    monkeypatch.setattr(chat_routes_module, "is_egress_gate_enabled", lambda: True)
-    monkeypatch.setattr(chat_routes_module, "_maybe_run_egress_critic_gate", fake_critic_gate)
+    monkeypatch.setattr("magi_agent.transport.gate5b_serving.is_egress_gate_enabled", lambda: True)
+    monkeypatch.setattr("magi_agent.transport.gate5b_serving._maybe_run_egress_critic_gate", fake_critic_gate)
 
     body = {
         "sessionId": "s-equivalence",

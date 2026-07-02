@@ -1887,7 +1887,7 @@ def test_chat_route_gate1a_success_uses_live_egress_proxy_telemetry(
             "2026-05-24T10:00:05.000Z",
         )
     )
-    monkeypatch.setattr(chat_routes_module, "_utc_now_iso", lambda: next(timestamps))
+    monkeypatch.setattr("magi_agent.transport.gate5b_serving._utc_now_iso", lambda: next(timestamps))
     runtime = make_runtime(
         authority=PythonRuntimeAuthorityConfig(
             userVisibleOutputAllowed=True,
@@ -2271,8 +2271,7 @@ def test_chat_route_failed_canary_records_explicit_counter_error(
         raise RuntimeError("synthetic runner failure")
 
     monkeypatch.setattr(
-        chat_routes_module,
-        "run_gate5b4c3_live_runner_boundary_async",
+        "magi_agent.transport.gate5b_serving.run_gate5b4c3_live_runner_boundary_async",
         fail_boundary,
     )
     runtime = make_runtime(
@@ -3443,8 +3442,7 @@ def test_gate5b_registers_turn_during_boundary_and_unregisters_after(
         await _asyncio.sleep(0)
 
     monkeypatch.setattr(
-        chat_routes_module,
-        "run_gate5b4c3_live_runner_boundary_async",
+        "magi_agent.transport.gate5b_serving.run_gate5b4c3_live_runner_boundary_async",
         fake_boundary,
     )
 
