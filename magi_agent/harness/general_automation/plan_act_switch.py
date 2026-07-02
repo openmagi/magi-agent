@@ -64,7 +64,7 @@ from magi_agent.recipes.first_party.general_automation.preset_projection import 
 )
 from magi_agent.runtime.control import ControlRequestRecord
 from magi_agent.tools.context import ToolContext
-from magi_agent.transport.tool_preview import sanitize_tool_preview
+from magi_agent.shared.tool_preview import sanitize_tool_preview
 
 
 #: The read-only GA preset a ``general`` plan-mode session resolves before the

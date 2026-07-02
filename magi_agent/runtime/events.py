@@ -31,7 +31,7 @@ from magi_agent.runtime.public_events import (
     is_rule_check_authority_field,
     rule_check_event_has_authority,
 )
-from magi_agent.transport.tool_preview import sanitize_tool_preview
+from magi_agent.shared.tool_preview import sanitize_tool_preview
 
 
 EventKind = Literal["status", "token", "tool", "control", "artifact", "error"]

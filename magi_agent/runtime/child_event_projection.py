@@ -13,7 +13,7 @@ from magi_agent.runtime.child_runner_boundary import (
     ChildRunnerResult,
     ChildTaskRequest,
 )
-from magi_agent.transport.tool_preview import sanitize_tool_preview
+from magi_agent.shared.tool_preview import sanitize_tool_preview
 
 
 PublicChildEvent = dict[str, object]

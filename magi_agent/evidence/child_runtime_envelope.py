@@ -23,7 +23,7 @@ from magi_agent.evidence.runtime_issuance import (
     require_runtime_issue_authority,
 )
 from magi_agent.ops.authority import FalseOnlyAuthorityModel
-from magi_agent.transport.tool_preview import sanitize_tool_preview
+from magi_agent.shared.tool_preview import sanitize_tool_preview
 
 from .subagent import (
     OPENMAGI_RUNTIME_ENVELOPE_ISSUER,
