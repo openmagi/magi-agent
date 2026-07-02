@@ -365,11 +365,10 @@ def load(path: str | os.PathLike[str]) -> list[Envelope]:
 # :func:`_rehydrate`) ARE IMPLEMENTED — they reconstruct the linear transcript
 # and feed it through ``SessionContinuityBoundary.import_committed_transcript``.
 #
-# v1 STATUS (NOT yet wired): in v1 these primitives are NOT called by the CLI
-# entrypoint or the engine. The entrypoint only threads a session-id label, and
-# ``engine._drive`` reads ``initial_messages`` but does not feed them into the
-# runner. Wiring resume into the live turn loop is a v1.1 follow-up; the code is
-# kept here (tested in isolation) so that work is a small wire-up, not a rewrite.
+# STATUS (wired): ``cli/app.py`` calls ``prepare_resume`` under the
+# ``MAGI_CLI_RESUME_ENABLED`` gate and threads the rehydrated
+# ``initial_messages`` into the run. The local-full profile turns the gate ON by
+# default (eval and an explicit ``=0`` opt-out stay id-only).
 #
 # Import-cleanliness contract (identical to ``cli/engine.py``)
 # -----------------------------------------------------------
@@ -900,11 +899,12 @@ async def resume_async(
     the returned ``ResumeContext`` still carries ``initial_messages`` and a
     ``reason`` — never raises just because rehydration could not run.
 
-    A future async entrypoint should ``await resume_async(...)`` directly so
+    An async entrypoint should ``await resume_async(...)`` directly so
     rehydration actually runs; the sync :func:`resume` wrapper is for non-async
-    callers only and CANNOT rehydrate from inside a running loop. NOTE (v1): the
-    CLI entrypoint does NOT yet call this — resume wiring is a v1.1 follow-up
-    (see the module-level "PR-B2: resume / continue" note above).
+    callers only and CANNOT rehydrate from inside a running loop. STATUS: the CLI
+    entrypoint calls ``prepare_resume`` under the ``MAGI_CLI_RESUME_ENABLED``
+    gate (ON by default in the local-full profile); see the module-level
+    "PR-B2: resume / continue" note above.
 
     An empty/nonexistent session yields an empty-but-valid ``ResumeContext``.
     """

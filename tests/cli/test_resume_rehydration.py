@@ -303,7 +303,7 @@ def test_app_resume_gate_on_threads_initial_messages(
     assert "earlier answer" in joined
 
 
-def test_app_resume_gate_off_is_empty(
+def test_app_resume_explicit_opt_out_is_empty(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
     from unittest.mock import patch
@@ -313,7 +313,9 @@ def test_app_resume_gate_off_is_empty(
     from magi_agent.cli.app import app
 
     monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
-    monkeypatch.delenv("MAGI_CLI_RESUME_ENABLED", raising=False)
+    # C2 (N-15): the local-full overlay now setdefaults RESUME=1, so an explicit
+    # opt-out (not a delenv) is what keeps --resume in the legacy id-only mode.
+    monkeypatch.setenv("MAGI_CLI_RESUME_ENABLED", "0")
     monkeypatch.setenv("MAGI_CLI_SESSION_DIR", str(tmp_path))
 
     _write_fixture_log("appsess2")
@@ -332,5 +334,49 @@ def test_app_resume_gate_off_is_empty(
             catch_exceptions=False,
         )
 
-    # Gate OFF: --resume threads the id only (legacy), no prior messages.
+    # Explicit =0: --resume threads the id only (legacy), no prior messages.
     assert captured.get("initial_messages") == []
+
+
+def test_app_resume_default_on_under_local_full_profile(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """ON-path e2e: fresh local-full install (no resume env set) rehydrates.
+
+    Drives overlay -> gate -> prepare_resume -> initial_messages with only
+    run_headless faked, so the resume default-ON path is proven end to end.
+    """
+    from unittest.mock import patch
+
+    from typer.testing import CliRunner
+
+    from magi_agent.cli.app import app
+
+    monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CLI_SESSION_DIR", str(tmp_path))
+    # Fresh install: nothing about resume or the profile is set in the env.
+    monkeypatch.delenv("MAGI_CLI_RESUME_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
+    monkeypatch.delenv("MAGI_AGENT_LOCAL_FULL_RUNTIME_DEFAULTS", raising=False)
+
+    _write_fixture_log("appsess3")
+
+    captured: dict[str, object] = {}
+
+    async def fake_headless(prompt, *, initial_messages=None, **_kw):
+        captured["initial_messages"] = initial_messages
+        return 0
+
+    cli = CliRunner()
+    with patch("magi_agent.cli.app.run_headless", fake_headless):
+        cli.invoke(
+            app,
+            ["-p", "follow up", "--resume", "appsess3"],
+            catch_exceptions=False,
+        )
+
+    msgs = captured.get("initial_messages")
+    assert msgs, f"local-full default ON must rehydrate initial_messages, got {msgs!r}"
+    joined = " ".join(m["content"] for m in msgs)  # type: ignore[union-attr]
+    assert "earlier question" in joined
+    assert "earlier answer" in joined
