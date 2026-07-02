@@ -17,45 +17,10 @@ Usage example::
 
 from __future__ import annotations
 
+from magi_agent.shared.provider_family import detect_provider
+
 from .providers import ProviderCacheStrategy, get_strategy
 from .types import PromptBlock
-
-
-def detect_provider(model: str) -> str:
-    """Auto-detect the LLM provider from a model identifier string.
-
-    Detection priority:
-    1. Exact prefix match (``claude-``, ``anthropic/``, ``gpt-``, etc.)
-    2. Substring match as fallback for router-wrapped model strings
-       (e.g. ``"some-router/claude-flex"`` → ``"anthropic"``).
-    3. Falls back to ``"unknown"`` when no pattern matches.
-
-    Args:
-        model: Model identifier as it appears in the request (e.g.
-            ``"claude-sonnet-4-6"``, ``"openai/gpt-5.5"``).
-
-    Returns:
-        One of ``"anthropic"``, ``"openai"``, ``"google"``, or ``"unknown"``.
-    """
-    model_lower = model.lower()
-
-    # Prefix-based detection — highest priority
-    if model_lower.startswith(("claude-", "anthropic/")):
-        return "anthropic"
-    if model_lower.startswith(("gpt-", "openai/", "openai-codex/")):
-        return "openai"
-    if model_lower.startswith(("gemini-", "google/")):
-        return "google"
-
-    # Substring fallback for router-wrapped model strings
-    if "claude" in model_lower:
-        return "anthropic"
-    if "gpt" in model_lower:
-        return "openai"
-    if "gemini" in model_lower:
-        return "google"
-
-    return "unknown"
 
 
 class CacheControlInjector:
