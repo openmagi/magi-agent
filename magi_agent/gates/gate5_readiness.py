@@ -5,12 +5,14 @@ import importlib
 from magi_agent.config.models import PythonGate5ReadinessConfig
 from magi_agent.gates._readiness_common import (
     DIGEST_RE as _DIGEST_RE,
+    SAFE_ENVIRONMENTS,
     digest_present as _digest_present,
+    selected_scope_matched,
     sha256_text_digest as _sha256_text_digest,
 )
 
 
-_SAFE_ENVIRONMENTS = frozenset({"local", "development", "staging", "production"})
+_SAFE_ENVIRONMENTS = SAFE_ENVIRONMENTS
 _READY_SURFACES = (
     "gate5a_no_memory_shadow_canary",
     "gate5b4_internal_endpoint_contract",
@@ -137,25 +139,7 @@ def _reason_codes_for_scope(
     return tuple(dict.fromkeys(reasons))
 
 
-def _selected_scope_matched(
-    config: PythonGate5ReadinessConfig,
-    *,
-    bot_id: str,
-    user_id: str,
-) -> bool:
-    if not config.enabled:
-        return False
-    if not _digest_present(config.selected_bot_digest) or not _digest_present(
-        config.selected_owner_user_id_digest
-    ):
-        return False
-    if config.selected_bot_digest != _sha256_text_digest(bot_id):
-        return False
-    if config.selected_owner_user_id_digest != _sha256_text_digest(user_id):
-        return False
-    if config.environment not in _SAFE_ENVIRONMENTS:
-        return False
-    return config.environment in config.environment_allowlist
+_selected_scope_matched = selected_scope_matched
 
 
 def _shadow_modules_ready() -> bool:
