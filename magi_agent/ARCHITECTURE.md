@@ -1,7 +1,3 @@
-   Building magi-agent @ file:///Users/kevin/Desktop/claude_code/magi-agent
-      Built magi-agent @ file:///Users/kevin/Desktop/claude_code/magi-agent
-Uninstalled 1 package in 1ms
-Installed 1 package in 2ms
 # Module Purpose Map (auto-generated)
 
 ## Dependency Graph
@@ -524,7 +520,7 @@ graph LR
 | memory_bootstrap.py | CLI memory bootstrap: ``config.toml[memory]`` → process env (PR-C). | config, memory_session_extract, providers | (root)/main.py, cli/app.py |
 | memory_cli.py | ``magi memory`` CLI helpers: optional qmd install + explicit search. | cli, config, qmd, search | — |
 | memory_manifest.py | PR3 — memory file manifest (frontmatter + mtime, newest-first). | conformance | cli/memory_recall_block.py, cli/memory_recall_rerank.py |
-| memory_recall_block.py | Per-turn query-based memory recall block builder (PR-E item 3). | config, memory_manifest, memory_mode_guard, memory_recall_rerank, prompt_projection, search | cli/tool_runtime.py |
+| memory_recall_block.py | Per-turn query-based memory recall block builder (PR-E item 3). | backend_cache, config, memory_manifest, memory_mode_guard, memory_recall_rerank, prompt_projection, search | cli/tool_runtime.py |
 | memory_recall_rerank.py | PR3 — optional cheap-model semantic re-rank over BM25 recall candidates. | base, flags, memory_manifest, readonly_classifier | cli/memory_recall_block.py |
 | ndjson.py | Single-writer NDJSON output for the headless CLI. | protocol | cli/headless.py, cli/tests/test_ndjson.py |
 | permissions.py | Permission rules engine + gate skeleton for the Magi headless CLI. | contracts, control, durable_control_store, env, protocol, readonly_classifier | cli/engine.py, cli/headless.py, cli/tests/test_app.py, cli/tests/test_coldstart.py, cli/tests/test_engine_gate.py, cli/tests/test_headless_approval.py, cli/tests/test_headless_projection.py, cli/tests/test_permissions.py, cli/tests/test_streaming_driver.py, cli/wiring.py, customize/capability_scope.py, transport/active_turn.py, transport/streaming_driver.py, transport/streaming_sink.py |
@@ -1285,7 +1281,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | hipocampus_readonly | — |
-| hipocampus_readonly.py | — | config, contracts, flags, policy, qmd_client, search | memory/adapters/__init__.py, memory/adapters/local_file_writable.py, memory/adapters/operator_soul_writer.py, memory/conformance.py, memory/prompt_projection.py |
+| hipocampus_readonly.py | — | backend_cache, config, contracts, flags, policy, qmd_client, search | memory/adapters/__init__.py, memory/adapters/local_file_writable.py, memory/adapters/operator_soul_writer.py, memory/conformance.py, memory/prompt_projection.py |
 | local_file_writable.py | LocalFileMemoryProvider — gated writable local-file memory adapter (D1). | _truthy, compactor, config, contracts, hipocampus_readonly, policy, tool_preview | harness/memory_write.py, memory/adapters/operator_soul_writer.py, memory/compaction_tree.py, memory/conformance.py, runtime/memory_turn_hook.py, runtime/memory_write_wiring.py, runtime/session_extract_runtime.py |
 | operator_soul_writer.py | OperatorSoulWriter — operator-gated SOUL.md write path (D4). | config, hipocampus_readonly, local_file_writable | — |
 
@@ -1293,7 +1289,8 @@ graph LR
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
-| __init__.py | Hipocampus memory search backends (PR2, read-side, unwired). | base, bm25, config, qmd, qmd_http | cli/memory_cli.py, cli/memory_recall_block.py, memory/adapters/hipocampus_readonly.py, transport/app_api.py |
+| __init__.py | Hipocampus memory search backends (PR2, read-side, unwired). | backend_cache, base, bm25, config, qmd, qmd_http | cli/memory_cli.py, cli/memory_recall_block.py, memory/adapters/hipocampus_readonly.py, transport/app_api.py |
+| backend_cache.py | Process-scope search backend cache (PR-D1 / N-12). | — | cli/memory_recall_block.py, memory/adapters/hipocampus_readonly.py, memory/search/__init__.py |
 | base.py | SearchBackend abstraction for Hipocampus memory (PR2, read-side). | — | cli/memory_recall_rerank.py, memory/search/__init__.py, memory/search/bm25.py, memory/search/qmd.py, memory/search/qmd_http.py |
 | bm25.py | Pure-Python Okapi BM25 backend (PR2) — the DEFAULT search backend. | base | memory/search/__init__.py |
 | qmd.py | ``qmd`` CLI search backend (PR2). | base | cli/memory_cli.py, knowledge/qmd_index.py, memory/search/__init__.py |
