@@ -1,5 +1,7 @@
 """Stable interface surface for the Magi headless CLI.
 
+Canonical home since rem2/F3; ``magi_agent.cli.contracts`` is a byte-compatible alias.
+
 Downstream streams (B/C/D/E/F) import ONLY from this module. The names here are
 load-bearing — do not rename them without coordinating every stream.
 
