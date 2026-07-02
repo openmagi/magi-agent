@@ -493,12 +493,28 @@ class TestPromptCacheMetricsToEvidence:
 
 class TestLoadCacheConfig:
     def test_defaults_when_env_not_set(self, monkeypatch) -> None:
+        # C1 / N-10: profile-aware default-ON. Unset flag + unset profile
+        # resolves to the full profile, so prompt caching is ON.
         monkeypatch.delenv("MAGI_PROMPT_CACHE_ENABLED", raising=False)
         monkeypatch.delenv("MAGI_PROMPT_CACHE_PROVIDER", raising=False)
+        monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
         load_cache_config = _metrics_module().load_cache_config
         enabled, provider = load_cache_config()
-        assert enabled is False
+        assert enabled is True
         assert provider == "auto"
+
+    def test_disabled_under_safe_profile(self, monkeypatch) -> None:
+        monkeypatch.delenv("MAGI_PROMPT_CACHE_ENABLED", raising=False)
+        monkeypatch.setenv("MAGI_RUNTIME_PROFILE", "safe")
+        load_cache_config = _metrics_module().load_cache_config
+        enabled, _ = load_cache_config()
+        assert enabled is False
+
+    def test_enabled_true_when_env_is_on(self, monkeypatch) -> None:
+        monkeypatch.setenv("MAGI_PROMPT_CACHE_ENABLED", "on")
+        load_cache_config = _metrics_module().load_cache_config
+        enabled, _ = load_cache_config()
+        assert enabled is True
 
     def test_enabled_true_when_env_is_1(self, monkeypatch) -> None:
         monkeypatch.setenv("MAGI_PROMPT_CACHE_ENABLED", "1")

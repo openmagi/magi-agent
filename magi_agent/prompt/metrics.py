@@ -18,6 +18,7 @@ Usage::
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 
@@ -85,22 +86,29 @@ class PromptCacheMetrics:
         }
 
 
-def load_cache_config() -> tuple[bool, str]:
-    """Load prompt cache configuration from environment variables.
+def load_cache_config(
+    env: Mapping[str, str] | None = None,
+) -> tuple[bool, str]:
+    """Load prompt cache configuration from the flag registry.
 
-    Environment variables:
-    - ``MAGI_PROMPT_CACHE_ENABLED``: Set to ``"1"``, ``"true"``, or ``"yes"``
-      to enable prompt caching.  Defaults to disabled.
-    - ``MAGI_PROMPT_CACHE_PROVIDER``: Provider hint (``"anthropic"``,
-      ``"openai"``, ``"google"``, or ``"auto"``).  Defaults to ``"auto"``.
+    ``MAGI_PROMPT_CACHE_ENABLED`` is a profile-aware default-ON flag: unset
+    resolves to ON under the full runtime profile and OFF under
+    ``safe``/``eval``/``minimal``/``conservative``/``off``. An explicit
+    ``"0"/"false"/...`` or ``"1"/"true"/yes/on"`` always wins.
+    ``MAGI_PROMPT_CACHE_PROVIDER`` is a provider hint (``"anthropic"``,
+    ``"openai"``, ``"google"``, or ``"auto"``); it defaults to ``"auto"``.
+
+    Args:
+        env: Optional environment mapping. ``None`` reads ``os.environ``.
 
     Returns:
         A ``(enabled, provider)`` tuple.
     """
-    # I-4: routed through the typed flag registry. Pre-I-4 truthy set
-    # ``{1, true, yes}`` widens to canonical ``{1, true, yes, on}``.
-    from magi_agent.config.flags import flag_bool, flag_str  # noqa: PLC0415
+    from magi_agent.config.flags import (  # noqa: PLC0415
+        flag_profile_bool,
+        flag_str,
+    )
 
-    enabled = flag_bool("MAGI_PROMPT_CACHE_ENABLED")
-    provider = flag_str("MAGI_PROMPT_CACHE_PROVIDER") or "auto"
+    enabled = flag_profile_bool("MAGI_PROMPT_CACHE_ENABLED", env=env)
+    provider = flag_str("MAGI_PROMPT_CACHE_PROVIDER", env=env) or "auto"
     return enabled, provider

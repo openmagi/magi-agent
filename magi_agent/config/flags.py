@@ -2765,11 +2765,12 @@ FLAGS: tuple[FlagSpec, ...] = (
         kind="str",
     ),
     # --- Prompt cache (I-4 batch 12) ---------------------------------------
-    _b(
+    _pb(
         "MAGI_PROMPT_CACHE_ENABLED",
         summary=(
-            "Emit prompt-cache metrics from the prompt-build path. "
-            "Default-OFF; ON adds bookkeeping per request."
+            "Inject an Anthropic ephemeral cache_control marker on the static "
+            "system-prompt prefix of live ADK Anthropic requests and record "
+            "prompt-cache usage metrics (default-ON full profile)."
         ),
     ),
     FlagSpec(
