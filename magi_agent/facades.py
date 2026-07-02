@@ -23,6 +23,86 @@ from magi_agent.tools.manifest import RuntimeMode
 from magi_agent.tools.result import ToolResult
 
 
+async def apply_customize_before_tool_stages(
+    *,
+    tool_name: str,
+    arguments: dict[str, object],
+    session_id: str | None = None,
+    turn_id: str | None = None,
+) -> tuple[dict[str, object], ToolResult | None]:
+    """Run the customize before-tool-boundary rule stages in order.
+
+    Sequence (identical to the historical inline order in
+    :func:`execute_tool_with_hooks`):
+
+    1. F-MUT1 ``prompt_injection`` mutator (appends into the dispatch args).
+    2. F-EXEC1 ``shell_command`` action at ``before_tool_use`` (block short
+       circuits dispatch).
+    3. F-EXEC2 ``shell_check`` condition at ``before_tool_use`` (block short
+       circuits dispatch).
+
+    Returns ``(arguments, blocked)``. When ``blocked`` is non-None the caller
+    MUST skip dispatch and treat it as the tool result. Each stage is
+    triple-gated + fail-open, so an OFF flag / no authored rule / any error
+    leaves ``arguments`` unchanged and returns ``(arguments, None)``.
+
+    ``session_id`` / ``turn_id`` are threaded to
+    :func:`magi_agent.adk_bridge.lifecycle_shell_command_control.shell_budget_for`
+    so the live ADK bridge can name the per-turn shell budget explicitly; the
+    facade path passes ``(None, None)`` and lets ``shell_budget_for`` fall back
+    to the active-turn ContextVar (byte-identical to today).
+    """
+    arguments = _maybe_apply_prompt_injection_to_tool_args(
+        arguments=arguments, tool_name=tool_name
+    )
+    blocked = await _maybe_apply_shell_command_before_tool(
+        tool_name=tool_name,
+        arguments=arguments,
+        session_id=session_id,
+        turn_id=turn_id,
+    )
+    if blocked is not None:
+        return arguments, blocked
+    blocked = await _maybe_apply_shell_check_before_tool(
+        tool_name=tool_name,
+        arguments=arguments,
+        session_id=session_id,
+        turn_id=turn_id,
+    )
+    if blocked is not None:
+        return arguments, blocked
+    return arguments, None
+
+
+async def apply_customize_after_tool_stages(
+    *,
+    tool_name: str,
+    result: ToolResult,
+    session_id: str | None = None,
+    turn_id: str | None = None,
+) -> ToolResult:
+    """Run the customize after-tool-boundary rule stages in order.
+
+    Sequence (identical to the historical inline order in
+    :func:`execute_tool_with_hooks`):
+
+    1. F-MUT2 ``output_rewrite`` mutator (redacts the result text).
+    2. F-EXEC1 ``shell_command`` after-audit (audit-only; never un-executes).
+
+    Each stage is triple-gated + fail-open. ``session_id`` / ``turn_id`` are
+    threaded to ``shell_budget_for`` as in
+    :func:`apply_customize_before_tool_stages`.
+    """
+    result = _maybe_apply_output_rewrite(result=result, tool_name=tool_name)
+    await _maybe_apply_shell_command_after_tool(
+        tool_name=tool_name,
+        result_output=_result_output_text(result),
+        session_id=session_id,
+        turn_id=turn_id,
+    )
+    return result
+
+
 async def execute_tool_with_hooks(
     dispatcher: ToolDispatcher,
     hook_bus: HookBus,
@@ -96,35 +176,14 @@ async def execute_tool_with_hooks(
             # message_builder._apply_prompt_transform's "failing safe to
             # original sections" branch.
 
-    # F-MUT1 prompt_injection rule mutator. Triple-gated + fail-open: bails
-    # silently when the master flag is OFF, when no rules are authored, or on
-    # any exception. Runs AFTER the HookBus replace branch so a hook-authored
-    # full replacement composes deterministically with rule-driven appends.
-    arguments = _maybe_apply_prompt_injection_to_tool_args(
-        arguments=arguments, tool_name=tool_name
-    )
-
-    # F-EXEC1 shell_command rule action at ``before_tool_use``. Triple-gated +
-    # fail-open. Runs AFTER the F-MUT1 prompt_injection mutator so the
-    # operator-authored shell hook sees the final dispatch arguments. A rule
-    # with ``action == "block"`` that exits with a non-zero exit code returns
-    # a blocked ToolResult immediately (no dispatch, no after-hook). Rules
-    # with ``action == "audit"`` always run to completion and never block.
-    blocked = await _maybe_apply_shell_command_before_tool(
-        tool_name=tool_name, arguments=arguments
-    )
-    if blocked is not None:
-        return blocked, before_result, None
-
-    # F-EXEC2 shell_check rule condition at ``before_tool_use``. Triple-gated
-    # + fail-open. Mirrors the F-EXEC1 short-circuit semantics: a rule with
-    # ``action == "block"`` whose script reports ``passed=false`` (or exits
-    # non-zero in exit-code fallback mode) returns a blocked ToolResult
-    # immediately so dispatch is skipped. Shares the per-(session, turn)
-    # MAGI_CUSTOMIZE_SHELL_AUDIT_BUDGET counter with F-EXEC1 via
-    # :func:`shell_budget_for` so cross-kind spawning is bounded by the
-    # SAME ceiling within a turn.
-    blocked = await _maybe_apply_shell_check_before_tool(
+    # Customize before-tool-boundary stages (F-MUT1 prompt_injection ->
+    # F-EXEC1 shell_command block -> F-EXEC2 shell_check block). Extracted into
+    # :func:`apply_customize_before_tool_stages` so the same seam is consumed by
+    # both this composed facade AND the live ADK before_tool_callback bridge in
+    # :mod:`magi_agent.cli.customize_tool_wiring`. The facade path passes no
+    # explicit ``(session_id, turn_id)`` so ``shell_budget_for`` resolves the
+    # per-turn identity from the ContextVar (byte-identical to today).
+    arguments, blocked = await apply_customize_before_tool_stages(
         tool_name=tool_name, arguments=arguments
     )
     if blocked is not None:
@@ -164,21 +223,13 @@ async def execute_tool_with_hooks(
                 if update:
                     result = result.model_copy(update=update)
 
-    # F-MUT2 output_rewrite rule mutator. Triple-gated + fail-open: bails
-    # silently when the master flag is OFF, when no rules are authored, or
-    # on any exception. Runs AFTER the HookBus replace branch so a
-    # hook-authored full overlay composes deterministically with the
-    # rule-driven redact (the rule sees the hook's overlaid text and may
-    # redact additional patterns from it).
-    result = _maybe_apply_output_rewrite(result=result, tool_name=tool_name)
-
-    # F-EXEC1 shell_command rule action at ``after_tool_use``. Audit-only:
-    # the dispatch already returned, so a "block" action has no honest
-    # semantics here. Runs the operator-authored scripts (subject to the
-    # per-turn budget cap enforced by the LifecycleShellCommandControl
-    # plugin) and silently discards any verdict.
-    await _maybe_apply_shell_command_after_tool(
-        tool_name=tool_name, result_output=_result_output_text(result)
+    # Customize after-tool-boundary stages (F-MUT2 output_rewrite ->
+    # F-EXEC1 shell_command after audit). Extracted into
+    # :func:`apply_customize_after_tool_stages` so the same seam is consumed by
+    # both this composed facade AND the live ADK after_tool_callback bridge in
+    # :mod:`magi_agent.cli.customize_tool_wiring`.
+    result = await apply_customize_after_tool_stages(
+        tool_name=tool_name, result=result
     )
 
     return result, before_result, after_result
@@ -286,7 +337,11 @@ def _result_output_text(result: ToolResult) -> str:
 
 
 async def _maybe_apply_shell_command_before_tool(
-    *, tool_name: str, arguments: dict[str, object]
+    *,
+    tool_name: str,
+    arguments: dict[str, object],
+    session_id: str | None = None,
+    turn_id: str | None = None,
 ) -> ToolResult | None:
     """F-EXEC1 facades helper: before-dispatch ``shell_command`` consumer.
 
@@ -296,6 +351,10 @@ async def _maybe_apply_shell_command_before_tool(
     tool-boundary spawns alongside the 9 turn / llm / compaction slots.
     Returns a blocked :class:`ToolResult` on a ``block`` verdict; ``None``
     otherwise. Fail-open: any unexpected exception returns ``None``.
+
+    ``session_id`` / ``turn_id`` are passed through to ``shell_budget_for``
+    (explicit identity for the live ADK bridge); ``(None, None)`` falls back to
+    the active-turn ContextVar.
     """
     try:
         if not _shell_command_enabled():
@@ -312,7 +371,7 @@ async def _maybe_apply_shell_command_before_tool(
             snapshot = _safe_json(arguments)
             if isinstance(snapshot, dict):
                 safe_args = snapshot
-        remaining, decrement_fn = shell_budget_for()
+        remaining, decrement_fn = shell_budget_for(session_id, turn_id)
         audits, verdict = await run_shell_command_at_before_tool_use(
             tool_name=tool_name,
             tool_args=safe_args,
@@ -342,7 +401,11 @@ async def _maybe_apply_shell_command_before_tool(
 
 
 async def _maybe_apply_shell_command_after_tool(
-    *, tool_name: str, result_output: str
+    *,
+    tool_name: str,
+    result_output: str,
+    session_id: str | None = None,
+    turn_id: str | None = None,
 ) -> None:
     """F-EXEC1 facades helper: after-dispatch ``shell_command`` consumer.
 
@@ -353,6 +416,8 @@ async def _maybe_apply_shell_command_after_tool(
     Audit-only — the tool has already returned, so any ``block`` rule is
     recorded as audit + ``passed: false`` without un-executing the call.
     Fail-open on any exception.
+
+    ``session_id`` / ``turn_id`` are passed through to ``shell_budget_for``.
     """
     try:
         if not _shell_command_enabled():
@@ -364,7 +429,7 @@ async def _maybe_apply_shell_command_after_tool(
             run_shell_command_at_after_tool_use,
         )
 
-        remaining, decrement_fn = shell_budget_for()
+        remaining, decrement_fn = shell_budget_for(session_id, turn_id)
         await run_shell_command_at_after_tool_use(
             tool_name=tool_name,
             tool_output=result_output,
@@ -376,7 +441,11 @@ async def _maybe_apply_shell_command_after_tool(
 
 
 async def _maybe_apply_shell_check_before_tool(
-    *, tool_name: str, arguments: dict[str, object]
+    *,
+    tool_name: str,
+    arguments: dict[str, object],
+    session_id: str | None = None,
+    turn_id: str | None = None,
 ) -> ToolResult | None:
     """F-EXEC2 facades helper: before-dispatch ``shell_check`` consumer.
 
@@ -385,8 +454,9 @@ async def _maybe_apply_shell_check_before_tool(
     fan-out helper so the budget plumbing, rule loading, and verdict
     reduction stay in one place. Threads the shared per-(session, turn)
     shell budget through :func:`magi_agent.adk_bridge
-    .lifecycle_shell_command_control.shell_budget_for` (resolves identity
-    from the active turn ContextVar published by ``run_governed_turn``).
+    .lifecycle_shell_command_control.shell_budget_for`. When ``session_id`` /
+    ``turn_id`` are not given, ``shell_budget_for`` resolves identity from the
+    active-turn ContextVar published by ``run_governed_turn``.
     Returns a blocked :class:`ToolResult` on a ``block`` verdict; ``None``
     otherwise. Fail-open: any unexpected exception returns ``None``.
     """
@@ -400,7 +470,7 @@ async def _maybe_apply_shell_check_before_tool(
             run_shell_check_at_before_tool_use,
         )
 
-        remaining, decrement_fn = shell_budget_for()
+        remaining, decrement_fn = shell_budget_for(session_id, turn_id)
         # _safe_json returns either the original dict (when serialisable) or a
         # str fallback; the fan-out helper expects ``dict | None`` so we coerce
         # the fallback case to ``None`` and let the script see only the
@@ -546,6 +616,20 @@ def _prompt_injection_enabled() -> bool:
         return False
 
 
+# Public rename-aliases for the two after-tool sub-stages. The live ADK
+# after_tool_callback bridge in ``cli/customize_tool_wiring.py`` consumes these
+# individually (per response key for output_rewrite, exactly once for the shell
+# after-audit) so the redact runs per str key without spawning the shell audit
+# once per key. The facade's :func:`apply_customize_after_tool_stages` keeps
+# calling the underscored originals.
+apply_output_rewrite_stage = _maybe_apply_output_rewrite
+apply_shell_command_after_stage = _maybe_apply_shell_command_after_tool
+
+
 __all__ = [
     "execute_tool_with_hooks",
+    "apply_customize_before_tool_stages",
+    "apply_customize_after_tool_stages",
+    "apply_output_rewrite_stage",
+    "apply_shell_command_after_stage",
 ]

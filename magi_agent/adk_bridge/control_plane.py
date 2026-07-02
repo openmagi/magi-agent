@@ -65,6 +65,18 @@ overrides ``on_before_tool``. Such controls are forbidden until the permission g
 is moved to the plugin level (or re-checked after the plane). This fails loud at
 registration rather than silently bypassing security at runtime.
 
+Where customize deny/rewrite actually lives
+--------------------------------------------
+Operator-authored customize tool-boundary rules (prompt_injection append,
+shell_command block/audit, shell_check block, output_rewrite redact) DO perform
+deny/rewrite, but they are wired **agent-level**, not through this plane. The
+bridge is ``magi_agent/cli/customize_tool_wiring.py`` (attached by the engine
+via ``_attach_customize_rules``), appended AFTER the permission gate on the
+agent's ``before_tool_callback`` so the gate (Step 2) always runs first and a
+gate deny short-circuits before any customize rule. Because that path is
+agent-level and gate-ordered, the plugin-level ``on_before_tool`` prohibition
+below stays intact: it is NOT the mechanism customize deny/rewrite uses.
+
 Known ADK limitations (do NOT try to force into the plane)
 -----------------------------------------------------------
 The following controls CANNOT be expressed via ADK callbacks and remain
@@ -340,6 +352,11 @@ class ControlPlane:
                 short-circuit Step 2 and bypass the permission gate entirely.
                 Move the gate to the plugin level (or re-check it after the plane)
                 before introducing deny/rewrite-capable ``on_before_tool`` controls.
+
+        Note: customize tool-boundary deny/rewrite does NOT go through this plane.
+        It is wired agent-level in ``magi_agent/cli/customize_tool_wiring.py``
+        (engine ``_attach_customize_rules``), running AFTER the permission gate,
+        so this plugin-level prohibition remains correct and is left unchanged.
         """
         if type(control).on_before_tool is not BaseLoopControl.on_before_tool:
             raise ValueError(

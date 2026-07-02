@@ -2300,6 +2300,13 @@ class MagiEngineDriver:
         hook_attach = self._attach_user_hook_bus(
             runner=runner, session_id=session_id, turn_id=turn_id
         )
+        # Third agent-level bridge: authored customize tool-boundary rules,
+        # appended AFTER the gate + user hook (order: gate -> user hook ->
+        # customize). No-op when every customize slot is OFF. Restored in the
+        # ``finally`` below, before the user-hook + gate restores (LIFO).
+        customize_attach = self._attach_customize_rules(
+            runner=runner, session_id=session_id, turn_id=turn_id
+        )
         route_attach = self._attach_runner_policy_route(
             runner=runner,
             route_selection=route_selection,
@@ -3050,6 +3057,7 @@ class MagiEngineDriver:
                 break
         finally:
             self._restore_runner_policy_route(route_attach)
+            self._restore_customize_rules(customize_attach)
             self._restore_user_hook_bus(hook_attach)
             self._restore_gate_callback(gate_attach)
 
@@ -3415,6 +3423,9 @@ class MagiEngineDriver:
             repair_hook_attach = self._attach_user_hook_bus(
                 runner=runner, session_id=session_id, turn_id=turn_id
             )
+            repair_customize_attach = self._attach_customize_rules(
+                runner=runner, session_id=session_id, turn_id=turn_id
+            )
             repair_route_attach = self._attach_runner_policy_route(
                 runner=runner,
                 route_selection=route_selection,
@@ -3484,6 +3495,7 @@ class MagiEngineDriver:
             finally:
                 await self._aclose_iter(adk_iter)
                 self._restore_runner_policy_route(repair_route_attach)
+                self._restore_customize_rules(repair_customize_attach)
                 self._restore_user_hook_bus(repair_hook_attach)
                 self._restore_gate_callback(repair_gate_attach)
                 _fold_usage(usage, _repair_usage)
@@ -5843,6 +5855,34 @@ class MagiEngineDriver:
         from magi_agent.cli.hook_wiring import restore_hook_bus_tool_callbacks
 
         restore_hook_bus_tool_callbacks(attachment)  # type: ignore[arg-type]
+
+    def _attach_customize_rules(
+        self, *, runner: object, session_id: str, turn_id: str
+    ) -> object | None:
+        """Attach the customize tool-boundary bridge (third agent-level layer).
+
+        Fires the authored customize rules (prompt_injection / shell_command /
+        shell_check / output_rewrite) at the live ADK tool boundary. Appended
+        AFTER the gate and user-hook bridges so a gate deny short-circuits
+        first. No-op when no customize slot is ON or the runner has no agent.
+        """
+        from magi_agent.cli.customize_tool_wiring import (
+            attach_customize_tool_callbacks,
+        )
+
+        return attach_customize_tool_callbacks(
+            runner=runner, session_id=session_id, turn_id=turn_id
+        )
+
+    @staticmethod
+    def _restore_customize_rules(attachment: object | None) -> None:
+        if attachment is None:
+            return
+        from magi_agent.cli.customize_tool_wiring import (
+            restore_customize_tool_callbacks,
+        )
+
+        restore_customize_tool_callbacks(attachment)  # type: ignore[arg-type]
 
     @staticmethod
     def _build_gate_before_tool(
