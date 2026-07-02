@@ -864,3 +864,84 @@ def test_has_evidence_no_payload_row_excluded_via_store(tmp_path):
     rows = store.list_events(has_evidence=True)
     assert rows == []
     store.close()
+
+
+# ---------------------------------------------------------------------------
+# PR-D4 / N-16: kind-aware prune + noise commit batching
+# ---------------------------------------------------------------------------
+import sqlite3 as _sqlite3
+
+
+def test_prune_kind_aware_evicts_noise_before_enforcement(tmp_path):
+    store = ActivityStore(tmp_path / "obs.db")
+    for _ in range(12):
+        store.record_event(ActivityEvent(kind="text_delta"))
+    for _ in range(3):
+        store.record_event(ActivityEvent(kind="rule_check"))
+    store.prune(max_events=10, noise_kinds=("text_delta",))
+    rows = store.list_events(limit=1000)
+    kinds = [r["kind"] for r in rows]
+    assert kinds.count("rule_check") == 3  # enforcement events survive
+    assert len(rows) <= 10
+    assert kinds.count("text_delta") <= 7  # only noise was evicted
+    store.close()
+
+
+def test_prune_without_noise_kinds_is_legacy_behavior(tmp_path):
+    store = ActivityStore(tmp_path / "obs.db")
+    ids = [store.record_event(ActivityEvent(kind="x")) for _ in range(10)]
+    removed = store.prune(max_events=4)
+    assert removed == 6
+    # Legacy behavior keeps the newest N by id, indiscriminate of kind.
+    surviving = {r["id"] for r in store.list_events(limit=1000)}
+    assert surviving == set(ids[-4:])
+    store.close()
+
+
+def test_prune_second_stage_still_enforces_cap(tmp_path):
+    store = ActivityStore(tmp_path / "obs.db")
+    for _ in range(2):
+        store.record_event(ActivityEvent(kind="text_delta"))
+    for _ in range(20):
+        store.record_event(ActivityEvent(kind="rule_check"))
+    store.prune(max_events=10, noise_kinds=("text_delta",))
+    assert store.count_events() <= 10
+    store.close()
+
+
+def test_noise_commit_batching_visible_same_connection(tmp_path):
+    store = ActivityStore(tmp_path / "obs.db", noise_kinds=("text_delta",))
+    rids = [store.record_event(ActivityEvent(kind="text_delta")) for _ in range(5)]
+    assert all(r >= 1 for r in rids)  # rowids valid even while uncommitted
+    # Same-connection reads see uncommitted rows: read contract unchanged.
+    assert len(store.list_events(limit=1000)) == 5
+    assert store.count_events() == 5
+    store.close()
+
+
+def test_non_noise_event_flushes_pending_noise(tmp_path):
+    db = tmp_path / "obs.db"
+    store = ActivityStore(db, noise_kinds=("text_delta",))
+    for _ in range(3):
+        store.record_event(ActivityEvent(kind="text_delta"))
+    external = _sqlite3.connect(str(db))
+    try:
+        # noise inserts are batched: not yet committed, external reader sees 0.
+        assert external.execute("SELECT COUNT(*) FROM activity_events").fetchone()[0] == 0
+        # a non-noise insert commits, flushing the pending noise too.
+        store.record_event(ActivityEvent(kind="rule_check"))
+        assert external.execute("SELECT COUNT(*) FROM activity_events").fetchone()[0] == 4
+    finally:
+        external.close()
+    store.close()
+
+
+def test_close_flushes_pending_noise(tmp_path):
+    db = tmp_path / "obs.db"
+    store = ActivityStore(db, noise_kinds=("text_delta",))
+    for _ in range(3):
+        store.record_event(ActivityEvent(kind="text_delta"))
+    store.close()
+    reopened = ActivityStore(db)
+    assert reopened.count_events() == 3
+    reopened.close()

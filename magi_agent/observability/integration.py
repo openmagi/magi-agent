@@ -47,7 +47,13 @@ def register_observability(app: Any, runtime: Any) -> ObservabilityCore | None:
     # Opportunistic one-shot prune at startup; the periodic retention loop is
     # started lazily by the core on the first recorded event (in the run loop).
     try:
-        core.store.prune(max_events=config.max_events, retention_days=config.retention_days)
+        from magi_agent.observability.taxonomy import NOISE_KINDS  # noqa: PLC0415
+
+        core.store.prune(
+            max_events=config.max_events,
+            retention_days=config.retention_days,
+            noise_kinds=tuple(NOISE_KINDS),
+        )
     except Exception:
         logger.debug("observability initial prune failed", exc_info=True)
 
