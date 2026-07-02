@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from typing import Literal, Self
 
@@ -22,115 +21,19 @@ from magi_agent.evidence.types import (
 from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.ops.safety import (
     MAX_PUBLIC_TEXT_CHARS as _PUBLIC_SUMMARY_MAX_STRING_LENGTH,
+    PUBLIC_CREDENTIAL_KEY_NAMES as _PUBLIC_SUMMARY_SECRET_FIELD_NAMES,
+    SECRET_KEY_FRAGMENTS as _SECRET_FIELD_FRAGMENTS,
+    is_secret_key as _kernel_is_secret_key,
+    redact_secret_tokens as _redact_public_summary_text,
 )
 
 
-_SECRET_FIELD_FRAGMENTS = (
-    "api_key",
-    "apikey",
-    "auth_token",
-    "bearer_token",
-    "client_secret",
-    "id_token",
-    "password",
-    "passphrase",
-    "private_key",
-    "refresh_token",
-    "secret",
-    "service_role_key",
-    "session_token",
-    "token",
-)
-_PUBLIC_SUMMARY_SECRET_FIELD_NAMES = frozenset(
-    (
-        "authorization",
-        "proxy_authorization",
-        "proxyauthorization",
-        "cookie",
-        "set_cookie",
-        "setcookie",
-        "credential",
-        "credentials",
-    )
-)
+# The secret-key grammar, token/KV patterns, and the public-summary text
+# redactor now live in the single home magi_agent/ops/safety.py (imported
+# above). _redact_public_summary_text is the kernel redactor: it adds the
+# session-assignment step and the wider secret-key grammar the old local copy
+# lacked (stricter only).
 _REDACTED = "[redacted]"
-_BEARER_TOKEN_RE = re.compile(r"(Bearer\s+)[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
-_AUTHORIZATION_HEADER_RE = re.compile(
-    r"\b((?:Proxy-)?Authorization\s*:\s*[A-Za-z][A-Za-z0-9+.-]*\s+)"
-    r"([^\s,;]+)",
-    re.IGNORECASE,
-)
-_COOKIE_HEADER_RE = re.compile(
-    r"\b((?:Set-)?Cookie\s*:\s*)"
-    r"(.+?)(?=(?:\s+and\s+|\s*,|\n|$|"
-    r"\s+(?:(?:Proxy-)?Authorization|(?:Set-)?Cookie|credentials?)\s*[:=]))",
-    re.IGNORECASE,
-)
-_GITHUB_TOKEN_RE = re.compile(r"\bgh[opusr]_[A-Za-z0-9_]+\b")
-_OPENAI_TOKEN_RE = re.compile(r"\bsk-[A-Za-z0-9._-]+\b")
-_STRIPE_TOKEN_RE = re.compile(r"\b[rs]k_(?:live|test)_[A-Za-z0-9_]+\b")
-_SECRET_KEY_NAME = (
-    r"(?:"
-    r"[A-Za-z0-9_-]*(?:api[_-]?key|secret[_-]?key|service[_-]?role[_-]?key)"
-    r"[A-Za-z0-9_-]*"
-    r"|"
-    r"[A-Za-z0-9_-]*(?:access|auth|bearer|id|refresh|session)[_-]?token"
-    r"[A-Za-z0-9_-]*"
-    r"|"
-    r"[A-Za-z0-9_-]*credentials?"
-    r"[A-Za-z0-9_-]*"
-    r"|"
-    r"[A-Za-z0-9_-]*(?:token|secret|password|passphrase|private[_-]?key|client[_-]?secret)"
-    r"[A-Za-z0-9_-]*"
-    r")"
-)
-_PUBLIC_CREDENTIAL_KEY_NAME = (
-    r"(?:"
-    r"proxy_authorization|proxyAuthorization|ProxyAuthorization|proxyauthorization"
-    r"|"
-    r"authorization|Authorization"
-    r"|"
-    r"set_cookie|setCookie|SetCookie|setcookie|Setcookie"
-    r"|"
-    r"cookie|Cookie"
-    r"|"
-    r"credentials?"
-    r"|"
-    r"Credentials?"
-    r")"
-)
-_DOUBLE_QUOTED_PUBLIC_CREDENTIAL_KEY_VALUE_RE = re.compile(
-    rf"(?<![A-Za-z0-9_-])([\"']?{_PUBLIC_CREDENTIAL_KEY_NAME}[\"']?\s*[:=]\s*)"
-    r'"((?:\\.|[^"\\])*)"'
-)
-_SINGLE_QUOTED_PUBLIC_CREDENTIAL_KEY_VALUE_RE = re.compile(
-    rf"(?<![A-Za-z0-9_-])([\"']?{_PUBLIC_CREDENTIAL_KEY_NAME}[\"']?\s*[:=]\s*)"
-    r"'((?:\\.|[^'\\])*)'"
-)
-_UNQUOTED_PUBLIC_CREDENTIAL_KEY_VALUE_RE = re.compile(
-    rf"(?<![A-Za-z0-9_-])([\"']?{_PUBLIC_CREDENTIAL_KEY_NAME}[\"']?\s*[:=]\s*)"
-    r"(?![A-Za-z][A-Za-z0-9+.-]*\s+\[redacted\])"
-    r"("
-    r"[A-Za-z][A-Za-z0-9+.-]*\s+[A-Za-z0-9._~+/=-]+"
-    r"|"
-    r"[^\"'\s,}\n](?:(?!\s+[A-Za-z0-9_-]+\s*[:=])[^\"',}\n])*"
-    r")"
-)
-_DOUBLE_QUOTED_KEY_VALUE_SECRET_RE = re.compile(
-    r"(?i)"
-    rf"([\"']?{_SECRET_KEY_NAME}[\"']?\s*[:=]\s*)"
-    r'"((?:\\.|[^"\\])*)"'
-)
-_SINGLE_QUOTED_KEY_VALUE_SECRET_RE = re.compile(
-    r"(?i)"
-    rf"([\"']?{_SECRET_KEY_NAME}[\"']?\s*[:=]\s*)"
-    r"'((?:\\.|[^'\\])*)'"
-)
-_UNQUOTED_KEY_VALUE_SECRET_RE = re.compile(
-    r"(?i)"
-    rf"([\"']?{_SECRET_KEY_NAME}[\"']?\s*[:=]\s*)"
-    r"([^\"'\s,}\n](?:(?!\s+[A-Za-z0-9_-]+\s*[:=])[^\"',}\n])*)"
-)
 EvidenceLedgerEntryKind = Literal[
     "evidence_record",
     "verifier_verdict",
@@ -617,34 +520,10 @@ def _is_secret_key(
     *,
     include_public_credential_keys: bool = False,
 ) -> bool:
-    normalized = key.replace("-", "_").lower()
-    if include_public_credential_keys and (
-        normalized in _PUBLIC_SUMMARY_SECRET_FIELD_NAMES
-        or normalized.replace("_", "") in _PUBLIC_SUMMARY_SECRET_FIELD_NAMES
-    ):
-        return True
-    return any(fragment in normalized for fragment in _SECRET_FIELD_FRAGMENTS)
-
-
-def _redact_public_summary_text(value: str) -> str:
-    redacted = _BEARER_TOKEN_RE.sub(r"\1[redacted]", value)
-    redacted = _AUTHORIZATION_HEADER_RE.sub(r"\1[redacted]", redacted)
-    redacted = _COOKIE_HEADER_RE.sub(r"\1[redacted]", redacted)
-    redacted = _GITHUB_TOKEN_RE.sub("[redacted]", redacted)
-    redacted = _OPENAI_TOKEN_RE.sub("[redacted]", redacted)
-    redacted = _STRIPE_TOKEN_RE.sub("[redacted]", redacted)
-    redacted = _DOUBLE_QUOTED_PUBLIC_CREDENTIAL_KEY_VALUE_RE.sub(
-        r'\1"[redacted]"',
-        redacted,
+    return _kernel_is_secret_key(
+        key,
+        include_public_credential_keys=include_public_credential_keys,
     )
-    redacted = _SINGLE_QUOTED_PUBLIC_CREDENTIAL_KEY_VALUE_RE.sub(
-        r"\1'[redacted]'",
-        redacted,
-    )
-    redacted = _UNQUOTED_PUBLIC_CREDENTIAL_KEY_VALUE_RE.sub(r"\1[redacted]", redacted)
-    redacted = _DOUBLE_QUOTED_KEY_VALUE_SECRET_RE.sub(r'\1"[redacted]"', redacted)
-    redacted = _SINGLE_QUOTED_KEY_VALUE_SECRET_RE.sub(r"\1'[redacted]'", redacted)
-    return _UNQUOTED_KEY_VALUE_SECRET_RE.sub(r"\1[redacted]", redacted)
 
 
 def _sanitize_public_summary_value(

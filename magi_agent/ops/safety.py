@@ -499,6 +499,14 @@ SECRET_KEY_NAME = (
     r"[A-Za-z0-9_-]*(?:session[_-]?(?:key|id)|session(?:key|id))"
     r"[A-Za-z0-9_-]*"
     r"|"
+    # B3 union: ledger's wrapped credentials branch.
+    r"[A-Za-z0-9_-]*credentials?"
+    r"[A-Za-z0-9_-]*"
+    r"|"
+    # B3 union: adk_bridge's access-key family (kernel gap closed in N-02).
+    r"[A-Za-z0-9_-]*(?:access[_-]?key|aws[_-]?access[_-]?key[_-]?id|aws[_-]?secret[_-]?access[_-]?key)"
+    r"[A-Za-z0-9_-]*"
+    r"|"
     r"[A-Za-z0-9_-]*(?:token|secret|password|passphrase|private[_-]?key|client[_-]?secret)"
     r"[A-Za-z0-9_-]*"
     r")"
@@ -596,3 +604,78 @@ def redact_secret_tokens(text: str) -> str:
     redacted = UNQUOTED_KEY_VALUE_SECRET_RE.sub(r"\1[redacted]", redacted)
     redacted = SESSION_ASSIGNMENT_RE.sub(r"\1[redacted]", redacted)
     return redacted
+
+
+# B3 -- secret-key-name classifier single home (moved from the three evidence
+# _is_secret_key forks in ledger.py / reports.py / tool_boundary.py). The base
+# fragment union is the ledger/reports 14 plus the tool_boundary excess
+# {authorization, cookie, credential, credential_id, credentials, service_key};
+# the bare "key" fragment stays a tool_boundary-only extra (passed via
+# extra_fragments) so ledger/reports do not over-redact public keys like
+# objectKey. Compact (underscore-stripped) matching subsumes tool_boundary's
+# privatekey/servicekey compact fragments.
+SECRET_KEY_FRAGMENTS: tuple[str, ...] = (
+    "api_key",
+    "apikey",
+    "auth_token",
+    "authorization",
+    "bearer_token",
+    "client_secret",
+    "cookie",
+    "credential",
+    "credential_id",
+    "credentials",
+    "id_token",
+    "password",
+    "passphrase",
+    "private_key",
+    "refresh_token",
+    "secret",
+    "service_key",
+    "service_role_key",
+    "session_token",
+    "token",
+)
+PUBLIC_CREDENTIAL_KEY_NAMES: frozenset[str] = frozenset(
+    (
+        "authorization",
+        "proxy_authorization",
+        "proxyauthorization",
+        "cookie",
+        "set_cookie",
+        "setcookie",
+        "credential",
+        "credentials",
+    )
+)
+
+
+def is_secret_key(
+    key: str,
+    *,
+    include_public_credential_keys: bool = False,
+    extra_fragments: tuple[str, ...] = (),
+) -> bool:
+    """Return True if *key* names a secret/credential field.
+
+    ``normalized`` lower-cases and maps ``-`` to ``_``; ``compact`` additionally
+    strips ``_``. Public-credential names (exact) only count when
+    ``include_public_credential_keys`` is set (ledger threads the caller's opt-in;
+    reports passes it always-on). ``extra_fragments`` layers site-specific
+    fragments (tool_boundary passes the bare ``"key"`` axis) without weakening any
+    other site.
+    """
+    normalized = str(key).replace("-", "_").lower()
+    compact = normalized.replace("_", "")
+    if include_public_credential_keys and (
+        normalized in PUBLIC_CREDENTIAL_KEY_NAMES
+        or compact in PUBLIC_CREDENTIAL_KEY_NAMES
+    ):
+        return True
+    for fragment in SECRET_KEY_FRAGMENTS:
+        if fragment in normalized or fragment.replace("_", "") in compact:
+            return True
+    for fragment in extra_fragments:
+        if fragment in normalized or fragment.replace("_", "") in compact:
+            return True
+    return False
