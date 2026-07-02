@@ -33,12 +33,13 @@ from magi_agent.memory.contracts import (
     UnsupportedMemoryOperationError,
 )
 from magi_agent.memory.policy import MemoryPolicy, evaluate_memory_policy
-# Shared, broader token/secret redactor — single source of truth, also used by
-# the read-side projection (``memory/prompt_projection.py``).  ``tool_preview``
-# imports only ``re`` (no transport/network at module load), so importing it at
-# module top does not trip the memory import-boundary tests.  This keeps the
-# write-side redactor at least as strong as the read-side one (C2 / PR-D).
-from magi_agent.shared.tool_preview import MAX_TOOL_PREVIEW, redact_secret_tokens
+# Shared, broader token/secret redactor: single home in ``ops/safety.py``, also
+# used by the read-side projection (``memory/prompt_projection.py``).
+# ``ops/safety`` imports only stdlib + pydantic (no transport/network at module
+# load), so importing it at module top does not trip the memory import-boundary
+# tests. This keeps the write-side redactor at least as strong as the read-side
+# one (C2 / PR-D).
+from magi_agent.ops.safety import MAX_TOOL_PREVIEW, redact_secret_tokens
 from magi_agent.memory.adapters.hipocampus_readonly import (
     UnsafeMemoryPathError,
     _PRODUCTION_PATH_RE,

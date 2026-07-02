@@ -40,7 +40,7 @@ from magi_agent.memory.projection import (
     _drop_private_projection_lines,
     _redact_private_path,
 )
-from magi_agent.shared.tool_preview import MAX_TOOL_PREVIEW, redact_secret_tokens
+from magi_agent.ops.safety import MAX_TOOL_PREVIEW, redact_secret_tokens
 
 # ReDoS guard for per-line token redaction: some patterns in redact_secret_tokens
 # have superlinear backtracking; cap each line to a safe length before running
