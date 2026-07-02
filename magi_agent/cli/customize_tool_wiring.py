@@ -230,7 +230,7 @@ def attach_customize_tool_callbacks(
 
     No-op (returns ``None``) when no customize tool-boundary slot is ON
     (:func:`customize_tool_boundary_enabled`) or the runner exposes no
-    ``agent`` — so the agentless test runners and the all-OFF path stay
+    ``agent``, so the agentless test runners and the all-OFF path stay
     byte-identical.
 
     Both bridges are APPENDED after any pre-existing callbacks (gate, user
