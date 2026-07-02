@@ -17,6 +17,13 @@ from magi_agent.customize.modes import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_builtins(monkeypatch: pytest.MonkeyPatch) -> None:
+    # These are user-store CRUD tests; isolate them from the default-ON built-in
+    # posture modes (covered by tests/test_builtin_modes.py).
+    monkeypatch.setenv("MAGI_CUSTOMIZE_BUILTIN_MODES_ENABLED", "0")
+
+
 def _path(tmp_path: Path) -> Path:
     return tmp_path / "customize.json"
 

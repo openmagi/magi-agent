@@ -1799,6 +1799,21 @@ FLAGS: tuple[FlagSpec, ...] = (
         scope="public",
         stage="stage2",
     ),
+    _pb(
+        "MAGI_CUSTOMIZE_BUILTIN_MODES_ENABLED",
+        summary=(
+            "Surface the read-only built-in POSTURE modes (Coding / Research / "
+            "Delivery) in the modes list, composer, and rule-scoping picker. Each "
+            "carries only a soft system prompt (posture); they never re-home "
+            "enforcement (enforcement stays ambient/global). Built-ins are inert "
+            "until the operator SELECTS one active, so this governs visibility, "
+            "not runtime behavior: with no active mode the assembly is "
+            "byte-identical. Profile-aware default-ON (a capability, not a safety "
+            "floor); opt out anywhere with '0'."
+        ),
+        scope="public",
+        stage="stage2",
+    ),
     _b(
         "MAGI_CUSTOMIZE_NL_INTERVIEW_MODE_ENABLED",
         summary=(

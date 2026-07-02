@@ -16,7 +16,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Layers, Plus, Trash2, Pencil, Check, Sparkles } from "lucide-react";
+import { Layers, Plus, Trash2, Pencil, Check, Sparkles, Copy } from "lucide-react";
 
 import { useAgentFetch } from "@/lib/local-api";
 import {
@@ -349,7 +349,11 @@ export function ModesPanel({ botId }: { botId: string }): React.JSX.Element {
         </div>
       ) : (
         <div className="space-y-2">
-          {modes.map((mode) => (
+          {modes.map((mode) => {
+            // PR-P5.1: built-in posture modes are read-only (backend rejects
+            // edit/delete). Offer Clone instead so the user customizes a copy.
+            const isBuiltin = mode.id.startsWith("builtin-");
+            return (
             <div
               key={mode.id}
               className="flex items-start justify-between gap-4 rounded-xl border border-black/[0.06] bg-white px-4 py-3"
@@ -360,6 +364,11 @@ export function ModesPanel({ botId }: { botId: string }): React.JSX.Element {
                   <span className="inline-flex items-center rounded-full bg-black/5 px-2 py-0.5 font-mono text-[11px] text-secondary">
                     {mode.id}
                   </span>
+                  {isBuiltin ? (
+                    <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                      built-in
+                    </span>
+                  ) : null}
                   {active === mode.id ? (
                     <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
                       <Check className="h-3 w-3" /> active
@@ -377,30 +386,52 @@ export function ModesPanel({ botId }: { botId: string }): React.JSX.Element {
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditor(editorFromMode(mode));
-                    setDraftWarnings([]);
-                  }}
-                  disabled={busy}
-                  aria-label={`Edit mode ${mode.displayName}`}
-                  className="rounded-lg p-1.5 text-secondary hover:bg-black/[0.04] hover:text-foreground disabled:opacity-50"
-                >
-                  <Pencil className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDelete(mode.id)}
-                  disabled={busy}
-                  aria-label={`Delete mode ${mode.displayName}`}
-                  className="rounded-lg p-1.5 text-secondary hover:bg-red-500/[0.08] hover:text-red-600 disabled:opacity-50"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+                {isBuiltin ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditor({
+                        ...editorFromMode(mode),
+                        modeId: null,
+                        displayName: `${mode.displayName} (copy)`,
+                      });
+                      setDraftWarnings([]);
+                    }}
+                    disabled={busy}
+                    aria-label={`Clone mode ${mode.displayName}`}
+                    className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-secondary hover:bg-black/[0.04] hover:text-foreground disabled:opacity-50"
+                  >
+                    <Copy className="h-3.5 w-3.5" /> Clone
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditor(editorFromMode(mode));
+                        setDraftWarnings([]);
+                      }}
+                      disabled={busy}
+                      aria-label={`Edit mode ${mode.displayName}`}
+                      className="rounded-lg p-1.5 text-secondary hover:bg-black/[0.04] hover:text-foreground disabled:opacity-50"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(mode.id)}
+                      disabled={busy}
+                      aria-label={`Delete mode ${mode.displayName}`}
+                      className="rounded-lg p-1.5 text-secondary hover:bg-red-500/[0.08] hover:text-red-600 disabled:opacity-50"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </>
+                )}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
