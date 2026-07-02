@@ -4,7 +4,11 @@ import json
 
 from magi_agent.shadow.gate5b4c3_shadow_counter_store import (
     Gate5B4C3ShadowCounterStore,
+    _counter_date,
 )
+
+
+_DAY_MS = 86_400_000
 
 
 BOT_DIGEST = "sha256:" + "a" * 64
@@ -1791,3 +1795,171 @@ def test_counter_store_pending_cap_is_enforced(tmp_path) -> None:
     assert blocked.status == "blocked"
     assert blocked.reason == "pending_cap_exhausted"
     assert blocked.counter_state.pending_generation_runs == 1
+
+
+# --- PR-D3 / N-11: scope retention prune + per-scope terminal record cap ---
+
+_DAY_D_MS = 1_779_200_000_000
+
+
+def _reserve(store, *, request_digest, now_ms, max_daily_generation_runs=100):
+    return store.reserve(
+        request_digest=request_digest,
+        shadow_generation_id="shadow_gen_retention",
+        selected_bot_digest=BOT_DIGEST,
+        trusted_owner_user_id_digest=OWNER_DIGEST,
+        environment="production",
+        max_daily_generation_runs=max_daily_generation_runs,
+        max_daily_generation_cost_usd=50.0,
+        max_concurrent_generation_runs=10,
+        max_pending_generation_runs=10,
+        cost_cap_usd=0.05,
+        now_ms=now_ms,
+    )
+
+
+def _finish(store, reservation, *, now_ms, report_digest="sha256:" + "e" * 64):
+    return store.finish(
+        reservation,
+        status="runner_completed",
+        reason="runner_completed",
+        report_digest=report_digest,
+        now_ms=now_ms,
+    )
+
+
+def _raw_scopes(path):
+    return json.loads(path.read_text(encoding="utf-8"))["scopes"]
+
+
+def test_counter_store_prunes_scopes_older_than_retention(tmp_path) -> None:
+    path = tmp_path / "gate5b-shadow-counters.json"
+    store = Gate5B4C3ShadowCounterStore(path)
+
+    day_d = _reserve(store, request_digest=REQUEST_DIGEST, now_ms=_DAY_D_MS)
+    _finish(store, day_d, now_ms=_DAY_D_MS + 2_000)
+
+    day_d_plus_8 = _DAY_D_MS + 8 * _DAY_MS
+    _reserve(store, request_digest=SECOND_REQUEST_DIGEST, now_ms=day_d_plus_8)
+
+    scopes = _raw_scopes(path)
+    # Day-D scope is more than 7 days old at day D+8 -> pruned wholesale;
+    # only the day D+8 scope survives.
+    assert len(scopes) == 1
+    surviving_key = next(iter(scopes))
+    assert surviving_key.split("|")[0] == _counter_date(day_d_plus_8)
+
+
+def test_counter_store_retention_zero_disables_scope_prune(tmp_path) -> None:
+    path = tmp_path / "gate5b-shadow-counters.json"
+    store = Gate5B4C3ShadowCounterStore(path, retention_days=0)
+
+    day_d = _reserve(store, request_digest=REQUEST_DIGEST, now_ms=_DAY_D_MS)
+    _finish(store, day_d, now_ms=_DAY_D_MS + 2_000)
+    _reserve(
+        store,
+        request_digest=SECOND_REQUEST_DIGEST,
+        now_ms=_DAY_D_MS + 8 * _DAY_MS,
+    )
+
+    scopes = _raw_scopes(path)
+    assert len(scopes) == 2  # escape hatch: nothing pruned
+
+
+def test_counter_store_same_day_duplicate_replay_survives_prune(tmp_path) -> None:
+    path = tmp_path / "gate5b-shadow-counters.json"
+    store = Gate5B4C3ShadowCounterStore(path)
+    report_digest = "sha256:" + "d" * 64
+
+    reservation = _reserve(store, request_digest=REQUEST_DIGEST, now_ms=_DAY_D_MS)
+    _finish(
+        store, reservation, now_ms=_DAY_D_MS + 2_000, report_digest=report_digest
+    )
+
+    replay = _reserve(store, request_digest=REQUEST_DIGEST, now_ms=_DAY_D_MS + 3_000)
+
+    # Prune runs on the same day but must not disturb duplicate-replay admission.
+    assert replay.status == "duplicate_replay"
+    assert replay.previous_report_digest == report_digest
+
+
+def test_counter_store_late_delivery_receipt_within_retention_window_recorded(
+    tmp_path,
+) -> None:
+    path = tmp_path / "gate5b-shadow-counters.json"
+    store = Gate5B4C3ShadowCounterStore(path)
+
+    reservation = _reserve(store, request_digest=REQUEST_DIGEST, now_ms=_DAY_D_MS)
+    _finish(store, reservation, now_ms=_DAY_D_MS + 2_000)
+
+    receipt = store.record_delivery_receipt(
+        request_digest=REQUEST_DIGEST,
+        selected_bot_digest=BOT_DIGEST,
+        trusted_owner_user_id_digest=OWNER_DIGEST,
+        environment="production",
+        delivery_status="served_to_client",
+        reason="served_to_client",
+        body_digest="sha256:" + "1" * 64,
+        route_decision="python_selected",
+        response_authority="python",
+        gate="gate1a_readonly_tools",
+        sse_frame_count=4,
+        tool_receipt_count=1,
+        model_attempt_count=1,
+        provider_request_count=1,
+        expected_model_attempt_count=1,
+        egress_tunnel_count=1,
+        egress_discipline_mode="bounded_provider_tunnels",
+        egress_evidence_status="observed_egress_evidence_present",
+        max_provider_tunnels_per_model_attempt=2,
+        egress_host_classes=("gemini_proxy",),
+        egress_window_started_at="2026-05-24T02:31:35.000Z",
+        egress_window_ended_at="2026-05-24T02:31:41.000Z",
+        # 2 days later: within the 7-day retention window, still resolvable.
+        now_ms=_DAY_D_MS + 2 * _DAY_MS,
+    )
+
+    assert receipt.status == "recorded"
+
+
+def test_counter_store_scope_record_cap_evicts_oldest_terminal_only(tmp_path) -> None:
+    path = tmp_path / "gate5b-shadow-counters.json"
+    store = Gate5B4C3ShadowCounterStore(path, max_terminal_records_per_scope=3)
+
+    digests = ["sha256:" + str(i) * 64 for i in range(1, 5)]
+    for index, digest in enumerate(digests):
+        reservation = _reserve(store, request_digest=digest, now_ms=_DAY_D_MS + index)
+        _finish(store, reservation, now_ms=_DAY_D_MS + 1_000 + index)
+
+    # 5th request stays in-flight (reserved) after the cap prune runs.
+    in_flight_digest = "sha256:" + "5" * 64
+    _reserve(store, request_digest=in_flight_digest, now_ms=_DAY_D_MS + 5)
+
+    scope = next(iter(_raw_scopes(path).values()))
+    requests = scope["requests"]
+    # cap=3 terminal + 1 reserved survivor == 4 records.
+    assert len(requests) == 4
+    # Oldest terminal (first finished) is evicted; the reserved record is kept.
+    assert digests[0] not in requests
+    assert in_flight_digest in requests
+    assert requests[in_flight_digest]["status"] == "reserved"
+
+
+def test_counter_store_prune_keeps_unparseable_scope_keys(tmp_path) -> None:
+    path = tmp_path / "gate5b-shadow-counters.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": "gate5b4c3.shadowCounterStore.v1",
+                "scopes": {"legacy-key": {"state": {}, "requests": {}}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = Gate5B4C3ShadowCounterStore(path)
+
+    _reserve(store, request_digest=REQUEST_DIGEST, now_ms=_DAY_D_MS + 30 * _DAY_MS)
+
+    scopes = _raw_scopes(path)
+    # fail-safe: a scope key that does not split into 4 parts is never deleted.
+    assert "legacy-key" in scopes

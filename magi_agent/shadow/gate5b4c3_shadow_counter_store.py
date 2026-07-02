@@ -185,6 +185,17 @@ _CONTEXT_REASON_CODE_FORBIDDEN_RE = re.compile(
     re.IGNORECASE,
 )
 _DEFAULT_STALE_AFTER_MS = 120_000
+#: Scopes whose counter_date is older than this many days (vs the mutating
+#: call's now_ms) are pruned wholesale. Must stay comfortably larger than the
+#: longest legitimate late-delivery-receipt / evidence-lookup lag (minutes in
+#: practice); 7 days gives audit margin while bounding the file to
+#: O(retention_days x daily records).
+_DEFAULT_SCOPE_RETENTION_DAYS = 7
+#: Per-scope safety net: terminal request records beyond this cap are evicted
+#: oldest-first. The daily-cap ladder (max 1000 runs/day) plus fallback
+#: receipts bounds organic growth well below this; the cap only bites on
+#: pathological duplicates.
+_DEFAULT_MAX_TERMINAL_RECORDS_PER_SCOPE = 4000
 _DIRECTORY_STATE_FILENAME = "state.json"
 _DIRECTORY_LOCK_FILENAME = ".lock"
 _EGRESS_FAILURE_STATUSES = frozenset(
@@ -534,6 +545,8 @@ class Gate5B4C3ShadowCounterStore:
         path: str | Path,
         *,
         stale_after_ms: int = _DEFAULT_STALE_AFTER_MS,
+        retention_days: int = _DEFAULT_SCOPE_RETENTION_DAYS,
+        max_terminal_records_per_scope: int = _DEFAULT_MAX_TERMINAL_RECORDS_PER_SCOPE,
     ) -> None:
         configured_path = Path(path)
         self._directory_state_path = (
@@ -544,6 +557,8 @@ class Gate5B4C3ShadowCounterStore:
         else:
             self.path = configured_path
         self.stale_after_ms = max(0, stale_after_ms)
+        self.retention_days = int(retention_days)
+        self.max_terminal_records_per_scope = int(max_terminal_records_per_scope)
 
     @_with_exclusive_lock
     def reserve(
@@ -573,6 +588,7 @@ class Gate5B4C3ShadowCounterStore:
         _validate_safe_label(shadow_generation_id, "shadow generation id must be public-safe")
 
         data = self._load()
+        _prune_expired_scopes(data, now_ms=now, retention_days=self.retention_days)
         scopes = data.setdefault("scopes", {})
         scope_key = _scope_key(
             selected_bot_digest=selected_bot_digest,
@@ -605,6 +621,9 @@ class Gate5B4C3ShadowCounterStore:
         )
         requests = scope.setdefault("requests", {})
         _release_stale_in_flight(state, requests, now, self.stale_after_ms)
+        _prune_scope_terminal_records(
+            scope, cap=self.max_terminal_records_per_scope
+        )
 
         existing = requests.get(request_digest)
         if isinstance(existing, dict):
@@ -711,6 +730,7 @@ class Gate5B4C3ShadowCounterStore:
             runner_error_diagnostic
         )
         data = self._load()
+        _prune_expired_scopes(data, now_ms=now, retention_days=self.retention_days)
         scopes = data.setdefault("scopes", {})
         scope_key = _scope_key(
             selected_bot_digest=reservation.counter_state.selected_bot_digest,
@@ -1923,6 +1943,72 @@ def _release_stale_in_flight(
         state["staleInFlightReleased"] = (
             int(state.get("staleInFlightReleased") or 0) + released
         )
+
+
+def _prune_expired_scopes(
+    data: dict[str, Any], *, now_ms: int, retention_days: int
+) -> int:
+    """Delete scopes whose counter_date is older than the retention window.
+
+    Deleting an expired scope wholesale is safe because:
+      1. reserve()'s duplicate-replay lookup is scoped to TODAY's scope only, so
+         removing a scope more than retention_days old cannot change admission
+         semantics. If that lookup ever becomes cross-day, retention_days would
+         become the duplicate-replay defense window - keep this coupling in mind.
+      2. any "reserved" record inside an expired scope has already blown past
+         stale_after_ms (2 minutes) by orders of magnitude; it is an orphan and
+         is unrelated to today's live counters.
+      3. late delivery receipts / evidence resolved through _find_request_scope
+         still behave exactly as before WITHIN the retention window; only
+         receipts arriving later than retention_days degrade to not_found.
+    """
+    if retention_days <= 0:
+        return 0
+    scopes = data.get("scopes")
+    if not isinstance(scopes, dict):
+        return 0
+    cutoff_date = _counter_date(now_ms - retention_days * 86_400_000)
+    removed = 0
+    for scope_key in list(scopes):
+        if not isinstance(scope_key, str):
+            continue
+        parts = scope_key.split("|")
+        if len(parts) != 4:
+            continue  # fail-safe: never delete an unparseable scope
+        if parts[0] < cutoff_date:  # ISO dates compare lexicographically
+            del scopes[scope_key]
+            removed += 1
+    return removed
+
+
+def _prune_scope_terminal_records(scope: dict[str, Any], *, cap: int) -> int:
+    """Evict oldest terminal request records beyond ``cap`` from one scope.
+
+    Never evicts an in-flight ("reserved") record - only records that already
+    reached a terminal status are eligible, oldest finishedAtMs first.
+    """
+    if cap <= 0:
+        return 0
+    requests = scope.get("requests")
+    if not isinstance(requests, dict) or len(requests) <= cap:
+        return 0
+    # Never evict in-flight ("reserved") records; evict oldest terminal first.
+    terminal = [
+        (digest, record)
+        for digest, record in requests.items()
+        if isinstance(record, dict) and record.get("status") != "reserved"
+    ]
+    excess = len(requests) - cap
+    terminal.sort(
+        key=lambda item: int(
+            item[1].get("finishedAtMs") or item[1].get("reservedAtMs") or 0
+        )
+    )
+    removed = 0
+    for digest, _record in terminal[:excess]:
+        del requests[digest]
+        removed += 1
+    return removed
 
 
 def _cap_block_reason(
