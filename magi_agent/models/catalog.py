@@ -170,6 +170,38 @@ class ModelCatalog:
                 return r
         return self.default_model_for(provider)
 
+    def id_forms(self, record: ModelRecord) -> tuple[str, ...]:
+        """All model-id string forms a single record answers for.
+
+        Returns ``record.model`` (bare), the provider-prefixed
+        ``f"{record.provider}/{record.model}"``, and one prefixed form per
+        provider alias whose canonical target is ``record.provider`` (so a
+        ``gemini`` record answers under both ``gemini/<m>`` and
+        ``google/<m>``). Order is deterministic: bare, canonical prefix,
+        then aliases in ``provider_aliases`` iteration order.
+        """
+        forms: list[str] = [record.model, f"{record.provider}/{record.model}"]
+        for alias, canonical in self._aliases.items():
+            if canonical == record.provider:
+                forms.append(f"{alias}/{record.model}")
+        return tuple(forms)
+
+    def provider_for_model(self, model: str) -> str | None:
+        """Canonical provider for a model id, or ``None`` when unknown.
+
+        Scans records in JSON authoring order (skipping ``source="router"``
+        meta-router records) and returns the canonical ``record.provider`` of
+        the first record whose :meth:`id_forms` contains ``model`` (case
+        insensitive). Returns ``None`` when nothing matches.
+        """
+        needle = model.strip().lower()
+        for r in self._records:
+            if r.source == "router":
+                continue
+            if needle in {form.lower() for form in self.id_forms(r)}:
+                return r.provider
+        return None
+
     def context_window(self, model: str) -> int | None:
         """First catalogued ``context_window`` whose record.model matches.
 
