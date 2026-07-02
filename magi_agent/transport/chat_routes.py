@@ -389,16 +389,22 @@ async def _local_adk_chat_sse(
     # downstream (recall_enabled AND prefer_local_search, incognito-aware): when
     # off this is byte-identical (recall_query is just an unused string).
     #
-    # TODO(PR-C offload): the recall search runs SYNCHRONOUSLY inside
-    # build_headless_runtime → build_cli_instruction (prompt assembly), so it is
+    # TODO(N-47 offload, deferred): the recall search runs SYNCHRONOUSLY inside
+    # build_headless_runtime -> build_cli_instruction (prompt assembly), so it is
     # on this event loop. It already has an empty-tree guard
     # (memory_recall_block._has_indexable_memory) + a tiny corpus + a qmd
-    # subprocess timeout, so it is cheap today. It is NOT offloaded here because
+    # subprocess timeout, and since D1 (N-12/N-13) the search backend is a
+    # process-scope cache prepared bind-first (qmd `update` never runs on the hot
+    # path), so it is cheap today. It is NOT offloaded here because
     # build_headless_runtime is a single sync call that assembles the whole
-    # runtime (engine/gate/commands), not just recall — wrapping the lot in
-    # to_thread would move unrelated wiring off-loop. If the memory tree ever
-    # grows enough to matter, split the recall-block build out of prompt assembly
-    # and to_thread JUST that, mirroring the record_turn offload below.
+    # runtime (engine/gate/commands), not just recall: wrapping the lot in
+    # to_thread would move unrelated wiring off-loop. Splitting the recall-block
+    # build out and to_thread-ing JUST that (mirroring the record_turn offload
+    # below at asyncio.to_thread(record_turn, ...)) requires threading a
+    # pre-computed block through 3 seams (build_headless_runtime ->
+    # build_cli_model_runner -> build_cli_instruction) plus per-key backend-cache
+    # locking (see backend_cache thread-safety note), so it is deferred until the
+    # tree grows enough to matter.
     # 01-PR4 (C2, issue 3): thread the REAL bot/owner identity into prompt
     # assembly so the gated-live learning recall/write ladder matches the
     # selected-canary digest against the genuine identity (the previous literal

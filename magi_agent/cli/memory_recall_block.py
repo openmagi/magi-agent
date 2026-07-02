@@ -199,8 +199,20 @@ def _build_block(
     # rank, so a fresh/empty workspace pays no scan cost on the hot path.
     if not _has_indexable_memory(root):
         return ""
-    backend = select_search_backend(config)
-    backend.reindex(root)
+    from magi_agent.memory.search.backend_cache import (  # noqa: PLC0415
+        bind_or_reindex,
+        cached_search_backend,
+    )
+
+    # D1 (N-12/N-13): reuse a process-scope backend so PyBM25's H-27 mtime cache
+    # and qmd's bound collection survive across turns, and prepare the index
+    # bind-first (qmd ``update`` never runs on the hot path). The module-level
+    # ``select_search_backend`` seam is preserved as the (monkeypatchable)
+    # factory so tests keep injecting fakes through it.
+    backend = cached_search_backend(
+        config, root, factory=lambda: select_search_backend(config)
+    )
+    bind_or_reindex(backend, root)
     hits = backend.search(query, k=max(int(recall_k), 1))
     if not hits:
         return ""
