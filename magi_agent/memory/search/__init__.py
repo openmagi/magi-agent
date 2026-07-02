@@ -20,6 +20,11 @@ from __future__ import annotations
 
 from magi_agent.memory.config import MemoryRuntimeConfig
 
+from .backend_cache import (
+    bind_or_reindex,
+    cached_search_backend,
+    clear_search_backend_cache,
+)
 from .base import SearchBackend, SearchCapabilities, SearchHit
 from .bm25 import PyBM25Backend
 from .qmd import QmdBackend
@@ -77,5 +82,8 @@ __all__ = [
     "SearchBackend",
     "SearchCapabilities",
     "SearchHit",
+    "bind_or_reindex",
+    "cached_search_backend",
+    "clear_search_backend_cache",
     "select_search_backend",
 ]
