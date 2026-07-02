@@ -35,6 +35,13 @@ def _runtime() -> OpenMagiRuntime:
     )
 
 
+@pytest.fixture(autouse=True)
+def _no_builtins(monkeypatch: pytest.MonkeyPatch) -> None:
+    # User-store CRUD route tests; isolate from the default-ON built-in posture
+    # modes (covered by tests/test_builtin_modes.py).
+    monkeypatch.setenv("MAGI_CUSTOMIZE_BUILTIN_MODES_ENABLED", "0")
+
+
 def _authed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
     client = TestClient(create_app(_runtime()))
@@ -112,3 +119,20 @@ def test_put_bad_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         headers={"content-type": "application/json"},
     )
     assert resp.status_code == 400
+
+
+# PR-P5.1: built-in posture modes are read-only. The guards are flag-independent
+# (the builtin- prefix is reserved regardless of the autouse _no_builtins), so
+# both routes must 400 rather than mutate/500.
+def test_delete_builtin_mode_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _authed(tmp_path, monkeypatch)
+    resp = client.delete("/v1/app/modes/builtin-coding")
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "delete_rejected"
+
+
+def test_upsert_builtin_mode_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _authed(tmp_path, monkeypatch)
+    resp = client.put("/v1/app/modes/builtin-coding", json={"displayName": "X"})
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "upsert_rejected"

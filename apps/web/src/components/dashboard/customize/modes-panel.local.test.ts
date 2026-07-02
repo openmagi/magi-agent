@@ -63,6 +63,17 @@ describe("ModesPanel: PR-U3.4 conversational NL → mode composer", () => {
   });
 });
 
+describe("ModesPanel: PR-P5.1 built-in posture modes are read-only", () => {
+  it("treats builtin- ids as read-only and offers Clone instead of edit/delete", () => {
+    expect(src).toContain('mode.id.startsWith("builtin-")');
+    expect(src).toContain("isBuiltin");
+    expect(src).toContain("built-in");
+    // Clone opens the editor with a null id (creates a new user mode).
+    expect(src).toContain("modeId: null");
+    expect(src).toContain("(copy)");
+  });
+});
+
 describe("ModesPanel: PR-P1 tool picker replaces freeform typing", () => {
   it("renders a ModeToolPicker sourced from the live tool catalog", () => {
     expect(src).toContain("function ModeToolPicker");

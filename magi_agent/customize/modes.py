@@ -142,9 +142,76 @@ def _modes_raw(path: Path | None) -> dict:
     return raw if isinstance(raw, dict) else {}
 
 
+# PR-P5.1: read-only, non-deletable built-in POSTURE modes. Per the 2026-07-02
+# review + Kevin's decision, built-in modes carry POSTURE ONLY (a soft system
+# prompt); they never re-home enforcement (enforcement stays ambient/global,
+# "the moat"). They are inert until the operator SELECTS one active, so adding
+# them to list_modes is byte-identical for a fleet with no active mode. Ids use
+# the ``builtin-`` prefix (``:`` is not allowed by the mode-id regex). A user
+# customizes by cloning into a new mode; the built-ins themselves are immutable.
+_BUILTIN_MODES: tuple[AgentMode, ...] = (
+    AgentMode(
+        mode_id="builtin-coding",
+        display_name="Coding",
+        system_prompt=(
+            "Work as a careful software engineer this turn: read a file before "
+            "you edit it, keep changes minimal and self-consistent, and verify "
+            "before claiming done. Prefer the smallest change that works."
+        ),
+    ),
+    AgentMode(
+        mode_id="builtin-research",
+        display_name="Research",
+        system_prompt=(
+            "Work as a rigorous researcher this turn: gather from multiple "
+            "sources, cite them, and clearly separate evidence from inference. "
+            "Do not assert what you have not checked."
+        ),
+    ),
+    AgentMode(
+        mode_id="builtin-delivery",
+        display_name="Delivery",
+        system_prompt=(
+            "Focus on producing the final deliverable the user asked for, in the "
+            "requested format, and confirm what was delivered. Do not stop at a "
+            "plan when an artifact was requested."
+        ),
+    ),
+)
+_BUILTIN_IDS: frozenset[str] = frozenset(m.mode_id for m in _BUILTIN_MODES)
+
+
+def _builtin_modes_enabled() -> bool:
+    """Profile-aware default-ON (capability). Built-ins are inert until selected,
+    so this governs visibility/selectability, not runtime behavior."""
+    try:
+        from magi_agent.config.flags import flag_profile_bool  # noqa: PLC0415
+
+        return flag_profile_bool("MAGI_CUSTOMIZE_BUILTIN_MODES_ENABLED")
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def is_builtin_mode_id(mode_id: str) -> bool:
+    # Reserve the whole ``builtin-`` prefix (not just the seeded ids) so the
+    # backend guard matches the frontend's prefix heuristic: a user can never
+    # create/edit/delete a ``builtin-`` id, so the FE's read-only treatment of
+    # that prefix can never strand a user's own mode.
+    return mode_id in _BUILTIN_IDS or mode_id.startswith("builtin-")
+
+
+def builtin_modes() -> tuple[AgentMode, ...]:
+    return _BUILTIN_MODES if _builtin_modes_enabled() else ()
+
+
 def list_modes(path: Path | None = None) -> tuple[AgentMode, ...]:
-    """All valid stored modes, sorted by id. Malformed entries are skipped."""
+    """All valid stored modes + enabled built-in posture modes, sorted by id.
+
+    Malformed stored entries are skipped. A stored (user) mode with the same id
+    as a built-in shadows it (user customization wins).
+    """
     out: list[AgentMode] = []
+    stored_ids: set[str] = set()
     for key, raw in _modes_raw(path).items():
         if not isinstance(raw, dict):
             continue
@@ -155,23 +222,32 @@ def list_modes(path: Path | None = None) -> tuple[AgentMode, ...]:
         if mode.mode_id != key:
             continue  # dict key must match payload id (hand-edit guard)
         out.append(mode)
+        stored_ids.add(mode.mode_id)
+    out.extend(m for m in builtin_modes() if m.mode_id not in stored_ids)
     return tuple(sorted(out, key=lambda mode: mode.mode_id))
 
 
 def get_mode(mode_id: str, path: Path | None = None) -> AgentMode | None:
     raw = _modes_raw(path).get(mode_id)
-    if not isinstance(raw, dict):
-        return None
-    try:
-        mode = AgentMode.model_validate(raw)
-    except ValidationError:
-        return None
-    if mode.mode_id != mode_id:
-        return None  # dict key must match payload id (hand-edit guard)
-    return mode
+    if isinstance(raw, dict):
+        try:
+            mode = AgentMode.model_validate(raw)
+            if mode.mode_id == mode_id:  # dict key must match payload id
+                return mode
+        except ValidationError:
+            pass
+    # Fall back to a built-in posture mode (so it can be set active). Also the
+    # fallback for a hand-edited/malformed stored entry at a built-in id, so
+    # get_mode and list_modes agree on what exists.
+    for m in builtin_modes():
+        if m.mode_id == mode_id:
+            return m
+    return None
 
 
 def upsert_mode(mode: AgentMode, path: Path | None = None) -> None:
+    if is_builtin_mode_id(mode.mode_id):
+        raise ValueError("built-in modes are read-only; clone to a new id to customize")
     overrides = load_overrides(path)
     modes = dict(overrides.get("agent_modes", {}) if isinstance(overrides.get("agent_modes"), dict) else {})
     if mode.mode_id not in modes and len(modes) >= _MAX_MODES:
@@ -182,6 +258,8 @@ def upsert_mode(mode: AgentMode, path: Path | None = None) -> None:
 
 
 def delete_mode(mode_id: str, path: Path | None = None) -> None:
+    if is_builtin_mode_id(mode_id):
+        raise ValueError("built-in modes cannot be deleted")
     overrides = load_overrides(path)
     modes = dict(overrides.get("agent_modes", {}) if isinstance(overrides.get("agent_modes"), dict) else {})
     if mode_id not in modes:
