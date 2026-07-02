@@ -15,8 +15,6 @@ _current_trace: contextvars.ContextVar[ExecutionTrace | None] = contextvars.Cont
     "_current_trace", default=None
 )
 
-_TRUTHY_VALUES = frozenset({"1", "true", "yes"})
-
 
 def get_trace() -> ExecutionTrace | None:
     """Return the current turn's trace, or ``None`` if tracing is not active."""
