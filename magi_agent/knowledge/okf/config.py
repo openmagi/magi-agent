@@ -21,7 +21,8 @@ Resolution precedence for every sub-flag / tunable::
     explicit env / config override  >  MAGI_KNOWLEDGE_OKF_ENABLED master default
     >  hardcoded default
 
-This module imports only stdlib + pydantic — no network/provider/runtime deps,
+This module imports only stdlib + pydantic + the ``config._bool_resolution``
+leaf (config-owned, itself stdlib-only) — no network/provider/runtime deps,
 and crucially nothing from ``magi_agent.memory`` (the OKF trust path is kept
 decoupled from the memory subsystem per the design's boundary invariants).
 """
@@ -31,6 +32,12 @@ import os
 from collections.abc import Mapping
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from magi_agent.config._bool_resolution import (
+    coerce_bool,
+    override_bool,
+    resolve_bool,
+)
 
 # ---------------------------------------------------------------------------
 # Env var names (single registry)
@@ -54,9 +61,6 @@ MAX_TOTAL_BYTES_ENV_VAR: str = "MAGI_KNOWLEDGE_OKF_MAX_TOTAL_BYTES"
 
 #: config.toml table that mirrors the env names (snake_case keys).
 CONFIG_TABLE: str = "knowledge_okf"
-
-_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
-_FALSE_VALUES = frozenset({"0", "false", "no", "off", ""})
 
 # ---------------------------------------------------------------------------
 # Hardcoded defaults / bounds
@@ -196,48 +200,13 @@ def _okf_table(config: Mapping[str, object] | None) -> Mapping[str, object]:
     return section if isinstance(section, Mapping) else {}
 
 
-def coerce_bool(value: object) -> bool | None:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return None
-    normalized = str(value).strip().lower()
-    if normalized in _TRUE_VALUES:
-        return True
-    if normalized in _FALSE_VALUES:
-        return False
-    return None
-
-
-def _override_bool(
-    env: Mapping[str, str],
-    table: Mapping[str, object],
-    *,
-    env_var: str,
-    config_key: str,
-) -> bool | None:
-    """Return the explicit override (env beats config), or None if neither set."""
-    if env_var in env:
-        coerced = coerce_bool(env.get(env_var))
-        if coerced is not None:
-            return coerced
-    if config_key in table:
-        coerced = coerce_bool(table.get(config_key))
-        if coerced is not None:
-            return coerced
-    return None
-
-
-def _resolve_bool(
-    env: Mapping[str, str],
-    table: Mapping[str, object],
-    *,
-    env_var: str,
-    config_key: str,
-    default: bool,
-) -> bool:
-    override = _override_bool(env, table, env_var=env_var, config_key=config_key)
-    return default if override is None else override
+#: N-36 dedup: the resolution trio now lives in the ``config._bool_resolution``
+#: leaf. ``coerce_bool`` is re-exported under its public name; the private
+#: ``_override_bool`` / ``_resolve_bool`` aliases keep the in-module call sites
+#: unchanged. The leaf is config-owned, so the "nothing from magi_agent.memory"
+#: trust invariant stays intact.
+_override_bool = override_bool
+_resolve_bool = resolve_bool
 
 
 def _resolve_int(

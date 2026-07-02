@@ -16,8 +16,11 @@ from zoneinfo import ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# Reuse the existing 5-field cron parser from cron_policy (no reimplementation).
-from magi_agent.missions.cron_policy import _next_fire_after, _parse_cron_field  # type: ignore[attr-defined]
+# Reuse the existing cron primitives (no reimplementation). ``_parse_cron_field``
+# now lives in the ``shared.cron_fields`` leaf (N-33); ``_next_fire_after`` stays
+# a private cron_policy import.
+from magi_agent.missions.cron_policy import _next_fire_after  # type: ignore[attr-defined]
+from magi_agent.shared.cron_fields import parse_cron_field as _parse_cron_field
 
 # ---------------------------------------------------------------------------
 # Model config — identical pattern to cron_policy._MODEL_CONFIG
