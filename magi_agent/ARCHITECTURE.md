@@ -166,6 +166,7 @@ graph LR
     harness --> permissions
     harness --> recipes
     harness --> runtime
+    harness --> shared
     harness --> storage
     harness --> telemetry
     harness --> tools
@@ -179,6 +180,7 @@ graph LR
     introspection --> config
     introspection --> evidence
     introspection --> tools
+    knowledge --> config
     knowledge --> evidence
     knowledge --> memory
     knowledge --> tools
@@ -201,6 +203,7 @@ graph LR
     missions --> customize
     missions --> harness
     missions --> runtime
+    missions --> shared
     missions --> storage
     models --> runtime
     observability --> config
@@ -750,7 +753,8 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | env, models | config/tests/test_flags.py, config/tests/test_truthy.py |
-| _truthy.py | Dependency-free leaf for the canonical truthy convention + profile defaults. | — | (root)/main.py, adk_bridge/control_plane.py, channels/discord_live.py, channels/email_live.py, channels/slack_live.py, channels/telegram_live.py, config/env.py, config/flags.py, config/tests/test_truthy.py, customize/control_plane_overrides.py, gateway/daemon.py, gateway/poll_resilience.py, gateway/watchers.py, harness/scheduler_job_execution.py, harness/self_review.py, harness/self_review_pipeline.py, harness/skill_curator.py, memory/adapters/local_file_writable.py, observability/config.py, ops/health.py, plugins/native/_hosted_knowledge.py, plugins/native/web.py, research/research_first_canary.py, runtime/child_runner_status.py, runtime/local_defaults.py, transport/chat_routes.py, transport/chat_shared.py, web_acquisition/deep_research_config.py, web_acquisition/research_tools.py |
+| _bool_resolution.py | N-36 leaf: single home for the env/config boolean resolution trio. | _truthy | knowledge/okf/config.py, memory/config.py |
+| _truthy.py | Dependency-free leaf for the canonical truthy convention + profile defaults. | — | (root)/main.py, adk_bridge/control_plane.py, channels/discord_live.py, channels/email_live.py, channels/slack_live.py, channels/telegram_live.py, config/_bool_resolution.py, config/env.py, config/flags.py, config/tests/test_truthy.py, customize/control_plane_overrides.py, gateway/daemon.py, gateway/poll_resilience.py, gateway/watchers.py, harness/scheduler_job_execution.py, harness/self_review.py, harness/self_review_pipeline.py, harness/skill_curator.py, memory/adapters/local_file_writable.py, observability/config.py, ops/health.py, plugins/native/_hosted_knowledge.py, plugins/native/web.py, research/research_first_canary.py, runtime/child_runner_status.py, runtime/local_defaults.py, transport/chat_routes.py, transport/chat_shared.py, web_acquisition/deep_research_config.py, web_acquisition/research_tools.py |
 | env.py | — | _truthy, facts_replan, flags, gate3a_replay, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, hosted_defaults, mcp_resilience, models, pregate8_continuity_canary, shadow_generations | (root)/main.py, adk_bridge/anthropic_cache_model.py, adk_bridge/control_plane.py, adk_bridge/dashboard_producer_control.py, adk_bridge/tool_adapter.py, browser/autonomous/config.py, cli/app.py, cli/engine.py, cli/goal_nudge_wiring.py, cli/headless.py, cli/hook_wiring.py, cli/permissions.py, cli/providers.py, cli/real_runner.py, cli/tests/test_app.py, cli/tool_runtime.py, cli/wiring.py, computer/autonomous/config.py, config/__init__.py, config/tests/test_flag_migration_parity.py, evidence/final_output_gate.py, evidence/local_tool_collector.py, firstparty/packs/workspace_tools_default/impl.py, gates/gate5b_full_toolhost.py, gates/tool_usage_guidance.py, harness/general_automation/constraint_reinjection.py, harness/general_automation/delegation.py, harness/general_automation/live_gate.py, harness/general_automation/plan_act_switch.py, harness/general_automation/question_tool.py, harness/general_automation/recipe_disclosure.py, harness/general_automation/task_completion.py, introspection/tool.py, packs/loader.py, packs/signing.py, plugins/native/missions.py, plugins/native/scheduled_work.py, plugins/native/skills.py, plugins/native/taskboard.py, recipes/coding_mutation.py, recipes/compiler.py, recipes/ledger_workforce.py, recipes/recipe_routing.py, runtime/coding_context.py, runtime/facts_replan.py, runtime/governed_turn.py, runtime/local_defaults.py, runtime/message_builder.py, runtime/model_factory.py, runtime/model_tiers.py, runtime/openmagi_runtime.py, runtime/prompt_guidance.py, runtime/tool_synthesis.py, shadow/gate5b4c3_live_runner_boundary.py, shadow/gate5b4c3_runner_input_adapter.py, shadow/session_service_registry.py, tools/ask_user_question_toolhost.py, tools/core_toolhost.py, tools/dispatcher.py, tools/document_tools.py, tools/file_tool_manifests.py, tools/file_toolhost.py, tools/image_tools.py, tools/local_readonly.py, tools/plan_mode_toolhost.py, tools/safety.py, tools/user_tool_packs.py, tools/web_search_tools.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/gate5b_governance.py, transport/packs_dashboard.py, transport/streaming_chat_route.py |
 | flags.py | Canonical feature-flag registry + typed reader (single source of truth). | _truthy | (root)/facades.py, (root)/main.py, adk_bridge/control_plane.py, adk_bridge/event_adapter.py, adk_bridge/runner_adapter.py, adk_bridge/session_service.py, adk_bridge/tool_adapter.py, artifacts/file_delivery_live.py, cli/app.py, cli/engine.py, cli/headless.py, cli/memory_recall_rerank.py, cli/providers.py, cli/real_runner.py, cli/tui/app.py, cli/tui/tool_render.py, cli/wiring.py, composio/config.py, config/env.py, config/tests/test_flag_migration_parity.py, config/tests/test_flags.py, context/hook.py, credentials_admin/approval_resolver.py, credentials_admin/approvals_store.py, credentials_admin/local_vault.py, credentials_admin/store.py, credentials_admin/vault_local.py, credentials_admin/vault_server.py, customize/after_tool_gate.py, customize/apply.py, customize/budgets_apply.py, customize/lifecycle_audit.py, customize/modes.py, customize/runtime_gate.py, customize/scoped_policy.py, customize/store.py, customize/tool_perm.py, customize/what_menu.py, egress_proxy/config.py, evidence/gate1a_egress_correlation.py, evidence/observed_egress.py, gates/memory_write_readiness.py, gateway/watchers.py, harness/kernel_roles.py, harness/memory_review.py, harness/memory_session_extract.py, harness/scheduler_executor.py, harness/scheduler_job_execution.py, harness/skill_curator.py, harness/verifier_bus.py, harness/workflow_executor.py, hooks/builtin/prompt_transforms.py, hooks/executors/http_executor.py, hooks/executors/llm_executor.py, hooks/external_config.py, memory/adapters/hipocampus_readonly.py, missions/work_queue/board_api.py, missions/work_queue/store.py, observability/api.py, observability/config.py, observability/integration.py, observability/transcript.py, ops/health.py, packs/discovery.py, plugins/native/missions.py, prompt/metrics.py, recipes/kernel_recipe_packs.py, recipes/ledger_orchestrator.py, research/live_audit.py, runtime/child_bash.py, runtime/child_runner_live.py, runtime/deadline.py, runtime/durable_recovery.py, runtime/error_recovery/types.py, runtime/facts_replan.py, runtime/fork_runner.py, runtime/local_defaults.py, runtime/manual_compaction_context.py, runtime/memory_mode_context.py, runtime/message_builder.py, runtime/model_tiers.py, runtime/session_extract_runtime.py, runtime/stream_fallback.py, runtime/stream_withholding.py, shadow/gate5b4c3_live_runner_boundary.py, shadow/gate5b4c3_runner_input_adapter.py, storage/durable_checkpoint_store.py, telemetry/trace_context.py, tools/audio_tools.py, tools/document_qa_tools.py, tools/document_write/agentic.py, tools/image_tools.py, tools/python_exec.py, tools/video_tools.py, transport/chat_routes.py, transport/chat_shared.py, transport/customize.py, transport/gate2_sandbox_canary.py, transport/health.py, transport/sse.py, transport/streaming_chat_route.py, transport/web_dashboard.py, web_acquisition/deep_research_config.py, web_acquisition/research_tools.py |
 | models.py | — | authority, pregate8_continuity_canary | (root)/main.py, cli/tests/test_model_picker_wire.py, config/__init__.py, config/env.py, gates/gate2_readiness.py, gates/gate3_readiness.py, gates/gate4_readiness.py, gates/gate5_readiness.py, gates/gate7_readiness.py, gates/gate8_readiness.py, runtime/openmagi_runtime.py |
@@ -1083,7 +1087,7 @@ graph LR
 | approval_receipts.py | — | — | harness/__init__.py |
 | audit.py | — | presets | — |
 | autopilot.py | — | authority | — |
-| cron_runtime.py | — | authority, config, contract, learning_executor, provider_receipts | learning/api.py, learning/bootstrap.py |
+| cron_runtime.py | — | authority, config, contract, cron_fields, learning_executor, provider_receipts | learning/api.py, learning/bootstrap.py |
 | cron_turn_runner_adapter.py | A-driver — CronTurnRunnerAdapter: OpenMagiRunnerAdapter -> CronTurnRunner bridge. | resolved, runner_adapter, scheduler_job_execution | — |
 | cross_review.py | Track 17 PR4 — adversarial cross-review + best-of-N variant generation. | inference_scaling, public_events, verifier_bus | harness/workflow_executor.py, recipes/workflow_recipe.py |
 | discipline_boundary.py | — | authority | cli/engine.py, harness/__init__.py |
@@ -1225,7 +1229,7 @@ graph LR
 |---|---|---|---|
 | __init__.py | OKF (Open Knowledge Format) knowledge-bundle adapter — PR1 (pure, unwired). | bundle_loader, config, matcher | — |
 | bundle_loader.py | OKF bundle loader (PR1, pure + unwired). | config, matcher | knowledge/okf/__init__.py, plugins/native/okf.py |
-| config.py | Single source of truth for OKF knowledge-bundle activation (PR1). | — | knowledge/okf/__init__.py, knowledge/okf/bundle_loader.py, plugins/native/okf.py, runtime/message_builder.py |
+| config.py | Single source of truth for OKF knowledge-bundle activation (PR1). | _bool_resolution | knowledge/okf/__init__.py, knowledge/okf/bundle_loader.py, plugins/native/okf.py, runtime/message_builder.py |
 | matcher.py | Local lexical matcher for OKF search (v1). | — | knowledge/okf/__init__.py, knowledge/okf/bundle_loader.py |
 
 ### learning/
@@ -1256,7 +1260,7 @@ graph LR
 | adk_bridge.py | — | contracts, policy | — |
 | compaction_tree.py | 5-level persistent compaction tree + ROOT.md synthesis (PR-A). | compactor, config, local_file_writable | runtime/memory_turn_hook.py |
 | compactor.py | Deterministic, IO-free memory compactor (gap-closer B2). | — | memory/adapters/local_file_writable.py, memory/compaction_tree.py |
-| config.py | Single source of truth for Hipocampus memory activation (PR1). | — | cli/app.py, cli/memory_bootstrap.py, cli/memory_cli.py, cli/memory_recall_block.py, gates/memory_write_readiness.py, memory/adapters/hipocampus_readonly.py, memory/adapters/local_file_writable.py, memory/adapters/operator_soul_writer.py, memory/compaction_tree.py, memory/policy.py, memory/search/__init__.py, memory/summarizer_runtime.py, plugins/native/knowledge.py, runtime/memory_turn_hook.py, transport/app_api.py |
+| config.py | Single source of truth for Hipocampus memory activation (PR1). | _bool_resolution | cli/app.py, cli/memory_bootstrap.py, cli/memory_cli.py, cli/memory_recall_block.py, gates/memory_write_readiness.py, memory/adapters/hipocampus_readonly.py, memory/adapters/local_file_writable.py, memory/adapters/operator_soul_writer.py, memory/compaction_tree.py, memory/policy.py, memory/search/__init__.py, memory/summarizer_runtime.py, plugins/native/knowledge.py, runtime/memory_turn_hook.py, transport/app_api.py |
 | conformance.py | — | authority, declarative_filter, hipocampus_readonly, local_file_writable, policy | cli/memory_manifest.py |
 | continuity_policy.py | A1 — memory continuity policy block. | — | cli/tool_runtime.py, memory/prompt_projection.py |
 | contracts.py | — | authority | cli/learning_recall.py, harness/memory_recall.py, harness/memory_write.py, learning/injection.py, memory/__init__.py, memory/adapters/hipocampus_readonly.py, memory/adapters/local_file_writable.py, memory/adk_bridge.py, memory/namespaces.py, memory/policy.py, memory/projection.py, recipes/first_party/memory_recall.py |
@@ -1308,11 +1312,11 @@ graph LR
 |---|---|---|---|
 | __init__.py | Default-off mission lifecycle contract boundaries. | lifecycle, receipts | — |
 | background_tasks.py | — | long_running_activity, receipt_utils | — |
-| cron_policy.py | — | receipts | missions/schedule_grammar.py, missions/scheduler_adapter.py |
+| cron_policy.py | — | cron_fields, receipts | missions/schedule_grammar.py, missions/scheduler_adapter.py |
 | events.py | — | receipts | transport/sse.py |
 | lifecycle.py | — | receipts | missions/__init__.py |
 | receipts.py | — | receipt_redaction, runtime | missions/__init__.py, missions/cron_policy.py, missions/events.py, missions/lifecycle.py |
-| schedule_grammar.py | A1 — ScheduleSpec: once / interval / cron grammar (preview-only). | cron_policy | harness/scheduler_executor.py |
+| schedule_grammar.py | A1 — ScheduleSpec: once / interval / cron grammar (preview-only). | cron_fields, cron_policy | harness/scheduler_executor.py |
 | scheduler_adapter.py | — | cron_policy | — |
 
 ### missions/work_queue/
@@ -1777,6 +1781,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | — | — |
+| cron_fields.py | N-33 leaf: single home for the cron field parser. | — | harness/cron_runtime.py, missions/cron_policy.py, missions/schedule_grammar.py |
 | provider_family.py | E-13 — single source of truth for provider-family detection. | injection | adk_bridge/tool_schema_repair.py, prompt/provider_adapter.py |
 | token_estimation.py | — | — | adk_bridge/context_compaction.py, context/token_tracker.py, runtime/error_recovery/strategies/_token_utils.py, shadow/gate5b4c3_runner_input_adapter.py |
 | types.py | — | — | context/types.py, runtime/error_recovery/types.py |
