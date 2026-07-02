@@ -119,10 +119,15 @@ export function PoliciesTable({
     [policies, originFilter, scopeFilter, firesAtFilter, needle],
   );
 
-  // Group by origin so the head of the list is the user's own policies and
-  // the long built-in catalog can be collapsed if needed.
-  const userPolicies = visible.filter((p) => p.origin === "user");
-  const builtinPolicies = visible.filter((p) => p.origin === "builtin");
+  // Group by origin so the head of the list is the user's own rules and the
+  // long built-in catalog can be collapsed if needed. PR-P2: rules whose
+  // enforcement is not wired yet (state "preview") are pulled OUT of the live
+  // groups into a collapsed "Dormant" section so the main list only shows rules
+  // that actually gate a turn.
+  const isDormant = (p: Policy) => p.state === "preview";
+  const userPolicies = visible.filter((p) => p.origin === "user" && !isDormant(p));
+  const builtinPolicies = visible.filter((p) => p.origin === "builtin" && !isDormant(p));
+  const dormantPolicies = visible.filter(isDormant);
 
   return (
     <div className="space-y-4">
@@ -236,6 +241,23 @@ export function PoliciesTable({
           onEdit={onEdit}
           scopedInModes={scopedInModes}
           defaultOpen={userPolicies.length === 0}
+        />
+      ) : null}
+      {dormantPolicies.length > 0 ? (
+        <Group
+          title={`Dormant · not wired yet (${dormantPolicies.length})`}
+          rows={dormantPolicies}
+          pendingPresets={pendingPresets}
+          busy={busy}
+          onTogglePreset={onTogglePreset}
+          onToggleCustomRule={onToggleCustomRule}
+          onDeleteCustomRule={onDeleteCustomRule}
+          onToggleDashboardCheck={onToggleDashboardCheck}
+          onDeleteDashboardCheck={onDeleteDashboardCheck}
+          onDeleteSeamSpec={onDeleteSeamSpec}
+          onEdit={onEdit}
+          scopedInModes={scopedInModes}
+          defaultOpen={false}
         />
       ) : null}
       {visible.length === 0 ? (
@@ -513,7 +535,7 @@ function StatePill({ state }: { state: Policy["state"] }): React.ReactElement {
     enabled: "on",
     disabled: "off",
     "always-on": "always-on",
-    preview: "preview",
+    preview: "not wired",
   };
   return (
     <span

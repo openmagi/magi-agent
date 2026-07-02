@@ -54,6 +54,19 @@ describe("PoliciesTable — unified policy surface (PR-E1)", () => {
     expect(src).toContain("p.condition.summary");
   });
 
+  it("PR-P2: pulls not-wired (preview) rules into a collapsed Dormant group", () => {
+    // Dormant rules are separated out of the live user/built-in groups and
+    // shown collapsed so the main list only has rules that actually gate.
+    expect(src).toContain('p.state === "preview"');
+    expect(src).toContain("dormantPolicies");
+    expect(src).toContain("Dormant");
+    expect(src).toContain("not wired yet");
+    // The badge pill reads "not wired", not "preview".
+    expect(src).toContain('preview: "not wired"');
+    // Dormant group starts collapsed.
+    expect(src).toMatch(/title=\{`Dormant[\s\S]*?defaultOpen=\{false\}/);
+  });
+
   it("PR-U4a: renders a 'scoped in N modes' reverse-cross-link badge", () => {
     // The badge only appears when the policy id is present in scopedInModes.
     expect(src).toContain("scopedInModes");
