@@ -157,7 +157,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_LLM_API_BASE` (no default) — Optional LiteLlm ``api_base`` URL routing every model build through a gateway (in-cluster api-proxy holding provider keys). Unset ⇒ direct-to-provider (default).
 - `MAGI_LLM_API_HEADER` (default `x-api-key`) — Auth header name used to forward ``MAGI_LLM_API_KEY`` to the gateway (default ``x-api-key``). Empty resolves to the default.
 - `MAGI_LLM_API_KEY` (no default) — Credential paired with ``MAGI_LLM_API_BASE``: surfaced as the litellm ``api_key`` AND an explicit auth header so OpenAI-prefixed models still present the gateway token. SENSITIVE — never logged or persisted; treat as a secret like ``MAGI_DISCORD_BOT_TOKEN``.
-- `MAGI_LLM_HOOKS_ENABLED` (no default) — Sub-switch for LLM-classified hook executors. **Default-ON** when unset / empty; only an explicit non-truthy value (anything outside ``{1, true, yes}``) disables. ``str`` kind because the default-ON-when-unset semantics differ from ``flag_bool``'s strict default-OFF.
+- `MAGI_LLM_HOOKS_ENABLED` (no default) — Sub-switch for LLM-classified hook executors. **Default-ON** when unset / empty; only an explicit non-truthy value (anything outside canonical ``{1, true, yes, on}``) disables. ``str`` kind because the default-ON-when-unset semantics differ from ``flag_bool``'s strict default-OFF.
 - `MAGI_LLM_HOOK_CLASSIFIER_MODEL` (no default) — Override the LLM classifier model for the hook executor. Empty falls back to the per-hook ``classifier_model`` context value.
 - `MAGI_LOCAL_VAULT_ENABLED` (default off) — Activate the native local credential vault backend. Default-OFF at the library level; the local serve / dashboard bootstrap flips it on via ``setdefault`` in ``runtime/local_defaults.py``. Forced OFF when ``MAGI_VAULT_ADMIN_URL`` is configured (the external HTTP backend then takes precedence).
 - `MAGI_LOCAL_VAULT_PROXY_ENABLED` (default off) — Activate the local credential-injecting forward proxy. Default-OFF; requires the native local vault to also be active (``MAGI_LOCAL_VAULT_ENABLED``) and is forced OFF when ``MAGI_VAULT_ADMIN_URL`` is configured.
@@ -298,7 +298,6 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_WORK_QUEUE_BOARD_API_ENABLED` (default off) — Mount the read-only work-queue board HTTP API.
 - `MAGI_WORK_QUEUE_CLAIMER` (no default) — Claimer id used on work-queue lease acquisitions. Empty uses the runtime-resolved default.
 - `MAGI_WORK_QUEUE_DB_PATH` (no default) — Explicit path to the work-queue SQLite db. Empty uses ``<MAGI_STATE_DIR>/work_queue.db`` (default ``~/.magi/work_queue.db``).
-- `MAGI_WORK_QUEUE_ENABLED` (default off) — Enable the durable multi-agent work-queue (task board + dispatcher).
 - `MAGI_WORK_QUEUE_EXECUTOR_ENABLED` (default off) — Enable the durable work-queue dispatcher tick loop.
 - `MAGI_WORK_QUEUE_NOTIFY_ENABLED` (default off) — Enable the work-queue terminal-event notifier gateway watcher: polls for newly-completed/blocked/failed tasks and pushes each through the injected delivery sink (default sink = logging-only; real channel sinks are wired in P6). Default-OFF; when off the daemon does not poll.
 
