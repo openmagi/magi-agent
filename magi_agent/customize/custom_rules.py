@@ -405,8 +405,13 @@ def validate_custom_rule(rule: Any) -> list[str]:
                 "(no ':' or whitespace) when provided"
             )
 
+    # PR-P5.0: scope is now OPTIONAL. The auto turn-scope axis
+    # (coding/research/delivery) is retired: rules apply globally, or only while
+    # a user-selected mode scopes them in. An absent/None scope means "always"
+    # (global). A present value must still be a known scope for back-compat with
+    # rules authored before the wizard stopped sending it.
     scope = rule.get("scope")
-    if scope not in SCOPES:
+    if scope is not None and scope not in SCOPES:
         errors.append(f"scope must be one of {sorted(SCOPES)}")
 
     # PR-F-UX6: optional ``groupId`` (non-empty string when present). Rules
