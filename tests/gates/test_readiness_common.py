@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib
 import re
+from types import SimpleNamespace
 
 import pytest
 
@@ -43,6 +44,123 @@ def test_modules_share_kernel_digest_helpers(name: str) -> None:
     )
     assert mod._digest_present is common.digest_present
     assert mod._DIGEST_RE is common.DIGEST_RE
+
+
+@pytest.mark.parametrize("name", _READINESS_MODULES)
+def test_modules_share_kernel_scope_matcher(name: str) -> None:
+    """G6: every readiness module references the SAME shared scope matcher and
+    the SAME ``SAFE_ENVIRONMENTS`` frozenset, not a local fork."""
+    mod = _module(name)
+    assert mod._selected_scope_matched is common.selected_scope_matched, (
+        f"{name} must alias the shared selected_scope_matched, not a local fork"
+    )
+    assert mod._SAFE_ENVIRONMENTS is common.SAFE_ENVIRONMENTS, (
+        f"{name} must alias the shared SAFE_ENVIRONMENTS, not a local fork"
+    )
+
+
+def test_no_readiness_module_redefines_the_scope_matcher() -> None:
+    """Ratchet: no ``*_readiness.py`` may carry its own ``def _selected_scope_matched``
+    (it must alias the shared one)."""
+    import pathlib
+
+    gates_dir = pathlib.Path(common.__file__).parent
+    offenders: list[str] = []
+    for path in gates_dir.glob("*_readiness.py"):
+        src = path.read_text(encoding="utf-8")
+        if re.search(r"^def _selected_scope_matched\b", src, re.MULTILINE):
+            offenders.append(path.name)
+    assert not offenders, (
+        "These readiness modules still define the scope matcher locally instead "
+        "of aliasing magi_agent.gates._readiness_common.selected_scope_matched: "
+        + ", ".join(sorted(offenders))
+    )
+
+
+def _scoped_config(
+    *,
+    enabled: bool = True,
+    selected_bot_digest: str,
+    selected_owner_user_id_digest: str,
+    environment: str = "production",
+    environment_allowlist: tuple[str, ...] = ("production",),
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        enabled=enabled,
+        selected_bot_digest=selected_bot_digest,
+        selected_owner_user_id_digest=selected_owner_user_id_digest,
+        environment=environment,
+        environment_allowlist=environment_allowlist,
+    )
+
+
+def test_selected_scope_matched_behavior_table() -> None:
+    bot_id = "bot-123"
+    user_id = "user-456"
+    bot_digest = common.sha256_text_digest(bot_id)
+    owner_digest = common.sha256_text_digest(user_id)
+
+    # 1. disabled -> False
+    cfg = _scoped_config(
+        enabled=False,
+        selected_bot_digest=bot_digest,
+        selected_owner_user_id_digest=owner_digest,
+    )
+    assert common.selected_scope_matched(cfg, bot_id=bot_id, user_id=user_id) is False
+
+    # 2. malformed digest format -> False
+    cfg = _scoped_config(
+        selected_bot_digest="not-a-digest",
+        selected_owner_user_id_digest=owner_digest,
+    )
+    assert common.selected_scope_matched(cfg, bot_id=bot_id, user_id=user_id) is False
+
+    # 3. bot digest mismatch -> False
+    cfg = _scoped_config(
+        selected_bot_digest=common.sha256_text_digest("other-bot"),
+        selected_owner_user_id_digest=owner_digest,
+    )
+    assert common.selected_scope_matched(cfg, bot_id=bot_id, user_id=user_id) is False
+
+    # 4. owner digest mismatch -> False
+    cfg = _scoped_config(
+        selected_bot_digest=bot_digest,
+        selected_owner_user_id_digest=common.sha256_text_digest("other-user"),
+    )
+    assert common.selected_scope_matched(cfg, bot_id=bot_id, user_id=user_id) is False
+
+    # 5. unsafe environment -> False
+    cfg = _scoped_config(
+        selected_bot_digest=bot_digest,
+        selected_owner_user_id_digest=owner_digest,
+        environment="wonderland",
+        environment_allowlist=("wonderland",),
+    )
+    assert common.selected_scope_matched(cfg, bot_id=bot_id, user_id=user_id) is False
+
+    # 6. environment not in allowlist -> False
+    cfg = _scoped_config(
+        selected_bot_digest=bot_digest,
+        selected_owner_user_id_digest=owner_digest,
+        environment="production",
+        environment_allowlist=("staging",),
+    )
+    assert common.selected_scope_matched(cfg, bot_id=bot_id, user_id=user_id) is False
+
+    # 7. all pass -> True
+    cfg = _scoped_config(
+        selected_bot_digest=bot_digest,
+        selected_owner_user_id_digest=owner_digest,
+        environment="production",
+        environment_allowlist=("production",),
+    )
+    assert common.selected_scope_matched(cfg, bot_id=bot_id, user_id=user_id) is True
+
+
+def test_safe_environments_membership() -> None:
+    assert common.SAFE_ENVIRONMENTS == frozenset(
+        {"local", "development", "staging", "production"}
+    )
 
 
 def test_sha256_text_digest_format() -> None:
