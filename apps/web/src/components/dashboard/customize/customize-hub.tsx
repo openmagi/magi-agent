@@ -822,12 +822,12 @@ function RulesSectionMount({
       {/* sub-tab nav + Add button */}
       <div className="flex items-center justify-between gap-3">
         <nav
-          aria-label="Policy sub-tabs"
+          aria-label="Rules sub-tabs"
           className="flex rounded-xl border border-black/[0.06] bg-white p-1 text-xs"
         >
           {(
             [
-              { id: "policies", label: `Policies (${policies.length})` },
+              { id: "policies", label: `Rules (${policies.length})` },
               // PR-F-UX5 — Evidence counter = built-in evidence menu (raw
               // producer records the runtime knows about) + the user-consumed
               // refs the policies-derived index has surfaced. Both halves
