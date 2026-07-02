@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from magi_agent.evidence.gate1a_egress_correlation import (
     GATE1A_EGRESS_CORRELATION_MODE,
     GATE1A_EGRESS_TELEMETRY_SOURCE,
+    SENSITIVE_EGRESS_MARKER_RE as _SENSITIVE_RE,
     safe_proxy_url_from_env,
 )
 
@@ -34,15 +35,8 @@ _DIGEST_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
 _SAFE_LABEL_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _SAFE_REASON_RE = re.compile(r"^[a-z][a-z0-9_:-]{0,95}$")
 _SAFE_TIMESTAMP_RE = re.compile(r"^[0-9TZ:.+-]{10,40}$")
-_SENSITIVE_RE = re.compile(
-    r"(?:"
-    r"authorization|bearer|cookie|token|secret|password|api[_-]?key|"
-    r"generativelanguage\.googleapis\.com|https?://|"
-    r"/Users(?:/[^\s,;}\"']*)?|/home(?:/[^\s,;}\"']*)?|"
-    r"/workspace(?:/[^\s,;}\"']*)?|/private(?:/[^\s,;}\"']*)?"
-    r")",
-    re.IGNORECASE,
-)
+# _SENSITIVE_RE now comes from gate1a_egress_correlation (superset detector);
+# see the import above. observed_egress previously kept a strict-subset copy.
 _DEFAULT_LIVE_EGRESS_TELEMETRY_SOURCE = GATE1A_EGRESS_TELEMETRY_SOURCE
 _LIVE_EGRESS_TELEMETRY_SCHEMA = "gate1a.egressProxyTelemetry.v1"
 _LIVE_EGRESS_CORRELATION_MODE = GATE1A_EGRESS_CORRELATION_MODE

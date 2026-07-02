@@ -435,28 +435,11 @@ _SENSITIVE_PATH_PART_RE = re.compile(
     r"secret|session|token)(?:[-_.]|$))",
     re.IGNORECASE,
 )
-_SENSITIVE_RE = re.compile(
-    r"(?:"
-    r"authorization\s*:\s*bearer\s+\S+|"
-    r"\bbearer\s+\S+|"
-    r"\bcookie\s*:\s*[^\n\r]+|"
-    r"\bset-cookie\s*:\s*[^\n\r]+|"
-    r"\bsid=[A-Za-z0-9._-]+|"
-    r"\bsk-[A-Za-z0-9._-]+|"
-    r"gh[opusr]_[A-Za-z0-9_]+|"
-    r"github_pat_[A-Za-z0-9_]+|"
-    r"xox[a-z]-[A-Za-z0-9._-]+|"
-    r"AKIA[0-9A-Z]{8,}|"
-    r"AIza[A-Za-z0-9_-]+|"
-    r"/Users(?:/[^\s,;}\"']*)?|"
-    r"/home(?:/[^\s,;}\"']*)?|"
-    r"/workspace(?:/[^\s,;}\"']*)?|"
-    r"/data/bots(?:/[^\s,;}\"']*)?|"
-    r"raw[_ -]?(?:user|tool|session|auth|cookie|text)|"
-    r"hidden[_ -]?reasoning|chain[_ -]?of[_ -]?thought"
-    r")",
-    re.IGNORECASE,
+# Shared with gate1a via the single home in gates/_redaction_common.py.
+from magi_agent.gates._redaction_common import (  # noqa: E402
+    SENSITIVE_TRANSCRIPT_RE as _SENSITIVE_RE,
 )
+
 _URL_USERINFO_RE = re.compile(
     r"\b(?P<scheme>https?://)(?P<userinfo>[^/\s@]+@)(?P<authority>[^/\s]+)",
     re.IGNORECASE,

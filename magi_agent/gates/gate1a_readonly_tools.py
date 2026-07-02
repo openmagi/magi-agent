@@ -85,28 +85,11 @@ _FORBIDDEN_TOOL_NAMES = frozenset(
     }
 )
 GATE1A_FORBIDDEN_TOOL_NAMES = tuple(sorted(_FORBIDDEN_TOOL_NAMES))
-_SENSITIVE_RE = re.compile(
-    r"(?:"
-    r"authorization\s*:\s*bearer\s+\S+|"
-    r"\bbearer\s+\S+|"
-    r"\bcookie\s*:\s*[^\n\r]+|"
-    r"\bset-cookie\s*:\s*[^\n\r]+|"
-    r"\bsid=[A-Za-z0-9._-]+|"
-    r"\bsk-[A-Za-z0-9._-]+|"
-    r"gh[opusr]_[A-Za-z0-9_]+|"
-    r"github_pat_[A-Za-z0-9_]+|"
-    r"xox[a-z]-[A-Za-z0-9._-]+|"
-    r"AKIA[0-9A-Z]{8,}|"
-    r"AIza[A-Za-z0-9_-]+|"
-    r"/Users(?:/[^\s,;}\"']*)?|"
-    r"/home(?:/[^\s,;}\"']*)?|"
-    r"/workspace(?:/[^\s,;}\"']*)?|"
-    r"/data/bots(?:/[^\s,;}\"']*)?|"
-    r"raw[_ -]?(?:user|tool|session|auth|cookie|text)|"
-    r"hidden[_ -]?reasoning|chain[_ -]?of[_ -]?thought"
-    r")",
-    re.IGNORECASE,
+# Shared with gate5b via the single home in gates/_redaction_common.py.
+from magi_agent.gates._redaction_common import (  # noqa: E402
+    SENSITIVE_TRANSCRIPT_RE as _SENSITIVE_RE,
 )
+
 _SENSITIVE_KEY_RE = re.compile(
     r"(authorization|auth|bearer|cookie|credential|key|password|path|private|raw|secret|session|token)",
     re.IGNORECASE,

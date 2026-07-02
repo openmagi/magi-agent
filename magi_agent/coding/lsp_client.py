@@ -82,8 +82,9 @@ _LANGUAGE_FAMILY: dict[str, str] = {
 
 # Redaction for diagnostic message text before it can flow toward evidence.
 # Token shapes (sk-, gh[opusr]_, github_pat_, xox*, AKIA, AIza) are kept in
-# sync with the evidence-layer regex in gate5b_full_toolhost._SENSITIVE_RE so
-# the model-facing redaction is no weaker than the evidence layer's.
+# sync with the shared gate transcript pattern
+# gates._redaction_common.SENSITIVE_TRANSCRIPT_RE so the model-facing redaction
+# is no weaker than the evidence layer's.
 _PRIVATE_TEXT_RE = re.compile(
     r"(?:"
     r"/Users(?:/[^\s,;}\"']*)?"

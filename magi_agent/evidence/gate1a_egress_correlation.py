@@ -7,7 +7,9 @@ from urllib.parse import urlparse
 
 
 _DIGEST_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
-_SENSITIVE_RE = re.compile(
+# Superset egress-marker detector. observed_egress imports this public name so
+# both surfaces reject the same (or a strictly larger) set of raw/secret markers.
+SENSITIVE_EGRESS_MARKER_RE = re.compile(
     r"(?:"
     r"authorization|bearer|cookie|token|secret|password|api[_-]?key|"
     r"session|prompt|output|provider[_-]?payload|"
@@ -17,6 +19,7 @@ _SENSITIVE_RE = re.compile(
     r")",
     re.IGNORECASE,
 )
+_SENSITIVE_RE = SENSITIVE_EGRESS_MARKER_RE
 GATE1A_EGRESS_CORRELATION_MODE = "proxy_connect_headers"
 GATE1A_EGRESS_TELEMETRY_SOURCE = "gate5b_egress_proxy"
 GATE1A_REQUEST_DIGEST_HEADER = "x-gate1a-request-digest"
