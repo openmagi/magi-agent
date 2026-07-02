@@ -75,6 +75,7 @@ _UNSAFE_SECRET_SHAPED_RE = re.compile(
     re.IGNORECASE,
 )
 _STAGE_ORDER = {
+    "onSessionStart": -10,
     "beforeTurnStart": 0,
     "beforeSystemPrompt": 4,
     "beforeMessageSend": 7,
@@ -90,8 +91,10 @@ _STAGE_ORDER = {
     "afterCommit": 100,
     "afterCompaction": 110,
     "afterTurnEnd": 120,
+    "onTaskComplete": 125,
     "onAbort": 130,
     "onError": 140,
+    "onSessionEnd": 150,
 }
 
 
