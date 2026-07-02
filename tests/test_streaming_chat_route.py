@@ -2865,3 +2865,153 @@ def test_default_builder_prefers_override_over_config(monkeypatch) -> None:
     # The serve-config model is used; a bare non-anthropic id is provider-
     # normalized for the local engine (gpt-5.2 -> openai/gpt-5.2).
     assert seen[-1] == "openai/gpt-5.2"
+
+
+# ---------------------------------------------------------------------------
+# PR-D4 / N-40: per-token delta frames are not content-keyed; thinking_delta
+# replay guard; emitted_event_keys bounded under a token stream.
+# ---------------------------------------------------------------------------
+def test_delta_events_not_keyed() -> None:
+    key = streaming_chat_route_module._selected_stream_event_key
+    assert key({"type": "text_delta", "delta": "a"}) is None
+    assert key({"type": "thinking_delta", "delta": "b"}) is None
+    # tool events still get a content key (a JSON string)
+    tool_key = key({"type": "tool_start", "toolName": "read"})
+    assert isinstance(tool_key, str)
+    assert "tool_start" in tool_key
+    # heartbeat/pending llm_progress keyed by shape, not per-beat content
+    assert key({"type": "llm_progress", "stage": "waiting", "iter": 1}) == "llm_progress:waiting"
+    assert key({"type": "llm_progress", "stage": "waiting", "iter": 99}) == "llm_progress:waiting"
+
+
+def test_event_key_not_called_with_json_dumps_for_tokens(monkeypatch) -> None:
+    calls = {"n": 0}
+    real_dumps = json.dumps
+
+    def _counting_dumps(*args, **kwargs):
+        calls["n"] += 1
+        return real_dumps(*args, **kwargs)
+
+    monkeypatch.setattr(streaming_chat_route_module.json, "dumps", _counting_dumps)
+    key = streaming_chat_route_module._selected_stream_event_key
+    for i in range(500):
+        assert key({"type": "text_delta", "delta": str(i)}) is None
+        assert key({"type": "thinking_delta", "delta": str(i)}) is None
+    # zero json.dumps for delta tokens regardless of token count
+    assert calls["n"] == 0
+
+
+def test_replay_skips_thinking_delta_after_live_thinking(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    # thinking_delta is sanitizer-gated behind MAGI_STREAM_THINKING; enable it
+    # so the frames are observable on the wire for this replay-guard test.
+    monkeypatch.setenv("MAGI_STREAM_THINKING", "1")
+
+    async def fake_selected_chat_response(
+        runtime: object,
+        body: object,
+        *,
+        request: object,
+        public_event_sink=None,
+    ) -> JSONResponse:
+        assert public_event_sink is not None
+        public_event_sink({"type": "thinking_delta", "delta": "live think"})
+        public_event_sink({"type": "text_delta", "delta": "live answer"})
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "python_ready",
+                "publicEvents": [
+                    {"type": "thinking_delta", "delta": "live think aggregate"},
+                    {"type": "text_delta", "delta": "live answer"},
+                ],
+                "choices": [
+                    {"message": {"role": "assistant", "content": "live answer"}}
+                ],
+            },
+        )
+
+    monkeypatch.setattr(
+        streaming_chat_route_module,
+        "run_gate5b_user_visible_chat_response",
+        fake_selected_chat_response,
+    )
+
+    async def _collect() -> list[dict]:
+        frames = _drive_selected_gate5b_stream(
+            SimpleNamespace(),
+            {"messages": [{"role": "user", "content": "stream selected"}]},
+            SimpleNamespace(),
+            session_id="s-thinking-replay",
+            turn_id="t-thinking-replay",
+        )
+        return [payload async for frame in frames for payload in _data_lines(frame.decode("utf-8"))]
+
+    payloads = asyncio.run(_collect())
+    thinking = [p["delta"] for p in payloads if p.get("type") == "thinking_delta"]
+    # only the live thinking_delta is emitted; the replayed one is skipped
+    assert thinking == ["live think"]
+
+
+def test_stream_frames_bounded_under_token_stream(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+
+    async def fake_selected_chat_response(
+        runtime: object,
+        body: object,
+        *,
+        request: object,
+        public_event_sink=None,
+    ) -> JSONResponse:
+        assert public_event_sink is not None
+        for i in range(500):
+            public_event_sink({"type": "text_delta", "delta": f"tok{i}"})
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "python_ready",
+                "publicEvents": [
+                    {"type": "text_delta", "delta": "".join(f"tok{i}" for i in range(500))},
+                ],
+                "choices": [
+                    {"message": {"role": "assistant", "content": "done"}}
+                ],
+            },
+        )
+
+    monkeypatch.setattr(
+        streaming_chat_route_module,
+        "run_gate5b_user_visible_chat_response",
+        fake_selected_chat_response,
+    )
+
+    # Count only sort_keys=True dumps: that is exactly the per-event keying
+    # path (_selected_stream_event_key). Frame encoding uses the shared json
+    # module too (without sort_keys), so we isolate the keying calls.
+    calls = {"sort_keys": 0}
+    real_dumps = json.dumps
+
+    def _counting_dumps(*args, **kwargs):
+        if kwargs.get("sort_keys"):
+            calls["sort_keys"] += 1
+        return real_dumps(*args, **kwargs)
+
+    monkeypatch.setattr(streaming_chat_route_module.json, "dumps", _counting_dumps)
+
+    async def _collect() -> list[dict]:
+        frames = _drive_selected_gate5b_stream(
+            SimpleNamespace(),
+            {"messages": [{"role": "user", "content": "stream selected"}]},
+            SimpleNamespace(),
+            session_id="s-bounded",
+            turn_id="t-bounded",
+        )
+        return [payload async for frame in frames for payload in _data_lines(frame.decode("utf-8"))]
+
+    payloads = asyncio.run(_collect())
+    text_payloads = [p for p in payloads if p.get("type") == "text_delta"]
+    # all 500 live tokens surfaced, replay aggregate suppressed
+    assert len(text_payloads) == 500
+    # zero sort_keys keying dumps for the 500-token stream (delta frames are
+    # never keyed).
+    assert calls["sort_keys"] == 0
