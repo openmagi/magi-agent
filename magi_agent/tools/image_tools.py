@@ -336,7 +336,7 @@ def _call_vision_model_via_litellm(
 
     import litellm  # noqa: PLC0415
 
-    from magi_agent.cli.providers import (  # noqa: PLC0415
+    from magi_agent.engine.providers import (  # noqa: PLC0415
         SUPPORTED_PROVIDERS,
         resolve_provider_config,
         resolve_vision_provider_config,

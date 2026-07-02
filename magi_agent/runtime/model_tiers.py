@@ -434,7 +434,7 @@ def _keyed_registry_providers(
     one key is found, else ``None``.  Callers treat ``None`` as "skip filtering".
     """
     try:
-        from magi_agent.cli.providers import (  # noqa: PLC0415
+        from magi_agent.engine.providers import (  # noqa: PLC0415
             configured_providers,
             resolve_provider_config,
         )
@@ -498,7 +498,7 @@ def resolve_child_route(provider: str, model: str, env: Mapping[str, str]) -> Ch
     sel_model: str | None = None
     if keyed is not None:
         try:
-            from magi_agent.cli.providers import resolve_provider_config  # noqa: PLC0415
+            from magi_agent.engine.providers import resolve_provider_config  # noqa: PLC0415
 
             sel = resolve_provider_config(env=env)
             if sel:
@@ -618,7 +618,7 @@ def available_child_model_routes(env: Mapping[str, str]) -> list[str]:
     # (handles custom model ids not in the static registry).
     if keyed is not None:
         try:
-            from magi_agent.cli.providers import resolve_provider_config  # noqa: PLC0415
+            from magi_agent.engine.providers import resolve_provider_config  # noqa: PLC0415
 
             sel = resolve_provider_config(env=env)
             if sel:

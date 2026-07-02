@@ -194,7 +194,7 @@ def _production_egress_critic_model_factory() -> Callable[[], object] | None:
     resolution is unchanged.
     """
     try:
-        from magi_agent.cli.providers import resolve_provider_config  # noqa: PLC0415
+        from magi_agent.engine.providers import resolve_provider_config  # noqa: PLC0415
 
         provider_config = resolve_provider_config()
     except Exception:  # noqa: BLE001 — fail open (no provider config -> dormant)

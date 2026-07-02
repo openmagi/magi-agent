@@ -196,7 +196,7 @@ def _normalize_model_provider(model: str | None) -> str | None:
     if not model or "/" in model:
         return model
     try:
-        from magi_agent.cli.providers import _infer_provider_for_model
+        from magi_agent.engine.providers import _infer_provider_for_model
 
         provider = _infer_provider_for_model(model)
     except Exception:  # noqa: BLE001 — never break the build over inference.
@@ -231,7 +231,7 @@ def _qualified_litellm_model(model: str | None) -> str | None:
     if not model:
         return None
     try:
-        from magi_agent.cli.providers import resolve_provider_config
+        from magi_agent.engine.providers import resolve_provider_config
 
         cfg = resolve_provider_config(model_override=model)
     except Exception:  # noqa: BLE001 — resolution is best-effort

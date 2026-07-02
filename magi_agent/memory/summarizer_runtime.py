@@ -228,7 +228,7 @@ def build_compaction_summarizer(
 # Re-exported provider seam (patched by tests; kept here so the lazy import in
 # ``CheapModelSummarizer._resolve_model`` resolves these names on THIS module).
 def resolve_provider_config(*args, **kwargs):  # type: ignore[no-untyped-def]
-    from magi_agent.cli.providers import (  # noqa: PLC0415
+    from magi_agent.engine.providers import (  # noqa: PLC0415
         resolve_provider_config as _impl,
     )
 
