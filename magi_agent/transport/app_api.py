@@ -525,7 +525,7 @@ def _traversable_has_script(node: Traversable) -> bool:
 # Config
 # --------------------------------------------------------------------------- #
 def _config_snapshot(runtime: OpenMagiRuntime) -> dict[str, Any]:
-    from magi_agent.cli import providers
+    from magi_agent.engine import providers
 
     raw = providers._load_config_file()
     model_section = providers._section(raw, "model")
@@ -569,7 +569,7 @@ def _toml_escape(value: str) -> str:
 
 
 def _canonical_provider(value: object, *, strict: bool = True) -> str | None:
-    from magi_agent.cli import providers
+    from magi_agent.engine import providers
 
     provider = providers._clean(value)
     if provider is None:
@@ -594,7 +594,7 @@ def _write_config(payload: dict[str, Any]) -> None:
     """
     import tomllib
 
-    from magi_agent.cli import providers
+    from magi_agent.engine import providers
 
     llm = payload.get("llm") if isinstance(payload.get("llm"), dict) else {}
     existing = providers._load_config_file()
@@ -665,7 +665,7 @@ def _write_config(payload: dict[str, Any]) -> None:
 # --------------------------------------------------------------------------- #
 def _providers_snapshot() -> dict[str, Any]:
     """Build the GET /v1/app/providers response — NEVER leaks key values."""
-    from magi_agent.cli import providers
+    from magi_agent.engine import providers
 
     raw = providers._load_config_file()
     providers_cfg = providers._section(raw, "providers")
@@ -936,8 +936,8 @@ def register_app_api_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
 
     @app.put("/v1/app/providers")
     async def app_providers_put(request: Request) -> JSONResponse:
-        from magi_agent.cli import providers as _providers
-        from magi_agent.cli.providers import UnknownProviderError
+        from magi_agent.engine import providers as _providers
+        from magi_agent.engine.providers import UnknownProviderError
 
         denied = guard(request)
         if denied is not None:

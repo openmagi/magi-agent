@@ -99,7 +99,7 @@ async def _computer_task_handler(
             status="error", error_code="missing_task", error_message="task is required"
         )
 
-    from magi_agent.cli import providers as _providers  # noqa: PLC0415
+    from magi_agent.engine import providers as _providers  # noqa: PLC0415
     from magi_agent.computer.autonomous.config import ComputerToolConfig  # noqa: PLC0415
     from magi_agent.computer.autonomous.engine import ComputerEngine  # noqa: PLC0415
     from magi_agent.computer.autonomous.provider_bridge import (  # noqa: PLC0415

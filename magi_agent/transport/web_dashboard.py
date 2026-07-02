@@ -107,8 +107,8 @@ def local_dashboard_bootstrap(runtime: OpenMagiRuntime) -> dict[str, object]:
     provider already set up, or with the flag OFF, ``setup.needed`` is false so
     the bootstrap is behaviorally unchanged and existing consumers ignore it.
     """
-    from magi_agent.cli import providers
-    from magi_agent.cli.providers import SUPPORTED_PROVIDERS
+    from magi_agent.engine import providers
+    from magi_agent.engine.providers import SUPPORTED_PROVIDERS
     from magi_agent.config.flags import flag_bool
 
     token = runtime.config.gateway_token

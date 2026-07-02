@@ -17,7 +17,7 @@ from pydantic import (
 )
 
 from magi_agent.ops.authority import FalseOnlyAuthorityModel
-from magi_agent.transport.tool_preview import sanitize_tool_preview
+from magi_agent.shared.tool_preview import sanitize_tool_preview
 from magi_agent.runtime.events import NormalizedEvent
 
 from .contracts import MemoryRecord, RecallResult

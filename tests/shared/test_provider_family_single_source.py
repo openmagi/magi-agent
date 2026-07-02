@@ -147,3 +147,30 @@ def test_only_shared_module_defines_detect_provider_family() -> None:
         "``shared/provider_family.py``. "
         f"Offenders: {offenders}"
     )
+
+
+def test_only_shared_module_defines_detect_provider() -> None:
+    package_root = Path(__file__).resolve().parents[1] / "magi_agent"
+    if not package_root.exists():
+        package_root = Path(__file__).resolve().parents[2] / "magi_agent"
+    assert package_root.exists()
+
+    canonical = {"provider_family.py"}
+    offenders: list[str] = []
+    for path in package_root.rglob("*.py"):
+        if path.name in canonical:
+            continue
+        if "tests" in path.relative_to(package_root).parts:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if "def detect_provider(model" in text:
+            offenders.append(str(path.relative_to(package_root)))
+    assert offenders == [], (
+        "Second definition of ``detect_provider`` outside "
+        "``shared/provider_family.py``. Re-exports must use ``from "
+        "magi_agent.shared.provider_family import detect_provider``. "
+        f"Offenders: {offenders}"
+    )

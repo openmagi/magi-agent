@@ -14,7 +14,7 @@ from magi_agent.runtime.public_events import (
     tool_progress_event,
     tool_start_event,
 )
-from magi_agent.transport.tool_preview import sanitize_tool_preview
+from magi_agent.shared.tool_preview import sanitize_tool_preview
 
 if TYPE_CHECKING:
     from magi_agent.tools.kernel import (

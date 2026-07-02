@@ -1559,7 +1559,7 @@ async def _summarize_dropped_prefix(
     import asyncio
 
     try:
-        from magi_agent.cli.providers import resolve_provider_config
+        from magi_agent.engine.providers import resolve_provider_config
 
         provider_config = resolve_provider_config()
     except Exception:

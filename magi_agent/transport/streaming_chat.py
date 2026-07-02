@@ -30,7 +30,7 @@ from __future__ import annotations
 import math
 from collections.abc import Iterator
 
-from magi_agent.cli.contracts import EngineResult
+from magi_agent.engine.contracts import EngineResult
 from magi_agent.runtime.events import RuntimeEvent
 # streaming_chat intentionally reuses sse's internal helpers (_json, _sanitize_agent_event)
 # to stay lock-step with the SSE wire format. The redaction helpers

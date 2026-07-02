@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from magi_agent.transport.tool_preview import sanitize_tool_preview
+from magi_agent.shared.tool_preview import sanitize_tool_preview
 
 
 ToolEvidenceKind = Literal["tool_call", "tool_result", "tool_error", "tool_timeout"]

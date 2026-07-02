@@ -61,7 +61,7 @@ from magi_agent.harness.general_automation.control_projection import (
 )
 from magi_agent.tools.context import ToolContext
 from magi_agent.tools.result import ToolResult
-from magi_agent.transport.tool_preview import sanitize_tool_preview
+from magi_agent.shared.tool_preview import sanitize_tool_preview
 
 if TYPE_CHECKING:
     from magi_agent.runtime.control import ControlRequestStore, ControlRequestStoreResult

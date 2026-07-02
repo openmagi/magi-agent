@@ -1121,7 +1121,7 @@ def _production_shacl_compiler_model_factory() -> Callable[[], Any] | None:
     the compile route gracefully returns ``{ok: False}`` (never 500).
     """
     try:
-        from magi_agent.cli.providers import resolve_provider_config  # noqa: PLC0415
+        from magi_agent.engine.providers import resolve_provider_config  # noqa: PLC0415
 
         provider_config = resolve_provider_config()
     except Exception:  # noqa: BLE001 — fail open

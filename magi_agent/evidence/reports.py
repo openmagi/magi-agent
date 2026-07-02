@@ -14,7 +14,7 @@ from magi_agent.evidence.types import (
     EvidenceRequirement,
 )
 from magi_agent.ops.authority import FalseOnlyAuthorityModel
-from magi_agent.transport.tool_preview import sanitize_tool_preview
+from magi_agent.shared.tool_preview import sanitize_tool_preview
 
 
 _SECRET_FIELD_FRAGMENTS = (

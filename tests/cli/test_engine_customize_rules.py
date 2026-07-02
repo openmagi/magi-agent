@@ -261,7 +261,7 @@ def test_customize_bridge_appended_after_gate_and_user_hooks(
     during = runner.before_during_run
     assert isinstance(during, list)
     assert len(during) == 3
-    assert during[0].__module__ == "magi_agent.cli.engine"
+    assert during[0].__module__ == "magi_agent.engine.driver"
     assert during[1].__module__ == "magi_agent.cli.hook_wiring"
     assert during[2].__module__ == "magi_agent.cli.customize_tool_wiring"
     # After the turn the agent is fully restored.

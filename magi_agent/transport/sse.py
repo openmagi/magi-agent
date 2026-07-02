@@ -12,7 +12,7 @@ from urllib.parse import SplitResult, urlsplit
 from magi_agent.composio.redaction import redact_composio_text
 from magi_agent.ops.health import _truthy_env
 from magi_agent.runtime.public_events import rule_check_event_has_authority
-from magi_agent.transport import tool_preview as _tool_preview
+from magi_agent.shared import tool_preview as _tool_preview
 
 
 _PRODUCTION_PATH_RE = re.compile(

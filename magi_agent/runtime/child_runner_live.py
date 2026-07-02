@@ -1067,7 +1067,7 @@ class RealLocalChildRunner:
         if injected_key and injected_provider in {provider, provider_key}:
             return self._provider_config
 
-        from magi_agent.cli.providers import (  # noqa: PLC0415
+        from magi_agent.engine.providers import (  # noqa: PLC0415
             ProviderConfig,
             SUPPORTED_PROVIDERS,
             UnknownProviderError,
@@ -1329,7 +1329,7 @@ class RealLocalChildRunner:
 
         from google.genai import types  # noqa: PLC0415
 
-        from magi_agent.cli.real_runner import (  # noqa: PLC0415
+        from magi_agent.engine.model_runner import (  # noqa: PLC0415
             build_cli_model_runner,
         )
         from magi_agent.config.flags import flag_bool  # noqa: PLC0415

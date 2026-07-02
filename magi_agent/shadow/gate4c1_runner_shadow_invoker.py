@@ -21,7 +21,7 @@ from magi_agent.shadow.gate4c0_shadow_config import (
     Gate4C0ShadowConfig,
     resolve_gate4c0_shadow_config,
 )
-from magi_agent.transport.tool_preview import sanitize_tool_preview
+from magi_agent.shared.tool_preview import sanitize_tool_preview
 
 
 Gate4C1RunnerStatus: TypeAlias = Literal["skipped", "dropped", "completed", "error"]

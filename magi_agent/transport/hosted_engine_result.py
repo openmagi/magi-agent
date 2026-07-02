@@ -55,7 +55,7 @@ import time
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 
-from magi_agent.cli.contracts import EngineResult, RuntimeEvent, Terminal
+from magi_agent.engine.contracts import EngineResult, RuntimeEvent, Terminal
 from magi_agent.cli.headless import drain
 from magi_agent.shadow.gate5b4c3_live_runner_boundary import (
     Gate5B4C3LiveRunnerBoundaryResult,

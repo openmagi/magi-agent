@@ -10,7 +10,7 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
-from magi_agent.transport.tool_preview import sanitize_tool_preview
+from magi_agent.shared.tool_preview import sanitize_tool_preview
 from magi_agent.workspace.isolation import (
     ExternalSandboxImportMetadata,
     WorkspaceChangePreview,

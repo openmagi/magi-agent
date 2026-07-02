@@ -38,7 +38,7 @@ from magi_agent.memory.policy import MemoryPolicy, evaluate_memory_policy
 # imports only ``re`` (no transport/network at module load), so importing it at
 # module top does not trip the memory import-boundary tests.  This keeps the
 # write-side redactor at least as strong as the read-side one (C2 / PR-D).
-from magi_agent.transport.tool_preview import MAX_TOOL_PREVIEW, redact_secret_tokens
+from magi_agent.shared.tool_preview import MAX_TOOL_PREVIEW, redact_secret_tokens
 from magi_agent.memory.adapters.hipocampus_readonly import (
     UnsafeMemoryPathError,
     _PRODUCTION_PATH_RE,

@@ -130,7 +130,7 @@ async def _browser_task_handler(
     )
     # Import the providers MODULE (not the symbol) so monkeypatching
     # ``magi_agent.cli.providers.resolve_provider_config`` is honored.
-    from magi_agent.cli import providers as _providers  # noqa: PLC0415
+    from magi_agent.engine import providers as _providers  # noqa: PLC0415
 
     start_url = arguments.get("start_url")
     max_steps = int(arguments.get("max_steps") or BrowserToolConfig().max_steps)

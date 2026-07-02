@@ -151,8 +151,8 @@ def drive_runner_once(
 
     from google.genai import types  # noqa: PLC0415
 
-    from magi_agent.cli.providers import ProviderConfig  # noqa: PLC0415
-    from magi_agent.cli.real_runner import (  # noqa: PLC0415
+    from magi_agent.engine.providers import ProviderConfig  # noqa: PLC0415
+    from magi_agent.engine.model_runner import (  # noqa: PLC0415
         CliModelRunner,
         build_cli_model_runner,
     )

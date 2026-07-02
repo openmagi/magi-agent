@@ -11,7 +11,7 @@ from typing import Literal, Self
 from pydantic import BaseModel, ConfigDict, Field
 
 from magi_agent.runtime.public_events import rule_check_event_has_authority
-from magi_agent.transport.tool_preview import sanitize_tool_preview
+from magi_agent.shared.tool_preview import sanitize_tool_preview
 
 
 PublicEvent = Mapping[str, object]

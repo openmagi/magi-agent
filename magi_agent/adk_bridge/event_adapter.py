@@ -25,7 +25,7 @@ from magi_agent.runtime.transcript import (
     ToolResultEntry,
     TurnAbortedEntry,
 )
-from magi_agent.transport import tool_preview as _tool_preview
+from magi_agent.shared import tool_preview as _tool_preview
 from magi_agent.adk_bridge.wire_profile import WireProfile
 
 

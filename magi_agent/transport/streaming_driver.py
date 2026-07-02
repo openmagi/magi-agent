@@ -32,7 +32,7 @@ import contextlib
 from collections.abc import AsyncIterator, Callable
 from typing import TYPE_CHECKING
 
-from magi_agent.cli.contracts import EngineResult, Terminal
+from magi_agent.engine.contracts import EngineResult, Terminal
 from magi_agent.runtime.events import RuntimeEvent
 from magi_agent.runtime.public_events import turn_phase_event
 from magi_agent.transport.active_turn import ActiveTurn, ActiveTurnTable

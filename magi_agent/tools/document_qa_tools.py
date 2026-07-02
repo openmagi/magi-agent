@@ -173,7 +173,7 @@ def _call_qa_model(
     ``MAGI_DOCUMENT_QA_MODEL`` overrides the model id when set (cheap-model
     routing).  Raises on failure — :func:`document_qa` catches and degrades.
     """
-    from magi_agent.cli.providers import resolve_provider_config  # noqa: PLC0415
+    from magi_agent.engine.providers import resolve_provider_config  # noqa: PLC0415
 
     provider_cfg = resolve_provider_config()
     if provider_cfg is not None:
