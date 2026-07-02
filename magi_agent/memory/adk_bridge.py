@@ -16,6 +16,14 @@ from magi_agent.memory.contracts import (
     UnsupportedMemoryOperationError,
 )
 from magi_agent.memory.policy import MemoryPolicy, evaluate_memory_policy
+from magi_agent.ops.safety import (
+    AUTHORIZATION_HEADER_RE as _AUTHORIZATION_HEADER_RE,
+    BEARER_TOKEN_RE as _BEARER_TOKEN_RE,
+    GITHUB_TOKEN_RE as _GITHUB_TOKEN_RE,
+    OPENAI_TOKEN_RE as _OPENAI_TOKEN_RE,
+    STRIPE_TOKEN_RE as _STRIPE_TOKEN_RE,
+    redact_secret_tokens as _kernel_redact_secret_tokens,
+)
 
 
 _MODEL_CONFIG = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")
@@ -41,15 +49,10 @@ _PRIVATE_METADATA_KEY_RE = re.compile(
     r"raw|hidden|private|prompt|tool|child|path|secret|token|authorization|cookie|password",
     re.IGNORECASE,
 )
-_BEARER_TOKEN_RE = re.compile(r"(Bearer\s+)[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
-_AUTHORIZATION_HEADER_RE = re.compile(
-    r"\b((?:Proxy-)?Authorization\s*:\s*[A-Za-z][A-Za-z0-9+.-]*\s+)"
-    r"([^\s,;]+)",
-    re.IGNORECASE,
-)
-_GITHUB_TOKEN_RE = re.compile(r"\bgh[opusr]_[A-Za-z0-9_]+\b")
-_OPENAI_TOKEN_RE = re.compile(r"\bsk-[A-Za-z0-9._-]+\b")
-_STRIPE_TOKEN_RE = re.compile(r"\b[rs]k_(?:live|test)_[A-Za-z0-9_]+\b")
+# The five token patterns and the generic redactor now come from the single
+# home magi_agent/ops/safety.py (imported above). adk_bridge keeps its own
+# site-specific label patterns (telegram/object/sensitive URL, whole-line
+# cookie) and applies the kernel redactor LAST in _redact_secret_text.
 _TELEGRAM_BOT_URL_RE = re.compile(
     r"https?://api\.telegram\.org/bot[0-9]+:[^/\s\"'<>]+[^\s\"'<>]*",
     re.IGNORECASE,
@@ -454,7 +457,10 @@ def _redact_secret_text(text: str) -> str:
     redacted = _GITHUB_TOKEN_RE.sub("[redacted]", redacted)
     redacted = _OPENAI_TOKEN_RE.sub("[redacted]", redacted)
     redacted = _STRIPE_TOKEN_RE.sub("[redacted]", redacted)
-    return _SECRET_KEY_VALUE_RE.sub(r"\1[redacted]", redacted)
+    redacted = _SECRET_KEY_VALUE_RE.sub(r"\1[redacted]", redacted)
+    # Kernel LAST: site labels above are preserved, and the kernel adds quoted
+    # key/value, public-credential KV, and session-assignment coverage.
+    return _kernel_redact_secret_tokens(redacted)
 
 
 def _safe_source_ref(source_ref: str) -> str:
