@@ -825,12 +825,12 @@ graph LR
 | nl_compiler_interactive.py | Conversational policy compiler — turn-by-turn multi-step variant. | custom_rules, rule_compiler | transport/customize.py |
 | output_rewrite.py | F-MUT2 — ``output_rewrite`` custom_rule kind. | result | (root)/facades.py, customize/custom_rules.py |
 | prebuilt_components.py | PR-P4: prebuilt (always-on) runtime components catalog. | — | transport/customize.py |
-| preset_map.py | Canonical preset id → runtime-seam map for the Customize verification tab. | scope, seam_apply, seam_spec | cli/real_runner.py, customize/catalog.py, customize/seam_apply.py, customize/seam_compiler.py, customize/seam_spec.py |
+| preset_map.py | Canonical preset id → runtime-seam map for the Customize verification tab. | seam_apply, seam_spec | cli/real_runner.py, customize/catalog.py, customize/seam_apply.py, customize/seam_compiler.py, customize/seam_spec.py |
 | prompt_injection.py | F-MUT1 — ``prompt_injection`` custom_rule kind. | — | (root)/facades.py, customize/custom_rules.py, runtime/message_builder.py |
 | rule_compiler.py | Unified NL → Rule compiler — single LLM call that routes a natural- | custom_rules, dashboard_authored, field_constraint_compiler, seam_spec, shacl_compiler, shacl_verifier | customize/mode_compiler.py, customize/nl_compiler_interactive.py, transport/customize.py |
 | runtime_fields.py | Runtime-fields derivation for the wizard's variable chip picker (F-UX2 / F8). | shacl_compiler, tool_perm | transport/customize.py |
 | runtime_gate.py | Runtime-side query for Customize verification preset state. | flags, store, verification_policy | cli/engine.py, customize/what_menu.py |
-| scope.py | Single source of truth for scope vocabulary + task-type → scope mapping. | — | customize/preset_map.py, customize/verification_policy.py |
+| scope.py | Single source of truth for the scope vocabulary. | — | customize/verification_policy.py |
 | scoped_policy.py | Mode ``scoped_policy_ids`` → per-turn policy overlay (resolver only; inert). | flags, modes, per_turn_agent_mode_context, store, verification_policy, what_menu | adk_bridge/dashboard_producer_control.py, cli/engine.py, customize/tool_perm.py |
 | seam_apply.py | Apply a :class:`SeamSpec` IR to the static :data:`PRESET_SEAMS` catalog. | preset_map, seam_spec | customize/preset_map.py |
 | seam_compiler.py | NL → SeamSpec compiler — registration-time only, fail-open everywhere. | preset_map, seam_spec, shacl_compiler | transport/customize.py |
