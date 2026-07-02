@@ -365,7 +365,13 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             return unauthorized
         from magi_agent.customize.modes import active_mode_id, delete_mode, list_modes
 
-        delete_mode(mode_id)
+        try:
+            delete_mode(mode_id)
+        except ValueError as exc:
+            # Built-in posture modes are read-only.
+            return JSONResponse(
+                status_code=400, content={"error": "delete_rejected", "message": str(exc)}
+            )
         return JSONResponse(
             content={
                 "modes": [mode.to_payload() for mode in list_modes()],
