@@ -170,9 +170,12 @@ def test_route_returns_mode_draft(tmp_path, monkeypatch) -> None:
     assert body["draft"]["displayName"] == "Careful reviewer"
     assert body["draft"]["permissionMode"] == "default"
     assert body["warnings"] == []
-    # The compile route must never activate a mode.
+    # The compile route must never ACTIVATE a mode (nor create a user mode).
+    # (list_modes may include default-ON built-in posture modes; the invariant
+    # is that nothing was activated and no user mode was persisted.)
     listing = _client().get("/v1/app/modes").json()
-    assert listing["modes"] == []
+    assert listing["activeMode"] is None
+    assert [m for m in listing["modes"] if not m["id"].startswith("builtin-")] == []
 
 
 def test_route_fails_open_when_no_model_configured(tmp_path, monkeypatch) -> None:
