@@ -824,7 +824,7 @@ graph LR
 | modes.py | Agent MODES (postures) — typed model + customize.json CRUD. | per_turn_agent_mode_context, store | cli/wiring.py, customize/mode_compiler.py, customize/scoped_policy.py, runtime/message_builder.py, transport/chat_routes.py, transport/customize.py, transport/streaming_chat_route.py |
 | nl_compiler_interactive.py | Conversational policy compiler — turn-by-turn multi-step variant. | custom_rules, rule_compiler | transport/customize.py |
 | output_rewrite.py | F-MUT2 — ``output_rewrite`` custom_rule kind. | result | (root)/facades.py, customize/custom_rules.py |
-| prebuilt_components.py | PR-P4: prebuilt (always-on) runtime components catalog. | — | — |
+| prebuilt_components.py | PR-P4: prebuilt (always-on) runtime components catalog. | — | transport/customize.py |
 | preset_map.py | Canonical preset id → runtime-seam map for the Customize verification tab. | scope, seam_apply, seam_spec | cli/real_runner.py, customize/catalog.py, customize/seam_apply.py, customize/seam_compiler.py, customize/seam_spec.py |
 | prompt_injection.py | F-MUT1 — ``prompt_injection`` custom_rule kind. | — | (root)/facades.py, customize/custom_rules.py, runtime/message_builder.py |
 | rule_compiler.py | Unified NL → Rule compiler — single LLM call that routes a natural- | custom_rules, dashboard_authored, field_constraint_compiler, seam_spec, shacl_compiler, shacl_verifier | customize/mode_compiler.py, customize/nl_compiler_interactive.py, transport/customize.py |
@@ -1937,7 +1937,7 @@ graph LR
 | composio_broker.py | Composio platform-broker server routes. | composio | — |
 | control_requests.py | Control-request REST surface consumed by the restored web dashboard. | chat_shared, openmagi_runtime | (root)/app.py |
 | credentials.py | Dashboard "Credentials" admin routes. | credentials_admin, durable_store, openmagi_runtime, payload, tools | (root)/app.py |
-| customize.py | — | apply, budgets_apply, catalog, control_plane_overrides, custom_rules, field_constraint_compiler, flags, inventory, live_catalog, mode_compiler, modes, nl_compiler_interactive, openmagi_runtime, rule_compiler, runtime_fields, seam_compiler, seam_spec, shacl_compiler, store, tools, types, wiring | (root)/app.py |
+| customize.py | — | apply, budgets_apply, catalog, control_plane_overrides, custom_rules, field_constraint_compiler, flags, inventory, live_catalog, mode_compiler, modes, nl_compiler_interactive, openmagi_runtime, prebuilt_components, rule_compiler, runtime_fields, seam_compiler, seam_spec, shacl_compiler, store, tools, types, wiring | (root)/app.py |
 | debug_trace.py | Debug endpoint exposing the current turn's execution trace. | trace_context | (root)/app.py |
 | egress_critic.py | Egress critic gate and live evidence projection for the chat serving path. | egress_gate, gate1a_readonly_tools, gate5b_full_toolhost, generation_request, mapping, projection, providers, readonly_classifier, reason_safety, user_visible_model_routing | cli/wiring.py, transport/chat.py, transport/chat_routes.py |
 | gate2_sandbox_canary.py | Gate2 sandbox workspace canary chat + delivery-receipt logic. | chat_shared, flags, gate2_activation_loop_a, gate2_durable_evidence, gate2_readiness, openmagi_runtime, user_visible_model_routing | transport/chat.py, transport/chat_routes.py |
