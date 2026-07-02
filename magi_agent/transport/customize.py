@@ -398,6 +398,43 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             return JSONResponse(status_code=404, content={"error": "unknown_mode"})
         return JSONResponse(content={"activeMode": active_mode_id()})
 
+    @app.get("/v1/app/prebuilt-components")
+    async def list_prebuilt_components(request: Request) -> JSONResponse:
+        """PR-P4: read-only list of always-on kernel components (read-before-write,
+        path safety, receipts, ...) that gate every turn but were invisible in the
+        dashboard. Descriptive only; never mutates.
+        """
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        from magi_agent.customize.prebuilt_components import (  # noqa: PLC0415
+            prebuilt_components_view,
+        )
+
+        try:
+            components = prebuilt_components_view()
+        except Exception:  # noqa: BLE001
+            components = []
+        return JSONResponse(content={"components": components})
+
+    @app.get("/v1/app/packs")
+    async def list_installed_packs(request: Request) -> JSONResponse:
+        """PR-P3: read-only inventory of installed packs + what each provides.
+
+        Powers the Packs tab's contents view so the operator can see the rules /
+        behaviors / tools a pack contributes, not just its id. Never mutates.
+        """
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        from magi_agent.packs.inventory import installed_packs_view  # noqa: PLC0415
+
+        try:
+            packs = installed_packs_view()
+        except Exception:  # noqa: BLE001
+            packs = []
+        return JSONResponse(content={"packs": packs})
+
     @app.post("/v1/app/modes/compile")
     async def compile_agent_mode(request: Request) -> JSONResponse:
         """PR-U3.4: NL → agent-mode draft compile preview.

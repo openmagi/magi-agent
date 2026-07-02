@@ -63,8 +63,10 @@ import { BehaviorsPanel } from "./behaviors-panel";
 import { BudgetsTab } from "./budgets-tab";
 import { GuidancePanel } from "./guidance-panel";
 import { ModesPanel } from "./modes-panel";
+import { PacksPanel } from "./packs-panel";
 import { PageHint } from "./page-hint";
 import { PoliciesTable } from "./policies-table";
+import { PrebuiltComponentsPanel } from "./prebuilt-components-panel";
 import { ReusableEvidenceTab } from "./reusable-evidence-tab";
 import { ReusableConditionsTab } from "./reusable-conditions-tab";
 import { SeamBuilderPanel } from "./seam-builder-panel";
@@ -650,13 +652,21 @@ export function CustomizeHub({
         ) : null}
 
         {section === "recipes" ? (
-          <RecipesPanel
-            recipes={recipes}
-            enabledRecipeIds={enabledRecipeIds}
-            pendingIds={recipePending}
-            error={recipeError}
-            onToggle={handleToggleRecipe}
-          />
+          <div className="space-y-6">
+            <PacksPanel />
+            <div>
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+                First-party bundles (opt in / out)
+              </p>
+              <RecipesPanel
+                recipes={recipes}
+                enabledRecipeIds={enabledRecipeIds}
+                pendingIds={recipePending}
+                error={recipeError}
+                onToggle={handleToggleRecipe}
+              />
+            </div>
+          </div>
         ) : null}
 
         {section === "hooks" ? <HooksPanel /> : null}
@@ -996,6 +1006,7 @@ function RulesSectionMount({
               scopedInModes={scopedInModes}
             />
           ) : null}
+          {subTab === "policies" ? <PrebuiltComponentsPanel /> : null}
           {subTab === "evidence" ? (
             <ReusableEvidenceTab entries={evidenceTypes} />
           ) : null}
