@@ -19,6 +19,7 @@ from magi_agent.harness.learning_executor import (
 )
 from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.runtime.provider_receipts import provider_digest
+from magi_agent.shared.cron_fields import parse_cron_field
 
 
 logger = logging.getLogger(__name__)
@@ -376,35 +377,10 @@ def _next_fire_after(cron: CronDefinition, now: int) -> int:
     return now + 300_000
 
 
-def _parse_cron_field(field: str, minimum: int, maximum: int) -> frozenset[int]:
-    values: set[int] = set()
-    for part in field.split(","):
-        part = part.strip()
-        step = 1
-        if "/" in part:
-            range_part, step_part = part.split("/", 1)
-            step = int(step_part)
-            if step <= 0:
-                raise ValueError("cron step must be positive")
-        else:
-            range_part = part
-        if range_part == "*":
-            values.update(range(minimum, maximum + 1, step))
-        elif "-" in range_part:
-            start_text, end_text = range_part.split("-", 1)
-            start = int(start_text)
-            end = int(end_text)
-            if start < minimum or end > maximum or start > end:
-                raise ValueError("cron range out of bounds")
-            values.update(range(start, end + 1, step))
-        else:
-            value = int(range_part)
-            if value < minimum or value > maximum:
-                raise ValueError("cron value out of range")
-            values.add(value)
-    if not values:
-        raise ValueError("cron field cannot be empty")
-    return frozenset(values)
+#: N-33 dedup: the parser body now lives in the ``shared.cron_fields`` leaf.
+#: The private ``_parse_cron_field`` alias is kept so the in-module call sites
+#: stay unchanged.
+_parse_cron_field = parse_cron_field
 
 
 def _diagnostics(config: CronRuntimeConfig, metadata: Mapping[str, object]) -> dict[str, object]:
