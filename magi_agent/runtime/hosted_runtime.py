@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from magi_agent.adk_bridge.wire_profile import HOSTED_PROFILE
-from magi_agent.cli.engine import MagiEngineDriver
+from magi_agent.engine.driver import MagiEngineDriver
 
 
 # ---------------------------------------------------------------------------

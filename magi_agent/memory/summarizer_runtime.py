@@ -236,8 +236,8 @@ def resolve_provider_config(*args, **kwargs):  # type: ignore[no-untyped-def]
 
 
 def _build_litellm_model(*args, **kwargs):  # type: ignore[no-untyped-def]
-    from magi_agent.cli.real_runner import (  # noqa: PLC0415
-        _build_litellm_model as _impl,
+    from magi_agent.engine.model_runner import (  # noqa: PLC0415
+        build_litellm_model as _impl,
     )
 
     return _impl(*args, **kwargs)

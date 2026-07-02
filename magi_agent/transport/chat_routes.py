@@ -323,7 +323,7 @@ async def _local_adk_chat_sse(
     prompt: str,
 ) -> AsyncIterator[str]:
     from magi_agent.engine.contracts import EngineResult
-    from magi_agent.cli.real_runner import (
+    from magi_agent.engine.model_runner import (
         reset_per_turn_reasoning_effort,
         set_per_turn_reasoning_effort,
     )
