@@ -77,13 +77,13 @@ from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping, Se
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from magi_agent.cli.contracts import ControlRequest, EngineResult, Terminal
+from magi_agent.engine.contracts import ControlRequest, EngineResult, Terminal
 from magi_agent.runtime.events import RuntimeEvent
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
-    from magi_agent.cli.contracts import PermissionGate
+    from magi_agent.engine.contracts import PermissionGate
     from magi_agent.runtime.error_recovery import (
         RecoverableError,
         RecoveryAttemptState,
@@ -500,7 +500,7 @@ def _build_nudge_message(nudge: "GoalNudge") -> str:
 # cli.event_projection so this engine, cli/headless.py, and cli/tui/app.py
 # all consult the same source. Aliased to the historical underscore-private
 # names so the body of this module keeps reading exactly as it did.
-from magi_agent.cli.event_projection import (
+from magi_agent.engine.event_projection import (
     ARTIFACT_EVENT_TYPES as _ARTIFACT_EVENT_TYPES,
     CONTROL_EVENT_TYPES as _CONTROL_EVENT_TYPES,
     ERROR_EVENT_TYPES as _ERROR_EVENT_TYPES,

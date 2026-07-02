@@ -27,8 +27,8 @@ from datetime import datetime
 from typing import Any, AsyncGenerator, Callable
 
 from magi_agent.adk_bridge.anthropic_cache_model import build_cache_aware_claude
-from magi_agent.cli.engine import RunnerPolicyAssembly
-from magi_agent.cli.providers import ProviderConfig
+from magi_agent.engine.driver import RunnerPolicyAssembly
+from magi_agent.engine.providers import ProviderConfig
 from magi_agent.config.env import is_message_cache_enabled
 from magi_agent.runtime.session_identity import MemoryMode
 
@@ -674,7 +674,7 @@ def _build_litellm_model(config: ProviderConfig, env: Mapping[str, str] | None =
     # classifier (PR #827) catches it and surfaces a typed
     # ``child_llm_empty_provider_stream`` failure with the model name —
     # actionable on the first repro instead of an opaque empty turn.
-    from magi_agent.cli.litellm_empty_observer import (  # noqa: PLC0415
+    from magi_agent.engine.litellm_empty_observer import (  # noqa: PLC0415
         EmptyProviderStreamObserverLiteLlm,
     )
 
@@ -696,6 +696,12 @@ def _build_litellm_model(config: ProviderConfig, env: Mapping[str, str] | None =
         **_model_reasoning_kwargs(env, provider=config.provider, config=config),
         **api_base_kwargs,
     )
+
+
+# rem2/F5 (deep-review N-26): public home for the single canonical LiteLlm
+# model builder. ``memory/summarizer_runtime`` (and any future cross-package
+# consumer) must import THIS name instead of the underscore-private one.
+build_litellm_model = _build_litellm_model
 
 
 def _app_identifier(app_name: str) -> str:
