@@ -133,9 +133,28 @@ def _normalize(data: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
+#: Parse cache keyed by (st_mtime_ns, st_size, st_ino) per target path (N-39).
+#: The freshness contract is preserved because every call still stat()s the
+#: file; only the read+json.loads+_normalize work is skipped on a cache hit.
+#: save_overrides() writes via os.replace (new inode + mtime_ns), so a write
+#: automatically invalidates the entry.
+_PARSE_CACHE: dict[str, tuple[tuple[int, int, int], dict[str, Any]]] = {}
+
+
 def load_overrides(path: Path | None = None) -> dict[str, Any]:
     """Load + shape-normalize the overrides file. Never raises; falls back to defaults."""
     target = path or customize_path()
+    try:
+        stat = target.stat()  # freshness contract: stat EVERY call
+    except OSError:
+        return _clone_default()
+    sig = (stat.st_mtime_ns, stat.st_size, stat.st_ino)
+    cache_key = str(target)
+    cached = _PARSE_CACHE.get(cache_key)
+    if cached is not None and cached[0] == sig:
+        # Callers mutate the result (e.g. set_tool_override), so hand back a
+        # deep copy and keep the cached value pristine.
+        return copy.deepcopy(cached[1])
     try:
         raw = target.read_text(encoding="utf-8")
     except (FileNotFoundError, NotADirectoryError, IsADirectoryError, OSError):
@@ -146,7 +165,9 @@ def load_overrides(path: Path | None = None) -> dict[str, Any]:
         return _clone_default()
     if not isinstance(data, dict):
         return _clone_default()
-    return _normalize(data)
+    normalized = _normalize(data)
+    _PARSE_CACHE[cache_key] = (sig, copy.deepcopy(normalized))
+    return normalized
 
 
 def save_overrides(overrides: dict[str, Any], path: Path | None = None) -> None:
