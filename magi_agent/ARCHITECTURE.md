@@ -96,6 +96,7 @@ graph LR
     context --> config
     context --> harness
     context --> hooks
+    context --> models
     context --> runtime
     context --> shared
     context --> tools
@@ -308,6 +309,7 @@ graph LR
     shadow --> tools
     shadow --> transport
     shadow --> workspace
+    shared --> models
     storage --> config
     storage --> missions
     storage --> runtime
@@ -801,7 +803,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | — | — |
-| _token_window_table.py | E-4 — single canonical home for the model→context-window lookup table. | — | context/token_tracker.py, runtime/message_builder.py |
+| _token_window_table.py | E-4 / H1 - single canonical home for the model->context-window table. | catalog | context/token_tracker.py, runtime/message_builder.py |
 | auto_compact.py | — | protected_tools, transcript_render, types | adk_bridge/context_compaction.py, context/hook.py |
 | content_replacement.py | — | types | context/hook.py |
 | hook.py | — | auto_compact, collapse_drain, content_replacement, context, flags, manifest, microcompact, reactive_compact, result, scope, token_tracker, types | — |
@@ -1372,7 +1374,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | Single source of truth for provider/model metadata (E-1). | catalog, types | engine/model_runner.py |
-| catalog.py | Single source of truth: loads ``builtin_catalog.json`` once and serves it. | types | cli/app.py, engine/model_runner.py, engine/providers.py, models/__init__.py, models/export_ts.py, runtime/model_tiers.py |
+| catalog.py | Single source of truth: loads ``builtin_catalog.json`` once and serves it. | types | cli/app.py, context/_token_window_table.py, engine/model_runner.py, engine/providers.py, models/__init__.py, models/export_ts.py, runtime/model_tiers.py, shared/provider_family.py |
 | export_ts.py | Render ``apps/web/src/lib/models/generated-local-runtime-models.ts``. | catalog, types | — |
 | types.py | Frozen ``ModelRecord`` shape consumed by :mod:`magi_agent.models.catalog`. | model_tiers | models/__init__.py, models/catalog.py, models/export_ts.py |
 
@@ -1816,7 +1818,7 @@ graph LR
 |---|---|---|---|
 | __init__.py | — | — | adk_bridge/event_adapter.py, transport/sse.py, transport/tool_preview.py |
 | cron_fields.py | N-33 leaf: single home for the cron field parser. | — | harness/cron_runtime.py, missions/cron_policy.py, missions/schedule_grammar.py |
-| provider_family.py | E-13 - single source of truth for provider-family detection. | — | adk_bridge/tool_schema_repair.py, prompt/injection.py, prompt/provider_adapter.py |
+| provider_family.py | E-13 - single source of truth for provider-family detection. | catalog | adk_bridge/tool_schema_repair.py, prompt/injection.py, prompt/provider_adapter.py |
 | token_estimation.py | — | — | adk_bridge/context_compaction.py, context/token_tracker.py, runtime/error_recovery/strategies/_token_utils.py, shadow/gate5b4c3_runner_input_adapter.py |
 | tool_preview.py | — | — | evidence/child_runtime_envelope.py, evidence/reports.py, evidence/tool_boundary.py, harness/general_automation/plan_act_switch.py, harness/general_automation/question_tool.py, harness/plan_gate.py, memory/projection.py, runtime/child_event_projection.py, runtime/control.py, runtime/events.py, runtime/work_console_snapshot.py, shadow/gate4c1_runner_shadow_invoker.py, shadow/workspace_adoption_preflight_contract.py, tools/event_projection.py |
 | types.py | — | — | context/types.py, runtime/error_recovery/types.py |

@@ -12,8 +12,10 @@ because the previous arrangement (``shared`` top-level importing
 ``prompt/injection``) was a real two-node top-level cycle that crashed a
 fresh interpreter. ``prompt/injection`` now re-exports ``detect_provider``
 for back-compat. ``detect_provider_family`` delegates to it and extends
-the result with the FIREWORKS family. ``shared`` no longer imports any
-``magi_agent`` module, so it is a true leaf.
+the result with the FIREWORKS family. Both detectors consult
+``ModelCatalog`` first (H1/N-28) via a function-local lazy import, so at
+import time ``shared`` still pulls in no ``magi_agent`` module and stays a
+true top-level leaf.
 """
 
 from __future__ import annotations
@@ -37,6 +39,20 @@ def detect_provider(model: str) -> str:
     Returns:
         One of ``"anthropic"``, ``"openai"``, ``"google"``, or ``"unknown"``.
     """
+    # Catalog-first: a catalogued id (including aliases like ``haiku`` with no
+    # ``claude-`` prefix) resolves via the single source before heuristics.
+    # ``fireworks``/``openrouter`` fall through: they are not part of this
+    # function's four-string return contract, so the heuristic decides.
+    catalog_provider = _catalog_provider(model)
+    if catalog_provider is not None:
+        mapped = {
+            "anthropic": "anthropic",
+            "openai": "openai",
+            "gemini": "google",
+        }.get(catalog_provider)
+        if mapped is not None:
+            return mapped
+
     model_lower = model.lower()
 
     # Prefix-based detection - highest priority
@@ -58,6 +74,18 @@ def detect_provider(model: str) -> str:
     return "unknown"
 
 
+def _catalog_provider(model: str) -> str | None:
+    """Catalog lookup for ``model`` via a function-local lazy import.
+
+    Kept lazy so importing ``shared`` never eagerly loads ``models.catalog``
+    (cold-import cost and future layering ratchet). Returns the canonical
+    provider string or ``None`` when the catalog has no record.
+    """
+    from magi_agent.models.catalog import ModelCatalog  # noqa: PLC0415
+
+    return ModelCatalog.builtin().provider_for_model(model)
+
+
 class ProviderFamily(str, Enum):
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
@@ -69,10 +97,22 @@ class ProviderFamily(str, Enum):
 def detect_provider_family(model: str) -> ProviderFamily:
     """Map a model id to a :class:`ProviderFamily`.
 
-    Reuses ``detect_provider`` (the prefix/substring matcher) and extends
-    it with fireworks detection for the Kimi/MiniMax families. Unknown ids
-    fall through to :attr:`ProviderFamily.DEFAULT`.
+    Catalog-first: a catalogued id resolves via the single source before the
+    heuristic. Falls back to ``detect_provider`` (the prefix/substring
+    matcher) extended with fireworks detection for the Kimi/MiniMax families.
+    Unknown ids fall through to :attr:`ProviderFamily.DEFAULT`.
     """
+
+    catalog_provider = _catalog_provider(model)
+    if catalog_provider is not None:
+        mapped = {
+            "anthropic": ProviderFamily.ANTHROPIC,
+            "openai": ProviderFamily.OPENAI,
+            "gemini": ProviderFamily.GOOGLE,
+            "fireworks": ProviderFamily.FIREWORKS,
+        }.get(catalog_provider)
+        if mapped is not None:
+            return mapped
 
     model_lower = model.lower()
     if model_lower.startswith(("fireworks/", "kimi-", "minimax-")):
