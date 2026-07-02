@@ -1,5 +1,7 @@
 """Provider/key resolution for the local ``magi`` CLI.
 
+Canonical home since rem2/F4; ``magi_agent.cli.providers`` is a byte-compatible alias.
+
 The installed CLI ships a model-free stub runner (:mod:`magi_agent.cli.local_runner`)
 so ``magi`` launches without any configuration. This module is the bridge to a
 *real* runner: it discovers which model provider the user has configured and the
