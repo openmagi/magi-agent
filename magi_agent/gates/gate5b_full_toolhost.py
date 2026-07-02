@@ -343,13 +343,14 @@ def _match_path(match: object) -> str | None:
     return None
 
 
+# Every name here MUST resolve in the runtime tool registry built by
+# runtime/openmagi_runtime._build_core_tool_registry (catalog + native
+# plugins). Enforced by tests/gates/test_gate5b_tool_surface_sync.py; add
+# new names there-first or the sync test will fail.
 _GATE5B_FIRST_PARTY_REGISTRY_TOOL_NAMES = (
     "AgentMemoryRemember",
     "AgentMemorySearch",
-    "ArtifactCreate",
     "ArtifactDelete",
-    "ArtifactList",
-    "ArtifactRead",
     "ArtifactUpdate",
     "AskUserQuestion",
     "BatchRead",
@@ -372,7 +373,6 @@ _GATE5B_FIRST_PARTY_REGISTRY_TOOL_NAMES = (
     "ExternalSourceRead",
     "ExternalToolLoader",
     "GitDiff",
-    "HealthStatus",
     "KnowledgeSearch",
     "KnowledgeWrite",
     "MemoryRedact",
@@ -398,7 +398,6 @@ _GATE5B_FIRST_PARTY_REGISTRY_TOOL_NAMES = (
     "TaskStop",
     "TaskWait",
     "TestRun",
-    "ToolSearch",
     "WebFetch",
     "WebSearch",
 )
