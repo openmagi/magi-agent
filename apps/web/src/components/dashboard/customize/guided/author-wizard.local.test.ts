@@ -118,10 +118,22 @@ describe("AuthorWizard — variable-length policy authoring (F1.5 + F-UX3)", () 
     // lifecycle + scope pair. The fieldset count is 3 in the source.
     expect(src.match(/<fieldset/g)?.length).toBe(3);
     // PR-U3.2: legend reframed from the internal "Lifecycle event" jargon to
-    // the plain "When it runs"; scope + tool-target legends are unchanged.
+    // the plain "When it runs". PR-P5.2: the "Turn scope" picker
+    // (coding/research/delivery) is retired for a "Where does this apply?"
+    // global note; tool-target legend is unchanged.
     expect(src).toContain("When it runs");
-    expect(src).toContain("Turn scope");
+    expect(src).toContain("Where does this apply?");
     expect(src).toContain("Tool target");
+  });
+
+  it("PR-P5.2: retires the coding/research/delivery turn-scope picker (global only)", () => {
+    expect(src).not.toContain("Turn scope");
+    expect(src).not.toContain("Coding turns");
+    expect(src).not.toContain("Research turns");
+    expect(src).not.toContain("SCOPE_OPTIONS");
+    // Rules are authored global; stance-scoping points at the Modes tab.
+    expect(src).toContain("Every turn (global)");
+    expect(src).toContain('scope: "always"');
   });
 
   it("drops the disabled 'emit' archetype (audit+(no condition) covers the same outcome)", () => {
