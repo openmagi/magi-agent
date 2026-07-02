@@ -1290,7 +1290,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | contracts, namespaces, policy | — |
-| adk_bridge.py | — | contracts, policy | — |
+| adk_bridge.py | — | contracts, policy, safety | — |
 | compaction_tree.py | 5-level persistent compaction tree + ROOT.md synthesis (PR-A). | compactor, config, local_file_writable | runtime/memory_turn_hook.py |
 | compactor.py | Deterministic, IO-free memory compactor (gap-closer B2). | — | memory/adapters/local_file_writable.py, memory/compaction_tree.py |
 | config.py | Single source of truth for Hipocampus memory activation (PR1). | _bool_resolution | cli/app.py, cli/memory_bootstrap.py, cli/memory_cli.py, cli/memory_recall_block.py, gates/memory_write_readiness.py, memory/adapters/hipocampus_readonly.py, memory/adapters/local_file_writable.py, memory/adapters/operator_soul_writer.py, memory/compaction_tree.py, memory/policy.py, memory/search/__init__.py, memory/summarizer_runtime.py, plugins/native/knowledge.py, runtime/memory_turn_hook.py, transport/app_api.py |
@@ -1301,7 +1301,7 @@ graph LR
 | namespaces.py | — | authority, contracts, policy | cli/learning_recall.py, harness/memory_recall.py, memory/__init__.py, memory/projection.py, recipes/first_party/memory_recall.py |
 | policy.py | — | authority, config, contracts | memory/__init__.py, memory/adapters/hipocampus_readonly.py, memory/adapters/local_file_writable.py, memory/adk_bridge.py, memory/conformance.py, memory/namespaces.py, memory/projection.py, memory/prompt_projection.py, recipes/first_party/memory_recall.py |
 | projection.py | — | authority, contracts, events, namespaces, policy, tool_preview | memory/prompt_projection.py, recipes/first_party/memory_recall.py |
-| prompt_projection.py | D3 — gated memory prompt projection. | continuity_policy, hipocampus_readonly, policy, projection, tool_preview | cli/memory_recall_block.py, runtime/memory_snapshot_cache.py |
+| prompt_projection.py | D3 — gated memory prompt projection. | continuity_policy, hipocampus_readonly, policy, projection, safety | cli/memory_recall_block.py, runtime/memory_snapshot_cache.py |
 | qmd_client.py | Fail-open client for live qmd memory search. | — | memory/adapters/hipocampus_readonly.py |
 | recall_ledger.py | — | authority | — |
 | summarizer_runtime.py | Production cheap-model summarizer for the compaction tree (PR2). | config, model_runner, providers, summarizer_runtime | runtime/memory_turn_hook.py, runtime/session_extract_runtime.py |
@@ -1313,7 +1313,7 @@ graph LR
 |---|---|---|---|
 | __init__.py | — | hipocampus_readonly | — |
 | hipocampus_readonly.py | — | backend_cache, config, contracts, flags, policy, qmd_client, search | memory/adapters/__init__.py, memory/adapters/local_file_writable.py, memory/adapters/operator_soul_writer.py, memory/conformance.py, memory/prompt_projection.py |
-| local_file_writable.py | LocalFileMemoryProvider — gated writable local-file memory adapter (D1). | _truthy, compactor, config, contracts, hipocampus_readonly, policy, tool_preview | harness/memory_write.py, memory/adapters/operator_soul_writer.py, memory/compaction_tree.py, memory/conformance.py, runtime/memory_turn_hook.py, runtime/memory_write_wiring.py, runtime/session_extract_runtime.py |
+| local_file_writable.py | LocalFileMemoryProvider — gated writable local-file memory adapter (D1). | _truthy, compactor, config, contracts, hipocampus_readonly, policy, safety | harness/memory_write.py, memory/adapters/operator_soul_writer.py, memory/compaction_tree.py, memory/conformance.py, runtime/memory_turn_hook.py, runtime/memory_write_wiring.py, runtime/session_extract_runtime.py |
 | operator_soul_writer.py | OperatorSoulWriter — operator-gated SOUL.md write path (D4). | config, hipocampus_readonly, local_file_writable | — |
 
 ### memory/search/
@@ -1405,7 +1405,7 @@ graph LR
 | job_queue.py | Agent job-queue FSM — reference contract (NOT wired into the OSS runtime). | authority, safety | — |
 | metrics.py | — | authority, safety | — |
 | otel_noise.py | Suppress a benign OpenTelemetry teardown log line. | — | (root)/main.py, cli/app.py |
-| safety.py | — | authority | artifacts/delivery_receipts.py, artifacts/local_result_store.py, artifacts/render_verification.py, billing/quota.py, billing/spend_guard.py, composio/redaction.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, evidence/ledger.py, evidence/run_redaction.py, gates/gate2_readiness.py, harness/verifier_bus.py, ops/health.py, ops/job_queue.py, ops/metrics.py, permissions/auto_control.py, runtime/governed_projection.py, runtime/heartbeat_contract.py, runtime/model_tiers.py, runtime/no_agent_watchdog.py, runtime/plan_ledger.py, runtime/resume_decision.py, security/compliance.py, shadow/gate2_recipe_profile_resolver.py, tenancy/context.py, tools/kernel.py, tools/output_budget.py, tools/schema_validation.py, transport/product_admin.py, web_acquisition/policy.py |
+| safety.py | — | authority | artifacts/delivery_receipts.py, artifacts/local_result_store.py, artifacts/render_verification.py, billing/quota.py, billing/spend_guard.py, composio/redaction.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, evidence/ledger.py, evidence/run_redaction.py, gates/gate2_readiness.py, harness/verifier_bus.py, memory/adapters/local_file_writable.py, memory/adk_bridge.py, memory/prompt_projection.py, ops/health.py, ops/job_queue.py, ops/metrics.py, permissions/auto_control.py, runtime/governed_projection.py, runtime/heartbeat_contract.py, runtime/model_tiers.py, runtime/no_agent_watchdog.py, runtime/plan_ledger.py, runtime/resume_decision.py, security/compliance.py, shadow/gate2_recipe_profile_resolver.py, tenancy/context.py, tools/kernel.py, tools/output_budget.py, tools/schema_validation.py, transport/product_admin.py, web_acquisition/policy.py |
 
 ### packs/
 
@@ -1818,7 +1818,7 @@ graph LR
 | cron_fields.py | N-33 leaf: single home for the cron field parser. | — | harness/cron_runtime.py, missions/cron_policy.py, missions/schedule_grammar.py |
 | provider_family.py | E-13 - single source of truth for provider-family detection. | — | adk_bridge/tool_schema_repair.py, prompt/injection.py, prompt/provider_adapter.py |
 | token_estimation.py | — | — | adk_bridge/context_compaction.py, context/token_tracker.py, runtime/error_recovery/strategies/_token_utils.py, shadow/gate5b4c3_runner_input_adapter.py |
-| tool_preview.py | — | — | evidence/child_runtime_envelope.py, evidence/reports.py, evidence/tool_boundary.py, harness/general_automation/plan_act_switch.py, harness/general_automation/question_tool.py, harness/plan_gate.py, memory/adapters/local_file_writable.py, memory/projection.py, memory/prompt_projection.py, runtime/child_event_projection.py, runtime/control.py, runtime/events.py, runtime/work_console_snapshot.py, shadow/gate4c1_runner_shadow_invoker.py, shadow/workspace_adoption_preflight_contract.py, tools/event_projection.py |
+| tool_preview.py | — | — | evidence/child_runtime_envelope.py, evidence/reports.py, evidence/tool_boundary.py, harness/general_automation/plan_act_switch.py, harness/general_automation/question_tool.py, harness/plan_gate.py, memory/projection.py, runtime/child_event_projection.py, runtime/control.py, runtime/events.py, runtime/work_console_snapshot.py, shadow/gate4c1_runner_shadow_invoker.py, shadow/workspace_adoption_preflight_contract.py, tools/event_projection.py |
 | types.py | — | — | context/types.py, runtime/error_recovery/types.py |
 | usage_metadata.py | Shared, duck-typed ADK usage-metadata extraction (single source). | — | adk_bridge/context_compaction.py, engine/driver.py, shared/tests/test_usage_metadata.py |
 
