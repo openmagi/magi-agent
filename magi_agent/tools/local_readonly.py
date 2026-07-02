@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import fnmatch
 import hashlib
 import json
 import os
@@ -22,6 +21,10 @@ from magi_agent.evidence.source_ledger import (
     public_source_ledger_report,
 )
 
+from ._workspace_path_guards import (
+    glob_pattern_matches as _glob_pattern_matches,
+    read_offset as _read_offset,
+)
 from .context import ToolContext
 from .memory_mode_guard import (
     is_incognito_memory_mode,
@@ -924,17 +927,6 @@ def _normalize_glob_pattern(pattern: str) -> str | None:
     return "/".join(parts) or "*"
 
 
-def _glob_pattern_matches(relative: str, pattern: str) -> bool:
-    if pattern in {"**", "**/*"}:
-        return True
-    if pattern.startswith("**/"):
-        suffix = pattern[3:]
-        return fnmatch.fnmatchcase(relative, suffix) or fnmatch.fnmatchcase(relative, pattern)
-    if "/" not in pattern and "/" in relative:
-        return False
-    return fnmatch.fnmatchcase(relative, pattern)
-
-
 def _is_workspace_escape(path_text: str) -> bool:
     if path_text.startswith(("/", "~")):
         return True
@@ -1015,17 +1007,6 @@ def _bounded_int(
     if isinstance(value, str) and value.isdecimal():
         return min(max(int(value), minimum), maximum)
     return default
-
-
-def _read_offset(value: object) -> int:
-    if isinstance(value, bool):
-        return 1
-    if isinstance(value, int) and value >= 1:
-        return value
-    if isinstance(value, str) and value.strip().isdecimal():
-        parsed = int(value.strip())
-        return parsed if parsed >= 1 else 1
-    return 1
 
 
 def _read_limit(value: object, default: int = 2000) -> int:

@@ -14,6 +14,11 @@ from typing import Any, Literal, Self
 from google.adk.tools import FunctionTool
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from magi_agent.tools._workspace_path_guards import (
+    SENSITIVE_PATH_PART_RE as _SENSITIVE_PATH_PART_RE,
+    glob_pattern_matches as _glob_pattern_matches,
+    is_sensitive_workspace_path as _is_sensitive_workspace_path,
+)
 from magi_agent.tools.catalog import register_core_tool_manifests
 from magi_agent.tools.context import ToolContext
 from magi_agent.tools.manifest import (
@@ -94,11 +99,8 @@ _SENSITIVE_KEY_RE = re.compile(
     r"(authorization|auth|bearer|cookie|credential|key|password|path|private|raw|secret|session|token)",
     re.IGNORECASE,
 )
-_SENSITIVE_PATH_PART_RE = re.compile(
-    r"(^\.|(?:^|[-_.])(?:auth|config|cookie|credential|env|key|kube|kubeconfig|password|"
-    r"secret|session|token)(?:[-_.]|$))",
-    re.IGNORECASE,
-)
+# _SENSITIVE_PATH_PART_RE now comes from the tools/_workspace_path_guards leaf
+# (imported above), shared with gate5b.
 
 
 class Gate1APathPolicyError(ValueError):
@@ -914,17 +916,6 @@ def _safe_glob_files(root: Path, pattern: str, *, limit: int) -> tuple[Path, ...
     return tuple(safe_files)
 
 
-def _is_sensitive_workspace_path(relative_path: Path) -> bool:
-    for part in relative_path.parts:
-        if not part or part in {".", ".."}:
-            return True
-        if part.startswith("."):
-            return True
-        if _SENSITIVE_PATH_PART_RE.search(part):
-            return True
-    return False
-
-
 def _normalize_safe_glob_pattern(pattern: str) -> str | None:
     normalized = str(pattern or "*").replace("\\", "/").strip()
     if not normalized:
@@ -935,20 +926,6 @@ def _normalize_safe_glob_pattern(pattern: str) -> str | None:
     if any(part == ".." for part in parts):
         return None
     return "/".join(parts) or "*"
-
-
-def _glob_pattern_matches(relative_path: str, pattern: str) -> bool:
-    if pattern in {"**", "**/*"}:
-        return True
-    if pattern.startswith("**/"):
-        suffix = pattern[3:]
-        return fnmatch.fnmatchcase(relative_path, suffix) or fnmatch.fnmatchcase(
-            relative_path,
-            pattern,
-        )
-    if "/" not in pattern and "/" in relative_path:
-        return False
-    return fnmatch.fnmatchcase(relative_path, pattern)
 
 
 def _evaluate_expression(expression: str) -> int | float:

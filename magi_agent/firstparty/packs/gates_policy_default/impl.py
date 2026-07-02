@@ -13,20 +13,20 @@ from __future__ import annotations
 from typing import Any
 
 from magi_agent.tools.memory_mode_guard import (
+    MEMORY_READ_TOOL_NAMES as _MEMORY_READ_TOOL_NAMES,
+    MEMORY_WRITE_TOOL_NAMES as _MEMORY_WRITE_TOOL_NAMES,
     command_may_write_protected_memory,
     command_mentions_protected_memory,
+    filter_protected_memory_matches as _filter_protected_memory_matches,
+    grep_glob_may_include_protected_memory as _grep_glob_may_include_protected_memory,
     is_incognito_memory_mode,
     is_long_term_memory_read_disabled,
     is_long_term_memory_write_disabled,
     is_protected_memory_path,
+    memory_read_target_paths as _memory_read_target_paths,
     memory_write_target_paths,
     normalize_memory_mode,
 )
-
-# Same values as the gate5b module constants (frozen there since the memory-mode
-# enforcement landed); replicated so the pack does not import private constants.
-_MEMORY_WRITE_TOOL_NAMES = frozenset({"FileWrite", "FileEdit", "PatchApply"})
-_MEMORY_READ_TOOL_NAMES = frozenset({"FileRead", "Glob", "Grep"})
 
 
 def _deny(ctx: Any) -> None:
@@ -38,14 +38,9 @@ def memory_mode_policy(ctx) -> None:  # noqa: ANN001 — duck-typed ctx-callable
     # ContextDispatcher contract calls every impl at every hook and impls no-op
     # on contexts they do not handle. Param intentionally unannotated (the §1
     # typed-context guard maps control_plane impls to a single provide-context).
-    # Library reuse: the path/glob helpers are pure module-level functions in the
-    # gate5b module (the same lazy-import pattern the workspace tool pack uses).
-    from magi_agent.gates.gate5b_full_toolhost import (
-        _filter_protected_memory_matches,
-        _grep_glob_may_include_protected_memory,
-        _memory_read_target_paths,
-    )
-
+    # Library reuse: the memory-mode read-half helpers are now imported at
+    # module top from their single home (magi_agent.tools.memory_mode_guard),
+    # the same module gate5b imports them from; no gate5b private import needed.
     mode = normalize_memory_mode(str(ctx.session.get_state("memoryMode", "normal")))
     if hasattr(ctx, "decide"):  # before_tool: block path (moved _enforce_memory_mode)
         tool_name = ctx.tool_name

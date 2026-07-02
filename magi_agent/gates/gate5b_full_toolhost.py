@@ -8,7 +8,6 @@ import inspect
 import json
 import logging
 import os
-import posixpath
 import re
 import signal
 import subprocess
@@ -65,13 +64,25 @@ from magi_agent.runtime.public_events import (
 from magi_agent.tools.context import ToolContext
 from magi_agent.tools.dispatcher import ToolDispatcher
 from magi_agent.tools.manifest import RuntimeMode, ToolManifest, ToolSource
+from magi_agent.tools._workspace_path_guards import (
+    SENSITIVE_PATH_PART_RE as _SENSITIVE_PATH_PART_RE,
+    glob_pattern_matches as _glob_pattern_matches,
+    is_sensitive_workspace_path as _is_sensitive_workspace_path,
+    read_offset as _read_offset,
+)
 from magi_agent.tools.memory_mode_guard import (
+    MEMORY_READ_TOOL_NAMES as _MEMORY_READ_TOOL_NAMES,
+    MEMORY_WRITE_TOOL_NAMES as _MEMORY_WRITE_TOOL_NAMES,
+    PROTECTED_GLOB_SENTINELS as _PROTECTED_GLOB_SENTINELS,
     command_may_write_protected_memory,
     command_mentions_protected_memory,
+    filter_protected_memory_matches as _filter_protected_memory_matches,
+    grep_glob_may_include_protected_memory as _grep_glob_may_include_protected_memory,
     is_incognito_memory_mode,
     is_long_term_memory_read_disabled,
     is_long_term_memory_write_disabled,
     is_protected_memory_path,
+    memory_read_target_paths as _memory_read_target_paths,
     memory_write_target_paths,
     normalize_memory_mode,
 )
@@ -242,105 +253,9 @@ _GATE5B_LEGACY_FULL_TOOLHOST_TOOL_NAMES = (
 # Memory-mode enforcement tool groupings. Writes and raw reads obey
 # read_only/incognito. Bash mirrors core_toolhost: incognito blocks protected
 # mentions, while read_only blocks protected writes.
-_MEMORY_WRITE_TOOL_NAMES = frozenset({"FileWrite", "FileEdit", "PatchApply"})
-_MEMORY_READ_TOOL_NAMES = frozenset({"FileRead", "Glob", "Grep"})
-_PROTECTED_GLOB_SENTINELS = (
-    "MEMORY.md",
-    "SCRATCHPAD.md",
-    "WORKING.md",
-    "TASK-QUEUE.md",
-    "memory/example.md",
-)
-
-
-def _memory_read_target_paths(
-    tool_name: str,
-    arguments: Mapping[str, object],
-) -> tuple[str, ...]:
-    """Return candidate paths a read-style tool call would touch.
-
-    Mirrors the core toolhost read preflight: FileRead resolves path aliases,
-    Glob resolves the selector, and Grep resolves the glob/path selector.
-    """
-
-    if tool_name == "FileRead":
-        names = ("path", "file", "filePath")
-    elif tool_name == "Glob":
-        names = ("pattern", "glob")
-    elif tool_name == "Grep":
-        names = ("glob", "path", "patternGlob")
-    else:
-        names = ()
-    paths: list[str] = []
-    for name in names:
-        value = arguments.get(name)
-        if isinstance(value, str) and value:
-            paths.append(value)
-    return tuple(paths)
-
-
-def _grep_glob_may_include_protected_memory(arguments: Mapping[str, object]) -> bool:
-    raw_glob = (
-        arguments.get("glob")
-        or arguments.get("path")
-        or arguments.get("patternGlob")
-        or "**/*"
-    )
-    if not isinstance(raw_glob, str):
-        return True
-    pattern = _normalize_memory_glob(raw_glob)
-    if pattern is None:
-        return False
-    return any(_glob_pattern_matches(path, pattern) for path in _PROTECTED_GLOB_SENTINELS)
-
-
-def _normalize_memory_glob(pattern: str) -> str | None:
-    text = str(pattern or "*").strip().replace("\\", "/")
-    if not text:
-        return "*"
-    if text.startswith(("/", "~")):
-        return None
-    parts = [part for part in text.split("/") if part not in {"", "."}]
-    if any(part == ".." for part in parts):
-        return None
-    normalized = posixpath.normpath("/".join(parts) or "*")
-    return "*" if normalized == "." else normalized
-
-
-def _glob_pattern_matches(relative: str, pattern: str) -> bool:
-    if pattern in {"**", "**/*"}:
-        return True
-    if pattern.startswith("**/"):
-        suffix = pattern[3:]
-        return fnmatch.fnmatchcase(relative, suffix) or fnmatch.fnmatchcase(relative, pattern)
-    if "/" not in pattern and "/" in relative:
-        return False
-    return fnmatch.fnmatchcase(relative, pattern)
-
-
-def _filter_protected_memory_matches(output: object) -> object:
-    if not isinstance(output, Mapping):
-        return output
-    matches = output.get("matches")
-    if not isinstance(matches, list):
-        return output
-    filtered = [
-        match for match in matches if not is_protected_memory_path(_match_path(match))
-    ]
-    if len(filtered) == len(matches):
-        return output
-    updated = dict(output)
-    updated["matches"] = filtered
-    return updated
-
-
-def _match_path(match: object) -> str | None:
-    if isinstance(match, str):
-        return match
-    if isinstance(match, Mapping):
-        path = match.get("path")
-        return path if isinstance(path, str) else None
-    return None
+# The memory-mode read-half helpers and the ``**`` glob matcher now come from
+# the single home magi_agent/tools/memory_mode_guard.py (imported above,
+# alongside the write-half and the _workspace_path_guards leaf).
 
 
 # Every name here MUST resolve in the runtime tool registry built by
@@ -429,11 +344,8 @@ def _unwrap_arguments_envelope(args: dict[str, object]) -> dict[str, object]:
 
 _SAFE_ENVIRONMENTS = frozenset({"local", "development", "staging", "production"})
 _DIGEST_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
-_SENSITIVE_PATH_PART_RE = re.compile(
-    r"(^\.|(?:^|[-_.])(?:auth|config|cookie|credential|env|key|kube|kubeconfig|password|"
-    r"secret|session|token)(?:[-_.]|$))",
-    re.IGNORECASE,
-)
+# _SENSITIVE_PATH_PART_RE now comes from the tools/_workspace_path_guards leaf
+# (imported above), shared with gate1a.
 # Shared with gate1a via the single home in gates/_redaction_common.py.
 from magi_agent.gates._redaction_common import (  # noqa: E402
     SENSITIVE_TRANSCRIPT_RE as _SENSITIVE_RE,
@@ -2827,17 +2739,6 @@ def _function_tool(
     return tool
 
 
-def _read_offset(value: object) -> int:
-    if isinstance(value, bool):
-        return 1
-    if isinstance(value, int) and value >= 1:
-        return value
-    if isinstance(value, str) and value.strip().isdecimal():
-        parsed = int(value.strip())
-        return parsed if parsed >= 1 else 1
-    return 1
-
-
 def _read_limit(value: object, default: int) -> int:
     if isinstance(value, bool):
         return default
@@ -2893,17 +2794,6 @@ def _safe_child_path(root: Path, path_text: str, *, allow_missing: bool = False)
     if _is_sensitive_workspace_path(resolved_parent_relative):
         raise Gate5BFullToolPathPolicyError("protected path")
     return candidate
-
-
-def _is_sensitive_workspace_path(relative_path: Path) -> bool:
-    for part in relative_path.parts:
-        if not part or part in {".", ".."}:
-            return True
-        if part.startswith("."):
-            return True
-        if _SENSITIVE_PATH_PART_RE.search(part):
-            return True
-    return False
 
 
 def _safe_glob_files(root: Path, pattern: str, *, limit: int) -> list[str]:
