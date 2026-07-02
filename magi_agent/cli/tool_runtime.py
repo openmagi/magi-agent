@@ -598,6 +598,9 @@ def build_tool_advertisement_block(*, workspace_root: str | None = None) -> str:
     Fail-open: any error returns an empty string so prompt assembly never breaks.
     """
     try:
+        # TODO(N-48): memoize on the gate-flag tuple if this ~4ms/turn re-assembly
+        # ever matters; the rebuild is intentional (catalog can never diverge from
+        # bind-time enabled tools).
         registry = build_cli_tool_runtime(
             workspace_root=str(Path(workspace_root or ".").resolve()),
             session_id="tool-advertisement",

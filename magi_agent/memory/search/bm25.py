@@ -100,10 +100,15 @@ class PyBM25Backend:
         # H-27: ``_index_signature`` keys the built index on
         # ``(resolved_root, max(mtime), file_count)``. A subsequent reindex
         # over an unchanged tree returns immediately without re-reading or
-        # re-tokenising — ``hipocampus_readonly._local_search_results`` calls
-        # ``reindex(...)`` before every search, so the cache turns N recall
-        # turns over an unchanged corpus into 1 tokenisation pass + N stat
-        # walks. The signature is None until the first successful reindex.
+        # re-tokenising. The recall hot paths (memory_recall_block._build_block
+        # and hipocampus_readonly._local_search_results) fetch this backend from
+        # the process-scope cache (memory/search/backend_cache.py) and call
+        # bind_or_reindex(...) -> reindex(...) before every search, so the cache
+        # turns N recall turns over an unchanged corpus into 1 tokenisation pass
+        # + N stat walks. Before D1 those callers built a fresh backend per turn,
+        # making this cache a permanent miss; the process-scope cache is what
+        # makes the claim true. The signature is None until the first successful
+        # reindex.
         self._index_signature: tuple[Path, float, int] | None = None
 
     @property

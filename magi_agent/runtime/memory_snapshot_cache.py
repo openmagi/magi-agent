@@ -3,8 +3,19 @@
 Computes the memory snapshot ONCE per (session_key, memory_mode) pair and
 reuses the same string for every subsequent call in that session.  This
 ensures the volatile/dynamic section of the system prompt never changes
-mid-session — which would invalidate the cached static prefix — while still
+mid-session, which would invalidate the cached static prefix, while still
 allowing a fresh snapshot after a session switch or /reset.
+
+Scope of the "ONCE per session" contract (N-46 honesty):
+    This is an INSTANCE-scope cache. The contract holds on the CLI/TUI paths,
+    where a single long-lived cache instance is built once per process and the
+    instruction is assembled once. On the serve path
+    (transport.chat -> cli.tool_runtime.build_cli_instruction) a NEW
+    MemorySnapshotCache is constructed every turn (build_cli_instruction runs
+    per turn), so the snapshot is recomputed per turn by design: the recall
+    query precedes snapshot assembly there, so a session-persistent snapshot
+    would not yield a stable cached prefix anyway, and promoting the cache to
+    session scope would stop reflecting mid-session memory writes.
 
 Usage::
 

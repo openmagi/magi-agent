@@ -201,12 +201,14 @@ class OpenMagiRuntime:
         except Exception:
             pass
         # TODO(memory): wire hosted ADK prompt assembly to
-        # project_memory_snapshot — see docs/plans. The live local-dashboard
-        # chat turn (transport.chat._local_adk_chat_sse) already gets the frozen
-        # snapshot for free because it builds its runner via
+        # project_memory_snapshot. The live local-dashboard chat turn
+        # (transport.chat._local_adk_chat_sse) recomputes the snapshot per turn:
+        # it builds its runner via
         # cli.wiring.build_headless_runtime -> cli.real_runner.build_cli_model_runner
-        # -> cli.tool_runtime.build_cli_instruction, which threads the
-        # MemorySnapshotCache block into the Agent instruction. The production
+        # -> cli.tool_runtime.build_cli_instruction, which constructs a
+        # turn-local MemorySnapshotCache and threads its block into the Agent
+        # instruction (the cache instance is turn-local on the serve path; see
+        # runtime.memory_snapshot_cache docstring). The production
         # multi-tenant path (transport.chat._run_live_chat_runner) instead routes
         # through the Gate 5B-4c-3 shadow generation boundary, whose policy
         # contract forbids memory injection, so it is intentionally NOT wired
