@@ -71,55 +71,6 @@ def test_scope_distribution_matches_design() -> None:
     assert "memory-continuity" in by_scope["memory"]
     assert "task-contract" in by_scope["task"]
 
-
-# ---------------------------------------------------------------------------
-# filter_refs_by_scope — keep unscoped, drop scope-mismatched preset refs
-# ---------------------------------------------------------------------------
-
-
-def test_filter_keeps_unowned_refs() -> None:
-    """A ref no preset claims is left alone — scope filter is opt-in per preset."""
-    from magi_agent.customize.preset_map import filter_refs_by_scope
-
-    refs = ("verifier:some-external-pack", "evidence:custom")
-    assert filter_refs_by_scope(refs, current_scope="coding") == refs
-
-
-def test_filter_keeps_coding_ref_on_coding_turn() -> None:
-    from magi_agent.customize.preset_map import filter_refs_by_scope
-
-    refs = ("verifier:dev-coding:test-evidence",)
-    assert (
-        filter_refs_by_scope(refs, current_scope="coding") == refs
-    )
-
-
-def test_filter_drops_coding_ref_on_non_coding_turn() -> None:
-    """The lab bug fix: a coding preset's ref must not be required on a
-    non-coding turn (else the gate blocks ``Hi`` on a missing coding evidence)."""
-    from magi_agent.customize.preset_map import filter_refs_by_scope
-
-    refs = ("verifier:dev-coding:test-evidence", "verifier:other-external")
-    kept = filter_refs_by_scope(refs, current_scope="research")
-    assert "verifier:dev-coding:test-evidence" not in kept
-    assert "verifier:other-external" in kept  # external = kept
-
-
-def test_filter_always_scope_kept_on_every_turn() -> None:
-    """An ``always`` preset's ref applies to every turn."""
-    from magi_agent.customize.preset_map import filter_refs_by_scope
-
-    # redaction is always-scope and owns no controls_refs by default (opt-in
-    # seam) so use an evidence-pack preset variant — but the test stays generic:
-    # any ref classified under an always preset survives every scope.
-    # Skip if no always preset has a controls_ref to assert against.
-    from magi_agent.customize.preset_map import PRESET_SEAMS
-
-    always_refs: list[str] = []
-    for preset_id, seam in PRESET_SEAMS.items():
-        if scope_for_preset(preset_id) == ("always",):
-            always_refs.extend(seam.controls_refs)
-    if not always_refs:
-        return  # no always-scope seam currently contributes refs
-    refs = tuple(always_refs)
-    assert filter_refs_by_scope(refs, current_scope="research") == refs
+# PR-P5.3: the filter_refs_by_scope tests were removed with the function (the
+# auto turn-scope axis is retired). PRESET_SCOPES / scope_for_preset remain for
+# the catalog's display-only "scope" field and are covered above.

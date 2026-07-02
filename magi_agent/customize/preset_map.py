@@ -33,10 +33,9 @@ from dataclasses import dataclass, field
 #
 # Scope vocabulary lives in ``customize/scope.py`` (mirrors ``custom_rules.SCOPES``
 # so the schema exposed in the UI custom-rule builder matches the catalog rows).
-# A preset may belong to multiple scopes — multi-scope presets match every turn
-# that includes any of their scopes (``always`` is the universal). The runtime
-# filter (``_apply_customize_verification`` / opt-in satisfier) consults this map
-# via :func:`preset_scope_matches`.
+# A preset may belong to multiple scopes. This map now feeds only the catalog's
+# display-only "scope" field via :func:`scope_for_preset` (PR-P5.3: the auto
+# turn-scope runtime filter was retired).
 #
 # Defaults: ``always`` is conservative — a preset not in this map (e.g. an
 # externally-contributed unknown preset) is treated as scope ``("always",)`` by
@@ -96,37 +95,10 @@ def scope_for_preset(preset_id: str) -> tuple[str, ...]:
     return PRESET_SCOPES.get(preset_id, ("always",))
 
 
-def filter_refs_by_scope(
-    refs: tuple[str, ...] | list[str],
-    *,
-    current_scope: str,
-) -> tuple[str, ...]:
-    """Drop ``refs`` belonging to presets whose scope does not include
-    ``current_scope`` (and is not ``always``).
-
-    A ref is "scoped" when it appears in some preset seam's ``controls_refs``.
-    Refs not owned by any preset seam (e.g. external pack validators) are kept
-    unchanged — scope filtering is opt-in per preset and cannot silently drop a
-    ref a preset has no claim over.
-    """
-    from magi_agent.customize.scope import preset_scope_matches  # local — circular guard
-
-    # Build ref → preset_id index from PRESET_SEAMS at first call (cheap; small).
-    ref_owner: dict[str, str] = {}
-    for preset_id, seam in PRESET_SEAMS.items():
-        for ref in seam.controls_refs:
-            ref_owner.setdefault(ref, preset_id)
-
-    kept: list[str] = []
-    for ref in refs:
-        owner = ref_owner.get(ref)
-        if owner is None:
-            kept.append(ref)
-            continue
-        scopes = scope_for_preset(owner)
-        if preset_scope_matches(scopes, current_scope):
-            kept.append(ref)
-    return tuple(kept)
+# PR-P5.3: filter_refs_by_scope (auto turn-scope ref filtering) removed. It had
+# zero production callers: the auto turn-scope axis was never wired to
+# enforcement (runtime is scope-blind), and it is now retired. scope_for_preset
+# above is retained for the catalog's display-only "scope" field.
 
 
 @dataclass(frozen=True)

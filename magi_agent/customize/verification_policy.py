@@ -139,10 +139,10 @@ class CustomizeVerificationPolicy:
         """Enabled ``tool_perm`` custom rules (P2 before-tool-use deny/ask).
 
         When ``current_scope`` is supplied, the returned list is filtered to
-        rules whose ``scope`` matches the current turn (per
-        :func:`customize.scope.preset_scope_matches`: ``always`` is universal;
-        multi-scope match-any). When ``current_scope`` is ``None`` the historic
-        scope-blind list is returned so legacy call sites keep working.
+        rules whose ``scope`` matches the current turn (``always`` is universal)
+        via :func:`_rule_scope_matches`. When ``current_scope`` is ``None`` the
+        scope-blind list is returned, which is what every runtime caller passes
+        (the auto turn-scope axis is retired; PR-P5.3).
 
         ``force_include_ids`` (PR-D3): rule ids an active mode force-activates via
         its ``scoped_policy_ids``. A ``tool_perm`` rule whose id is in this set is
