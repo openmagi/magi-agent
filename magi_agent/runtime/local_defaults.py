@@ -157,10 +157,10 @@ LOCAL_FULL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     # stay default-OFF so a fresh import is byte-identical.
     "MAGI_PLAN_LEDGER_DURABLE_ENABLED": "1",
     "MAGI_GOAL_COMPLETION_EVIDENCE_FIRST_ENABLED": "1",
-    # PR-04-PR2: --resume/--continue rehydration. Stage-1 OFF ("0") safety net;
-    # depends on the session-log write path above, so a later release stages both
-    # on together.
-    "MAGI_CLI_RESUME_ENABLED": "0",
+    # PR-04-PR2: --resume/--continue rehydration. Staging complete: ON together
+    # with the session-log write path above. An explicit
+    # MAGI_CLI_RESUME_ENABLED=0 still wins via the setdefault overlay semantics.
+    "MAGI_CLI_RESUME_ENABLED": "1",
     "MAGI_LEARNING_ENABLED": "true",
     "MAGI_LEARNING_REFLECTION_ENABLED": "1",
     "MAGI_LEARNING_DASHBOARD_ENABLED": "1",
