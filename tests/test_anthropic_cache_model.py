@@ -115,6 +115,62 @@ class TestInjectMessageTailCacheControl:
 
 
 # ---------------------------------------------------------------------------
+# Pure system-prefix marker logic — no anthropic package required (C1 / N-10)
+# ---------------------------------------------------------------------------
+
+
+class TestInjectSystemPrefixCacheControl:
+    def test_plain_string_becomes_single_marked_block(self) -> None:
+        module = _model_module()
+        blocks = module.inject_system_prefix_cache_control("a plain system prompt")
+        assert blocks == [
+            {
+                "type": "text",
+                "text": "a plain system prompt",
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+
+    def test_boundary_splits_static_marked_and_dynamic_unmarked(self) -> None:
+        module = _model_module()
+        original = f"STATIC PREFIX{module.PROMPT_DYNAMIC_BOUNDARY}dynamic tail"
+        blocks = module.inject_system_prefix_cache_control(original)
+        assert len(blocks) == 2
+        assert blocks[0]["cache_control"] == {"type": "ephemeral"}
+        assert "cache_control" not in blocks[1]
+        # Byte-identical reconstruction — model sees the same prompt.
+        assert "".join(b["text"] for b in blocks) == original
+        # The boundary literal stays in the static (marked) block.
+        assert module.PROMPT_DYNAMIC_BOUNDARY in blocks[0]["text"]
+
+    def test_boundary_with_empty_tail_omits_second_block(self) -> None:
+        module = _model_module()
+        original = f"only static{module.PROMPT_DYNAMIC_BOUNDARY}"
+        blocks = module.inject_system_prefix_cache_control(original)
+        assert len(blocks) == 1
+        assert blocks[0]["text"] == original
+        assert blocks[0]["cache_control"] == {"type": "ephemeral"}
+
+    def test_boundary_literal_matches_message_builder(self) -> None:
+        from magi_agent.runtime.message_builder import (
+            PROMPT_DYNAMIC_BOUNDARY as MB_BOUNDARY,
+        )
+
+        module = _model_module()
+        assert module.PROMPT_DYNAMIC_BOUNDARY == MB_BOUNDARY
+
+    def test_non_string_and_empty_passthrough(self) -> None:
+        module = _model_module()
+        inject = module.inject_system_prefix_cache_control
+        empty_list: list = []
+        assert inject(None) is None
+        assert inject(empty_list) is empty_list
+        assert inject("") == ""
+        already = [{"type": "text", "text": "x"}]
+        assert inject(already) is already
+
+
+# ---------------------------------------------------------------------------
 # Request-level injection via CacheAwareClaude + FAKE anthropic client
 # ---------------------------------------------------------------------------
 
@@ -356,6 +412,162 @@ class TestStreamingInjection:
         asyncio.run(_drive())
         assert recorder["create_kwargs"]["stream"] is True
         assert _count_breakpoints(recorder["create_kwargs"]["messages"]) == 0
+
+
+# ---------------------------------------------------------------------------
+# System-prefix request injection — ON path proven through the mixin (C1 / N-10)
+# ---------------------------------------------------------------------------
+
+
+class _FakeUsageMessages:
+    """Fake ``messages`` whose non-stream response carries custom usage."""
+
+    def __init__(self, recorder: dict, usage) -> None:
+        self._recorder = recorder
+        self._usage = usage
+
+    async def create(self, **kwargs: Any):
+        self._recorder["create_kwargs"] = kwargs
+        from anthropic import types as anthropic_types
+
+        return anthropic_types.Message(
+            id="msg_fake",
+            type="message",
+            role="assistant",
+            model="claude-test",
+            content=[anthropic_types.TextBlock(type="text", text="ok")],
+            stop_reason="end_turn",
+            stop_sequence=None,
+            usage=self._usage,
+        )
+
+
+def _build_llm_request_with_system(system):
+    from google.adk.models.llm_request import LlmRequest
+    from google.genai import types as genai_types
+
+    contents = [
+        genai_types.Content(role="user", parts=[genai_types.Part.from_text(text="hi")])
+    ]
+    config = genai_types.GenerateContentConfig(system_instruction=system)
+    return LlmRequest(model="claude-sonnet-4-6", contents=contents, config=config)
+
+
+class TestSystemPrefixRequestInjection:
+    @pytest.fixture(autouse=True)
+    def _reset_metrics(self):
+        module = _model_module()
+        module.reset_prompt_cache_metrics()
+        yield
+        module.reset_prompt_cache_metrics()
+
+    def _model(self):
+        return _model_module().get_cache_aware_claude_class()(model="claude-sonnet-4-6")
+
+    def test_prompt_cache_on_marks_system_prefix_nonstream(self, monkeypatch) -> None:
+        pytest.importorskip("anthropic")
+        monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
+        monkeypatch.setenv("MAGI_PROMPT_CACHE_ENABLED", "1")
+        monkeypatch.setenv("MAGI_MESSAGE_CACHE_ENABLED", "1")
+        model = self._model()
+        boundary = _model_module().PROMPT_DYNAMIC_BOUNDARY
+        req = _build_llm_request_with_system(f"STATIC{boundary}dynamic")
+
+        create_kwargs = _run_generate(model, req)
+        system = create_kwargs["system"]
+        assert isinstance(system, list)
+        assert system[0]["cache_control"] == {"type": "ephemeral"}
+        assert "".join(b["text"] for b in system) == f"STATIC{boundary}dynamic"
+
+    def test_prompt_cache_on_marks_system_prefix_streaming(self, monkeypatch) -> None:
+        pytest.importorskip("anthropic")
+        monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
+        monkeypatch.setenv("MAGI_PROMPT_CACHE_ENABLED", "1")
+        monkeypatch.setenv("MAGI_MESSAGE_CACHE_ENABLED", "1")
+        model = self._model()
+        boundary = _model_module().PROMPT_DYNAMIC_BOUNDARY
+        req = _build_llm_request_with_system(f"STATIC{boundary}dynamic")
+
+        recorder: dict = {}
+        object.__setattr__(model, "_anthropic_client", _FakeAnthropicClient(recorder))
+
+        async def _drive() -> None:
+            async for _ in model.generate_content_async(req, stream=True):
+                pass
+
+        asyncio.run(_drive())
+        create_kwargs = recorder["create_kwargs"]
+        assert create_kwargs["stream"] is True
+        system = create_kwargs["system"]
+        assert isinstance(system, list)
+        assert system[0]["cache_control"] == {"type": "ephemeral"}
+
+    def test_profile_default_on_marks_system_prefix(self, monkeypatch) -> None:
+        """flag-promotion evidence: unset flag + unset profile still marks."""
+        pytest.importorskip("anthropic")
+        monkeypatch.delenv("MAGI_PROMPT_CACHE_ENABLED", raising=False)
+        monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
+        monkeypatch.setenv("MAGI_MESSAGE_CACHE_ENABLED", "1")
+        model = self._model()
+        boundary = _model_module().PROMPT_DYNAMIC_BOUNDARY
+        req = _build_llm_request_with_system(f"STATIC{boundary}dynamic")
+
+        create_kwargs = _run_generate(model, req)
+        system = create_kwargs["system"]
+        assert isinstance(system, list)
+        assert system[0]["cache_control"] == {"type": "ephemeral"}
+
+    def test_prompt_cache_off_system_passthrough(self, monkeypatch) -> None:
+        pytest.importorskip("anthropic")
+        monkeypatch.setenv("MAGI_PROMPT_CACHE_ENABLED", "0")
+        monkeypatch.setenv("MAGI_MESSAGE_CACHE_ENABLED", "1")
+        model = self._model()
+        boundary = _model_module().PROMPT_DYNAMIC_BOUNDARY
+        original = f"STATIC{boundary}dynamic"
+        req = _build_llm_request_with_system(original)
+
+        create_kwargs = _run_generate(model, req)
+        assert create_kwargs["system"] == original
+
+    def test_prompt_cache_usage_metrics_recorded_and_logged(
+        self, monkeypatch, caplog
+    ) -> None:
+        pytest.importorskip("anthropic")
+        import logging as _logging
+
+        from anthropic import types as anthropic_types
+
+        monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
+        monkeypatch.setenv("MAGI_PROMPT_CACHE_ENABLED", "1")
+        monkeypatch.setenv("MAGI_MESSAGE_CACHE_ENABLED", "1")
+        module = _model_module()
+        model = self._model()
+        req = _build_llm_request_with_system("sys-prompt")
+
+        usage = anthropic_types.Usage(
+            input_tokens=100,
+            output_tokens=1,
+            cache_read_input_tokens=7,
+            cache_creation_input_tokens=3,
+        )
+        recorder: dict = {}
+        fake_client = _FakeAnthropicClient(recorder)
+        fake_client.messages = _FakeUsageMessages(recorder, usage)
+        object.__setattr__(model, "_anthropic_client", fake_client)
+
+        with caplog.at_level(_logging.INFO, logger=module.__name__):
+
+            async def _drive() -> None:
+                async for _ in model.generate_content_async(req, stream=False):
+                    pass
+
+            asyncio.run(_drive())
+
+        metrics = module.get_prompt_cache_metrics()
+        assert metrics.cache_read_tokens == 7
+        assert metrics.cache_creation_tokens == 3
+        assert metrics.to_evidence()["cache_hit_rate"] > 0
+        assert any("prompt_cache_usage" in rec.message for rec in caplog.records)
 
 
 # ---------------------------------------------------------------------------

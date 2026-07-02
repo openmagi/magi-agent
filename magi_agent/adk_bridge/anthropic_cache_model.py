@@ -49,18 +49,37 @@ Claude does NOT yet flow through this ADK model path by default. This is NOT
 dormant infra: it is wired into the model class that WILL be used the moment a
 Claude/anthropic model id is routed through ADK
 (:func:`magi_agent.shadow.gate5b4c3_live_runner_boundary` resolves the model),
-and the request-level injection is proven by tests.
+and both the message-tail and the system-prefix injection are proven by tests.
+
+Two independent caching seams live here:
+
+1. The rolling message tail (``MAGI_MESSAGE_CACHE_ENABLED``, default-ON full
+   profile) marks the last ~2 non-system messages.
+2. The static system-prompt prefix (``MAGI_PROMPT_CACHE_ENABLED``, profile-aware
+   default-ON) marks one block at the boundary between the static prefix and the
+   per-turn dynamic tail (see :func:`inject_system_prefix_cache_control`). Its
+   response usage is recorded through :func:`get_prompt_cache_metrics` and logged
+   as a ``prompt_cache_usage`` INFO record on the non-stream branch.
+
+Breakpoint budget: system prefix 1 + message tail up to 2 = at most 3, within
+Anthropic's 4-breakpoint ceiling. The streaming branch cannot record cache
+counters because the ADK base streaming helper only surfaces ``input_tokens`` /
+``output_tokens`` from usage; system-prefix caching still applies on the wire,
+only the metric is a non-stream-only v1 limitation. A custom ``MAGI_LLM_API_BASE``
+makes the whole cache-aware model inert (see ``runtime.model_factory``), so both
+flags are no-ops behind a gateway.
 
 Design notes
 ------------
 - Anthropic-only. The last ``tail_size`` (default 2) non-system messages get a
   marker on their final content block; never more than
   :data:`MESSAGE_TAIL_MAX_BREAKPOINTS` (2) new breakpoints, so combined with the
-  up-to-2 system-prefix breakpoints the request stays within Anthropic's
+  single system-prefix breakpoint the request stays within Anthropic's
   4-breakpoint ceiling.
-- Gated on ``MAGI_MESSAGE_CACHE_ENABLED`` (default OFF) via
-  :func:`magi_agent.config.env.is_message_cache_enabled`. OFF ⇒ the request is
-  byte-identical to default ADK behaviour.
+- Message-tail marking is gated on ``MAGI_MESSAGE_CACHE_ENABLED`` (default-ON
+  full profile) via :func:`magi_agent.config.env.is_message_cache_enabled`;
+  system-prefix marking is gated on ``MAGI_PROMPT_CACHE_ENABLED``. With both OFF
+  the request is byte-identical to default ADK behaviour.
 - The ``anthropic`` package is an OPTIONAL extra and is imported lazily by ADK
   itself; this module never imports it directly, so environments without
   ``anthropic`` are unaffected until a Claude model is actually constructed.
@@ -69,10 +88,13 @@ Design notes
 from __future__ import annotations
 
 from collections.abc import Mapping
+import logging
 import os
 from typing import Any, ClassVar
 
 from magi_agent.config.env import is_message_cache_enabled
+
+_LOGGER = logging.getLogger(__name__)
 
 # Anthropic accepts at most 4 cache breakpoints per request. The system prefix
 # may already reserve up to 2 (see prompt.injection), so the rolling
@@ -80,6 +102,78 @@ from magi_agent.config.env import is_message_cache_enabled
 MESSAGE_TAIL_MAX_BREAKPOINTS = 2
 
 _EPHEMERAL_CACHE_CONTROL = {"type": "ephemeral"}
+
+# Literal boundary marker between the static system-prompt prefix and the
+# per-turn dynamic tail. It is a copy of
+# ``magi_agent.runtime.message_builder.PROMPT_DYNAMIC_BOUNDARY`` kept here to
+# avoid a module-level adk_bridge -> runtime import; the two are pinned equal by
+# ``tests/test_anthropic_cache_model.py::TestInjectSystemPrefixCacheControl``.
+PROMPT_DYNAMIC_BOUNDARY = "__MAGI_PROMPT_DYNAMIC_BOUNDARY__"
+
+# Module-scope singleton PromptCacheMetrics for the live ADK Anthropic path.
+# Built lazily so ``prompt.metrics`` is only imported when a Claude request is
+# actually served. ``reset_prompt_cache_metrics`` exists for test isolation.
+_PROMPT_CACHE_METRICS: Any = None
+
+
+def get_prompt_cache_metrics() -> Any:
+    """Return the process-wide ``PromptCacheMetrics`` singleton (lazy)."""
+    global _PROMPT_CACHE_METRICS
+    if _PROMPT_CACHE_METRICS is None:
+        from magi_agent.prompt.metrics import PromptCacheMetrics  # noqa: PLC0415
+
+        _PROMPT_CACHE_METRICS = PromptCacheMetrics()
+    return _PROMPT_CACHE_METRICS
+
+
+def reset_prompt_cache_metrics() -> None:
+    """Drop the singleton so the next accessor rebuilds a fresh instance."""
+    global _PROMPT_CACHE_METRICS
+    _PROMPT_CACHE_METRICS = None
+
+
+def inject_system_prefix_cache_control(system: object) -> object:
+    """Return *system* rewritten so the static prompt prefix carries a marker.
+
+    The Anthropic Messages API ``system`` parameter accepts either a plain
+    ``str`` or an iterable of ``TextBlockParam`` dicts. When *system* is a
+    non-empty string this splits it at :data:`PROMPT_DYNAMIC_BOUNDARY`:
+
+    - block 1 is the static prefix (up to and including the boundary literal)
+      and carries ``cache_control: {"type": "ephemeral"}``;
+    - block 2 is the per-turn dynamic tail and is left unmarked (omitted when
+      empty).
+
+    When the boundary is absent the whole string becomes a single marked block.
+    Anything that is not a non-empty ``str`` (``None``, an already-built list, a
+    non-string) is returned unchanged so callers can no-op safely.
+
+    Invariant: concatenating the ``text`` of the returned blocks reproduces the
+    original string byte-for-byte, so the model-visible prompt is unchanged.
+    """
+    if not isinstance(system, str) or not system:
+        return system
+    idx = system.find(PROMPT_DYNAMIC_BOUNDARY)
+    if idx == -1:
+        return [
+            {
+                "type": "text",
+                "text": system,
+                "cache_control": dict(_EPHEMERAL_CACHE_CONTROL),
+            }
+        ]
+    cut = idx + len(PROMPT_DYNAMIC_BOUNDARY)
+    blocks: list[dict[str, Any]] = [
+        {
+            "type": "text",
+            "text": system[:cut],
+            "cache_control": dict(_EPHEMERAL_CACHE_CONTROL),
+        }
+    ]
+    tail = system[cut:]
+    if tail:
+        blocks.append({"type": "text", "text": tail})
+    return blocks
 
 # Memoised cache-aware subclasses, keyed by ADK base-class name. We build one
 # subclass per base (direct ``AnthropicLlm`` / Vertex ``Claude``) lazily so the
@@ -271,7 +365,66 @@ def _build_cache_control_mixin() -> type:
                 return messages
             return inject_message_tail_cache_control(messages)
 
+        def _maybe_mark_system_prefix(self, llm_request):
+            """Mark the static system-prompt prefix when prompt caching is ON.
+
+            Gated on ``MAGI_PROMPT_CACHE_ENABLED`` (profile-aware default-ON) via
+            :func:`magi_agent.prompt.metrics.load_cache_config`. Returns a
+            ``model_copy`` with the rewritten ``system_instruction`` so both the
+            non-stream ``create`` call (which reads
+            ``llm_request.config.system_instruction`` directly) and the streaming
+            branch (whose ADK base helper reads the same field) are covered from
+            one place. The original request is never mutated.
+            """
+            from magi_agent.prompt.metrics import load_cache_config  # noqa: PLC0415
+
+            enabled, provider = load_cache_config()
+            if not enabled or provider not in ("auto", "anthropic"):
+                return llm_request
+            config = getattr(llm_request, "config", None)
+            system = (
+                getattr(config, "system_instruction", None) if config else None
+            )
+            marked = inject_system_prefix_cache_control(system)
+            if marked is system:
+                return llm_request
+            return llm_request.model_copy(
+                update={
+                    "config": config.model_copy(
+                        update={"system_instruction": marked}
+                    )
+                }
+            )
+
+        def _record_prompt_cache_usage(self, message: Any) -> None:
+            """Record prompt-cache usage from a non-stream Anthropic response.
+
+            Best-effort: never lets a metrics/logging failure abort the request.
+            The ADK streaming helper drops the cache counters, so this only fires
+            on the non-stream branch (a documented v1 limitation).
+            """
+            try:
+                usage = getattr(message, "usage", None)
+                if usage is None:
+                    return
+                usage_dict = (
+                    usage.model_dump()
+                    if hasattr(usage, "model_dump")
+                    else dict(usage)
+                )
+                get_prompt_cache_metrics().record_api_usage(usage_dict)
+                _LOGGER.info(
+                    "prompt_cache_usage cache_read_input_tokens=%s "
+                    "cache_creation_input_tokens=%s input_tokens=%s",
+                    usage_dict.get("cache_read_input_tokens", 0),
+                    usage_dict.get("cache_creation_input_tokens", 0),
+                    usage_dict.get("input_tokens", 0),
+                )
+            except Exception:  # noqa: BLE001 - metrics must never break a turn
+                pass
+
         async def generate_content_async(self, llm_request, stream: bool = False):
+            llm_request = self._maybe_mark_system_prefix(llm_request)
             model_to_use = self._resolve_model_name(llm_request.model)
             messages = [
                 content_to_message_param(content)
@@ -306,6 +459,7 @@ def _build_cache_control_mixin() -> type:
                     max_tokens=self.max_tokens,
                     thinking=thinking,
                 )
+                self._record_prompt_cache_usage(message)
                 yield message_to_generate_content_response(message)
             else:
                 async for response in self._generate_content_streaming(
@@ -346,7 +500,11 @@ def build_cache_aware_claude(model: str):
 
 __all__ = [
     "MESSAGE_TAIL_MAX_BREAKPOINTS",
+    "PROMPT_DYNAMIC_BOUNDARY",
     "build_cache_aware_claude",
     "get_cache_aware_claude_class",
+    "get_prompt_cache_metrics",
     "inject_message_tail_cache_control",
+    "inject_system_prefix_cache_control",
+    "reset_prompt_cache_metrics",
 ]
