@@ -66,6 +66,7 @@ import { ModesPanel } from "./modes-panel";
 import { PacksPanel } from "./packs-panel";
 import { PageHint } from "./page-hint";
 import { PoliciesTable } from "./policies-table";
+import { PrebuiltComponentsPanel } from "./prebuilt-components-panel";
 import { ReusableEvidenceTab } from "./reusable-evidence-tab";
 import { ReusableConditionsTab } from "./reusable-conditions-tab";
 import { SeamBuilderPanel } from "./seam-builder-panel";
@@ -1005,6 +1006,7 @@ function RulesSectionMount({
               scopedInModes={scopedInModes}
             />
           ) : null}
+          {subTab === "policies" ? <PrebuiltComponentsPanel /> : null}
           {subTab === "evidence" ? (
             <ReusableEvidenceTab entries={evidenceTypes} />
           ) : null}
