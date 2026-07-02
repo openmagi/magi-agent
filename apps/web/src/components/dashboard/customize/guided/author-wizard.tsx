@@ -343,7 +343,7 @@ interface Draft {
 
 const EMPTY: Draft = {
   lifecycle: "pre_final",
-  scope: "coding",
+  scope: "always",
   toolTarget: "any",
   toolName: "",
   conditionKind: "evidence_ref",
@@ -1076,16 +1076,10 @@ function lifecycleOptionMatchesQuery(
 }
 
 
-const SCOPE_OPTIONS: ReadonlyArray<{
-  id: Scope;
-  label: string;
-  description: string;
-}> = [
-  { id: "coding", label: "Coding turns", description: "Turns where the agent is writing or modifying code." },
-  { id: "research", label: "Research turns", description: "Turns where the agent is fetching or citing sources." },
-  { id: "delivery", label: "Delivery turns", description: "Turns where the agent is producing a final deliverable." },
-  { id: "always", label: "Every turn", description: "Any turn regardless of scope." },
-];
+// PR-P5.2: the auto turn-scope picker (coding/research/delivery/always) is
+// retired. Guided rules are authored GLOBAL (scope "always"); stance-scoping is
+// done in the Modes tab. The Scope type is retained for back-compat with rules
+// persisted before this change.
 
 
 // PR-F-UX3 — tool-bearing lifecycles get a third sub-fieldset inside
@@ -1388,17 +1382,19 @@ function TriggerStep({
 
       <fieldset className="space-y-2">
         <legend className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
-          Turn scope
+          Where does this apply?
         </legend>
-        {SCOPE_OPTIONS.map((opt) => (
-          <RadioCard
-            key={opt.id}
-            checked={draft.scope === opt.id}
-            onClick={() => update({ scope: opt.id })}
-            label={opt.label}
-            description={opt.description}
-          />
-        ))}
+        {/* PR-P5.2: the auto turn-scope axis (coding/research/delivery) is
+            retired. A rule applies globally; to limit it to a stance, scope it
+            to a mode in the Modes tab (the two-axis model). */}
+        <div className="rounded-xl border border-black/[0.08] bg-white px-4 py-3">
+          <p className="text-sm font-semibold text-foreground">Every turn (global)</p>
+          <p className="mt-1 text-xs leading-relaxed text-secondary">
+            This rule applies on every turn by default. To limit it to a
+            stance, scope it to a mode in the <strong>Modes</strong> tab after
+            saving.
+          </p>
+        </div>
       </fieldset>
 
       {showToolTarget ? (
