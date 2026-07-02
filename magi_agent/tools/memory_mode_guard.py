@@ -20,10 +20,24 @@ import re
 from collections.abc import Mapping
 
 from magi_agent.runtime.session_identity import MemoryMode
+from magi_agent.tools._workspace_path_guards import glob_pattern_matches
 
 
 PROTECTED_TOP_LEVEL_FILES = frozenset(
     {"MEMORY.md", "SCRATCHPAD.md", "WORKING.md", "TASK-QUEUE.md"}
+)
+
+# Read-half of the memory-mode guards, single home alongside the write-half
+# below. Shared by the core toolhost, the gate5b full toolhost, and the
+# gates_policy_default firstparty pack so all three enforce identical extraction.
+MEMORY_WRITE_TOOL_NAMES = frozenset({"FileWrite", "FileEdit", "PatchApply"})
+MEMORY_READ_TOOL_NAMES = frozenset({"FileRead", "Glob", "Grep"})
+PROTECTED_GLOB_SENTINELS = (
+    "MEMORY.md",
+    "SCRATCHPAD.md",
+    "WORKING.md",
+    "TASK-QUEUE.md",
+    "memory/example.md",
 )
 
 _COMMAND_MENTIONS_MEMORY_RE = re.compile(r"\bmemory(?:/|\b)", re.IGNORECASE)
@@ -144,15 +158,101 @@ def _patch_envelope_paths(patch_text: str) -> tuple[str, ...]:
     return tuple(paths)
 
 
+def memory_read_target_paths(
+    tool_name: str,
+    arguments: Mapping[str, object],
+) -> tuple[str, ...]:
+    """Return candidate paths a read-style tool call would touch.
+
+    FileRead resolves path aliases, Glob resolves the selector, and Grep
+    resolves the glob/path selector.
+    """
+
+    if tool_name == "FileRead":
+        names = ("path", "file", "filePath")
+    elif tool_name == "Glob":
+        names = ("pattern", "glob")
+    elif tool_name == "Grep":
+        names = ("glob", "path", "patternGlob")
+    else:
+        names = ()
+    paths: list[str] = []
+    for name in names:
+        value = arguments.get(name)
+        if isinstance(value, str) and value:
+            paths.append(value)
+    return tuple(paths)
+
+
+def grep_glob_may_include_protected_memory(arguments: Mapping[str, object]) -> bool:
+    raw_glob = (
+        arguments.get("glob")
+        or arguments.get("path")
+        or arguments.get("patternGlob")
+        or "**/*"
+    )
+    if not isinstance(raw_glob, str):
+        return True
+    pattern = normalize_memory_glob(raw_glob)
+    if pattern is None:
+        return False
+    return any(glob_pattern_matches(path, pattern) for path in PROTECTED_GLOB_SENTINELS)
+
+
+def normalize_memory_glob(pattern: str) -> str | None:
+    text = str(pattern or "*").strip().replace("\\", "/")
+    if not text:
+        return "*"
+    if text.startswith(("/", "~")):
+        return None
+    parts = [part for part in text.split("/") if part not in {"", "."}]
+    if any(part == ".." for part in parts):
+        return None
+    normalized = posixpath.normpath("/".join(parts) or "*")
+    return "*" if normalized == "." else normalized
+
+
+def filter_protected_memory_matches(output: object) -> object:
+    if not isinstance(output, Mapping):
+        return output
+    matches = output.get("matches")
+    if not isinstance(matches, list):
+        return output
+    filtered = [
+        match for match in matches if not is_protected_memory_path(_match_path(match))
+    ]
+    if len(filtered) == len(matches):
+        return output
+    updated = dict(output)
+    updated["matches"] = filtered
+    return updated
+
+
+def _match_path(match: object) -> str | None:
+    if isinstance(match, str):
+        return match
+    if isinstance(match, Mapping):
+        path = match.get("path")
+        return path if isinstance(path, str) else None
+    return None
+
+
 __all__ = [
+    "MEMORY_READ_TOOL_NAMES",
+    "MEMORY_WRITE_TOOL_NAMES",
+    "PROTECTED_GLOB_SENTINELS",
     "PROTECTED_TOP_LEVEL_FILES",
     "command_may_write_protected_memory",
     "command_mentions_protected_memory",
+    "filter_protected_memory_matches",
+    "grep_glob_may_include_protected_memory",
     "is_incognito_memory_mode",
     "is_long_term_memory_read_disabled",
     "is_long_term_memory_write_disabled",
     "is_protected_memory_path",
+    "memory_read_target_paths",
     "memory_write_target_paths",
+    "normalize_memory_glob",
     "normalize_memory_mode",
     "protected_memory_error",
 ]
