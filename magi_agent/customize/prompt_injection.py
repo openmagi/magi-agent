@@ -6,10 +6,12 @@ lifecycle slots are honored today:
 
 * ``before_tool_use`` — append a value to a chosen ``arguments`` key of a
   matched tool call BEFORE dispatch. Example: "append ``--dry-run`` to
-  ``shell_exec.command``". Wired through :func:`apply_prompt_injection_to_tool_args`
-  which is invoked from :func:`magi_agent.facades.execute_tool_with_hooks`
-  after the ``before_result`` block branch (so a blocked call still fails
-  closed).
+  ``shell_exec.command``". Wired through :func:`apply_prompt_injection_to_tool_args`,
+  which the live agent-level ADK bridge
+  :mod:`magi_agent.cli.customize_tool_wiring` invokes at the
+  before_tool_callback boundary (and which
+  :func:`magi_agent.facades.execute_tool_with_hooks` also composes) after the
+  ``before_result`` block branch (so a blocked call still fails closed).
 * ``on_user_prompt_submit`` — append a value as a new section to the assembled
   system prompt. Example: "always append coding-standards context". Wired
   through :func:`apply_prompt_injection_to_prompt_sections` which is invoked

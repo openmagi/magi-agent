@@ -8,7 +8,10 @@ operator-authored kind. A rule's payload conforms to
 applier resolves the payload, invokes :func:`run_shell_payload`, and converts
 the result into an audit-ledger-shaped record plus an optional gate verdict.
 
-Two consumer sites for v1 (see :func:`magi_agent.facades.execute_tool_with_hooks`):
+Two tool-boundary stages for v1. The live wire is the agent-level ADK callback
+bridge :mod:`magi_agent.cli.customize_tool_wiring` (engine
+``_attach_customize_rules``); :func:`magi_agent.facades.execute_tool_with_hooks`
+is a composed entry point that consumes the same stage helpers:
 
 * ``before_tool_use`` — fired BEFORE the dispatcher dispatches the tool. When
   the rule's persisted ``action == "block"`` AND the subprocess exited with a

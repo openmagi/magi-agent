@@ -9,9 +9,14 @@ Why this plugin exists
 ----------------------
 The shell_command consumer ships in two places (see F-EXEC1 spec):
 
-* :mod:`magi_agent.facades` — ``before_tool_use`` + ``after_tool_use`` slots
-  inside ``execute_tool_with_hooks``.
-* :mod:`magi_agent.customize.lifecycle_audit` — 9 additional audit-only
+* The tool-boundary ``before_tool_use`` + ``after_tool_use`` slots. The live
+  wire is the agent-level ADK callback bridge
+  :mod:`magi_agent.cli.customize_tool_wiring` (engine
+  ``_attach_customize_rules``), which threads the turn's
+  ``(session_id, turn_id)`` into :func:`shell_budget_for`;
+  :mod:`magi_agent.facades` ``execute_tool_with_hooks`` composes the same
+  stage helpers.
+* :mod:`magi_agent.customize.lifecycle_audit` provides 9 additional audit-only
   slots (pre_final / on_user_prompt_submit / on_subagent_stop /
   before_turn_start / after_turn_end / before_compaction /
   after_compaction / on_task_checkpoint / on_artifact_created).
@@ -34,11 +39,13 @@ share ONE state map (``_SHARED_BUDGET``) keyed by ``(session_id, turn_id)``:
    a turn — so the 6th spawn across slots short-circuits, not the 6th spawn
    within a single slot.
 
-The facades.py before/after tool consumers (the OTHER 2 of the 11 advertised
-slots) intentionally stay stateless: tool dispatch is naturally bounded by
-the tool call rate AND the budget map is only meaningful when ALL slot wires
-share it. The lifecycle_audit 9-slot share IS the operator-cost-ceiling
-guarantee.
+The tool-boundary before/after tool consumers (the OTHER 2 of the 11 advertised
+slots) now share this per-turn counter too: the agent-level ADK bridge passes
+the turn's ``(session_id, turn_id)`` to :func:`shell_budget_for` so all 11 slot
+wires read and decrement ONE counter. The composed ``execute_tool_with_hooks``
+facade path passes ``(None, None)`` and resolves the same identity from the
+:data:`_ACTIVE_TURN_IDENTITY` ContextVar. The shared counter across all 11
+slots IS the operator-cost-ceiling guarantee.
 
 Honest-degrade contract
 -----------------------

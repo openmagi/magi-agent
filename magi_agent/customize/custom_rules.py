@@ -50,14 +50,18 @@ KINDS = frozenset(
         # ``redact`` mode (re.sub-based pattern → replacement); summarize/replace
         # are deferred to v2 with an admin-tier flag. See
         # magi_agent/customize/output_rewrite.py for the validator + apply
-        # helpers, and magi_agent.facades.execute_tool_with_hooks for the
-        # runtime wire (parallel to the F-MUT1 BEFORE_TOOL_USE consumer).
+        # helpers, and magi_agent/cli/customize_tool_wiring.py (engine
+        # _attach_customize_rules) for the live agent-level ADK
+        # after_tool_callback wire, which magi_agent.facades.execute_tool_with_hooks
+        # also composes (parallel to the F-MUT1 BEFORE_TOOL_USE consumer).
         "output_rewrite",
         # F-EXEC1: shell_command — operator-authored subprocess action. The
         # rule payload conforms to
         # :class:`magi_agent.customize.shell_runner.ShellPayload` (inline /
-        # file source, timeout, env_vars whitelist, shell selector). The
-        # facades wire fires at ``before_tool_use`` (action=block honored
+        # file source, timeout, env_vars whitelist, shell selector). The live
+        # agent-level ADK bridge magi_agent/cli/customize_tool_wiring.py (which
+        # execute_tool_with_hooks also composes) fires at ``before_tool_use``
+        # (action=block honored
         # when the script exits non-zero) and ``after_tool_use`` (audit-only
         # — the dispatch already happened). Lifecycle_audit fan-outs cover
         # 9 additional audit-only slots (pre_final + 8 Tier 2 emitters);
