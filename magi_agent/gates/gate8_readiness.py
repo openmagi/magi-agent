@@ -16,12 +16,14 @@ from magi_agent.evidence.gate1a_egress_correlation import (
 )
 from magi_agent.gates._readiness_common import (
     DIGEST_RE as _DIGEST_RE,
+    SAFE_ENVIRONMENTS,
     digest_present as _digest_present,
+    selected_scope_matched,
     sha256_text_digest as _sha256_text_digest,
 )
 
 
-_SAFE_ENVIRONMENTS = frozenset({"local", "development", "staging", "production"})
+_SAFE_ENVIRONMENTS = SAFE_ENVIRONMENTS
 
 
 class Gate8PreGate8ContinuityReceipt(BaseModel):
@@ -265,25 +267,7 @@ def _primary_block_reason(
     return context_continuity.gate8_block_reason
 
 
-def _selected_scope_matched(
-    config: PythonGate8ReadinessConfig,
-    *,
-    bot_id: str,
-    user_id: str,
-) -> bool:
-    if not config.enabled:
-        return False
-    if not _digest_present(config.selected_bot_digest):
-        return False
-    if not _digest_present(config.selected_owner_user_id_digest):
-        return False
-    if config.selected_bot_digest != _sha256_text_digest(bot_id):
-        return False
-    if config.selected_owner_user_id_digest != _sha256_text_digest(user_id):
-        return False
-    if config.environment not in _SAFE_ENVIRONMENTS:
-        return False
-    return config.environment in config.environment_allowlist
+_selected_scope_matched = selected_scope_matched
 
 
 def _continuity_evidence_metadata(

@@ -31,14 +31,16 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 from magi_agent.gates._readiness_common import (
     DIGEST_RE as _DIGEST_RE,
+    SAFE_ENVIRONMENTS,
     digest_present as _digest_present,
+    selected_scope_matched,
     sha256_text_digest as _sha256_text_digest,
 )
 
 
 WorkflowExecutionMode = Literal["disabled", "shadow", "live"]
 
-_SAFE_ENVIRONMENTS = frozenset({"local", "development", "staging", "production"})
+_SAFE_ENVIRONMENTS = SAFE_ENVIRONMENTS
 
 #: The gate at which live (canary) dispatch first becomes eligible.  Mirrors the
 #: PR6 ladder: shadow runs through gate1-5, then canary 186bf3d7 promotion flips
@@ -220,25 +222,7 @@ def _reason_codes(
     return ("selected_shadow_ready",)
 
 
-def _selected_scope_matched(
-    config: WorkflowExecutorReadinessConfig,
-    *,
-    bot_id: str,
-    user_id: str,
-) -> bool:
-    if not config.enabled:
-        return False
-    if not _digest_present(config.selected_bot_digest) or not _digest_present(
-        config.selected_owner_user_id_digest
-    ):
-        return False
-    if config.selected_bot_digest != _sha256_text_digest(bot_id):
-        return False
-    if config.selected_owner_user_id_digest != _sha256_text_digest(user_id):
-        return False
-    if config.environment not in _SAFE_ENVIRONMENTS:
-        return False
-    return config.environment in config.environment_allowlist
+_selected_scope_matched = selected_scope_matched
 
 
 __all__ = [
