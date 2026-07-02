@@ -44,6 +44,29 @@ def test_valid_deterministic_rule():
     assert validate_custom_rule(_det()) == []
 
 
+# --- PR-P5.0: scope is optional (auto turn-scope retired) ---
+def test_scope_absent_is_valid_global():
+    # The reworked wizard stops sending coding/research/delivery scope; an
+    # absent scope means "global" and must validate.
+    rule = _det()
+    del rule["scope"]
+    assert validate_custom_rule(rule) == []
+
+
+def test_scope_none_is_valid_global():
+    assert validate_custom_rule(_det(scope=None)) == []
+
+
+def test_legacy_scope_value_still_accepted():
+    # Back-compat: a rule persisted with a known scope before the rework stays
+    # valid (treated as global at runtime, which is already scope-blind).
+    assert validate_custom_rule(_det(scope="coding")) == []
+
+
+def test_present_but_unknown_scope_still_rejected():
+    assert validate_custom_rule(_det(scope="bogus"))
+
+
 def test_valid_tool_perm_rule():
     assert validate_custom_rule(_tool()) == []
 
