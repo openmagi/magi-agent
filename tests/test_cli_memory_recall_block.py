@@ -311,3 +311,111 @@ def test_fail_soft_when_backend_raises(
         )
         == ""
     )
+
+
+# --- D1 (N-12 / N-13): process-scope backend cache + qmd bind-first hot path ---
+
+
+def _clear_backend_cache() -> None:
+    from magi_agent.memory.search.backend_cache import clear_search_backend_cache
+
+    clear_search_backend_cache()
+
+
+def test_recall_reuses_backend_across_turns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The per-turn recall backend is constructed ONCE and reused across turns
+    (the H-27 mtime cache and qmd binding survive), and both turns emit a
+    byte-identical block."""
+    _on_env(monkeypatch)
+    _clear_backend_cache()
+    _write(
+        tmp_path,
+        "memory/daily/2026-06-01.md",
+        "decision: we will adopt zebraquux for the billing rollout",
+    )
+
+    import magi_agent.cli.memory_recall_block as mod
+    from magi_agent.memory.search.base import SearchHit
+
+    constructions = {"count": 0}
+
+    class _Fake:
+        def reindex(self, root: object, **kwargs: object) -> None:
+            pass
+
+        def search(self, query: str, *, k: int) -> object:
+            return [
+                SearchHit(
+                    path="memory/daily/2026-06-01.md",
+                    content="decision: we will adopt zebraquux for the billing rollout",
+                    score=1.0,
+                )
+            ]
+
+    def _factory(config: object) -> object:
+        constructions["count"] += 1
+        return _Fake()
+
+    monkeypatch.setattr(mod, "select_search_backend", _factory)
+
+    first = build_cli_memory_recall_block(
+        workspace_root=str(tmp_path), query="zebraquux", memory_mode="normal"
+    )
+    second = build_cli_memory_recall_block(
+        workspace_root=str(tmp_path), query="zebraquux", memory_mode="normal"
+    )
+    assert first
+    assert first == second  # behavior-preservation across turns
+    assert constructions["count"] == 1  # counter-based regression
+
+
+def test_qmd_preferred_recall_never_runs_update_on_hot_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With a qmd-like backend the hot path binds once and NEVER calls reindex
+    (which is what would run ``qmd update``)."""
+    _on_env(monkeypatch)
+    _clear_backend_cache()
+    _write(tmp_path, "memory/daily/2026-06-01.md", "zebraquux billing note")
+
+    import magi_agent.cli.memory_recall_block as mod
+    from magi_agent.memory.search.base import SearchHit
+
+    class _FakeQmd:
+        def __init__(self) -> None:
+            self.bind_calls = 0
+            self.reindex_calls = 0
+            self._bound = False
+
+        @property
+        def bound(self) -> bool:
+            return self._bound
+
+        def bind(self, root: object) -> bool:
+            self.bind_calls += 1
+            self._bound = True
+            return True
+
+        def reindex(self, root: object, **kwargs: object) -> None:
+            self.reindex_calls += 1
+
+        def search(self, query: str, *, k: int) -> object:
+            return [
+                SearchHit(
+                    path="memory/daily/2026-06-01.md",
+                    content="zebraquux billing note",
+                    score=1.0,
+                )
+            ]
+
+    fake = _FakeQmd()
+    monkeypatch.setattr(mod, "select_search_backend", lambda config: fake)
+
+    for _ in range(2):
+        build_cli_memory_recall_block(
+            workspace_root=str(tmp_path), query="zebraquux", memory_mode="normal"
+        )
+    assert fake.bind_calls == 1
+    assert fake.reindex_calls == 0

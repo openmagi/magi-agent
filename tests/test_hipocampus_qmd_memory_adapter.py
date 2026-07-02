@@ -208,6 +208,52 @@ def test_hipocampus_qmd_adapter_search_returns_qmd_refs_only(tmp_path: Path) -> 
     assert any("QMD launch plan search ref." in record.body for record in result.records)
 
 
+def test_local_search_backend_reused_across_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D1 (N-12): the local ``memory/search`` backend feeding
+    ``_local_search_results`` is constructed ONCE and reused across calls, and
+    both calls return identical records."""
+    import magi_agent.memory.adapters.hipocampus_readonly as hro
+    from magi_agent.memory.search.backend_cache import clear_search_backend_cache
+    from magi_agent.memory.search.base import SearchHit
+
+    clear_search_backend_cache()
+
+    constructions = {"count": 0}
+
+    class _Fake:
+        def reindex(self, root: object, **kwargs: object) -> None:
+            pass
+
+        def search(self, query: str, *, k: int) -> object:
+            return [
+                SearchHit(
+                    path="memory/daily/2026-05-24.md",
+                    content="Launch plan daily note for compatibility.",
+                    score=0.9,
+                )
+            ]
+
+    def _factory(config: object) -> object:
+        constructions["count"] += 1
+        return _Fake()
+
+    monkeypatch.setattr(hro, "select_search_backend", _factory)
+
+    adapter = HipocampusReadOnlyAdapter(
+        HipocampusReadOnlyConfig(workspace_root=tmp_path, enabled=True)
+    )
+    first = adapter._local_search_results(_request())
+    second = adapter._local_search_results(_request())
+
+    assert first == second
+    assert first  # a hit was returned
+    assert constructions["count"] == 1
+
+    clear_search_backend_cache()
+
+
 def test_hipocampus_qmd_adapter_denies_write_compaction_and_erase(
     tmp_path: Path,
 ) -> None:

@@ -322,9 +322,21 @@ class HipocampusReadOnlyAdapter:
         """
         try:
             from magi_agent.memory.config import resolve_memory_config  # noqa: PLC0415
+            from magi_agent.memory.search.backend_cache import (  # noqa: PLC0415
+                bind_or_reindex,
+                cached_search_backend,
+            )
 
-            backend = select_search_backend(resolve_memory_config())
-            backend.reindex(self.workspace_root)
+            # D1 (N-12/N-13): reuse a process-scope backend + bind-first, mirroring
+            # the per-turn recall path. The module-level ``select_search_backend``
+            # seam stays the (monkeypatchable) factory for tests.
+            config = resolve_memory_config()
+            backend = cached_search_backend(
+                config,
+                self.workspace_root,
+                factory=lambda: select_search_backend(config),
+            )
+            bind_or_reindex(backend, self.workspace_root)
             hits = backend.search(
                 request.query,
                 k=min(request.limit, self.config.max_records),
