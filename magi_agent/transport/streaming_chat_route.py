@@ -41,7 +41,7 @@ from typing import Callable
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
-from magi_agent.cli.contracts import EngineResult, Terminal
+from magi_agent.engine.contracts import EngineResult, Terminal
 from magi_agent.cli.protocol import ControlResponse
 from magi_agent.ops.health import _truthy_env
 from magi_agent.runtime.events import RuntimeEvent

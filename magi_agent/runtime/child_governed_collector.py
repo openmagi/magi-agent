@@ -20,7 +20,7 @@ import os
 from collections.abc import AsyncGenerator, Mapping
 from typing import Union
 
-from magi_agent.cli.contracts import EngineResult, Terminal
+from magi_agent.engine.contracts import EngineResult, Terminal
 from magi_agent.runtime.child_runner_live import (
     _MAX_SUMMARY_CHARS as _MAX_SUMMARY_CHARS,
     _maybe_log_trace_governed_collector_terminal,

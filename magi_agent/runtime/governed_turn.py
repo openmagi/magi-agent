@@ -330,7 +330,7 @@ class _BookendCollector:
 
     def observe(self, item: object) -> None:
         try:
-            from magi_agent.cli.contracts import EngineResult
+            from magi_agent.engine.contracts import EngineResult
 
             if isinstance(item, EngineResult):
                 self._terminal = item
@@ -446,7 +446,7 @@ def _build_policy_blocked_terminal(*, ctx: TurnContext, slot: str, reason: str) 
     Mirrors the engine's own abort-path terminal shape so emit-side parsing
     is unchanged.
     """
-    from magi_agent.cli.contracts import EngineResult, Terminal  # noqa: PLC0415
+    from magi_agent.engine.contracts import EngineResult, Terminal  # noqa: PLC0415
 
     return EngineResult(
         terminal=Terminal.aborted,
@@ -1164,7 +1164,7 @@ class _ShellPreFinalCollector:
         if self._fired:
             return None
         try:
-            from magi_agent.cli.contracts import EngineResult  # noqa: PLC0415
+            from magi_agent.engine.contracts import EngineResult  # noqa: PLC0415
         except Exception:
             return None
         if not isinstance(item, EngineResult):
@@ -1269,7 +1269,7 @@ class _ShellCheckPreFinalCollector:
         if self._fired:
             return None
         try:
-            from magi_agent.cli.contracts import EngineResult  # noqa: PLC0415
+            from magi_agent.engine.contracts import EngineResult  # noqa: PLC0415
         except Exception:
             return None
         if not isinstance(item, EngineResult):
