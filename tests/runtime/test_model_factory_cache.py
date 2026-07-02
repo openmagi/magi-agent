@@ -103,12 +103,33 @@ def test_cache_flag_off_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         model_factory, "is_message_cache_enabled", lambda env=None: False
     )
+    # C1 / N-10: the gate is now the union of MESSAGE_CACHE and PROMPT_CACHE.
+    # PROMPT_CACHE is profile-aware default-ON, so an empty env would resolve it
+    # ON; drive the explicit-OFF env through the same ``env`` the factory
+    # forwards to ``load_cache_config`` so BOTH seams are off.
     assert (
         model_factory.maybe_build_cache_aware_anthropic(
-            _StubConfig("anthropic"), env={}
+            _StubConfig("anthropic"), env={"MAGI_PROMPT_CACHE_ENABLED": "0"}
         )
         is None
     )
+
+
+def test_prompt_cache_alone_builds_cache_aware(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MESSAGE_CACHE OFF but PROMPT_CACHE ON still builds the cache-aware model."""
+    from magi_agent.runtime import model_factory
+
+    calls = _patch_build(monkeypatch)
+    monkeypatch.setattr(
+        model_factory, "is_message_cache_enabled", lambda env=None: False
+    )
+    out = model_factory.maybe_build_cache_aware_anthropic(
+        _StubConfig("anthropic"), env={"MAGI_PROMPT_CACHE_ENABLED": "1"}
+    )
+    assert out is _SENTINEL
+    assert calls["model"] == "claude-sonnet-4-6"
 
 
 def test_gate_on_flag_false_bypasses_flag_check(

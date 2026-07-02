@@ -53,7 +53,10 @@ def maybe_build_cache_aware_anthropic(
     Returns ``None`` when:
 
     - ``config.provider != "anthropic"``;
-    - ``gate_on_flag`` is True and ``MAGI_MESSAGE_CACHE_ENABLED`` is OFF;
+    - ``gate_on_flag`` is True and BOTH ``MAGI_MESSAGE_CACHE_ENABLED`` and
+      ``MAGI_PROMPT_CACHE_ENABLED`` are OFF (either flag ON builds the
+      cache-aware model, so an operator can run one caching seam without the
+      other);
     - ``custom_endpoint`` is True (the native Anthropic client may not
       honor a custom API base; CLI passes this when
       ``_model_api_base_kwargs(env)`` yields an ``api_base``);
@@ -73,8 +76,12 @@ def maybe_build_cache_aware_anthropic(
     if config.provider != "anthropic":
         return None
     try:
-        if gate_on_flag and not is_message_cache_enabled(env):
-            return None
+        if gate_on_flag:
+            from magi_agent.prompt.metrics import load_cache_config  # noqa: PLC0415
+
+            prompt_cache_on, _ = load_cache_config(env)
+            if not (is_message_cache_enabled(env) or prompt_cache_on):
+                return None
         if custom_endpoint:
             return None
         # Backfill ANTHROPIC_API_KEY in ``os.environ`` so the underlying

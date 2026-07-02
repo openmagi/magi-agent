@@ -385,7 +385,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | — | cli/tests/test_rich_tool_preview.py |
-| anthropic_cache_model.py | Cache-aware Anthropic (Claude) model for the ADK runner boundary — PR11. | env | engine/model_runner.py, prompt/injection.py, runtime/model_factory.py |
+| anthropic_cache_model.py | Cache-aware Anthropic (Claude) model for the ADK runner boundary — PR11. | env, metrics | engine/model_runner.py, prompt/injection.py, runtime/model_factory.py |
 | artifact_service.py | — | — | — |
 | callback_adapter.py | — | bus, context, manifest, resolved | — |
 | context_compaction.py | Live context-compaction wiring for the ADK Runner (PR13). | auto_compact, collapse_drain, context, context_lifecycle, lifecycle_audit, lifecycle_shell_command_control, manual_compaction_context, protected_tools, providers, query_state, reactive_compact, readonly_classifier, session_service, token_estimation, token_tracker, transcript_render, types, usage_metadata, wiring | adk_bridge/control_plane.py |
@@ -1496,7 +1496,7 @@ graph LR
 | __init__.py | Public API for the prompt caching split package. | injection, memoizer, metrics, provider_adapter, providers, splitter, types | — |
 | injection.py | Cache control injection: convert PromptBlocks to provider-formatted dicts. | anthropic_cache_model, provider_family, providers, types | prompt/__init__.py, runtime/message_builder.py |
 | memoizer.py | Section memoization for the prompt caching pipeline. | — | prompt/__init__.py |
-| metrics.py | Prompt cache metrics and environment config loader. | flags | prompt/__init__.py |
+| metrics.py | Prompt cache metrics and environment config loader. | flags | adk_bridge/anthropic_cache_model.py, prompt/__init__.py, runtime/model_factory.py |
 | provider_adapter.py | Model-aware prompt adaptation per LLM provider. | provider_family, tool_schema_repair | adk_bridge/tool_adapter.py, prompt/__init__.py, runtime/message_builder.py |
 | providers.py | Provider-specific cache control strategies. | — | prompt/__init__.py, prompt/injection.py |
 | splitter.py | Prompt split logic: partition a flat list of prompt parts into static and | types | prompt/__init__.py, runtime/message_builder.py |
@@ -1669,7 +1669,7 @@ graph LR
 | memory_turn_hook.py | Turn-end memory hook: transcript→daily flush + compaction trigger (PR-B). | compaction_tree, config, local_file_writable, summarizer_runtime | cli/headless.py, transport/chat_routes.py |
 | memory_write_wiring.py | Gate-aware factory for the MemoryWrite tool host (Task D, PR2). | local_file_writable, memory_write_readiness, memory_write_tool | cli/tool_runtime.py, runtime/openmagi_runtime.py |
 | message_builder.py | — | _token_window_table, bus, child_runner_live, config, context, env, flags, injection, manifest, model_tiers, modes, per_turn_agent_mode_context, prompt_injection, provider_adapter, resolved, splitter, store, verification_policy | cli/clipboard_image.py, cli/tool_runtime.py, runtime/context_attachments.py, shadow/gate5b4c3_runner_input_adapter.py, transport/chat.py, transport/generation_request.py |
-| model_factory.py | E-7 — single seam for per-turn model construction. | anthropic_cache_model, env | shadow/gate5b4c3_live_runner_boundary.py |
+| model_factory.py | E-7 — single seam for per-turn model construction. | anthropic_cache_model, env, metrics | shadow/gate5b4c3_live_runner_boundary.py |
 | model_tiers.py | — | catalog, env, flags, providers, safety, trace_sink | evidence/final_output_gate.py, gates/tool_usage_guidance.py, harness/long_context_eval.py, models/types.py, plugins/tool_projection.py, recipes/materializer.py, recipes/phase_routing_defaults.py, recipes/reliability_policy.py, runtime/adk_turn_runner.py, runtime/child_runner_boundary.py, runtime/child_runner_live.py, runtime/context_budget.py, runtime/message_builder.py, runtime/phase_routing.py, runtime/reliability_budget.py, runtime/request_shape.py, runtime/tool_synthesis.py, tools/image_tools.py |
 | no_agent_watchdog.py | — | safety | runtime/events.py |
 | openmagi_runtime.py | — | apply, base, catalog, core_toolhost, env, manager, memory_write_wiring, models, native_catalog, persistent_python_toolhost, primitives, profiles, registry, store, todo_toolhost, tool, tool_projection | (root)/app.py, (root)/main.py, cli/tests/test_model_picker_wire.py, cli/wiring.py, transport/app_api.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/control_requests.py, transport/credentials.py, transport/customize.py, transport/gate2_sandbox_canary.py, transport/generation_request.py, transport/health.py, transport/integrations.py, transport/learning_dashboard.py, transport/plugins.py, transport/product_admin.py, transport/shadow_invocations.py, transport/tools.py, transport/web_dashboard.py |

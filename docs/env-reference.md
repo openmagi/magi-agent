@@ -206,7 +206,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_PLAN_MODE_TOOLS_ENABLED` (default off) — Plan-mode read-only toolset activation. Default-OFF keeps the full toolset on every turn regardless of declared mode.
 - `MAGI_PLATFORM_API_KEY` (no default) — API key for the hosted Magi platform search/fetch endpoint. Required together with ``MAGI_PLATFORM_BASE_URL`` to enable the platform provider; left empty for self-host.
 - `MAGI_PLATFORM_BASE_URL` (no default) — Base URL of the hosted Magi platform search/fetch endpoint. When set together with ``MAGI_PLATFORM_API_KEY``, the platform provider becomes the primary live-web backend.
-- `MAGI_PROMPT_CACHE_ENABLED` (default off) — Emit prompt-cache metrics from the prompt-build path. Default-OFF; ON adds bookkeeping per request.
+- `MAGI_PROMPT_CACHE_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Inject an Anthropic ephemeral cache_control marker on the static system-prompt prefix of live ADK Anthropic requests and record prompt-cache usage metrics (default-ON full profile).
 - `MAGI_PROMPT_CACHE_PROVIDER` (default `auto`) — Provider id to report in prompt-cache metrics. Default ``auto`` picks per-request based on the resolved model.
 - `MAGI_PROMPT_EXAMPLES_ENABLED` (default off) — Append the <action_discipline_examples> prompt block (positive/negative contrast pairs: act-vs-ask, finish-vs-defer) in build_cli_instruction.
 - `MAGI_PROMPT_REDFLAGS_ENABLED` (default off) — Append the <red_flags> anti-rationalization prompt block ("this thought means stop and correct course" table) in build_cli_instruction.
