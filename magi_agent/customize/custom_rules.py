@@ -19,6 +19,11 @@ from magi_agent.customize.what_menu import allowed_actions_for, is_known_ref
 
 CRITERION_MAX = 2000
 
+# Cap on the number of evidence types/refs an ``llm_criterion`` may declare it
+# reads (see the evidence-grounded-judge seam). Keeps the projected critic
+# prompt bounded and the "this judge reads: X, Y" UI summary short.
+EVIDENCE_REFS_MAX = 12
+
 # A custom rule's ``id`` (when the client supplies one) must be a reference-safe
 # token: no ``:`` (the ``custom_rule:<id>`` prefix separator used by mode
 # scoped_policy_ids and the dashboard's unified policy index), no whitespace,
@@ -501,6 +506,22 @@ def validate_custom_rule(rule: Any) -> list[str]:
         has_criterion = isinstance(criterion, str) and bool(criterion.strip())
         if has_criterion and len(criterion) > CRITERION_MAX:
             errors.append(f"criterion exceeds the {CRITERION_MAX}-char cap")
+
+        # Optional evidence-grounding: the criterion declares which evidence
+        # types/refs the judge should read (evidence-grounded-judge seam). Absent
+        # keeps the judge evidence-blind (fully back-compat).
+        evidence_refs = payload.get("evidenceRefs")
+        if evidence_refs is not None:
+            if not isinstance(evidence_refs, list) or not all(
+                isinstance(r, str) and r.strip() for r in evidence_refs
+            ):
+                errors.append(
+                    "llm_criterion.payload.evidenceRefs must be a list of non-empty strings"
+                )
+            elif len(evidence_refs) > EVIDENCE_REFS_MAX:
+                errors.append(
+                    f"llm_criterion.payload.evidenceRefs exceeds the {EVIDENCE_REFS_MAX}-ref cap"
+                )
 
         # P4: an after-tool rule may carry a deterministic contentMatch pre-filter
         # (substring/regex on the tool result). With contentMatch present the

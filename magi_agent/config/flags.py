@@ -1145,6 +1145,22 @@ FLAGS: tuple[FlagSpec, ...] = (
             "them)."
         ),
     ),
+    _pb(
+        "MAGI_EVIDENCE_GROUNDED_CRITIC_ENABLED",
+        stage="stage2",
+        summary=(
+            "Let an operator-authored llm_criterion judge read a scoped, "
+            "redaction-safe projection of the evidence ledger (test-run output, "
+            "git-diff, opened sources) so a fuzzy judgment can be made against "
+            "what the runtime actually captured this turn, not the draft text "
+            "alone. Profile-aware default-ON (full profile; OFF under "
+            "safe/eval). Requires MAGI_CUSTOMIZE_VERIFICATION_ENABLED plus "
+            "MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED. Inert (byte-identical to the "
+            "evidence-blind judge) until a criterion declares evidenceRefs, and "
+            "fail-open: an evidence projection fault falls back to the "
+            "evidence-blind prompt rather than wedging the turn."
+        ),
+    ),
     _b(
         "MAGI_CUSTOMIZE_CAPABILITY_SCOPE_ENABLED",
         stage="stage2",
