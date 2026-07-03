@@ -10,6 +10,20 @@ from magi_agent.evidence.types import EvidenceRecord
 from magi_agent.tools.result import ToolResult
 
 
+def _as_producer_control(record: object, producing_rule_id: str = "") -> object:
+    """Re-stamp a runtime-control-written record with the trusted
+    ``producer_control`` origin (+ producing rule id), safe-by-construction:
+    the write path is the authority for provenance, never a caller-supplied
+    record's declared origin. A record LIFTED from tool metadata never reaches
+    this path (it keeps the default ``tool_declared``), so a tool cannot forge a
+    ``producer_control`` record. Non-EvidenceRecord inputs pass through."""
+    if isinstance(record, EvidenceRecord):
+        return record.model_copy(
+            update={"origin": "producer_control", "producing_rule_id": producing_rule_id}
+        )
+    return record
+
+
 _PUBLIC_REF_PREFIXES = ("evidence:", "verifier:", "receipt:sha256:", "sha256:")
 _SAFE_ARTIFACT_REF_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{1,180}$")
 _OUTPUT_ARTIFACT_REF_TOOL_NAMES = frozenset({"documentwrite", "filedeliver"})
@@ -492,7 +506,12 @@ class LocalToolEvidenceCollector:
             self._ledgers.pop(key, None)
 
     def append_evidence_record_for_turn(
-        self, *, session_id: str, turn_id: str, record: object
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        record: object,
+        producing_rule_id: str = "",
     ) -> None:
         """Append a pre-built evidence record under ``(session_id, turn_id)``.
 
@@ -502,8 +521,14 @@ class LocalToolEvidenceCollector:
         same ``_records`` corpus that ``collect_for_turn`` (and thus the
         pre-final verifier-bus gate) reads, so it is NOT gated on any lifecycle
         flag — it must always be collectible by the gate.
+
+        This is a runtime-control write path, so the record is re-stamped
+        ``origin="producer_control"`` (+ ``producing_rule_id``) here rather than
+        trusting the caller: a record lifted from tool metadata never reaches
+        this method, so it can never acquire the trusted origin.
         """
-        self._records.setdefault((session_id, turn_id), []).append(record)
+        stamped = _as_producer_control(record, producing_rule_id)
+        self._records.setdefault((session_id, turn_id), []).append(stamped)
 
     def record_audit_evidence_for_turn(
         self,
@@ -526,17 +551,23 @@ class LocalToolEvidenceCollector:
 
         Fail-soft: a persistence error never breaks the tool path; the live-view
         append always happens so the gate still sees the record.
+
+        Runtime-control write path, so the record is stamped
+        ``origin="producer_control"`` with an empty ``producing_rule_id`` (an
+        audit record is not a producer binding, so it can never satisfy a
+        session gate's producer-id match).
         """
-        self._records.setdefault((session_id, turn_id), []).append(record)
+        stamped = _as_producer_control(record)
+        self._records.setdefault((session_id, turn_id), []).append(stamped)
         try:
-            status = str(getattr(record, "status", "ok"))
+            status = str(getattr(stamped, "status", "ok"))
             self._maybe_persist_records(
                 session_id=session_id,
                 turn_id=turn_id,
                 tool_call_id=tool_call_id or "customize-audit",
                 tool_name=tool_name,
                 status=status,
-                records=[record],
+                records=[stamped],
             )
         except Exception:
             return

@@ -20,7 +20,9 @@
             "lastCodeMutation": 1779000000
           },
           "observedAt": 1779000040,
+          "origin": "tool_declared",
           "preview": "pytest passed with token=[redacted]",
+          "producingRuleId": "",
           "source": {
             "acknowledgementId": null,
             "artifactId": null,
@@ -67,7 +69,9 @@
             "contractStart": 1779000000
           },
           "observedAt": 0,
+          "origin": "tool_declared",
           "preview": "git diff inspected locally",
+          "producingRuleId": "",
           "source": {
             "acknowledgementId": null,
             "artifactId": null,
