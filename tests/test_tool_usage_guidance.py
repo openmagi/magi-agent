@@ -7,11 +7,13 @@ from magi_agent.gates.tool_usage_guidance import (
 )
 
 _ON = {"MAGI_TOOL_USAGE_GUIDANCE_ENABLED": "1"}
+# Promoted _pb: unset now resolves ON, so the disabled path is an explicit "0".
+_OFF = {"MAGI_TOOL_USAGE_GUIDANCE_ENABLED": "0"}
 
 
 def test_flag_off_returns_description_unchanged() -> None:
     desc = "Gate 5B selected full toolhost WebSearch tool."
-    assert apply_usage_guidance("WebSearch", desc, {}) == desc
+    assert apply_usage_guidance("WebSearch", desc, _OFF) == desc
     assert apply_usage_guidance(
         "WebSearch", desc, {"MAGI_TOOL_USAGE_GUIDANCE_ENABLED": "0"}
     ) == desc
@@ -68,7 +70,7 @@ def test_spawn_agent_includes_operator_allowlist_routes() -> None:
 
 def test_spawn_agent_routes_absent_when_flag_off() -> None:
     desc = "Gate 5B selected full toolhost SpawnAgent tool."
-    assert apply_usage_guidance("SpawnAgent", desc, {}) == desc
+    assert apply_usage_guidance("SpawnAgent", desc, _OFF) == desc
 
 
 def test_apply_is_fail_open(monkeypatch) -> None:
@@ -94,7 +96,7 @@ def _build_named_tool(name: str):
 
 
 def test_function_tool_flag_off_docstring_unchanged(monkeypatch) -> None:
-    monkeypatch.delenv("MAGI_TOOL_USAGE_GUIDANCE_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_TOOL_USAGE_GUIDANCE_ENABLED", "0")
     tool = _build_named_tool("WebSearch")
     assert tool.func.__doc__ == "Gate 5B selected full toolhost WebSearch tool."
 

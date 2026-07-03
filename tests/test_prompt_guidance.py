@@ -15,7 +15,8 @@ _KEYS = {"BRAVE_API_KEY": "k1", "FIRECRAWL_API_KEY": "k2"}
 
 
 def test_examples_block_matrix() -> None:
-    assert action_discipline_examples_block({}) == ""
+    # Promoted _pb: OFF under a safe profile or an explicit "0" (unset now ON).
+    assert action_discipline_examples_block({"MAGI_RUNTIME_PROFILE": "safe"}) == ""
     assert action_discipline_examples_block(
         {"MAGI_PROMPT_EXAMPLES_ENABLED": "0"}
     ) == ""
@@ -38,7 +39,7 @@ def test_search_block_requires_flag_and_both_keys() -> None:
 
 
 def test_redflags_block_matrix() -> None:
-    assert anti_rationalization_block({}) == ""
+    assert anti_rationalization_block({"MAGI_RUNTIME_PROFILE": "safe"}) == ""
     assert anti_rationalization_block({"MAGI_PROMPT_REDFLAGS_ENABLED": "0"}) == ""
     block = anti_rationalization_block({"MAGI_PROMPT_REDFLAGS_ENABLED": "1"})
     assert block.startswith("<red_flags>")
@@ -46,7 +47,7 @@ def test_redflags_block_matrix() -> None:
 
 
 def test_research_methodology_block_matrix() -> None:
-    assert research_methodology_block({}) == ""
+    assert research_methodology_block({"MAGI_RUNTIME_PROFILE": "safe"}) == ""
     assert research_methodology_block({"MAGI_RESEARCH_METHODOLOGY_ENABLED": "0"}) == ""
     block = research_methodology_block({"MAGI_RESEARCH_METHODOLOGY_ENABLED": "1"})
     assert block.startswith("<research_methodology>")
@@ -56,7 +57,7 @@ def test_research_methodology_block_matrix() -> None:
 
 
 def test_automation_methodology_block_matrix() -> None:
-    assert automation_methodology_block({}) == ""
+    assert automation_methodology_block({"MAGI_RUNTIME_PROFILE": "safe"}) == ""
     assert automation_methodology_block({"MAGI_AUTOMATION_METHODOLOGY_ENABLED": "0"}) == ""
     block = automation_methodology_block({"MAGI_AUTOMATION_METHODOLOGY_ENABLED": "1"})
     assert block.startswith("<automation_methodology>")
@@ -115,7 +116,9 @@ def test_builders_fail_open(monkeypatch, builder, helper_name, enabled_env) -> N
     assert builder(enabled_env) == ""
 
 
-def test_cli_instruction_off_by_default(monkeypatch) -> None:
+def test_cli_instruction_off_when_disabled(monkeypatch) -> None:
+    # 5 guidance blocks: 4 are profile-aware default-ON now, so explicitly "0"
+    # them (search-rules stays strict default-OFF).
     for name in (
         "MAGI_PROMPT_EXAMPLES_ENABLED",
         "MAGI_PROMPT_SEARCH_RULES_ENABLED",
@@ -123,7 +126,7 @@ def test_cli_instruction_off_by_default(monkeypatch) -> None:
         "MAGI_RESEARCH_METHODOLOGY_ENABLED",
         "MAGI_AUTOMATION_METHODOLOGY_ENABLED",
     ):
-        monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv(name, "0")
     from magi_agent.cli.tool_runtime import build_cli_instruction
 
     prompt = build_cli_instruction(session_id="s")
@@ -147,7 +150,7 @@ def test_cli_instruction_injects_methodology_blocks(monkeypatch) -> None:
 def test_cli_instruction_methodology_blocks_independent(monkeypatch) -> None:
     # Each flag is independent: research on, automation off.
     monkeypatch.setenv("MAGI_RESEARCH_METHODOLOGY_ENABLED", "1")
-    monkeypatch.delenv("MAGI_AUTOMATION_METHODOLOGY_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_AUTOMATION_METHODOLOGY_ENABLED", "0")
     from magi_agent.cli.tool_runtime import build_cli_instruction
 
     prompt = build_cli_instruction(session_id="s")

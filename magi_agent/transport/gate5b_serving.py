@@ -19,6 +19,10 @@ import os
 import time
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from magi_agent.memory.config import MemoryMode
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from magi_agent.config.env import is_egress_gate_enabled

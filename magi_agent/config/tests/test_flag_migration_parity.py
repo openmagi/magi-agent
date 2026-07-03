@@ -121,15 +121,11 @@ _PARITY_CASES: tuple[tuple[str | None, bool], ...] = (
 # Reader fn + env-name pair for each migrated flag. Adding a row here in a
 # future batch automatically extends the parametrized parity suite.
 _MIGRATED_FLAGS = (
-    # I-1 batch 1 (8 flags):
-    (is_automation_methodology_enabled, MAGI_AUTOMATION_METHODOLOGY_ENABLED_ENV),
-    (is_coding_context_enabled, MAGI_CODING_CONTEXT_ENABLED_ENV),
+    # I-1 batch 1 (remaining strict default-OFF; the 6 guidance flags were
+    # promoted to profile-aware default-ON `_pb` and now live in
+    # _PROFILE_MIGRATED_FLAGS below, per the no-default-off policy):
     (is_key_aware_model_routes_enabled, MAGI_KEY_AWARE_MODEL_ROUTES_ENABLED_ENV),
-    (is_prompt_examples_enabled, MAGI_PROMPT_EXAMPLES_ENABLED_ENV),
-    (is_prompt_redflags_enabled, MAGI_PROMPT_REDFLAGS_ENABLED_ENV),
     (is_prompt_search_rules_enabled, MAGI_PROMPT_SEARCH_RULES_ENABLED_ENV),
-    (is_research_methodology_enabled, MAGI_RESEARCH_METHODOLOGY_ENABLED_ENV),
-    (is_tool_usage_guidance_enabled, MAGI_TOOL_USAGE_GUIDANCE_ENABLED_ENV),
     # I-1 batch 2 (7 strict default-OFF master-switch flags):
     (is_dashboard_pack_authoring_enabled, MAGI_DASHBOARD_PACK_AUTHORING_ENABLED_ENV),
     (is_facts_replan_enabled, MAGI_FACTS_REPLAN_ENABLED_ENV),
@@ -249,6 +245,14 @@ _PROFILE_CASES: tuple[tuple[str | None, bool], ...] = (
 
 
 _PROFILE_MIGRATED_FLAGS = (
+    # Promoted _b -> _pb under the no-default-off policy (default-ON in the full
+    # profile; OFF only under safe/eval or an explicit "0").
+    (is_automation_methodology_enabled, MAGI_AUTOMATION_METHODOLOGY_ENABLED_ENV),
+    (is_coding_context_enabled, MAGI_CODING_CONTEXT_ENABLED_ENV),
+    (is_prompt_examples_enabled, MAGI_PROMPT_EXAMPLES_ENABLED_ENV),
+    (is_prompt_redflags_enabled, MAGI_PROMPT_REDFLAGS_ENABLED_ENV),
+    (is_research_methodology_enabled, MAGI_RESEARCH_METHODOLOGY_ENABLED_ENV),
+    (is_tool_usage_guidance_enabled, MAGI_TOOL_USAGE_GUIDANCE_ENABLED_ENV),
     (is_read_ledger_enabled, MAGI_READ_LEDGER_ENABLED_ENV),
     (is_self_introspection_enabled, MAGI_SELF_INTROSPECTION_ENABLED_ENV),
     (is_evidence_ledger_lifecycle_enabled, MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED_ENV),

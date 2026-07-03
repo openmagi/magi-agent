@@ -57,8 +57,18 @@ def _init_git_repo(path: Path) -> bool:
 
 # ---------- §F.1 — default OFF returns "" ----------
 
-def test_default_off_returns_empty(workspace: Path) -> None:
-    assert coding_context_block(workspace_root=workspace, env={}) == ""
+def test_default_on_when_unset(workspace: Path) -> None:
+    # Promoted _b -> _pb: unset now resolves ON in the full runtime profile;
+    # the safe/eval profiles keep it inert (empty block).
+    from magi_agent.config.env import is_coding_context_enabled
+
+    assert is_coding_context_enabled({}) is True
+    assert (
+        coding_context_block(
+            workspace_root=workspace, env={"MAGI_RUNTIME_PROFILE": "safe"}
+        )
+        == ""
+    )
 
 
 def test_explicit_off_returns_empty(workspace: Path) -> None:
@@ -214,7 +224,7 @@ def test_build_cli_instruction_injects_when_on(
 def test_build_cli_instruction_omits_when_off(
     workspace: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delenv("MAGI_CODING_CONTEXT_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_CODING_CONTEXT_ENABLED", "0")
     monkeypatch.chdir(workspace)
     from magi_agent.cli.tool_runtime import build_cli_instruction
 
