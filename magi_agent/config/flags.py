@@ -3858,6 +3858,21 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
+    FlagSpec(
+        name="MAGI_COMPOSIO_BROKER_ENABLED",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Run THIS instance as a platform Composio broker: serves "
+            "``/v1/integrations/composio/*`` so self-hosters use Composio via "
+            "our master key (no key of their own). Default OFF (routes are not "
+            "registered). Only the broker deployment turns this on, with the "
+            "master key in env and ``MAGI_COMPOSIO_BROKER_TOKENS`` for caller "
+            "auth."
+        ),
+        kind="bool",
+    ),
     # I-1: hosted gate1a egress-correlation knobs (``evidence/observed_egress``
     # + ``evidence/gate1a_egress_correlation``). All ``scope="hosted"``;
     # empty/unset falls through to the no-op
