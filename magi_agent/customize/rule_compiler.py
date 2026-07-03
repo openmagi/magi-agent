@@ -267,6 +267,15 @@ matches its draft-shape contract.
     "after_tool_use" (override use), and
     what:{kind:"llm_criterion", payload:{criterion:"<sentence>"} or
     {toolMatch:[...], contentMatch:{pattern, isRegex, negate}}}.
+    EVIDENCE-GROUNDED: to have the critic judge AGAINST evidence the
+    runtime captured this turn (a test run, a diff, the sources the agent
+    opened) instead of the draft text alone, add an optional payload key
+    evidenceRefs:["TestRun","GitDiff"] naming the evidence types it should
+    read. Use this for a FUZZY judgment over evidence (e.g. "does the diff
+    implement the requested change, given the test output"). When the
+    check is EXACT ("exit_code == 0"), prefer field_constraint instead
+    (cheaper, hard verdict). Omit evidenceRefs to keep the judge
+    evidence-blind (judges the draft text only).
 
   field_constraint — PREFERRED for any single-field or per-record
     cardinality intent. Structured IR; the compiler turns it into SHACL
@@ -332,6 +341,13 @@ _COMPILE_SYSTEM_INSTRUCTION_TMPL = (
     "be expressed as a single-field predicate or a cross-record cardinality "
     "claim. Only fall back to shacl_constraint for multi-shape / advanced "
     "SHACL the structured IR cannot express.\n\n"
+    "When the policy asks to judge or verify something USING or AGAINST "
+    "evidence the runtime captured (a test run, a diff, the sources the "
+    "agent opened) rather than the answer text alone, emit an "
+    "llm_criterion whose payload carries an evidenceRefs list naming those "
+    "evidence types, so the judge reads them. If that judgment is exact "
+    "enough to be a single-field check (e.g. a passing exit code), prefer "
+    "field_constraint instead.\n\n"
     "The ``scope`` field classifies the KIND of task turn a rule applies to "
     "(always, coding, research, delivery, memory, task) — it is NOT the user's "
     "agent MODE. If the policy says it should apply only in some named agent "
@@ -1245,6 +1261,14 @@ _PROPOSE_PRIMITIVE_SYSTEM_INSTRUCTION_TMPL = (
     "* PREFER deterministic. Reach for ``advisory`` only when the policy "
     "genuinely requires judgment the runtime cannot derive (e.g. 'is this "
     "AWS key a real secret or a test fixture?').\n"
+    "* EVIDENCE-GROUNDED ADVISORY. When an advisory critic should judge "
+    "against evidence the runtime captured this turn (a test run, a diff, "
+    "the sources the agent opened) rather than the answer text alone, emit "
+    "the ``llm_criterion`` primitive with an ``evidenceRefs`` list in its "
+    "payload naming those evidence types. A strong hybrid is a "
+    "deterministic pre-filter (e.g. a GitDiff ``field_constraint``) plus an "
+    "evidence-grounded ``llm_criterion`` critic that only earns its cost "
+    "when that evidence exists.\n"
     "* MUTATOR PRIMITIVES (PR-F-MUT3). When the intent's "
     "``whatToDoOnFail`` is ``inject`` / ``rewrite`` / ``redact``, or the "
     "``whatToCheck`` phrase carries 'redact' / 'scrub' / 'mask' / "

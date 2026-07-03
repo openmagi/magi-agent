@@ -208,6 +208,7 @@ _PLAIN_LANGUAGE_MAP: Final[tuple[tuple[re.Pattern[str], str], ...]] = tuple(
         ("llm critic", "an AI judge"),
         ("shacl_constraint", "a structured rule"),
         ("shacl", "a structured rule"),
+        ("evidencerefs", "which evidence to read"),
         ("evidence_req", "a requirement"),
         ("evidence ref", "a requirement"),
         ("evidenceref", "a requirement"),
