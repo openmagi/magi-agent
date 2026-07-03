@@ -92,22 +92,25 @@ def _content_text(content: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_default_off_parse_returns_none() -> None:
-    assert parse_facts_replan_env({}) is None
+_FLAG_OFF = {"MAGI_FACTS_REPLAN_ENABLED": "0"}
 
 
-def test_default_off_not_registered_in_plane() -> None:
-    plane = build_default_plane(os_environ={})
+def test_disabled_parse_returns_none() -> None:
+    assert parse_facts_replan_env(dict(_FLAG_OFF)) is None
+
+
+def test_disabled_not_registered_in_plane() -> None:
+    plane = build_default_plane(os_environ=dict(_FLAG_OFF))
     assert not _has_facts_replan(plane._controls)
 
 
-def test_default_off_no_arg_plugin_has_no_control() -> None:
-    plugin = build_default_plugin()
+def test_disabled_plugin_has_no_control() -> None:
+    plugin = build_default_plugin(dict(_FLAG_OFF))
     assert not _has_facts_replan(plugin._p._controls)
 
 
-def test_default_off_request_untouched_through_plane() -> None:
-    plane = build_default_plane(os_environ={})
+def test_disabled_request_untouched_through_plane() -> None:
+    plane = build_default_plane(os_environ=dict(_FLAG_OFF))
     request = {"contents": [{"role": "user", "content": "hello"}]}
     before = copy.deepcopy(request)
     for _ in range(12):
@@ -145,7 +148,7 @@ def test_interval_zero_env_not_registered() -> None:
 
 
 def test_build_facts_replan_control_off_returns_none() -> None:
-    assert build_facts_replan_control({}) is None
+    assert build_facts_replan_control(dict(_FLAG_OFF)) is None
 
 
 def test_build_facts_replan_control_on_returns_named_control() -> None:
@@ -419,12 +422,15 @@ def test_parse_custom_values() -> None:
     assert cfg == FactsReplanConfig(interval=2, max_surveys_per_turn=1)
 
 
-def test_parse_strict_truthy_variants() -> None:
+def test_parse_truthy_and_explicit_falsy_variants() -> None:
     for value in ("1", "true", "yes", "on", " TRUE "):
         assert (
             parse_facts_replan_env({"MAGI_FACTS_REPLAN_ENABLED": value}) is not None
         ), f"expected ON for {value!r}"
-    for value in ("0", "false", "off", "", "2", "enabled"):
+    # Profile-aware default-ON (_pb): only the explicit-falsy tokens disable it;
+    # empty string is in the FALSE set, but unrecognised values resolve to the
+    # (full) profile default and are covered by the profile cases elsewhere.
+    for value in ("0", "false", "off", ""):
         assert (
             parse_facts_replan_env({"MAGI_FACTS_REPLAN_ENABLED": value}) is None
         ), f"expected OFF for {value!r}"
@@ -436,18 +442,18 @@ def test_config_env_accessor_and_reexport() -> None:
         parse_facts_replan_env as env_parse,
     )
 
-    assert is_facts_replan_enabled({}) is False
+    assert is_facts_replan_enabled(dict(_FLAG_OFF)) is False
     assert is_facts_replan_enabled(dict(_FLAG_ON)) is True
     assert env_parse(dict(_FLAG_ON)) == FactsReplanConfig()
-    assert env_parse({}) is None
+    assert env_parse(dict(_FLAG_OFF)) is None
 
 
 def test_flags_registered_in_registry() -> None:
     from magi_agent.config.flags import get_flag
 
     enabled = get_flag("MAGI_FACTS_REPLAN_ENABLED")
-    assert enabled.kind == "bool"
-    assert enabled.default is False
+    assert enabled.kind == "profile_bool"
+    assert enabled.default is None
 
     interval = get_flag("MAGI_FACTS_REPLAN_INTERVAL")
     assert interval.kind == "int"

@@ -128,12 +128,8 @@ _MIGRATED_FLAGS = (
     (is_prompt_search_rules_enabled, MAGI_PROMPT_SEARCH_RULES_ENABLED_ENV),
     # I-1 batch 2 (7 strict default-OFF master-switch flags):
     (is_dashboard_pack_authoring_enabled, MAGI_DASHBOARD_PACK_AUTHORING_ENABLED_ENV),
-    (is_facts_replan_enabled, MAGI_FACTS_REPLAN_ENABLED_ENV),
-    (is_goal_nudge_enabled, MAGI_GOAL_NUDGE_ENABLED_ENV),
     (is_grounded_answer_guard_enabled, MAGI_GROUNDED_ANSWER_GUARD_ENABLED_ENV),
     (is_research_fact_guidance_enabled, MAGI_RESEARCH_FACT_GUIDANCE_ENABLED_ENV),
-    (is_tool_synthesis_nudge_enabled, MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED_ENV),
-    (is_user_hooks_enabled, MAGI_USER_HOOKS_ENABLED_ENV),
 )
 
 
@@ -245,6 +241,10 @@ _PROFILE_CASES: tuple[tuple[str | None, bool], ...] = (
 
 
 _PROFILE_MIGRATED_FLAGS = (
+    (is_facts_replan_enabled, MAGI_FACTS_REPLAN_ENABLED_ENV),
+    (is_goal_nudge_enabled, MAGI_GOAL_NUDGE_ENABLED_ENV),
+    (is_tool_synthesis_nudge_enabled, MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED_ENV),
+    (is_user_hooks_enabled, MAGI_USER_HOOKS_ENABLED_ENV),
     # Promoted _b -> _pb under the no-default-off policy (default-ON in the full
     # profile; OFF only under safe/eval or an explicit "0").
     (is_automation_methodology_enabled, MAGI_AUTOMATION_METHODOLOGY_ENABLED_ENV),

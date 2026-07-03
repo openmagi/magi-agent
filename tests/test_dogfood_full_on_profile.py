@@ -117,14 +117,10 @@ _STRICT_BOOL_FLAGS_ENABLED = (
     "MAGI_FACT_GROUNDING_VERIFICATION_ENABLED",
     "MAGI_GA_DELIVERABLE_GATE_ENABLED",
     "MAGI_EGRESS_GATE_ENABLED",
-    "MAGI_FACTS_REPLAN_ENABLED",
-    "MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED",
     "MAGI_RESEARCH_FACT_GUIDANCE_ENABLED",
     "MAGI_CROSS_VERIFY_ENABLED",
-    "MAGI_STEP_DECOMPOSITION_ENABLED",
     "MAGI_DEEP_WEB_RESEARCH_ENABLED",
     "MAGI_BROWSER_TOOL_ENABLED",
-    "MAGI_CODE_ACTION_ENABLED",
     "MAGI_DEFERRED_TOOLS_ENABLED",
     "MAGI_HEADTAIL_TRUNCATION_ENABLED",
     "MAGI_FILE_DELIVERY_LIVE_ENABLED",
@@ -171,6 +167,10 @@ def test_strict_bool_flag_enabled_under_profile(
 # unset under MAGI_RUNTIME_PROFILE=full; the profile reaffirms them explicitly.)
 # ---------------------------------------------------------------------------
 _PROFILE_BOOL_FLAGS_ENABLED = (
+    "MAGI_FACTS_REPLAN_ENABLED",
+    "MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED",
+    "MAGI_STEP_DECOMPOSITION_ENABLED",
+    "MAGI_CODE_ACTION_ENABLED",
     "MAGI_EDIT_FUZZY_MATCH_ENABLED",
     "MAGI_EDIT_FORMAT_ON_WRITE_ENABLED",
     "MAGI_LSP_DIAGNOSTICS_ENABLED",
@@ -314,8 +314,6 @@ def test_unset_env_is_default_off_for_strict_gates() -> None:
     assert cfg_env.parse_fact_grounding_verification_enabled(empty) is False
     assert cfg_env.parse_ga_deliverable_gate_enabled(empty) is False
     assert cfg_env.is_egress_gate_enabled(empty) is False
-    assert flag_bool("MAGI_FACTS_REPLAN_ENABLED", env=empty) is False
-    assert flag_bool("MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED", env=empty) is False
     assert flag_bool("MAGI_DEEP_WEB_RESEARCH_ENABLED", env=empty) is False
     # Mode/string gates default to the inert value.
     assert research_governance_mode(empty) == "off"

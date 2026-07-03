@@ -27,8 +27,14 @@ _ON = {"MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED": "1"}
 
 
 class TestNudgeActiveResolution:
-    def test_default_off_even_for_frontier_model(self) -> None:
-        assert tool_synthesis_nudge_active(model_label=_FRONTIER_LABEL, env={}) is False
+    def test_off_when_disabled_even_for_frontier_model(self) -> None:
+        assert (
+            tool_synthesis_nudge_active(
+                model_label=_FRONTIER_LABEL,
+                env={"MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED": "0"},
+            )
+            is False
+        )
 
     def test_flag_on_frontier_tier_is_active(self) -> None:
         assert tool_synthesis_nudge_active(model_label=_FRONTIER_LABEL, env=_ON) is True
@@ -77,7 +83,10 @@ class TestNudgeText:
 class TestInstructionBlock:
     def test_block_empty_when_flag_off(self) -> None:
         assert (
-            build_tool_synthesis_instruction_block(model_label=_FRONTIER_LABEL, env={})
+            build_tool_synthesis_instruction_block(
+                model_label=_FRONTIER_LABEL,
+                env={"MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED": "0"},
+            )
             == ""
         )
 

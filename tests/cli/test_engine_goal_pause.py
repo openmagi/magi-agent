@@ -514,7 +514,7 @@ class TestReader2Independence:
         monkeypatch.setenv(
             "MAGI_GOAL_NUDGE_REQUIRED_EVIDENCE", "source_ledger,calculation_evidence"
         )
-        monkeypatch.delenv("MAGI_GOAL_NUDGE_ENABLED", raising=False)
+        monkeypatch.setenv("MAGI_GOAL_NUDGE_ENABLED", "0")
         monkeypatch.delenv("MAGI_GOAL_LOOP_ENABLED", raising=False)
         rt = build_headless_runtime(
             runner=FakeRunner(),
@@ -530,9 +530,9 @@ class TestReader2Independence:
     def test_off_flags_engine_byte_identical_di(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
     ) -> None:
-        monkeypatch.delenv("MAGI_GOAL_COMPLETION_EVIDENCE_FIRST_ENABLED", raising=False)
+        monkeypatch.setenv("MAGI_GOAL_COMPLETION_EVIDENCE_FIRST_ENABLED", "0")
         monkeypatch.delenv("MAGI_GOAL_NUDGE_REQUIRED_EVIDENCE", raising=False)
-        monkeypatch.delenv("MAGI_PLAN_LEDGER_DURABLE_ENABLED", raising=False)
+        monkeypatch.setenv("MAGI_PLAN_LEDGER_DURABLE_ENABLED", "0")
         from magi_agent.cli.wiring import build_headless_runtime
 
         rt = build_headless_runtime(

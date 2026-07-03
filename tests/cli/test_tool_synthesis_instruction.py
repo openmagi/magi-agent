@@ -15,8 +15,8 @@ _CHEAP_LABEL = "anthropic/haiku"
 _TAG = "<creating_your_own_tools>"
 
 
-def test_block_absent_by_default(monkeypatch) -> None:
-    monkeypatch.delenv(_FLAG, raising=False)
+def test_block_absent_when_disabled(monkeypatch) -> None:
+    monkeypatch.setenv(_FLAG, "0")
     instruction = build_cli_instruction(
         session_id="test-session", model=_FRONTIER_LABEL
     )

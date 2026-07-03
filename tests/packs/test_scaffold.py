@@ -67,7 +67,7 @@ def test_scaffold_code_recipe_emits_callable_and_registers_when_flag_on(
     assert manifest.pack_id.startswith("ext.")
 
     # OFF: dropped at load time (callable never imported).
-    monkeypatch.delenv("MAGI_RECIPE_AS_CODE_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_RECIPE_AS_CODE_ENABLED", "0")
     off_result, _ = load_from_bases([tmp_path / "packs"], RecordingSink())
     assert ("recipe", meta.ref) not in {(p.type, p.ref) for p in off_result.primitives}
 

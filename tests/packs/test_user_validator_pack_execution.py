@@ -110,7 +110,7 @@ def test_user_validator_inert_when_flag_off(tmp_path: Path, monkeypatch) -> None
     packs_base = tmp_path / "packs"
     _write_user_validator_pack(packs_base)
     _patch_bases(monkeypatch, packs_base)
-    monkeypatch.delenv("MAGI_USER_VALIDATOR_PACKS_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_USER_VALIDATOR_PACKS_ENABLED", "0")
 
     payload = _gate(_driver(), final_text="APPROVED: all good")
 

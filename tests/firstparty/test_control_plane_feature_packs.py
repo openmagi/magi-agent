@@ -120,9 +120,17 @@ def test_pack_path_loads_all_three_features_when_flagged(monkeypatch, tmp_path) 
     assert names[-1] == TOOL_SYNTHESIS_NUDGE_PLUGIN_NAME, "nudge registers LAST"
 
 
-def test_pack_path_default_off_loads_none(monkeypatch, tmp_path) -> None:
+def test_pack_path_all_off_loads_none(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))
-    plane = _bundled_plane({}, tool_synthesis_model_label=_FRONTIER_LABEL)
+    # facts-replan + tool-synthesis-nudge are profile-aware default-ON (_pb), so
+    # disable them explicitly; the other two features are strict default-OFF.
+    plane = _bundled_plane(
+        {
+            "MAGI_FACTS_REPLAN_ENABLED": "0",
+            "MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED": "0",
+        },
+        tool_synthesis_model_label=_FRONTIER_LABEL,
+    )
     assert not (_FEATURE_CONTROL_NAMES & set(_names(plane)))
 
 

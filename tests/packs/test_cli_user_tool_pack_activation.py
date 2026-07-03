@@ -104,7 +104,7 @@ def test_user_tool_pack_absent_when_flag_off(tmp_path: Path, monkeypatch) -> Non
         "magi_agent.packs.discovery.default_search_bases",
         lambda: [packs_base],
     )
-    monkeypatch.delenv("MAGI_USER_TOOL_PACKS_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_USER_TOOL_PACKS_ENABLED", "0")
 
     runtime = build_cli_tool_runtime(workspace_root=str(tmp_path))
     assert runtime.registry.resolve_registration(_USER_TOOL_NAME) is None

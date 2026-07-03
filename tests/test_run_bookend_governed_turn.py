@@ -71,7 +71,7 @@ async def test_flag_off_writes_no_bookend(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("MAGI_EVIDENCE_LEDGER_DIR", str(tmp_path))
-    monkeypatch.delenv("MAGI_PERSIST_RUN_BOOKENDS_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_PERSIST_RUN_BOOKENDS_ENABLED", "0")
 
     items = await _drain(_ctx(), _FakeRuntime(_stream()))
 

@@ -326,7 +326,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
-    _b(
+    _pb(
         "MAGI_GOAL_NUDGE_ENABLED",
         summary=(
             "Enable the production goal-nudge: a bounded continuation that "
@@ -335,7 +335,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "the driver behaves byte-identically to pre-PR4)."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_PLAN_LEDGER_DURABLE_ENABLED",
         summary=(
             "Enable the durable plan/todo ledger (WS3 PR3a): TodoWrite "
@@ -348,7 +348,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "index half additionally requires MAGI_DURABLE_LOCAL_WRITES_ENABLED."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_GOAL_COMPLETION_EVIDENCE_FIRST_ENABLED",
         summary=(
             "Enable evidence-first goal completion (WS3 PR3b): before the "
@@ -616,7 +616,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "answer surfaces byte-identical."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_PERSIST_RUN_BOOKENDS_ENABLED",
         summary=(
             "Persist a per-turn run-bookend record (goal, one-line result, "
@@ -629,18 +629,18 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_BROWSER_TOOL_ENABLED",
         summary="Expose the browser-use autonomous vision BrowserTask tool.",
     ),
-    _b(
+    _pb(
         "MAGI_CODE_ACTION_ENABLED",
         summary="Expose the persistent PythonExec code-execution tool.",
     ),
-    _b(
+    _pb(
         "MAGI_PERSISTENT_PYTHON_ENABLED",
         summary=(
             "Register + bind the neutral tools-persistent-python pack's "
             "PersistentPython tool (CodeAct: persistent interpreter namespace)."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_USER_TOOL_PACKS_ENABLED",
         summary=(
             "Discover + merge user-authored tool packs (~/.magi/packs, "
@@ -648,7 +648,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "tools."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_USER_VALIDATOR_PACKS_ENABLED",
         summary=(
             "Execute user-authored validator pack impls at the pre-final "
@@ -656,7 +656,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "ref, a failing verdict blocks with its detail."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_USER_EVIDENCE_PACKS_ENABLED",
         summary=(
             "Run user-authored evidence_producer pack runtime emitters at the "
@@ -664,7 +664,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "so it can satisfy a required evidence ref."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_RECIPE_AS_CODE_ENABLED",
         summary=(
             "Activate code-computed recipe packs: a recipe provides-entry may "
@@ -861,7 +861,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "filename suggestions on miss (default-ON full profile)."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED",
         summary=(
             "Live-SWE-style tool-synthesis: per-step reflection nudge + "
@@ -1107,7 +1107,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "the sole access boundary."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_USER_HOOKS_ENABLED",
         summary=(
             "Master gate for CC-style user settings.json hooks (self-host / "
@@ -1478,7 +1478,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_EGRESS_GATE_ENABLED",
         summary="Run the evidence-grounded critic gate before chat egress.",
     ),
-    _b(
+    _pb(
         "MAGI_STEP_DECOMPOSITION_ENABLED",
         summary=(
             "Inject a light first-pass guidance asking the agent to enumerate "
@@ -2085,7 +2085,7 @@ FLAGS: tuple[FlagSpec, ...] = (
     # --- In-context replanning ----------------------------------------------
     # Strict default-OFF (flat _b, NOT profile-resolved): MAGI_RUNTIME_PROFILE
     # never auto-enables the facts-survey injection.
-    _b(
+    _pb(
         "MAGI_FACTS_REPLAN_ENABLED",
         stage="stage2",
         summary=(
