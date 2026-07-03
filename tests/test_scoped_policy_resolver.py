@@ -49,9 +49,12 @@ def _llm_rule(rule_id: str) -> dict:
     }
 
 
-def _resolve(ids, *, rules=(), checks=()):
+def _resolve(ids, *, rules=(), checks=(), policies=None):
     return resolve_scoped_policy_overlay(
-        ids, custom_rules=list(rules), dashboard_check_ids=set(checks)
+        ids,
+        custom_rules=list(rules),
+        dashboard_check_ids=set(checks),
+        policies=policies,
     )
 
 
@@ -93,6 +96,77 @@ def test_custom_rule_unknown_id_dropped():
 def test_force_include_ignores_enabled_flag():
     # A globally-disabled rule still resolves — scoping force-activates it.
     overlay = _resolve(["custom_rule:cr1"], rules=[_det_rule("cr1", enabled=False)])
+    assert overlay.prefinal_validator_refs == (_KNOWN_REF,)
+
+
+def test_policy_ref_fans_out_members_into_buckets():
+    # A policy:P ref fans out to its member rule refs (a deterministic_ref +
+    # a tool_perm), each routed exactly as the equivalent custom_rule: ref.
+    overlay = _resolve(
+        ["policy:verify-source"],
+        rules=[_det_rule("cr_det"), _tool_rule("cr_tp")],
+        policies={"verify-source": ("cr_det", "cr_tp")},
+    )
+    assert overlay.prefinal_validator_refs == (_KNOWN_REF,)
+    assert overlay.tool_perm_rule_ids == ("cr_tp",)
+    assert not overlay.dropped
+
+
+def test_policy_ref_without_policies_map_dropped():
+    # policies=None (the default) makes policy: refs unresolvable.
+    overlay = _resolve(["policy:verify-source"], rules=[_det_rule("cr_det")])
+    assert overlay.is_empty
+    assert overlay.dropped == (("policy:verify-source", "unknown"),)
+
+
+def test_policy_ref_unknown_id_dropped():
+    overlay = _resolve(
+        ["policy:ghost"],
+        rules=[_det_rule("cr_det")],
+        policies={"verify-source": ("cr_det",)},
+    )
+    assert overlay.dropped == (("policy:ghost", "unknown"),)
+
+
+def test_policy_member_unknown_attributed_to_member():
+    overlay = _resolve(
+        ["policy:p"],
+        rules=[_det_rule("cr_det")],
+        policies={"p": ("cr_det", "cr_missing")},
+    )
+    assert overlay.prefinal_validator_refs == (_KNOWN_REF,)
+    assert overlay.dropped == (("policy:p", "member[cr_missing]:unknown"),)
+
+
+def test_policy_member_unsupported_kind_attributed_to_member():
+    overlay = _resolve(
+        ["policy:p"],
+        rules=[_llm_rule("cr_llm")],
+        policies={"p": ("cr_llm",)},
+    )
+    assert overlay.dropped == (
+        ("policy:p", "member[cr_llm]:unsupported_kind:llm_criterion"),
+    )
+
+
+def test_policy_fanout_is_idempotent_with_bare_ref():
+    # A member also referenced bare in the same mode must not double-count
+    # (buckets are deduped): the ref appears exactly once.
+    overlay = _resolve(
+        ["policy:p", "custom_rule:cr_det"],
+        rules=[_det_rule("cr_det")],
+        policies={"p": ("cr_det",)},
+    )
+    assert overlay.prefinal_validator_refs == (_KNOWN_REF,)
+
+
+def test_policy_fanout_ignores_member_enabled_flag():
+    # Fan-out force-activates a globally-disabled member (same as a bare ref).
+    overlay = _resolve(
+        ["policy:p"],
+        rules=[_det_rule("cr_det", enabled=False)],
+        policies={"p": ("cr_det",)},
+    )
     assert overlay.prefinal_validator_refs == (_KNOWN_REF,)
 
 
@@ -387,3 +461,37 @@ def test_enabled_tool_perm_rules_byte_identical_without_forced():
     ]
     policy = CustomizeVerificationPolicy.from_overrides({"verification": {"custom_rules": rules}})
     assert [r["id"] for r in policy.enabled_tool_perm_rules()] == ["a"]
+
+
+# --- policy: ref end-to-end through the pre-final bridge ----------------------
+
+from magi_agent.customize.policies import Policy, upsert_policy  # noqa: E402
+
+
+def test_scoped_prefinal_force_includes_via_policy_ref(
+    customize_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A mode scoping a policy: ref must force-include the member rule's ref
+    # through the real bridge (Mode contains Policy, end to end).
+    _enable_customize_flags(monkeypatch)
+    set_custom_rule(_det_rule("cr_member", enabled=False))  # globally off
+    upsert_policy(
+        Policy.model_validate(
+            {"id": "verify", "displayName": "Verify", "ruleIds": ["cr_member"]}
+        )
+    )
+    upsert_mode(_mode("research", ["policy:verify"]))
+    set_active_mode("research")
+    assert scoped_prefinal_validator_refs() == (_KNOWN_REF,)
+
+
+def test_scoped_policies_ruleids_reads_store(customize_env: None) -> None:
+    from magi_agent.customize.scoped_policy import scoped_policies_ruleids
+
+    assert scoped_policies_ruleids() == {}
+    upsert_policy(
+        Policy.model_validate(
+            {"id": "p", "displayName": "P", "ruleIds": ["cr_a", "cr_b"]}
+        )
+    )
+    assert scoped_policies_ruleids() == {"p": ("cr_a", "cr_b")}

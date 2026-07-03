@@ -163,12 +163,16 @@ def matched_decision(
         from magi_agent.customize.scoped_policy import (  # noqa: PLC0415
             active_scoped_policy_ids,
             resolve_scoped_policy_overlay,
+            scoped_policies_ruleids,
         )
 
         _scoped = active_scoped_policy_ids()
         _force_ids = (
             resolve_scoped_policy_overlay(
-                _scoped, custom_rules=policy.custom_rules, dashboard_check_ids=()
+                _scoped,
+                custom_rules=policy.custom_rules,
+                dashboard_check_ids=(),
+                policies=scoped_policies_ruleids(),
             ).tool_perm_rule_ids
             if _scoped
             else ()

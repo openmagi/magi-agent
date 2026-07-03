@@ -38,6 +38,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 from magi_agent.customize.what_menu import is_known_ref
 
@@ -45,12 +46,18 @@ __all__ = [
     "ScopedPolicyOverlay",
     "active_scoped_policy_ids",
     "resolve_scoped_policy_overlay",
+    "scoped_policies_ruleids",
     "scoped_prefinal_validator_refs",
 ]
 
 # Namespaces that resolve to a live runtime ref in v1.
 _NS_CUSTOM_RULE = "custom_rule"
 _NS_DASHBOARD_CHECK = "dashboard_check"
+# A ``policy:<id>`` ref fans out to its member rule refs (each resolved exactly
+# as a ``custom_rule:<memberId>`` would be), unioned idempotently into the same
+# buckets. A policy is a named composition of 1..N rules; "Mode contains Policy
+# or Rule" is thus a ref-grammar extension, not a new read-point.
+_NS_POLICY = "policy"
 # Namespaces recognized but intentionally not applied yet (dormant runtime).
 _DEFERRED_NAMESPACES = frozenset({"seam_spec", "verifier"})
 
@@ -89,17 +96,64 @@ def _dedupe(values: list[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(values))
 
 
+def _route_custom_rule(
+    local: str,
+    drop_ref: str,
+    rules_by_id: Mapping[str, Mapping[str, object]],
+    *,
+    prefinal: list[str],
+    tool_perm: list[str],
+    dropped: list[tuple[str, str]],
+    reason_prefix: str = "",
+) -> None:
+    """Route one custom-rule id into the overlay buckets by its ``what.kind``.
+
+    Shared by the ``custom_rule:`` branch and the ``policy:`` fan-out (each
+    policy member is routed exactly as the equivalent ``custom_rule:`` ref).
+    Drops are recorded against ``drop_ref`` (the top-level scoped id) so a stale
+    mode ref stays visible; ``reason_prefix`` attributes a policy member's drop
+    to its member id (e.g. ``member[cr_x]:unknown``)."""
+    rule = rules_by_id.get(local)
+    if rule is None:
+        dropped.append((drop_ref, f"{reason_prefix}unknown"))
+        return
+    what = rule.get("what")
+    what = what if isinstance(what, Mapping) else {}
+    kind = what.get("kind")
+    if kind == "deterministic_ref":
+        payload = what.get("payload")
+        payload = payload if isinstance(payload, Mapping) else {}
+        ref = payload.get("ref")
+        if isinstance(ref, str) and is_known_ref(ref):
+            prefinal.append(ref)
+        else:
+            dropped.append((drop_ref, f"{reason_prefix}unknown_ref"))
+    elif kind == "tool_perm":
+        tool_perm.append(local)
+    else:
+        dropped.append((drop_ref, f"{reason_prefix}unsupported_kind:{kind}"))
+
+
 def resolve_scoped_policy_overlay(
     scoped_policy_ids: Sequence[str],
     *,
     custom_rules: Sequence[Mapping[str, object]],
     dashboard_check_ids: Collection[str],
+    policies: Mapping[str, Sequence[str]] | None = None,
 ) -> ScopedPolicyOverlay:
     """Resolve a mode's ``scoped_policy_ids`` into a bucketed overlay.
 
     Pure + fail-soft: an id that resolves to nothing is recorded in ``dropped``,
     never raised. A rule's own ``enabled`` flag is intentionally ignored (scoping
     force-activates it for the turn).
+
+    ``policies`` maps a policy id (bare slug) to its member rule ids; a
+    ``policy:<id>`` ref fans out to those members (each routed as a
+    ``custom_rule:<memberId>``), unioned idempotently into the buckets (so a
+    member also referenced bare, or shared across two policies, is not
+    double-counted). ``None`` (the default) makes ``policy:`` refs unresolvable
+    (recorded as dropped), preserving the pre-fan-out behavior for callers that
+    do not pass it.
     """
     prefinal: list[str] = []
     tool_perm: list[str] = []
@@ -113,6 +167,7 @@ def resolve_scoped_policy_overlay(
             if isinstance(rid, str) and rid and rid not in rules_by_id:
                 rules_by_id[rid] = rule
 
+    policies_map = policies or {}
     known_checks = set(dashboard_check_ids)
     seen: set[str] = set()
     for raw in scoped_policy_ids:
@@ -129,25 +184,23 @@ def resolve_scoped_policy_overlay(
         namespace, local = parsed
 
         if namespace == _NS_CUSTOM_RULE:
-            rule = rules_by_id.get(local)
-            if rule is None:
+            _route_custom_rule(
+                local, raw, rules_by_id,
+                prefinal=prefinal, tool_perm=tool_perm, dropped=dropped,
+            )
+        elif namespace == _NS_POLICY:
+            member_ids = policies_map.get(local)
+            if not member_ids:
                 dropped.append((raw, "unknown"))
                 continue
-            what = rule.get("what")
-            what = what if isinstance(what, Mapping) else {}
-            kind = what.get("kind")
-            if kind == "deterministic_ref":
-                payload = what.get("payload")
-                payload = payload if isinstance(payload, Mapping) else {}
-                ref = payload.get("ref")
-                if isinstance(ref, str) and is_known_ref(ref):
-                    prefinal.append(ref)
-                else:
-                    dropped.append((raw, "unknown_ref"))
-            elif kind == "tool_perm":
-                tool_perm.append(local)
-            else:
-                dropped.append((raw, f"unsupported_kind:{kind}"))
+            for member_id in member_ids:
+                if not isinstance(member_id, str) or not member_id:
+                    continue
+                _route_custom_rule(
+                    member_id, raw, rules_by_id,
+                    prefinal=prefinal, tool_perm=tool_perm, dropped=dropped,
+                    reason_prefix=f"member[{member_id}]:",
+                )
         elif namespace == _NS_DASHBOARD_CHECK:
             if local in known_checks:
                 dashboard.append(local)
@@ -164,6 +217,18 @@ def resolve_scoped_policy_overlay(
         dashboard_check_ids=_dedupe(dashboard),
         dropped=tuple(dropped),
     )
+
+
+def scoped_policies_ruleids(path: Path | None = None) -> dict[str, tuple[str, ...]]:
+    """Map each stored policy's id -> its member rule ids, for ``policy:`` ref
+    fan-out in :func:`resolve_scoped_policy_overlay`. Fail-soft: returns ``{}``
+    on any error so a broken policies store never wedges the resolver."""
+    try:
+        from magi_agent.customize.policies import list_policies  # noqa: PLC0415
+
+        return {p.policy_id: p.rule_ids for p in list_policies(path)}
+    except Exception:
+        return {}
 
 
 def active_scoped_policy_ids() -> tuple[str, ...]:
@@ -227,6 +292,7 @@ def scoped_prefinal_validator_refs() -> tuple[str, ...]:
             scoped_ids,
             custom_rules=policy.custom_rules,
             dashboard_check_ids=(),
+            policies=scoped_policies_ruleids(),
         )
         return overlay.prefinal_validator_refs
     except Exception:

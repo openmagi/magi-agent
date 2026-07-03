@@ -849,7 +849,7 @@ graph LR
 | modes.py | Agent MODES (postures) — typed model + customize.json CRUD. | flags, per_turn_agent_mode_context, store | cli/wiring.py, customize/mode_compiler.py, customize/scoped_policy.py, runtime/message_builder.py, transport/chat_routes.py, transport/chat_routes_local.py, transport/customize.py, transport/streaming_chat_route.py |
 | nl_compiler_interactive.py | Conversational policy compiler — turn-by-turn multi-step variant. | custom_rules, rule_compiler | transport/customize.py |
 | output_rewrite.py | F-MUT2 — ``output_rewrite`` custom_rule kind. | result | (root)/facades.py, customize/custom_rules.py |
-| policies.py | POLICIES: named user-intent units, typed model + customize.json CRUD. | store | — |
+| policies.py | POLICIES: named user-intent units, typed model + customize.json CRUD. | store | customize/scoped_policy.py |
 | prebuilt_components.py | PR-P4: prebuilt (always-on) runtime components catalog. | — | transport/customize.py |
 | preset_map.py | Canonical preset id → runtime-seam map for the Customize verification tab. | seam_apply, seam_spec | customize/catalog.py, customize/seam_apply.py, customize/seam_compiler.py, customize/seam_spec.py, engine/model_runner.py |
 | prompt_injection.py | F-MUT1 — ``prompt_injection`` custom_rule kind. | — | (root)/facades.py, customize/custom_rules.py, runtime/message_builder.py |
@@ -857,7 +857,7 @@ graph LR
 | runtime_fields.py | Runtime-fields derivation for the wizard's variable chip picker (F-UX2 / F8). | shacl_compiler, tool_perm | transport/customize.py |
 | runtime_gate.py | Runtime-side query for Customize verification preset state. | flags, store, verification_policy | customize/what_menu.py, engine/driver.py, engine/engine_gates.py |
 | scope.py | Single source of truth for the scope vocabulary. | — | customize/verification_policy.py |
-| scoped_policy.py | Mode ``scoped_policy_ids`` → per-turn policy overlay (resolver only; inert). | flags, modes, per_turn_agent_mode_context, store, verification_policy, what_menu | adk_bridge/dashboard_producer_control.py, customize/tool_perm.py, engine/driver.py |
+| scoped_policy.py | Mode ``scoped_policy_ids`` → per-turn policy overlay (resolver only; inert). | flags, modes, per_turn_agent_mode_context, policies, store, verification_policy, what_menu | adk_bridge/dashboard_producer_control.py, customize/tool_perm.py, engine/driver.py |
 | seam_apply.py | Apply a :class:`SeamSpec` IR to the static :data:`PRESET_SEAMS` catalog. | preset_map, seam_spec | customize/preset_map.py |
 | seam_compiler.py | NL → SeamSpec compiler — registration-time only, fail-open everywhere. | preset_map, seam_spec, shacl_compiler | transport/customize.py |
 | seam_spec.py | SeamSpec — declarative PresetSeam mutation IR for the NL rule builder. | preset_map | customize/preset_map.py, customize/rule_compiler.py, customize/seam_apply.py, customize/seam_compiler.py, transport/customize.py |
