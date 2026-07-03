@@ -585,6 +585,50 @@ class LocalToolEvidenceCollector:
     def __call__(self, turn_id: str) -> tuple[object, ...]:
         return self.collect_for_turn(turn_id)
 
+    def collect_for_session(self, session_id: str) -> tuple[object, ...]:
+        """All ``_records`` for a session, across turns (session-scoped sibling
+        of :meth:`collect_for_turn`).
+
+        This is the corpus a session-scoped gate reads (a producer records
+        credibility on an earlier turn; the gate on a later turn must see it).
+        Reads only ``_records`` (the producer/tool-lift corpus), NOT the
+        ``_ledgers`` lifecycle store, matching where producers actually write."""
+        return tuple(
+            record
+            for (stored_session_id, _turn_id), records in self._records.items()
+            if stored_session_id == session_id
+            for record in records
+        )
+
+    def has_unlock_evidence(
+        self,
+        session_id: str,
+        *,
+        evidence_type: str,
+        producing_rule_id: str,
+    ) -> bool:
+        """True if this session holds an UNLOCK-eligible evidence record.
+
+        The security join (see the policy-abstraction design): a record may
+        unlock a gated tool ONLY when it was written by the runtime producer
+        control (``origin == "producer_control"``, never a tool-declared/lifted
+        record), was emitted by the SPECIFIC bound producer
+        (``producing_rule_id`` match, never a free-text type-name coincidence),
+        carries the expected type, and passed (``status == "ok"``). An empty
+        ``producing_rule_id`` never matches (audit/unbound records are not unlock
+        keys)."""
+        if not producing_rule_id:
+            return False
+        for record in self.collect_for_session(session_id):
+            if (
+                getattr(record, "origin", None) == "producer_control"
+                and getattr(record, "producing_rule_id", "") == producing_rule_id
+                and getattr(record, "type", None) == evidence_type
+                and getattr(record, "status", None) == "ok"
+            ):
+                return True
+        return False
+
     def _general_automation_entries_for_turn(self, turn_id: str) -> tuple[object, ...]:
         entries_for_turn = getattr(
             self._general_automation_receipts,
