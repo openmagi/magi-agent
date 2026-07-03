@@ -84,7 +84,7 @@ def test_llm_criterion_block_action_fires_when_critic_fails(
     """
     calls: list[dict] = []
 
-    async def fake_eval(*, criterion, draft_text, model_factory):
+    async def fake_eval(*, criterion, draft_text, model_factory, evidence_context=None):
         calls.append(
             {
                 "criterion": criterion,
@@ -124,7 +124,7 @@ def test_llm_criterion_rule_does_not_fire_when_critic_passes(
     """
     calls: list[dict] = []
 
-    async def fake_eval(*, criterion, draft_text, model_factory):
+    async def fake_eval(*, criterion, draft_text, model_factory, evidence_context=None):
         calls.append({"criterion": criterion, "draft_text": draft_text})
         return (True, "ok")
 
@@ -158,7 +158,7 @@ def test_llm_criterion_inert_when_flags_off(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
     set_custom_rule(_llm_criterion_rule(), path=cfile)
 
-    async def fail_eval(*, criterion, draft_text, model_factory):
+    async def fail_eval(*, criterion, draft_text, model_factory, evidence_context=None):
         raise AssertionError(
             "judge must not be invoked when master flags are off"
         )
