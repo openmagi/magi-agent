@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from magi_agent.customize.custom_rules import CRITERION_MAX, validate_custom_rule
+from magi_agent.customize.custom_rules import (
+    CRITERION_MAX,
+    EVIDENCE_REFS_MAX,
+    validate_custom_rule,
+)
 
 
 def _det(**over):
@@ -224,6 +228,61 @@ def test_criterion_length_cap():
     rule = _llm(what={"kind": "llm_criterion", "payload": {"criterion": "x" * (CRITERION_MAX + 1)}})
     errs = validate_custom_rule(rule)
     assert any("criterion" in e.lower() for e in errs)
+
+
+# --- evidence-grounded judge: optional evidenceRefs on llm_criterion ---
+def test_llm_criterion_without_evidence_refs_is_valid():
+    # Back-compat: an evidence-blind criterion (no evidenceRefs) stays valid.
+    assert validate_custom_rule(_llm()) == []
+
+
+def test_llm_criterion_with_valid_evidence_refs():
+    rule = _llm(
+        what={
+            "kind": "llm_criterion",
+            "payload": {
+                "criterion": "the change is covered by a passing test run",
+                "evidenceRefs": ["TestRun", "GitDiff"],
+            },
+        }
+    )
+    assert validate_custom_rule(rule) == []
+
+
+def test_llm_criterion_evidence_refs_must_be_string_list():
+    rule = _llm(
+        what={
+            "kind": "llm_criterion",
+            "payload": {"criterion": "x", "evidenceRefs": [1, 2]},
+        }
+    )
+    errs = validate_custom_rule(rule)
+    assert any("evidenceRefs" in e for e in errs)
+
+
+def test_llm_criterion_evidence_refs_rejects_empty_string():
+    rule = _llm(
+        what={
+            "kind": "llm_criterion",
+            "payload": {"criterion": "x", "evidenceRefs": ["TestRun", "  "]},
+        }
+    )
+    errs = validate_custom_rule(rule)
+    assert any("evidenceRefs" in e for e in errs)
+
+
+def test_llm_criterion_evidence_refs_cap():
+    rule = _llm(
+        what={
+            "kind": "llm_criterion",
+            "payload": {
+                "criterion": "x",
+                "evidenceRefs": [f"T{i}" for i in range(EVIDENCE_REFS_MAX + 1)],
+            },
+        }
+    )
+    errs = validate_custom_rule(rule)
+    assert any("evidenceRefs" in e for e in errs)
 
 
 # --- P4: after-tool contentMatch pre-filter (deterministic) ---
