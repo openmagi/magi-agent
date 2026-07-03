@@ -99,7 +99,8 @@ def detect_provider_family(model: str) -> ProviderFamily:
 
     Catalog-first: a catalogued id resolves via the single source before the
     heuristic. Falls back to ``detect_provider`` (the prefix/substring
-    matcher) extended with fireworks detection for the Kimi/MiniMax families.
+    matcher) extended with fireworks detection for the Kimi/MiniMax/GLM
+    families.
     Unknown ids fall through to :attr:`ProviderFamily.DEFAULT`.
     """
 
@@ -115,7 +116,7 @@ def detect_provider_family(model: str) -> ProviderFamily:
             return mapped
 
     model_lower = model.lower()
-    if model_lower.startswith(("fireworks/", "kimi-", "minimax-")):
+    if model_lower.startswith(("fireworks/", "kimi-", "minimax-", "glm-")):
         return ProviderFamily.FIREWORKS
     provider = detect_provider(model)
     try:

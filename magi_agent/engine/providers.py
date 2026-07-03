@@ -737,7 +737,8 @@ def _infer_provider_for_model(model_id: str) -> str | None:
 
     Anchored on stable id families (``claude-*`` → anthropic, ``gpt-*``/``o*-``
     → openai, ``gemini-*`` → gemini, ``accounts/fireworks/*`` / ``kimi-*`` /
-    ``minimax-*`` → fireworks, ``<vendor>/<model>`` slug → openrouter). Returns
+    ``minimax-*`` / ``glm-*`` → fireworks, ``<vendor>/<model>`` slug →
+    openrouter). Returns
     ``None`` for a model whose provider cannot be unambiguously determined so the
     caller keeps the existing provider rather than guessing wrong.
     """
@@ -748,6 +749,7 @@ def _infer_provider_for_model(model_id: str) -> str | None:
         text.startswith("accounts/fireworks/")
         or text.startswith("kimi-")
         or text.startswith("minimax-")
+        or text.startswith("glm-")
     ):
         return "fireworks"
     if text.startswith("claude-"):
