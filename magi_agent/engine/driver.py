@@ -106,11 +106,45 @@ from magi_agent.engine.engine_routing import (
     compile_intent_bindings,
     RunnerPolicyAssembly,
 )
+from magi_agent.engine.engine_gates import (
+    _build_coding_repair_decision_payload,
+    _build_pre_final_verifier_bus_payload,
+    _build_repair_continuation_message,
+    _CODING_TASK_TYPES,
+    _coding_repair_loop_enabled,
+    _coding_repair_max_attempts,
+    _document_coverage_blocks,
+    _evidence_mapping,
+    _evidence_observed_at,
+    _extract_task_types,
+    _is_coding_test_evidence,
+    _is_research_recipe_scope,
+    _latest_coding_test_evidence,
+    _load_shacl_policy_if_enabled,
+    _NON_CODING_TASK_TYPES,
+    _normalize_task_type,
+    _pre_final_gate_applies,
+    _resolve_document_coverage_mode_with_preset,
+    _run_shacl_rules_for_turn,
+    _string_values,
+)
+from magi_agent.engine.engine_recovery import (
+    _is_continuation_output_event,
+    _suppress_cleanup_errors,
+    build_empty_response_recovery_config,
+    build_engine_recovery_policy,
+    build_output_continuation_config,
+    EngineRecoveryPolicy,
+    should_reprompt_for_zero_edits,
+)
 from magi_agent.engine.engine_user_packs import (
     run_user_evidence_producers,
     run_user_validators,
 )
 from magi_agent.runtime.events import RuntimeEvent
+
+# N-34: back-compat alias for the renamed cleanup-error suppression CM.
+_suppress_cancel = _suppress_cleanup_errors
 
 logger = logging.getLogger(__name__)
 
@@ -126,48 +160,6 @@ if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
     )
     from magi_agent.runtime.goal_nudge import GoalNudge
     from magi_agent.runtime.output_continuation import OutputContinuationConfig
-
-
-@dataclass(frozen=True)
-class EngineRecoveryPolicy:
-    """Live retry policy for the run invocation (PR12 genuine recovery seam).
-
-    Holds the EXISTING :class:`RecoveryEngine` (activation, not reimpl) plus the
-    per-turn attempt budget. Passed to :class:`MagiEngineDriver`; ``None`` (the
-    default) disables the retry wrapper entirely so the OFF path is unchanged.
-    """
-
-    engine: "RecoveryEngine"
-    max_attempts: int = 3
-
-
-def build_engine_recovery_policy(env: object = None) -> "EngineRecoveryPolicy | None":
-    """Build the recovery policy from env, or ``None`` when recovery is OFF.
-
-    Reuses ``MAGI_ERROR_RECOVERY_ENABLED`` / ``MAGI_MAX_RECOVERY_ATTEMPTS`` (the
-    single source of truth in ``config.env``) and the existing default
-    ``RecoveryEngine``. Imports are deferred so ``import cli.engine`` stays
-    cold-clean (no error_recovery import at module top is required, but these
-    are pure-python anyway).
-    """
-
-    import os
-
-    from magi_agent.config.env import parse_error_recovery_env
-    from magi_agent.runtime.error_recovery import ErrorRecoveryConfig, RecoveryEngine
-
-    mapping = env if isinstance(env, dict) else os.environ
-    parsed = parse_error_recovery_env(mapping)
-    if not parsed.enabled:
-        return None
-    config = ErrorRecoveryConfig(
-        recovery_enabled=True,
-        max_recovery_attempts=parsed.max_recovery_attempts,
-    )
-    return EngineRecoveryPolicy(
-        engine=RecoveryEngine(config),
-        max_attempts=parsed.max_recovery_attempts,
-    )
 
 
 def _adk_invocation_id(event: object) -> str | None:
@@ -217,63 +209,6 @@ def _fold_usage(turn_usage: dict[str, object], attempt_usage: Mapping[str, objec
             turn_usage[key] = int(turn_usage.get(key, 0)) + int(value)  # type: ignore[arg-type]
         except (TypeError, ValueError):
             continue
-
-
-def build_output_continuation_config(
-    env: object = None,
-) -> "OutputContinuationConfig | None":
-    """Build the output-continuation config from env, or ``None`` when OFF.
-
-    Reuses ``MAGI_OUTPUT_CONTINUATION_ENABLED`` / ``MAGI_MAX_OUTPUT_CONTINUATIONS``
-    (single source of truth in ``config.env``). ``None`` leaves streaming
-    byte-for-byte identical to the pre-continuation path.
-    """
-
-    import os
-
-    from magi_agent.config.env import parse_output_continuation_env
-    from magi_agent.runtime.output_continuation import OutputContinuationConfig
-
-    mapping = env if isinstance(env, dict) else os.environ
-    parsed = parse_output_continuation_env(mapping)
-    if not parsed.enabled:
-        return None
-    return OutputContinuationConfig(
-        enabled=True,
-        max_continuations=parsed.max_continuations,
-    )
-
-
-def build_empty_response_recovery_config(
-    env: object = None,
-) -> "EmptyResponseRecoveryConfig | None":
-    """Build the empty-response recovery config from env, or ``None`` when OFF.
-
-    Reuses ``MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED`` /
-    ``MAGI_EMPTY_RESPONSE_MAX_RECOVERIES`` (single source of truth in
-    ``config.env``; strict truthy opt-in, default OFF). ``None`` leaves
-    streaming byte-for-byte identical to the pre-recovery path.
-    """
-
-    import os
-
-    from magi_agent.config.env import parse_empty_response_recovery_env
-    from magi_agent.runtime.empty_response_recovery import (
-        EmptyResponseRecoveryConfig,
-    )
-
-    mapping = env if isinstance(env, dict) else os.environ
-    parsed = parse_empty_response_recovery_env(mapping)
-    if not parsed.enabled:
-        return None
-    # PR5b: thread ``escalate`` explicitly. When escalation is OFF the resulting
-    # config is byte-identical to the pre-PR5b dataclass (escalate defaults
-    # False, grace_event_allowance keeps its dataclass default).
-    return EmptyResponseRecoveryConfig(
-        enabled=True,
-        max_recoveries=parsed.max_recoveries,
-        escalate=parsed.escalate,
-    )
 
 
 # A sane default cap so a runaway stream can't yield forever; headless can
@@ -330,37 +265,8 @@ _EDIT_CLASS_TOOLS = frozenset(
 )
 
 
-def should_reprompt_for_zero_edits(
-    *, file_edits: int, already_reprompted: bool, enabled: bool
-) -> bool:
-    """Return True iff the zero-edit guard should fire a re-invocation.
-
-    Pure helper — no side effects, fully unit-testable without driving the
-    engine. The engine calls this after the main run loop concludes and before
-    yielding the terminal EngineResult.
-
-    Args:
-        file_edits: number of file-mutating tool calls observed this turn.
-        already_reprompted: True if we already fired the guard once this turn
-            (prevents infinite re-invocation).
-        enabled: value of ``parse_eval_zero_edit_guard_enabled(os.environ)``.
-    """
-    return bool(enabled and not already_reprompted and file_edits == 0)
-
-
 def _is_turn_end_event(event: Mapping[str, object]) -> bool:
     return event.get("type") == "turn_end"
-
-
-def _is_continuation_output_event(event: Mapping[str, object]) -> bool:
-    event_type = event.get("type")
-    if event_type in _TOKEN_EVENT_TYPES:
-        return bool(event.get("delta"))
-    if event_type in _TOOL_EVENT_TYPES:
-        return True
-    if event_type in _ARTIFACT_EVENT_TYPES:
-        return True
-    return False
 
 
 def _unstreamed_text_delta(aggregate_text: str, emitted_text: str) -> str:
@@ -434,215 +340,6 @@ def _map_event_kind(event_type: object) -> str:
     return _classify_event(event_type)
 
 
-_CODING_TASK_TYPES = frozenset(
-    {
-        "coding",
-        "code",
-        "dev-coding",
-        "developer",
-        "software",
-        "workspace",
-        "file-edit",
-        "patch",
-    }
-)
-_NON_CODING_TASK_TYPES = frozenset(
-    {
-        "chat",
-        "general",
-        "conversation",
-        "research",
-        "readonly",
-        "read-only",
-        "planning",
-        "plan",
-    }
-)
-
-
-def _pre_final_gate_applies(
-    *,
-    assembly: RunnerPolicyAssembly,
-    prompt: str,
-    harness_state: object | None,
-    coding_mutation_observed: bool,
-    live_selected_pack_ids: Sequence[str] = (),
-) -> bool:
-    """Return whether the assembled policy should enforce the final gate.
-
-    The local runner may assemble the dev-coding pack as an available first-party
-    policy, but availability is not the same thing as routing every turn through
-    a coding verification gate.  The dev-coding verification gate exists to
-    confirm that *code mutations* were tested/grounded — so it only has something
-    to enforce on a turn that actually mutated a file. A read-only / research
-    turn (no file-mutating tool call) produces nothing to verify and must not be
-    blocked, even when the prompt classifier would otherwise flag it as coding.
-    """
-
-    dev_coding_pack_id = "openmagi.dev-coding"
-    base_selected = set(assembly.selected_pack_ids)
-    selected = base_selected | set(live_selected_pack_ids)
-    if dev_coding_pack_id not in selected:
-        return True
-
-    # Mutation-scope: the coding evidence gate only applies to turns that
-    # actually changed code. No file mutation ⇒ nothing coding to verify.
-    if not coding_mutation_observed:
-        # If dev-coding is part of the PROFILE baseline, preserve main's exact
-        # behavior: a no-mutation turn produces nothing to verify ⇒ no gate.
-        # (When live_selected_pack_ids is empty this branch is always taken,
-        # so the OFF-path stays byte-identical to main.)
-        if dev_coding_pack_id in base_selected:
-            return False
-        # dev-coding arrived PURELY via live selection. Its (mutation-scoped)
-        # coding obligation has nothing to verify on a no-mutation turn, but we
-        # must NOT suppress the gate — that would drop the non-coding profile
-        # baseline obligations. Defer to the baseline's own applies-decision
-        # (i.e. what the gate would decide without the live dev-coding pack).
-        return _pre_final_gate_applies(
-            assembly=assembly,
-            prompt=prompt,
-            harness_state=harness_state,
-            coding_mutation_observed=coding_mutation_observed,
-            live_selected_pack_ids=(),
-        )
-
-    task_types = _extract_task_types(harness_state)
-    if task_types:
-        normalized = {_normalize_task_type(item) for item in task_types}
-        if normalized & _CODING_TASK_TYPES:
-            return True
-        if normalized & _NON_CODING_TASK_TYPES:
-            return False
-
-    normalized_prompt = prompt.lower()
-    return any(marker in normalized_prompt for marker in _CODING_PROMPT_MARKERS)
-
-
-def _build_coding_repair_decision_payload(
-    repair_policy: Mapping[str, object],
-    *,
-    attempt_count: int = 0,
-    latest_test_evidence: Mapping[str, object] | None = None,
-    is_coding_turn: bool = True,
-) -> dict[str, object]:
-    from magi_agent.coding.repair_loop import (
-        CodingRepairLoopConfig,
-        CodingRepairLoopState,
-        evaluate_repair_decision,
-        project_repair_decision_event,
-        repair_max_attempts,
-    )
-
-    max_attempts = repair_max_attempts(repair_policy)
-    decision = evaluate_repair_decision(
-        config=CodingRepairLoopConfig(enabled=True, maxAttempts=max_attempts),
-        state=CodingRepairLoopState(attemptCount=attempt_count),
-        latest_test_evidence=latest_test_evidence,
-        is_coding_turn=is_coding_turn,
-    )
-    return project_repair_decision_event(decision)
-
-
-def _latest_coding_test_evidence(
-    evidence_records: Sequence[object],
-) -> Mapping[str, object] | None:
-    latest: Mapping[str, object] | None = None
-    latest_key: tuple[float, int] | None = None
-    for index, record in enumerate(evidence_records):
-        evidence = _evidence_mapping(record)
-        if evidence is None or not _is_coding_test_evidence(evidence):
-            continue
-        key = (_evidence_observed_at(evidence), index)
-        if latest_key is None or key > latest_key:
-            latest = evidence
-            latest_key = key
-    return latest
-
-
-def _evidence_mapping(record: object) -> Mapping[str, object] | None:
-    if isinstance(record, Mapping):
-        return record
-    model_dump = getattr(record, "model_dump", None)
-    if callable(model_dump):
-        try:
-            dumped = model_dump(by_alias=True, mode="python", warnings=False)
-        except TypeError:
-            dumped = model_dump()
-        return dumped if isinstance(dumped, Mapping) else None
-    return None
-
-
-def _is_coding_test_evidence(evidence: Mapping[str, object]) -> bool:
-    haystack = " ".join(
-        _string_values(
-            evidence,
-            (
-                "type",
-                "evidenceType",
-                "evidence_type",
-                "kind",
-                "evidenceRef",
-                "evidence_ref",
-                "validatorRef",
-                "validator_ref",
-                "verifierId",
-                "verifier_id",
-                "id",
-            ),
-        )
-    ).lower()
-    return any(
-        marker in haystack
-        for marker in (
-            "testrun",
-            "test_run",
-            "test-run",
-            "test evidence",
-            "test-evidence",
-            "dev-coding:test-evidence",
-        )
-    )
-
-
-def _string_values(source: Mapping[str, object], keys: Sequence[str]) -> tuple[str, ...]:
-    values: list[str] = []
-    for key in keys:
-        value = source.get(key)
-        if isinstance(value, str) and value:
-            values.append(value)
-    return tuple(values)
-
-
-def _evidence_observed_at(evidence: Mapping[str, object]) -> float:
-    raw = evidence.get("observedAt", evidence.get("observed_at", 0.0))
-    if isinstance(raw, int | float) and not isinstance(raw, bool):
-        return float(raw)
-    if isinstance(raw, str):
-        try:
-            return float(raw)
-        except ValueError:
-            return 0.0
-    return 0.0
-
-
-def _coding_repair_loop_enabled() -> bool:
-    from magi_agent.coding.repair_loop import coding_repair_loop_enabled
-
-    return coding_repair_loop_enabled()
-
-
-def _document_coverage_blocks(mode: str, failed_count: int) -> bool:
-    """Whether failed document coverage should flip the pre-final decision.
-
-    14-PR3 (C11): the gate is 3-state (``off`` | ``advisory`` | ``block``). Only
-    ``block`` mode lets a failed-coverage count contribute to a ``"block"``
-    decision; ``advisory`` records the count for telemetry but never blocks, and
-    ``off`` is inert.
-    """
-    return mode == "block" and failed_count > 0
-
-
 # C8 task-board-completion: taskboard statuses (lower-cased) that count as DONE.
 # Any latest-per-title status outside this set marks the board incomplete.
 _TASKBOARD_TERMINAL_STATUSES: frozenset[str] = frozenset(
@@ -697,230 +394,6 @@ _EVIDENCE_HEDGE_NOTICE_TEXT = (
     "answer against the collected evidence. Treat the unverified figures as "
     "uncertain and confirm them before relying on them."
 )
-
-
-def _is_research_recipe_scope(
-    assembly: RunnerPolicyAssembly,
-    live_selected_pack_ids: Sequence[str] = (),
-) -> bool:
-    """Return whether the assembled policy opted into the research evidence
-    contract, so the WS6 soft research-governance notice is in scope.
-
-    Design: WS6 PR6a. Scope is keyed on the recipe having a research evidence
-    contract (a research validator label) or a research pack selection, NOT on a
-    specific missing label.
-    """
-    required = set(getattr(assembly, "required_validators", ()) or ())
-    if required & _RESEARCH_CONTRACT_VALIDATOR_LABELS:
-        return True
-    selected = set(getattr(assembly, "selected_pack_ids", ()) or ())
-    selected.update(live_selected_pack_ids or ())
-    return bool(selected & _RESEARCH_RECIPE_PACK_IDS)
-
-
-def _resolve_document_coverage_mode_with_preset() -> str:
-    """Resolve the document-coverage gate mode, honoring the Customize opt-in seam.
-
-    The base mode comes from ``MAGI_DOCUMENT_AUTHORING_COVERAGE``
-    (``off``|``advisory``|``block``). An enabled ``document-authoring-coverage``
-    Customize preset promotes an otherwise-``off`` gate to ``block`` for the
-    runtime — the same opt-in pattern (env OR preset) as the other satisfier
-    seams. Byte-identical when the preset is unset/disabled: the env-resolved
-    mode is returned unchanged.
-    """
-    from magi_agent.config.env import (  # noqa: PLC0415
-        resolve_document_authoring_coverage_mode,
-    )
-
-    mode = resolve_document_authoring_coverage_mode()
-    if mode == "off":
-        from magi_agent.customize.runtime_gate import preset_enabled  # noqa: PLC0415
-
-        if preset_enabled("document-authoring-coverage", default=False):
-            return "block"
-    return mode
-
-
-def _run_shacl_rules_for_turn(
-    policy: object,
-    evidence_records: "Sequence[object]",
-    *,
-    enabled: bool,
-    observed_at: int,
-) -> tuple[object, ...]:
-    """Run enabled SHACL rules against turn evidence and return constraint-check records.
-
-    Pure module-level helper for testability (mirrors the document-coverage
-    pattern). Returns a tuple of ``EvidenceRecord`` objects — one per enabled
-    ``shacl_constraint`` rule in ``policy``.
-
-    Returns ``()`` when:
-    - ``enabled`` is ``False`` (flag OFF → byte-identical to before),
-    - ``policy`` is ``None`` (no policy set / MAGI_CUSTOMIZE_VERIFICATION_ENABLED OFF),
-    - ``policy`` has no enabled shacl rules.
-
-    Never raises: any per-rule exception is caught and skipped so a bad rule
-    cannot break a turn. The ``run_shacl_rule`` producer is itself fail-safe
-    (returns ``status="unknown"`` on any internal error), so the belt-and-suspenders
-    guard here only catches unexpected attribute / type errors on policy access.
-    """
-    if not enabled:
-        return ()
-    if policy is None:
-        return ()
-    try:
-        rules = policy.enabled_shacl_rules()  # type: ignore[union-attr]
-    except Exception:  # noqa: BLE001
-        return ()
-    if not rules:
-        return ()
-    from magi_agent.evidence.shacl_verifier import run_shacl_rule  # noqa: PLC0415
-
-    results: list[object] = []
-    for rule in rules:
-        try:
-            shape_ttl = rule.get("shapeTtl") if isinstance(rule, dict) else None
-            rule_id = rule.get("ruleId") if isinstance(rule, dict) else None
-            if not shape_ttl or not rule_id:
-                continue
-            record = run_shacl_rule(
-                evidence_records,
-                shape_ttl,
-                rule_id,
-                observed_at=observed_at,
-            )
-            results.append(record)
-        except Exception:  # noqa: BLE001
-            continue
-    return tuple(results)
-
-
-def _load_shacl_policy_if_enabled() -> tuple[bool, object]:
-    """Resolve the SHACL gate state and load the customize policy when enabled.
-
-    Returns ``(shacl_enabled, policy)`` where:
-    - ``shacl_enabled`` is ``True`` only when **both** flags are ON:
-      ``MAGI_SHACL_VERIFIER_ENABLED`` (``flag_bool``) AND
-      ``MAGI_CUSTOMIZE_VERIFICATION_ENABLED`` (``flag_profile_bool``).
-    - ``policy`` is a ``CustomizeVerificationPolicy`` loaded from the store
-      when ``shacl_enabled`` is ``True``, otherwise ``None``.
-
-    Mirrors the precedent in ``magi_agent/customize/apply.py``
-    (``apply_verification_overrides``) and ``magi_agent/customize/runtime_gate.py``
-    (``preset_enabled``): **both** gate on ``MAGI_CUSTOMIZE_VERIFICATION_ENABLED``
-    before reading the store.
-
-    Never raises: any exception → returns ``(False, None)`` (fail-safe).
-    """
-    try:
-        from magi_agent.config.flags import flag_bool as _flag_bool  # noqa: PLC0415
-        from magi_agent.config.flags import flag_profile_bool as _flag_profile_bool  # noqa: PLC0415
-
-        shacl_enabled: bool = _flag_bool("MAGI_SHACL_VERIFIER_ENABLED") and _flag_profile_bool(
-            "MAGI_CUSTOMIZE_VERIFICATION_ENABLED"
-        )
-        if shacl_enabled:
-            from magi_agent.customize.store import load_overrides as _load_overrides  # noqa: PLC0415
-            from magi_agent.customize.verification_policy import (  # noqa: PLC0415
-                CustomizeVerificationPolicy as _CVP,
-            )
-
-            return True, _CVP.from_overrides(_load_overrides())
-        return False, None
-    except Exception:  # noqa: BLE001
-        return False, None
-
-
-def _coding_repair_max_attempts(repair_policy: Mapping[str, object]) -> int:
-    from magi_agent.coding.repair_loop import repair_max_attempts
-
-    return repair_max_attempts(repair_policy)
-
-
-def _build_repair_continuation_message(
-    *,
-    missing_evidence: Sequence[str],
-    missing_validators: Sequence[str],
-    attempt: int,
-    max_attempts: int,
-) -> str:
-    from magi_agent.coding.repair_loop import build_repair_continuation_message
-
-    return build_repair_continuation_message(
-        missing_evidence=tuple(missing_evidence),
-        missing_validators=tuple(missing_validators),
-        attempt=attempt,
-        max_attempts=max_attempts,
-    )
-
-
-def _build_pre_final_verifier_bus_payload(
-    *,
-    decision: str,
-    missing_evidence: list[str],
-    missing_validators: list[str],
-) -> dict[str, object]:
-    """Project the live pre-final gate into public verifier-bus metadata."""
-
-    from magi_agent.harness.verifier_bus import VerifierResultMetadata
-
-    results: list[dict[str, object]] = []
-    if missing_evidence:
-        results.append(
-            VerifierResultMetadata(
-                verifierId="tool-evidence-contract",
-                status="missing",
-                publicSummary="missing required deterministic evidence",
-                retryMessage="collect required evidence before final answer",
-            ).model_dump(by_alias=True, mode="json", warnings=False)
-        )
-    if missing_validators:
-        results.append(
-            VerifierResultMetadata(
-                verifierId="dev-coding-verification-audit",
-                status="missing",
-                publicSummary="missing required validator evidence",
-                retryMessage="run required validation before final answer",
-            ).model_dump(by_alias=True, mode="json", warnings=False)
-        )
-    if not results:
-        results.append(
-            VerifierResultMetadata(
-                verifierId="pre-final-evidence-gate",
-                status="pass" if decision == "pass" else "audit",
-                publicSummary="pre-final evidence gate passed",
-            ).model_dump(by_alias=True, mode="json", warnings=False)
-        )
-    return {
-        "metadataOnly": True,
-        "decision": decision,
-        "results": results,
-        "trafficAttached": False,
-        "executionAttached": False,
-        "failedDocumentCoverage": 0,
-    }
-
-
-def _extract_task_types(harness_state: object | None) -> tuple[str, ...]:
-    if not isinstance(harness_state, Mapping):
-        return ()
-    profile = harness_state.get("taskProfile") or harness_state.get("task_profile")
-    if not isinstance(profile, Mapping):
-        return ()
-    direct = profile.get("taskType") or profile.get("task_type")
-    multi = profile.get("taskTypes") or profile.get("task_types")
-    values: list[str] = []
-    if isinstance(direct, str):
-        values.append(direct)
-    if isinstance(multi, str):
-        values.append(multi)
-    elif isinstance(multi, list | tuple):
-        values.extend(item for item in multi if isinstance(item, str))
-    return tuple(values)
-
-
-def _normalize_task_type(value: str) -> str:
-    return value.strip().lower().replace("_", "-")
 
 
 def _lazy_engine_deps() -> dict[str, object]:
@@ -3702,14 +3175,14 @@ class MagiEngineDriver:
 
         if next_task in done:
             cancel_task.cancel()
-            with _suppress_cancel():
+            with _suppress_cleanup_errors():
                 await cancel_task
             result = next_task.result()
             return result
 
         # cancel fired first; abandon the in-flight pull.
         next_task.cancel()
-        with _suppress_cancel():
+        with _suppress_cleanup_errors():
             await next_task
         return _CANCELLED
 
@@ -3725,7 +3198,7 @@ class MagiEngineDriver:
         aclose = getattr(adk_iter, "aclose", None)
         if aclose is None:
             return
-        with _suppress_cancel():
+        with _suppress_cleanup_errors():
             try:
                 await aclose()
             except Exception:  # noqa: BLE001 - best-effort cleanup
@@ -5597,18 +5070,6 @@ class MagiEngineDriver:
             return None  # tool runs (with original or rewritten args)
 
         return _gate_before_tool
-
-
-class _suppress_cancel:
-    """Context manager swallowing ``asyncio.CancelledError`` (and others)."""
-
-    def __enter__(self) -> "_suppress_cancel":
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> bool:
-        return exc_type is not None and issubclass(
-            exc_type, (asyncio.CancelledError, Exception)
-        )
 
 
 def build_smart_approve_gate(
