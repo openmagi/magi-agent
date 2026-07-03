@@ -3149,3 +3149,39 @@ describe("AuthorWizard — F-UX11 binary verdict authoring guidance", () => {
     expect(guidanceBlock).not.toMatch(/useState\(/);
   });
 });
+
+describe("AuthorWizard: evidence-grounded judge authoring", () => {
+  it("adds an evidenceRefs string[] to the Draft + EMPTY default", () => {
+    expect(src).toContain("evidenceRefs: string[];");
+    expect(src).toContain("evidenceRefs: [],");
+  });
+
+  it("derives evidence type options from the same evidenceMenu the Evidence tab renders", () => {
+    // Options come from catalog.verification.evidenceMenu[].evidenceType, so
+    // authoring works before any run has emitted a record (static known refs).
+    expect(src).toContain("const evidenceTypeOptions = useMemo");
+    expect(src).toMatch(/catalog\.verification\.evidenceMenu[\s\S]*?evidenceType/);
+  });
+
+  it("renders the EvidenceReadPicker inside the llm_criterion condition block", () => {
+    expect(src).toContain("function EvidenceReadPicker");
+    expect(src).toContain("<EvidenceReadPicker");
+    expect(src).toContain("options={evidenceTypeOptions}");
+    expect(src).toContain("selected={draft.evidenceRefs}");
+    // The picker is a plain checkbox multiselect (optional; empty = blind).
+    expect(src).toContain("Read evidence before judging (optional)");
+  });
+
+  it("builds payload.evidenceRefs only when the operator selected any (back-compat)", () => {
+    // Anchor the guarded payload write so an empty selection stays byte-
+    // identical to the pre-existing evidence-blind llm_criterion payload.
+    expect(src).toMatch(
+      /if \(draft\.evidenceRefs\.length > 0\) \{[\s\S]*?payload\.evidenceRefs = \[\.\.\.draft\.evidenceRefs\];/,
+    );
+  });
+
+  it("surfaces the evidence the judge reads in the review clause", () => {
+    expect(src).toContain("reading ");
+    expect(src).toContain("draft.evidenceRefs.join(\", \")");
+  });
+});

@@ -274,6 +274,11 @@ interface Draft {
   evidenceRef: string;
   shapeTtl: string;
   criterion: string;
+  // Evidence-grounded judge: evidence TYPE names the LLM critic should read
+  // (test-run, diff, opened sources) so it judges against captured evidence,
+  // not the draft text alone. Empty = evidence-blind (the default judge).
+  // Populates the llm_criterion payload's `evidenceRefs`.
+  evidenceRefs: string[];
   regexPattern: string;
   regexIsRegex: boolean;
   // PR-F6.5 (BLOCKER fix): comma-separated list of tool names the after-tool
@@ -361,6 +366,7 @@ const EMPTY: Draft = {
   evidenceRef: "",
   shapeTtl: "",
   criterion: "",
+  evidenceRefs: [],
   regexPattern: "",
   regexIsRegex: false,
   llmToolMatch: "",
@@ -653,6 +659,19 @@ export function AuthorWizard({
     () => [...evidenceRefOptions, ...judgmentRefOptions],
     [evidenceRefOptions, judgmentRefOptions],
   );
+  // Evidence-grounded judge: the distinct evidence TYPE names an llm_criterion
+  // can declare it reads. Derived from the same evidenceMenu the Evidence tab
+  // renders (static known refs), so authoring works before any run has emitted
+  // a record. Deduped + sorted; empty when the catalog has no evidence types.
+  const evidenceTypeOptions = useMemo(() => {
+    const types = new Set<string>();
+    for (const item of catalog.verification.evidenceMenu) {
+      if (item.evidenceType && item.evidenceType.trim()) {
+        types.add(item.evidenceType.trim());
+      }
+    }
+    return [...types].sort((a, b) => a.localeCompare(b));
+  }, [catalog]);
 
   // PR-F3: field_constraint picker reads from the F2 evidence live-catalog
   // so it can hide inert-producer types (empty registeredFields). The
@@ -791,6 +810,7 @@ export function AuthorWizard({
           evidenceRefOptions={evidenceRefOptions}
           judgmentRefOptions={judgmentRefOptions}
           liveCatalogTypes={liveCatalogTypes}
+          evidenceTypeOptions={evidenceTypeOptions}
         />
       ) : null}
       {currentKey === "action" ? (
@@ -2155,12 +2175,73 @@ function buildRefOptionsFromMenu(
 }
 
 
+/**
+ * Evidence-grounded judge picker: optionally have the LLM critic read specific
+ * evidence TYPES captured this turn (a test run, a diff, opened sources) so it
+ * judges against evidence, not the answer text alone. Empty selection keeps the
+ * evidence-blind judge (unchanged default). Populates `evidenceRefs` on the
+ * llm_criterion payload; the runtime then projects a scoped, redacted view of
+ * those types into the critic prompt.
+ */
+function EvidenceReadPicker({
+  options,
+  selected,
+  onToggle,
+}: {
+  options: string[];
+  selected: string[];
+  onToggle: (type: string) => void;
+}): React.ReactElement {
+  return (
+    <div className="space-y-1.5">
+      <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+        Read evidence before judging (optional)
+      </span>
+      {options.length === 0 ? (
+        <p className="text-[11px] leading-relaxed text-secondary">
+          No evidence types are registered yet, so the judge reads the answer
+          text only. Once tools or skills emit evidence (a test run, a diff,
+          opened sources), those types appear here to ground the judgment.
+        </p>
+      ) : (
+        <>
+          <p className="text-[11px] leading-relaxed text-secondary">
+            Pick the evidence the critic should read. It then judges against
+            what the runtime actually captured this turn, not the answer text
+            alone. Leave everything unchecked to judge the answer text only.
+          </p>
+          <div className="space-y-1 rounded-lg border border-black/[0.08] bg-white p-2">
+            {options.map((type) => (
+              <label
+                key={type}
+                className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-black/[0.03]"
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.includes(type)}
+                  onChange={() => onToggle(type)}
+                  className="h-3.5 w-3.5 accent-primary"
+                />
+                <span className="truncate font-mono text-xs text-foreground">
+                  {type}
+                </span>
+              </label>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+
 function SpecificsStep({
   draft,
   update,
   evidenceRefOptions,
   judgmentRefOptions,
   liveCatalogTypes,
+  evidenceTypeOptions,
 }: {
   draft: Draft;
   update: (patch: Partial<Draft>) => void;
@@ -2171,6 +2252,9 @@ function SpecificsStep({
   evidenceRefOptions: RefOption[];
   judgmentRefOptions: RefOption[];
   liveCatalogTypes: EvidenceLiveCatalogTypeEntry[];
+  // Evidence-grounded judge: evidence TYPE names an llm_criterion may declare
+  // it reads. Empty → the "read evidence?" picker is hidden (evidence-blind).
+  evidenceTypeOptions: string[];
 }): React.ReactElement {
   // PR-F-UX2 — refs for cursor-aware chip insertion. One ref per chip-bearing
   // input; the chip click reads selectionStart from the right ref and splices
@@ -2391,6 +2475,23 @@ function SpecificsStep({
               ]}
             />
           </div>
+          {/* Evidence-grounded judge: let the critic read the evidence the
+              runtime captured this turn (a test run, a diff, opened sources)
+              instead of the answer text alone. Optional; empty keeps the
+              judge evidence-blind. Type list comes from the same evidenceMenu
+              the Evidence tab renders. */}
+          <EvidenceReadPicker
+            options={evidenceTypeOptions}
+            selected={draft.evidenceRefs}
+            onToggle={(type) => {
+              const has = draft.evidenceRefs.includes(type);
+              update({
+                evidenceRefs: has
+                  ? draft.evidenceRefs.filter((t) => t !== type)
+                  : [...draft.evidenceRefs, type],
+              });
+            }}
+          />
           {/* PR-F6.5 — deterministic contentMatch pre-filter on after-tool
               llm_criterion rules. The runtime gate only invokes the LLM
               critic when the tool output matches the pattern. Surface this
@@ -4180,7 +4281,11 @@ function conditionClause(draft: Draft, refOptions: RefOption[]): string {
     case "shacl":
       return "the SHACL shape does NOT conform on any evidence record";
     case "llm_criterion": {
-      let base = `an LLM critic judges "${draft.criterion}" is false`;
+      const evidenceSuffix =
+        draft.evidenceRefs.length > 0
+          ? ` (reading ${draft.evidenceRefs.join(", ")} evidence)`
+          : "";
+      let base = `an LLM critic judges "${draft.criterion}"${evidenceSuffix} is false`;
       // PR-F6.5 BLOCKER fix: prefix the per-rule tool filter on after-tool
       // rules so the operator sees which tool(s) the critic actually runs
       // against. Mirrors the runtime gate's exact-membership check.
@@ -4765,6 +4870,12 @@ function customRulePayload(draft: Draft): Record<string, unknown> {
       const payload: Record<string, unknown> = {
         criterion: draft.criterion.trim(),
       };
+      // Evidence-grounded judge: declare the evidence TYPES the critic should
+      // read. Omitted when empty (evidence-blind, back-compat); the backend
+      // validator + runtime projection consume `evidenceRefs` when present.
+      if (draft.evidenceRefs.length > 0) {
+        payload.evidenceRefs = [...draft.evidenceRefs];
+      }
       if (draft.lifecycle === "after_tool_use") {
         // BLOCKER fix: `toolMatch` is REQUIRED by the backend validator on
         // every after_tool_use llm_criterion rule. The runtime gate
