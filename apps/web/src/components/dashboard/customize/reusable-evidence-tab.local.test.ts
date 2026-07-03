@@ -84,6 +84,22 @@ describe("ReusableEvidenceTab — live input space browser (PR-F2)", () => {
     expect(src).toMatch(/verifier|verdict primitive/i);
     expect(src).toContain("Conditions");
   });
+
+  // PR-F-UX5b — the Evidence tab COUNTER counts the static evidenceMenu
+  // (known refs the runtime knows about), so the body must render them too;
+  // otherwise the tab reads "Evidence (3)" over an empty body until a run
+  // emits a record. This section fixes that counter/body mismatch.
+  it("renders a 'Known evidence types' section from the static knownRefs prop", () => {
+    expect(src).toContain("knownRefs");
+    expect(src).toContain("Known evidence types");
+    // Each known ref is authorable as a deterministic_ref / field_constraint.
+    expect(src).toContain("deterministic_ref");
+    expect(src).toContain("field_constraint");
+  });
+
+  it("guards the known-refs section on a non-empty list (no empty header)", () => {
+    expect(src).toContain("knownRefs.length > 0");
+  });
 });
 
 describe("customize-api.ts — getEvidenceLiveCatalog (PR-F2)", () => {
