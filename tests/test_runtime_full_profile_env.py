@@ -168,3 +168,29 @@ def test_local_overlay_enables_key_aware_model_routes() -> None:
     assert LOCAL_FULL_RUNTIME_ENV_DEFAULTS.get("MAGI_KEY_AWARE_MODEL_ROUTES_ENABLED") == "1", (
         "MAGI_KEY_AWARE_MODEL_ROUTES_ENABLED must be '1' in LOCAL_FULL_RUNTIME_ENV_DEFAULTS"
     )
+
+
+# ---------------------------------------------------------------------------
+# C2 (N-15): --resume/--continue rehydration default-ON in the local-full profile
+# ---------------------------------------------------------------------------
+
+def test_local_full_overlay_enables_cli_resume() -> None:
+    from magi_agent.config import env as cfg_env
+    from magi_agent.runtime.local_defaults import (
+        EVAL_RUNTIME_ENV_DEFAULTS,
+        LOCAL_FULL_RUNTIME_ENV_DEFAULTS,
+        apply_local_full_runtime_defaults,
+    )
+
+    assert LOCAL_FULL_RUNTIME_ENV_DEFAULTS["MAGI_CLI_RESUME_ENABLED"] == "1"
+    assert LOCAL_FULL_RUNTIME_ENV_DEFAULTS["MAGI_CLI_SESSION_LOG_ENABLED"] == "1"
+    assert EVAL_RUNTIME_ENV_DEFAULTS["MAGI_CLI_RESUME_ENABLED"] == "0"
+
+    env: dict[str, str] = {}
+    apply_local_full_runtime_defaults(env)
+    assert cfg_env.cli_resume_enabled(env) is True
+
+    # An explicit opt-out still wins under the setdefault overlay semantics.
+    env2 = {"MAGI_CLI_RESUME_ENABLED": "0"}
+    apply_local_full_runtime_defaults(env2)
+    assert cfg_env.cli_resume_enabled(env2) is False

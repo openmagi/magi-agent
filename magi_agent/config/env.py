@@ -3415,8 +3415,8 @@ def cli_resume_enabled(env: Mapping[str, str] | None = None) -> bool:
     Stage-1 default-OFF (strict, like ``MAGI_CLI_SESSION_LOG_ENABLED``): only an
     explicit truthy value enables it, independent of the runtime profile. If the
     session-log write path is OFF there is no transcript to read, so resume is a
-    graceful no-op regardless of this flag. The local-full / eval profiles
-    register the flag at ``"0"`` so a later release can stage it ON.
+    graceful no-op regardless of this flag. The local-full profile registers the
+    flag at ``"1"`` (ON by default); the eval profile keeps it at ``"0"``.
     """
 
     import os as _os
