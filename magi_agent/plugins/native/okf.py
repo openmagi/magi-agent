@@ -21,7 +21,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from magi_agent.knowledge.okf.bundle_loader import OkfDoc, load_bundles
-from magi_agent.knowledge.okf.config import resolve_okf_config
+from magi_agent.knowledge.okf.config import OkfConfig, resolve_okf_config
 from magi_agent.plugins.native._common import blocked_result, ok_result, workspace_root
 from magi_agent.tools.context import ToolContext
 from magi_agent.tools.result import ToolResult
@@ -33,19 +33,33 @@ _TOOL_NAME = "OkfLookup"
 #: intersects the memory subsystem's globs (design §8.5 invariant 1).
 _WORKSPACE_BUNDLE_SUBDIR = ("knowledge", "okf")
 
+#: Widened fallback subdir when ``config.default_scope == "knowledge_root"``: the
+#: whole ``knowledge/`` dir (still OUT of ``memory/``; the loader prunes
+#: ``memory/`` / ``.magi/`` / ``.git/`` / ``node_modules/`` so the invariant holds).
+_WORKSPACE_KNOWLEDGE_ROOT = ("knowledge",)
 
-def _resolve_bundle_roots(config_paths: tuple[str, ...], context: ToolContext) -> list[Path]:
-    """Resolve bundle roots from config, else the workspace ``knowledge/okf`` dir.
 
-    Explicit ``MAGI_OKF_BUNDLE_PATHS`` wins.  Otherwise we fall back to
-    ``<workspace_root>/knowledge/okf`` *only if it exists* (no fabrication of an
-    empty path).  Workspace root reuses the shared ``_common.workspace_root``
-    helper — the lowest-coupling resolver already used by every other native tool
-    (it reads ``context.workspace_root`` and resolves it).
+def _resolve_bundle_roots(config: OkfConfig, context: ToolContext) -> list[Path]:
+    """Resolve bundle roots from config, else a scope-driven workspace fallback.
+
+    Explicit ``MAGI_OKF_BUNDLE_PATHS`` (``config.bundle_paths``) wins.  Otherwise
+    the fallback honours ``config.default_scope``:
+
+      * ``"okf_subdir"`` (default) → ``<workspace_root>/knowledge/okf``
+      * ``"knowledge_root"``       → ``<workspace_root>/knowledge``
+
+    In every case the fallback is returned *only if it exists* (no fabrication of
+    an empty path).  Workspace root reuses the shared ``_common.workspace_root``
+    helper — the lowest-coupling resolver already used by every other native tool.
     """
-    if config_paths:
-        return [Path(p) for p in config_paths]
-    fallback = workspace_root(context).joinpath(*_WORKSPACE_BUNDLE_SUBDIR)
+    if config.bundle_paths:
+        return [Path(p) for p in config.bundle_paths]
+    subdir = (
+        _WORKSPACE_KNOWLEDGE_ROOT
+        if config.default_scope == "knowledge_root"
+        else _WORKSPACE_BUNDLE_SUBDIR
+    )
+    fallback = workspace_root(context).joinpath(*subdir)
     return [fallback] if fallback.is_dir() else []
 
 
@@ -77,7 +91,7 @@ async def okf_lookup(arguments: dict[str, object], context: ToolContext) -> Tool
     if not query and not path:
         return blocked_result(_TOOL_NAME, "query_required")
 
-    bundle_roots = _resolve_bundle_roots(config.bundle_paths, context)
+    bundle_roots = _resolve_bundle_roots(config, context)
     if not bundle_roots:
         return ok_result(
             _TOOL_NAME,
