@@ -38,7 +38,7 @@ records the per-rule judgment.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 AuditRecord = dict[str, Any]
@@ -252,12 +252,45 @@ def _default_policy_loader() -> Any:
     return CustomizeVerificationPolicy.from_overrides(load_overrides())
 
 
+def _audit_evidence_context(
+    payload: dict[str, Any],
+    evidence_records: Sequence[object] | None,
+) -> Any | None:
+    """Project an evidence view for an evidence-grounded audit criterion.
+
+    Returns ``None`` (evidence-blind, byte-identical judge) unless
+    ``MAGI_EVIDENCE_GROUNDED_CRITIC_ENABLED`` is on, the rule declares
+    ``evidenceRefs``, and the caller supplied records. Best-effort: any fault
+    degrades to ``None`` rather than perturbing the audit fan-out.
+    """
+    try:
+        if not evidence_records:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        evidence_refs = payload.get("evidenceRefs")
+        if not (isinstance(evidence_refs, list) and evidence_refs):
+            return None
+        from magi_agent.config.flags import flag_profile_bool  # noqa: PLC0415
+
+        if not flag_profile_bool("MAGI_EVIDENCE_GROUNDED_CRITIC_ENABLED"):
+            return None
+        from magi_agent.customize.criterion_engine import (  # noqa: PLC0415
+            project_evidence_for_criterion,
+        )
+
+        return project_evidence_for_criterion(evidence_records, evidence_refs)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 async def _audit_one_rule(
     rule: dict[str, Any],
     *,
     draft_text: str,
     model_factory: Callable[[], Any] | None,
     invoke: InvokeFn | None,
+    evidence_records: Sequence[object] | None = None,
 ) -> AuditRecord:
     """Run a single ``llm_criterion`` rule against ``draft_text``; return audit dict.
 
@@ -265,6 +298,11 @@ async def _audit_one_rule(
     audit dict carries ``passed=True`` with a status describing why the rule
     short-circuited. This matches the fail-open contract from
     :func:`magi_agent.customize.criterion_engine.evaluate_criterion`.
+
+    When the rule declares ``evidenceRefs`` and the caller passes
+    ``evidence_records`` (with ``MAGI_EVIDENCE_GROUNDED_CRITIC_ENABLED`` on),
+    the criterion is judged against a scoped, redacted projection of those
+    records. Byte-identical (evidence-blind) otherwise.
     """
     rule_id = rule.get("id")
     payload = rule.get("what", {}).get("payload", {}) if isinstance(rule.get("what"), dict) else {}
@@ -299,11 +337,13 @@ async def _audit_one_rule(
             evaluate_criterion,
         )
 
+        evidence_context = _audit_evidence_context(payload, evidence_records)
         passed, reason = await evaluate_criterion(
             criterion=criterion,
             draft_text=draft_text,
             model_factory=model_factory,
             invoke=invoke,
+            evidence_context=evidence_context,
         )
         return {
             "rule_id": rule_id,
@@ -365,6 +405,7 @@ async def run_subagent_stop_audit(
     invoke: InvokeFn | None = None,
     policy_loader: Callable[[], Any] | None = None,
     env: dict[str, str] | None = None,
+    evidence_records: Sequence[object] | None = None,
 ) -> list[AuditRecord]:
     """Audit fan-out for ``firesAt == "on_subagent_stop"`` llm_criterion rules.
 
@@ -393,6 +434,7 @@ async def run_subagent_stop_audit(
             draft_text=final_text,
             model_factory=model_factory,
             invoke=invoke,
+            evidence_records=evidence_records,
         )
         audits.append(audit)
     return audits
@@ -446,6 +488,7 @@ async def run_after_turn_end_audit(
     invoke: InvokeFn | None = None,
     policy_loader: Callable[[], Any] | None = None,
     env: dict[str, str] | None = None,
+    evidence_records: Sequence[object] | None = None,
 ) -> list[AuditRecord]:
     """PR-F-LIFE1 audit fan-out for ``firesAt == "after_turn_end"``.
 
@@ -476,6 +519,7 @@ async def run_after_turn_end_audit(
             draft_text=final_text,
             model_factory=model_factory,
             invoke=invoke,
+            evidence_records=evidence_records,
         )
         audits.append(audit)
     return audits

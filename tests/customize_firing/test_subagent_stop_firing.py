@@ -52,7 +52,7 @@ def test_subagent_stop_audit_fires_and_records_pass_verdict(
 ) -> None:
     calls: list[dict] = []
 
-    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         calls.append({"criterion": criterion, "draft_text": draft_text})
         return (True, "looks clean")
 
@@ -86,7 +86,7 @@ def test_subagent_stop_audit_records_fail_verdict_never_blocks(
     the fan-out must NOT raise / return a block dict, only an audit record.
     """
 
-    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         return (False, "leaked tool envelope detected")
 
     monkeypatch.setattr(
@@ -121,7 +121,7 @@ def test_subagent_stop_inert_when_master_flag_off(
     monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
     set_custom_rule(_rule(), path=cfile)
 
-    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         raise AssertionError("judge must not be invoked when master flag is OFF")
 
     monkeypatch.setattr(

@@ -597,7 +597,12 @@ def test_llm_criterion_audit_before_llm_call_roundtrip(
     judge_calls: list[str] = []
 
     async def _fake_eval(
-        *, criterion: str, draft_text: str, model_factory: Any, invoke: Any = None
+        *,
+        criterion: str,
+        draft_text: str,
+        model_factory: Any,
+        invoke: Any = None,
+        evidence_context: Any = None,
     ) -> tuple[bool, str]:
         judge_calls.append(criterion)
         return (True, "ok")

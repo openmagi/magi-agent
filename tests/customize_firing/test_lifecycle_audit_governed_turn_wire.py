@@ -117,7 +117,7 @@ async def test_governed_turn_fires_user_prompt_submit_audit(
 
     calls: list[dict] = []
 
-    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         calls.append({"criterion": criterion, "draft_text": draft_text})
         return (True, "ok")
 
@@ -150,7 +150,7 @@ async def test_governed_turn_user_prompt_submit_inert_when_master_flag_off(
     monkeypatch.setenv("MAGI_CUSTOMIZE_LIFECYCLE_EXPANSION_ENABLED", "0")
     set_custom_rule(_prompt_rule(), path=cfile)
 
-    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         raise AssertionError("judge must not be invoked when master flag is OFF")
 
     monkeypatch.setattr(
@@ -173,7 +173,7 @@ async def test_governed_turn_fires_subagent_stop_audit_on_child_turn(
 
     calls: list[dict] = []
 
-    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         calls.append({"criterion": criterion, "draft_text": draft_text})
         return (True, "looks clean")
 
@@ -213,7 +213,7 @@ async def test_governed_turn_subagent_stop_inert_on_top_level_turn(
     cfile = _flags_on(monkeypatch, tmp_path)
     set_custom_rule(_stop_rule(), path=cfile)
 
-    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         raise AssertionError(
             "on_subagent_stop must not fire on a top-level (depth=0) turn"
         )
@@ -241,7 +241,7 @@ async def test_governed_turn_subagent_stop_skips_when_no_text_emitted(
     cfile = _flags_on(monkeypatch, tmp_path)
     set_custom_rule(_stop_rule(), path=cfile)
 
-    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         raise AssertionError(
             "judge must not be invoked when there is no content to judge"
         )
