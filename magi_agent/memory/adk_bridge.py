@@ -21,6 +21,7 @@ from magi_agent.ops.safety import (
     BEARER_TOKEN_RE as _BEARER_TOKEN_RE,
     GITHUB_TOKEN_RE as _GITHUB_TOKEN_RE,
     OPENAI_TOKEN_RE as _OPENAI_TOKEN_RE,
+    SECRET_KEY_NAME as _SECRET_KEY_NAME,
     STRIPE_TOKEN_RE as _STRIPE_TOKEN_RE,
     redact_secret_tokens as _kernel_redact_secret_tokens,
 )
@@ -85,13 +86,10 @@ _PRIVATE_LINE_START_RE = re.compile(
     r"[A-Za-z0-9_-]*)\s*[:=].*$",
     re.IGNORECASE,
 )
-_SECRET_KEY_VALUE_RE = re.compile(
-    r"(?i)"
-    r"([A-Za-z0-9_-]*(?:secret|token|password|private[_-]?key|api[_-]?key|"
-    r"access[_-]?key|aws[_-]?access[_-]?key[_-]?id|aws[_-]?secret[_-]?access[_-]?key)"
-    r"[A-Za-z0-9_-]*\s*[:=]\s*)"
-    r"([^\s,}\n]+)"
-)
+# Rebased onto the kernel secret-key grammar (single home in ops/safety.py). The
+# kernel SECRET_KEY_NAME is a superset of the old local key-name literals
+# (adds session-key/credentials branches), so detection/redaction only widen.
+_SECRET_KEY_VALUE_RE = re.compile(r"(?i)(" + _SECRET_KEY_NAME + r"\s*[:=]\s*)([^\s,}\n]+)")
 _SENSITIVE_SOURCE_SCHEME_RE = re.compile(
     r"^(?:s3|gs|gcs|supabase|postgres|postgresql|mysql|redis|mongodb|file|vault|"
     r"secret|secrets|ssh|scp|ftp)://",
