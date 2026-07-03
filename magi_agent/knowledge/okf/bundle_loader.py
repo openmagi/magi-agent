@@ -42,6 +42,10 @@ logger = logging.getLogger(__name__)
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 _H1_RE = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
 
+#: Default ``type`` assigned to a doc rescued by ``config.auto_type`` (a doc with
+#: no frontmatter / missing / non-string type). Fixed + deterministic (no LLM).
+_DEFAULT_DOC_TYPE = "document"
+
 # ---------------------------------------------------------------------------
 # Secret / sealed basename rules — LOCAL copy mirroring
 # ``magi_agent/transport/app_api.py:42-52``.  Re-declared here (not imported) so
@@ -98,6 +102,10 @@ class OkfBundleIndex:
     skipped_no_type: int = 0
     skipped_unsafe: int = 0
     dropped_capped: int = 0
+    #: Docs indexed via the auto-type path (would have been ``skipped_no_type``
+    #: under strict mode, rescued because ``config.auto_type`` was ON). Observability
+    #: counter so ``skipped_no_type`` going to 0 does not hide the transition.
+    auto_typed: int = 0
 
     def search(self, query: str, *, max_records: int) -> list[OkfDoc]:
         """Lexical search over title/description/tags/body (highest score first)."""
@@ -168,27 +176,52 @@ def _parse_doc(
     bundle_root: Path,
     raw_bytes: bytes,
     config: OkfConfig,
-) -> OkfDoc | None:
-    """Parse one file's bytes into an :class:`OkfDoc`, or ``None`` (skip).
+) -> tuple[OkfDoc | None, bool]:
+    """Parse one file's bytes into an :class:`OkfDoc`.
 
-    ``None`` here means "no frontmatter / not a dict / missing type" — the caller
-    counts it as ``skipped_no_type``.
+    Returns ``(doc, auto_typed)``:
+      * ``(None, False)`` → skip (caller counts ``skipped_no_type``). This means
+        "no frontmatter / not a dict / missing/non-string type" under strict mode
+        (``config.auto_type`` False), or broken/non-dict YAML under any mode.
+      * ``(doc, False)`` → indexed with an explicit valid ``type``.
+      * ``(doc, True)`` → indexed via the auto-type path (``config.auto_type`` True
+        rescued a doc that strict mode would have skipped).
     """
     text = raw_bytes.decode("utf-8", errors="replace")
     match = _FRONTMATTER_RE.match(text)
-    if not match:
-        return None
-    try:
-        loaded = yaml.safe_load(match.group(1))
-    except yaml.YAMLError:
-        return None
-    if not isinstance(loaded, Mapping):
-        return None
-    doc_type = loaded.get("type")
-    if not isinstance(doc_type, str) or not doc_type.strip():
-        return None
 
-    body = text[match.end():]
+    # Track whether this doc had to be rescued by auto_type.
+    auto_typed = False
+
+    if not match:
+        # No frontmatter. Strict mode skips; auto_type indexes as ``document``.
+        if not config.auto_type:
+            return None, False
+        loaded: Mapping[str, object] = {}
+        doc_type = _DEFAULT_DOC_TYPE
+        auto_typed = True
+    else:
+        try:
+            parsed = yaml.safe_load(match.group(1))
+        except yaml.YAMLError:
+            return None, False
+        # Broken/non-dict frontmatter is never trusted, even under auto_type.
+        if not isinstance(parsed, Mapping):
+            return None, False
+        loaded = parsed
+        raw_type = loaded.get("type")
+        if isinstance(raw_type, str) and raw_type.strip():
+            doc_type = raw_type.strip()
+        elif config.auto_type:
+            # Missing / empty / non-string type → treat as malformed, default.
+            doc_type = _DEFAULT_DOC_TYPE
+            auto_typed = True
+        else:
+            return None, False
+
+    # BODY-SLICE FIX: ``match.end()`` raises when ``match is None``. Defensive in
+    # both paths (in the OFF path match is always non-None here, but be explicit).
+    body = text[match.end():] if match else text
     body_bytes = body.encode("utf-8")
     max_doc_bytes = config.max_doc_bytes or MAX_DOC_BYTES
     truncated = False
@@ -200,10 +233,10 @@ def _parse_doc(
     resource = loaded.get("resource")
     rel_path = resolved.relative_to(bundle_root.resolve()).as_posix()
 
-    return OkfDoc(
+    doc = OkfDoc(
         rel_path=rel_path,
         bundle_root=str(bundle_root),
-        doc_type=doc_type.strip(),
+        doc_type=doc_type,
         title=_title_fallback(loaded, body, resolved.stem),
         description=description.strip() if isinstance(description, str) else "",
         tags=_normalize_tags(loaded.get("tags")),
@@ -214,15 +247,21 @@ def _parse_doc(
         byte_size=len(raw_bytes),
         truncated=truncated,
     )
+    return doc, auto_typed
 
 
 # ---------------------------------------------------------------------------
 # Cache
 # ---------------------------------------------------------------------------
 
-#: Keyed by (absolute path, mtime_ns, size) → parsed doc. Invalidated naturally:
-#: a changed file produces a different key, so the stale entry is simply unused.
-_DOC_CACHE: dict[tuple[str, int, int], OkfDoc] = {}
+#: Keyed by (absolute path, mtime_ns, size) → (parsed doc, auto_typed flag).
+#: Invalidated naturally: a changed file produces a different key, so the stale
+#: entry is simply unused. The auto_typed flag is cached alongside the doc so the
+#: observability counter is consistent across cache hits. The cache key does NOT
+#: include ``config.auto_type``; a doc that was strict-skipped (returned None) is
+#: never cached, so flipping auto_type ON re-parses it, and a doc cached with an
+#: explicit valid type is auto_type-independent (its ``doc_type`` never changes).
+_DOC_CACHE: dict[tuple[str, int, int], tuple[OkfDoc, bool]] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +283,7 @@ def load_bundles(
     skipped_no_type = 0
     skipped_unsafe = 0
     dropped_capped = 0
+    auto_typed = 0
     total_bytes = 0
 
     for raw_root in bundle_roots:
@@ -274,14 +314,14 @@ def load_bundles(
                 continue
 
             cache_key = (str(resolved), stat.st_mtime_ns, stat.st_size)
-            doc = _DOC_CACHE.get(cache_key)
-            if doc is None:
+            cached = _DOC_CACHE.get(cache_key)
+            if cached is None:
                 try:
                     raw_bytes = resolved.read_bytes()
                 except OSError:
                     skipped_unsafe += 1
                     continue
-                doc = _parse_doc(
+                doc, was_auto_typed = _parse_doc(
                     resolved=resolved,
                     bundle_root=root,
                     raw_bytes=raw_bytes,
@@ -290,9 +330,13 @@ def load_bundles(
                 if doc is None:
                     skipped_no_type += 1
                     continue
-                _DOC_CACHE[cache_key] = doc
+                _DOC_CACHE[cache_key] = (doc, was_auto_typed)
+            else:
+                doc, was_auto_typed = cached
 
             docs.append(doc)
+            if was_auto_typed:
+                auto_typed += 1
             total_bytes += stat.st_size
 
     if dropped_capped:
@@ -309,11 +353,13 @@ def load_bundles(
         skipped_no_type=skipped_no_type,
         skipped_unsafe=skipped_unsafe,
         dropped_capped=dropped_capped,
+        auto_typed=auto_typed,
     )
 
 
 __all__ = [
     "OkfBundleIndex",
     "OkfDoc",
+    "_DEFAULT_DOC_TYPE",
     "load_bundles",
 ]

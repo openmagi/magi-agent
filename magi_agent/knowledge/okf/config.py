@@ -50,6 +50,11 @@ MASTER_ENV_VAR: str = "MAGI_KNOWLEDGE_OKF_ENABLED"
 LOOKUP_ENABLED_ENV_VAR: str = "MAGI_KNOWLEDGE_OKF_LOOKUP_ENABLED"
 INDEX_INJECT_ENABLED_ENV_VAR: str = "MAGI_KNOWLEDGE_OKF_INDEX_INJECT_ENABLED"
 
+#: Auto-type capability — index docs lacking a valid ``type`` as ``document``.
+#: Follows the master (``master_default=master``): a capability that rescues
+#: otherwise-skipped docs without changing existing (typed) results.
+AUTO_TYPE_ENV_VAR: str = "MAGI_KNOWLEDGE_OKF_AUTO_TYPE"
+
 #: Bundle path list (colon-separated directories).
 BUNDLE_PATHS_ENV_VAR: str = "MAGI_OKF_BUNDLE_PATHS"
 
@@ -98,6 +103,9 @@ class OkfConfig(BaseModel):
     lookup_enabled: bool = Field(default=False, alias="lookupEnabled")
     #: Mode B index injection — opt-in even under master-on.
     index_inject_enabled: bool = Field(default=False, alias="indexInjectEnabled")
+    #: Auto-type capability — follows the master. When True the loader indexes
+    #: docs lacking a valid ``type`` as ``document`` instead of skipping them.
+    auto_type: bool = Field(default=False, alias="autoType")
 
     #: Resolved bundle directories (colon-split, blanks dropped).
     bundle_paths: tuple[str, ...] = Field(default=(), alias="bundlePaths")
@@ -164,6 +172,10 @@ def resolve_okf_config(
         # index-inject is opt-in even under master-on (mutates the prompt).
         indexInjectEnabled=sub_flag(
             INDEX_INJECT_ENABLED_ENV_VAR, "index_inject_enabled", master_default=False
+        ),
+        # auto_type is a capability that follows the master (rescues untyped docs).
+        autoType=sub_flag(
+            AUTO_TYPE_ENV_VAR, "auto_type", master_default=master
         ),
         bundlePaths=_resolve_bundle_paths(env, table),
         maxRecords=_resolve_int(
@@ -265,6 +277,7 @@ def _resolve_bundle_paths(
 
 
 __all__ = [
+    "AUTO_TYPE_ENV_VAR",
     "BUNDLE_PATHS_ENV_VAR",
     "CONFIG_TABLE",
     "INDEX_INJECT_ENABLED_ENV_VAR",
