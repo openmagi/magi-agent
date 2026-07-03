@@ -883,3 +883,59 @@ def test_id_length_boundary_matches_frontend_contract():
     # 128 chars accepted (matches the guided-wizard Policy-ID max), 129 rejected.
     assert validate_custom_rule(_det(id="a" * 128)) == []
     assert any(e.startswith("id must be") for e in validate_custom_rule(_det(id="a" * 129)))
+
+
+# --- tool_perm requireEvidence (session-evidence unlock gate) validation ---
+
+
+def _tool_with_require(**require_over):
+    require = {"evidenceType": "custom:SourceCredibility", "producerRuleId": "cr_prod"}
+    require.update(require_over)
+    return _tool(
+        what={
+            "kind": "tool_perm",
+            "payload": {
+                "match": {"tool": "dangerous_tool"},
+                "decision": "deny",
+                "requireEvidence": require,
+            },
+        }
+    )
+
+
+def test_tool_perm_without_require_evidence_valid():
+    assert validate_custom_rule(_tool()) == []
+
+
+def test_tool_perm_require_evidence_valid():
+    assert validate_custom_rule(_tool_with_require()) == []
+
+
+def test_tool_perm_require_evidence_rejects_builtin_type():
+    errs = validate_custom_rule(_tool_with_require(evidenceType="TestRun"))
+    assert any("evidenceType" in e for e in errs)
+
+
+def test_tool_perm_require_evidence_rejects_missing_producer():
+    errs = validate_custom_rule(_tool_with_require(producerRuleId=""))
+    assert any("producerRuleId" in e for e in errs)
+
+
+def test_tool_perm_require_evidence_rejects_colon_producer():
+    errs = validate_custom_rule(_tool_with_require(producerRuleId="custom_rule:cr_prod"))
+    assert any("producerRuleId" in e for e in errs)
+
+
+def test_tool_perm_require_evidence_rejects_bad_scope():
+    errs = validate_custom_rule(_tool_with_require(scope="turn"))
+    assert any("scope" in e for e in errs)
+
+
+def test_tool_perm_require_evidence_rejects_bad_on_unavailable():
+    errs = validate_custom_rule(_tool_with_require(onEvidenceUnavailable="explode"))
+    assert any("onEvidenceUnavailable" in e for e in errs)
+
+
+def test_tool_perm_require_evidence_accepts_valid_on_unavailable():
+    for action in ("deny", "ask", "allow"):
+        assert validate_custom_rule(_tool_with_require(onEvidenceUnavailable=action)) == []

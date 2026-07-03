@@ -103,6 +103,7 @@ class ToolPermissionPolicy:
         runtime_arbiter: RuntimePermissionArbiter | None = None,
         *,
         credential_resolver: CredentialApprovalResolver | None = None,
+        tool_evidence_collector: object | None = None,
     ) -> None:
         self.runtime_arbiter = runtime_arbiter or RuntimePermissionArbiter()
         # Resolves whether a tool call's egress host is guarded by a
@@ -113,6 +114,11 @@ class ToolPermissionPolicy:
             if credential_resolver is not None
             else default_credential_approval_resolver()
         )
+        # Session-evidence source for a tool_perm ``requireEvidence`` gate (the
+        # LocalToolEvidenceCollector). None (the default / kernel path) means the
+        # gate cannot read evidence, so a requireEvidence rule fails CLOSED
+        # (applies onEvidenceUnavailable); non-evidence rules are unaffected.
+        self._tool_evidence_collector = tool_evidence_collector
 
     def decide(
         self,
@@ -171,7 +177,12 @@ class ToolPermissionPolicy:
         # Custom tool_perm rules (P2) layer on top of immutable safety: they can
         # deny/ask a call safety would allow, but never loosen a safety deny/ask
         # (handled above). No-op (returns None) unless both customize flags are on.
-        custom = matched_decision(tool_name=manifest.name, arguments=arguments)
+        custom = matched_decision(
+            tool_name=manifest.name,
+            arguments=arguments,
+            session_id=getattr(context, "session_id", None),
+            collector=self._tool_evidence_collector,
+        )
         if custom is not None:
             custom_action, rule_id = custom
             reason = f"custom rule {rule_id}"

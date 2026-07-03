@@ -161,3 +161,99 @@ def test_path_match_ignores_url_in_path_field(cfg: Path):
         tool_name="Browse",
         arguments={"path": "https://example.com/Users/me/secret/x"},
     ) is None
+
+
+# --- session-evidence gate (requireEvidence) ---
+
+
+class _FakeCollector:
+    """Minimal has_unlock_evidence stub: returns the preset verdict."""
+
+    def __init__(self, present: bool) -> None:
+        self._present = present
+        self.calls: list[tuple] = []
+
+    def has_unlock_evidence(self, session_id, *, evidence_type, producing_rule_id):
+        self.calls.append((session_id, evidence_type, producing_rule_id))
+        return self._present
+
+
+def _gated_rule(**require_over):
+    require = {
+        "evidenceType": "custom:SourceCredibility",
+        "producerRuleId": "cr_prod",
+    }
+    require.update(require_over)
+    rule = _tool_rule({"tool": "dangerous_tool"}, "deny", rid="cr_gate")
+    rule["what"]["payload"]["requireEvidence"] = require
+    return rule
+
+
+def test_gate_allows_when_evidence_present(cfg: Path):
+    set_custom_rule(_gated_rule(), path=cfg)
+    got = matched_decision(
+        tool_name="dangerous_tool",
+        arguments={},
+        session_id="s1",
+        collector=_FakeCollector(present=True),
+    )
+    assert got is None  # evidence present -> rule does not fire (allowed)
+
+
+def test_gate_denies_when_evidence_absent(cfg: Path):
+    set_custom_rule(_gated_rule(), path=cfg)
+    got = matched_decision(
+        tool_name="dangerous_tool",
+        arguments={},
+        session_id="s1",
+        collector=_FakeCollector(present=False),
+    )
+    assert got == ("deny", "cr_gate")  # read ok, absent -> gate fires with decision
+
+
+def test_gate_fails_closed_without_collector(cfg: Path):
+    # Could-not-read (no collector, e.g. the kernel path) -> fail-CLOSED (deny).
+    set_custom_rule(_gated_rule(), path=cfg)
+    got = matched_decision(tool_name="dangerous_tool", arguments={})
+    assert got == ("deny", "cr_gate")
+
+
+def test_gate_fails_closed_without_session(cfg: Path):
+    set_custom_rule(_gated_rule(), path=cfg)
+    got = matched_decision(
+        tool_name="dangerous_tool",
+        arguments={},
+        session_id=None,
+        collector=_FakeCollector(present=True),
+    )
+    assert got == ("deny", "cr_gate")
+
+
+def test_gate_on_evidence_unavailable_ask(cfg: Path):
+    set_custom_rule(_gated_rule(onEvidenceUnavailable="ask"), path=cfg)
+    got = matched_decision(tool_name="dangerous_tool", arguments={})
+    assert got == ("ask", "cr_gate")
+
+
+def test_gate_on_evidence_unavailable_allow_opt_out(cfg: Path):
+    # Explicit opt-out: could-not-read allows (non-security use).
+    set_custom_rule(_gated_rule(onEvidenceUnavailable="allow"), path=cfg)
+    got = matched_decision(tool_name="dangerous_tool", arguments={})
+    assert got is None
+
+
+def test_gate_passes_correct_join_args(cfg: Path):
+    set_custom_rule(_gated_rule(), path=cfg)
+    collector = _FakeCollector(present=True)
+    matched_decision(
+        tool_name="dangerous_tool", arguments={}, session_id="s1", collector=collector
+    )
+    assert collector.calls == [("s1", "custom:SourceCredibility", "cr_prod")]
+
+
+def test_non_gated_rule_byte_identical(cfg: Path):
+    # A plain tool_perm rule (no requireEvidence) is unaffected by the new params.
+    set_custom_rule(_tool_rule({"tool": "web_fetch"}, "deny", rid="cr_plain"), path=cfg)
+    assert matched_decision(
+        tool_name="web_fetch", arguments={}, session_id="s1", collector=_FakeCollector(True)
+    ) == ("deny", "cr_plain")
