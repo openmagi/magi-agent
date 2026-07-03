@@ -108,6 +108,17 @@ async def run_governed_turn(
 
     rt = runtime if runtime is not None else _build_runtime(ctx)
     cancel = cancel if cancel is not None else asyncio.Event()
+
+    # Evidence-grounded lifecycle audit: the same per-turn evidence source the
+    # enforcement path uses (``LocalToolEvidenceCollector.collect_for_turn``,
+    # wired into the engine driver in cli/wiring.py). Threaded into the
+    # turn-boundary audit collectors so an ``after_turn_end`` /
+    # ``on_subagent_stop`` llm_criterion that declares ``evidenceRefs`` is
+    # judged against the records captured this turn. ``None`` (no runtime
+    # collector) keeps the audit judge evidence-blind (byte-identical).
+    _lifecycle_evidence_collector = getattr(
+        getattr(rt, "local_tool_evidence", None), "collect_for_turn", None
+    )
     stream = rt.engine.run_turn_stream(  # type: ignore[union-attr]
         None,
         ctx.to_turn_input(),
@@ -122,13 +133,17 @@ async def run_governed_turn(
     # PR-F-UX1: Tier 2 ``on_subagent_stop`` final-text collector. Only created
     # for CHILD turns (``ctx.depth > 0``) when the master flag resolves ON so
     # the parent / top-level turn path stays byte-identical and zero-cost.
-    subagent_collector = _SubagentStopCollector.maybe_create(ctx)
+    subagent_collector = _SubagentStopCollector.maybe_create(
+        ctx, evidence_collector=_lifecycle_evidence_collector
+    )
 
     # PR-F-LIFE1: Tier 2 ``after_turn_end`` final-text collector. Distinct
     # from _SubagentStopCollector — this one ONLY fires for TOP-LEVEL turns
     # (``ctx.depth == 0``), so the two collectors do not overlap. Both share
     # the same response_clear / text_delta aggregation pattern.
-    turn_end_collector = _AfterTurnEndCollector.maybe_create(ctx)
+    turn_end_collector = _AfterTurnEndCollector.maybe_create(
+        ctx, evidence_collector=_lifecycle_evidence_collector
+    )
 
     # PR-F-LIFE4b: Tier 2 ``on_task_complete`` final-text collector.
     # Distinct from _AfterTurnEndCollector (which fires every top-level
@@ -554,6 +569,32 @@ async def _maybe_run_user_prompt_submit_audit(ctx: TurnContext) -> None:
         return
 
 
+def _collect_lifecycle_evidence_records(
+    evidence_collector: object | None, ctx: TurnContext
+) -> tuple[object, ...] | None:
+    """Collect this turn's evidence records for the lifecycle audit judge.
+
+    Reuses the enforcement path's ``collect_for_turn`` callable. Gated on
+    ``MAGI_EVIDENCE_GROUNDED_CRITIC_ENABLED`` so the OFF path never touches the
+    collector (zero-cost, byte-identical); the audit wrapper still only projects
+    when a rule declares ``evidenceRefs``. Fully fail-open: any fault returns
+    ``None`` (evidence-blind judge) rather than perturbing the turn.
+    """
+    try:
+        if evidence_collector is None or not callable(evidence_collector):
+            return None
+        from magi_agent.config.flags import flag_profile_bool  # noqa: PLC0415
+
+        if not flag_profile_bool("MAGI_EVIDENCE_GROUNDED_CRITIC_ENABLED"):
+            return None
+        turn_id = getattr(ctx, "turn_id", None)
+        if not isinstance(turn_id, str) or not turn_id:
+            return None
+        return tuple(evidence_collector(turn_id))
+    except Exception:
+        return None
+
+
 class _SubagentStopCollector:
     """Accumulates the child's final assistant text off the event stream and
     runs the ``on_subagent_stop`` audit fan-out at turn end.
@@ -566,14 +607,19 @@ class _SubagentStopCollector:
     governed turn never breaks because of audit bookkeeping.
     """
 
-    __slots__ = ("_ctx", "_result_text")
+    __slots__ = ("_ctx", "_result_text", "_evidence_collector")
 
-    def __init__(self, ctx: TurnContext) -> None:
+    def __init__(
+        self, ctx: TurnContext, evidence_collector: object | None = None
+    ) -> None:
         self._ctx = ctx
         self._result_text = ""
+        self._evidence_collector = evidence_collector
 
     @classmethod
-    def maybe_create(cls, ctx: TurnContext) -> "_SubagentStopCollector | None":
+    def maybe_create(
+        cls, ctx: TurnContext, *, evidence_collector: object | None = None
+    ) -> "_SubagentStopCollector | None":
         # Top-level turns (depth == 0) are NOT subagent turns — the
         # ``on_subagent_stop`` slot fires only for spawned child agents.
         if getattr(ctx, "depth", 0) <= 0:
@@ -585,7 +631,7 @@ class _SubagentStopCollector:
 
             if not lifecycle_expansion_enabled():
                 return None
-            return cls(ctx)
+            return cls(ctx, evidence_collector=evidence_collector)
         except Exception:
             return None
 
@@ -613,6 +659,9 @@ class _SubagentStopCollector:
             await run_subagent_stop_audit(
                 final_text=self._result_text,
                 model_factory=_build_lifecycle_critic_factory(),
+                evidence_records=_collect_lifecycle_evidence_records(
+                    self._evidence_collector, self._ctx
+                ),
             )
         except Exception:
             return
@@ -659,14 +708,19 @@ class _AfterTurnEndCollector:
     governed turn never breaks because of audit bookkeeping.
     """
 
-    __slots__ = ("_ctx", "_result_text")
+    __slots__ = ("_ctx", "_result_text", "_evidence_collector")
 
-    def __init__(self, ctx: TurnContext) -> None:
+    def __init__(
+        self, ctx: TurnContext, evidence_collector: object | None = None
+    ) -> None:
         self._ctx = ctx
         self._result_text = ""
+        self._evidence_collector = evidence_collector
 
     @classmethod
-    def maybe_create(cls, ctx: TurnContext) -> "_AfterTurnEndCollector | None":
+    def maybe_create(
+        cls, ctx: TurnContext, *, evidence_collector: object | None = None
+    ) -> "_AfterTurnEndCollector | None":
         # Only the TOP-LEVEL turn (depth == 0) emits after_turn_end. Child
         # turns are covered by _SubagentStopCollector so the two slots stay
         # disjoint.
@@ -679,7 +733,7 @@ class _AfterTurnEndCollector:
 
             if not lifecycle_turn_hooks_enabled():
                 return None
-            return cls(ctx)
+            return cls(ctx, evidence_collector=evidence_collector)
         except Exception:
             return None
 
@@ -727,6 +781,9 @@ class _AfterTurnEndCollector:
             await run_after_turn_end_audit(
                 final_text=self._result_text,
                 model_factory=_build_lifecycle_critic_factory(),
+                evidence_records=_collect_lifecycle_evidence_records(
+                    self._evidence_collector, self._ctx
+                ),
             )
         except Exception:
             return
