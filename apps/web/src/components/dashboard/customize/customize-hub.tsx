@@ -1008,7 +1008,10 @@ function RulesSectionMount({
           ) : null}
           {subTab === "policies" ? <PrebuiltComponentsPanel /> : null}
           {subTab === "evidence" ? (
-            <ReusableEvidenceTab entries={evidenceTypes} />
+            <ReusableEvidenceTab
+              entries={evidenceTypes}
+              knownRefs={data.catalog.verification.evidenceMenu}
+            />
           ) : null}
           {subTab === "conditions" ? (
             <ReusableConditionsTab

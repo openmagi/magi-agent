@@ -42,6 +42,24 @@ export interface ReusableEvidenceTabProps {
    * with `customize-hub.tsx` which already derives this view from policies.
    */
   entries?: EvidenceTypeEntry[];
+  /**
+   * PR-F-UX5b: the STATIC known-evidence menu (`catalog.verification.evidenceMenu`)
+   * — the evidence refs the runtime knows about regardless of whether a policy
+   * uses them or a run has populated them yet. The tab counter counts these, so
+   * the tab body must render them too (else the counter says "3" over an empty
+   * body until a run emits a record). Each row is authorable as a
+   * deterministic_ref / field_constraint rule.
+   */
+  knownRefs?: EvidenceMenuItem[];
+}
+
+/** One static known-evidence ref (mirrors `CustomRuleMenuItem` on the wire). */
+export interface EvidenceMenuItem {
+  ref: string;
+  label?: string;
+  evidenceType?: string;
+  tier?: string;
+  firesAt?: string;
 }
 
 
@@ -282,6 +300,7 @@ function PolicyDerivedRefs({
 
 export function ReusableEvidenceTab({
   entries,
+  knownRefs = [],
 }: ReusableEvidenceTabProps): React.ReactElement {
   const agentFetch = useAgentFetch();
   const [catalog, setCatalog] = useState<EvidenceLiveCatalog | null>(null);
@@ -334,6 +353,47 @@ export function ReusableEvidenceTab({
           tab and are judgments OVER evidence, not evidence itself.
         </p>
       </section>
+      {knownRefs.length > 0 ? (
+        <section className="space-y-2">
+          <header>
+            <h3 className="text-sm font-semibold text-foreground">
+              Known evidence types ({knownRefs.length})
+            </h3>
+            <p className="text-xs leading-relaxed text-secondary">
+              Evidence refs the runtime knows about, whether or not a run has
+              produced one yet. Author a <span className="font-mono">deterministic_ref</span>
+              {" "}(require it this turn) or a <span className="font-mono">field_constraint</span>
+              {" "}(constrain its fields) rule against any of these.
+            </p>
+          </header>
+          <ul className="space-y-2">
+            {knownRefs.map((item) => (
+              <li
+                key={item.ref}
+                className="rounded-xl border border-black/[0.06] bg-[var(--glass-regular-bg)] backdrop-blur-xl px-4 py-3"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-mono text-foreground">{item.ref}</p>
+                    {item.label ? (
+                      <p className="mt-0.5 text-xs text-secondary">{item.label}</p>
+                    ) : null}
+                    {item.evidenceType || item.firesAt ? (
+                      <p className="mt-1 flex flex-wrap gap-x-3 text-[10px] uppercase tracking-wider text-secondary/70">
+                        {item.evidenceType ? <span>type {item.evidenceType}</span> : null}
+                        {item.firesAt ? <span>at {item.firesAt}</span> : null}
+                      </p>
+                    ) : null}
+                  </div>
+                  <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
+                    Built-in
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       <section className="space-y-2">
         <header>
           <h3 className="text-sm font-semibold text-foreground">
