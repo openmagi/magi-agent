@@ -508,7 +508,7 @@ def parse_loop_guard_env(env: Mapping[str, str]) -> LoopGuardEnv:
 
 # Single source of truth for the PR12 error-recovery wiring flags. Reuses the
 # existing ``MAGI_ERROR_RECOVERY_ENABLED`` / ``MAGI_MAX_RECOVERY_ATTEMPTS`` names
-# (also consumed by ErrorRecoveryConfig.from_env). When enabled, the live ADK
+# (ErrorRecoveryConfig.from_env delegates here). When enabled, the live ADK
 # Runner attaches the MagiResiliencePlugin whose on_model_error_callback runs the
 # existing RecoveryEngine: classify the model error and apply the first
 # applicable strategy (RateLimit honors Retry-After). Enabled by default in the

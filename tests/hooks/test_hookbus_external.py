@@ -373,6 +373,17 @@ def test_external_hook_config_various_truthy_values():
             assert ExternalHookConfig.from_env().enabled is False, f"expected disabled for '{falsy}'"
 
 
+def test_llm_hooks_env_on_is_truthy():
+    """C3 (N-21): the canonical ``on`` value must enable the default-ON sub-switch."""
+    env_base = {k: v for k, v in os.environ.items() if k != "MAGI_LLM_HOOKS_ENABLED"}
+    with patch.dict(os.environ, {**env_base, "MAGI_LLM_HOOKS_ENABLED": "on"}, clear=True):
+        assert ExternalHookConfig.from_env().llm_hooks_enabled is True
+    with patch.dict(os.environ, {**env_base, "MAGI_LLM_HOOKS_ENABLED": "off"}, clear=True):
+        assert ExternalHookConfig.from_env().llm_hooks_enabled is False
+    with patch.dict(os.environ, env_base, clear=True):
+        assert ExternalHookConfig.from_env().llm_hooks_enabled is True
+
+
 # ---------------------------------------------------------------------------
 # 12. load_external_hooks_from_yaml returns empty list for missing file
 # ---------------------------------------------------------------------------

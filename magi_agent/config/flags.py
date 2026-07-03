@@ -457,10 +457,6 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
-        "MAGI_WORK_QUEUE_ENABLED",
-        summary="Enable the durable multi-agent work-queue (task board + dispatcher).",
-    ),
-    _b(
         "MAGI_WORK_QUEUE_EXECUTOR_ENABLED",
         summary="Enable the durable work-queue dispatcher tick loop.",
     ),
@@ -2833,8 +2829,8 @@ FLAGS: tuple[FlagSpec, ...] = (
         summary=(
             "Sub-switch for LLM-classified hook executors. **Default-ON** "
             "when unset / empty; only an explicit non-truthy value "
-            "(anything outside ``{1, true, yes}``) disables. ``str`` "
-            "kind because the default-ON-when-unset semantics differ "
+            "(anything outside canonical ``{1, true, yes, on}``) disables. "
+            "``str`` kind because the default-ON-when-unset semantics differ "
             "from ``flag_bool``'s strict default-OFF."
         ),
         kind="str",

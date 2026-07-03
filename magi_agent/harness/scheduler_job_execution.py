@@ -211,7 +211,7 @@ def _env_shadow_flag(name: str, *, default: bool) -> bool:
     if raw is None:
         return default
     clean = raw.strip().lower()
-    if clean in {"0", "false"}:
+    if clean in {"0", "false", "no", "off"}:
         return False
     return True
 

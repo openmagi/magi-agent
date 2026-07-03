@@ -205,15 +205,18 @@ class ExternalHookConfig(BaseModel):
         """Build config by reading ``MAGI_EXTERNAL_HOOKS_ENABLED`` and
         ``MAGI_LLM_HOOKS_ENABLED`` from the environment."""
         # I-4: routed through the typed flag registry.
+        from magi_agent.config._truthy import is_true  # noqa: PLC0415
         from magi_agent.config.flags import flag_bool, flag_str  # noqa: PLC0415
 
         enabled = flag_bool("MAGI_EXTERNAL_HOOKS_ENABLED")
         # LLM hooks default to enabled (True) unless explicitly disabled.
         # ``MAGI_LLM_HOOKS_ENABLED`` is registered as ``str`` so the
         # default-ON-when-unset semantics are preserved (``flag_bool``
-        # would default-OFF and silently flip live behavior).
+        # would default-OFF and silently flip live behavior). Use the
+        # canonical ``is_true`` (accepts ``on``); ``env_bool_default_true``
+        # would misread ``""`` as False and regress the unset->ON default.
         llm_raw = (flag_str("MAGI_LLM_HOOKS_ENABLED") or "").strip().lower()
-        llm_enabled = llm_raw in ("1", "true", "yes") if llm_raw else True
+        llm_enabled = is_true(llm_raw) if llm_raw else True
         return cls(enabled=enabled, llm_hooks_enabled=llm_enabled)
 
 

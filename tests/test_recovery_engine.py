@@ -267,10 +267,18 @@ class TestDefaultStrategies:
 
 class TestErrorRecoveryConfigFromEnv:
     def test_defaults_when_no_env(self) -> None:
+        # C3 (N-37): from_env now delegates to the canonical profile-bool
+        # reader. Unset flag + unset profile resolves to the full profile,
+        # so recovery is ON by default.
         with patch.dict(os.environ, {}, clear=True):
             cfg = ErrorRecoveryConfig.from_env()
-        assert cfg.recovery_enabled is False
+        assert cfg.recovery_enabled is True
         assert cfg.max_recovery_attempts == 3
+
+    def test_disabled_under_safe_profile(self) -> None:
+        with patch.dict(os.environ, {"MAGI_RUNTIME_PROFILE": "safe"}, clear=True):
+            cfg = ErrorRecoveryConfig.from_env()
+        assert cfg.recovery_enabled is False
 
     def test_values_from_env(self) -> None:
         env = {
@@ -287,13 +295,21 @@ class TestErrorRecoveryConfigFromEnv:
             cfg = ErrorRecoveryConfig.from_env()
         assert cfg.recovery_enabled is True
 
-    def test_invalid_attempts_falls_back(self) -> None:
-        env = {
-            "MAGI_MAX_RECOVERY_ATTEMPTS": "not_a_number",
-        }
+    def test_invalid_attempts_raises(self) -> None:
+        from magi_agent.config.env import RuntimeEnvError
+
+        env = {"MAGI_MAX_RECOVERY_ATTEMPTS": "not_a_number"}
         with patch.dict(os.environ, env, clear=True):
-            cfg = ErrorRecoveryConfig.from_env()
-        assert cfg.max_recovery_attempts == 3
+            with pytest.raises(RuntimeEnvError):
+                ErrorRecoveryConfig.from_env()
+
+    def test_zero_attempts_raises(self) -> None:
+        from magi_agent.config.env import RuntimeEnvError
+
+        env = {"MAGI_MAX_RECOVERY_ATTEMPTS": "0"}
+        with patch.dict(os.environ, env, clear=True):
+            with pytest.raises(RuntimeEnvError):
+                ErrorRecoveryConfig.from_env()
 
     def test_disabled_by_default(self) -> None:
         with patch.dict(os.environ, {"MAGI_ERROR_RECOVERY_ENABLED": "false"}, clear=True):
