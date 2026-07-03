@@ -12,7 +12,13 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # The default-ON flag work (no-default-off policy) exercises materially more
+    # of the runtime in every test, so the full serial suite grew to ~45 min and
+    # began tripping the old 45-min cap even after the worker-leak wedge fix
+    # (#1275). Give headroom; a proper follow-up is pytest-xdist parallelization
+    # (add pytest-xdist to the dev extra + `-n auto` here) once the suite is
+    # audited for parallel-safety, which would cut this back well under 30 min.
+    timeout-minutes: 70
     strategy:
       fail-fast: false
       matrix:
