@@ -470,7 +470,7 @@ def _build_cache_control_mixin() -> type:
     return _CacheControlMixin
 
 
-def get_cache_aware_claude_class(model: str = "claude-sonnet-4-6") -> type:
+def get_cache_aware_claude_class(model: str = "claude-sonnet-5") -> type:
     """Return (and memoise) the cache-aware subclass for *model*'s deployment.
 
     The base class is chosen by :func:`_select_anthropic_base` (direct

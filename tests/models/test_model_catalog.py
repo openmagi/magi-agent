@@ -16,13 +16,13 @@ from magi_agent.models.catalog import ModelCatalog, UnknownModelError
 from magi_agent.runtime.model_tiers import ModelTierRegistry
 
 
-def test_anthropic_default_is_claude_sonnet_4_6() -> None:
-    """Locked default: anthropic flagship for the CLI/serve path is sonnet-4-6.
+def test_anthropic_default_is_claude_sonnet_5() -> None:
+    """Locked default: anthropic flagship for the CLI/serve path is sonnet-5.
 
     Catching drift here is the point — the catalog is the single source.
     """
     record = ModelCatalog.builtin().default_model_for("anthropic")
-    assert record.model == "claude-sonnet-4-6"
+    assert record.model == "claude-sonnet-5"
     assert record.provider == "anthropic"
     assert record.litellm_prefix == "anthropic"
 
@@ -73,6 +73,7 @@ def test_all_records_includes_flagships() -> None:
     models = {r.model for r in catalog.all_records()}
     # Anthropic frontier (PR12 user-visible bug fix: 4-8 NOT 4-6).
     assert "claude-opus-4-8" in models
+    assert "claude-sonnet-5" in models
     assert "claude-sonnet-4-6" in models
     # Other provider flagships referenced across cli/providers + registry.
     assert "gpt-5.5" in models

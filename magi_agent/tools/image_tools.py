@@ -409,7 +409,7 @@ def _call_vision_model_via_litellm(
         # Fallback: try env-based auto-detect without a config file.
         # If still nothing, litellm will raise an auth error which the caller
         # wraps into a graceful "[vision call failed: ...]" string.
-        model_id = "anthropic/claude-sonnet-4-6"
+        model_id = "anthropic/claude-sonnet-5"
         api_key = None
 
     text = _complete(model_id, api_key)

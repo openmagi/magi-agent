@@ -46,7 +46,7 @@ describe("wizard step flow", () => {
 
 describe("defaultModelForProvider", () => {
   it("returns the catalog default for a known provider", () => {
-    expect(defaultModelForProvider("anthropic")).toBe("claude-sonnet-4-6");
+    expect(defaultModelForProvider("anthropic")).toBe("claude-sonnet-5");
     expect(defaultModelForProvider("openai")).toBe("gpt-5.5");
     expect(defaultModelForProvider("fireworks")).toBe("kimi-k2p6");
   });

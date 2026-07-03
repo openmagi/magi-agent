@@ -30,7 +30,7 @@ describe("local-runtime-models", () => {
 
   it("matches the local CLI resolver defaults (cli/providers.py _DEFAULT_MODEL)", () => {
     expect(LOCAL_RUNTIME_DEFAULT_MODEL).toEqual({
-      anthropic: "claude-sonnet-4-6",
+      anthropic: "claude-sonnet-5",
       openai: "gpt-5.5",
       gemini: "gemini-3.5-flash",
       fireworks: "kimi-k2p6",
@@ -59,6 +59,7 @@ describe("local-runtime-models", () => {
   it("offers the current frontier Anthropic model (Opus 4.8) and keeps 4.6 for back-compat", () => {
     const anthropic = LOCAL_RUNTIME_MODEL_PRESETS.anthropic.map((m) => m.value);
     expect(anthropic).toContain("claude-opus-4-8");
+    expect(anthropic).toContain("claude-sonnet-5");
     expect(anthropic).toContain("claude-sonnet-4-6");
     expect(anthropic).toContain("claude-haiku-4-5");
     expect(anthropic).toContain("claude-opus-4-6"); // legacy, kept selectable

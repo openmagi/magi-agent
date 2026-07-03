@@ -20,8 +20,8 @@ def test_autodetect_from_env_anthropic() -> None:
     assert isinstance(cfg, ProviderConfig)
     assert cfg.provider == "anthropic"
     assert cfg.api_key == "sk-a"
-    assert cfg.model == "claude-sonnet-4-6"
-    assert cfg.litellm_model == "anthropic/claude-sonnet-4-6"
+    assert cfg.model == "claude-sonnet-5"
+    assert cfg.litellm_model == "anthropic/claude-sonnet-5"
 
 
 def test_autodetect_follows_supported_order() -> None:
@@ -126,7 +126,7 @@ def test_unknown_provider_raises() -> None:
 
 
 def test_default_model_for_returns_provider_default() -> None:
-    assert default_model_for("anthropic") == "claude-sonnet-4-6"
+    assert default_model_for("anthropic") == "claude-sonnet-5"
     assert default_model_for("openai") == "gpt-5.5"
     assert default_model_for("gemini") == "gemini-3.5-flash"
     assert default_model_for("fireworks") == "kimi-k2p6"
@@ -181,8 +181,8 @@ def test_local_dev_model_in_config_falls_back_to_provider_default() -> None:
         config={"model": {"model": "local-dev"}},
     )
     assert cfg is not None
-    assert cfg.model == "claude-sonnet-4-6"
-    assert cfg.litellm_model == "anthropic/claude-sonnet-4-6"
+    assert cfg.model == "claude-sonnet-5"
+    assert cfg.litellm_model == "anthropic/claude-sonnet-5"
 
 
 def test_local_dev_model_in_env_falls_back_to_provider_default() -> None:
@@ -191,8 +191,8 @@ def test_local_dev_model_in_env_falls_back_to_provider_default() -> None:
         config={},
     )
     assert cfg is not None
-    assert cfg.model == "claude-sonnet-4-6"
-    assert cfg.litellm_model == "anthropic/claude-sonnet-4-6"
+    assert cfg.model == "claude-sonnet-5"
+    assert cfg.litellm_model == "anthropic/claude-sonnet-5"
 
 
 def test_loads_config_file_from_magi_config_env(tmp_path, monkeypatch) -> None:

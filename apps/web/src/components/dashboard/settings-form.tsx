@@ -64,7 +64,7 @@ export function SettingsForm(_props: SettingsFormProps) {
   const t = useMessages();
 
   const [provider, setProvider] = useState<ProviderName>("anthropic");
-  const [model, setModel] = useState("claude-sonnet-4-6");
+  const [model, setModel] = useState("claude-sonnet-5");
   // When true, the Model field is a free-text input ("Custom…") instead of the
   // provider's preset dropdown.
   const [customModel, setCustomModel] = useState(false);
@@ -94,7 +94,7 @@ export function SettingsForm(_props: SettingsFormProps) {
       const nextProvider = asString(llm?.provider);
       const loadedProvider: ProviderName = isProviderName(nextProvider) ? nextProvider : "anthropic";
       if (isProviderName(nextProvider)) setProvider(nextProvider);
-      const loadedModel = asString(llm?.model) || "claude-sonnet-4-6";
+      const loadedModel = asString(llm?.model) || "claude-sonnet-5";
       setModel(loadedModel);
       setCustomModel(!isPresetModel(loadedProvider, loadedModel));
       setBaseUrl(asString(llm?.baseUrl));
@@ -226,7 +226,7 @@ export function SettingsForm(_props: SettingsFormProps) {
               label="Custom model id"
               value={model}
               onChange={(event) => setModel(event.target.value)}
-              placeholder="claude-sonnet-4-6, gpt-5.5, accounts/fireworks/models/…"
+              placeholder="claude-sonnet-5, gpt-5.5, accounts/fireworks/models/…"
             />
           ) : null}
 

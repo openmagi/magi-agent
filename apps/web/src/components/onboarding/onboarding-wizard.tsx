@@ -199,7 +199,7 @@ export function OnboardingWizard({
                 label={copy.localSetupCustomModelLabel}
                 value={model}
                 onChange={(event) => setModel(event.target.value)}
-                placeholder="claude-sonnet-4-6, gpt-5.5, accounts/fireworks/models/…"
+                placeholder="claude-sonnet-5, gpt-5.5, accounts/fireworks/models/…"
               />
             ) : null}
           </div>

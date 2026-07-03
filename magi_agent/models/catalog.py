@@ -132,8 +132,8 @@ class ModelCatalog:
 
         JSON authoring order is the single tiebreaker — put the desired default
         FIRST under each provider block in ``builtin_catalog.json``. This keeps
-        the legacy ``_DEFAULT_MODEL`` mapping (anthropic→sonnet-4-6, gemini→
-        flash, fireworks→kimi-k2p6) byte-identical without a separate
+        the ``_DEFAULT_MODEL`` mapping (anthropic→sonnet-5, gemini→
+        flash, fireworks→kimi-k2p6) in one place without a separate
         ``is_default: true`` flag. Raises :class:`UnknownModelError` for an
         unknown provider OR for a provider with no non-deprecated record (the
         latter is a catalog authoring bug).

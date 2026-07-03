@@ -19,8 +19,9 @@ const source = readFileSync(
 );
 
 describe("BASE_MODEL_OPTIONS label fidelity", () => {
-  it("labels 'sonnet' as Claude Sonnet 4.6 (slug routes to claude-sonnet-4-6)", () => {
-    expect(source).toMatch(/value: "sonnet",\s*label: "Claude Sonnet 4\.6"/);
+  it("labels 'sonnet' as Claude Sonnet 5 (slug routes to claude-sonnet-5)", () => {
+    expect(source).toMatch(/value: "sonnet",\s*label: "Claude Sonnet 5"/);
+    expect(source).not.toMatch(/value: "sonnet",\s*label: "Claude Sonnet 4\.6"/);
     expect(source).not.toMatch(/value: "sonnet",\s*label: "Claude Sonnet 4\.5"/);
   });
 

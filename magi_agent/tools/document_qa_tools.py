@@ -43,7 +43,7 @@ _SIDECAR_MAX_TOKENS = 1_500
 _SIDECAR_TIMEOUT_S = 90
 _MIN_CONTENT_CHARS = 1_000
 
-_FALLBACK_MODEL_ID = "anthropic/claude-sonnet-4-6"
+_FALLBACK_MODEL_ID = "anthropic/claude-sonnet-5"
 
 _QA_SYSTEM_PROMPT = (
     "You answer questions about a document. Quote exact figures/strings. "
