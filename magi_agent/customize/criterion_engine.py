@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -155,6 +155,73 @@ class EvidenceCriterionView(BaseModel):
         if len(text) > _MAX_EVIDENCE_JSON_CHARS:
             text = text[:_MAX_EVIDENCE_JSON_CHARS] + '..."truncated":true}'
         return text
+
+
+def _record_attr(record: Any, name: str) -> Any:
+    """Read an attribute from an evidence record that may be a dict OR an
+    object (the collector yields a mix of ``EvidenceRecord`` models and plain
+    dicts, so both access patterns must be supported)."""
+    if isinstance(record, Mapping):
+        return record.get(name)
+    return getattr(record, name, None)
+
+
+def _record_ref(record: Any) -> str:
+    """Best-effort evidence ref for a record. Records carry no top-level ref of
+    their own; the ref convention lives in ``fields['evidenceRef']`` (with a
+    top-level ``ref`` as a secondary fallback)."""
+    fields = _record_attr(record, "fields")
+    if isinstance(fields, Mapping):
+        ref = fields.get("evidenceRef")
+        if isinstance(ref, str) and ref:
+            return ref
+    ref = _record_attr(record, "ref")
+    return ref if isinstance(ref, str) else ""
+
+
+def project_evidence_for_criterion(
+    records: Iterable[Any] | None,
+    evidence_refs: Sequence[str],
+) -> EvidenceCriterionView | None:
+    """Project collected evidence records into the scoped view a criterion
+    declared it needs (by evidence TYPE name or by evidence ref).
+
+    Returns ``None`` when the criterion declares no evidence (evidence-blind,
+    so :func:`evaluate_criterion` renders the byte-identical prompt). Records
+    whose type/ref matches a declared entry are included; declared entries that
+    matched nothing become ``absent_types`` so the judge can reason about
+    absence. Redaction + size bounds are enforced later by
+    :meth:`EvidenceCriterionView.render`, not here.
+    """
+    wanted = [r for r in evidence_refs if isinstance(r, str) and r.strip()]
+    if not wanted:
+        return None
+    wanted_set = set(wanted)
+    projected: list[EvidenceCriterionRecord] = []
+    matched: set[str] = set()
+    for record in records or ():
+        rtype = _record_attr(record, "type")
+        if not isinstance(rtype, str):
+            continue
+        rref = _record_ref(record)
+        type_hit = rtype in wanted_set
+        ref_hit = bool(rref) and rref in wanted_set
+        if not (type_hit or ref_hit):
+            continue
+        if type_hit:
+            matched.add(rtype)
+        if ref_hit:
+            matched.add(rref)
+        fields = _record_attr(record, "fields")
+        projected.append(
+            EvidenceCriterionRecord(
+                type=rtype,
+                ref=rref,
+                fields=dict(fields) if isinstance(fields, Mapping) else {},
+            )
+        )
+    absent = tuple(sorted(w for w in wanted if w not in matched))
+    return EvidenceCriterionView(records=tuple(projected), absent_types=absent)
 
 
 InvokeFn = Callable[[Any, str], Awaitable[str]]

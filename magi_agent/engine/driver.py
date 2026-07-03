@@ -634,13 +634,22 @@ class MagiEngineDriver:
             criterion_model_factory
         )
 
-    async def _maybe_llm_criterion_block(self, *, final_text: str) -> str | None:
+    async def _maybe_llm_criterion_block(
+        self, *, final_text: str, turn_id: str = ""
+    ) -> str | None:
         """Reason string if an enabled pre-final llm_criterion rule BLOCKS, else None.
 
         Flag-gated by ``MAGI_EGRESS_GATE_ENABLED`` + ``MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED``;
         returns ``None`` (no block) when off, no rules, or on any error (fail-open).
         Only ``action == "block"`` rules can block here (P3); other actions are
         recorded by validation but not enforced at pre-final in this phase.
+
+        Evidence-grounded (``MAGI_EVIDENCE_GROUNDED_CRITIC_ENABLED``): when a
+        rule's payload declares ``evidenceRefs``, the criterion is judged
+        against a scoped projection of this turn's evidence ledger. Projection
+        is best-effort (a fault falls back to the evidence-blind judge, never
+        drops the block); byte-identical to before for rules without
+        ``evidenceRefs``.
         """
         from magi_agent.config.flags import flag_bool, flag_profile_bool  # noqa: PLC0415
 
@@ -650,12 +659,18 @@ class MagiEngineDriver:
         ):
             return None
         try:
-            from magi_agent.customize.criterion_engine import evaluate_criterion
+            from magi_agent.customize.criterion_engine import (
+                evaluate_criterion,
+                project_evidence_for_criterion,
+            )
             from magi_agent.customize.store import load_overrides
             from magi_agent.customize.verification_policy import (
                 CustomizeVerificationPolicy,
             )
 
+            evidence_grounded = flag_profile_bool(
+                "MAGI_EVIDENCE_GROUNDED_CRITIC_ENABLED"
+            )
             policy = CustomizeVerificationPolicy.from_overrides(load_overrides())
             rules = policy.enabled_llm_criterion_rules(fires_at="pre_final")
             for rule in rules:
@@ -665,10 +680,21 @@ class MagiEngineDriver:
                 criterion = payload.get("criterion") if isinstance(payload, dict) else None
                 if not isinstance(criterion, str) or not criterion.strip():
                     continue
+                evidence_context = None
+                if evidence_grounded and isinstance(payload, dict):
+                    try:
+                        evidence_refs = payload.get("evidenceRefs")
+                        if isinstance(evidence_refs, list) and evidence_refs:
+                            evidence_context = project_evidence_for_criterion(
+                                self._collect_evidence(turn_id), evidence_refs
+                            )
+                    except Exception:
+                        evidence_context = None
                 passed, reason = await evaluate_criterion(
                     criterion=criterion,
                     draft_text=final_text,
                     model_factory=self._criterion_model_factory,
+                    evidence_context=evidence_context,
                 )
                 if not passed:
                     return reason or "custom criterion not satisfied"
@@ -2465,7 +2491,9 @@ class MagiEngineDriver:
         # FAIL verdict from an enabled block rule aborts the turn with a custom
         # error (mirrors the deterministic block-error return). Flag-gated +
         # fail-open → byte-identical when off.
-        llm_block_reason = await self._maybe_llm_criterion_block(final_text=emitted_text)
+        llm_block_reason = await self._maybe_llm_criterion_block(
+            final_text=emitted_text, turn_id=turn_id
+        )
         # C1 — built-in answer-quality llm gate (independent of user custom rules).
         # Shares the same abort path; flag/preset + model gated, fail-open → None.
         if llm_block_reason is None:

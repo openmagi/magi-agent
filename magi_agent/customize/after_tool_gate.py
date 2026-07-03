@@ -190,11 +190,13 @@ class CustomizeAfterToolControl(BaseLoopControl):
         if isinstance(criterion, str) and criterion.strip():
             if self._model_factory is None:
                 return None  # LLM sub-mode inert without a critic model.
+            evidence_context = self._evidence_context_for(payload, turn_id)
             passed, reason = await evaluate_criterion(
                 criterion=criterion,
                 draft_text=result_text,
                 model_factory=self._model_factory,
                 invoke=self._invoke,
+                evidence_context=evidence_context,
             )
             if passed:
                 return None
@@ -212,6 +214,36 @@ class CustomizeAfterToolControl(BaseLoopControl):
                 turn_id=turn_id,
             )
         return None
+
+    def _evidence_context_for(
+        self, payload: dict[str, Any], turn_id: str
+    ) -> Any | None:
+        """Project this turn's evidence for an evidence-grounded criterion.
+
+        Returns ``None`` (evidence-blind, byte-identical judge) unless
+        ``MAGI_EVIDENCE_GROUNDED_CRITIC_ENABLED`` is on, the rule declares
+        ``evidenceRefs``, and an evidence collector is wired. Best-effort: any
+        fault degrades to ``None`` rather than dropping the after-tool gate.
+        """
+        try:
+            from magi_agent.config.flags import flag_profile_bool  # noqa: PLC0415
+
+            if self._collector is None:
+                return None
+            if not flag_profile_bool("MAGI_EVIDENCE_GROUNDED_CRITIC_ENABLED"):
+                return None
+            evidence_refs = payload.get("evidenceRefs")
+            if not (isinstance(evidence_refs, list) and evidence_refs):
+                return None
+            collect = getattr(self._collector, "collect_for_turn", None)
+            records = collect(turn_id) if callable(collect) else ()
+            from magi_agent.customize.criterion_engine import (  # noqa: PLC0415
+                project_evidence_for_criterion,
+            )
+
+            return project_evidence_for_criterion(records, evidence_refs)
+        except Exception:
+            return None
 
     def _fire(
         self,

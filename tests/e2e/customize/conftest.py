@@ -173,6 +173,7 @@ class JudgePatcher:
         draft_text: str,
         model_factory: object,
         invoke: object | None = None,
+        evidence_context: object | None = None,
     ) -> _JudgeVerdict:
         self.calls.append(
             {
@@ -180,6 +181,7 @@ class JudgePatcher:
                 "draft_text": draft_text,
                 "model_factory": model_factory,
                 "invoke": invoke,
+                "evidence_context": evidence_context,
             }
         )
         return self._verdict

@@ -123,6 +123,83 @@ def test_llm_criterion_pass_allows():
     assert _run(ctrl, result="10-K") is None
 
 
+class _EvidenceCollector:
+    """Collector exposing collect_for_turn (the evidence-grounded read path)."""
+
+    def __init__(self, records):
+        self._records = records
+
+    def collect_for_turn(self, _turn_id):
+        return tuple(self._records)
+
+
+def test_evidence_grounded_criterion_feeds_evidence_into_judge(monkeypatch):
+    monkeypatch.setenv("MAGI_EVIDENCE_GROUNDED_CRITIC_ENABLED", "1")
+    seen: list[str] = []
+
+    async def capture_invoke(_model, prompt):
+        seen.append(prompt)
+        return '{"pass": true, "reason": "ok"}'
+
+    collector = _EvidenceCollector(
+        [{"type": "TestRun", "fields": {"exit_code": 0}}]
+    )
+    ctrl = CustomizeAfterToolControl(
+        model_factory=lambda: object(),
+        invoke=capture_invoke,
+        collector=collector,
+        policy_loader=lambda: _policy(
+            _rule(criterion="covered by a passing test", evidenceRefs=["TestRun"])
+        ),
+    )
+    assert _run(ctrl, result="done") is None
+    assert len(seen) == 1
+    assert "UNTRUSTED_EVIDENCE" in seen[0]
+    assert "TestRun" in seen[0]
+
+
+def test_evidence_grounded_off_when_flag_disabled(monkeypatch):
+    monkeypatch.setenv("MAGI_EVIDENCE_GROUNDED_CRITIC_ENABLED", "0")
+    seen: list[str] = []
+
+    async def capture_invoke(_model, prompt):
+        seen.append(prompt)
+        return '{"pass": true, "reason": "ok"}'
+
+    collector = _EvidenceCollector([{"type": "TestRun", "fields": {"exit_code": 0}}])
+    ctrl = CustomizeAfterToolControl(
+        model_factory=lambda: object(),
+        invoke=capture_invoke,
+        collector=collector,
+        policy_loader=lambda: _policy(
+            _rule(criterion="covered by a passing test", evidenceRefs=["TestRun"])
+        ),
+    )
+    assert _run(ctrl, result="done") is None
+    assert len(seen) == 1
+    assert "UNTRUSTED_EVIDENCE" not in seen[0]
+
+
+def test_criterion_without_evidence_refs_is_evidence_blind(monkeypatch):
+    monkeypatch.setenv("MAGI_EVIDENCE_GROUNDED_CRITIC_ENABLED", "1")
+    seen: list[str] = []
+
+    async def capture_invoke(_model, prompt):
+        seen.append(prompt)
+        return '{"pass": true, "reason": "ok"}'
+
+    collector = _EvidenceCollector([{"type": "TestRun", "fields": {"exit_code": 0}}])
+    ctrl = CustomizeAfterToolControl(
+        model_factory=lambda: object(),
+        invoke=capture_invoke,
+        collector=collector,
+        policy_loader=lambda: _policy(_rule(criterion="only 10-K filings allowed")),
+    )
+    assert _run(ctrl, result="done") is None
+    assert len(seen) == 1
+    assert "UNTRUSTED_EVIDENCE" not in seen[0]
+
+
 def test_llm_criterion_inert_without_model_factory():
     # criterion rule but no model factory (egress gate off) → inert, never blocks.
     called = {"n": 0}
