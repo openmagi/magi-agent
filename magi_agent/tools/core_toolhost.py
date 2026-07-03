@@ -1,22 +1,26 @@
 from __future__ import annotations
 
-import fnmatch
 import hashlib
 import json
 import os
-import posixpath
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from .context import ToolContext
 from .memory_mode_guard import (
+    MEMORY_READ_TOOL_NAMES as _MEMORY_READ_TOOL_NAMES,
+    MEMORY_WRITE_TOOL_NAMES as _MEMORY_WRITE_TOOL_NAMES,
+    PROTECTED_GLOB_SENTINELS as _PROTECTED_GLOB_SENTINELS,
     command_may_write_protected_memory,
     command_mentions_protected_memory,
+    filter_protected_memory_matches as _filter_protected_memory_matches,
+    grep_glob_may_include_protected_memory as _grep_glob_may_include_protected_memory,
     is_incognito_memory_mode,
     is_long_term_memory_read_disabled,
     is_long_term_memory_write_disabled,
     is_protected_memory_path,
+    memory_read_target_paths as _memory_mode_read_target_paths,
     memory_write_target_paths,
     protected_memory_error,
 )
@@ -196,17 +200,6 @@ def bind_core_toolhost_handlers(registry: ToolRegistry) -> tuple[str, ...]:
     return CoreToolhostHandlerSet.from_env().bind(registry)
 
 
-_MEMORY_WRITE_TOOL_NAMES = frozenset({"FileWrite", "FileEdit", "PatchApply"})
-_MEMORY_READ_TOOL_NAMES = frozenset({"FileRead", "Glob", "Grep"})
-_PROTECTED_GLOB_SENTINELS = (
-    "MEMORY.md",
-    "SCRATCHPAD.md",
-    "WORKING.md",
-    "TASK-QUEUE.md",
-    "memory/example.md",
-)
-
-
 def _memory_mode_block(
     tool_name: str,
     arguments: dict[str, object],
@@ -251,65 +244,6 @@ def _memory_mode_block(
     return None
 
 
-def _memory_mode_read_target_paths(
-    tool_name: str,
-    arguments: dict[str, object],
-) -> tuple[str, ...]:
-    if tool_name == "FileRead":
-        names = ("path", "file", "filePath")
-    elif tool_name == "Glob":
-        names = ("pattern", "glob")
-    elif tool_name == "Grep":
-        names = ("glob", "path", "patternGlob")
-    else:
-        names = ()
-    paths: list[str] = []
-    for name in names:
-        value = arguments.get(name)
-        if isinstance(value, str) and value:
-            paths.append(value)
-    return tuple(paths)
-
-
-def _grep_glob_may_include_protected_memory(arguments: dict[str, object]) -> bool:
-    raw_glob = (
-        arguments.get("glob")
-        or arguments.get("path")
-        or arguments.get("patternGlob")
-        or "**/*"
-    )
-    if not isinstance(raw_glob, str):
-        return True
-    pattern = _normalize_memory_glob(raw_glob)
-    if pattern is None:
-        return False
-    return any(_glob_pattern_matches(path, pattern) for path in _PROTECTED_GLOB_SENTINELS)
-
-
-def _normalize_memory_glob(pattern: str) -> str | None:
-    text = str(pattern or "*").strip().replace("\\", "/")
-    if not text:
-        return "*"
-    if text.startswith(("/", "~")):
-        return None
-    parts = [part for part in text.split("/") if part not in {"", "."}]
-    if any(part == ".." for part in parts):
-        return None
-    normalized = posixpath.normpath("/".join(parts) or "*")
-    return "*" if normalized == "." else normalized
-
-
-def _glob_pattern_matches(relative: str, pattern: str) -> bool:
-    if pattern in {"**", "**/*"}:
-        return True
-    if pattern.startswith("**/"):
-        suffix = pattern[3:]
-        return fnmatch.fnmatchcase(relative, suffix) or fnmatch.fnmatchcase(relative, pattern)
-    if "/" not in pattern and "/" in relative:
-        return False
-    return fnmatch.fnmatchcase(relative, pattern)
-
-
 def _memory_mode_filter_result(
     tool_name: str,
     result: ToolResult,
@@ -322,26 +256,10 @@ def _memory_mode_filter_result(
         or not isinstance(result.output, Mapping)
     ):
         return result
-    matches = result.output.get("matches")
-    if not isinstance(matches, list):
+    filtered_output = _filter_protected_memory_matches(result.output)
+    if filtered_output is result.output:
         return result
-    filtered = [
-        match for match in matches if not is_protected_memory_path(_match_path(match))
-    ]
-    if len(filtered) == len(matches):
-        return result
-    output = dict(result.output)
-    output["matches"] = filtered
-    return result.model_copy(update={"output": output})
-
-
-def _match_path(match: object) -> str | None:
-    if isinstance(match, str):
-        return match
-    if isinstance(match, Mapping):
-        path = match.get("path")
-        return path if isinstance(path, str) else None
-    return None
+    return result.model_copy(update={"output": filtered_output})
 
 
 def _memory_mode_blocked_result(tool_name: str, path_label: str) -> ToolResult:
