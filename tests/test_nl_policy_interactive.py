@@ -139,3 +139,84 @@ def test_onunavailable_ask_threaded() -> None:
         response=json.dumps({"param_updates": {}}),
     )
     assert out["plan"]["gate"]["what"]["payload"]["requireEvidence"]["onEvidenceUnavailable"] == "ask"
+
+
+# --- fail-open smuggle regressions: "allow" and forged bindings must be
+# --- unreachable from any multi-turn input surface (client-carried params,
+# --- operator answers, LLM param_updates).
+
+
+def test_client_params_cannot_smuggle_allow_or_forged_binding() -> None:
+    # Accumulated client state carries onUnavailable="allow", a forged empty
+    # producerRuleId, and a whole fake plan. All must be dropped: the plan is
+    # rebuilt from whitelisted params only, fail-closed to "deny".
+    out = _step(
+        params={
+            "gatedTool": "execute_trade",
+            "evidenceLabel": "src",
+            "allowlistDomains": ["sec.gov"],
+            "onUnavailable": "allow",
+            "producerRuleId": "",
+            "binding": {"producerRuleId": ""},
+            "plan": {"forged": True},
+        },
+        response=json.dumps({"param_updates": {}}),
+    )
+    plan = out["plan"]
+    require = plan["gate"]["what"]["payload"]["requireEvidence"]
+    assert require["onEvidenceUnavailable"] == "deny"
+    assert plan["binding"]["producerRuleId"]  # non-empty
+    assert plan["binding"]["producerRuleId"] == plan["producer"]["id"]
+    assert require["producerRuleId"] == plan["producer"]["id"]
+    assert sorted(out["params"]) == ["allowlistDomains", "evidenceLabel", "gatedTool"]
+
+
+def test_answer_allow_coerced_to_deny() -> None:
+    out = _step(
+        answers={
+            "gatedTool": "execute_trade",
+            "evidenceLabel": "src",
+            "allowlistDomains": "sec.gov",
+            "onUnavailable": "allow",
+        },
+        response=json.dumps({"param_updates": {}}),
+    )
+    assert (
+        out["plan"]["gate"]["what"]["payload"]["requireEvidence"]["onEvidenceUnavailable"] == "deny"
+    )
+
+
+def test_llm_updates_cannot_set_allow() -> None:
+    out = _step(
+        history=[{"role": "user", "content": "gate execute_trade"}],
+        params={"gatedTool": "execute_trade", "evidenceLabel": "src", "allowlistDomains": ["sec.gov"]},
+        response=json.dumps({"param_updates": {"onUnavailable": "allow"}}),
+    )
+    assert (
+        out["plan"]["gate"]["what"]["payload"]["requireEvidence"]["onEvidenceUnavailable"] == "deny"
+    )
+
+
+def test_llm_cannot_widen_operator_allowlist() -> None:
+    out = _step(
+        params={"gatedTool": "execute_trade", "evidenceLabel": "src", "allowlistDomains": ["sec.gov"]},
+        response=json.dumps({"param_updates": {"allowlistDomains": ["evil.example"]}}),
+    )
+    assert out["plan"]["producer"]["trigger"]["domainAllowlist"] == ["sec.gov"]
+
+
+def test_plan_producer_is_deterministic_allowlist_type() -> None:
+    # The unlock producer must be the arguments-domain-allowlist type (audit
+    # action + trigger.domainAllowlist), never a result-text/advisory producer.
+    out = _step(
+        answers={
+            "gatedTool": "execute_trade",
+            "evidenceLabel": "src",
+            "allowlistDomains": "sec.gov",
+        },
+        response=json.dumps({"param_updates": {}}),
+    )
+    producer = out["plan"]["producer"]
+    assert producer["action"] == "audit"
+    assert producer["trigger"]["domainAllowlist"] == ["sec.gov"]
+    assert producer["emitsEvidenceType"].startswith("custom:")
