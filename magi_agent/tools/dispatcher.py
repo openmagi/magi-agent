@@ -64,7 +64,14 @@ class ToolDispatcher:
         first_party_evidence_refs: tuple[str, ...] | None = None,
     ) -> None:
         self.registry = registry
-        self.permission_policy = permission_policy or ToolPermissionPolicy()
+        # Inject the evidence collector so a tool_perm ``requireEvidence`` gate
+        # can read session evidence (the collector is also stored as
+        # ``self._fp_collector`` below for first-party activity recording). An
+        # explicitly-supplied ``permission_policy`` is used as-is (the caller
+        # owns its wiring).
+        self.permission_policy = permission_policy or ToolPermissionPolicy(
+            tool_evidence_collector=first_party_activity_collector,
+        )
         self._coding_receipt_boundary = coding_receipt_boundary or CodingToolReceiptBoundary()
         self._general_automation_live_gate = (
             general_automation_live_gate or GeneralAutomationLiveGate()

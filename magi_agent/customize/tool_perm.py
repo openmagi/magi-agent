@@ -130,11 +130,62 @@ def _rule_matches(match: dict[str, Any], *, tool_name: str, arguments: dict[str,
     return False
 
 
+def _evidence_satisfied(
+    require: dict[str, Any], session_id: str | None, collector: object | None
+) -> bool | None:
+    """Resolve a ``requireEvidence`` block against the session evidence.
+
+    Returns ``True`` (a bound producer recorded the named evidence this
+    session), ``False`` (read succeeded, evidence absent), or ``None`` (COULD
+    NOT read: no collector/session, malformed block, or any error). Self-contained
+    try so an evidence-read fault NEVER bubbles to :func:`matched_decision`'s
+    outer fail-open except (which would silently OPEN a security gate)."""
+    try:
+        if collector is None or not session_id:
+            return None
+        check = getattr(collector, "has_unlock_evidence", None)
+        if not callable(check):
+            return None
+        etype = require.get("evidenceType")
+        producer = require.get("producerRuleId")
+        if not (isinstance(etype, str) and isinstance(producer, str) and producer):
+            return None
+        return bool(check(session_id, evidence_type=etype, producing_rule_id=producer))
+    except Exception:
+        return None
+
+
+def _apply_require_evidence(
+    require: dict[str, Any],
+    decision: str,
+    session_id: str | None,
+    collector: object | None,
+) -> str | None:
+    """Resolve a matched tool_perm rule's session-evidence gate.
+
+    ``None`` => the rule does NOT fire (evidence present, or an explicit
+    ``onEvidenceUnavailable="allow"`` opt-out). Otherwise the action the gate
+    fires with. FAIL-CLOSED: evidence-absent fires the rule's ``decision``; a
+    could-not-read applies ``onEvidenceUnavailable`` (default ``deny``), never a
+    silent allow."""
+    satisfied = _evidence_satisfied(require, session_id, collector)
+    if satisfied is True:
+        return None
+    if satisfied is False:
+        return decision
+    action = require.get("onEvidenceUnavailable", "deny")
+    if action == "allow":
+        return None
+    return "ask" if action == "ask" else "deny"
+
+
 def matched_decision(
     *,
     tool_name: str,
     arguments: dict[str, Any],
     current_scope: str | None = None,
+    session_id: str | None = None,
+    collector: object | None = None,
 ) -> tuple[str, str] | None:
     """Return ``(action, rule_id)`` for the first matching enabled tool_perm rule.
 
@@ -144,6 +195,12 @@ def matched_decision(
     ``current_scope`` (Phase 2): when supplied, only rules whose ``scope`` covers
     the current turn are considered. Backwards-compat: ``None`` preserves the
     historic scope-blind behavior so legacy call sites keep working.
+
+    ``session_id`` + ``collector`` (the session-evidence unlock gate): when a
+    matched rule declares ``requireEvidence``, its decision applies UNLESS the
+    bound producer recorded the named evidence this session. Fail-CLOSED for
+    that branch (see :func:`_apply_require_evidence`); ``None`` for both keeps
+    every non-evidence rule byte-identical.
     """
     from magi_agent.config.flags import flag_profile_bool
 
@@ -187,7 +244,18 @@ def matched_decision(
             if _rule_matches(match, tool_name=tool_name, arguments=arguments):
                 decision = "ask" if payload.get("decision") == "ask" else "deny"
                 rid = rule.get("id")
-                return (decision, rid if isinstance(rid, str) else "custom")
+                rid_str = rid if isinstance(rid, str) else "custom"
+                require = payload.get("requireEvidence")
+                if isinstance(require, dict):
+                    gated = _apply_require_evidence(
+                        require, decision, session_id, collector
+                    )
+                    if gated is None:
+                        # Requirement satisfied (or explicit allow opt-out): this
+                        # rule does not fire; keep scanning for another denier.
+                        continue
+                    return (gated, rid_str)
+                return (decision, rid_str)
         return None
     except Exception:
         return None

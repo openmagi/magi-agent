@@ -35,6 +35,47 @@ EVIDENCE_REFS_MAX = 12
 # pre-existing ids.
 _RULE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 
+# Fail-closed actions a session-evidence gate takes when the required evidence
+# is unavailable (could not read) OR absent. Default is ``deny`` (a security
+# gate must not silently open when it cannot verify); ``allow`` is an explicit
+# opt-out for a non-security use.
+_ON_EVIDENCE_UNAVAILABLE = frozenset({"deny", "ask", "allow"})
+
+
+def _validate_require_evidence(require: object) -> list[str]:
+    """Validate a tool_perm ``requireEvidence`` block (the session unlock gate).
+
+    ``{evidenceType: "custom:...", producerRuleId: "<rule>", scope?: "session",
+       onEvidenceUnavailable?: "deny"|"ask"|"allow"}``. The evidence type must be
+    an operator-named ``custom:`` type (never a runtime-reserved builtin, so a
+    producer cannot mint a trusted-typed unlock key); ``producerRuleId`` binds
+    the gate to a SPECIFIC producer by identity (the unlock join is by producer,
+    not type name)."""
+    errors: list[str] = []
+    if not isinstance(require, dict):
+        return ["tool_perm.payload.requireEvidence must be an object"]
+    etype = require.get("evidenceType")
+    if not (isinstance(etype, str) and etype.startswith("custom:") and etype.strip()):
+        errors.append(
+            "requireEvidence.evidenceType must be an operator-named custom: type"
+        )
+    producer = require.get("producerRuleId")
+    if not (isinstance(producer, str) and _RULE_ID_RE.fullmatch(producer)):
+        errors.append(
+            "requireEvidence.producerRuleId must be a reference-safe rule id (no ':')"
+        )
+    scope = require.get("scope")
+    if scope is not None and scope != "session":
+        errors.append("requireEvidence.scope must be 'session' (v1)")
+    on_unavailable = require.get("onEvidenceUnavailable")
+    if on_unavailable is not None and on_unavailable not in _ON_EVIDENCE_UNAVAILABLE:
+        errors.append(
+            f"requireEvidence.onEvidenceUnavailable must be one of "
+            f"{sorted(_ON_EVIDENCE_UNAVAILABLE)}"
+        )
+    return errors
+
+
 SCOPES = frozenset({"always", "coding", "research", "delivery", "memory", "task"})
 KINDS = frozenset(
     {
@@ -501,6 +542,13 @@ def validate_custom_rule(rule: Any) -> list[str]:
             )
         if payload.get("decision") not in {"deny", "ask"}:
             errors.append("tool_perm.payload.decision must be 'deny' or 'ask'")
+        # Optional session-evidence gate (the policy-abstraction unlock gate):
+        # the rule's decision applies UNLESS a bound producer recorded the named
+        # evidence this session. Absent keeps the historic unconditional gate
+        # (fully back-compat).
+        require = payload.get("requireEvidence")
+        if require is not None:
+            errors.extend(_validate_require_evidence(require))
     elif kind == "llm_criterion":
         criterion = payload.get("criterion")
         has_criterion = isinstance(criterion, str) and bool(criterion.strip())
