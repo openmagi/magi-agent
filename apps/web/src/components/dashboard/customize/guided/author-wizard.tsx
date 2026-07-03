@@ -76,6 +76,8 @@ import {
   type ToolItem,
 } from "@/lib/customize-api";
 import { useAgentFetch } from "@/lib/local-api";
+import { getModes, putMode, type AgentModeInput } from "@/lib/agent-modes-api";
+import type { AgentMode } from "@/chat-core";
 import {
   putDashboardCheck,
   type DashboardCheck,
@@ -338,6 +340,10 @@ interface Draft {
   // common
   ruleId: string;
   description: string;
+  // PR-P5.2b: mode-scoping authored in-wizard. Empty = global (every turn);
+  // non-empty = the rule is force-activated only while one of these modes is
+  // active (each mode's scopedPolicyIds gets `custom_rule:<id>` on save).
+  scopedModeIds: string[];
 }
 
 
@@ -386,6 +392,7 @@ const EMPTY: Draft = {
   shShell: "bash",
   ruleId: "",
   description: "",
+  scopedModeIds: [],
 };
 
 
@@ -487,6 +494,15 @@ export function AuthorWizard({
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // PR-P5.2b: available modes for the in-wizard "apply to modes" picker.
+  // Loaded here (not prop-threaded) so the shell stays unchanged; empty on
+  // failure so the wizard degrades to global-only.
+  const [modes, setModes] = useState<AgentMode[]>([]);
+  useEffect(() => {
+    getModes(agentFetch)
+      .then((resp) => setModes(resp.modes))
+      .catch(() => setModes([]));
+  }, [agentFetch]);
 
   const plan = stepPlan(draft.lifecycle);
   const TOTAL = plan.length;
@@ -684,10 +700,43 @@ export function AuthorWizard({
     setSaveError(null);
     try {
       const built = buildPolicy(draft);
+      // PR-P5.2b: "Only in these modes" means the rule must NOT fire globally.
+      // Persist it global-OFF (enabled:false); the scoped_policy resolver
+      // force-activates it (regardless of its enabled flag) only while a mode
+      // that scopes it is active. Global rules (no modes) keep enabled:true.
+      const scopedToModes = draft.scopedModeIds.length > 0;
+      let scopedRefId: string | null = null;
       if (built.kind === "custom_rule") {
-        await putCustomRule(agentFetch, built.rule);
+        const rule = scopedToModes ? { ...built.rule, enabled: false } : built.rule;
+        await putCustomRule(agentFetch, rule);
+        scopedRefId = `custom_rule:${rule.id}`;
       } else {
-        await putDashboardCheck(agentFetch, built.check);
+        const check = scopedToModes ? { ...built.check, enabled: false } : built.check;
+        await putDashboardCheck(agentFetch, check);
+        scopedRefId = `dashboard_check:${check.id}`;
+      }
+      // PR-P5.2b: if the operator chose "only in these modes", add this rule's
+      // prefixed ref to each selected mode's scopedPolicyIds (additive; the
+      // rule stays global-off and fires only while a scoped mode is active).
+      if (scopedRefId && draft.scopedModeIds.length > 0) {
+        for (const modeId of draft.scopedModeIds) {
+          const mode = modes.find((m) => m.id === modeId);
+          if (!mode) continue;
+          const nextScoped = mode.scopedPolicyIds.includes(scopedRefId)
+            ? mode.scopedPolicyIds
+            : [...mode.scopedPolicyIds, scopedRefId];
+          const input: AgentModeInput = {
+            displayName: mode.displayName,
+            systemPrompt: mode.systemPrompt,
+            toolDelta: {
+              exclude: [...mode.toolDelta.exclude],
+              include: [...mode.toolDelta.include],
+            },
+            scopedPolicyIds: nextScoped,
+            permissionMode: mode.permissionMode ?? null,
+          };
+          await putMode(agentFetch, mode.id, input);
+        }
       }
       onActivated();
     } catch (err) {
@@ -729,6 +778,7 @@ export function AuthorWizard({
           draft={draft}
           update={updateDraft}
           tools={catalog.tools}
+          modes={modes}
         />
       ) : null}
       {currentKey === "condition" ? (
@@ -1314,10 +1364,12 @@ function TriggerStep({
   draft,
   update,
   tools,
+  modes,
 }: {
   draft: Draft;
   update: (patch: Partial<Draft>) => void;
   tools: ToolItem[];
+  modes: AgentMode[];
 }): React.ReactElement {
   const showToolTarget = lifecycleHasToolTarget(draft.lifecycle);
   // PR-F-UX8 — search query state lives in TriggerStep so the COMMON /
@@ -1384,17 +1436,15 @@ function TriggerStep({
         <legend className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
           Where does this apply?
         </legend>
-        {/* PR-P5.2: the auto turn-scope axis (coding/research/delivery) is
-            retired. A rule applies globally; to limit it to a stance, scope it
-            to a mode in the Modes tab (the two-axis model). */}
-        <div className="rounded-xl border border-black/[0.08] bg-white px-4 py-3">
-          <p className="text-sm font-semibold text-foreground">Every turn (global)</p>
-          <p className="mt-1 text-xs leading-relaxed text-secondary">
-            This rule applies on every turn by default. To limit it to a
-            stance, scope it to a mode in the <strong>Modes</strong> tab after
-            saving.
-          </p>
-        </div>
+        {/* PR-P5.2b: the auto turn-scope axis (coding/research/delivery) is
+            retired. A rule applies globally, OR only while one of the selected
+            (user-authored) modes is active. Built-in modes are read-only and
+            carry no scoped rules, so they are not offered here. */}
+        <ApplyScopePicker
+          scopedModeIds={draft.scopedModeIds}
+          modes={modes}
+          onChange={(ids) => update({ scopedModeIds: ids })}
+        />
       </fieldset>
 
       {showToolTarget ? (
@@ -1455,6 +1505,84 @@ function TriggerStep({
 // We deliberately avoid a third-party combobox library — controlled
 // input + click-outside listener + filtered list is small enough to
 // keep inline and free of dependency risk.
+/**
+ * ApplyScopePicker (PR-P5.2b): "Where does this apply?" as Global vs a
+ * multi-select of user-authored modes. Selecting modes force-activates this
+ * rule only while one of them is active (additive; the rule stays global-off).
+ *
+ * Built-in modes (`builtin-` prefix) are read-only and carry no scoped rules,
+ * so they are NOT offered; if the operator wants "only in Coding", they Clone
+ * the built-in into a user mode first (Modes tab). With zero user modes the
+ * picker shows Global only + a hint pointing at the Modes tab.
+ */
+function ApplyScopePicker({
+  scopedModeIds,
+  modes,
+  onChange,
+}: {
+  scopedModeIds: string[];
+  modes: AgentMode[];
+  onChange: (ids: string[]) => void;
+}): React.ReactElement {
+  const userModes = modes.filter((m) => !m.id.startsWith("builtin-"));
+  const isGlobal = scopedModeIds.length === 0;
+  const toggle = (id: string) => {
+    const next = scopedModeIds.includes(id)
+      ? scopedModeIds.filter((x) => x !== id)
+      : [...scopedModeIds, id];
+    onChange(next);
+  };
+  return (
+    <div className="space-y-2">
+      <RadioCard
+        checked={isGlobal}
+        onClick={() => onChange([])}
+        label="Every turn (global)"
+        description="Applies on every turn by default."
+      />
+      <RadioCard
+        checked={!isGlobal}
+        onClick={() => {
+          if (isGlobal && userModes[0]) onChange([userModes[0].id]);
+        }}
+        label="Only in these modes"
+        description="Fires only while one of the selected modes is active (additive; never loosens a global rule)."
+        disabled={userModes.length === 0}
+        disabledReason="No user modes yet. Create one in the Modes tab (or Clone a built-in) first."
+      />
+      {!isGlobal ? (
+        <div
+          className="ml-4 space-y-1 rounded-lg border border-black/[0.08] bg-white p-2"
+          data-testid="apply-scope-mode-list"
+        >
+          {userModes.map((mode) => (
+            <label
+              key={mode.id}
+              className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-black/[0.03]"
+            >
+              <input
+                type="checkbox"
+                checked={scopedModeIds.includes(mode.id)}
+                onChange={() => toggle(mode.id)}
+                className="h-3.5 w-3.5 accent-primary"
+              />
+              <span className="truncate text-foreground">{mode.displayName}</span>
+            </label>
+          ))}
+        </div>
+      ) : null}
+      {userModes.length === 0 ? (
+        <p className="ml-4 text-[11px] leading-relaxed text-secondary/70">
+          Built-in modes (Coding / Research / Delivery) are read-only. To scope a
+          rule to a stance, Clone one into your own mode in the <strong>Modes</strong>
+          {" "}tab first.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+
 function ToolNameSelect({
   value,
   onChange,

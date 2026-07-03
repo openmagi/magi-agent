@@ -136,6 +136,32 @@ describe("AuthorWizard — variable-length policy authoring (F1.5 + F-UX3)", () 
     expect(src).toContain('scope: "always"');
   });
 
+  it("PR-P5.2b: 'Where does this apply?' offers Global vs a user-mode multiselect", () => {
+    expect(src).toContain("function ApplyScopePicker");
+    expect(src).toContain("Only in these modes");
+    // Built-in modes are read-only, so they are filtered out of the picker.
+    expect(src).toContain('m.id.startsWith("builtin-")');
+    expect(src).toContain('data-testid="apply-scope-mode-list"');
+  });
+
+  it("PR-P5.2b: scopes the saved rule into each selected mode's scopedPolicyIds", () => {
+    // On save, the rule's prefixed ref is added to each chosen mode via putMode.
+    expect(src).toContain("scopedModeIds");
+    expect(src).toContain("custom_rule:${rule.id}");
+    expect(src).toContain("putMode(agentFetch, mode.id, input)");
+    // Additive: existing scoped ids are preserved.
+    expect(src).toContain("mode.scopedPolicyIds.includes(scopedRefId)");
+  });
+
+  it("PR-P5.2b: a mode-scoped rule is persisted global-OFF (enabled:false) so it only fires in-mode", () => {
+    // Otherwise an enabled:true rule fires globally regardless of mode; the
+    // scoped_policy resolver force-activates the disabled rule only while a
+    // scoping mode is active.
+    expect(src).toContain("const scopedToModes = draft.scopedModeIds.length > 0");
+    expect(src).toContain("{ ...built.rule, enabled: false }");
+    expect(src).toContain("{ ...built.check, enabled: false }");
+  });
+
   it("drops the disabled 'emit' archetype (audit+(no condition) covers the same outcome)", () => {
     expect(src).not.toContain("Coming soon");
     expect(src).not.toContain("Megaphone");
