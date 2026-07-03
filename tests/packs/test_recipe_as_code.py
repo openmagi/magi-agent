@@ -111,7 +111,7 @@ def test_flag_off_code_recipe_ignored_and_never_imported(
         _VALID_EXT_IMPL.replace("ext.acme.flow", "ext.acme.off"),
     )
     monkeypatch.syspath_prepend(str(user_root))
-    monkeypatch.delenv("MAGI_RECIPE_AS_CODE_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_RECIPE_AS_CODE_ENABLED", "0")
 
     registries, report = load_into_registries([_FIRST_PARTY_ROOT, user_root])
 

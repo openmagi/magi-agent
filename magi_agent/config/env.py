@@ -2299,10 +2299,10 @@ def is_persist_run_bookends_enabled(env: Mapping[str, str] | None = None) -> boo
     by the ``MAGI_PERSIST_RUN_BOOKENDS_ENABLED`` ``FlagSpec``. Imported lazily to
     avoid a config<->flags import cycle.
     """
-    from .flags import flag_bool
+    from .flags import flag_profile_bool
 
     source = os.environ if env is None else env
-    return flag_bool(MAGI_PERSIST_RUN_BOOKENDS_ENABLED_ENV, env=source)
+    return flag_profile_bool(MAGI_PERSIST_RUN_BOOKENDS_ENABLED_ENV, env=source)
 
 
 MAGI_GROUNDED_ANSWER_GUARD_ENABLED_ENV = "MAGI_GROUNDED_ANSWER_GUARD_ENABLED"
@@ -2380,10 +2380,10 @@ def is_goal_nudge_enabled(env: Mapping[str, str] | None = None) -> bool:
     ``False`` default and the same strict-truthy parser. Imported lazily to
     avoid a config<->flags import cycle.
     """
-    from .flags import flag_bool
+    from .flags import flag_profile_bool
 
     source = os.environ if env is None else env
-    return flag_bool(MAGI_GOAL_NUDGE_ENABLED_ENV, env=source)
+    return flag_profile_bool(MAGI_GOAL_NUDGE_ENABLED_ENV, env=source)
 
 
 MAGI_PLAN_LEDGER_DURABLE_ENABLED_ENV = "MAGI_PLAN_LEDGER_DURABLE_ENABLED"
@@ -2411,10 +2411,10 @@ def is_plan_ledger_durable_enabled(env: Mapping[str, str] | None = None) -> bool
     with a ``False`` default and the same strict-truthy parser. Imported lazily
     to avoid a config<->flags import cycle.
     """
-    from .flags import flag_bool
+    from .flags import flag_profile_bool
 
     source = os.environ if env is None else env
-    return flag_bool(MAGI_PLAN_LEDGER_DURABLE_ENABLED_ENV, env=source)
+    return flag_profile_bool(MAGI_PLAN_LEDGER_DURABLE_ENABLED_ENV, env=source)
 
 
 MAGI_GOAL_COMPLETION_EVIDENCE_FIRST_ENABLED_ENV = (
@@ -2447,10 +2447,10 @@ def is_goal_completion_evidence_first_enabled(
     is registered with a ``False`` default and the same strict-truthy parser.
     Imported lazily to avoid a config<->flags import cycle.
     """
-    from .flags import flag_bool
+    from .flags import flag_profile_bool
 
     source = os.environ if env is None else env
-    return flag_bool(MAGI_GOAL_COMPLETION_EVIDENCE_FIRST_ENABLED_ENV, env=source)
+    return flag_profile_bool(MAGI_GOAL_COMPLETION_EVIDENCE_FIRST_ENABLED_ENV, env=source)
 
 
 MAGI_GOAL_NUDGE_REQUIRED_EVIDENCE_ENV = "MAGI_GOAL_NUDGE_REQUIRED_EVIDENCE"
@@ -2534,10 +2534,10 @@ def is_facts_replan_enabled(env: Mapping[str, str] | None = None) -> bool:
     a ``False`` default and the same strict-truthy parser. Imported lazily to
     avoid a config<->flags import cycle.
     """
-    from .flags import flag_bool
+    from .flags import flag_profile_bool
 
     source = os.environ if env is None else env
-    return flag_bool(MAGI_FACTS_REPLAN_ENABLED_ENV, env=source)
+    return flag_profile_bool(MAGI_FACTS_REPLAN_ENABLED_ENV, env=source)
 
 
 def parse_facts_replan_env(env: Mapping[str, str] | None = None):
@@ -2578,10 +2578,10 @@ def is_step_decomposition_enabled(env: Mapping[str, str] | None = None) -> bool:
     convention (A/B evidence gates any default flip). Imported lazily to avoid a
     config<->flags import cycle.
     """
-    from .flags import flag_bool
+    from .flags import flag_profile_bool
 
     source = os.environ if env is None else env
-    return flag_bool(MAGI_STEP_DECOMPOSITION_ENABLED_ENV, env=source)
+    return flag_profile_bool(MAGI_STEP_DECOMPOSITION_ENABLED_ENV, env=source)
 
 
 MAGI_USER_HOOKS_ENABLED_ENV = "MAGI_USER_HOOKS_ENABLED"
@@ -2608,10 +2608,10 @@ def is_user_hooks_enabled(env: Mapping[str, str] | None = None) -> bool:
     ``False`` default and the same strict-truthy parser. Imported lazily to
     avoid a config<->flags import cycle.
     """
-    from .flags import flag_bool
+    from .flags import flag_profile_bool
 
     source = os.environ if env is None else env
-    return flag_bool(MAGI_USER_HOOKS_ENABLED_ENV, env=source)
+    return flag_profile_bool(MAGI_USER_HOOKS_ENABLED_ENV, env=source)
 
 
 MAGI_DASHBOARD_PACK_AUTHORING_ENABLED_ENV = "MAGI_DASHBOARD_PACK_AUTHORING_ENABLED"
@@ -2673,10 +2673,10 @@ def is_tool_synthesis_nudge_enabled(env: Mapping[str, str] | None = None) -> boo
     registered with a ``False`` default and the same strict-truthy parser.
     Imported lazily to avoid a config<->flags import cycle.
     """
-    from .flags import flag_bool
+    from .flags import flag_profile_bool
 
     source = os.environ if env is None else env
-    return flag_bool(MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED_ENV, env=source)
+    return flag_profile_bool(MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED_ENV, env=source)
 
 
 MAGI_RECIPE_ROUTING_LLM_ENABLED_ENV = "MAGI_RECIPE_ROUTING_LLM_ENABLED"
@@ -3942,10 +3942,10 @@ def code_action_enabled(env: Mapping[str, str] | None = None) -> bool:
     """
     # Delegate to the canonical config.flags registry. Imported lazily to
     # avoid a config<->flags import cycle.
-    from .flags import flag_bool
+    from .flags import flag_profile_bool
 
     source = os.environ if env is None else env
-    return flag_bool(MAGI_CODE_ACTION_ENABLED_ENV, env=source)
+    return flag_profile_bool(MAGI_CODE_ACTION_ENABLED_ENV, env=source)
 
 
 MAGI_PERSISTENT_PYTHON_ENABLED_ENV = "MAGI_PERSISTENT_PYTHON_ENABLED"
@@ -3965,10 +3965,10 @@ def persistent_python_enabled(env: Mapping[str, str] | None = None) -> bool:
     ``code_action_enabled`` this is an additive, default-disabled seam and
     deliberately does NOT follow the runtime-profile default-ON convention.
     """
-    from .flags import flag_bool
+    from .flags import flag_profile_bool
 
     source = os.environ if env is None else env
-    return flag_bool(MAGI_PERSISTENT_PYTHON_ENABLED_ENV, env=source)
+    return flag_profile_bool(MAGI_PERSISTENT_PYTHON_ENABLED_ENV, env=source)
 
 
 MAGI_USER_TOOL_PACKS_ENABLED_ENV = "MAGI_USER_TOOL_PACKS_ENABLED"
@@ -3987,10 +3987,10 @@ def user_tool_packs_enabled(env: Mapping[str, str] | None = None) -> bool:
     ``persistent_python_enabled`` this is an additive, default-disabled seam and
     deliberately does NOT follow the runtime-profile default-ON convention.
     """
-    from .flags import flag_bool
+    from .flags import flag_profile_bool
 
     source = os.environ if env is None else env
-    return flag_bool(MAGI_USER_TOOL_PACKS_ENABLED_ENV, env=source)
+    return flag_profile_bool(MAGI_USER_TOOL_PACKS_ENABLED_ENV, env=source)
 
 
 MAGI_USER_VALIDATOR_PACKS_ENABLED_ENV = "MAGI_USER_VALIDATOR_PACKS_ENABLED"
@@ -4010,10 +4010,10 @@ def user_validator_packs_enabled(env: Mapping[str, str] | None = None) -> bool:
     default-disabled seam and deliberately does NOT follow the runtime-profile
     default-ON convention.
     """
-    from .flags import flag_bool
+    from .flags import flag_profile_bool
 
     source = os.environ if env is None else env
-    return flag_bool(MAGI_USER_VALIDATOR_PACKS_ENABLED_ENV, env=source)
+    return flag_profile_bool(MAGI_USER_VALIDATOR_PACKS_ENABLED_ENV, env=source)
 
 
 MAGI_USER_EVIDENCE_PACKS_ENABLED_ENV = "MAGI_USER_EVIDENCE_PACKS_ENABLED"
@@ -4036,10 +4036,10 @@ def user_evidence_packs_enabled(env: Mapping[str, str] | None = None) -> bool:
     additive, default-disabled seam and deliberately does NOT follow the
     runtime-profile default-ON convention.
     """
-    from .flags import flag_bool
+    from .flags import flag_profile_bool
 
     source = os.environ if env is None else env
-    return flag_bool(MAGI_USER_EVIDENCE_PACKS_ENABLED_ENV, env=source)
+    return flag_profile_bool(MAGI_USER_EVIDENCE_PACKS_ENABLED_ENV, env=source)
 
 
 MAGI_RECIPE_AS_CODE_ENABLED_ENV = "MAGI_RECIPE_AS_CODE_ENABLED"
@@ -4063,10 +4063,10 @@ def recipe_as_code_enabled(env: Mapping[str, str] | None = None) -> bool:
     ``user_evidence_packs_enabled`` this is additive, default-disabled, and
     deliberately does NOT follow the runtime-profile default-ON convention.
     """
-    from .flags import flag_bool
+    from .flags import flag_profile_bool
 
     source = os.environ if env is None else env
-    return flag_bool(MAGI_RECIPE_AS_CODE_ENABLED_ENV, env=source)
+    return flag_profile_bool(MAGI_RECIPE_AS_CODE_ENABLED_ENV, env=source)
 
 
 MAGI_PACK_CAPABILITY_ENFORCEMENT_ENABLED_ENV = (

@@ -258,7 +258,6 @@ EVAL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
 LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     "MAGI_BROWSER_TOOL_ENABLED",
     "MAGI_CHILD_MEMORY_INHERIT_ENABLED",
-    "MAGI_CODE_ACTION_ENABLED",
     "MAGI_CODING_REPAIR_LOOP_ENABLED",
     "MAGI_COMPACTION_ANCHORED_SUMMARY_ENABLED",
     "MAGI_COMPACTION_MANUAL_ENABLED",
@@ -429,7 +428,6 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     # guard apply_evidence_hedge_pairing_guard) so the verification flag is never
     # in effect without this hedge flag, i.e. lab hedges instead of hard-refusing.
     "MAGI_EVIDENCE_HEDGE_ON_GUESS_ENABLED",
-    "MAGI_FACTS_REPLAN_ENABLED",
     "MAGI_FACT_GROUNDING_VERIFICATION_ENABLED",
     # WS6 PR6b: enable the otherwise-disabled live-finalizer FinalOutputGate for
     # opted-in recipes on the engine path (gate evaluates live, not "skipped").
@@ -456,7 +454,6 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     "MAGI_MEMORY_WRITE_ENABLED",
     "MAGI_MULTI_FILE_JOIN_ENABLED",
     "MAGI_OBSERVABILITY_ENABLED",
-    "MAGI_PERSISTENT_PYTHON_ENABLED",
     "MAGI_RECIPE_ROUTING_LLM_ENABLED",
     "MAGI_RESEARCH_FACT_GUIDANCE_ENABLED",
     # WS6 PR6a: soft research-governance notice (promote the hard research
@@ -480,10 +477,8 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     # is missing so the runtime degrades to the existing behavior.
     "MAGI_SHACL_VERIFIER_ENABLED",
     "MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED",
-    "MAGI_STEP_DECOMPOSITION_ENABLED",
     "MAGI_SUBAGENT_GOVERNED_TURN_ENABLED",
     "MAGI_SUBAGENT_TOOL_TIGHTEN_ONLY_ENABLED",
-    "MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED",
     "MAGI_WORKER_ROUTING_LLM_ENABLED",
 )
 

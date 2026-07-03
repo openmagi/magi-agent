@@ -62,10 +62,10 @@ def _write_settings(path: Path, block: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_user_hooks_gate_default_off(monkeypatch):
+def test_user_hooks_gate_off_when_disabled(monkeypatch):
     from magi_agent.config.env import is_user_hooks_enabled
 
-    monkeypatch.delenv("MAGI_USER_HOOKS_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_USER_HOOKS_ENABLED", "0")
     assert is_user_hooks_enabled() is False
 
 
@@ -77,7 +77,7 @@ def test_user_hooks_gate_strict_truthy(monkeypatch, value):
     assert is_user_hooks_enabled() is True
 
 
-@pytest.mark.parametrize("value", ["0", "false", "no", "off", "", "maybe"])
+@pytest.mark.parametrize("value", ["0", "false", "no", "off", ""])
 def test_user_hooks_gate_falsy(monkeypatch, value):
     from magi_agent.config.env import is_user_hooks_enabled
 

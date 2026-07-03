@@ -21,8 +21,10 @@ from magi_agent.cli.tool_runtime import build_cli_instruction, step_decompositio
 # ---------------------------------------------------------------------------
 # Env gate — strict default-OFF truthy opt-in
 # ---------------------------------------------------------------------------
-def test_gate_default_off_when_unset() -> None:
-    assert is_step_decomposition_enabled(env={}) is False
+def test_gate_off_when_disabled() -> None:
+    assert is_step_decomposition_enabled(
+        env={MAGI_STEP_DECOMPOSITION_ENABLED_ENV: "0"}
+    ) is False
 
 
 @pytest.mark.parametrize("value", ["1", "true", "yes", "on", "TRUE", "On"])
@@ -32,7 +34,7 @@ def test_gate_on_for_truthy_values(value: str) -> None:
     ) is True
 
 
-@pytest.mark.parametrize("value", ["0", "false", "no", "off", "", "maybe"])
+@pytest.mark.parametrize("value", ["0", "false", "no", "off", ""])
 def test_gate_off_for_falsy_values(value: str) -> None:
     assert is_step_decomposition_enabled(
         env={MAGI_STEP_DECOMPOSITION_ENABLED_ENV: value}
@@ -40,14 +42,18 @@ def test_gate_off_for_falsy_values(value: str) -> None:
 
 
 def test_gate_registered_in_flags_registry() -> None:
-    from magi_agent.config.flags import FLAGS, flag_bool
+    from magi_agent.config.flags import FLAGS, flag_profile_bool
 
     names = {spec.name for spec in FLAGS}
     assert MAGI_STEP_DECOMPOSITION_ENABLED_ENV in names
-    # The gate delegates to flag_bool, so the registry and the gate agree.
-    assert flag_bool(MAGI_STEP_DECOMPOSITION_ENABLED_ENV, env={}) is False
+    # The gate delegates to flag_profile_bool (profile-aware default-ON), so the
+    # registry and the gate agree.
+    assert flag_profile_bool(
+        MAGI_STEP_DECOMPOSITION_ENABLED_ENV,
+        env={MAGI_STEP_DECOMPOSITION_ENABLED_ENV: "0"},
+    ) is False
     assert (
-        flag_bool(MAGI_STEP_DECOMPOSITION_ENABLED_ENV, env={
+        flag_profile_bool(MAGI_STEP_DECOMPOSITION_ENABLED_ENV, env={
             MAGI_STEP_DECOMPOSITION_ENABLED_ENV: "1"
         })
         is True
@@ -58,7 +64,9 @@ def test_gate_registered_in_flags_registry() -> None:
 # step_decomposition_block — standalone helper (mirrors eval_autonomy_block)
 # ---------------------------------------------------------------------------
 def test_block_empty_when_off() -> None:
-    assert step_decomposition_block(env={}) == ""
+    assert step_decomposition_block(
+        env={MAGI_STEP_DECOMPOSITION_ENABLED_ENV: "0"}
+    ) == ""
 
 
 def test_block_present_when_on_and_general_not_gaia() -> None:
@@ -79,7 +87,7 @@ def test_block_present_when_on_and_general_not_gaia() -> None:
 # build_cli_instruction — OFF path byte-identity + ON path injection
 # ---------------------------------------------------------------------------
 def test_build_cli_instruction_off_has_no_decomposition_block(monkeypatch) -> None:
-    monkeypatch.delenv(MAGI_STEP_DECOMPOSITION_ENABLED_ENV, raising=False)
+    monkeypatch.setenv(MAGI_STEP_DECOMPOSITION_ENABLED_ENV, "0")
     instruction = build_cli_instruction(session_id="s1", model="claude-sonnet-4-6")
     assert "<step_decomposition>" not in instruction
 
@@ -100,7 +108,7 @@ def test_build_cli_instruction_off_is_byte_identical_to_baseline(monkeypatch) ->
         text = re.sub(r"\d{2}:\d{2}:\d{2}\.\d{3}Z", "TS", text)
         return re.sub(r"(runtime_local_time: )\d{2}:\d{2}:\d{2}", r"\1TS", text)
 
-    monkeypatch.delenv(MAGI_STEP_DECOMPOSITION_ENABLED_ENV, raising=False)
+    monkeypatch.setenv(MAGI_STEP_DECOMPOSITION_ENABLED_ENV, "0")
     off = normalize_runtime_clock(
         build_cli_instruction(session_id="s1", model="claude-sonnet-4-6")
     )
@@ -108,8 +116,8 @@ def test_build_cli_instruction_off_is_byte_identical_to_baseline(monkeypatch) ->
     # The decomposition block contributes nothing when OFF — so the OFF
     # instruction is byte-identical to the instruction with the empty block
     # explicitly appended (the guarded-append no-op).
-    assert step_decomposition_block(env={}) == ""
-    monkeypatch.delenv(MAGI_STEP_DECOMPOSITION_ENABLED_ENV, raising=False)
+    assert step_decomposition_block(env={MAGI_STEP_DECOMPOSITION_ENABLED_ENV: "0"}) == ""
+    monkeypatch.setenv(MAGI_STEP_DECOMPOSITION_ENABLED_ENV, "0")
     off2 = normalize_runtime_clock(
         build_cli_instruction(session_id="s1", model="claude-sonnet-4-6")
     )
@@ -153,7 +161,9 @@ def test_gaia_constant_is_unchanged_and_has_no_gated_text() -> None:
 def test_gaia_block_empty_when_off() -> None:
     from benchmarks.gaia.answer import gaia_step_decomposition_block
 
-    assert gaia_step_decomposition_block(env={}) == ""
+    assert gaia_step_decomposition_block(
+        env={MAGI_STEP_DECOMPOSITION_ENABLED_ENV: "0"}
+    ) == ""
 
 
 def test_gaia_block_present_when_on() -> None:
@@ -168,7 +178,7 @@ def test_gaia_block_present_when_on() -> None:
 
 def test_gaia_harness_instruction_off_has_no_block(monkeypatch) -> None:
     """When OFF the harness instruction is the constant + question only."""
-    monkeypatch.delenv(MAGI_STEP_DECOMPOSITION_ENABLED_ENV, raising=False)
+    monkeypatch.setenv(MAGI_STEP_DECOMPOSITION_ENABLED_ENV, "0")
     from benchmarks.gaia.answer import GAIA_SYSTEM_PROMPT, gaia_step_decomposition_block
 
     assert gaia_step_decomposition_block() == ""

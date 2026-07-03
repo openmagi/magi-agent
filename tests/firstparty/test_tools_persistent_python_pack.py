@@ -252,7 +252,7 @@ def test_live_catalog_discovers_persistent_python_and_harness() -> None:
 
 
 def test_cli_build_path_omits_tool_when_gate_off(monkeypatch) -> None:
-    monkeypatch.delenv("MAGI_PERSISTENT_PYTHON_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_PERSISTENT_PYTHON_ENABLED", "0")
     from magi_agent.cli.tool_runtime import build_cli_tool_runtime
 
     runtime = build_cli_tool_runtime(workspace_root="/tmp", session_id="s-off")

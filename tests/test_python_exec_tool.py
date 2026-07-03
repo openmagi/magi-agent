@@ -81,14 +81,14 @@ def _run(
 # ---------------------------------------------------------------------------
 
 
-def test_flag_helper_default_off() -> None:
-    assert code_action_enabled(env={}) is False
+def test_flag_helper_off_when_disabled() -> None:
+    assert code_action_enabled(env={"MAGI_CODE_ACTION_ENABLED": "0"}) is False
 
 
-def test_flag_helper_off_even_in_full_profile() -> None:
-    # Strict opt-in: unlike profile flags, the full runtime profile must NOT
-    # turn the seam on.
-    assert code_action_enabled(env={"MAGI_RUNTIME_PROFILE": "full"}) is False
+def test_flag_helper_off_under_safe_profile() -> None:
+    # Profile-aware default-ON (_pb): a safe runtime profile walks the seam back
+    # off even without an explicit "0".
+    assert code_action_enabled(env={"MAGI_RUNTIME_PROFILE": "safe"}) is False
 
 
 def test_flag_helper_on_when_set() -> None:
@@ -103,7 +103,7 @@ def test_python_exec_absent_from_runtime_by_default(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.delenv("MAGI_CODE_ACTION_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_CODE_ACTION_ENABLED", "0")
     from magi_agent.cli.tool_runtime import build_cli_tool_runtime
 
     runtime = build_cli_tool_runtime(workspace_root=str(tmp_path))
@@ -115,7 +115,7 @@ def test_python_exec_absent_from_instruction_by_default(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.delenv("MAGI_CODE_ACTION_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_CODE_ACTION_ENABLED", "0")
     from magi_agent.cli.tool_runtime import build_cli_instruction
 
     instruction = build_cli_instruction(

@@ -181,16 +181,17 @@ def _control_names(plane) -> list[str]:
 
 class TestPlaneWiring:
     def test_flag_off_no_control_registered(self) -> None:
+        # Promoted _b -> _pb: unset now resolves ON, so disable explicitly.
         plane = build_default_plane(
-            os_environ={}, tool_synthesis_model_label=_FRONTIER_LABEL
+            os_environ={_FLAG: "0"}, tool_synthesis_model_label=_FRONTIER_LABEL
         )
         assert TOOL_SYNTHESIS_NUDGE_PLUGIN_NAME not in _control_names(plane)
 
     def test_flag_off_plane_identical_to_no_label(self) -> None:
-        # Hard requirement: flag OFF (default) == ZERO behavior change.
-        without_label = build_default_plane(os_environ={})
+        # Hard requirement: flag OFF == ZERO behavior change.
+        without_label = build_default_plane(os_environ={_FLAG: "0"})
         with_label = build_default_plane(
-            os_environ={}, tool_synthesis_model_label=_FRONTIER_LABEL
+            os_environ={_FLAG: "0"}, tool_synthesis_model_label=_FRONTIER_LABEL
         )
         assert _control_names(with_label) == _control_names(without_label)
 

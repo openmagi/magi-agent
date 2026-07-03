@@ -25,8 +25,8 @@ from magi_agent.cli.goal_nudge_wiring import build_goal_nudge_from_env
 from magi_agent.runtime.goal_nudge import GoalNudge
 
 
-def test_disabled_by_default_returns_none() -> None:
-    assert build_goal_nudge_from_env(env={}) is None
+def test_disabled_when_off_returns_none() -> None:
+    assert build_goal_nudge_from_env(env={"MAGI_GOAL_NUDGE_ENABLED": "0"}) is None
 
 
 @pytest.mark.parametrize("falsy", ["0", "false", "no", "off", "  Off  ", ""])
@@ -94,7 +94,7 @@ def test_goal_text_from_env() -> None:
 
 
 def test_default_env_is_os_environ(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("MAGI_GOAL_NUDGE_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_GOAL_NUDGE_ENABLED", "0")
     assert build_goal_nudge_from_env() is None
     monkeypatch.setenv("MAGI_GOAL_NUDGE_ENABLED", "1")
     nudge = build_goal_nudge_from_env()
@@ -119,7 +119,7 @@ def test_build_headless_runtime_injects_goal_nudge(
 def test_build_headless_runtime_off_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
     from magi_agent.cli.wiring import build_headless_runtime
 
-    monkeypatch.delenv("MAGI_GOAL_NUDGE_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_GOAL_NUDGE_ENABLED", "0")
 
     rt = build_headless_runtime(runner=object())
     assert rt.engine._goal_nudge is None

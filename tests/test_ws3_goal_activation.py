@@ -36,7 +36,7 @@ from magi_agent.config.env import (
     is_plan_ledger_durable_enabled,
     read_goal_required_evidence,
 )
-from magi_agent.config.flags import flag_bool
+from magi_agent.config.flags import flag_bool, flag_profile_bool
 from magi_agent.runtime.local_defaults import (
     apply_local_eval_runtime_defaults,
     apply_local_full_runtime_defaults,
@@ -154,9 +154,11 @@ def test_full_profile_does_not_force_required_evidence(hermetic_env: None) -> No
     # evidence branch is reached ONLY when a recipe declares it.
     assert _REQUIRED_EVIDENCE_FLAG not in env
     assert read_goal_required_evidence(env) == ()
-    # Subsystem A (the synthetic nudge) is also never activated by WS3.
+    # WS3 itself never SETS the synthetic-nudge flag; MAGI_GOAL_NUDGE_ENABLED was
+    # promoted to profile-aware default-ON (_pb), so its activation now follows
+    # the full-profile default rather than being wired by WS3.
     assert _NUDGE_FLAG not in env
-    assert is_goal_nudge_enabled(env) is False
+    assert is_goal_nudge_enabled(env) is True
 
 
 @pytest.mark.parametrize("profile", ["safe", "off", "minimal", "conservative"])
@@ -165,7 +167,14 @@ def test_safe_profile_keeps_ws3_off(hermetic_env: None, profile: str) -> None:
     apply_local_full_runtime_defaults(env)
     for flag in (_LEDGER_FLAG, _EVIDENCE_FIRST_FLAG, _GOAL_LOOP_FLAG):
         assert flag not in env, f"{profile}:{flag}"
-        assert flag_bool(flag, env=env) is False, f"{profile}:{flag}"
+        # The two WS3 flags are profile-aware default-ON (_pb) and read False
+        # under a safe profile; the cost-bearing loop stays a strict bool.
+        reader = (
+            flag_profile_bool
+            if flag in (_LEDGER_FLAG, _EVIDENCE_FIRST_FLAG)
+            else flag_bool
+        )
+        assert reader(flag, env=env) is False, f"{profile}:{flag}"
     assert is_plan_ledger_durable_enabled(env) is False, profile
     assert is_goal_completion_evidence_first_enabled(env) is False, profile
 

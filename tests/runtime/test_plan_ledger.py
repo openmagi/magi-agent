@@ -71,8 +71,8 @@ class _FakeDurableStore:
 # ---------------------------------------------------------------------------
 
 
-def test_flag_defaults_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv(_FLAG, raising=False)
+def test_flag_off_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(_FLAG, "0")
     assert is_plan_ledger_durable_enabled() is False
 
 
@@ -446,7 +446,7 @@ def test_live_path_restores_todos_across_turn_builds(
 def test_off_flag_is_byte_identical(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delenv(_FLAG, raising=False)
+    monkeypatch.setenv(_FLAG, "0")
     _patch_real_runner_build(monkeypatch)
     from magi_agent.cli.wiring import _build_default_runner, _plan_ledger_handler_set
 
