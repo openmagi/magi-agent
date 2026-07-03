@@ -302,7 +302,19 @@ class RuntimePermissionArbiter:
         mode: RuntimeMode,
     ) -> RuntimeSafetyDecision:
         scope = _resolve_scope(context, runtime_mode=mode)
+        return _apply_bypass_preapproval(
+            self._decide_scoped(manifest, arguments, mode=mode, scope=scope),
+            scope,
+        )
 
+    def _decide_scoped(
+        self,
+        manifest: ToolManifest,
+        arguments: dict[str, object],
+        *,
+        mode: RuntimeMode,
+        scope: dict[str, object],
+    ) -> RuntimeSafetyDecision:
         if manifest.name in {"Bash", "TestRun"}:
             return _shell_decision(manifest, arguments, mode=mode, scope=scope)
         if manifest.name == "SafeCommand":
@@ -1282,6 +1294,62 @@ def _selected_full_toolhost_scope(scope: dict[str, object]) -> bool:
     return (
         _scope_mode(scope) == "selected_full_toolhost"
         and str(scope.get("source", "builtin")) == "selected_full_toolhost"
+    )
+
+
+def _bypass_scope(scope: dict[str, object]) -> bool:
+    """True for an explicit ``bypass`` scope (``--permission-mode bypassPermissions``).
+
+    Parallels :func:`magi_agent.tools.permission.bypass_preapproved`, which is
+    otherwise unreachable for approval-class calls: ``permission.decide`` honors
+    safety's ``ask`` before the bypass rescue, so without this an explicit bypass
+    could never bypass workspace-write / complex-shell approvals.
+    """
+    return _scope_mode(scope) == "bypass"
+
+
+# Approval-class ``ask`` reasons that an explicit ``bypass`` scope preapproves.
+# Deliberately EXCLUDES ``network_command_requires_approval`` (network egress
+# keeps asking even under bypass, matching selected_full_toolhost) and every
+# hard-safety DENY reason (denies are ``action="deny"`` and never reach here).
+_BYPASS_PREAPPROVABLE_ASK_REASONS = frozenset(
+    {
+        "workspace_mutation_requires_approval",
+        "patch_workspace_mutation_requires_approval",
+        "complex_shell_requires_approval",
+    }
+)
+
+
+def _apply_bypass_preapproval(
+    decision: RuntimeSafetyDecision,
+    scope: dict[str, object],
+) -> RuntimeSafetyDecision:
+    """Upgrade an approval-class ``ask`` to ``allow`` under an explicit bypass.
+
+    Only fires when the scope is an explicit ``bypass`` AND the decision is an
+    ``ask`` carrying a preapprovable reason. Hard-safety denies (``action="deny"``)
+    and network asks are returned unchanged. ``securityPrecheck`` is already
+    ``"passed"`` on any non-deny decision, so no precheck is skipped.
+    """
+    if decision.action != "ask" or not _bypass_scope(scope):
+        return decision
+    reasons = set(decision.metadata.get("reasonCodes", ()))
+    if not (reasons & _BYPASS_PREAPPROVABLE_ASK_REASONS):
+        return decision
+    metadata = dict(decision.metadata)
+    metadata["bypassPreapproved"] = True
+    metadata["reason"] = "bypass permissions preapproved"
+    metadata["reasonCodes"] = tuple(decision.metadata.get("reasonCodes", ())) + (
+        "bypass_workspace_mutation_preapproved",
+    )
+    metadata["securityPrecheck"] = "passed"
+    # A control request only makes sense for an ask; drop it on the upgrade.
+    metadata.pop("controlRequest", None)
+    return RuntimeSafetyDecision(
+        action="allow",
+        reason="bypass permissions preapproved",
+        metadata=metadata,
     )
 
 
