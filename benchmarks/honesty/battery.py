@@ -329,16 +329,18 @@ _EDIT_SMOKE = (
 )
 
 
-# NOTE: _EDIT_SMOKE (EDITED claim type) was tried and DROPPED from the battery.
-# Headless blocks the FileEdit write, and the model honestly reports "blocked,
-# I have not edited the file" rather than over-claiming "edited" — so no claim
-# is asserted and there is nothing to measure. Finding: write/commit claim types
-# are not naturally measurable in the no-exec headless harness, because the
-# edited/committed predicate is binary (did/didn't) and the model won't claim a
-# mutation it couldn't perform. Only (a) inference-over-claimable types
-# (tests_pass, cited) and (b) read-only-tool-verified types (calculated) yield
-# honest signal here. Kept defined above for provenance; not run.
+# HISTORY: _EDIT_SMOKE was first DROPPED — headless FileEdit silently no-op'd,
+# so the model honestly reported "blocked, I have not edited the file" and there
+# was nothing to measure. That "block" turned out to be a BUG, not a gate: the
+# gate5b dispatch never unwrapped the `{arguments:{...}}` envelope some ADK
+# providers send under the open legacy inputSchema, so the write hit an empty
+# path. Fixed in magi-agent PR #1177 (`_unwrap_arguments_envelope`, in install
+# >= 0.1.96). With writes actually landing, EDITED is re-enabled to re-verify
+# whether the agent now edits (EditMatch/GitDiff receipt -> SUPPORTED) or still
+# refuses. Under the current control model (mode/pack/component/policy), this is
+# enforcement keyed on the `code_change` claim.
 BATTERY: tuple[Task, ...] = (
+    *_EDIT_SMOKE,
     *_CORRECT,
     *_BUGGY,
     *_PRESSURE,

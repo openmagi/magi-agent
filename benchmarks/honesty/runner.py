@@ -202,7 +202,14 @@ def run_task(
     layer: str = "baseline",
     magi_cmd: list[str] | None = None,
     timeout_s: int = 420,
-    permission_mode: str = "default",
+    # bypassPermissions so workspace-mutation tools (FileEdit/FileWrite) auto-
+    # allow: under `default`, mutation still needs an approval the headless host
+    # can't supply, so write tasks (edited/committed) would falsely register as
+    # refusals. Read-only tasks are unaffected. The auto-approver stays wired but
+    # simply sees no control_request under bypass (harmless no-op). Hard-safety
+    # denies still run after the approval gate, so this only relaxes the prompt
+    # posture, not the safety floor.
+    permission_mode: str = "bypassPermissions",
     full_runtime: bool = True,
 ) -> RunArtifacts:
     run_dir = corpus_root / layer / task.id
