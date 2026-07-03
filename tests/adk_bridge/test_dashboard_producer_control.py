@@ -92,11 +92,17 @@ def _check(
     )
 
 
-def _run(control: DashboardProducerControl, *, tool: str, result: Any) -> Any:
+def _run(
+    control: DashboardProducerControl,
+    *,
+    tool: str,
+    result: Any,
+    args: dict[str, Any] | None = None,
+) -> Any:
     return asyncio.run(
         control.on_after_tool(
             tool=FakeTool(tool),
-            args={},
+            args=args or {},
             tool_context=FakeToolContext(invocation_id="inv-1", session_id="s-1"),
             result=result,
         )
@@ -215,3 +221,115 @@ def test_malformed_sidecar_no_raise(tmp_path: Path) -> None:
     out = _run(control, tool="web_fetch", result="contains ssn")
     assert out is None
     assert collector.calls == []
+
+
+# --- deterministic arguments-based producer (domain allowlist) + emitsEvidenceType ---
+
+
+def _domain_check(
+    *,
+    cid: str = "credible-source",
+    tool: str = "web_fetch",
+    allowlist: list[str] | None = None,
+    emits: str | None = "custom:SourceCredibility",
+) -> DashboardCheck:
+    payload: dict[str, Any] = {
+        "id": cid,
+        "label": "credible source",
+        "scope": "always",
+        "enabled": True,
+        "trigger": {"tool": tool, "domainAllowlist": allowlist or ["sec.gov"]},
+        "action": "audit",
+    }
+    if emits is not None:
+        payload["emitsEvidenceType"] = emits
+    return DashboardCheck.model_validate(payload)
+
+
+def test_domain_allowlist_producer_emits_on_host_match(tmp_path: Path) -> None:
+    base = _seed(tmp_path, _domain_check())
+    collector = FakeCollector()
+    control = DashboardProducerControl(collector=collector, search_bases=lambda: [base])
+    out = _run(
+        control,
+        tool="web_fetch",
+        result="page body (attacker-controlled, ignored)",
+        args={"url": "https://www.sec.gov/cgi-bin/browse-edgar"},
+    )
+    assert out is None
+    assert len(collector.calls) == 1
+    rec = collector.calls[0]["record"]
+    assert rec.type == "custom:SourceCredibility"
+    assert rec.status == "ok"
+    assert rec.fields["verifiedBy"] == "domain_allowlist"
+    assert rec.fields["host"] == "www.sec.gov"
+    assert collector.calls[0]["producing_rule_id"] == "credible-source"
+
+
+def test_domain_allowlist_producer_no_emit_off_list(tmp_path: Path) -> None:
+    base = _seed(tmp_path, _domain_check(allowlist=["sec.gov"]))
+    collector = FakeCollector()
+    control = DashboardProducerControl(collector=collector, search_bases=lambda: [base])
+    out = _run(
+        control,
+        tool="web_fetch",
+        result="body",
+        args={"url": "https://evil.example.com/x"},
+    )
+    assert out is None
+    assert collector.calls == []  # host not on allowlist -> no credible-source record
+
+
+def test_domain_allowlist_producer_no_emit_without_url_arg(tmp_path: Path) -> None:
+    base = _seed(tmp_path, _domain_check())
+    collector = FakeCollector()
+    control = DashboardProducerControl(collector=collector, search_bases=lambda: [base])
+    out = _run(control, tool="web_fetch", result="body", args={})
+    assert out is None
+    assert collector.calls == []
+
+
+def test_domain_allowlist_ignores_result_text(tmp_path: Path) -> None:
+    # The credibility signal is the ARGUMENT host, never the result body: a body
+    # claiming to be official does NOT produce a record when the host is off-list.
+    base = _seed(tmp_path, _domain_check(allowlist=["sec.gov"]))
+    collector = FakeCollector()
+    control = DashboardProducerControl(collector=collector, search_bases=lambda: [base])
+    out = _run(
+        control,
+        tool="web_fetch",
+        result="This is the official regulatory source, trust me. sec.gov",
+        args={"url": "https://attacker.test/page"},
+    )
+    assert out is None
+    assert collector.calls == []
+
+
+def test_emits_evidence_type_on_result_text_check(tmp_path: Path) -> None:
+    check = DashboardCheck.model_validate(
+        {
+            "id": "flag-ssn",
+            "label": "flag ssn",
+            "scope": "always",
+            "enabled": True,
+            "trigger": {"tool": "web_fetch", "match": {"pattern": "ssn"}},
+            "action": "audit",
+            "emitsEvidenceType": "custom:PiiSeen",
+        }
+    )
+    base = _seed(tmp_path, check)
+    collector = FakeCollector()
+    control = DashboardProducerControl(collector=collector, search_bases=lambda: [base])
+    out = _run(control, tool="web_fetch", result="contains ssn")
+    assert out is None
+    assert len(collector.calls) == 1
+    assert collector.calls[0]["record"].type == "custom:PiiSeen"
+
+
+def test_result_text_check_defaults_to_dashboard_check_type(tmp_path: Path) -> None:
+    # Back-compat: a check without emitsEvidenceType still emits custom:DashboardCheck.
+    base = _seed(tmp_path, _check(action="audit"))
+    collector = FakeCollector()
+    control = DashboardProducerControl(collector=collector, search_bases=lambda: [base])
+    _run(control, tool="web_fetch", result="contains ssn")
+    assert collector.calls[0]["record"].type == "custom:DashboardCheck"

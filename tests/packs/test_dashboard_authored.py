@@ -331,3 +331,43 @@ def test_recipe_spec_round_trips_through_parse_recipe_manifest(tmp_path: Path) -
     # recipe spec round-trips with empty evidenceRefs.
     assert tuple(parsed.evidence_refs) == ()
     assert validate_external_recipe_pack(parsed) == ""
+
+
+# --- emitsEvidenceType + arguments-based domainAllowlist trigger (2b) ---
+
+
+def test_validate_passes_domain_allowlist_trigger() -> None:
+    check = _ok(
+        trigger={"tool": "web_fetch", "domainAllowlist": ["sec.gov"]},
+        action="audit",
+        emitsEvidenceType="custom:SourceCredibility",
+    )
+    assert validate_dashboard_check(check) == []
+
+
+def test_validate_passes_emits_type_on_result_text() -> None:
+    assert validate_dashboard_check(_ok(emitsEvidenceType="custom:PiiSeen")) == []
+
+
+def test_validate_rejects_bad_emits_type() -> None:
+    errs = validate_dashboard_check(_ok(emitsEvidenceType="source_credibility"))
+    assert any("emitsEvidenceType" in e for e in errs)
+
+
+def test_validate_rejects_trigger_without_match_or_domain() -> None:
+    errs = validate_dashboard_check(_ok(trigger={"tool": "web_fetch"}))
+    assert any("match or a domainAllowlist" in e for e in errs)
+
+
+def test_validate_rejects_empty_domain_allowlist() -> None:
+    errs = validate_dashboard_check(
+        _ok(trigger={"tool": "web_fetch", "domainAllowlist": []})
+    )
+    assert any("domainAllowlist" in e for e in errs)
+
+
+def test_validate_rejects_non_string_domain_allowlist_entry() -> None:
+    errs = validate_dashboard_check(
+        _ok(trigger={"tool": "web_fetch", "domainAllowlist": ["sec.gov", 42]})
+    )
+    assert any("domainAllowlist" in e for e in errs)

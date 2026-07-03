@@ -72,6 +72,10 @@ class DashboardProducerControl(BaseLoopControl):
             if not is_dashboard_pack_authoring_enabled():
                 return None
 
+            from magi_agent.customize.tool_perm import (  # noqa: PLC0415
+                _domain_matches,
+                _host_from_arguments,
+            )
             from magi_agent.evidence.types import EvidenceRecord  # noqa: PLC0415
             from magi_agent.packs.dashboard_authored import (  # noqa: PLC0415
                 DASHBOARD_PACK_DIR_NAME,
@@ -123,24 +127,46 @@ class DashboardProducerControl(BaseLoopControl):
                         continue
                     if check.trigger.tool != tool_name:
                         continue
-                    if not _matches(check.trigger.match, result_text):
-                        continue
+                    evidence_type = check.emits_evidence_type or "custom:DashboardCheck"
+                    fields: dict[str, Any] = {
+                        "evidenceRef": f"evidence:dashboard:{check.id}",
+                        "ruleId": check.id,
+                        "action": check.action,
+                    }
+                    if check.trigger.domain_allowlist:
+                        # Arguments-based deterministic producer: the credibility
+                        # signal is the host the runtime was asked to fetch (the
+                        # argument), NOT the attacker-controlled result text. Emit
+                        # a positive ``ok`` record ONLY when the host is on the
+                        # operator's allowlist, stamped ``verifiedBy`` so a
+                        # consumer can require domain-verified provenance.
+                        host = _host_from_arguments(args or {})
+                        if not host or not any(
+                            _domain_matches(host, d) for d in check.trigger.domain_allowlist
+                        ):
+                            continue
+                        status = "ok"
+                        fields["verifiedBy"] = "domain_allowlist"
+                        fields["host"] = host
+                    else:
+                        # Result-text match (historic, advisory). Never an
+                        # unlock key: a policy gate binds only a deterministic
+                        # (domain-allowlist) producer.
+                        if check.trigger.match is None or not _matches(
+                            check.trigger.match, result_text
+                        ):
+                            continue
+                        status = "failed" if check.action == "block" else "ok"
                     record = EvidenceRecord.model_validate(
                         {
-                            "type": "custom:DashboardCheck",
-                            "status": (
-                                "failed" if check.action == "block" else "ok"
-                            ),
+                            "type": evidence_type,
+                            "status": status,
                             "observedAt": int(time.time() * 1000),
                             "source": {
                                 "kind": "tool_trace",
                                 "toolName": tool_name,
                             },
-                            "fields": {
-                                "evidenceRef": f"evidence:dashboard:{check.id}",
-                                "ruleId": check.id,
-                                "action": check.action,
-                            },
+                            "fields": fields,
                         }
                     )
                     self._collector.append_evidence_record_for_turn(
