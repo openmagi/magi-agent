@@ -167,7 +167,7 @@ async def test_before_llm_call_audit_fires_when_rule_matches(
 
     calls: list[dict] = []
 
-    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         calls.append({"criterion": criterion, "draft_text": draft_text})
         return (True, "ok")
 
@@ -196,7 +196,7 @@ async def test_after_llm_call_audit_fires_when_rule_matches(
 
     calls: list[dict] = []
 
-    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         calls.append({"criterion": criterion, "draft_text": draft_text})
         return (True, "ok")
 
@@ -226,7 +226,7 @@ async def test_before_llm_call_inert_when_master_flag_off(
     monkeypatch.setenv("MAGI_CUSTOMIZE_LLM_CALL_HOOKS_ENABLED", "0")
     set_custom_rule(_before_rule(), path=cfile)
 
-    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         raise AssertionError("judge must not run when master flag is OFF")
 
     monkeypatch.setattr(
@@ -250,7 +250,7 @@ async def test_before_llm_call_budget_exhausted_emits_skip_record(
     cfile = _flags_on(monkeypatch, tmp_path)
     set_custom_rule(_before_rule(), path=cfile)
 
-    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         raise AssertionError(
             "critic must not run when the per-turn budget is exhausted"
         )
@@ -276,7 +276,7 @@ async def test_after_llm_call_budget_exhausted_emits_skip_record(
     cfile = _flags_on(monkeypatch, tmp_path)
     set_custom_rule(_after_rule(), path=cfile)
 
-    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         raise AssertionError("critic must not run when budget is exhausted")
 
     monkeypatch.setattr(
@@ -317,7 +317,7 @@ async def test_before_fan_out_intra_call_budget_caps_at_remaining(
 
     calls: list[dict] = []
 
-    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         calls.append({"criterion": criterion})
         return (True, "ok")
 
@@ -358,7 +358,7 @@ async def test_after_fan_out_intra_call_budget_caps_at_remaining(
 
     calls: list[dict] = []
 
-    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         calls.append({"criterion": criterion})
         return (True, "ok")
 
@@ -397,7 +397,7 @@ async def test_plugin_invokes_critic_under_budget(
 
     calls: list[dict] = []
 
-    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         calls.append({"criterion": criterion, "draft_text": draft_text})
         return (True, "ok")
 
@@ -424,7 +424,7 @@ async def test_plugin_after_model_extracts_response_text(
 
     calls: list[dict] = []
 
-    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         calls.append({"criterion": criterion, "draft_text": draft_text})
         return (True, "ok")
 
@@ -456,7 +456,7 @@ async def test_plugin_budget_exhausts_after_n_invocations(
 
     call_count = {"n": 0}
 
-    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         call_count["n"] += 1
         return (True, "ok")
 
@@ -492,7 +492,7 @@ async def test_plugin_inert_when_master_flag_off(
     set_custom_rule(_before_rule(), path=cfile)
     set_custom_rule(_after_rule(), path=cfile)
 
-    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         raise AssertionError("judge must not run with master flag OFF")
 
     monkeypatch.setattr(
@@ -522,7 +522,7 @@ async def test_plugin_budget_per_turn_isolated(
 
     call_count = {"n": 0}
 
-    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         call_count["n"] += 1
         return (True, "ok")
 

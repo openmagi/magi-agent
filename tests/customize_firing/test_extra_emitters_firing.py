@@ -123,7 +123,7 @@ async def test_before_compaction_audit_fires_when_rule_matches(
 
     calls: list[dict] = []
 
-    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         calls.append({"criterion": criterion, "draft_text": draft_text})
         return (True, "ok")
 
@@ -159,7 +159,7 @@ async def test_before_compaction_audit_inert_when_master_flag_off(
         path=cfile,
     )
 
-    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         raise AssertionError("judge must not run when master flag is OFF")
 
     monkeypatch.setattr(
@@ -179,7 +179,7 @@ async def test_before_compaction_audit_empty_when_no_rule(
 ) -> None:
     _flags_on(monkeypatch, tmp_path)
 
-    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         raise AssertionError("judge must not run when no rule is authored")
 
     monkeypatch.setattr(
@@ -214,7 +214,7 @@ async def test_after_compaction_audit_fires_when_rule_matches(
 
     calls: list[dict] = []
 
-    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         calls.append({"criterion": criterion, "draft_text": draft_text})
         return (True, "ok")
 
@@ -247,7 +247,7 @@ async def test_after_compaction_audit_inert_when_master_flag_off(
         path=cfile,
     )
 
-    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         raise AssertionError("judge must not run when master flag is OFF")
 
     monkeypatch.setattr(
@@ -282,7 +282,7 @@ async def test_task_checkpoint_audit_fires_when_rule_matches(
 
     calls: list[dict] = []
 
-    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         calls.append({"criterion": criterion, "draft_text": draft_text})
         return (True, "ok")
 
@@ -319,7 +319,7 @@ async def test_task_checkpoint_audit_inert_when_master_flag_off(
         path=cfile,
     )
 
-    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         raise AssertionError("judge must not run when master flag is OFF")
 
     monkeypatch.setattr(
@@ -356,7 +356,7 @@ async def test_artifact_created_audit_fires_when_rule_matches(
 
     calls: list[dict] = []
 
-    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         calls.append({"criterion": criterion, "draft_text": draft_text})
         return (True, "ok")
 
@@ -390,7 +390,7 @@ async def test_artifact_created_audit_inert_when_master_flag_off(
         path=cfile,
     )
 
-    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         raise AssertionError("judge must not run when master flag is OFF")
 
     monkeypatch.setattr(

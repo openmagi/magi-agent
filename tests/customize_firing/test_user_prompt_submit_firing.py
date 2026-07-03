@@ -61,7 +61,7 @@ def test_user_prompt_submit_audit_fires_and_records_fail_verdict(
 ) -> None:
     calls: list[dict] = []
 
-    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         calls.append(
             {"criterion": criterion, "draft_text": draft_text}
         )
@@ -96,7 +96,7 @@ def test_user_prompt_submit_audit_fires_and_records_fail_verdict(
 def test_user_prompt_submit_audit_records_pass_verdict(
     cfg: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         return (True, "ok")
 
     monkeypatch.setattr(
@@ -126,7 +126,7 @@ def test_user_prompt_submit_inert_when_master_flag_off(
     monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
     set_custom_rule(_rule(), path=cfile)
 
-    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         raise AssertionError("judge must not be invoked when master flag is OFF")
 
     monkeypatch.setattr(
@@ -153,7 +153,7 @@ def test_user_prompt_submit_inert_when_no_rules_authored(
     monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
     # no set_custom_rule call → empty customize
 
-    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         raise AssertionError("judge must not be invoked when no rules are authored")
 
     monkeypatch.setattr(
@@ -174,7 +174,7 @@ def test_user_prompt_submit_fail_open_when_critic_missing(
 ) -> None:
     """No critic model ⇒ audit short-circuits passed=True (fail-open contract)."""
 
-    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None):
+    async def fail_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
         raise AssertionError("judge must not be invoked when model_factory is None")
 
     monkeypatch.setattr(
