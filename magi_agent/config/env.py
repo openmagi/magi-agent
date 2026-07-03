@@ -2736,10 +2736,10 @@ def is_tool_usage_guidance_enabled(env: Mapping[str, str] | None = None) -> bool
     Delegates to the canonical ``config.flags`` registry (``flag_bool``);
     byte-identical to the previous inline ``_is_true(source.get(...))``.
     """
-    from .flags import flag_bool
+    from .flags import flag_profile_bool
 
     source = os.environ if env is None else env
-    return flag_bool(MAGI_TOOL_USAGE_GUIDANCE_ENABLED_ENV, env=source)
+    return flag_profile_bool(MAGI_TOOL_USAGE_GUIDANCE_ENABLED_ENV, env=source)
 
 
 MAGI_HOSTED_FULL_ACCESS_ENV = "MAGI_HOSTED_FULL_ACCESS"
@@ -2775,10 +2775,10 @@ def is_prompt_examples_enabled(env: Mapping[str, str] | None = None) -> bool:
     Delegates to the canonical ``config.flags`` registry (``flag_bool``);
     byte-identical to the previous inline ``_is_true(source.get(...))``.
     """
-    from .flags import flag_bool
+    from .flags import flag_profile_bool
 
     source = os.environ if env is None else env
-    return flag_bool(MAGI_PROMPT_EXAMPLES_ENABLED_ENV, env=source)
+    return flag_profile_bool(MAGI_PROMPT_EXAMPLES_ENABLED_ENV, env=source)
 
 
 MAGI_PROMPT_SEARCH_RULES_ENABLED_ENV = "MAGI_PROMPT_SEARCH_RULES_ENABLED"
@@ -2812,10 +2812,10 @@ def is_prompt_redflags_enabled(env: Mapping[str, str] | None = None) -> bool:
     Delegates to the canonical ``config.flags`` registry (``flag_bool``);
     byte-identical to the previous inline ``_is_true(source.get(...))``.
     """
-    from .flags import flag_bool
+    from .flags import flag_profile_bool
 
     source = os.environ if env is None else env
-    return flag_bool(MAGI_PROMPT_REDFLAGS_ENABLED_ENV, env=source)
+    return flag_profile_bool(MAGI_PROMPT_REDFLAGS_ENABLED_ENV, env=source)
 
 
 MAGI_RESEARCH_METHODOLOGY_ENABLED_ENV = "MAGI_RESEARCH_METHODOLOGY_ENABLED"
@@ -2831,10 +2831,10 @@ def is_research_methodology_enabled(env: Mapping[str, str] | None = None) -> boo
     Delegates to the canonical ``config.flags`` registry (``flag_bool``);
     byte-identical to the previous inline ``_is_true(source.get(...))``.
     """
-    from .flags import flag_bool
+    from .flags import flag_profile_bool
 
     source = os.environ if env is None else env
-    return flag_bool(MAGI_RESEARCH_METHODOLOGY_ENABLED_ENV, env=source)
+    return flag_profile_bool(MAGI_RESEARCH_METHODOLOGY_ENABLED_ENV, env=source)
 
 
 MAGI_AUTOMATION_METHODOLOGY_ENABLED_ENV = "MAGI_AUTOMATION_METHODOLOGY_ENABLED"
@@ -2850,10 +2850,10 @@ def is_automation_methodology_enabled(env: Mapping[str, str] | None = None) -> b
     Delegates to the canonical ``config.flags`` registry (``flag_bool``);
     byte-identical to the previous inline ``_is_true(source.get(...))``.
     """
-    from .flags import flag_bool
+    from .flags import flag_profile_bool
 
     source = os.environ if env is None else env
-    return flag_bool(MAGI_AUTOMATION_METHODOLOGY_ENABLED_ENV, env=source)
+    return flag_profile_bool(MAGI_AUTOMATION_METHODOLOGY_ENABLED_ENV, env=source)
 
 
 MAGI_CODING_CONTEXT_ENABLED_ENV = "MAGI_CODING_CONTEXT_ENABLED"
@@ -2872,10 +2872,10 @@ def is_coding_context_enabled(env: Mapping[str, str] | None = None) -> bool:
     Delegates to the canonical ``config.flags`` registry (``flag_bool``);
     byte-identical to the previous inline ``_is_true(source.get(...))``.
     """
-    from .flags import flag_bool
+    from .flags import flag_profile_bool
 
     source = os.environ if env is None else env
-    return flag_bool(MAGI_CODING_CONTEXT_ENABLED_ENV, env=source)
+    return flag_profile_bool(MAGI_CODING_CONTEXT_ENABLED_ENV, env=source)
 
 
 def coding_context_file_limit(env: Mapping[str, str] | None = None) -> int | None:

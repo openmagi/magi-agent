@@ -1037,7 +1037,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "read structured files fully, and run joins/dedup programmatically."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_AUTOMATION_METHODOLOGY_ENABLED",
         summary=(
             "Append the <automation_methodology> prompt block (deliverable up "
@@ -1045,7 +1045,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "build_cli_instruction. Guidance-only, not enforcing."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_CODING_CONTEXT_ENABLED",
         summary=(
             "Append the C10 <coding_context> auto-injection prompt block "
@@ -1054,7 +1054,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "provided. Guidance-only, not enforcing."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_PROMPT_EXAMPLES_ENABLED",
         summary=(
             "Append the <action_discipline_examples> prompt block "
@@ -1062,7 +1062,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "in build_cli_instruction."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_PROMPT_REDFLAGS_ENABLED",
         summary=(
             'Append the <red_flags> anti-rationalization prompt block ("this '
@@ -1078,7 +1078,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "tools are available (BRAVE_API_KEY AND FIRECRAWL_API_KEY)."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_RESEARCH_METHODOLOGY_ENABLED",
         summary=(
             "Append the <research_methodology> prompt block (multi-source "
@@ -1086,7 +1086,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "citation discipline) in build_cli_instruction. Guidance-only."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_TOOL_USAGE_GUIDANCE_ENABLED",
         summary=(
             "Synthesize per-tool 'Use when / Do NOT use when' usage-guidance "
