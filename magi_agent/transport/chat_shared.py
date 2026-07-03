@@ -756,3 +756,59 @@ def _int_env(value: object, *, fallback: int) -> int:
 
 def _csv_values(value: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in value.split(",") if item.strip())
+
+from magi_agent.runtime.session_identity import session_key_from_headers
+
+
+# --- pure move out of chat_routes.py (PR-G4) ---
+
+
+def _route_config(runtime: OpenMagiRuntime) -> Gate5BUserVisibleChatRouteConfig:
+    config = getattr(runtime, "gate5b_user_visible_chat_route_config", None)
+    if isinstance(config, Gate5BUserVisibleChatRouteConfig):
+        return config
+    return Gate5BUserVisibleChatRouteConfig()
+
+
+def _route_tool_bundle_names(
+    bundle: Gate1AReadOnlyToolBundle | Gate5BFullToolBundle | None,
+) -> list[str]:
+    if not _route_tool_bundle_ready(bundle):
+        return []
+    return list(bundle.exposed_tool_names)
+
+
+def _route_tool_bundle_mode(
+    bundle: Gate1AReadOnlyToolBundle | Gate5BFullToolBundle | None,
+) -> str:
+    if _route_tool_bundle_full(bundle):
+        return "gate5b_selected_full_toolhost"
+    if _route_tool_bundle_readonly(bundle):
+        return "gate1a_readonly_tools"
+    return "no_route_tools"
+
+
+def _local_chat_string(payload: object, key: str, default: str) -> str:
+    if isinstance(payload, Mapping):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return default
+
+
+def _resolve_session_key(payload: object, request: Request) -> str:
+    """Resolve the canonical chat session key across completions/interrupt/inject.
+
+    The chat-proxy sends the session in the interrupt/inject *body* as
+    ``sessionKey`` and on ``/v1/chat/completions`` via the session-key *header*;
+    both carry the same ``agent:main:app:<channel>`` value, so a turn registered
+    from the completions header is found by an interrupt carrying the body key.
+    ``sessionId`` body fallback preserves local-dashboard callers.
+    """
+    explicit = (
+        _local_chat_string(payload, "sessionKey", "")
+        or _local_chat_string(payload, "sessionId", "")
+    )
+    if explicit:
+        return explicit
+    return session_key_from_headers(request.headers) or ""
