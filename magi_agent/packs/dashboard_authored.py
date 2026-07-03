@@ -92,6 +92,17 @@ class DashboardCheck(BaseModel):
             return None
         from magi_agent.evidence.types import validate_evidence_type_name  # noqa: PLC0415
 
+        # A dashboard-authored producer may only emit an operator-named
+        # ``custom:`` type. Reusing ``validate_evidence_type_name`` alone would
+        # accept trusted builtin names (``TestRun``/``WebSearch``/…), letting a
+        # domain-allowlist producer mint a record typed as a trusted evidence
+        # family (type-confusion into the exact source-credibility signals the
+        # policy stack governs). Restrict to the ``custom:`` namespace here.
+        if not value.startswith("custom:"):
+            raise ValueError(
+                "emitsEvidenceType must be an operator-named custom: type "
+                "(built-in evidence types are runtime-reserved)"
+            )
         return validate_evidence_type_name(value)
 
 
@@ -153,6 +164,14 @@ def validate_dashboard_check(rule: Any) -> list[str]:
 
         if not isinstance(emits_type, str):
             errors.append("emitsEvidenceType must be a string")
+        elif not emits_type.startswith("custom:"):
+            # Only operator-named custom: types (never runtime-reserved builtins);
+            # mirror the DashboardCheck._validate_emits_type restriction so a
+            # domain-allowlist producer cannot mint a trusted-typed record.
+            errors.append(
+                "emitsEvidenceType must be an operator-named custom: type "
+                "(built-in evidence types are runtime-reserved)"
+            )
         else:
             try:
                 validate_evidence_type_name(emits_type)

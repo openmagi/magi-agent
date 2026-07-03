@@ -354,6 +354,20 @@ def test_validate_rejects_bad_emits_type() -> None:
     assert any("emitsEvidenceType" in e for e in errs)
 
 
+def test_validate_rejects_builtin_emits_type() -> None:
+    # A dashboard producer may only emit a custom: type. A trusted builtin name
+    # (e.g. TestRun) must be rejected so a domain-allowlist producer cannot mint
+    # a record typed as a runtime-reserved evidence family (N1, PR-2b review).
+    for builtin in ("TestRun", "WebSearch", "KnowledgeSearch"):
+        errs = validate_dashboard_check(_ok(emitsEvidenceType=builtin))
+        assert any("emitsEvidenceType" in e for e in errs), builtin
+
+
+def test_dashboard_check_model_rejects_builtin_emits_type() -> None:
+    with pytest.raises(ValueError, match="custom:"):
+        DashboardCheck.model_validate(_ok(emitsEvidenceType="TestRun"))
+
+
 def test_validate_rejects_trigger_without_match_or_domain() -> None:
     errs = validate_dashboard_check(_ok(trigger={"tool": "web_fetch"}))
     assert any("match or a domainAllowlist" in e for e in errs)
