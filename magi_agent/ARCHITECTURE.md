@@ -851,6 +851,7 @@ graph LR
 | nl_compiler_interactive.py | Conversational policy compiler — turn-by-turn multi-step variant. | custom_rules, rule_compiler | transport/customize.py |
 | output_rewrite.py | F-MUT2 — ``output_rewrite`` custom_rule kind. | result | (root)/facades.py, customize/custom_rules.py |
 | policies.py | POLICIES: named user-intent units, typed model + customize.json CRUD. | store | customize/scoped_policy.py, transport/customize.py |
+| policy_plan.py | Policy-integrity structural checks (the deterministic core of the review loop). | — | — |
 | prebuilt_components.py | PR-P4: prebuilt (always-on) runtime components catalog. | — | transport/customize.py |
 | preset_map.py | Canonical preset id → runtime-seam map for the Customize verification tab. | seam_apply, seam_spec | customize/catalog.py, customize/seam_apply.py, customize/seam_compiler.py, customize/seam_spec.py, engine/model_runner.py |
 | prompt_injection.py | F-MUT1 — ``prompt_injection`` custom_rule kind. | — | (root)/facades.py, customize/custom_rules.py, runtime/message_builder.py |
