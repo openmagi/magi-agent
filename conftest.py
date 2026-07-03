@@ -46,6 +46,29 @@ def _load_quarantine(manifest: Path) -> dict[str, str]:
     return entries
 
 
+@pytest.fixture(autouse=True)
+def _reap_leaked_python_exec_workers() -> "object":
+    """Kill any PersistentPython / PythonExec worker subprocess a test leaked.
+
+    Those workers run in their own session/process group and block reading stdin
+    forever, so a test that creates one without tearing it down (e.g. a
+    PersistentPython binder never ``close()``-d) leaks a live interpreter per
+    call. Enough of them accumulate to hang the whole suite's process (observed
+    as pytest at 0%% CPU with 30+ orphaned ``python -I -c`` children -> CI job
+    exceeds its wall-clock cap). Reaping after every test keeps the process clean
+    regardless of which owner forgot to close; complements the module-level
+    atexit reaper in ``tools/python_exec_worker`` (which only fires at exit).
+    Import is lazy + fail-soft so tests that never touch the tool are unaffected.
+    """
+    yield
+    try:
+        from magi_agent.tools.python_exec_worker import _reap_live_workers
+
+        _reap_live_workers()
+    except Exception:  # noqa: BLE001 - teardown hygiene must never fail a test
+        pass
+
+
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item]
 ) -> None:
