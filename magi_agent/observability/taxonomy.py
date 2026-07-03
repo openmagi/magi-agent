@@ -3,6 +3,15 @@
 This module defines:
   - NOISE_KINDS: event kinds that are hidden by default in the UI (high-volume,
     low-signal stream events emitted at sub-turn granularity).
+
+    NOISE_KINDS additionally drives storage-tier policy (PR-D4): (1) kind-aware
+    retention - when the event cap is exceeded, noise-kind rows are evicted
+    before any non-noise row, so enforcement events (policy category) outlive
+    token rows inside the max_events budget; (2) noise-kind inserts are
+    commit-batched (bounded loss of at most one batch on process crash). The
+    read-side contract is unchanged: noise kinds are stored, default-hidden in
+    the UI, and toggleable via the /meta ``noise_kinds`` list and the
+    ``exclude_kind`` query API.
   - CATEGORIES: mapping of semantic category name -> list of event kinds within
     that category.  Categories are mutually exclusive groupings of non-noise
     kinds; a kind may appear in more than one category only when it genuinely

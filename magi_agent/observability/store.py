@@ -6,11 +6,19 @@ import re
 import sqlite3
 import threading
 import time
+from collections.abc import Sequence
 from pathlib import Path
 
 from magi_agent.observability.models import ActivityEvent
 
 logger = logging.getLogger(__name__)
+
+#: Noise-kind INSERTs are commit-batched: at most this many noise rows may be
+#: buffered before a commit is forced. Any non-noise insert (and close()) also
+#: flushes the pending noise, so enforcement-audit durability is unchanged; the
+#: only crash-loss window is up to (_NOISE_COMMIT_BATCH - 1) high-volume,
+#: low-signal noise rows.
+_NOISE_COMMIT_BATCH = 50
 
 # Regex used by _payload_has_evidence to detect matched=N in detail strings.
 # Matches the literal "matched=<digits>" embedded in evidence verdict detail
@@ -150,11 +158,16 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
 class ActivityStore:
     """SQLite-backed append-only store. Thread-safe, fail-open at call sites."""
 
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: Path, *, noise_kinds: Sequence[str] | None = None) -> None:
         self._path = Path(db_path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._closed = False
+        # Kinds whose inserts are commit-batched (PR-D4 / N-16). Empty tuple by
+        # default so callers that do not pass noise_kinds are byte-identical to
+        # the pre-batching behavior (every insert commits immediately).
+        self._noise_kinds = frozenset(noise_kinds or ())
+        self._pending_noise_commits = 0
         self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
@@ -179,7 +192,18 @@ class ActivityStore:
                         event.elapsed_ms,
                     ),
                 )
-                self._conn.commit()
+                # Commit batching for noise kinds (PR-D4 / N-16). Same-connection
+                # reads (list_events/count_events/all API) see uncommitted rows,
+                # so the read contract is unchanged; a non-noise insert flushes
+                # the pending noise too, keeping enforcement events durable.
+                if event.kind in self._noise_kinds:
+                    self._pending_noise_commits += 1
+                    if self._pending_noise_commits >= _NOISE_COMMIT_BATCH:
+                        self._conn.commit()
+                        self._pending_noise_commits = 0
+                else:
+                    self._conn.commit()
+                    self._pending_noise_commits = 0
                 return int(cur.lastrowid)
         except Exception:
             logger.debug("activity store record_event failed", exc_info=True)
@@ -318,7 +342,13 @@ class ActivityStore:
             logger.debug("activity store kind_breakdown failed", exc_info=True)
             return {}
 
-    def prune(self, *, max_events: int | None = None, retention_days: int | None = None) -> int:
+    def prune(
+        self,
+        *,
+        max_events: int | None = None,
+        retention_days: int | None = None,
+        noise_kinds: Sequence[str] | None = None,
+    ) -> int:
         if self._closed:
             return 0
         removed = 0
@@ -329,6 +359,27 @@ class ActivityStore:
                     cur = self._conn.execute("DELETE FROM activity_events WHERE ts < ?", (cutoff,))
                     removed += cur.rowcount or 0
                 if max_events is not None:
+                    count = int(
+                        self._conn.execute("SELECT COUNT(*) FROM activity_events").fetchone()[0]
+                    )
+                    excess = count - max_events
+                    # Stage 1 (PR-D4 / N-16): when the cap is exceeded and
+                    # noise kinds are supplied, evict oldest noise-kind rows
+                    # FIRST so enforcement events (policy category) outlive
+                    # token rows inside the max_events budget.
+                    kinds = [k for k in (noise_kinds or ()) if k]
+                    if excess > 0 and kinds:
+                        placeholders = ",".join("?" for _ in kinds)
+                        cur = self._conn.execute(
+                            "DELETE FROM activity_events WHERE id IN "
+                            f"(SELECT id FROM activity_events WHERE kind IN ({placeholders}) "
+                            "ORDER BY id ASC LIMIT ?)",
+                            (*kinds, excess),
+                        )
+                        removed += cur.rowcount or 0
+                    # Stage 2: indiscriminate oldest-first, identical to the
+                    # legacy behavior. When noise_kinds is None this is the only
+                    # stage that runs (byte-identical to the pre-D4 prune).
                     cur = self._conn.execute(
                         "DELETE FROM activity_events WHERE id NOT IN "
                         "(SELECT id FROM activity_events ORDER BY id DESC LIMIT ?)",
@@ -336,6 +387,7 @@ class ActivityStore:
                     )
                     removed += cur.rowcount or 0
                 self._conn.commit()
+                self._pending_noise_commits = 0
         except Exception:
             logger.debug("activity store prune failed", exc_info=True)
         return removed
@@ -452,4 +504,11 @@ class ActivityStore:
             if self._closed:
                 return
             self._closed = True
+            # Flush any commit-batched noise rows before closing (PR-D4 / N-16).
+            if self._pending_noise_commits:
+                try:
+                    self._conn.commit()
+                except Exception:
+                    logger.debug("activity store close flush failed", exc_info=True)
+                self._pending_noise_commits = 0
             self._conn.close()

@@ -9,6 +9,7 @@ from magi_agent.observability.bus import ActivityBus
 from magi_agent.observability.config import ObservabilityConfig
 from magi_agent.observability.projector import project, project_public_event
 from magi_agent.observability.store import ActivityStore
+from magi_agent.observability.taxonomy import NOISE_KINDS
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,9 @@ class ObservabilityCore:
         self._retention_started = False
         if not config.enabled:
             return
-        self.store = ActivityStore(config.db_path)
+        # Pass NOISE_KINDS so the store commit-batches high-volume noise inserts
+        # and prunes them ahead of enforcement events (PR-D4 / N-16).
+        self.store = ActivityStore(config.db_path, noise_kinds=tuple(NOISE_KINDS))
         self.bus = ActivityBus(replay=config.replay_buffer)
         self.router = build_api_router(self.store, self.bus, runtime)
 
@@ -50,6 +53,7 @@ class ObservabilityCore:
                     self.store.prune(
                         max_events=self.config.max_events,
                         retention_days=self.config.retention_days,
+                        noise_kinds=tuple(NOISE_KINDS),
                     )
             except Exception:
                 logger.debug("observability retention prune failed", exc_info=True)

@@ -640,6 +640,29 @@ def _selected_stream_pending_events(
     )
 
 
+#: Per-token delta frames are never deduplicated by content key (PR-D4 /
+#: N-40). Their replay is already guarded by the live_text_emitted /
+#: live_thinking_emitted flags, so keying them would json.dumps(sort_keys=True)
+#: once per token for a key that is provably never looked up.
+_UNKEYED_DELTA_EVENT_TYPES = frozenset({"text_delta", "thinking_delta"})
+
+
+def _selected_stream_event_key(payload: Mapping[str, object]) -> str | None:
+    """Dedup key for a selected-stream public event, or None when the event
+    must not be keyed (PR-D4 / N-40).
+
+    Delta frames return None (dedup handled by the live_*_emitted replay
+    guards). Heartbeat/pending llm_progress frames carry per-beat
+    iter/elapsedMs, so they are keyed by shape (type + stage), not content,
+    keeping ``emitted_event_keys`` O(distinct shapes) instead of O(beats)."""
+    event_type = payload.get("type")
+    if event_type in _UNKEYED_DELTA_EVENT_TYPES:
+        return None
+    if event_type == "llm_progress":
+        return f"llm_progress:{payload.get('stage', '')}"
+    return json.dumps(dict(payload), sort_keys=True, default=str)
+
+
 async def _drive_selected_gate5b_stream(
     runtime: object,
     body: object,
@@ -652,15 +675,16 @@ async def _drive_selected_gate5b_stream(
     live_events: asyncio.Queue[Mapping[str, object]] = asyncio.Queue()
     emitted_event_keys: set[str] = set()
     live_text_emitted = False
-
-    def _event_key(payload: Mapping[str, object]) -> str:
-        return json.dumps(dict(payload), sort_keys=True, default=str)
+    live_thinking_emitted = False
 
     def _enqueue_public_event(payload: Mapping[str, object]) -> None:
-        nonlocal live_text_emitted
+        nonlocal live_text_emitted, live_thinking_emitted
         event = _selected_stream_public_event_for_turn(payload, turn_id=turn_id)
-        if event.get("type") == "text_delta":
+        event_type = event.get("type")
+        if event_type == "text_delta":
             live_text_emitted = True
+        elif event_type == "thinking_delta":
+            live_thinking_emitted = True
         live_events.put_nowait(event)
 
     async def _run_selected_response() -> object:
@@ -677,7 +701,9 @@ async def _drive_selected_gate5b_stream(
             runtime,
             turn_id=turn_id,
         ):
-            emitted_event_keys.add(_event_key(public_event))
+            key = _selected_stream_event_key(public_event)
+            if key is not None:
+                emitted_event_keys.add(key)
             frame = _runtime_event_frame(public_event, turn_id=turn_id)
             if frame is not None:
                 yield frame
@@ -699,7 +725,9 @@ async def _drive_selected_gate5b_stream(
             )
             if next_event_task in done:
                 public_event = next_event_task.result()
-                emitted_event_keys.add(_event_key(public_event))
+                key = _selected_stream_event_key(public_event)
+                if key is not None:
+                    emitted_event_keys.add(key)
                 frame = _runtime_event_frame(public_event, turn_id=turn_id)
                 if frame is not None:
                     yield frame
@@ -718,7 +746,9 @@ async def _drive_selected_gate5b_stream(
                 heartbeat_iter=heartbeat_iter,
                 elapsed_ms=elapsed_ms,
             ):
-                emitted_event_keys.add(_event_key(public_event))
+                key = _selected_stream_event_key(public_event)
+                if key is not None:
+                    emitted_event_keys.add(key)
                 frame = _runtime_event_frame(public_event, turn_id=turn_id)
                 if frame is not None:
                     yield frame
@@ -760,14 +790,24 @@ async def _drive_selected_gate5b_stream(
                     public_event,
                     turn_id=turn_id,
                 )
-                if live_text_emitted and public_event.get("type") == "text_delta":
+                event_type = public_event.get("type")
+                if live_text_emitted and event_type == "text_delta":
                     continue
-                event_key = _event_key(public_event)
-                if event_key in emitted_event_keys:
+                # Symmetric with text_delta (PR-D4 / N-40): once any live
+                # thinking_delta was emitted, skip every replayed one so
+                # differing chunk boundaries never replay duplicate thinking
+                # text.
+                if live_thinking_emitted and event_type == "thinking_delta":
                     continue
-                emitted_event_keys.add(event_key)
-                if public_event.get("type") == "text_delta":
+                event_key = _selected_stream_event_key(public_event)
+                if event_key is not None:
+                    if event_key in emitted_event_keys:
+                        continue
+                    emitted_event_keys.add(event_key)
+                if event_type == "text_delta":
                     live_text_emitted = True
+                elif event_type == "thinking_delta":
+                    live_thinking_emitted = True
                 frame = _runtime_event_frame(public_event, turn_id=turn_id)
                 if frame is not None:
                     yield frame

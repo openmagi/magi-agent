@@ -128,3 +128,31 @@ def test_save_creates_parent_dir(tmp_path):
     target = tmp_path / "nested" / "dir" / "customize.json"
     save_overrides(DEFAULT_OVERRIDES, target)
     assert target.exists()
+
+
+# ---------------------------------------------------------------------------
+# PR-D4 / N-39: parse cache preserves write-then-query freshness + isolation.
+# ---------------------------------------------------------------------------
+def test_load_overrides_reparses_after_save(tmp_path: Path) -> None:
+    from magi_agent.customize.store import save_overrides
+
+    p = tmp_path / "customize.json"
+    save_overrides({"user_rules": "first"}, path=p)
+    assert load_overrides(p)["user_rules"] == "first"
+    # a subsequent save (os.replace -> new inode/mtime) must invalidate cache
+    save_overrides({"user_rules": "second"}, path=p)
+    assert load_overrides(p)["user_rules"] == "second"
+
+
+def test_load_overrides_result_is_caller_mutable(tmp_path: Path) -> None:
+    from magi_agent.customize.store import save_overrides
+
+    p = tmp_path / "customize.json"
+    save_overrides({"user_rules": "keep"}, path=p)
+    first = load_overrides(p)
+    first["user_rules"] = "mutated locally"
+    first["tools"]["injected"] = True
+    # cache must not be polluted by caller mutation of a prior result
+    second = load_overrides(p)
+    assert second["user_rules"] == "keep"
+    assert "injected" not in second["tools"]

@@ -394,7 +394,7 @@ graph LR
 | control_plane.py | ADK loop control-plane abstraction (PR2, goose-parity). | _truthy, constraint_reinjection, context, context_compaction, edit_retry_reflection, env, facts_replan_control, flags, fork_runner, gemini_content_ordering, lifecycle_llm_call_control, lifecycle_session_control, lifecycle_shell_command_control, manifest, registries, resilience_plugin, schema_feedback, self_review, tool_exception_reflection, tool_not_found_soft_fail, tool_synthesis, tool_synthesis_nudge, turn_policy | adk_bridge/dashboard_producer_control.py, adk_bridge/facts_replan_control.py, adk_bridge/lifecycle_llm_call_control.py, adk_bridge/lifecycle_session_control.py, adk_bridge/lifecycle_shell_command_control.py, adk_bridge/local_runner.py, adk_bridge/schema_feedback.py, cli/tests/test_real_runner.py, customize/after_tool_gate.py, engine/model_runner.py, firstparty/packs/control_plane_default/impl.py, packs/context.py, packs/registries.py, transport/gate5b_governance.py |
 | dashboard_producer_control.py | Deny-on-present after-tool producer for dashboard-authored custom checks. | control_plane, dashboard_authored, discovery, env, scoped_policy, types | engine/model_runner.py |
 | edit_retry_reflection.py | Edit-failure reflection / retry wiring for the live ADK Runner. | context, retry_repair_policies, turn_utilities | adk_bridge/control_plane.py, adk_bridge/schema_feedback.py, adk_bridge/tool_exception_reflection.py, adk_bridge/tool_not_found_soft_fail.py |
-| event_adapter.py | — | events, flags, health, public_events, shared, transcript, wire_profile | engine/driver.py, runtime/child_runner_live.py, runtime/stream_withholding.py, shadow/fixture_runner.py, shadow/gate4c1_runner_shadow_invoker.py, transport/sse_buffer.py |
+| event_adapter.py | — | events, flags, health, public_events, shared, text_overlap, transcript, wire_profile | engine/driver.py, runtime/child_runner_live.py, runtime/stream_withholding.py, shadow/fixture_runner.py, shadow/gate4c1_runner_shadow_invoker.py, transport/sse_buffer.py |
 | facts_replan_control.py | FactsReplanControl — interval-based facts-survey injection (default-OFF). | context, control_plane, facts_replan | adk_bridge/control_plane.py |
 | gemini_content_ordering.py | Gemini content-ordering repair for the ADK before_model hook. | — | adk_bridge/control_plane.py |
 | lifecycle_llm_call_control.py | LifecycleLlmCallAuditControl — PR-F-LIFE2 per-LLM-call audit fan-out. | control_plane, lifecycle_audit, wiring | adk_bridge/control_plane.py, adk_bridge/lifecycle_session_control.py, artifacts/file_delivery.py, missions/work_queue/driver.py |
@@ -1387,14 +1387,14 @@ graph LR
 | audit_view.py | Per-session policy-enforcement verdict projection for the chat Audit panel. | audit_labels, reports | observability/api.py |
 | bus.py | — | — | observability/api.py, observability/core.py |
 | config.py | — | _truthy, flags | observability/__init__.py, observability/core.py, observability/integration.py |
-| core.py | — | api, bus, config, projector, store | observability/__init__.py, observability/integration.py |
-| integration.py | — | config, core, flags, page, runtime_sink | observability/__init__.py, observability/transcript.py, shadow/gate5b4c3_live_runner_boundary.py |
+| core.py | — | api, bus, config, projector, store, taxonomy | observability/__init__.py, observability/integration.py |
+| integration.py | — | config, core, flags, page, runtime_sink, taxonomy | observability/__init__.py, observability/transcript.py, shadow/gate5b4c3_live_runner_boundary.py |
 | models.py | — | — | observability/__init__.py, observability/projector.py, observability/store.py |
 | page.py | — | — | observability/integration.py |
 | projector.py | — | models | observability/core.py |
 | runtime_sink.py | Process-global event-sink registry. | — | cli/wiring.py, observability/integration.py |
 | store.py | — | models | observability/api.py, observability/core.py |
-| taxonomy.py | Single source of truth for the observability event taxonomy. | — | evidence/audit_labels.py, observability/api.py |
+| taxonomy.py | Single source of truth for the observability event taxonomy. | — | evidence/audit_labels.py, observability/api.py, observability/core.py, observability/integration.py |
 | transcript.py | Per-session JSONL transcript writer + process-global sink registry. | flags, integration | cli/wiring.py, observability/__init__.py, shadow/gate5b4c3_live_runner_boundary.py |
 
 ### ops/
@@ -1819,6 +1819,7 @@ graph LR
 | __init__.py | — | — | adk_bridge/event_adapter.py, transport/sse.py, transport/tool_preview.py |
 | cron_fields.py | N-33 leaf: single home for the cron field parser. | — | harness/cron_runtime.py, missions/cron_policy.py, missions/schedule_grammar.py |
 | provider_family.py | E-13 - single source of truth for provider-family detection. | catalog | adk_bridge/tool_schema_repair.py, prompt/injection.py, prompt/provider_adapter.py |
+| text_overlap.py | Linear suffix/prefix overlap for streamed-vs-final text reconciliation. | — | adk_bridge/event_adapter.py |
 | token_estimation.py | — | — | adk_bridge/context_compaction.py, context/token_tracker.py, runtime/error_recovery/strategies/_token_utils.py, shadow/gate5b4c3_runner_input_adapter.py |
 | tool_preview.py | — | — | evidence/child_runtime_envelope.py, evidence/reports.py, evidence/tool_boundary.py, harness/general_automation/plan_act_switch.py, harness/general_automation/question_tool.py, harness/plan_gate.py, memory/projection.py, runtime/child_event_projection.py, runtime/control.py, runtime/events.py, runtime/work_console_snapshot.py, shadow/gate4c1_runner_shadow_invoker.py, shadow/workspace_adoption_preflight_contract.py, tools/event_projection.py |
 | types.py | — | — | context/types.py, runtime/error_recovery/types.py |

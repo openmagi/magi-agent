@@ -1177,17 +1177,11 @@ def _public_stream_text(value: str) -> str:
 
 
 def _unstreamed_final_text(final_text: str, streamed_text: str) -> str:
-    if not streamed_text:
-        return final_text
-    if final_text.startswith(streamed_text):
-        return final_text[len(streamed_text) :]
-    if streamed_text.endswith(final_text):
-        return ""
-    max_overlap = min(len(final_text), len(streamed_text))
-    for size in range(max_overlap, 0, -1):
-        if streamed_text.endswith(final_text[:size]):
-            return final_text[size:]
-    return final_text
+    # Body single-homed in magi_agent/shared/text_overlap.py (PR-D4 / N-38);
+    # lazy import keeps event_adapter cold-start clean.
+    from magi_agent.shared.text_overlap import unstreamed_suffix  # noqa: PLC0415
+
+    return unstreamed_suffix(final_text, streamed_text)
 
 
 def _has_private_text_marker(value: str) -> bool:
