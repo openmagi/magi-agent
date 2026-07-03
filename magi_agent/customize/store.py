@@ -56,6 +56,14 @@ DEFAULT_OVERRIDES: dict[str, Any] = {
     "agent_modes": {},
     # Last-selected mode id (session-sticky). None ⇒ the bot default mode.
     "active_agent_mode": None,
+    # POLICIES: named user-intent units, each a composition of 1..N custom
+    # rules (a policy is the authoring/grouping unit; a rule is the atomic
+    # executable unit). Keyed id→policy dict, mirroring ``agent_modes``. Typed
+    # model + CRUD live in ``customize.policies``. A policy carries no
+    # precedence of its own (all custom_rule-composed policies are soft);
+    # activation is per member rule. Empty by default so OFF is byte-identical.
+    # See clawy docs/plans/2026-07-03-policy-abstraction-and-organic-multi-rule-authoring-design.md.
+    "policies": {},
 }
 
 _USER_RULES_MAX = 20_000
@@ -130,6 +138,16 @@ def _normalize(data: dict[str, Any]) -> dict[str, Any]:
     active_mode = data.get("active_agent_mode")
     if isinstance(active_mode, str) and active_mode.strip():
         merged["active_agent_mode"] = active_mode
+    # Policies: light structural filter here (id->dict); the typed Policy
+    # validation lives in ``customize.policies`` (get/list skip malformed
+    # entries). Mirrors the ``agent_modes`` branch above.
+    policies_raw = data.get("policies")
+    if isinstance(policies_raw, dict):
+        merged["policies"] = {
+            key: value
+            for key, value in policies_raw.items()
+            if isinstance(key, str) and isinstance(value, dict)
+        }
     return merged
 
 
