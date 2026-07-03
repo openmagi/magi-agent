@@ -9,8 +9,11 @@ from __future__ import annotations
 from magi_agent.transport import sse
 
 
-def test_thinking_stripped_by_default(monkeypatch):
+def test_thinking_stripped_under_safe_profile(monkeypatch):
+    # Promoted to profile-aware default-ON: an unset flag strips only under a
+    # safe runtime profile (the full profile now surfaces thinking).
     monkeypatch.delenv("MAGI_STREAM_THINKING", raising=False)
+    monkeypatch.setenv("MAGI_RUNTIME_PROFILE", "safe")
     assert sse._sanitize_agent_event({"type": "thinking_delta", "delta": "plan"}) is None
 
 

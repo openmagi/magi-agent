@@ -412,10 +412,12 @@ def test_config_from_env_vars() -> None:
     assert abs(cfg.critical_threshold - 0.85) < 1e-9
     assert cfg.proactive_recovery_enabled is True
 
-    # --- Default (no proactive env var) → disabled ---
+    # --- Explicit off (promoted to profile-aware default-ON) → disabled ---
     cfg_default = _with_env(
-        {"MAGI_CONTEXT_MGMT_ENABLED": "1"},
-        also_unset=["MAGI_CONTEXT_PROACTIVE_RECOVERY_ENABLED"],
+        {
+            "MAGI_CONTEXT_MGMT_ENABLED": "1",
+            "MAGI_CONTEXT_PROACTIVE_RECOVERY_ENABLED": "0",
+        },
     )
     assert cfg_default.proactive_recovery_enabled is False
 

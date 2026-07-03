@@ -146,17 +146,20 @@ class TestBuildForkedMessages:
 
 
 class TestForkRunner:
-    def test_disabled_by_default(self) -> None:
+    def test_disabled_when_flag_off(self) -> None:
         import os
-        os.environ.pop("MAGI_FORK_CACHE_ENABLED", None)
-        from magi_agent.runtime.fork_runner import ForkRunner
+        os.environ["MAGI_FORK_CACHE_ENABLED"] = "0"
+        try:
+            from magi_agent.runtime.fork_runner import ForkRunner
 
-        runner = ForkRunner()
-        assert not runner.enabled
+            runner = ForkRunner()
+            assert not runner.enabled
+        finally:
+            os.environ.pop("MAGI_FORK_CACHE_ENABLED", None)
 
     def test_disabled_returns_empty(self) -> None:
         import os
-        os.environ.pop("MAGI_FORK_CACHE_ENABLED", None)
+        os.environ["MAGI_FORK_CACHE_ENABLED"] = "0"
         from magi_agent.runtime.fork_runner import ForkRunner
 
         runner = ForkRunner()

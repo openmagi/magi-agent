@@ -17,7 +17,7 @@ from typing import Iterator
 import pytest
 
 from magi_agent.config.env import parse_context_compaction_env
-from magi_agent.config.flags import flag_bool
+from magi_agent.config.flags import flag_profile_bool
 from magi_agent.runtime.local_defaults import (
     apply_local_eval_runtime_defaults,
     apply_local_full_runtime_defaults,
@@ -53,9 +53,10 @@ def test_local_full_profile_enables_proactive(hermetic_env: None) -> None:
     # Both masters resolve ON together: the live plugin (compaction master) honors
     # the proactive flag, so tiers 6-7 engage at CRITICAL.
     assert env.get(_PROACTIVE_FLAG) == "1"
-    # COMPACTION is a profile_bool flag (read via its own resolver, not flag_bool).
+    # COMPACTION is a profile_bool flag (read via its own resolver).
     assert env.get(_COMPACTION_FLAG) == "1"
-    assert flag_bool(_PROACTIVE_FLAG, env=env) is True
+    # The proactive flag was promoted _b -> _pb; read via the profile-aware reader.
+    assert flag_profile_bool(_PROACTIVE_FLAG, env=env) is True
 
 
 def test_full_profile_resolves_proactive_in_compaction_env(hermetic_env: None) -> None:
@@ -73,7 +74,7 @@ def test_hosted_full_stage_enables_proactive(hermetic_env: None) -> None:
     env = {"MAGI_DEPLOYMENT": "hosted", "MAGI_CONTROL_STAGE": "full"}
     apply_hosted_runtime_defaults(env)
     assert env.get(_PROACTIVE_FLAG) == "1"
-    assert flag_bool(_PROACTIVE_FLAG, env=env) is True
+    assert flag_profile_bool(_PROACTIVE_FLAG, env=env) is True
     # Compaction (the live-plugin master) is also ON at the full stage.
     assert env.get(_COMPACTION_FLAG) == "1"
 
@@ -83,10 +84,11 @@ def test_hosted_resilience_stage_does_not_enable_proactive(hermetic_env: None) -
 
     env = {"MAGI_DEPLOYMENT": "hosted", "MAGI_CONTROL_STAGE": "resilience"}
     apply_hosted_runtime_defaults(env)
-    # The resilience stage activates neither the proactive flag nor the live
-    # compaction master, so the live plugin does not engage tiers 6-7.
+    # The resilience stage seeds neither the proactive flag nor the live
+    # compaction master (stage-level wiring is what this test owns). Resolution
+    # of the now-profile-aware flags is governed by MAGI_RUNTIME_PROFILE, not the
+    # hosted stage overlay.
     assert _PROACTIVE_FLAG not in env
-    assert flag_bool(_PROACTIVE_FLAG, env=env) is False
     assert _COMPACTION_FLAG not in env
 
 
@@ -95,8 +97,8 @@ def test_hosted_off_stage_keeps_proactive_off(hermetic_env: None) -> None:
 
     env = {"MAGI_DEPLOYMENT": "hosted", "MAGI_CONTROL_STAGE": "off"}
     apply_hosted_runtime_defaults(env)
+    # The off stage does not seed the proactive flag (stage-level wiring).
     assert _PROACTIVE_FLAG not in env
-    assert flag_bool(_PROACTIVE_FLAG, env=env) is False
 
 
 @pytest.mark.parametrize("profile", ["safe", "off", "minimal", "conservative"])
@@ -104,14 +106,18 @@ def test_safe_profile_keeps_proactive_off(hermetic_env: None, profile: str) -> N
     env = {"MAGI_RUNTIME_PROFILE": profile}
     apply_local_full_runtime_defaults(env)
     assert _PROACTIVE_FLAG not in env, profile
-    assert flag_bool(_PROACTIVE_FLAG, env=env) is False, profile
+    # Safe-profile-OFF guarantee: the promoted flag resolves OFF under a safe
+    # runtime profile even though it is default-ON under the full profile.
+    assert flag_profile_bool(_PROACTIVE_FLAG, env=env) is False, profile
 
 
 def test_eval_profile_keeps_proactive_off(hermetic_env: None) -> None:
     env: dict[str, str] = {}
     apply_local_eval_runtime_defaults(env)
     assert _PROACTIVE_FLAG not in env
-    assert flag_bool(_PROACTIVE_FLAG, env=env) is False
+    # The eval overlay sets MAGI_RUNTIME_PROFILE=eval (a safe profile), so the
+    # profile-aware reader resolves OFF.
+    assert flag_profile_bool(_PROACTIVE_FLAG, env=env) is False
 
 
 def test_explicit_off_overrides_full_profile(hermetic_env: None) -> None:
@@ -119,5 +125,5 @@ def test_explicit_off_overrides_full_profile(hermetic_env: None) -> None:
     env = {_PROACTIVE_FLAG: "0"}
     apply_local_full_runtime_defaults(env)
     assert env.get(_PROACTIVE_FLAG) == "0"
-    assert flag_bool(_PROACTIVE_FLAG, env=env) is False
+    assert flag_profile_bool(_PROACTIVE_FLAG, env=env) is False
     assert parse_context_compaction_env(env).proactive_recovery_enabled is False

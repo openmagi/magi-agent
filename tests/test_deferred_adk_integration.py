@@ -68,8 +68,8 @@ def _small_registry() -> ToolRegistry:
 
 
 class TestBuildDeferredAdkTools:
-    def test_default_disabled_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("MAGI_DEFERRED_TOOLS_ENABLED", raising=False)
+    def test_disabled_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MAGI_DEFERRED_TOOLS_ENABLED", "0")
         registry = _big_registry(35, non_deferrable=5)
         result = build_deferred_adk_tools(registry, threshold=30)
         assert result is None

@@ -32,13 +32,20 @@ def test_work_queue_master_flag_is_gone() -> None:
 
 
 def test_dogfood_profile_does_not_export_dead_work_queue_flag() -> None:
+    from magi_agent.config.flags import FLAGS_BY_NAME
     from tests.test_dogfood_full_on_profile import _load_profile
 
     profile = _load_profile()
     assert "MAGI_WORK_QUEUE_ENABLED" not in profile
-    # The surviving gates are still exported.
-    assert "MAGI_WORK_QUEUE_BOARD_API_ENABLED" in profile
-    assert "MAGI_WORK_QUEUE_NOTIFY_ENABLED" in profile
+    # The three real gates were promoted _b -> _pb (profile-default-ON), so they
+    # self-enable under MAGI_RUNTIME_PROFILE=full and are intentionally no longer
+    # exported by the dogfood profile. They remain registered flags.
+    for name in (
+        "MAGI_WORK_QUEUE_BOARD_API_ENABLED",
+        "MAGI_WORK_QUEUE_NOTIFY_ENABLED",
+    ):
+        assert name not in profile
+        assert FLAGS_BY_NAME[name].kind == "profile_bool"
 
 
 _SHADOW_CASES = [

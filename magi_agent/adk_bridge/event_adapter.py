@@ -16,7 +16,8 @@ from magi_agent.runtime.events import (
     public_refs,
     public_terminal_refs,
 )
-from magi_agent.config.flags import flag_bool
+from magi_agent.config.flags import flag_profile_bool
+
 from magi_agent.ops.health import _truthy_env
 from magi_agent.runtime.transcript import (
     AssistantTextEntry,
@@ -702,9 +703,9 @@ def _project_content_parts(
             # I-1: route through the typed flag registry (default-OFF
             # ``FlagSpec`` mirrors the ``_truthy_env`` missing/empty → False
             # semantics byte-identically).
-            from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+            from magi_agent.config.flags import flag_profile_bool  #  # noqa: PLC0415
 
-            if thought_text and event.partial and flag_bool("MAGI_STREAM_THINKING"):
+            if thought_text and event.partial and flag_profile_bool("MAGI_STREAM_THINKING"):
                 agent_events.append(
                     {"type": "thinking_delta", "delta": _public_stream_text(thought_text)}
                 )
@@ -1435,7 +1436,7 @@ def _normalize_preview_key(value: str) -> str:
 
 def _rich_preview_safe_keys(tool_name: str) -> frozenset[str]:
     """Top-level arg keys to surface for *tool_name*, or empty when the flag is off."""
-    if not flag_bool("MAGI_RICH_TOOL_PREVIEW"):
+    if not flag_profile_bool("MAGI_RICH_TOOL_PREVIEW"):
         return frozenset()
     return _RICH_PREVIEW_TOOL_ARG_ALLOWLIST.get(_normalize_preview_key(tool_name), frozenset())
 

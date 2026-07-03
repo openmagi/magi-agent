@@ -209,9 +209,8 @@ class TestCreateWithPersistence:
             assert service._store.config.db_path == ".openmagi/sessions.db"
             assert "opencode" not in service._store.config.db_path.lower()
 
-    def test_disabled_by_default(self) -> None:
-        with patch.dict(os.environ, {}, clear=True):
-            os.environ.pop("MAGI_SESSION_PERSISTENCE_ENABLED", None)
+    def test_disabled_when_flag_off(self) -> None:
+        with patch.dict(os.environ, {"MAGI_SESSION_PERSISTENCE_ENABLED": "0"}, clear=True):
             service = WorkspaceSessionService.create_with_persistence(
                 app_name="test_app",
             )

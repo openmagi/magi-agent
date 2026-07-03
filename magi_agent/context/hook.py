@@ -107,13 +107,13 @@ def load_config_from_env() -> ContextManagementConfig:
         MAGI_CONTEXT_PROACTIVE_RECOVERY_ENABLED: "1"/"true"/"True"/"yes" to enable
     """
     # I-4: routed through the typed flag registry.
-    from magi_agent.config.flags import flag_bool, flag_str  # noqa: PLC0415
+    from magi_agent.config.flags import flag_profile_bool, flag_str  #  # noqa: PLC0415
 
-    enabled = flag_bool("MAGI_CONTEXT_MGMT_ENABLED")
+    enabled = flag_profile_bool("MAGI_CONTEXT_MGMT_ENABLED")
     moderate = _safe_float(flag_str("MAGI_CONTEXT_MODERATE_THRESHOLD") or None, 0.60)
     high = _safe_float(flag_str("MAGI_CONTEXT_HIGH_THRESHOLD") or None, 0.75)
     critical = _safe_float(flag_str("MAGI_CONTEXT_CRITICAL_THRESHOLD") or None, 0.90)
-    proactive = flag_bool("MAGI_CONTEXT_PROACTIVE_RECOVERY_ENABLED")
+    proactive = flag_profile_bool("MAGI_CONTEXT_PROACTIVE_RECOVERY_ENABLED")
 
     return ContextManagementConfig(
         enabled=enabled,

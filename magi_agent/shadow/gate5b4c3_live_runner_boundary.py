@@ -126,9 +126,9 @@ def _stream_thinking_enabled() -> bool:
     ``_truthy_env`` semantics (missing/empty → False) when the spec is
     registered default-OFF.
     """
-    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+    from magi_agent.config.flags import flag_bool, flag_profile_bool  #  # noqa: PLC0415
 
-    return flag_bool("MAGI_STREAM_THINKING")
+    return flag_profile_bool("MAGI_STREAM_THINKING")
 _DEFAULT_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT = 2048
 _MAX_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT = 8192
 _MAX_MANUAL_TOOL_RESULTS_BYTES = 8192
@@ -1360,7 +1360,8 @@ class Gate5B4C3LiveRunnerBoundary:
         silently swallowed; a serving turn must never fail because of evidence
         persistence."""
         try:
-            from magi_agent.config.flags import flag_bool
+            from magi_agent.config.flags import flag_bool, flag_profile_bool
+
 
             if not flag_bool("MAGI_SERVE_EVIDENCE_ENABLED"):
                 return
@@ -1994,7 +1995,7 @@ def _stream_event_limit(*, selected_full_toolhost: bool) -> int:
         # / unparseable values; the in-module
         # ``_DEFAULT_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT`` then
         # takes over (preserving the pre-I-4 parse semantics).
-        from magi_agent.config.flags import flag_int  # noqa: PLC0415
+        from magi_agent.config.flags import flag_int  #  # noqa: PLC0415
 
         parsed = flag_int("MAGI_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT") or 0
         if parsed <= 0:

@@ -446,7 +446,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "home/evidence, overridable via MAGI_EVIDENCE_LEDGER_DIR)."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_RICH_TOOL_PREVIEW",
         summary=(
             "Expose human-readable tool-call argument summaries in the public "
@@ -456,7 +456,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "full secret/PII sanitizer; system/user/raw prompts stay redacted."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_WORK_QUEUE_EXECUTOR_ENABLED",
         summary="Enable the durable work-queue dispatcher tick loop.",
     ),
@@ -516,11 +516,11 @@ FLAGS: tuple[FlagSpec, ...] = (
             "listed or resumed)."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_WORK_QUEUE_BOARD_API_ENABLED",
         summary="Mount the read-only work-queue board HTTP API.",
     ),
-    _b(
+    _pb(
         "MAGI_WORK_QUEUE_NOTIFY_ENABLED",
         summary=(
             "Enable the work-queue terminal-event notifier gateway watcher: polls "
@@ -781,7 +781,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_CROSS_VERIFY_ENABLED",
         summary="Enable the cross-verification gate over spawned-agent results.",
     ),
-    _b(
+    _pb(
         "MAGI_DEFERRED_TOOLS_ENABLED",
         summary="Enable deferred (lazily-loaded) tool schemas.",
     ),
@@ -2115,7 +2115,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         kind="int",
     ),
     # --- Subagent / child-runner --------------------------------------------
-    _b(
+    _pb(
         "MAGI_SUBAGENT_GOVERNED_TURN_ENABLED",
         summary=(
             "Route spawned subagents through run_governed_turn (governed "
@@ -2123,7 +2123,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "keeps the legacy child path byte-identical."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_CHILD_MEMORY_INHERIT_ENABLED",
         summary=(
             "When ON, a normal-mode parent yields a read_only child memory mode "
@@ -2131,7 +2131,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "OFF keeps children incognito."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_SUBAGENT_TOOL_TIGHTEN_ONLY_ENABLED",
         summary=(
             "Intersect a spawned subagent's tool set with the parent's effective "
@@ -2139,7 +2139,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "parent cap is a no-op."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_SPAWN_RECIPE_CAP_ENABLED",
         summary=(
             "Apply the orchestrator's spawn_cap as the innermost tool-name ceiling "
@@ -2147,7 +2147,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "Default OFF / None spawn_cap is a no-op (byte-identical)."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_SPAWN_RECIPE_BIND_ENABLED",
         summary=(
             "Thread recipeRefs from request.metadata into the child runner as "
@@ -2428,7 +2428,7 @@ FLAGS: tuple[FlagSpec, ...] = (
     # ``context/hook.py`` resolves the per-turn ``ContextManagementConfig``
     # from 5 inline env reads. Registered here so the knobs are
     # discoverable in flag-discovery + the env-reference.
-    _b(
+    _pb(
         "MAGI_CONTEXT_MGMT_ENABLED",
         summary=(
             "Master switch for the per-turn context management hook "
@@ -2436,7 +2436,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "hook is a no-op until enabled."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_CONTEXT_PROACTIVE_RECOVERY_ENABLED",
         summary=(
             "Enable proactive context recovery (tier-6 collapse-drain + tier-7 "
@@ -2563,7 +2563,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     # --- Runtime stream-withholding + fork-cache + recovery (I-4 batch 5) ---
-    _b(
+    _pb(
         "MAGI_STREAM_WITHHOLDING_ENABLED",
         summary=(
             "Enable the runtime stream-withholding buffer. When ON the "
@@ -2580,7 +2580,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         summary=("Maximum suppress-and-retry attempts for the withholding buffer (default 2)."),
         kind="int",
     ),
-    _b(
+    _pb(
         "MAGI_FORK_CACHE_ENABLED",
         summary=(
             "Enable the per-child fork-runner output cache (skips re-"
@@ -2600,7 +2600,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         kind="int",
     ),
     # --- TUI surface knobs (I-4 batch 6) ------------------------------------
-    _b(
+    _pb(
         "MAGI_TUI_FILE_MENTIONS",
         summary=(
             "Enable the TUI ``@``-mention file picker (the input bar "
@@ -2615,7 +2615,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "Default-OFF; used for diagnosing render issues."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_TUI_DIFF_SPLIT",
         summary=(
             "Render Edit-tool diffs side-by-side in the TUI activity "
@@ -2794,7 +2794,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
-    _b(
+    _pb(
         "MAGI_SESSION_PERSISTENCE_ENABLED",
         summary=(
             "Enable the SQLite-backed ADK session store. Default-OFF; "
@@ -2814,7 +2814,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         kind="int",
     ),
     # --- External hooks framework (I-4 batch 11) ----------------------------
-    _b(
+    _pb(
         "MAGI_EXTERNAL_HOOKS_ENABLED",
         summary=(
             "Master switch for the external hooks framework "
@@ -2966,14 +2966,14 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_LEDGER_ORCHESTRATOR_ENABLED",
         summary=("Enable the ledger-orchestrator recipe seam. Default-OFF (GAIA benchmark code)."),
     ),
-    _b(
+    _pb(
         "MAGI_EXECUTION_TRACE",
         summary=(
             "Enable telemetry execution-trace context capture. "
             "Default-OFF; ON adds trace bookkeeping per turn."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_PROMPT_TRANSFORM_HOOKS_ENABLED",
         summary=(
             "Run runtime/message_builder's prompt-transform hooks "
@@ -3161,7 +3161,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "when OFF."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_STREAM_THINKING",
         summary=(
             "Pass-through thinking-delta events to the public SSE surface "

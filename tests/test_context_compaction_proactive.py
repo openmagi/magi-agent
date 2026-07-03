@@ -492,7 +492,12 @@ def test_proactive_self_guards_when_trim_request_already_returned(
 
 
 def test_env_parse_defaults() -> None:
-    env = parse_context_compaction_env({})
+    # MAGI_CONTEXT_PROACTIVE_RECOVERY_ENABLED was promoted to profile-aware
+    # default-ON (_pb); make the OFF case explicit so the "disabled => not
+    # proactive" intent is preserved without depending on an unset default.
+    env = parse_context_compaction_env(
+        {"MAGI_CONTEXT_PROACTIVE_RECOVERY_ENABLED": "0"}
+    )
     assert env.proactive_recovery_enabled is False
     assert env.proactive_critical_pct == 0.90
 

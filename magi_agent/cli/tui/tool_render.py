@@ -90,9 +90,9 @@ def _diff_split_enabled() -> bool:
 
     # I-4: routed through the typed flag registry. Pre-I-4 strict
     # ``=="1"`` widens to canonical ``flag_bool`` truthy set.
-    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+    from magi_agent.config.flags import flag_profile_bool  #  # noqa: PLC0415
 
-    return flag_bool("MAGI_TUI_DIFF_SPLIT")
+    return flag_profile_bool("MAGI_TUI_DIFF_SPLIT")
 
 
 # ---------------------------------------------------------------------------

@@ -28,19 +28,23 @@ from typing import Iterator
 import pytest
 
 from magi_agent.config.env import cli_session_log_enabled
-from magi_agent.config.flags import flag_bool
+from magi_agent.config.flags import flag_bool, flag_profile_bool
 from magi_agent.runtime.local_defaults import (
     apply_local_eval_runtime_defaults,
     apply_local_full_runtime_defaults,
 )
 
-# The four durable flags + the executor that the full profile activates.
-_DURABLE_PROFILE_FLAGS = (
+# Strict default-OFF durable flags (read via flag_bool).
+_DURABLE_STRICT_FLAGS = (
     "MAGI_DURABLE_LOCAL_WRITES_ENABLED",
     "MAGI_DURABLE_CHECKPOINTS_ENABLED",
     "MAGI_DURABLE_STARTUP_RECOVERY_ENABLED",
-    "MAGI_WORK_QUEUE_EXECUTOR_ENABLED",
 )
+# The work-queue executor was promoted _b -> _pb (profile-aware default-ON), so
+# it is read via flag_profile_bool. The full profile still seeds it explicitly.
+_WORK_QUEUE_EXECUTOR_FLAG = "MAGI_WORK_QUEUE_EXECUTOR_ENABLED"
+# The four durable flags + the executor that the full profile activates.
+_DURABLE_PROFILE_FLAGS = (*_DURABLE_STRICT_FLAGS, _WORK_QUEUE_EXECUTOR_FLAG)
 _SESSION_LOG_FLAG = "MAGI_CLI_SESSION_LOG_ENABLED"
 _FOREGROUND_FLAG = "MAGI_DURABLE_FOREGROUND_CONTINUATION_ENABLED"
 
@@ -71,10 +75,14 @@ def hermetic_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 def test_full_profile_enables_durable(hermetic_env: None) -> None:
     env: dict[str, str] = {}
     apply_local_full_runtime_defaults(env)
-    # The flag_bool-registered durable flags + the executor resolve ON.
+    # The durable flags + the executor are all seeded ON by the full profile.
     for flag in _DURABLE_PROFILE_FLAGS:
         assert env.get(flag) == "1", flag
+    # Strict durable flags resolve ON via flag_bool ...
+    for flag in _DURABLE_STRICT_FLAGS:
         assert flag_bool(flag, env=env) is True, flag
+    # ... the promoted executor resolves ON via the profile-aware reader.
+    assert flag_profile_bool(_WORK_QUEUE_EXECUTOR_FLAG, env=env) is True
     # MAGI_CLI_SESSION_LOG_ENABLED is read via its dedicated helper (not the
     # flag registry), so assert it through cli_session_log_enabled.
     assert env.get(_SESSION_LOG_FLAG) == "1"
@@ -108,7 +116,10 @@ def test_safe_profile_keeps_durable_off(
     apply_local_full_runtime_defaults(env)
     for flag in (*_DURABLE_PROFILE_FLAGS, _FOREGROUND_FLAG):
         assert flag not in env, f"{profile}:{flag}"
+    for flag in (*_DURABLE_STRICT_FLAGS, _FOREGROUND_FLAG):
         assert flag_bool(flag, env=env) is False, f"{profile}:{flag}"
+    # The promoted executor resolves OFF under a safe profile (profile-aware).
+    assert flag_profile_bool(_WORK_QUEUE_EXECUTOR_FLAG, env=env) is False, profile
     # Session log read via its dedicated helper, also OFF on safe profiles.
     assert _SESSION_LOG_FLAG not in env, f"{profile}:{_SESSION_LOG_FLAG}"
     assert cli_session_log_enabled(env) is False, profile

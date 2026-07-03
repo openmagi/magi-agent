@@ -48,6 +48,9 @@ def _isolate_provider_env(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "absent.toml"))
 
 
+_GOVERNED_OFF_ENV = {"MAGI_SUBAGENT_GOVERNED_TURN_ENABLED": "0"}
+
+
 def _request(**overrides: object) -> ChildTaskRequest:
     data: dict[str, object] = {
         "parentExecutionId": "parent-exec-1",
@@ -173,6 +176,7 @@ def test_is_live_child_runner_enabled_ignores_garbage_values() -> None:
 def test_run_child_completes_with_final_text_from_injected_runner() -> None:
     fake = _FakeRunner(text="ANSWER: the delegated subtask is done")
     runner = RealLocalChildRunner(
+        env=_GOVERNED_OFF_ENV,
         provider_config=_provider_config(),
         runner=fake,
     )
@@ -204,6 +208,7 @@ def test_run_child_emits_progress_for_streamed_child_chunks() -> None:
 
     progress_events: list[dict[str, object]] = []
     runner = RealLocalChildRunner(
+        env=_GOVERNED_OFF_ENV,
         provider_config=_provider_config(),
         runner=_ChunkRunner(),
         progress_sink=lambda event: progress_events.append(dict(event)),
@@ -245,6 +250,7 @@ def test_run_child_uses_model_factory_seam_with_build_cli_model_runner() -> None
         return _FakeEchoLlm(model="fake")
 
     runner = RealLocalChildRunner(
+        env=_GOVERNED_OFF_ENV,
         provider_config=_provider_config(),
         model_factory=_factory,
     )
@@ -262,7 +268,7 @@ def test_run_child_uses_model_factory_seam_with_build_cli_model_runner() -> None
 
 def test_boundary_drives_real_runner_when_live_gate_enabled() -> None:
     fake = _FakeRunner(text="ANSWER: boundary path complete")
-    real = RealLocalChildRunner(provider_config=_provider_config(), runner=fake)
+    real = RealLocalChildRunner(env=_GOVERNED_OFF_ENV, provider_config=_provider_config(), runner=fake)
     boundary = LocalChildRunnerBoundary(
         ChildRunnerConfig(enabled=True, liveChildRunnerEnabled=True),
         child_runner=real,
@@ -284,7 +290,7 @@ def test_boundary_drives_real_runner_when_live_gate_enabled() -> None:
 
 def test_boundary_blocks_real_runner_when_live_gate_disabled() -> None:
     fake = _FakeRunner()
-    real = RealLocalChildRunner(provider_config=_provider_config(), runner=fake)
+    real = RealLocalChildRunner(env=_GOVERNED_OFF_ENV, provider_config=_provider_config(), runner=fake)
     boundary = LocalChildRunnerBoundary(
         ChildRunnerConfig(enabled=True, localFakeChildRunnerEnabled=True),
         child_runner=real,
@@ -305,7 +311,7 @@ def test_boundary_blocks_real_runner_when_live_gate_disabled() -> None:
 def test_run_child_blocks_when_no_provider_key(monkeypatch) -> None:
     """No injected config + no env/config key → blocked, never executes."""
     fake = _FakeRunner()
-    runner = RealLocalChildRunner(runner=fake)  # no provider_config, no key
+    runner = RealLocalChildRunner(env=_GOVERNED_OFF_ENV, runner=fake)  # no provider_config, no key
 
     output = asyncio.run(runner.run_child(_request()))
 
@@ -316,7 +322,7 @@ def test_run_child_blocks_when_no_provider_key(monkeypatch) -> None:
 
 def test_run_child_blocks_on_unknown_model_tier() -> None:
     fake = _FakeRunner()
-    runner = RealLocalChildRunner(provider_config=_provider_config(), runner=fake)
+    runner = RealLocalChildRunner(env=_GOVERNED_OFF_ENV, provider_config=_provider_config(), runner=fake)
 
     # A model not in ModelTierRegistry.with_defaults() → blocked.
     output = asyncio.run(
@@ -334,7 +340,7 @@ def test_operator_allowlist_routes_model_absent_from_registry(monkeypatch) -> No
 
     monkeypatch.setenv(_ALLOWED_MODEL_ROUTES_ENV, "anthropic:claude-opus-4-8")
     fake = _FakeRunner()
-    runner = RealLocalChildRunner(provider_config=_provider_config(), runner=fake)
+    runner = RealLocalChildRunner(env=_GOVERNED_OFF_ENV, provider_config=_provider_config(), runner=fake)
 
     output = asyncio.run(runner.run_child(_request(provider="anthropic", model="claude-opus-4-8")))
 
@@ -348,7 +354,7 @@ def test_unknown_model_still_blocks_when_allowlist_unset(monkeypatch) -> None:
 
     monkeypatch.delenv(_ALLOWED_MODEL_ROUTES_ENV, raising=False)
     fake = _FakeRunner()
-    runner = RealLocalChildRunner(provider_config=_provider_config(), runner=fake)
+    runner = RealLocalChildRunner(env=_GOVERNED_OFF_ENV, provider_config=_provider_config(), runner=fake)
 
     output = asyncio.run(
         runner.run_child(_request(provider="anthropic", model="claude-does-not-exist-9000"))
@@ -364,7 +370,7 @@ def test_operator_allowlist_match_is_casefolded(monkeypatch) -> None:
 
     monkeypatch.setenv(_ALLOWED_MODEL_ROUTES_ENV, "Anthropic:Claude-Opus-4-8")
     fake = _FakeRunner()
-    runner = RealLocalChildRunner(provider_config=_provider_config(), runner=fake)
+    runner = RealLocalChildRunner(env=_GOVERNED_OFF_ENV, provider_config=_provider_config(), runner=fake)
 
     output = asyncio.run(runner.run_child(_request(provider="anthropic", model="claude-opus-4-8")))
 
@@ -394,7 +400,7 @@ def test_operator_allowed_model_routes_parser_failsafe() -> None:
 
 def test_run_child_never_raises_when_runner_raises_mid_turn() -> None:
     raising = _RaisingRunner()
-    runner = RealLocalChildRunner(provider_config=_provider_config(), runner=raising)
+    runner = RealLocalChildRunner(env=_GOVERNED_OFF_ENV, provider_config=_provider_config(), runner=raising)
 
     output = asyncio.run(runner.run_child(_request()))
 
@@ -409,7 +415,7 @@ def test_run_child_never_raises_when_runner_raises_mid_turn() -> None:
 
 def test_boundary_sanitises_blocked_output_from_real_runner() -> None:
     """A degraded (blocked) mapping still routes through the boundary cleanly."""
-    runner = RealLocalChildRunner(runner=_FakeRunner())  # no key → blocked
+    runner = RealLocalChildRunner(env=_GOVERNED_OFF_ENV, runner=_FakeRunner())  # no key → blocked
     boundary = LocalChildRunnerBoundary(
         ChildRunnerConfig(enabled=True, liveChildRunnerEnabled=True),
         child_runner=runner,
@@ -434,6 +440,7 @@ def test_run_child_resolves_google_provider_via_gemini_alias(monkeypatch) -> Non
     present resolves to a usable config — NOT ``child_provider_key_missing``."""
     # Gemini key present in env; provider explicitly the registry's "google".
     monkeypatch.setenv("GEMINI_API_KEY", "sk-gemini-test")
+    monkeypatch.setenv("MAGI_SUBAGENT_GOVERNED_TURN_ENABLED", "0")
     fake = _FakeRunner(text="ANSWER: gemini child ran")
     runner = RealLocalChildRunner(runner=fake)  # no injected provider_config
 
@@ -449,6 +456,7 @@ def test_run_child_default_google_route_resolves_with_gemini_key(monkeypatch) ->
     """The historical default child route is ``google``/gemini; with a Gemini
     key it resolves rather than silently blocking."""
     monkeypatch.setenv("GEMINI_API_KEY", "sk-gemini-test")
+    monkeypatch.setenv("MAGI_SUBAGENT_GOVERNED_TURN_ENABLED", "0")
     fake = _FakeRunner(text="ANSWER: default route")
     # Inject the boundary-default route via the per-request override (mirrors
     # ChildRunnerConfig.child_provider="google", child_model="gemini-3.5-flash").
@@ -469,6 +477,7 @@ def test_run_child_uses_canonical_lowercase_litellm_route(monkeypatch) -> None:
     """A mixed-case request ``model`` resolves to the canonical lowercase
     litellm route (the registry-validated route, not the raw input)."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-anthropic-test")
+    monkeypatch.setenv("MAGI_SUBAGENT_GOVERNED_TURN_ENABLED", "0")
 
     captured: dict[str, object] = {}
 
@@ -500,7 +509,7 @@ def test_run_child_uses_canonical_lowercase_litellm_route(monkeypatch) -> None:
 
 def test_run_child_times_out_on_budget_ms_and_never_raises() -> None:
     slow = _SlowRunner(sleep_s=5.0)
-    runner = RealLocalChildRunner(provider_config=_provider_config(), runner=slow)
+    runner = RealLocalChildRunner(env=_GOVERNED_OFF_ENV, provider_config=_provider_config(), runner=slow)
 
     # Tiny budget → the 5s runner must be cut off and degrade (never raise).
     output = asyncio.run(runner.run_child(_request(budgetMs=20)))
@@ -514,7 +523,7 @@ def test_run_child_no_budget_ms_fast_child_completes() -> None:
     """Without an explicit budget, a fast child still completes — the default
     ceiling bounds the turn but does not cut off a child that finishes in time."""
     fake = _FakeRunner(text="ANSWER: default-bound ok")
-    runner = RealLocalChildRunner(provider_config=_provider_config(), runner=fake)
+    runner = RealLocalChildRunner(env=_GOVERNED_OFF_ENV, provider_config=_provider_config(), runner=fake)
 
     output = asyncio.run(runner.run_child(_request()))  # budget_ms defaults to 0
 
@@ -530,7 +539,7 @@ def test_run_child_no_budget_ms_still_times_out_on_hang() -> None:
     runner = RealLocalChildRunner(
         provider_config=_provider_config(),
         runner=slow,
-        env={"MAGI_MODEL_TIMEOUT_S": "0.1"},
+        env={**_GOVERNED_OFF_ENV, "MAGI_MODEL_TIMEOUT_S": "0.1"},
     )
 
     # No budget_ms on the request → previously ran unbounded (the parent turn
@@ -557,7 +566,7 @@ def test_run_child_propagates_cancellation() -> None:
             yield  # pragma: no cover - async generator marker
 
     cancelling = _CancellingRunner()
-    runner = RealLocalChildRunner(provider_config=_provider_config(), runner=cancelling)
+    runner = RealLocalChildRunner(env=_GOVERNED_OFF_ENV, provider_config=_provider_config(), runner=cancelling)
 
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(runner.run_child(_request()))
@@ -595,7 +604,7 @@ def test_run_child_readonly_profile_forwards_readonly_tools_to_builder(
     monkeypatch.setattr("magi_agent.cli.tool_runtime.build_cli_adk_tools", _fake_build_tools)
     monkeypatch.setattr("magi_agent.cli.real_runner.build_cli_model_runner", _fake_build_runner)
 
-    runner = RealLocalChildRunner(provider_config=_provider_config(), toolset_profile="readonly")
+    runner = RealLocalChildRunner(env=_GOVERNED_OFF_ENV, provider_config=_provider_config(), toolset_profile="readonly")
     output = asyncio.run(runner.run_child(_request()))
 
     assert output["status"] == "completed"
@@ -633,6 +642,7 @@ def test_run_child_readonly_profile_builds_instruction_without_memory_projection
     monkeypatch.setattr("magi_agent.cli.real_runner.build_cli_model_runner", _fake_build_runner)
 
     runner = RealLocalChildRunner(
+        env=_GOVERNED_OFF_ENV,
         provider_config=_provider_config(),
         toolset_profile="readonly",
         workspace_root=str(tmp_path),
@@ -664,6 +674,7 @@ def test_readonly_child_toolset_does_not_build_full_local_handlers(
     )
 
     runner = RealLocalChildRunner(
+        env=_GOVERNED_OFF_ENV,
         toolset_profile="readonly",
         workspace_root=str(tmp_path),
     )
@@ -697,6 +708,7 @@ def test_run_child_readonly_profile_promotes_tool_receipts_to_evidence_refs() ->
 
     fake = _FakeRunner(text="ANSWER: read the file")
     runner = RealLocalChildRunner(
+        env=_GOVERNED_OFF_ENV,
         provider_config=_provider_config(),
         runner=fake,
         toolset_profile="readonly",
@@ -722,6 +734,7 @@ def test_readonly_evidence_refs_promoted_through_boundary_envelope() -> None:
 
     fake = _FakeRunner(text="ANSWER: boundary readonly")
     real = RealLocalChildRunner(
+        env=_GOVERNED_OFF_ENV,
         provider_config=_provider_config(),
         runner=fake,
         toolset_profile="readonly",
@@ -746,7 +759,7 @@ def test_run_child_default_profile_is_byte_identical_empty_toolset() -> None:
     """REGRESSION: with no toolset_profile (default ``none``) the output keys/
     values are unchanged — empty toolset, empty refs (v1 byte-identical)."""
     fake = _FakeRunner(text="ANSWER: text only child")
-    runner = RealLocalChildRunner(provider_config=_provider_config(), runner=fake)
+    runner = RealLocalChildRunner(env=_GOVERNED_OFF_ENV, provider_config=_provider_config(), runner=fake)
 
     output = asyncio.run(runner.run_child(_request()))
 
@@ -777,7 +790,7 @@ def test_run_child_none_profile_forwards_empty_toolset_to_builder(
 
     monkeypatch.setattr("magi_agent.cli.real_runner.build_cli_model_runner", _fake_build_runner)
 
-    runner = RealLocalChildRunner(provider_config=_provider_config())  # default none
+    runner = RealLocalChildRunner(env=_GOVERNED_OFF_ENV, provider_config=_provider_config())  # default none
     output = asyncio.run(runner.run_child(_request()))
 
     assert output["status"] == "completed"
@@ -791,7 +804,7 @@ def test_run_child_none_profile_forwards_empty_toolset_to_builder(
 
 def test_real_local_child_runner_declares_live_provider_marker() -> None:
     assert RealLocalChildRunner.openmagi_live_provider is True
-    assert RealLocalChildRunner(runner=_FakeRunner()).openmagi_live_provider is True
+    assert RealLocalChildRunner(env=_GOVERNED_OFF_ENV, runner=_FakeRunner()).openmagi_live_provider is True
 
 
 # --------------------------------------------------------------------------- #
@@ -807,6 +820,7 @@ def test_child_runner_live_import_stays_light() -> None:
             """
 import importlib
 import sys
+
 
 importlib.import_module("magi_agent.runtime.child_runner_live")
 

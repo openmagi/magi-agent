@@ -101,7 +101,8 @@ def _request(**overrides: object) -> ChildTaskRequest:
 def test_allowed_tools_flag_off_toolset_unchanged(monkeypatch) -> None:
     """When MAGI_SPAWN_RECIPE_CAP_ENABLED is OFF, allowedTools has no effect."""
     _patch_full_tools(monkeypatch)
-    monkeypatch.delenv("MAGI_SPAWN_RECIPE_CAP_ENABLED", raising=False)
+    # Promoted _b -> _pb: unset now resolves ON, so disable explicitly.
+    monkeypatch.setenv("MAGI_SPAWN_RECIPE_CAP_ENABLED", "0")
 
     req = _request(metadata={"allowedTools": ("FileRead",)})
     runner = RealLocalChildRunner(

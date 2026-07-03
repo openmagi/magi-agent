@@ -121,7 +121,6 @@ _STRICT_BOOL_FLAGS_ENABLED = (
     "MAGI_CROSS_VERIFY_ENABLED",
     "MAGI_DEEP_WEB_RESEARCH_ENABLED",
     "MAGI_BROWSER_TOOL_ENABLED",
-    "MAGI_DEFERRED_TOOLS_ENABLED",
     "MAGI_HEADTAIL_TRUNCATION_ENABLED",
     "MAGI_FILE_DELIVERY_LIVE_ENABLED",
     "MAGI_DOCUMENT_QA_ENABLED",
@@ -144,9 +143,6 @@ _STRICT_BOOL_FLAGS_ENABLED = (
     "MAGI_MEMORY_PROJECTION_ENABLED",
     "MAGI_MEMORY_QMD_LIVE_ENABLED",
     "MAGI_MEMORY_MODE_ROUTING_ENABLED",
-    # Orchestrator pattern: per-spawn tool ceiling + recipe-gate binding consumers.
-    "MAGI_SPAWN_RECIPE_CAP_ENABLED",
-    "MAGI_SPAWN_RECIPE_BIND_ENABLED",
 )
 
 
@@ -184,6 +180,13 @@ _PROFILE_BOOL_FLAGS_ENABLED = (
     "MAGI_SELF_INTROSPECTION_ENABLED",
     "MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED",
     "MAGI_EVIDENCE_COMPLETION_GATE_ENABLED",
+    # Promoted _b -> _pb (default-ON in the full profile; OFF only under
+    # safe/eval or an explicit "0"). No longer seeded into the dogfood profile
+    # since they self-enable under MAGI_RUNTIME_PROFILE=full.
+    "MAGI_DEFERRED_TOOLS_ENABLED",
+    # Orchestrator pattern: per-spawn tool ceiling + recipe-gate binding consumers.
+    "MAGI_SPAWN_RECIPE_CAP_ENABLED",
+    "MAGI_SPAWN_RECIPE_BIND_ENABLED",
 )
 
 

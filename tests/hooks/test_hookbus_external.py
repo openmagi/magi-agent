@@ -354,10 +354,9 @@ def test_external_hook_config_enabled_from_env():
     assert config.enabled is True
 
 
-def test_external_hook_config_disabled_by_default():
-    """ExternalHookConfig.from_env() must default to disabled when env var is absent."""
-    env_without_flag = {k: v for k, v in os.environ.items() if k != "MAGI_EXTERNAL_HOOKS_ENABLED"}
-    with patch.dict(os.environ, env_without_flag, clear=True):
+def test_external_hook_config_disabled_when_flag_off():
+    """ExternalHookConfig.from_env() must be disabled when the flag is explicit '0'."""
+    with patch.dict(os.environ, {"MAGI_EXTERNAL_HOOKS_ENABLED": "0"}, clear=True):
         config = ExternalHookConfig.from_env()
     assert config.enabled is False
 

@@ -87,7 +87,7 @@ def local_runner_policy_routing_enabled_from_env() -> bool:
     # Reads through the canonical registry (I-2 PR A) so the truthy
     # convention lives in one place. Default-OFF preserved; any explicit
     # ``"1"/"true"/"yes"/"on"`` enables, unset and unknown values keep OFF.
-    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+    from magi_agent.config.flags import flag_bool, flag_profile_bool  #  # noqa: PLC0415
 
     return flag_bool(_RUNNER_POLICY_ROUTING_ENV)
 
@@ -184,6 +184,7 @@ def _build_criterion_model_factory() -> object | None:
     Fail-soft to None.
     """
     from magi_agent.config.flags import flag_bool, flag_profile_bool
+
 
     if not (
         flag_bool("MAGI_EGRESS_GATE_ENABLED")
@@ -1309,7 +1310,7 @@ def _first_party_tools_enabled() -> bool:
     # Reads through the canonical registry (I-2 PR A); default-ON preserved.
     # Strict allowlist semantics: unset → True (registry default), explicit
     # ``"1"/"true"/"yes"/"on"`` → True, any other value → False.
-    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+    from magi_agent.config.flags import flag_bool, flag_profile_bool  #  # noqa: PLC0415
 
     return flag_bool("MAGI_FIRST_PARTY_TOOLS_ENABLED")
 
@@ -1391,9 +1392,9 @@ def build_tui_app(
     file_provider: object | None = None
     # I-4: routed through the typed flag registry. Pre-I-4 strict
     # ``=="1"`` widens to canonical ``flag_bool`` truthy set.
-    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+    from magi_agent.config.flags import flag_bool, flag_profile_bool  #  # noqa: PLC0415
 
-    if flag_bool("MAGI_TUI_FILE_MENTIONS"):
+    if flag_profile_bool("MAGI_TUI_FILE_MENTIONS"):
         from magi_agent.cli.tui.file_provider import (  # noqa: PLC0415
             WorkspaceFileProvider,
         )

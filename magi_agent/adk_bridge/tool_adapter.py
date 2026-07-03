@@ -223,7 +223,7 @@ def active_provider_family() -> "ProviderFamily":
             return family
 
     # I-4: routed through the typed flag registry.
-    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+    from magi_agent.config.flags import flag_str  #  # noqa: PLC0415
 
     provider_label = (
         flag_str("CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_LABEL") or ""
@@ -459,7 +459,7 @@ class DeferredToolManager:
 def build_deferred_tool_threshold() -> int:
     # I-4: routed through the typed flag registry. ``flag_int`` returns
     # the registered default (30) on missing / unparseable values.
-    from magi_agent.config.flags import flag_int  # noqa: PLC0415
+    from magi_agent.config.flags import flag_int  #  # noqa: PLC0415
 
     threshold = flag_int("MAGI_DEFERRED_TOOL_THRESHOLD") or 30
     return max(1, threshold)
@@ -474,9 +474,9 @@ def build_deferred_adk_tools(
     # I-4: routed through the typed flag registry. ``MAGI_DEFERRED_TOOLS_ENABLED``
     # was already registered (``_b``); the strict-``=="1"`` check
     # widens trivially to ``flag_bool``'s canonical set.
-    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+    from magi_agent.config.flags import flag_profile_bool  #  # noqa: PLC0415
 
-    if not flag_bool("MAGI_DEFERRED_TOOLS_ENABLED"):
+    if not flag_profile_bool("MAGI_DEFERRED_TOOLS_ENABLED"):
         return None
     deferred_registry = DeferredToolRegistry(registry)
     initial_tool_set = deferred_registry.get_initial_tools(

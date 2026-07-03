@@ -424,9 +424,9 @@ def _prompt_transform_hooks_enabled() -> bool:
     """
     # I-4: routed through the typed flag registry. Pre-I-4 truthy set
     # ``{1, true, yes}`` widens to canonical ``{1, true, yes, on}``.
-    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+    from magi_agent.config.flags import flag_bool, flag_profile_bool  #  # noqa: PLC0415
 
-    return flag_bool("MAGI_PROMPT_TRANSFORM_HOOKS_ENABLED")
+    return flag_profile_bool("MAGI_PROMPT_TRANSFORM_HOOKS_ENABLED")
 
 
 def _prompt_injection_enabled() -> bool:
@@ -597,6 +597,7 @@ def _user_rules_block() -> str:
     """
     from magi_agent.config.flags import flag_profile_bool
 
+
     if not flag_profile_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED"):
         return ""
     try:
@@ -687,6 +688,7 @@ def _credentials_awareness_block() -> str:
     byte-identical to before. Fail-soft to "".
     """
     from magi_agent.config.flags import flag_profile_bool
+
 
     if not flag_profile_bool("MAGI_CREDENTIAL_AWARENESS_ENABLED"):
         return ""

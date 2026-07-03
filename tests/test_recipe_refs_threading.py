@@ -93,7 +93,8 @@ def test_flag_off_governed_path_pins_are_empty(monkeypatch) -> None:
     """Flag OFF: even when metadata carries recipeRefs, governed build_headless_runtime
     receives pinned_recipe_pack_ids=() (byte-identical dormancy)."""
     monkeypatch.setenv("MAGI_SUBAGENT_GOVERNED_TURN_ENABLED", "1")
-    # MAGI_SPAWN_RECIPE_BIND_ENABLED is NOT set → OFF
+    # MAGI_SPAWN_RECIPE_BIND_ENABLED explicitly OFF (promoted to default-ON).
+    monkeypatch.setenv("MAGI_SPAWN_RECIPE_BIND_ENABLED", "0")
 
     captured_kwargs: list[dict[str, object]] = []
 
@@ -202,7 +203,8 @@ def test_flag_on_no_recipe_refs_governed_pins_empty(monkeypatch) -> None:
 def test_flag_on_legacy_path_pins_flow_from_metadata(monkeypatch) -> None:
     """Flag ON + recipeRefs in metadata → legacy build_cli_model_runner receives
     pinned_recipe_pack_ids with the supplied refs."""
-    # Governed flag is OFF → legacy path runs
+    # Governed flag explicitly OFF (promoted to default-ON) → legacy path runs
+    monkeypatch.setenv("MAGI_SUBAGENT_GOVERNED_TURN_ENABLED", "0")
     monkeypatch.setenv("MAGI_SPAWN_RECIPE_BIND_ENABLED", "1")
 
     captured_kwargs: dict[str, object] = {}
@@ -241,7 +243,10 @@ def test_flag_on_legacy_path_pins_flow_from_metadata(monkeypatch) -> None:
 def test_flag_off_legacy_path_pins_are_empty(monkeypatch) -> None:
     """Flag OFF: legacy build_cli_model_runner receives pinned_recipe_pack_ids=()
     (byte-identical dormancy — same as if no recipeRefs were present)."""
-    # MAGI_SPAWN_RECIPE_BIND_ENABLED is NOT set → OFF
+    # Governed + bind flags explicitly OFF (both promoted to default-ON) →
+    # legacy path with dormant pins.
+    monkeypatch.setenv("MAGI_SUBAGENT_GOVERNED_TURN_ENABLED", "0")
+    monkeypatch.setenv("MAGI_SPAWN_RECIPE_BIND_ENABLED", "0")
 
     captured_kwargs: dict[str, object] = {}
 

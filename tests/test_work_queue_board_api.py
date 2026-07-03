@@ -77,9 +77,9 @@ def test_no_token_configured_denies_all(tmp_path):
     )
 
 
-def test_board_api_gate_default_off(monkeypatch):
+def test_board_api_gate_when_disabled(monkeypatch):
     from magi_agent.missions.work_queue.board_api import is_work_queue_board_api_enabled
-    monkeypatch.delenv("MAGI_WORK_QUEUE_BOARD_API_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_WORK_QUEUE_BOARD_API_ENABLED", "0")
     assert is_work_queue_board_api_enabled() is False
     monkeypatch.setenv("MAGI_WORK_QUEUE_BOARD_API_ENABLED", "1")
     assert is_work_queue_board_api_enabled() is True
