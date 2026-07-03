@@ -79,6 +79,25 @@ def test_all_records_includes_flagships() -> None:
     assert "gemini-3.5-flash" in models
     assert "gemini-3.1-pro-preview" in models
     assert "kimi-k2p6" in models
+    assert "kimi-k2p7-code" in models
+    assert "glm-5p2" in models
+
+
+def test_new_fireworks_records_keep_provider_defaults_stable() -> None:
+    """Adding kimi-k2p7-code / glm-5p2 must NOT flip the fireworks default
+    (kimi-k2p6, JSON-order contract) or the cheap-tier pick."""
+    catalog = ModelCatalog.builtin()
+    assert catalog.default_model_for("fireworks").model == "kimi-k2p6"
+    assert catalog.cheap_model_for("fireworks").model == "kimi-k2p6"
+    k2p7 = catalog.record("fireworks", "kimi-k2p7-code")
+    assert k2p7 is not None
+    assert k2p7.context_window == 262_144
+    assert k2p7.max_output_tokens == 32_768
+    glm = catalog.record("fireworks", "glm-5p2")
+    assert glm is not None
+    assert glm.tier == "sota"
+    assert glm.context_window == 1_000_000
+    assert glm.max_output_tokens == 131_072
 
 
 def test_is_router_alias_distinguishes_openrouter_from_direct() -> None:

@@ -51,6 +51,11 @@ class TestDetectProviderFamily:
         assert detect_provider_family("fireworks/kimi-k2p6") == ProviderFamily.FIREWORKS
         assert detect_provider_family("kimi-k2p6") == ProviderFamily.FIREWORKS
         assert detect_provider_family("minimax-m2p7") == ProviderFamily.FIREWORKS
+        assert detect_provider_family("kimi-k2p7-code") == ProviderFamily.FIREWORKS
+        assert detect_provider_family("glm-5p2") == ProviderFamily.FIREWORKS
+        # ``glm-`` is a heuristic prefix too, so uncatalogued GLM variants
+        # still route to fireworks.
+        assert detect_provider_family("glm-5p1") == ProviderFamily.FIREWORKS
 
     def test_unknown_model_returns_default(self) -> None:
         assert detect_provider_family("some-custom-model") == ProviderFamily.DEFAULT
