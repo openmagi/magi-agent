@@ -272,19 +272,34 @@ def test_okf_knowledge_enabled_under_profile(profile: dict[str, str]) -> None:
     cfg = resolve_okf_config(env=profile)
     assert cfg.master_enabled is True
     assert cfg.lookup_enabled is True
-    # Mode B index injection (PR3) is not implemented; the profile must not set it.
+    # Mode B index injection is not implemented; the profile must not set it.
     assert cfg.index_inject_enabled is False
     assert "MAGI_KNOWLEDGE_OKF_INDEX_INJECT_ENABLED" not in profile
 
 
+def test_okf_zero_friction_enabled_under_profile(profile: dict[str, str]) -> None:
+    """Zero-friction KB is fully ON in the full profile: auto_type indexes plain
+    .md, and scope widens to the whole knowledge/ dir. Verified through OKF's
+    own resolver (flag-promotion rule)."""
+    from magi_agent.knowledge.okf.config import resolve_okf_config
+
+    assert profile.get("MAGI_KNOWLEDGE_OKF_AUTO_TYPE") == "1"
+    assert profile.get("MAGI_KNOWLEDGE_OKF_SCOPE") == "knowledge_root"
+    cfg = resolve_okf_config(env=profile)
+    assert cfg.auto_type is True
+    assert cfg.default_scope == "knowledge_root"
+
+
 def test_okf_knowledge_default_off_when_profile_unset() -> None:
     """Symmetric guard: OKF resolves OFF on empty env (profile is config, not a
-    code-default flip)."""
+    code-default flip). Zero-friction knobs also stay at their safe defaults."""
     from magi_agent.knowledge.okf.config import resolve_okf_config
 
     cfg = resolve_okf_config(env={})
     assert cfg.master_enabled is False
     assert cfg.lookup_enabled is False
+    assert cfg.auto_type is False
+    assert cfg.default_scope == "okf_subdir"
 
 
 # ---------------------------------------------------------------------------
