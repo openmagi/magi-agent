@@ -44,6 +44,15 @@ EvidenceEnforcement = Literal["off", "audit", "block_final_answer"]
 EvidenceAgentRole = Literal["general", "coding", "research"]
 EvidenceRunOn = Literal["main", "child"]
 EvidenceVerdictState = Literal["audit", "pass", "missing", "failed", "block_ready"]
+# Provenance of an evidence record, used to gate the "an evidence pass unlocks a
+# high-risk tool" security join. ``tool_declared`` = lifted from a tool result's
+# ``metadata["evidence"]`` (UNTRUSTED: any tool / MCP server can mint it, so it
+# is NEVER unlock-eligible). ``producer_control`` = written by a runtime control
+# path (a producer rule via the collector), the only origin a session gate may
+# treat as an unlock key, and then only when ``producing_rule_id`` matches the
+# gate's bound producer. Default is ``tool_declared`` (safe-by-construction: an
+# unmarked / legacy-persisted record is untrusted).
+EvidenceOrigin = Literal["tool_declared", "producer_control"]
 
 _BUILTIN_TYPE_RE = re.compile(r"^[A-Z][A-Za-z0-9_]*$")
 _CUSTOM_TYPE_RE = re.compile(r"^custom:[A-Z][A-Za-z0-9]*(?:[._-][A-Za-z0-9]+)*$")
@@ -660,6 +669,15 @@ class EvidenceRecord(EvidenceMetadataModel):
     fields: Mapping[str, object] = Field(default_factory=dict)
     preview: str | None = None
     metadata: Mapping[str, object] = Field(default_factory=dict)
+    # Provenance for the security unlock join (see ``EvidenceOrigin``). Set
+    # exclusively by the write paths: the tool-metadata lift leaves the default
+    # (``tool_declared``, untrusted); the collector's producer write path
+    # re-stamps ``producer_control`` + the producing rule id. A gate that
+    # unlocks a tool on evidence must require ``producer_control`` +
+    # ``producing_rule_id == <bound producer>``; a record's declared origin is
+    # never trusted from tool metadata.
+    origin: EvidenceOrigin = "tool_declared"
+    producing_rule_id: str = Field(default="", alias="producingRuleId")
 
     @field_validator("type")
     @classmethod

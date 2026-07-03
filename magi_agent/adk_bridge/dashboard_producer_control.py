@@ -147,6 +147,7 @@ class DashboardProducerControl(BaseLoopControl):
                         session_id=session_id,
                         turn_id=turn_id,
                         record=record,
+                        producing_rule_id=check.id,
                     )
             return None
         except Exception:
