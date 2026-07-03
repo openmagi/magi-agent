@@ -3,19 +3,19 @@
 @import "../src/components/ui/_ds/tokens.css";
 
 :root {
-  --background: #FAFAFA;
-  --foreground: #1A1A2E;
+  --background: #EFEDE8;
+  --foreground: #1B1D22;
   --text-secondary: #475569;
   --text-muted: #64748B;
-  --primary: #7C3AED;
-  --primary-light: #6D28D9;
-  --cta: #7C3AED;
-  --cta-light: #6D28D9;
+  --primary: #17635A;
+  --primary-light: #14564E;
+  --cta: #17635A;
+  --cta-light: #14564E;
   --glass-bg: rgba(255, 255, 255, 0.7);
   --glass-border: rgba(0, 0, 0, 0.08);
   --glass-hover: rgba(255, 255, 255, 0.9);
-  --neon-purple: rgba(124, 58, 237, 0.15);
-  --neon-rose: rgba(124, 58, 237, 0.1);
+  --neon-purple: rgba(23, 99, 90, 0.15);
+  --neon-rose: rgba(23, 99, 90, 0.1);
 }
 
 @theme inline {
@@ -30,7 +30,8 @@
   --color-glass-bg: var(--glass-bg);
   --color-glass-border: var(--glass-border);
   --color-glass-hover: var(--glass-hover);
-  --font-sans: "Plus Jakarta Sans", var(--font-geist-sans), "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+  --font-sans: "Instrument Sans", var(--font-geist-sans), "Pretendard Variable", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+  --font-display: "Cabinet Grotesk", "Space Grotesk", var(--font-geist-sans), system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
@@ -81,7 +82,7 @@ body {
   inset: 0;
   padding: 1px;
   border-radius: inherit;
-  background: linear-gradient(135deg, rgba(124, 58, 237, 0.3), rgba(244, 63, 94, 0.3));
+  background: linear-gradient(135deg, rgba(23, 99, 90, 0.3), rgba(23, 99, 90, 0.3));
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
@@ -91,22 +92,22 @@ body {
 
 /* Neon glow */
 .glow {
-  box-shadow: 0 0 20px rgba(124, 58, 237, 0.08), 0 0 40px rgba(244, 63, 94, 0.04);
+  box-shadow: 0 0 20px rgba(23, 99, 90, 0.08), 0 0 40px rgba(23, 99, 90, 0.04);
 }
 
 .glow-sm {
-  box-shadow: 0 0 8px rgba(124, 58, 237, 0.04);
+  box-shadow: 0 0 8px rgba(23, 99, 90, 0.04);
 }
 
 .glow-cta {
-  box-shadow: 0 0 16px rgba(124, 58, 237, 0.3), 0 0 32px rgba(124, 58, 237, 0.1);
+  box-shadow: 0 0 16px rgba(23, 99, 90, 0.3), 0 0 32px rgba(23, 99, 90, 0.1);
 }
 
 /* Page background glow */
 .page-glow {
   background:
-    radial-gradient(ellipse 60% 40% at 50% 0%, rgba(124, 58, 237, 0.06), transparent),
-    radial-gradient(ellipse 40% 30% at 65% 0%, rgba(244, 63, 94, 0.03), transparent),
+    radial-gradient(ellipse 60% 40% at 50% 0%, rgba(23, 99, 90, 0.06), transparent),
+    radial-gradient(ellipse 40% 30% at 65% 0%, rgba(23, 99, 90, 0.03), transparent),
     var(--background);
 }
 
@@ -132,15 +133,15 @@ body {
 }
 
 .shimmer {
-  background: linear-gradient(90deg, transparent, rgba(124, 58, 237, 0.08), rgba(244, 63, 94, 0.08), transparent);
+  background: linear-gradient(90deg, transparent, rgba(23, 99, 90, 0.08), rgba(23, 99, 90, 0.08), transparent);
   background-size: 200% auto;
   animation: shimmer 3s linear infinite;
 }
 
 /* Pulse glow for active indicators */
 @keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 6px rgba(124, 58, 237, 0.4); }
-  50% { box-shadow: 0 0 16px rgba(124, 58, 237, 0.7), 0 0 24px rgba(244, 63, 94, 0.2); }
+  0%, 100% { box-shadow: 0 0 6px rgba(23, 99, 90, 0.4); }
+  50% { box-shadow: 0 0 16px rgba(23, 99, 90, 0.7), 0 0 24px rgba(23, 99, 90, 0.2); }
 }
 
 .pulse-glow {
@@ -205,7 +206,7 @@ body {
   [role="tab"],
   [tabindex]:not([tabindex="-1"])
 ):focus-visible {
-  outline: 2px solid rgba(124, 58, 237, 0.65);
+  outline: 2px solid rgba(23, 99, 90, 0.65);
   outline-offset: 2px;
 }
 
@@ -216,7 +217,7 @@ body {
 
 /* Selection color */
 ::selection {
-  background: rgba(124, 58, 237, 0.3);
+  background: rgba(23, 99, 90, 0.3);
   color: white;
 }
 
@@ -299,12 +300,12 @@ body {
   0%, 100% {
     opacity: 0.78;
     transform: scale(1);
-    box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.18);
+    box-shadow: 0 0 0 0 rgba(23, 99, 90, 0.18);
   }
   50% {
     opacity: 1;
     transform: scale(1.14);
-    box-shadow: 0 0 0 5px rgba(124, 58, 237, 0);
+    box-shadow: 0 0 0 5px rgba(23, 99, 90, 0);
   }
 }
 
@@ -362,7 +363,7 @@ body {
   bottom: 0.25rem;
   height: 1px;
   border-radius: 999px;
-  background: linear-gradient(90deg, transparent, rgba(124, 58, 237, 0.32), transparent);
+  background: linear-gradient(90deg, transparent, rgba(23, 99, 90, 0.32), transparent);
   animation: work-console-row-sheen 1.9s ease-in-out infinite;
   pointer-events: none;
 }
@@ -517,7 +518,7 @@ body {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--primary-light);
-  background: rgba(124, 58, 237, 0.08);
+  background: rgba(23, 99, 90, 0.08);
   border-radius: 4px;
   padding: 0.05em 0.35em;
   margin: 0 0.1em;
@@ -528,7 +529,7 @@ body {
 
 .citation-badge:hover,
 .citation-badge:focus-visible {
-  background: rgba(124, 58, 237, 0.18);
+  background: rgba(23, 99, 90, 0.18);
   color: var(--primary);
   outline: none;
 }
@@ -769,3 +770,7 @@ body {
     top: 12rem;
   }
 }
+
+
+/* The Ledger — display voice (Cabinet Grotesk) on headings */
+h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.015em; }
