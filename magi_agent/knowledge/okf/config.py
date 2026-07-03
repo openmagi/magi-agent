@@ -55,6 +55,10 @@ INDEX_INJECT_ENABLED_ENV_VAR: str = "MAGI_KNOWLEDGE_OKF_INDEX_INJECT_ENABLED"
 #: otherwise-skipped docs without changing existing (typed) results.
 AUTO_TYPE_ENV_VAR: str = "MAGI_KNOWLEDGE_OKF_AUTO_TYPE"
 
+#: Default fallback scope — opt-in string (does NOT follow master). ``knowledge_root``
+#: widens the fallback bundle root from ``knowledge/okf`` to the whole ``knowledge/``.
+SCOPE_ENV_VAR: str = "MAGI_KNOWLEDGE_OKF_SCOPE"
+
 #: Bundle path list (colon-separated directories).
 BUNDLE_PATHS_ENV_VAR: str = "MAGI_OKF_BUNDLE_PATHS"
 
@@ -66,6 +70,12 @@ MAX_TOTAL_BYTES_ENV_VAR: str = "MAGI_KNOWLEDGE_OKF_MAX_TOTAL_BYTES"
 
 #: config.toml table that mirrors the env names (snake_case keys).
 CONFIG_TABLE: str = "knowledge_okf"
+
+#: Allowed values for ``default_scope``.  Anything else falls back to the default.
+_SCOPE_OKF_SUBDIR = "okf_subdir"
+_SCOPE_KNOWLEDGE_ROOT = "knowledge_root"
+_ALLOWED_SCOPES = frozenset({_SCOPE_OKF_SUBDIR, _SCOPE_KNOWLEDGE_ROOT})
+_DEFAULT_SCOPE = _SCOPE_OKF_SUBDIR
 
 # ---------------------------------------------------------------------------
 # Hardcoded defaults / bounds
@@ -109,6 +119,11 @@ class OkfConfig(BaseModel):
 
     #: Resolved bundle directories (colon-split, blanks dropped).
     bundle_paths: tuple[str, ...] = Field(default=(), alias="bundlePaths")
+
+    #: Fallback bundle-root scope.  ``"okf_subdir"`` (default) → ``knowledge/okf``;
+    #: ``"knowledge_root"`` → the whole ``knowledge/`` dir.  Opt-in (does NOT follow
+    #: the master) so existing OKF users' search surface never changes silently.
+    default_scope: str = Field(default=_DEFAULT_SCOPE, alias="defaultScope")
 
     #: Tunables.
     max_records: int = Field(
@@ -177,6 +192,8 @@ def resolve_okf_config(
         autoType=sub_flag(
             AUTO_TYPE_ENV_VAR, "auto_type", master_default=master
         ),
+        # scope is opt-in: a non-bool string that does NOT follow the master.
+        defaultScope=_resolve_scope(env, table),
         bundlePaths=_resolve_bundle_paths(env, table),
         maxRecords=_resolve_int(
             env, table, env_var=MAX_RECORDS_ENV_VAR, config_key="max_records",
@@ -261,6 +278,27 @@ def _resolve_int(
     return default
 
 
+def _resolve_scope(
+    env: Mapping[str, str],
+    table: Mapping[str, object],
+) -> str:
+    """Resolve ``default_scope`` as an opt-in string (env beats config).
+
+    Unlike the bool sub-flags this does NOT cascade off the master: widening the
+    scope is a deliberate opt-in so an existing OKF user's search surface never
+    changes silently.  An unknown/garbage value falls back to the default rather
+    than raising (an operator typo must not crash callers).
+    """
+    raw = env.get(SCOPE_ENV_VAR)
+    if raw is None or not str(raw).strip():
+        candidate = table.get("default_scope")
+        raw = candidate if isinstance(candidate, str) else None
+    if raw is None:
+        return _DEFAULT_SCOPE
+    value = str(raw).strip().lower()
+    return value if value in _ALLOWED_SCOPES else _DEFAULT_SCOPE
+
+
 def _resolve_bundle_paths(
     env: Mapping[str, str],
     table: Mapping[str, object],
@@ -284,6 +322,7 @@ __all__ = [
     "LOOKUP_ENABLED_ENV_VAR",
     "MASTER_ENV_VAR",
     "MAX_DOC_BYTES",
+    "SCOPE_ENV_VAR",
     "OkfConfig",
     "coerce_bool",
     "resolve_okf_config",

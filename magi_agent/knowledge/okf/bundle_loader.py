@@ -46,6 +46,14 @@ _H1_RE = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
 #: no frontmatter / missing / non-string type). Fixed + deterministic (no LLM).
 _DEFAULT_DOC_TYPE = "document"
 
+#: Directory names pruned from the walk so OKF never intersects the memory
+#: subsystem (``memory/``), the ``.magi`` identity namespace, or VCS / dependency
+#: internals (``.git`` / ``node_modules``).  Matters when the scope is widened to
+#: the whole ``knowledge/`` dir (design §2 Phase 2 SHOULD-FIX-1); harmless for the
+#: narrow ``knowledge/okf`` root (which contains none of these).  These are
+#: OUT-OF-SCOPE, not unsafe, so they are counted separately in ``pruned``.
+_PRUNE_DIR_NAMES = frozenset({"memory", ".magi", ".git", "node_modules"})
+
 # ---------------------------------------------------------------------------
 # Secret / sealed basename rules — LOCAL copy mirroring
 # ``magi_agent/transport/app_api.py:42-52``.  Re-declared here (not imported) so
@@ -66,6 +74,21 @@ _SECRET_NAME_RE = re.compile(
 def _is_protected(path: Path) -> bool:
     name = path.name
     return name in _SEALED_BASENAMES or bool(_SECRET_NAME_RE.search(name))
+
+
+def _is_pruned(root: Path, candidate: Path) -> bool:
+    """True when ``candidate`` lives under a pruned dir relative to ``root``.
+
+    Any path segment (except the final basename) matching ``_PRUNE_DIR_NAMES`` is
+    excluded, so e.g. ``knowledge/memory/x.md`` and ``knowledge/a/.git/y.md`` are
+    both pruned.  A candidate not under ``root`` (should not happen) is treated as
+    not pruned; the downstream ``_resolve_okf_path`` containment check handles it.
+    """
+    try:
+        rel = candidate.relative_to(root)
+    except ValueError:
+        return False
+    return any(part in _PRUNE_DIR_NAMES for part in rel.parts[:-1])
 
 
 # ---------------------------------------------------------------------------
@@ -102,6 +125,10 @@ class OkfBundleIndex:
     skipped_no_type: int = 0
     skipped_unsafe: int = 0
     dropped_capped: int = 0
+    #: Candidates skipped because they live under a pruned directory
+    #: (``memory`` / ``.magi`` / ``.git`` / ``node_modules``). Out-of-scope, NOT
+    #: unsafe — counted separately so widening the scope leaves no silent drops.
+    pruned: int = 0
     #: Docs indexed via the auto-type path (would have been ``skipped_no_type``
     #: under strict mode, rescued because ``config.auto_type`` was ON). Observability
     #: counter so ``skipped_no_type`` going to 0 does not hide the transition.
@@ -284,6 +311,7 @@ def load_bundles(
     skipped_unsafe = 0
     dropped_capped = 0
     auto_typed = 0
+    pruned = 0
     total_bytes = 0
 
     for raw_root in bundle_roots:
@@ -292,6 +320,11 @@ def load_bundles(
             continue
         # Deterministic order so caps drop a stable tail.
         for candidate in sorted(root.rglob("*.md")):
+            # Prune out-of-scope dirs (memory/.magi/.git/node_modules) before any
+            # I/O so a widened knowledge/ root never intersects them.
+            if _is_pruned(root, candidate):
+                pruned += 1
+                continue
             resolved = _resolve_okf_path(root, candidate)
             if resolved is None:
                 skipped_unsafe += 1
@@ -354,6 +387,7 @@ def load_bundles(
         skipped_unsafe=skipped_unsafe,
         dropped_capped=dropped_capped,
         auto_typed=auto_typed,
+        pruned=pruned,
     )
 
 
