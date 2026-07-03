@@ -379,6 +379,88 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             }
         )
 
+    # --- POLICIES (named compositions of 1..N rules) ---------------------
+    # A policy groups custom rules into a user-intent unit (see
+    # customize.policies). Storage-only CRUD, mirroring the modes routes;
+    # auth-gated identically.
+    @app.get("/v1/app/policies")
+    async def list_policies_route(request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        from magi_agent.customize.policies import list_policies
+
+        return JSONResponse(
+            content={"policies": [p.to_payload() for p in list_policies()]}
+        )
+
+    @app.put("/v1/app/policies/{policy_id}")
+    async def upsert_policy_route(policy_id: str, request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        if not isinstance(body, dict):
+            return JSONResponse(status_code=400, content={"error": "object_required"})
+        from pydantic import ValidationError
+
+        from magi_agent.customize.policies import Policy, list_policies, upsert_policy
+
+        # The path id is authoritative: drop any body-supplied id / policy_id so
+        # neither can conflict, then set the path id.
+        payload = {k: v for k, v in body.items() if k not in ("id", "policy_id")}
+        payload["id"] = policy_id
+        try:
+            policy = Policy.model_validate(payload)
+        except ValidationError:
+            return JSONResponse(status_code=400, content={"error": "invalid_policy"})
+        try:
+            upsert_policy(policy)
+        except ValueError as exc:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "upsert_rejected", "message": str(exc)},
+            )
+        return JSONResponse(
+            content={
+                "policy": policy.to_payload(),
+                "policies": [p.to_payload() for p in list_policies()],
+            }
+        )
+
+    @app.delete("/v1/app/policies/{policy_id}")
+    async def delete_policy_route(policy_id: str, request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        from magi_agent.customize.policies import delete_policy, list_policies
+
+        delete_policy(policy_id)
+        return JSONResponse(
+            content={"policies": [p.to_payload() for p in list_policies()]}
+        )
+
+    @app.post("/v1/app/policies/migrate")
+    async def migrate_policies_route(request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        from magi_agent.customize.policies import (
+            list_policies,
+            migrate_groups_to_policies,
+        )
+
+        created = migrate_groups_to_policies()
+        return JSONResponse(
+            content={
+                "created": created,
+                "policies": [p.to_payload() for p in list_policies()],
+            }
+        )
+
     @app.post("/v1/app/modes/active")
     async def set_active_agent_mode(request: Request) -> JSONResponse:
         unauthorized = _unauthorized_response(request, runtime)
