@@ -246,6 +246,39 @@ def _build_worker_env() -> dict[str, str]:
     return {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
 
 
+# Process-wide STRONG registry of every live worker's process-group id. Workers
+# run in their own session/process group (start_new_session=True) and block on
+# stdin, so they never die with the parent on their own. An owner that forgets to
+# ``close()`` (e.g. a test that lets a PersistentPython binder go out of scope)
+# orphans a live interpreter; enough accumulate to wedge the whole process (seen
+# as pytest at 0%% CPU with 30+ orphaned ``python -I -c`` children -> CI job
+# exceeds its wall-clock cap). We key the registry on the pgid (an int), NOT the
+# worker wrapper: a WeakSet of wrappers would DROP an orphaned worker the moment
+# its Python object is garbage-collected — precisely the leak we must reap — so a
+# strong set of pgids is required. Entries are removed on close()/force-stop, and
+# ``_reap_live_workers`` (per-test conftest hook + atexit) SIGKILLs any remainder.
+_LIVE_WORKER_PGIDS: "set[int]" = set()
+
+
+def _reap_live_workers() -> None:
+    """Force-kill any worker process group still registered as alive.
+
+    Idempotent and fail-soft: called after every test (conftest autouse) and once
+    at interpreter shutdown (atexit). A pgid already gone raises ProcessLookupError
+    which we swallow.
+    """
+    for pgid in list(_LIVE_WORKER_PGIDS):
+        if os.name == "posix":
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except (ProcessLookupError, OSError):
+                pass
+        _LIVE_WORKER_PGIDS.discard(pgid)
+
+
+atexit.register(_reap_live_workers)
+
+
 class PythonExecWorker:
     """One long-lived driver subprocess; calls are serialized by ``lock``."""
 
@@ -268,6 +301,12 @@ class PythonExecWorker:
             env=_build_worker_env(),
             start_new_session=True,
         )
+        # The worker is its own session leader (start_new_session), so its pgid
+        # equals its pid. Register that pgid strongly so the process-wide reaper
+        # can SIGKILL it even if this wrapper is GC'd without close() (the leak
+        # that wedges the test suite). Removed again in ``_force_stop``.
+        self._pgid = self._process.pid
+        _LIVE_WORKER_PGIDS.add(self._pgid)
 
     def is_alive(self) -> bool:
         return self._process.poll() is None
@@ -342,6 +381,7 @@ class PythonExecWorker:
 
     def _force_stop(self) -> None:
         """Group-kill the worker (the gate5b ``_force_stop_process`` pattern)."""
+        _LIVE_WORKER_PGIDS.discard(getattr(self, "_pgid", self._process.pid))
         if self._process.poll() is not None:
             return
         if os.name == "posix":
