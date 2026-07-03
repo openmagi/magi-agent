@@ -1102,7 +1102,7 @@ async def review_compilation(
 _ENV_SHACL_COMPILER_MODEL = "MAGI_SHACL_COMPILER_MODEL"
 
 # Fixed sensible default used when the provider config has no own model string.
-_SHACL_COMPILER_DEFAULT_MODEL = "anthropic/claude-sonnet-4-6"
+_SHACL_COMPILER_DEFAULT_MODEL = "anthropic/claude-sonnet-5"
 
 
 def _production_shacl_compiler_model_factory() -> Callable[[], Any] | None:

@@ -20,6 +20,7 @@ export const GENERATED_LOCAL_RUNTIME_MODEL_PRESETS: Record<
   readonly LocalRuntimeModelOption[]
 > = {
   anthropic: [
+    { value: "claude-sonnet-5", label: "Claude Sonnet 5" },
     { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
     { value: "claude-opus-4-8", label: "Claude Opus 4.8" },
     { value: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
@@ -52,7 +53,7 @@ export const GENERATED_LOCAL_RUNTIME_MODEL_PRESETS: Record<
 
 /** Per-provider default model id, sourced from the catalog. */
 export const GENERATED_LOCAL_RUNTIME_DEFAULT_MODEL: Record<LocalRuntimeProvider, string> = {
-  anthropic: "claude-sonnet-4-6",
+  anthropic: "claude-sonnet-5",
   openai: "gpt-5.5",
   gemini: "gemini-3.5-flash",
   fireworks: "kimi-k2p6",

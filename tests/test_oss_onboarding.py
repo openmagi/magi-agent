@@ -28,7 +28,7 @@ from magi_agent.runtime.model_tiers import ModelTierRegistry
 def test_default_models_are_current_not_retired() -> None:
     # Guards against the stale ids (gpt-4o / gemini-2.0-flash / claude-sonnet-4-5)
     # that produced model-not-found on a fresh `magi <prompt>`.
-    assert _DEFAULT_MODEL["anthropic"] == "claude-sonnet-4-6"
+    assert _DEFAULT_MODEL["anthropic"] == "claude-sonnet-5"
     assert _DEFAULT_MODEL["openai"] == "gpt-5.5"
     assert _DEFAULT_MODEL["gemini"] == "gemini-3.5-flash"
     assert _DEFAULT_MODEL["fireworks"] == "kimi-k2p6"
@@ -75,7 +75,7 @@ def test_no_model_override_falls_through_to_provider_default() -> None:
         config={},
     )
     assert cfg is not None
-    assert cfg.model == "claude-sonnet-4-6"
+    assert cfg.model == "claude-sonnet-5"
     assert "local-dev" not in cfg.litellm_model
 
 

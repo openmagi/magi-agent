@@ -740,7 +740,7 @@ def is_live_child_runner_enabled(env: Mapping[str, str] | None = None) -> bool:
 # ---------------------------------------------------------------------------
 
 _DEFAULT_CHILD_PROVIDER = "anthropic"
-_DEFAULT_CHILD_MODEL = "claude-sonnet-4-6"
+_DEFAULT_CHILD_MODEL = "claude-sonnet-5"
 
 #: Max chars of final text we forward as the envelope ``summary``. The boundary
 #: re-sanitises and re-trims to 512, so this is just a pre-trim guard against
