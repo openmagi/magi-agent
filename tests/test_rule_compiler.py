@@ -18,6 +18,8 @@ from typing import Any
 import pytest
 
 from magi_agent.customize.rule_compiler import (
+    _COMPILE_SYSTEM_INSTRUCTION_TMPL,
+    _PROPOSE_PRIMITIVE_SYSTEM_INSTRUCTION_TMPL,
     MAX_AGGREGATE_TEXT,
     PrecheckError,
     ROUTED_KINDS,
@@ -113,6 +115,27 @@ _VALID_TOOL_PERM_PAYLOAD = {
     "explanation": "Before the agent calls a tool, deny shell_exec.",
 }
 _VALID_TOOL_PERM_RESPONSE = f"```json\n{json.dumps(_VALID_TOOL_PERM_PAYLOAD)}\n```"
+
+_VALID_EVIDENCE_CRITERION_PAYLOAD = {
+    "routedKind": "llm_criterion",
+    "draft": {
+        "scope": "coding",
+        "enabled": True,
+        "firesAt": "pre_final",
+        "action": "block",
+        "what": {
+            "kind": "llm_criterion",
+            "payload": {
+                "criterion": "the change is covered by a passing test run",
+                "evidenceRefs": ["TestRun", "GitDiff"],
+            },
+        },
+    },
+    "explanation": "Judge the answer against the captured test run and diff.",
+}
+_VALID_EVIDENCE_CRITERION_RESPONSE = (
+    f"```json\n{json.dumps(_VALID_EVIDENCE_CRITERION_PAYLOAD)}\n```"
+)
 _VALID_REVIEW_RESPONSE = (
     '{"verdict": "aligned", "issues": [], "confidence": 0.9}'
 )
@@ -255,6 +278,52 @@ async def test_compile_returns_parsed_routed_kind_and_draft() -> None:
     assert out["routedKind"] == "tool_perm"
     assert out["draft"]["what"]["payload"]["match"]["tool"] == "shell_exec"
     assert "deny" in out["explanation"]
+
+
+# --- evidence-grounded judge authoring (conversational surface) ---
+
+
+@pytest.mark.asyncio
+async def test_compile_prompt_documents_evidence_grounded_criterion() -> None:
+    # The one-shot compiler's kind menu (in the user prompt) must teach the
+    # evidenceRefs option so the model can route an evidence-grounded judge.
+    captured: list[str] = []
+    factory = _factory_for(_VALID_TOOL_PERM_RESPONSE, prompt_capture=captured)
+    out = await compile_nl_to_rule("any", model_factory=factory)
+    assert out["ok"] is True
+    prompt = captured[0]
+    assert "evidenceRefs" in prompt
+    assert "EVIDENCE-GROUNDED" in prompt
+
+
+def test_compile_system_instruction_routes_evidence_grounded_intent() -> None:
+    text = _COMPILE_SYSTEM_INSTRUCTION_TMPL
+    assert "evidenceRefs" in text
+    # routes fuzzy-over-evidence to llm_criterion, exact-over-evidence to
+    # field_constraint.
+    assert "field_constraint" in text
+
+
+def test_propose_primitive_instruction_documents_evidence_grounded() -> None:
+    text = _PROPOSE_PRIMITIVE_SYSTEM_INSTRUCTION_TMPL
+    assert "EVIDENCE-GROUNDED" in text
+    assert "evidenceRefs" in text
+
+
+@pytest.mark.asyncio
+async def test_compile_preserves_evidence_refs_and_validates() -> None:
+    # A compiled evidence-grounded llm_criterion must (a) keep evidenceRefs in
+    # the draft (no key stripping) and (b) pass the compiler's own validator.
+    out = await compile_nl_to_rule(
+        "block the answer unless the diff is covered by a passing test run, "
+        "judging against the test output",
+        model_factory=_factory_for(_VALID_EVIDENCE_CRITERION_RESPONSE),
+    )
+    assert out["ok"] is True
+    assert out["routedKind"] == "llm_criterion"
+    payload = out["draft"]["what"]["payload"]
+    assert payload["evidenceRefs"] == ["TestRun", "GitDiff"]
+    assert schema_issues_for("llm_criterion", out["draft"]) == []
 
 
 @pytest.mark.asyncio
