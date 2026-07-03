@@ -42,7 +42,14 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "MAGI_MEMORY_RECALL_RERANK_ENABLED_ENV",
     "rerank_hits",
+    "rerank_hits_async",
 ]
+
+#: One-shot flag so the "called on a running loop" condition surfaces as a
+#: WARNING exactly once per process, then de-escalates to DEBUG. Making the
+#: default-ON re-rank's silent serve-path death visible is half the point of the
+#: loop-aware rewrite (N-14).
+_RUNNING_LOOP_WARNED = False
 
 #: Default-OFF activation flag for the cheap-model re-rank layer.
 MAGI_MEMORY_RECALL_RERANK_ENABLED_ENV = "MAGI_MEMORY_RECALL_RERANK_ENABLED"
@@ -85,6 +92,60 @@ def _rerank_gate_open(env: "os._Environ[str] | dict[str, str] | None" = None) ->
     return flag_bool(MAGI_MEMORY_RECALL_RERANK_ENABLED_ENV, env=source)
 
 
+def _warn_running_loop_skip() -> None:
+    """Log the running-loop skip: WARNING on the first occurrence per process,
+    DEBUG thereafter (spam-safe). Surfacing the previously-silent serve-path
+    death of the default-ON re-rank is half the point of N-14."""
+    global _RUNNING_LOOP_WARNED
+    message = (
+        "memory recall re-rank skipped: rerank_hits called on a running event "
+        "loop; wire rerank_hits_async instead (N-14)"
+    )
+    if not _RUNNING_LOOP_WARNED:
+        _RUNNING_LOOP_WARNED = True
+        logger.warning(message)
+    else:
+        logger.debug(message)
+
+
+async def rerank_hits_async(
+    *,
+    hits: "Sequence[SearchHit]",
+    query: str,
+    memory_dir: Path,
+    config: object,
+    model_factory: Callable[[], object] | None = None,
+    env: "os._Environ[str] | dict[str, str] | None" = None,
+) -> "list[SearchHit]":
+    """Async re-rank surface: reorder ``hits`` by a cheap model, or unchanged.
+
+    This is the canonical await point once a running-loop caller (e.g. a future
+    serve offload, N-47) has a legitimate place to await. Same fail-open
+    contract as :func:`rerank_hits`: identity (input order) when the gate is
+    OFF, fewer than two candidates, or ANY failure in model resolution /
+    invocation / parsing. Never raises; never drops a candidate.
+    """
+    ordered = list(hits)
+    if len(ordered) < 2 or not _rerank_gate_open(env):
+        return ordered
+    try:
+        model = _resolve_model(config, model_factory)
+        if model is None:
+            return ordered
+        manifest = _manifest_by_path(memory_dir)
+        prompt = _build_prompt(query=query, hits=ordered, manifest=manifest)
+        raw = await asyncio.wait_for(
+            _invoke_llm(model, prompt), timeout=_resolve_timeout()
+        )
+        order = _parse_order(raw)
+        if not order:
+            return ordered
+        return _apply_order(ordered, order)
+    except Exception:  # noqa: BLE001 - fail-open: never break the recall path
+        logger.debug("Memory recall re-rank failed; using BM25 order", exc_info=True)
+        return ordered
+
+
 def rerank_hits(
     *,
     hits: "Sequence[SearchHit]",
@@ -96,9 +157,24 @@ def rerank_hits(
 ) -> "list[SearchHit]":
     """Return ``hits`` re-ordered by a cheap model, or unchanged (fail-open).
 
+    Loop-aware (N-14):
+      * On a RUNNING event loop (the serve prompt-assembly path is sync but runs
+        inside the SSE event loop) a blocking LLM round-trip would stall every
+        concurrent stream, and ``asyncio.run()`` would raise anyway. Skip
+        immediately with a visible, one-time reason BEFORE paying any
+        model/manifest build cost, and return the BM25 order. Callers with an
+        actual await point should use :func:`rerank_hits_async` directly.
+      * With NO running loop (a genuine sync caller: the CLI) own an event loop
+        via ``asyncio.run`` and pay the blocking round-trip (default 10s
+        timeout). That cost is the intended price of this opt-in feature.
+
+    We deliberately do NOT copy ``learning_recall._run_coro_blocking`` (dedicated
+    thread + private loop joined to completion): that would still block the
+    serve event loop for the whole LLM round-trip because the recall caller
+    awaits it inline.
+
     Identity (input order, byte-for-byte downstream) when the gate is OFF, fewer
-    than two candidates, or any failure in model resolution / invocation /
-    parsing.  Never raises; never drops a candidate.
+    than two candidates, or any failure. Never raises; never drops a candidate.
 
     ``env`` is an optional injectable environment for the gate read
     (``MAGI_MEMORY_RECALL_RERANK_ENABLED``); it defaults to ``None`` so every
@@ -109,19 +185,27 @@ def rerank_hits(
     if len(ordered) < 2 or not _rerank_gate_open(env):
         return ordered
     try:
-        model = _resolve_model(config, model_factory)
-        if model is None:
-            return ordered
-        manifest = _manifest_by_path(memory_dir)
-        prompt = _build_prompt(query=query, hits=ordered, manifest=manifest)
-        raw = asyncio.run(
-            asyncio.wait_for(_invoke_llm(model, prompt), timeout=_resolve_timeout())
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass  # no running loop: safe to own one below
+    else:
+        # Running-loop caller (the serve prompt-assembly path). Skip with an
+        # explicit, visible reason instead of paying model/manifest build for a
+        # guaranteed asyncio.run() failure.
+        _warn_running_loop_skip()
+        return ordered
+    try:
+        return asyncio.run(
+            rerank_hits_async(
+                hits=ordered,
+                query=query,
+                memory_dir=memory_dir,
+                config=config,
+                model_factory=model_factory,
+                env=env,
+            )
         )
-        order = _parse_order(raw)
-        if not order:
-            return ordered
-        return _apply_order(ordered, order)
-    except Exception:  # noqa: BLE001 — fail-open: never break the recall path
+    except Exception:  # noqa: BLE001 - fail-open: never break the recall path
         logger.debug("Memory recall re-rank failed; using BM25 order", exc_info=True)
         return ordered
 

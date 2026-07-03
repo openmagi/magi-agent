@@ -28,6 +28,9 @@ from magi_agent.cli.memory_manifest import (
     build_memory_manifest,
 )
 from magi_agent.cli.memory_recall_block import build_cli_memory_recall_block
+from magi_agent.cli.memory_recall_rerank import (
+    MAGI_MEMORY_RECALL_RERANK_ENABLED_ENV,
+)
 from magi_agent.memory.search.base import SearchHit
 
 
@@ -315,3 +318,178 @@ def test_fresh_pick_has_no_staleness_reminder(
     )
     assert block
     assert "<system-reminder>" not in block
+
+
+# ---------------------------------------------------------------------------
+# D2 (N-14): recall re-rank is loop-aware.
+#   * On a running event loop (the serve prompt-assembly path) the sync
+#     rerank_hits returns identity WITH a one-time warning and pays ZERO
+#     model/manifest build cost.
+#   * rerank_hits_async is the real async surface (reorder + fail-open).
+# ---------------------------------------------------------------------------
+
+import asyncio  # noqa: E402
+import logging  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+
+def _rerank_env_on() -> dict[str, str]:
+    return {MAGI_MEMORY_RECALL_RERANK_ENABLED_ENV: "1"}
+
+
+def _two_hits() -> list[SearchHit]:
+    return [
+        SearchHit(path="memory/daily/a.md", content="alpha body", score=3.0),
+        SearchHit(path="memory/daily/b.md", content="beta body", score=2.0),
+    ]
+
+
+class _CountingFactory:
+    """A no-arg model factory that records how many times it is called.
+
+    It returns a reorder-capable fake model, so if the running-loop guard did
+    NOT short-circuit, the model/manifest build cost would be paid (call count
+    > 0) and the order would flip. The guard must keep the count at 0.
+    """
+
+    def __init__(self, order: list[str]) -> None:
+        self.calls = 0
+        self._order = order
+
+    def __call__(self) -> object:
+        self.calls += 1
+        return _FakeModel({"order": self._order})
+
+
+class _FakeResp:
+    def __init__(self, text: str) -> None:
+        self.content = SimpleNamespace(parts=[SimpleNamespace(text=text)])
+
+
+class _FakeModel:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self._text = __import__("json").dumps(payload)
+
+    async def generate_content_async(self, request: object, stream: bool = False):  # noqa: ANN201
+        yield _FakeResp(self._text)
+
+
+class _BoomModel:
+    async def generate_content_async(self, request: object, stream: bool = False):  # noqa: ANN201
+        raise RuntimeError("model boom")
+        yield  # pragma: no cover - makes this an async generator
+
+
+def test_rerank_skips_identity_with_warning_on_running_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from magi_agent.cli import memory_recall_rerank as rr
+
+    monkeypatch.setattr(rr, "_RUNNING_LOOP_WARNED", False, raising=False)
+    factory = _CountingFactory(order=["memory/daily/b.md", "memory/daily/a.md"])
+    hits = _two_hits()
+
+    async def _inner() -> list[SearchHit]:
+        return rr.rerank_hits(
+            hits=hits,
+            query="anything",
+            memory_dir=tmp_path / "memory",
+            config=object(),
+            model_factory=factory,
+            env=_rerank_env_on(),
+        )
+
+    with caplog.at_level(logging.WARNING, logger=rr.__name__):
+        out = asyncio.run(_inner())
+
+    # Identity: NOT reordered.
+    assert [h.path for h in out] == [h.path for h in hits]
+    # No pre-build cost paid.
+    assert factory.calls == 0
+    # Exactly one skip WARNING surfaced.
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "re-rank skipped" in warnings[0].getMessage()
+
+
+def test_rerank_running_loop_warns_once_then_debug(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from magi_agent.cli import memory_recall_rerank as rr
+
+    monkeypatch.setattr(rr, "_RUNNING_LOOP_WARNED", False, raising=False)
+    factory = _CountingFactory(order=["memory/daily/b.md", "memory/daily/a.md"])
+    hits = _two_hits()
+
+    async def _inner() -> None:
+        for _ in range(2):
+            rr.rerank_hits(
+                hits=hits,
+                query="anything",
+                memory_dir=tmp_path / "memory",
+                config=object(),
+                model_factory=factory,
+                env=_rerank_env_on(),
+            )
+
+    with caplog.at_level(logging.DEBUG, logger=rr.__name__):
+        asyncio.run(_inner())
+
+    skip_records = [
+        r for r in caplog.records if "re-rank skipped" in r.getMessage()
+    ]
+    levels = sorted(r.levelno for r in skip_records)
+    assert levels == [logging.DEBUG, logging.WARNING]
+    assert factory.calls == 0
+
+
+def test_rerank_async_variant_reorders(tmp_path: Path) -> None:
+    from magi_agent.cli.memory_recall_rerank import rerank_hits_async
+
+    hits = _two_hits()
+    factory = _CountingFactory(order=["memory/daily/b.md", "memory/daily/a.md"])
+
+    out = asyncio.run(
+        rerank_hits_async(
+            hits=hits,
+            query="anything",
+            memory_dir=tmp_path / "memory",
+            config=object(),
+            model_factory=factory,
+            env=_rerank_env_on(),
+        )
+    )
+    assert [h.path for h in out] == ["memory/daily/b.md", "memory/daily/a.md"]
+    assert factory.calls == 1
+
+    # Fail-open: a model that raises yields the input BM25 order unchanged.
+    out2 = asyncio.run(
+        rerank_hits_async(
+            hits=hits,
+            query="anything",
+            memory_dir=tmp_path / "memory",
+            config=object(),
+            model_factory=lambda: _BoomModel(),
+            env=_rerank_env_on(),
+        )
+    )
+    assert [h.path for h in out2] == [h.path for h in hits]
+
+
+def test_rerank_sync_no_loop_path_byte_identical(tmp_path: Path) -> None:
+    """The sync path (no running loop) is unchanged: with a real reordering
+    model it still reorders (representative behavior-preservation case)."""
+    from magi_agent.cli.memory_recall_rerank import rerank_hits
+
+    hits = _two_hits()
+    factory = _CountingFactory(order=["memory/daily/b.md", "memory/daily/a.md"])
+    out = rerank_hits(
+        hits=hits,
+        query="anything",
+        memory_dir=tmp_path / "memory",
+        config=object(),
+        model_factory=factory,
+        env=_rerank_env_on(),
+    )
+    assert [h.path for h in out] == ["memory/daily/b.md", "memory/daily/a.md"]
+    assert factory.calls == 1
