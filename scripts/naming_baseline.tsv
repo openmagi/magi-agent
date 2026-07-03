@@ -28,6 +28,8 @@ CORE_AGENT_	magi_agent/transport/streaming_chat_route.py	1
 CORE_AGENT_	magi_agent/transport/usage_receipt_emit.py	1
 clawy	magi_agent/credentials_admin/vault_local.py	1
 clawy	magi_agent/customize/modes.py	1
+clawy	magi_agent/customize/policies.py	1
+clawy	magi_agent/customize/store.py	1
 clawy	magi_agent/plugins/native/_hosted_knowledge.py	1
 clawy	magi_agent/tools/memory_mode_guard.py	1
 clawy	magi_agent/transport/credentials.py	1
