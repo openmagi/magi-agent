@@ -60,7 +60,7 @@ def _scheduler_executor_enabled() -> bool:
 
 def _scheduler_readiness_mode_from_env() -> str | None:
     # I-4: routed through the typed flag registry.
-    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+    from magi_agent.config.flags import flag_str  #  # noqa: PLC0415
 
     raw = flag_str("MAGI_SCHEDULER_READINESS_EXECUTION_MODE") or ""
     clean = raw.strip().lower()
@@ -71,7 +71,7 @@ def _scheduler_readiness_mode_from_env() -> str | None:
 
 def _scheduler_db_path_from_env() -> Path:
     # I-4: routed through the typed flag registry.
-    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+    from magi_agent.config.flags import flag_str  #  # noqa: PLC0415
 
     raw = flag_str("MAGI_SCHEDULER_DB_PATH") or ""
     if raw.strip():
@@ -82,7 +82,7 @@ def _scheduler_db_path_from_env() -> Path:
 
 def _scheduler_lock_dir_from_env() -> Path | None:
     # I-4: routed through the typed flag registry.
-    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+    from magi_agent.config.flags import flag_str  #  # noqa: PLC0415
 
     raw = flag_str("MAGI_SCHEDULER_LOCK_DIR") or ""
     if raw.strip():
@@ -92,7 +92,7 @@ def _scheduler_lock_dir_from_env() -> Path | None:
 
 def _scheduler_owner_digest_from_env() -> str:
     # I-4: routed through the typed flag registry.
-    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+    from magi_agent.config.flags import flag_str  #  # noqa: PLC0415
 
     raw = flag_str("MAGI_SCHEDULER_OWNER_DIGEST") or ""
     return raw.strip() or "owner:local-gateway"
@@ -171,9 +171,9 @@ def is_work_queue_executor_enabled() -> bool:
     in :mod:`magi_agent.config.flags`). Strict allowlist semantics — unknown
     values like ``"disabled"`` correctly read as False.
     """
-    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+    from magi_agent.config.flags import flag_profile_bool  #  # noqa: PLC0415
 
-    return flag_bool("MAGI_WORK_QUEUE_EXECUTOR_ENABLED")
+    return flag_profile_bool("MAGI_WORK_QUEUE_EXECUTOR_ENABLED")
 
 
 def _work_queue_executor_enabled() -> bool:
@@ -185,7 +185,7 @@ from magi_agent.missions.work_queue.store import work_queue_db_path_from_env as 
 
 def _work_queue_claimer_from_env() -> str:
     # I-4: routed through the typed flag registry.
-    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+    from magi_agent.config.flags import flag_str  #  # noqa: PLC0415
 
     raw = flag_str("MAGI_WORK_QUEUE_CLAIMER") or ""
     if raw.strip():
@@ -330,9 +330,9 @@ def build_work_queue_watcher(
 
 def is_work_queue_notify_enabled() -> bool:
     """Return True iff ``MAGI_WORK_QUEUE_NOTIFY_ENABLED`` is set and truthy."""
-    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+    from magi_agent.config.flags import flag_profile_bool  #  # noqa: PLC0415
 
-    return flag_bool("MAGI_WORK_QUEUE_NOTIFY_ENABLED")
+    return flag_profile_bool("MAGI_WORK_QUEUE_NOTIFY_ENABLED")
 
 
 def _work_queue_notify_enabled() -> bool:

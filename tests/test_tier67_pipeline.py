@@ -383,11 +383,14 @@ class TestProactiveConfigFromEnv:
             config = load_config_from_env()
         assert config.proactive_recovery_enabled is True
 
-    def test_proactive_env_var_default_disabled(self) -> None:
-        """MAGI_CONTEXT_PROACTIVE_RECOVERY_ENABLED absent -> disabled."""
+    def test_proactive_env_var_when_disabled(self) -> None:
+        """MAGI_CONTEXT_PROACTIVE_RECOVERY_ENABLED explicit "0" -> disabled."""
         from magi_agent.context.hook import load_config_from_env
 
-        env = {"MAGI_CONTEXT_MGMT_ENABLED": "1"}
+        env = {
+            "MAGI_CONTEXT_MGMT_ENABLED": "1",
+            "MAGI_CONTEXT_PROACTIVE_RECOVERY_ENABLED": "0",
+        }
         with patch("os.environ", env):
             config = load_config_from_env()
         assert config.proactive_recovery_enabled is False

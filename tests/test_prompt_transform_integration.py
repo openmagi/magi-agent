@@ -84,7 +84,7 @@ def _build_blocks(builder: ModuleType, **overrides):
 
 class TestFlagOffByteIdentical:
     def test_no_bus_no_flag_unchanged(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("MAGI_PROMPT_TRANSFORM_HOOKS_ENABLED", raising=False)
+        monkeypatch.setenv("MAGI_PROMPT_TRANSFORM_HOOKS_ENABLED", "0")
         builder = _builder()
         golden = _build(builder)
         # A replacing bus must be IGNORED when the flag is off.
@@ -115,7 +115,7 @@ class TestFlagOffByteIdentical:
         assert out == golden
 
     def test_blocks_flag_off_unchanged(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("MAGI_PROMPT_TRANSFORM_HOOKS_ENABLED", raising=False)
+        monkeypatch.setenv("MAGI_PROMPT_TRANSFORM_HOOKS_ENABLED", "0")
         builder = _builder()
         golden = _build_blocks(builder)
         bus = _bus_with_handler(
@@ -560,7 +560,7 @@ class TestFlagOffNoContextConstruction:
     ) -> None:
         """With the flag off, the handler must never run (so no context is
         projected) and output is byte-identical to the no-bus baseline."""
-        monkeypatch.delenv("MAGI_PROMPT_TRANSFORM_HOOKS_ENABLED", raising=False)
+        monkeypatch.setenv("MAGI_PROMPT_TRANSFORM_HOOKS_ENABLED", "0")
         builder = _builder()
         golden = _build(builder)
         calls: list[int] = []

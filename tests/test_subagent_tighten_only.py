@@ -170,7 +170,7 @@ def test_tighten_only_flag_on_returns_intersection(monkeypatch) -> None:
 def test_tighten_only_flag_off_returns_full_profile(monkeypatch) -> None:
     """Flag OFF → full profile returned unchanged even when parentToolNames is set."""
     _patch_full_tools(monkeypatch)
-    monkeypatch.delenv("MAGI_SUBAGENT_TOOL_TIGHTEN_ONLY_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_SUBAGENT_TOOL_TIGHTEN_ONLY_ENABLED", "0")
 
     req = _request(metadata={"parentToolNames": tuple(_READONLY_NAMES)})
     runner = RealLocalChildRunner(
@@ -393,8 +393,8 @@ def test_e2e_tighten_only_flag_off_full_profile_forwarded(
     profile toolset unchanged.
     """
     monkeypatch.setenv("MAGI_SUBAGENT_GOVERNED_TURN_ENABLED", "1")
-    # Tighten-only flag deliberately NOT set (OFF).
-    monkeypatch.delenv("MAGI_SUBAGENT_TOOL_TIGHTEN_ONLY_ENABLED", raising=False)
+    # Tighten-only flag deliberately set OFF (explicit "0").
+    monkeypatch.setenv("MAGI_SUBAGENT_TOOL_TIGHTEN_ONLY_ENABLED", "0")
 
     def _fake_build_core_tools(
         self_: object, session_id: str, collector: object | None

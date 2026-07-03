@@ -34,6 +34,6 @@ def trace_enabled() -> bool:
     """
     # I-4: routed through the typed flag registry. Pre-I-4 truthy set
     # ``{1, true, yes}`` widens to canonical ``{1, true, yes, on}``.
-    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+    from magi_agent.config.flags import flag_profile_bool  #  # noqa: PLC0415
 
-    return flag_bool("MAGI_EXECUTION_TRACE")
+    return flag_profile_bool("MAGI_EXECUTION_TRACE")

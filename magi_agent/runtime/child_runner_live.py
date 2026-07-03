@@ -1150,9 +1150,9 @@ class RealLocalChildRunner:
         # Task 2A.6: when MAGI_SUBAGENT_GOVERNED_TURN_ENABLED is ON, drive the
         # governed-turn primitive instead of the bare run_async loop.  When OFF
         # the existing path runs unchanged (byte-identical).
-        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+        from magi_agent.config.flags import flag_bool, flag_profile_bool  #  # noqa: PLC0415
 
-        if flag_bool("MAGI_SUBAGENT_GOVERNED_TURN_ENABLED", env=self._env):
+        if flag_profile_bool("MAGI_SUBAGENT_GOVERNED_TURN_ENABLED", env=self._env):
             return await self._collect_turn_text_governed(config, request)
         return await self._collect_turn_text_legacy(config, request)
 
@@ -1173,7 +1173,7 @@ class RealLocalChildRunner:
         import tempfile  # noqa: PLC0415
 
         from magi_agent.cli.wiring import build_headless_runtime  # noqa: PLC0415
-        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+        from magi_agent.config.flags import flag_bool, flag_profile_bool  #  # noqa: PLC0415
         from magi_agent.runtime.child_derive import derive  # noqa: PLC0415
         from magi_agent.runtime.child_governed_collector import (  # noqa: PLC0415
             collect_governed_child_turn,
@@ -1194,7 +1194,7 @@ class RealLocalChildRunner:
         # (written by the producer in subagents.py, Task F1).  Absent or falsy
         # ⇒ "incognito" (safe default; byte-identical to today when the producer
         # did not set it, i.e. gate-OFF spawn paths).
-        memory_inherit_enabled = flag_bool("MAGI_CHILD_MEMORY_INHERIT_ENABLED", env=self._env)
+        memory_inherit_enabled = flag_profile_bool("MAGI_CHILD_MEMORY_INHERIT_ENABLED", env=self._env)
 
         # spawnDepth in request.metadata becomes parent_depth for derive().
         metadata = getattr(request, "metadata", None) or {}
@@ -1216,7 +1216,7 @@ class RealLocalChildRunner:
         raw_refs = metadata.get("recipeRefs") if isinstance(metadata, dict) else None
         pinned_refs: tuple[str, ...] = (
             tuple(raw_refs)
-            if (raw_refs and flag_bool("MAGI_SPAWN_RECIPE_BIND_ENABLED", env=self._env))
+            if (raw_refs and flag_profile_bool("MAGI_SPAWN_RECIPE_BIND_ENABLED", env=self._env))
             else ()
         )
 
@@ -1332,7 +1332,7 @@ class RealLocalChildRunner:
         from magi_agent.engine.model_runner import (  # noqa: PLC0415
             build_cli_model_runner,
         )
-        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+        from magi_agent.config.flags import flag_bool, flag_profile_bool  #  # noqa: PLC0415
 
         # m-2: compute the child session id ONCE and reuse it.
         session_id = self._child_session_id(request)
@@ -1349,7 +1349,7 @@ class RealLocalChildRunner:
             )
             legacy_pinned_refs: tuple[str, ...] = (
                 tuple(legacy_raw_refs)
-                if (legacy_raw_refs and flag_bool("MAGI_SPAWN_RECIPE_BIND_ENABLED", env=self._env))
+                if (legacy_raw_refs and flag_profile_bool("MAGI_SPAWN_RECIPE_BIND_ENABLED", env=self._env))
                 else ()
             )
             workspace = self._workspace_root or tempfile.mkdtemp()
@@ -1509,7 +1509,7 @@ class RealLocalChildRunner:
         # NOTE: this governs FIRST-PARTY tools only; Composio MCP is a separate
         # default-OFF attachment seam and is out of scope here.
         """
-        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+        from magi_agent.config.flags import flag_bool, flag_profile_bool  #  # noqa: PLC0415
         from magi_agent.runtime.child_bash import (  # noqa: PLC0415
             ChildBashSandbox,
             child_bash_sandbox_enabled,
@@ -1559,7 +1559,7 @@ class RealLocalChildRunner:
         # When the flag is ON and parent_cap is non-empty, intersect with the
         # parent's tool names so the child never exceeds the parent's capability.
         # When the flag is OFF or parent_cap is empty, return profile_tools unchanged.
-        if flag_bool("MAGI_SUBAGENT_TOOL_TIGHTEN_ONLY_ENABLED", env=self._env):
+        if flag_profile_bool("MAGI_SUBAGENT_TOOL_TIGHTEN_ONLY_ENABLED", env=self._env):
             metadata = getattr(request, "metadata", None) or {}
             raw_cap = metadata.get("parentToolNames") if isinstance(metadata, dict) else None
             parent_cap = frozenset(raw_cap) if raw_cap else frozenset()
@@ -1573,7 +1573,7 @@ class RealLocalChildRunner:
         # ⟶ spawn_cap. Triple-gated: strict default-OFF F4 flag PLUS profile-aware
         # customize master flags (verification + custom_rules). Fail-open on any
         # customize-store fault so a broken overrides file never breaks a spawn.
-        from magi_agent.config.flags import flag_profile_bool  # noqa: PLC0415
+        from magi_agent.config.flags import flag_profile_bool  #  # noqa: PLC0415
 
         if (
             flag_bool("MAGI_CUSTOMIZE_CAPABILITY_SCOPE_ENABLED", env=self._env)
@@ -1618,7 +1618,7 @@ class RealLocalChildRunner:
 
         # Seam P2-T3: allowedTools is the orchestrator's explicit per-task grant.
         # Apply after parent-cap, before spawn_cap. Gated by same default-OFF flag.
-        if flag_bool("MAGI_SPAWN_RECIPE_CAP_ENABLED", env=self._env):
+        if flag_profile_bool("MAGI_SPAWN_RECIPE_CAP_ENABLED", env=self._env):
             metadata = getattr(request, "metadata", None) or {}
             raw_allowed = metadata.get("allowedTools") if isinstance(metadata, dict) else None
             allowed = frozenset(raw_allowed) if raw_allowed else frozenset()
@@ -1627,7 +1627,7 @@ class RealLocalChildRunner:
 
         # Seam 4: spawn_cap is the orchestrator's hard grant ceiling. Apply as the
         # innermost cap, after profile and parent-cap. Gated default-OFF.
-        if self._spawn_cap and flag_bool("MAGI_SPAWN_RECIPE_CAP_ENABLED", env=self._env):
+        if self._spawn_cap and flag_profile_bool("MAGI_SPAWN_RECIPE_CAP_ENABLED", env=self._env):
             cap = frozenset(self._spawn_cap)
             profile_tools = [t for t in profile_tools if _tool_name(t) in cap]
 

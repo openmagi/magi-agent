@@ -153,8 +153,9 @@ def _make_governed_stream(
 def test_flag_off_uses_injected_runner_not_governed_primitives(
     monkeypatch,
 ) -> None:
-    """When MAGI_SUBAGENT_GOVERNED_TURN_ENABLED is unset (OFF), the legacy
-    bare run_async path is used — the governed primitives are NOT called."""
+    """When MAGI_SUBAGENT_GOVERNED_TURN_ENABLED is explicitly "0" (OFF), the
+    legacy bare run_async path is used — the governed primitives are NOT called."""
+    monkeypatch.setenv("MAGI_SUBAGENT_GOVERNED_TURN_ENABLED", "0")
     governed_called: list[str] = []
 
     def _fake_build_headless_runtime(**kwargs: object) -> object:
@@ -179,7 +180,7 @@ def test_flag_off_uses_injected_runner_not_governed_primitives(
     fake = _FakeRunner(text="ANSWER: legacy path only")
     runner = RealLocalChildRunner(provider_config=_provider_config(), runner=fake)
 
-    # Flag not set → OFF
+    # Flag explicitly "0" → OFF
     output = asyncio.run(runner.run_child(_request()))
 
     assert output["status"] == "completed"
@@ -611,8 +612,8 @@ def test_flag_on_with_inherit_off_parent_memory_mode_normal_yields_incognito(
     This ensures the OFF path is byte-identical to today.
     """
     monkeypatch.setenv("MAGI_SUBAGENT_GOVERNED_TURN_ENABLED", "1")
-    # inherit flag explicitly OFF (default)
-    monkeypatch.delenv("MAGI_CHILD_MEMORY_INHERIT_ENABLED", raising=False)
+    # inherit flag explicitly OFF (promoted to profile-aware default-ON)
+    monkeypatch.setenv("MAGI_CHILD_MEMORY_INHERIT_ENABLED", "0")
 
     captured_runtime_kwargs: list[dict[str, object]] = []
 

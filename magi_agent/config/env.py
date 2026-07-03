@@ -713,7 +713,7 @@ def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv
         raise RuntimeEnvError(f"{COMPACTION_TAIL_EVENTS_ENV} must be >= 1")
     # G2: strict default-OFF real-token accounting (NOT profile-aware).
     # I-1: route through the typed flag registry.
-    from .flags import flag_bool  # noqa: PLC0415
+    from .flags import flag_bool, flag_profile_bool  # noqa: PLC0415
 
     real_tokens_enabled = flag_bool(COMPACTION_REAL_TOKENS_ENABLED_ENV, env=env)
     real_tokens_pct = _float_env(
@@ -784,7 +784,7 @@ def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv
     # WS4: strict default-OFF proactive recovery (tiers 6-7) for the live plugin.
     # I-1: route the master through the typed flag registry (imported above), the
     # critical-pct through ``_float_env`` (same env name as the dormant hook).
-    proactive_recovery_enabled = flag_bool(PROACTIVE_RECOVERY_ENABLED_ENV, env=env)
+    proactive_recovery_enabled = flag_profile_bool(PROACTIVE_RECOVERY_ENABLED_ENV, env=env)
     proactive_critical_pct = _float_env(
         env,
         CONTEXT_CRITICAL_THRESHOLD_ENV,

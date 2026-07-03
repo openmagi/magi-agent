@@ -70,9 +70,9 @@ class ForkRunner:
         # strict-truthy set ``{1, true, yes, on}`` adds ``on`` to the
         # pre-I-4 ``{1, true, yes}`` — a trivial widening that aligns
         # with the project-wide bool convention.
-        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+        from magi_agent.config.flags import flag_profile_bool  #  # noqa: PLC0415
 
-        self._enabled = flag_bool("MAGI_FORK_CACHE_ENABLED")
+        self._enabled = flag_profile_bool("MAGI_FORK_CACHE_ENABLED")
 
     @property
     def enabled(self) -> bool:

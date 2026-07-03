@@ -88,11 +88,8 @@ _UNKNOWN_INPUTS = ("disabled", "enabled", "random_garbage", "yes please", " ", "
             "is_scheduler_executor_enabled",
             "MAGI_SCHEDULER_EXECUTOR_ENABLED",
         ),
-        (
-            "magi_agent.gateway.watchers",
-            "is_work_queue_executor_enabled",
-            "MAGI_WORK_QUEUE_EXECUTOR_ENABLED",
-        ),
+        # MAGI_WORK_QUEUE_EXECUTOR_ENABLED promoted to profile-aware default-ON
+        # (_pb) under the no-default-off policy; no longer a default-OFF reader.
         (
             "magi_agent.gateway.watchers",
             "_background_live_runner_enabled",

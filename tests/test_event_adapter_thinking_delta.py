@@ -38,7 +38,7 @@ def test_partial_thought_part_projects_thinking_delta_when_enabled(monkeypatch) 
 
 
 def test_thought_part_dropped_when_flag_off(monkeypatch) -> None:
-    monkeypatch.delenv("MAGI_STREAM_THINKING", raising=False)
+    monkeypatch.setenv("MAGI_STREAM_THINKING", "0")
     bridge = OpenMagiEventBridge(live_compatible=True)
     event = _model_event(
         parts=[types.Part(text="PRIVATE_THOUGHT secret", thought=True)],

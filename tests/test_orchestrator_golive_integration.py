@@ -674,7 +674,8 @@ class TestLayer4RecipeBindingRidesAlong:
     ) -> None:
         """MAGI_SPAWN_RECIPE_BIND_ENABLED OFF → governed path receives pinned_recipe_pack_ids=()."""
         monkeypatch.setenv("MAGI_SUBAGENT_GOVERNED_TURN_ENABLED", "1")
-        # MAGI_SPAWN_RECIPE_BIND_ENABLED intentionally NOT set (OFF)
+        # MAGI_SPAWN_RECIPE_BIND_ENABLED explicitly OFF (promoted to default-ON)
+        monkeypatch.setenv("MAGI_SPAWN_RECIPE_BIND_ENABLED", "0")
 
         import magi_agent.runtime.governed_turn as governed_turn_mod  # noqa: PLC0415
 
@@ -780,7 +781,8 @@ class TestLayer5AllFlagsOFFContrast:
     ) -> None:
         """Layer 3 OFF: child sees the full profile toolset (no spawn_cap narrowing)."""
         _patch_full_tools(monkeypatch)
-        # MAGI_SPAWN_RECIPE_CAP_ENABLED intentionally NOT set → OFF
+        # MAGI_SPAWN_RECIPE_CAP_ENABLED explicitly OFF (promoted to default-ON)
+        monkeypatch.setenv("MAGI_SPAWN_RECIPE_CAP_ENABLED", "0")
 
         req = ChildTaskRequest(
             parentExecutionId="gl1-off-narrow-parent",

@@ -285,8 +285,15 @@ class TestNoClassifier:
 
 
 class TestConfigFromEnv:
-    def test_default_config(self) -> None:
-        with patch.dict(os.environ, {}, clear=True):
+    def test_config_when_disabled(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "MAGI_CONTEXT_MGMT_ENABLED": "0",
+                "MAGI_CONTEXT_PROACTIVE_RECOVERY_ENABLED": "0",
+            },
+            clear=True,
+        ):
             config = load_config_from_env()
         assert config.enabled is False
         assert config.moderate_threshold == 0.60
@@ -626,11 +633,11 @@ class TestEnabledEnvVar:
             config = load_config_from_env()
         assert config.enabled is False
 
-    def test_env_var_missing_disables(self) -> None:
-        env = {
-            k: v for k, v in os.environ.items()
-            if k != "MAGI_CONTEXT_MGMT_ENABLED"
-        }
-        with patch.dict(os.environ, env, clear=True):
+    def test_env_var_missing_under_safe_profile_disables(self) -> None:
+        # Promoted to profile-aware default-ON: missing resolves OFF only under a
+        # safe runtime profile (full profile self-enables).
+        with patch.dict(
+            os.environ, {"MAGI_RUNTIME_PROFILE": "safe"}, clear=True
+        ):
             config = load_config_from_env()
         assert config.enabled is False

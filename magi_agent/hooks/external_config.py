@@ -206,9 +206,9 @@ class ExternalHookConfig(BaseModel):
         ``MAGI_LLM_HOOKS_ENABLED`` from the environment."""
         # I-4: routed through the typed flag registry.
         from magi_agent.config._truthy import is_true  # noqa: PLC0415
-        from magi_agent.config.flags import flag_bool, flag_str  # noqa: PLC0415
+        from magi_agent.config.flags import flag_bool, flag_profile_bool, flag_str  #  # noqa: PLC0415
 
-        enabled = flag_bool("MAGI_EXTERNAL_HOOKS_ENABLED")
+        enabled = flag_profile_bool("MAGI_EXTERNAL_HOOKS_ENABLED")
         # LLM hooks default to enabled (True) unless explicitly disabled.
         # ``MAGI_LLM_HOOKS_ENABLED`` is registered as ``str`` so the
         # default-ON-when-unset semantics are preserved (``flag_bool``
@@ -276,7 +276,7 @@ def _build_manifest_from_yaml_entry(entry: dict[str, Any]) -> HookManifest:
         # the operator explicitly opts out via MAGI_HOOK_ALLOW_INTERNAL_URLS.
         # I-4: routed through the typed flag registry (canonical truthy
         # set widens trivially from ``{1, true, yes}`` to add ``on``).
-        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+        from magi_agent.config.flags import flag_bool, flag_profile_bool  #  # noqa: PLC0415
 
         allow_internal = flag_bool("MAGI_HOOK_ALLOW_INTERNAL_URLS")
         if not allow_internal and _is_internal_url(resolved_url):

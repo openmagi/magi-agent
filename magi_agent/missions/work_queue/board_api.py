@@ -13,7 +13,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
-from magi_agent.config.flags import flag_bool
+from magi_agent.config.flags import flag_profile_bool
+
 from magi_agent.missions.work_queue.store import SqliteWorkQueueStore
 
 logger = logging.getLogger(__name__)
@@ -115,7 +116,7 @@ def is_work_queue_board_api_enabled() -> bool:
     Reads via the central flag registry (``flag_bool``) so call-site counts
     in the ratchet gate are not incremented.
     """
-    return flag_bool("MAGI_WORK_QUEUE_BOARD_API_ENABLED")
+    return flag_profile_bool("MAGI_WORK_QUEUE_BOARD_API_ENABLED")
 
 
 # ---------------------------------------------------------------------------

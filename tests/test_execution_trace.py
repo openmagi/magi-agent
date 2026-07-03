@@ -198,14 +198,17 @@ class TestTraceContext:
             else:
                 os.environ["MAGI_EXECUTION_TRACE"] = old
 
-    def test_trace_enabled_default_false(self) -> None:
+    def test_trace_enabled_when_disabled(self) -> None:
         from magi_agent.telemetry.trace_context import trace_enabled
 
-        old = os.environ.pop("MAGI_EXECUTION_TRACE", None)
+        old = os.environ.get("MAGI_EXECUTION_TRACE")
         try:
+            os.environ["MAGI_EXECUTION_TRACE"] = "0"
             assert trace_enabled() is False
         finally:
-            if old is not None:
+            if old is None:
+                os.environ.pop("MAGI_EXECUTION_TRACE", None)
+            else:
                 os.environ["MAGI_EXECUTION_TRACE"] = old
 
     def test_concurrent_traces_via_contextvars(self) -> None:

@@ -179,7 +179,7 @@ class TestEvidenceSink:
     def test_flag_off_no_emission_even_with_sink(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.delenv("MAGI_PROMPT_TRANSFORM_HOOKS_ENABLED", raising=False)
+        monkeypatch.setenv("MAGI_PROMPT_TRANSFORM_HOOKS_ENABLED", "0")
         builder = _builder()
         captured: list[dict[str, object]] = []
         golden = _build(builder)

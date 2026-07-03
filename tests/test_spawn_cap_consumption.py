@@ -94,7 +94,7 @@ def test_spawn_cap_flag_off_toolset_unchanged(monkeypatch) -> None:
     full-profile tools are forwarded regardless of spawn_cap content.
     """
     _patch_full_tools(monkeypatch)
-    monkeypatch.delenv("MAGI_SPAWN_RECIPE_CAP_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_SPAWN_RECIPE_CAP_ENABLED", "0")
 
     runner = RealLocalChildRunner(
         provider_config=_provider_config(),

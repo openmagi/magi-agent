@@ -115,7 +115,7 @@ def test_sse_writer_live_compatible_agent_text_keeps_utf8_and_legacy_done_only()
 
 
 def test_sse_writer_drops_hidden_thinking_delta_events(monkeypatch) -> None:
-    monkeypatch.delenv("MAGI_STREAM_THINKING", raising=False)
+    monkeypatch.setenv("MAGI_STREAM_THINKING", "0")
     writer = InMemorySseWriter()
 
     writer.agent({"type": "thinking_delta", "delta": "private reasoning"})

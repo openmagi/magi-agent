@@ -199,8 +199,7 @@ def _test_app() -> FastAPI:
 class TestDebugTraceEndpoint:
     def test_404_when_tracing_disabled(self) -> None:
         client = TestClient(_test_app())
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("MAGI_EXECUTION_TRACE", None)
+        with patch.dict(os.environ, {"MAGI_EXECUTION_TRACE": "0"}):
             resp = client.get("/v1/debug/trace")
         assert resp.status_code == 404
         assert resp.json()["error"] == "tracing not enabled"
