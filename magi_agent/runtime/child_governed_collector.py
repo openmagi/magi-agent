@@ -1,4 +1,4 @@
-"""Governed-stream → child-envelope adapter.
+"""Governed-stream to child-envelope adapter.
 
 Consumes the ``run_governed_turn`` async-generator and produces the
 ``(summary, evidence_refs, status)`` tuple the child boundary expects.
@@ -8,11 +8,33 @@ Design notes
 - ``_collect_public_refs`` is re-implemented locally (identical logic to
   ``MagiEngineDriver._collect_public_refs`` in ``cli.engine``) to avoid
   importing the heavyweight engine module from a ``runtime`` submodule, which
-  would introduce an unwanted ``runtime`` → ``cli.engine`` dependency.
+  would introduce an unwanted ``runtime`` -> ``cli.engine`` dependency.
 - ``_public_evidence_refs`` is imported from ``child_runner_live`` because it
   lives in the same ``runtime`` package and carries no circular-import risk.
 - ``_MAX_SUMMARY_CHARS`` is re-exported from ``child_runner_live`` so the
   constant stays single-source.
+
+Response-block boundaries (PR-T)
+--------------------------------
+A single child turn can contain multiple ADK response blocks: the model may
+emit a preliminary text_delta, request a tool, receive the result, and then
+emit a fresh text_delta as the final answer. ADK signals the boundary with a
+``response_clear`` payload. Both text_delta events survive to the stream, so
+a flat accumulator would concatenate ``"prelim" + "final"`` instead of
+returning the final answer.
+
+``_BookendCollector`` in :mod:`magi_agent.runtime.governed_turn` handles this
+correctly by resetting its in-progress text on ``response_clear``. This module
+mirrors the same semantic:
+
+- ``response_clear`` clears the in-progress ``text_chunks`` accumulator so the
+  summary reflects only the final response block.
+- ``response_clear`` does NOT touch ``raw_refs``: evidence refs are collected
+  across the whole stream (tool receipts gathered mid-attempt remain valid
+  evidence for the terminal answer).
+- ``response_clear`` still counts toward ``items_yielded`` so the PR-K
+  ``terminal_consumed`` trace continues to detect silent-empty dispatches
+  honestly.
 """
 from __future__ import annotations
 
@@ -105,7 +127,15 @@ async def collect_governed_child_turn(
         payload = item.payload
         _collect_public_refs(payload, raw_refs)
 
-        if payload.get("type") == "text_delta":
+        payload_type = payload.get("type")
+        if payload_type == "response_clear":
+            # New ADK response block: drop the in-progress text_chunks so the
+            # summary reflects only the final block, not the concatenation of
+            # every intermediate one. Evidence refs are intentionally
+            # preserved (see module docstring).
+            text_chunks.clear()
+            continue
+        if payload_type == "text_delta":
             delta = payload.get("delta")
             if isinstance(delta, str) and delta:
                 text_chunks.append(delta)
