@@ -364,8 +364,7 @@ def _install_stub_boundary(
         )
 
     monkeypatch.setattr(
-        _chat_routes_module,
-        "run_gate5b4c3_live_runner_boundary_async",
+        "magi_agent.transport.gate5b_serving.run_gate5b4c3_live_runner_boundary_async",
         _stub_boundary,
     )
 

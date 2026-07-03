@@ -343,6 +343,34 @@ EXTRACTED_MODULE_SYMBOLS: dict[str, list[str]] = {
         "_runner_incomplete_output_reason",
         "_surface_safety",
     ],
+    # PR-G5: the Gate5B serving engine pure-moved to gate5b_serving. chat_routes
+    # re-imports each name, so the shim exposes the SAME object.
+    "magi_agent.transport.gate5b_serving": [
+        "_FIRST_PARTY_HARNESS_RECIPE_PACK_IDS",
+        "_bounded_tuple",
+        "_build_gate1a_egress_correlation_context",
+        "_client_disconnected",
+        "_collect_gate1a_observed_egress_evidence",
+        "_first_party_harness_families",
+        "_first_party_harness_metadata",
+        "_first_party_recipe_pack_ids_from_payload",
+        "_gate1a_config",
+        "_gate1a_readonly_tool_bundle",
+        "_gate1a_workspace_root",
+        "_gate5b_full_toolhost_bundle",
+        "_gate5b_full_toolhost_config",
+        "_gate5b_full_toolhost_public_events",
+        "_gate5b_full_toolhost_tool_event_id",
+        "_gate5b_full_toolhost_workspace_root",
+        "_model_attempt_digest",
+        "_run_live_chat_runner",
+        "_run_mocked_chat_runner",
+        "_schedule_runtime_direct_usage_receipt",
+        "_swallow_task_result",
+        "_utc_now_iso",
+        "gate5b_user_visible_chat_gate_active",
+        "run_gate5b_user_visible_chat_response",
+    ],
 }
 
 
