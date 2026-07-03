@@ -133,3 +133,38 @@ def test_unlock_evidence_false_for_other_session() -> None:
     assert not c.has_unlock_evidence(
         "other", evidence_type="custom:SourceCredibility", producing_rule_id="cr_prod"
     )
+
+
+def test_unlock_evidence_false_on_duck_typed_non_record() -> None:
+    # The join must read provenance ONLY off a real EvidenceRecord (write-path
+    # is the authority). A duck-typed object that self-declares trusted
+    # provenance with all four matching attributes must never unlock, even if
+    # it lands in the _records corpus. (Carry-forward isinstance guard.)
+    class _FakeProducerRecord:
+        origin = "producer_control"
+        producing_rule_id = "cr_prod"
+        type = "custom:SourceCredibility"
+        status = "ok"
+
+    c = LocalToolEvidenceCollector()
+    c._records[("s1", "t1")] = (_FakeProducerRecord(),)
+    # The fake is in the corpus...
+    assert any(
+        isinstance(r, _FakeProducerRecord) for r in c.collect_for_session("s1")
+    )
+    # ...but it is not an EvidenceRecord, so provenance is never read off it.
+    assert not c.has_unlock_evidence(
+        "s1", evidence_type="custom:SourceCredibility", producing_rule_id="cr_prod"
+    )
+
+
+def test_unlock_evidence_false_on_audit_record() -> None:
+    # record_audit_evidence_for_turn stamps producing_rule_id="" (audit is not a
+    # producer binding), so an audit record can never satisfy a bound gate.
+    c = LocalToolEvidenceCollector()
+    c.record_audit_evidence_for_turn(
+        session_id="s1", turn_id="t1", tool_name="web_fetch", record=_rec()
+    )
+    assert not c.has_unlock_evidence(
+        "s1", evidence_type="custom:SourceCredibility", producing_rule_id="cr_prod"
+    )

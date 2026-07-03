@@ -616,15 +616,23 @@ class LocalToolEvidenceCollector:
         (``producing_rule_id`` match, never a free-text type-name coincidence),
         carries the expected type, and passed (``status == "ok"``). An empty
         ``producing_rule_id`` never matches (audit/unbound records are not unlock
-        keys)."""
+        keys).
+
+        The corpus holds both :class:`EvidenceRecord` objects and plain dicts
+        (receipt projections, general-automation entries), so the join is gated
+        on ``isinstance(record, EvidenceRecord)`` FIRST: provenance is only ever
+        read off a real record whose ``origin``/``producing_rule_id`` were set by
+        the runtime write path, never off a duck-typed object that could
+        self-declare trusted provenance (write-path-is-authority invariant)."""
         if not producing_rule_id:
             return False
         for record in self.collect_for_session(session_id):
             if (
-                getattr(record, "origin", None) == "producer_control"
-                and getattr(record, "producing_rule_id", "") == producing_rule_id
-                and getattr(record, "type", None) == evidence_type
-                and getattr(record, "status", None) == "ok"
+                isinstance(record, EvidenceRecord)
+                and record.origin == "producer_control"
+                and record.producing_rule_id == producing_rule_id
+                and record.type == evidence_type
+                and record.status == "ok"
             ):
                 return True
         return False
