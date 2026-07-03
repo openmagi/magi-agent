@@ -267,3 +267,105 @@ async def test_governed_turn_subagent_stop_skips_when_no_text_emitted(
         item
         async for item in run_governed_turn(ctx, runtime=_FakeRuntime(empty_stream))
     ]
+
+
+# --- evidence-grounded audit producer (turn-evidence records → audit judge) ---
+
+
+class _FakeEvidenceRuntime(_FakeRuntime):
+    """Fake runtime carrying a ``local_tool_evidence`` collector, mirroring the
+    real HeadlessRuntime whose ``collect_for_turn`` the enforcement path uses."""
+
+    def __init__(self, items: list[object], records: list[object]) -> None:
+        super().__init__(items)
+
+        class _Collector:
+            def collect_for_turn(self, _turn_id: str) -> tuple[object, ...]:
+                return tuple(records)
+
+        self.local_tool_evidence = _Collector()
+
+
+def _stop_rule_with_evidence(refs: list[str]) -> dict:
+    rule = _stop_rule()
+    rule["what"]["payload"]["evidenceRefs"] = refs
+    return rule
+
+
+@pytest.mark.asyncio
+async def test_governed_turn_feeds_evidence_records_into_subagent_stop_audit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A child-turn on_subagent_stop rule that declares evidenceRefs MUST be
+    judged with an evidence_context projected from the runtime's evidence
+    collector (the same source the enforcement path uses)."""
+    monkeypatch.setenv("MAGI_EVIDENCE_GROUNDED_CRITIC_ENABLED", "1")
+    cfile = _flags_on(monkeypatch, tmp_path)
+    set_custom_rule(_stop_rule_with_evidence(["TestRun"]), path=cfile)
+
+    seen: list[object] = []
+
+    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
+        seen.append(evidence_context)
+        return (True, "clean")
+
+    monkeypatch.setattr(
+        "magi_agent.customize.criterion_engine.evaluate_criterion", fake_eval
+    )
+
+    records = [{"type": "TestRun", "fields": {"exit_code": 0}}]
+    ctx = TurnContext(
+        prompt="summary", session_id="sess-child", turn_id="turn-1", depth=1
+    )
+    _ = [
+        item
+        async for item in run_governed_turn(
+            ctx,
+            runtime=_FakeEvidenceRuntime(
+                _child_stream("child output"), records
+            ),
+        )
+    ]
+
+    assert len(seen) == 1
+    ctx_view = seen[0]
+    assert ctx_view is not None
+    assert [r.type for r in ctx_view.records] == ["TestRun"]
+
+
+@pytest.mark.asyncio
+async def test_governed_turn_evidence_blind_when_flag_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Flag OFF → the producer never touches the collector; the audit judge
+    stays evidence-blind (evidence_context is None) even with records present."""
+    monkeypatch.setenv("MAGI_EVIDENCE_GROUNDED_CRITIC_ENABLED", "0")
+    cfile = _flags_on(monkeypatch, tmp_path)
+    set_custom_rule(_stop_rule_with_evidence(["TestRun"]), path=cfile)
+
+    seen: list[object] = []
+
+    async def fake_eval(*, criterion, draft_text, model_factory, invoke=None, evidence_context=None):
+        seen.append(evidence_context)
+        return (True, "clean")
+
+    monkeypatch.setattr(
+        "magi_agent.customize.criterion_engine.evaluate_criterion", fake_eval
+    )
+
+    records = [{"type": "TestRun", "fields": {"exit_code": 0}}]
+    ctx = TurnContext(
+        prompt="summary", session_id="sess-child", turn_id="turn-1", depth=1
+    )
+    _ = [
+        item
+        async for item in run_governed_turn(
+            ctx,
+            runtime=_FakeEvidenceRuntime(
+                _child_stream("child output"), records
+            ),
+        )
+    ]
+
+    assert len(seen) == 1
+    assert seen[0] is None
