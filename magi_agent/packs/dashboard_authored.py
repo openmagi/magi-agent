@@ -52,7 +52,15 @@ class DashboardTriggerMatch(BaseModel):
 class DashboardTrigger(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
     tool: str
-    match: DashboardTriggerMatch
+    # A result-text match (the historic trigger). Optional now that an
+    # arguments-based ``domain_allowlist`` trigger exists; at least one must be
+    # present (enforced by validate_dashboard_check).
+    match: DashboardTriggerMatch | None = None
+    # An ARGUMENTS-based domain allowlist. When set, the producer fires on the
+    # tool's URL-argument host (NOT the attacker-controlled result text): a
+    # deterministic, unlock-eligible credibility signal. See the policy-
+    # abstraction security model (arguments, not returned content).
+    domain_allowlist: tuple[str, ...] = Field(default=(), alias="domainAllowlist")
 
 
 class DashboardCheck(BaseModel):
@@ -63,6 +71,9 @@ class DashboardCheck(BaseModel):
     enabled: bool
     trigger: DashboardTrigger
     action: DashboardAction
+    # Optional operator-named evidence type this check emits (``custom:PascalCase``).
+    # Absent → the historic hardcoded ``custom:DashboardCheck``.
+    emits_evidence_type: str | None = Field(default=None, alias="emitsEvidenceType")
 
     @field_validator("id")
     @classmethod
@@ -73,6 +84,26 @@ class DashboardCheck(BaseModel):
                 "1-63 chars, first char alphanumeric"
             )
         return value
+
+    @field_validator("emits_evidence_type")
+    @classmethod
+    def _validate_emits_type(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        from magi_agent.evidence.types import validate_evidence_type_name  # noqa: PLC0415
+
+        # A dashboard-authored producer may only emit an operator-named
+        # ``custom:`` type. Reusing ``validate_evidence_type_name`` alone would
+        # accept trusted builtin names (``TestRun``/``WebSearch``/…), letting a
+        # domain-allowlist producer mint a record typed as a trusted evidence
+        # family (type-confusion into the exact source-credibility signals the
+        # policy stack governs). Restrict to the ``custom:`` namespace here.
+        if not value.startswith("custom:"):
+            raise ValueError(
+                "emitsEvidenceType must be an operator-named custom: type "
+                "(built-in evidence types are runtime-reserved)"
+            )
+        return validate_evidence_type_name(value)
 
 
 _LABEL_MAX = 200
@@ -85,10 +116,11 @@ _CATASTROPHIC_REGEX = re.compile(r"\([^)]*[+*]\)[+*]|\([^)]*\|[^)]*\)[+*]")
 
 
 _ALLOWED_TOP_KEYS: frozenset[str] = frozenset(
-    {"id", "label", "scope", "enabled", "trigger", "action"}
+    {"id", "label", "scope", "enabled", "trigger", "action", "emitsEvidenceType"}
 )
-_ALLOWED_TRIGGER_KEYS: frozenset[str] = frozenset({"tool", "match"})
+_ALLOWED_TRIGGER_KEYS: frozenset[str] = frozenset({"tool", "match", "domainAllowlist"})
 _ALLOWED_MATCH_KEYS: frozenset[str] = frozenset({"pattern", "isRegex", "is_regex"})
+_DOMAIN_ALLOWLIST_MAX = 64
 
 
 def validate_dashboard_check(rule: Any) -> list[str]:
@@ -124,6 +156,28 @@ def validate_dashboard_check(rule: Any) -> list[str]:
     if rule.get("action") not in _ACTIONS:
         errors.append(f"action must be one of {sorted(_ACTIONS)}")
 
+    emits_type = rule.get("emitsEvidenceType")
+    if emits_type is not None:
+        from magi_agent.evidence.types import (  # noqa: PLC0415
+            validate_evidence_type_name,
+        )
+
+        if not isinstance(emits_type, str):
+            errors.append("emitsEvidenceType must be a string")
+        elif not emits_type.startswith("custom:"):
+            # Only operator-named custom: types (never runtime-reserved builtins);
+            # mirror the DashboardCheck._validate_emits_type restriction so a
+            # domain-allowlist producer cannot mint a trusted-typed record.
+            errors.append(
+                "emitsEvidenceType must be an operator-named custom: type "
+                "(built-in evidence types are runtime-reserved)"
+            )
+        else:
+            try:
+                validate_evidence_type_name(emits_type)
+            except ValueError as exc:
+                errors.append(f"emitsEvidenceType invalid: {exc}")
+
     trigger = rule.get("trigger")
     if not isinstance(trigger, dict):
         return [*errors, "trigger must be an object"]
@@ -135,27 +189,48 @@ def validate_dashboard_check(rule: Any) -> list[str]:
         errors.append("trigger.tool is required")
 
     match = trigger.get("match")
-    if not isinstance(match, dict):
-        return [*errors, "trigger.match must be an object"]
-    for key in match:
-        if key not in _ALLOWED_MATCH_KEYS:
-            errors.append(f"unknown key under trigger.match: {key!r}")
-    pattern = match.get("pattern")
-    is_regex = match.get("isRegex", False) or match.get("is_regex", False)
-    if not isinstance(pattern, str) or not pattern.strip():
-        errors.append("trigger.match.pattern is required")
-    elif len(pattern) > _PATTERN_MAX:
-        errors.append(f"trigger.match.pattern exceeds the {_PATTERN_MAX}-char cap")
-    elif is_regex:
-        try:
-            re.compile(pattern)
-        except re.error:
-            errors.append("trigger.match.pattern is not a valid regex")
-        else:
-            if _CATASTROPHIC_REGEX.search(pattern):
-                errors.append("trigger.match.pattern is a potentially catastrophic regex (nested quantifier)")
-    if not isinstance(is_regex, bool):
-        errors.append("trigger.match.isRegex must be a boolean")
+    domain_allowlist = trigger.get("domainAllowlist")
+    has_match = match is not None
+    has_domain = domain_allowlist is not None
+    if not has_match and not has_domain:
+        errors.append("trigger requires a match or a domainAllowlist")
+
+    # Arguments-based domain-allowlist trigger (deterministic, unlock-eligible).
+    if has_domain:
+        if (
+            not isinstance(domain_allowlist, list)
+            or not domain_allowlist
+            or not all(isinstance(d, str) and d.strip() for d in domain_allowlist)
+        ):
+            errors.append("trigger.domainAllowlist must be a non-empty list of non-empty strings")
+        elif len(domain_allowlist) > _DOMAIN_ALLOWLIST_MAX:
+            errors.append(
+                f"trigger.domainAllowlist exceeds the {_DOMAIN_ALLOWLIST_MAX}-entry cap"
+            )
+
+    # Result-text match trigger (historic; now optional).
+    if has_match:
+        if not isinstance(match, dict):
+            return [*errors, "trigger.match must be an object"]
+        for key in match:
+            if key not in _ALLOWED_MATCH_KEYS:
+                errors.append(f"unknown key under trigger.match: {key!r}")
+        pattern = match.get("pattern")
+        is_regex = match.get("isRegex", False) or match.get("is_regex", False)
+        if not isinstance(pattern, str) or not pattern.strip():
+            errors.append("trigger.match.pattern is required")
+        elif len(pattern) > _PATTERN_MAX:
+            errors.append(f"trigger.match.pattern exceeds the {_PATTERN_MAX}-char cap")
+        elif is_regex:
+            try:
+                re.compile(pattern)
+            except re.error:
+                errors.append("trigger.match.pattern is not a valid regex")
+            else:
+                if _CATASTROPHIC_REGEX.search(pattern):
+                    errors.append("trigger.match.pattern is a potentially catastrophic regex (nested quantifier)")
+        if not isinstance(is_regex, bool):
+            errors.append("trigger.match.isRegex must be a boolean")
 
     return errors
 
