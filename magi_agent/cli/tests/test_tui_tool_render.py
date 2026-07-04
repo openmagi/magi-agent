@@ -173,7 +173,10 @@ def test_edit_renderer_unified_by_default(monkeypatch) -> None:
     from magi_agent.cli.render import diff as diffmod
 
     diffmod.clear_diff_cache()
-    monkeypatch.delenv("MAGI_TUI_DIFF_SPLIT", raising=False)
+    # MAGI_TUI_DIFF_SPLIT is now profile-default-ON (no-default-off), so a bare
+    # delenv leaves the profile default (split/Table) in force. This test covers
+    # the unified/Text default, so pin the flag explicitly OFF.
+    monkeypatch.setenv("MAGI_TUI_DIFF_SPLIT", "0")
     renderer = tool_render.EditRenderer()
     node = renderer.render_call(
         {"file_path": "x.py", "old_string": "a", "new_string": "b"}

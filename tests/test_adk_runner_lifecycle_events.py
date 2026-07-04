@@ -589,7 +589,14 @@ def test_runner_lifecycle_preview_digests_private_marker_key_variants() -> None:
     assert "account id customer-function-response" not in response_variant_preview
 
 
-def test_adk_text_projection_drops_thought_parts_and_redacts_private_markers() -> None:
+def test_adk_text_projection_drops_thought_parts_and_redacts_private_markers(
+    monkeypatch,
+) -> None:
+    # MAGI_STREAM_THINKING is now profile-default-ON (no-default-off), which
+    # surfaces thought parts on the thinking_delta channel. This test asserts
+    # the OFF projection-layer privacy boundary (thought parts emit nothing), so
+    # pin the flag OFF.
+    monkeypatch.setenv("MAGI_STREAM_THINKING", "0")
     bridge = OpenMagiEventBridge()
     thought_event = Event(
         id="event-thought-text",

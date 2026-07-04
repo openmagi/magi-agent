@@ -59,8 +59,15 @@ def _question() -> GaiaQuestion:
 
 def test_gaia_instruction_byte_identical_when_off() -> None:
     q = _question()
-    off = _capture_instruction(q, {"MAGI_MULTI_FILE_JOIN_ENABLED": "0"})
-    unset = _capture_instruction(q, {})
+    # MAGI_STEP_DECOMPOSITION_ENABLED is now profile-default-ON (no-default-off
+    # batch), so it injects a <step_decomposition> block even under a cleared
+    # env. This test isolates the multi_file_join lever, so pin the unrelated
+    # step-decomposition flag OFF to recover the pre-flag GAIA baseline.
+    _sd_off = {"MAGI_STEP_DECOMPOSITION_ENABLED": "0"}
+    off = _capture_instruction(
+        q, {"MAGI_MULTI_FILE_JOIN_ENABLED": "0", **_sd_off}
+    )
+    unset = _capture_instruction(q, dict(_sd_off))
     assert "<multi_file_join>" not in off
     assert off == unset
     # The OFF instruction is exactly the GAIA baseline: the format-adherence note

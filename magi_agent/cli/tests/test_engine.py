@@ -432,6 +432,11 @@ def test_sanitizer_drops_thinking_events(monkeypatch: pytest.MonkeyPatch) -> Non
     # the real one being exercised.
     import magi_agent.cli.engine as engine_mod
 
+    # MAGI_STREAM_THINKING is now profile-default-ON (no-default-off), which
+    # passes thinking-delta through. This is the flag-OFF/drop side of the gate
+    # (test_sanitizer_passes_thinking_when_flag_on covers ON), so pin it OFF.
+    monkeypatch.setenv("MAGI_STREAM_THINKING", "0")
+
     runner = MockRunner([_text_event("visible")])
     driver = MagiEngineDriver(runner=runner)
 
