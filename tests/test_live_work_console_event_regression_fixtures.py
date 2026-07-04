@@ -99,7 +99,10 @@ def test_regression_fixture_manifest_covers_required_cases() -> None:
     assert set(cases) == REQUIRED_CASE_IDS
 
 
-def test_regression_fixtures_do_not_project_private_or_raw_payloads() -> None:
+def test_regression_fixtures_do_not_project_private_or_raw_payloads(monkeypatch) -> None:
+    # Non-projection of private/raw payloads is the MAGI_STREAM_THINKING=OFF path;
+    # that flag is now profile-default-ON (pass-through), so pin it OFF here.
+    monkeypatch.setenv("MAGI_STREAM_THINKING", "0")
     fixture = _load_fixture()
     blocked_fragments = tuple(fixture["blockedPublicFragments"])
 
