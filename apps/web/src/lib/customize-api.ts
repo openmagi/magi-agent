@@ -577,6 +577,117 @@ export async function compileCustomRuleInteractive(
 }
 
 
+// ---------------------------------------------------------------------------
+// Conversational POLICY compile (multi-rule producer + gate + binding).
+// POST /v1/app/policies/compile/interactive  (multi-turn)
+// POST /v1/app/policies/from-plan            (persist an assembled plan)
+// ---------------------------------------------------------------------------
+
+/** Body sent on every conversational policy turn. */
+export interface PolicyInteractiveRequest {
+  history: InteractiveHistoryTurn[];
+  paramsSoFar: Record<string, unknown> | null;
+  answers: Record<string, string> | null;
+}
+
+
+/** Response mirrored from ``nl_policy_interactive.step_policy_compile``. */
+export interface PolicyInteractiveResponse {
+  assistant_message?: string;
+  /** The params assembled so far (gatedTool / evidenceLabel / ...). */
+  params?: Record<string, unknown>;
+  /** The assembled producer+gate+binding plan; present only when
+   *  ``ready_to_save`` is true. The Save CTA persists it via
+   *  {@link savePolicyFromPlan}. */
+  plan?: Record<string, unknown> | null;
+  missing_params?: string[];
+  questions?: InteractiveQuestion[];
+  needs_more?: boolean;
+  ready_to_save?: boolean;
+  schema_issues?: string[];
+  ok?: boolean;
+  error?: string;
+}
+
+
+/** Result of persisting an assembled plan. */
+export interface PolicyFromPlanResponse {
+  ok?: boolean;
+  policyId?: string;
+  producerId?: string;
+  gateId?: string;
+  error?: string;
+  message?: string;
+}
+
+
+/** One conversational policy turn. Same thin-shell contract as
+ *  {@link compileCustomRuleInteractive}: 200 -> wire envelope verbatim;
+ *  non-OK / network failure -> ``{ok:false, error}`` (never throws). */
+export async function compilePolicyInteractive(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  body: PolicyInteractiveRequest,
+): Promise<PolicyInteractiveResponse> {
+  try {
+    const res = await fetch(`/v1/app/policies/compile/interactive`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      let backendError = `Policy compile-interactive failed (${res.status})`;
+      try {
+        const errBody = (await res.json()) as { error?: string };
+        if (typeof errBody.error === "string" && errBody.error.length > 0) {
+          backendError = errBody.error;
+        }
+      } catch {
+        /* ignore JSON parse failure on error body */
+      }
+      return { ok: false, ready_to_save: false, error: backendError };
+    }
+    return (await res.json()) as PolicyInteractiveResponse;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Network error";
+    return { ok: false, ready_to_save: false, error: message };
+  }
+}
+
+
+/** Persists an assembled policy plan (producer + gate + Policy record).
+ *  Same non-throwing envelope contract as the compile helpers. */
+export async function savePolicyFromPlan(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  plan: Record<string, unknown>,
+): Promise<PolicyFromPlanResponse> {
+  try {
+    const res = await fetch(`/v1/app/policies/from-plan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan }),
+    });
+    if (!res.ok) {
+      let backendError = `Save policy failed (${res.status})`;
+      try {
+        const errBody = (await res.json()) as { error?: string; message?: string };
+        if (typeof errBody.message === "string" && errBody.message.length > 0) {
+          backendError = errBody.message;
+        } else if (typeof errBody.error === "string" && errBody.error.length > 0) {
+          backendError = errBody.error;
+        }
+      } catch {
+        /* ignore */
+      }
+      return { ok: false, error: backendError };
+    }
+    return (await res.json()) as PolicyFromPlanResponse;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Network error";
+    return { ok: false, error: message };
+  }
+}
+
+
 /** Deletes a custom rule by id via `DELETE /v1/app/customize/custom-rules/{id}`. */
 export async function deleteCustomRule(
   fetch: (path: string, init?: RequestInit) => Promise<Response>,
