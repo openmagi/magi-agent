@@ -316,7 +316,7 @@ function ComposioSection({
     <SectionCard
       icon={<Plug className="w-5 h-5 text-foreground" />}
       title="Composio apps"
-      description="Connect Gmail, Slack, Notion, GitHub and 250+ apps via OAuth. Managed by Open Magi — no Composio key needed."
+      description="Connect Gmail, Slack, Notion, GitHub and 250+ apps via OAuth. Managed by Open Magi, no Composio key needed."
     >
       {err && (
         <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400">
@@ -325,7 +325,7 @@ function ComposioSection({
       )}
 
       <div className="space-y-2">
-        {/* Managed (brokered) is the default path — no key needed. */}
+        {/* Managed (brokered) is the default path; no key needed. */}
         <div
           className={`flex items-start gap-2 p-2.5 rounded-lg border text-[11px] ${
             brokered
@@ -338,12 +338,12 @@ function ComposioSection({
             {brokered ? (
               <>
                 <span className="font-medium">Managed by Open Magi.</span> Composio
-                runs on our key — no key of your own needed. Connect any app below.
+                runs on our key, no key of your own needed. Connect any app below.
               </>
             ) : (
               <>
                 <span className="font-medium">Managed by Open Magi.</span> Composio
-                is provided for you — no key of your own needed. It activates once
+                is provided for you, no key of your own needed. It activates once
                 this runtime has a platform token; until then you can bring your own
                 key under Advanced.
               </>
@@ -351,14 +351,14 @@ function ComposioSection({
           </div>
         </div>
 
-        {/* Advanced — bring your own Composio API key (fallback / override). */}
+        {/* Advanced: bring your own Composio API key (fallback / override). */}
         <div>
           <button
             type="button"
             onClick={() => setShowAdvanced((v) => !v)}
             className="text-[11px] text-secondary hover:text-foreground transition-colors"
           >
-            {showAdvanced ? "▾" : "▸"} Advanced — use your own Composio API key
+            {showAdvanced ? "▾" : "▸"} Advanced: use your own Composio API key
           </button>
           {showAdvanced && (
             <div className="mt-2 space-y-2">
