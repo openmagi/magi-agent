@@ -83,6 +83,11 @@ const RESET_LIVE_RUN_STATE: Partial<ChannelState> = {
 };
 
 const MAX_LOCAL_MESSAGES = 200;
+// Generous cap on how many completed/errored/cancelled child chips persist in
+// the AGENTS strip past turn end. Kevin: "generous". Bounds the strip so a
+// runaway spawn count cannot grow the retained list without limit; the entries
+// are cleared at the next turn-start reset regardless.
+const MAX_RETAINED_COMPLETED_SUBAGENTS = 16;
 const SERVER_READABLE_USER_TURN_MARKER_RE =
   /^\s*<!-- openmagi:server-readable-user-turn:v1:[A-Za-z0-9_-]+ -->\s*$/;
 const TRANSIENT_CONNECTION_ERROR_RE = /^Connecting to bot\.\.\. \(\d+\/\d+\)$/;
@@ -202,6 +207,31 @@ function activeSubagentsAfterLocalCancel(channelState: ChannelState): SubagentAc
     seen.add(background.taskId);
   }
   return active;
+}
+
+function isTerminalSubagentStatus(status: SubagentActivity["status"]): boolean {
+  return status === "done" || status === "error" || status === "cancelled";
+}
+
+// Completed / errored / cancelled NON-background child chips to keep past turn
+// end. The live background-detach path (activeBackgroundSubagents) already
+// retains still-running/waiting subagents; this adds the terminal children so a
+// finished spawn stays visible as a completed chip instead of vanishing at
+// turn end. Capped at the most recent MAX_RETAINED_COMPLETED_SUBAGENTS by
+// updatedAt to bound the strip. `alreadyRetained` are the taskIds kept by the
+// background-detach pass so we never duplicate one.
+function retainedCompletedSubagents(
+  channelState: ChannelState,
+  alreadyRetained: Set<string>,
+): SubagentActivity[] {
+  const completed = (channelState.subagents ?? []).filter(
+    (subagent) =>
+      isTerminalSubagentStatus(subagent.status) &&
+      !isExplicitBackgroundSubagent(subagent) &&
+      !alreadyRetained.has(subagent.taskId),
+  );
+  completed.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+  return completed.slice(0, MAX_RETAINED_COMPLETED_SUBAGENTS);
 }
 
 function shouldMergePushedAssistant(existing: ChatMessage, incoming: ChatMessage): boolean {
@@ -329,11 +359,19 @@ function terminalLiveRunReset(
   }
   if (partial.subagents === undefined) {
     const detachedSubagents = activeBackgroundSubagents(current);
-    if (detachedSubagents.length > 0) {
-      reset.subagents = detachedSubagents;
-      const activeTaskIds = new Set(detachedSubagents.map((subagent) => subagent.taskId));
+    const detachedTaskIds = new Set(detachedSubagents.map((subagent) => subagent.taskId));
+    // Also keep completed / errored / cancelled child chips so a finished
+    // subagent stays visible past turn end (cleared at the next turn-start
+    // reset via RESET_LIVE_RUN_STATE, which empties `subagents`).
+    const completedSubagents = retainedCompletedSubagents(current, detachedTaskIds);
+    const retained = [...detachedSubagents, ...completedSubagents];
+    if (retained.length > 0) {
+      reset.subagents = retained;
+      const retainedTaskIds = new Set(retained.map((subagent) => subagent.taskId));
       reset.subagentProgress = Object.fromEntries(
-        Object.entries(current.subagentProgress ?? {}).filter(([taskId]) => activeTaskIds.has(taskId)),
+        Object.entries(current.subagentProgress ?? {}).filter(([taskId]) =>
+          retainedTaskIds.has(taskId),
+        ),
       );
     }
   }
@@ -883,6 +921,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const researchEvidence = researchEvidenceFromChannelState(state);
     const usage = state.turnUsage;
     const detachedSubagents = activeBackgroundSubagents(state);
+    // Keep completed / errored / cancelled child chips visible past turn end
+    // (T2 retention), in addition to the still-running background subagents.
+    const detachedTaskIds = new Set(detachedSubagents.map((subagent) => subagent.taskId));
+    const completedSubagents = retainedCompletedSubagents(state, detachedTaskIds);
+    const retainedSubagents = [...detachedSubagents, ...completedSubagents];
+    const retainedSubagentProgress = (() => {
+      if (retainedSubagents.length === 0) return undefined;
+      const retainedTaskIds = new Set(retainedSubagents.map((subagent) => subagent.taskId));
+      return Object.fromEntries(
+        Object.entries(state.subagentProgress ?? {}).filter(([taskId]) =>
+          retainedTaskIds.has(taskId),
+        ),
+      );
+    })();
     const missions = durableMissionState(state);
     {
       const thinkingDuration = state.thinkingStartedAt
@@ -914,8 +966,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((s) => ({
       channelStates: {
         ...s.channelStates,
-        [channel]: detachedSubagents.length > 0
-          ? { ...DEFAULT_CHANNEL_STATE, ...missions, subagents: detachedSubagents }
+        [channel]: retainedSubagents.length > 0
+          ? {
+              ...DEFAULT_CHANNEL_STATE,
+              ...missions,
+              subagents: retainedSubagents,
+              ...(retainedSubagentProgress !== undefined
+                ? { subagentProgress: retainedSubagentProgress }
+                : {}),
+            }
           : { ...DEFAULT_CHANNEL_STATE, ...missions },
       },
     }));

@@ -805,7 +805,7 @@ describe("chat-store message queue", () => {
     ]);
   });
 
-  it("keeps running background subagents visible when finalizing a parent stream", () => {
+  it("keeps running background and completed subagents visible when finalizing a parent stream", () => {
     const runningSubagent: SubagentActivity = {
       taskId: "task-running",
       role: "writer",
@@ -850,10 +850,15 @@ describe("chat-store message queue", () => {
       role: "assistant",
       content: "I will keep watching this.",
     });
+    // Running background subagent stays live; the completed reviewer chip now
+    // persists past turn end (T2 retention) instead of vanishing.
+    const finalizedSubagents = useChatStore.getState().channelStates.general.subagents ?? [];
+    expect(finalizedSubagents.map((subagent) => subagent.taskId).sort()).toEqual(
+      ["task-done", "task-running"],
+    );
     expect(useChatStore.getState().channelStates.general).toMatchObject({
       streaming: false,
       streamingText: "",
-      subagents: [runningSubagent],
       turnPhase: null,
     });
   });
@@ -896,6 +901,117 @@ describe("chat-store message queue", () => {
       ],
       turnPhase: null,
     });
+  });
+
+  it("retains completed child subagents and their progress after terminal reset, capped at 16", () => {
+    // 20 completed (done/error/cancelled) non-background children; only the 16
+    // most recent by updatedAt survive.
+    const completed: SubagentActivity[] = Array.from({ length: 20 }, (_, index) => ({
+      taskId: `child-${index}`,
+      role: "researcher",
+      status: index % 3 === 0 ? "error" : index % 3 === 1 ? "cancelled" : "done",
+      detail: `finished ${index}`,
+      startedAt: 100 + index,
+      updatedAt: 1000 + index,
+    }));
+    const subagentProgress: Record<string, { taskId: string; lines: string[] }> = {};
+    for (const child of completed) {
+      subagentProgress[child.taskId] = { taskId: child.taskId, lines: [`line ${child.taskId}`] };
+    }
+
+    useChatStore.setState({
+      channelStates: {
+        general: {
+          streaming: true,
+          streamingText: "done with the fan-out.",
+          thinkingText: "",
+          error: null,
+          hasTextContent: true,
+          thinkingStartedAt: 123,
+          reconnecting: false,
+          activeTools: [],
+          subagents: completed,
+          subagentProgress: subagentProgress as unknown as ChannelState["subagentProgress"],
+          taskBoard: null,
+          fileProcessing: false,
+          turnPhase: "committed",
+          heartbeatElapsedMs: null,
+          pendingInjectionCount: 0,
+        },
+      },
+    });
+
+    useChatStore.getState().setChannelState("general", {
+      streaming: false,
+      streamingText: "",
+      thinkingText: "",
+      hasTextContent: false,
+      turnPhase: null,
+    });
+
+    const state = useChatStore.getState().channelStates.general;
+    const retained = state.subagents ?? [];
+    expect(retained).toHaveLength(16);
+    // The 16 most-recent-by-updatedAt are child-4 .. child-19.
+    const retainedIds = retained.map((subagent) => subagent.taskId).sort();
+    expect(retainedIds).not.toContain("child-0");
+    expect(retainedIds).not.toContain("child-3");
+    expect(retainedIds).toContain("child-19");
+    // subagentProgress retained only for the survivors.
+    const progressKeys = Object.keys(state.subagentProgress ?? {}).sort();
+    expect(progressKeys).toHaveLength(16);
+    expect(progressKeys).not.toContain("child-0");
+    expect(progressKeys).toContain("child-19");
+  });
+
+  it("clears retained completed child subagents at the next turn-start", () => {
+    const completedSubagent: SubagentActivity = {
+      taskId: "child-done",
+      role: "reviewer",
+      status: "done",
+      startedAt: 100,
+      updatedAt: 200,
+    };
+    useChatStore.setState({
+      channelStates: {
+        general: {
+          streaming: true,
+          streamingText: "final answer",
+          thinkingText: "",
+          error: null,
+          hasTextContent: true,
+          thinkingStartedAt: 123,
+          reconnecting: false,
+          activeTools: [],
+          subagents: [completedSubagent],
+          taskBoard: null,
+          fileProcessing: false,
+          turnPhase: "committed",
+          heartbeatElapsedMs: null,
+          pendingInjectionCount: 0,
+        },
+      },
+    });
+
+    // Terminal reset retains the completed chip.
+    useChatStore.getState().setChannelState("general", {
+      streaming: false,
+      streamingText: "",
+      thinkingText: "",
+      hasTextContent: false,
+      turnPhase: null,
+    });
+    expect(useChatStore.getState().channelStates.general.subagents).toEqual([completedSubagent]);
+
+    // Next turn-start reset (streaming false -> true) clears the strip.
+    useChatStore.getState().setChannelState("general", {
+      streaming: true,
+      streamingText: "",
+      thinkingText: "",
+      hasTextContent: false,
+      turnPhase: "pending",
+    });
+    expect(useChatStore.getState().channelStates.general.subagents).toEqual([]);
   });
 
   it("keeps background shell tasks visible when cancelling a parent stream", () => {

@@ -1414,6 +1414,14 @@ export async function sendMessage(
   // at runtime every time core-agent emitted `event: agent` text_delta.
   const activities = new Map<string, ToolActivity>();
   const subagents = new Map<string, SubagentActivity>();
+  // Task ids of subagents that detach and keep running independently of the
+  // parent turn (background_task events, or spawn_started with
+  // deliver="background"). At [DONE] these are left running rather than
+  // finalized, so the store's background-detach retention can keep them live
+  // across the turn boundary. The persona/role on these events is not a
+  // reliable "background" signal (e.g. persona "writer"), so we key off the
+  // event source, not the role string.
+  const backgroundSubagentIds = new Set<string>();
   const toolCallIdsByIndex = new Map<number, string>();
   const seenSkills = new Set<string>();
   let modelProgressId: string | null = null;
@@ -1880,12 +1888,39 @@ export async function sendMessage(
       noteToolStart(`skill-${skill}`, skill);
     }
   }
+  function isBackgroundSubagentRole(role: string): boolean {
+    const normalized = role.trim().toLowerCase();
+    return normalized === "bash" || normalized === "background";
+  }
+  function finalizeSubagents(): void {
+    // At turn end, any child chip still shown as running/waiting would leave a
+    // stale "running" dot after [DONE]. Finalize non-background children to a
+    // terminal state: `error` when the whole stream ended in a terminal agent
+    // error, otherwise `done`. Background subagents (bash / background roles)
+    // detach and keep running independently, so they are left untouched
+    // (mirrors the store's activeBackgroundSubagents retention).
+    const finalStatus: SubagentActivityStatus = terminalAgentError ? "error" : "done";
+    let changed = false;
+    for (const [taskId, subagent] of subagents) {
+      if (subagent.status !== "running" && subagent.status !== "waiting") continue;
+      if (backgroundSubagentIds.has(taskId)) continue;
+      if (isBackgroundSubagentRole(subagent.role)) continue;
+      subagents.set(taskId, {
+        ...subagent,
+        status: finalStatus,
+        updatedAt: Date.now(),
+      });
+      changed = true;
+    }
+    if (changed) emitSubagents();
+  }
   function markAllDone(): void {
     let changed = false;
     for (const a of activities.values()) {
       if (a.status === "running") { a.status = "done"; changed = true; }
     }
     if (changed) emitActivities();
+    finalizeSubagents();
   }
   function noteToolEnd(
     id: string,
@@ -2171,6 +2206,9 @@ export async function sendMessage(
         break;
       }
       case "spawn_started":
+        if (ev.deliver === "background" && typeof ev.taskId === "string" && ev.taskId) {
+          backgroundSubagentIds.add(ev.taskId);
+        }
         noteSubagent(ev.taskId, {
           role: ev.persona,
           status: "running",
@@ -2178,6 +2216,9 @@ export async function sendMessage(
         });
         break;
       case "background_task":
+        if (typeof ev.taskId === "string" && ev.taskId) {
+          backgroundSubagentIds.add(ev.taskId);
+        }
         noteSubagent(ev.taskId, {
           role: ev.persona,
           status: statusFromBackgroundTask(ev.status),
