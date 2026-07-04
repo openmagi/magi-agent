@@ -5,6 +5,7 @@ import { Trash2 } from "lucide-react";
 import { useAgentFetch } from "@/lib/local-api";
 import { slugifyCheckId } from "./custom-checks-section.slug";
 import { TrustBadge, type TrustClass } from "./trust-badge";
+import { Switch } from "@/components/ui/_ds";
 import {
   deleteDashboardCheck,
   getDashboardChecks,
@@ -217,23 +218,13 @@ export function CustomChecksSection({
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={check.enabled}
-                  aria-label={`Toggle check ${check.label}`}
+                <Switch
+                  checked={check.enabled}
+                  onToggle={async () => { await toggle(check); }}
+                  labelOn={`Disable check ${check.label}`}
+                  labelOff={`Enable check ${check.label}`}
                   disabled={rowBusy}
-                  onClick={() => void toggle(check)}
-                  className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-40 ${
-                    check.enabled ? "bg-primary" : "bg-black/15"
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-200 ${
-                      check.enabled ? "translate-x-6" : "translate-x-1"
-                    }`}
-                  />
-                </button>
+                />
                 <button
                   type="button"
                   disabled={rowBusy}
