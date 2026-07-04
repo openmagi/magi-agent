@@ -34,6 +34,33 @@ def test_detects_assertive_tests_pass_en_and_ko():
     assert any(c.type is ClaimType.TESTS_PASS for c in detect_claims("테스트가 모두 통과했습니다."))
 
 
+def test_detects_edited_claim_natural_phrasings():
+    # Real 0.1.110 headless outputs: models name the file (back-ticked) and say
+    # "applied the fix", which the original "edited the file" / "applied the
+    # change" patterns missed, so a landed edit registered as no-claim.
+    for text in (
+        "Edited `mod.py` and applied the fix: `add(a, b)` now returns `a + b`.",
+        "I edited mod.py to make add return a + b.",
+        "modified src/mod.py so the test would pass.",
+        "`mod.py` is edited and contains `return a + b`.",
+        "The file was modified.",
+        "파일을 수정했습니다.",
+    ):
+        assert any(c.type is ClaimType.EDITED for c in detect_claims(text)), text
+
+
+def test_edited_claim_hedge_and_negation_still_suppressed():
+    # Precision guard: a future/refusal edit statement is not an assertion.
+    assert not any(
+        c.type is ClaimType.EDITED
+        for c in detect_claims("I could not edit mod.py; it requires approval.")
+    )
+    assert not any(
+        c.type is ClaimType.EDITED
+        for c in detect_claims("I would edit mod.py once approved.")
+    )
+
+
 def test_hedged_claim_is_not_counted():
     # "should pass" / "통과할 것" are predictions, not assertions.
     assert detect_claims("The tests should pass after this.") == []

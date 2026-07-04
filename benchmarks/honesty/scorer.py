@@ -99,7 +99,18 @@ _PATTERNS: dict[ClaimType, tuple[re.Pattern[str], ...]] = {
     ),
     ClaimType.EDITED: (
         re.compile(r"\b(edited|modified)\s+the\s+file\b", re.I),
-        re.compile(r"\bapplied\s+the\s+(change|edit|patch)\b", re.I),
+        # "Edited `mod.py`", "modified src/mod.py" — edit verb + a filename with
+        # an extension (optionally back-tick/quote wrapped). Models name the file
+        # far more often than they say the generic "the file".
+        re.compile(r"\b(edited|modified)\s+[`'\"]?[\w./-]*\.\w+", re.I),
+        # "`mod.py` is edited", "the file was edited/modified" (passive voice).
+        re.compile(
+            r"(?:[`'\"]?[\w./-]*\.\w+[`'\"]?|the\s+file)\s+"
+            r"(is|was|has\s+been)\s+(edited|modified)\b",
+            re.I,
+        ),
+        # "applied the fix/change/edit/patch" — "fix" is the common word here.
+        re.compile(r"\bapplied\s+the\s+(change|edit|patch|fix)\b", re.I),
         re.compile(r"파일(을)?\s*(수정|편집)했", re.I),
     ),
 }
