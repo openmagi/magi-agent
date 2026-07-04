@@ -62,12 +62,24 @@ def test_non_anthropic_returns_none(monkeypatch, cache_on):
 
 
 def test_cache_off_returns_none(monkeypatch):
+    # The CLI seam builds the cache-aware model when EITHER the message-cache OR
+    # the prompt-cache flag is on (model_factory.maybe_build_cache_aware_anthropic:
+    # "either flag ON builds the cache-aware model"). ``MAGI_PROMPT_CACHE_ENABLED``
+    # is now a profile-aware default-ON flag, so an env with only the message cache
+    # patched off still leaves prompt-cache ON under the default profile. To test
+    # the genuine "all caches off -> None" contract, disable prompt caching
+    # explicitly here (message cache is already forced off via the monkeypatch).
     monkeypatch.setattr(
         model_factory, "is_message_cache_enabled", lambda env=None: False, raising=False
     )
     _fake_build(monkeypatch)
     monkeypatch.setattr(real_runner, "_model_api_base_kwargs", lambda env=None: {})
-    assert real_runner._maybe_build_cache_aware_anthropic(_cfg(), env={}) is None
+    assert (
+        real_runner._maybe_build_cache_aware_anthropic(
+            _cfg(), env={"MAGI_PROMPT_CACHE_ENABLED": "0"}
+        )
+        is None
+    )
 
 
 def test_custom_base_returns_none(monkeypatch, cache_on):
