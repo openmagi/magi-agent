@@ -104,11 +104,58 @@ def _parse_params(raw_text: str) -> dict | None:
     return parsed if isinstance(parsed, dict) else None
 
 
-def _build_plan(params: dict) -> dict:
-    """Deterministically template a policy plan from extracted params."""
+def _producer_domains(producer: Any) -> list[str]:
+    """The domainAllowlist a producer dict carries (empty on any miss)."""
+    if not isinstance(producer, dict):
+        return []
+    trigger = producer.get("trigger")
+    if not isinstance(trigger, dict):
+        return []
+    domains = trigger.get("domainAllowlist")
+    if not isinstance(domains, (list, tuple)):
+        return []
+    return [d for d in domains if isinstance(d, str) and d.strip()]
+
+
+def _find_reusable_producer(
+    existing_producers: list[dict] | None, evidence_type: str
+) -> dict | None:
+    """Find an already-authored producer that emits ``evidence_type`` and is
+    unlock-eligible (deterministic domain-allowlist trigger), so a new gate can
+    bind to it instead of minting a duplicate producer.
+
+    Match is by the exact emitted evidence type: two producers emitting the same
+    ``custom:`` type IS the duplication reuse avoids. A candidate must be enabled
+    (absent ``enabled`` defaults to enabled) and carry a non-empty domainAllowlist
+    (a result-text / advisory producer is not unlock-eligible, so reusing it would
+    yield an unsatisfiable gate). First match wins; the caller surfaces the reuse.
+    """
+    if not existing_producers:
+        return None
+    for producer in existing_producers:
+        if not isinstance(producer, dict):
+            continue
+        if producer.get("emitsEvidenceType") != evidence_type:
+            continue
+        if producer.get("enabled") is False:
+            continue
+        if not _producer_domains(producer):
+            continue
+        return producer
+    return None
+
+
+def _build_plan(params: dict, *, existing_producers: list[dict] | None = None) -> dict:
+    """Deterministically template a policy plan from extracted params.
+
+    When ``existing_producers`` contains a producer already emitting the target
+    evidence type (and unlock-eligible), the gate binds to THAT producer instead
+    of a freshly-minted one (reuse, not duplicate). The reused producer body is
+    still carried in the plan verbatim so :func:`policy_plan.validate_policy_plan`
+    stays sound; persistence detects ``producerReused`` and leaves the existing
+    producer untouched.
+    """
     evidence_type = "custom:" + _pascal(str(params.get("evidenceLabel") or "source"))
-    producer_id = _slug(str(params.get("evidenceLabel") or "credible-source"))
-    gate_id = f"cr_{producer_id.replace('-', '_')}_gate"
     gated_tool = str(params.get("gatedTool") or "").strip()
     fetch_tool = str(params.get("fetchTool") or "web_fetch").strip() or "web_fetch"
     domains = [
@@ -119,15 +166,43 @@ def _build_plan(params: dict) -> dict:
     on_unavailable = params.get("onUnavailable")
     on_unavailable = on_unavailable if on_unavailable in ("deny", "ask") else "deny"
 
-    producer = {
-        "id": producer_id,
-        "label": f"Records {evidence_type} when a trusted source is fetched",
-        "scope": "always",
-        "enabled": True,
-        "trigger": {"tool": fetch_tool, "domainAllowlist": domains},
-        "action": "audit",
-        "emitsEvidenceType": evidence_type,
-    }
+    reused = _find_reusable_producer(existing_producers, evidence_type)
+    reuse_note: str | None = None
+    if reused is not None:
+        producer = reused
+        producer_id = str(reused.get("id") or "")
+        # The reused producer's own domains govern the unlock; surface any
+        # requested domain it does not already cover (advisory, not a block).
+        existing_domains = _producer_domains(reused)
+        uncovered = [d for d in domains if d not in existing_domains]
+        if uncovered:
+            reuse_note = (
+                f"Reusing the existing producer '{producer_id}', which trusts "
+                f"{', '.join(existing_domains)}. Your requested "
+                f"{', '.join(uncovered)} {'is' if len(uncovered) == 1 else 'are'} "
+                "not covered by it; edit that producer to add the domain(s)."
+            )
+        else:
+            reuse_note = (
+                f"Reusing the existing producer '{producer_id}' "
+                f"(trusts {', '.join(existing_domains)}) instead of creating a duplicate."
+            )
+    else:
+        producer_id = _slug(str(params.get("evidenceLabel") or "credible-source"))
+        producer = {
+            "id": producer_id,
+            "label": f"Records {evidence_type} when a trusted source is fetched",
+            "scope": "always",
+            "enabled": True,
+            "trigger": {"tool": fetch_tool, "domainAllowlist": domains},
+            "action": "audit",
+            "emitsEvidenceType": evidence_type,
+        }
+
+    # Gate id is per-(producer, gated tool): a shared producer can back gates on
+    # DIFFERENT tools, so keying the gate id on the producer alone would collide
+    # (the second policy's gate would overwrite the first on save).
+    gate_id = f"cr_{producer_id.replace('-', '_')}_{_slug(gated_tool).replace('-', '_')}_gate"
     gate = {
         "id": gate_id,
         "scope": "always",
@@ -153,23 +228,30 @@ def _build_plan(params: dict) -> dict:
         "gateRuleId": gate_id,
         "evidenceType": evidence_type,
     }
-    return {
+    plan: dict = {
         "intent": str(params.get("intent") or "")[:_INTENT_MAX],
         "producer": producer,
         "gate": gate,
         "binding": binding,
+        "producerReused": reused is not None,
     }
+    if reuse_note is not None:
+        plan["reuseNote"] = reuse_note
+    return plan
 
 
 def _plan_explanation(plan: dict) -> str:
     gated = plan["gate"]["what"]["payload"]["match"].get("tool", "the tool")
     etype = plan["binding"]["evidenceType"]
     domains = plan["producer"]["trigger"].get("domainAllowlist") or []
-    return (
+    base = (
         f"Before {gated} runs, require {etype} recorded this session by fetching "
         f"an allowlisted source ({', '.join(domains) or 'no domains set'}); "
         f"otherwise {plan['gate']['what']['payload']['requireEvidence']['onEvidenceUnavailable']}."
     )
+    if plan.get("producerReused"):
+        base += f" {plan.get('reuseNote', 'Reuses an existing producer.')}"
+    return base
 
 
 async def compile_nl_to_policy(
@@ -177,15 +259,20 @@ async def compile_nl_to_policy(
     *,
     model_factory: Callable[[], Any] | None,
     prior_turns: tuple[dict, ...] = (),
+    existing_producers: list[dict] | None = None,
 ) -> dict:
     """Compile an intent into a producer+gate+binding policy plan.
 
     Returns one of:
-    * ``{"ok": True, "plan": {...}, "explanation": str}``
+    * ``{"ok": True, "plan": {...}, "explanation": str, "producerReused": bool}``
     * ``{"ok": False, "clarifyingQuestions": (...,), "confidenceLow": True}``
     * ``{"ok": False, "notApplicable": True, "reason": str}``
     * ``{"ok": False, "error": str}``
     Fail-open: ``model_factory=None`` -> ``{"ok": False, "error": ...}``.
+
+    ``existing_producers`` (already-authored dashboard-check producers, as
+    dicts) lets the templater bind a new gate to a producer that already emits
+    the target evidence type instead of duplicating it.
     """
     if model_factory is None:
         return {"ok": False, "error": "compiler unavailable", "plan": None}
@@ -226,7 +313,7 @@ async def compile_nl_to_policy(
     if not str(params.get("gatedTool") or "").strip():
         return {"ok": False, "error": "no gated tool identified", "plan": None}
 
-    plan = _build_plan(params)
+    plan = _build_plan(params, existing_producers=existing_producers)
 
     # Gate the templated plan through the structural + per-rule validators. A
     # finding here is a compiler bug (templating should always produce a sound
@@ -237,4 +324,12 @@ async def compile_nl_to_policy(
     if findings:
         return {"ok": False, "error": "; ".join(findings), "plan": None}
 
-    return {"ok": True, "plan": plan, "explanation": _plan_explanation(plan)}
+    result = {
+        "ok": True,
+        "plan": plan,
+        "explanation": _plan_explanation(plan),
+        "producerReused": bool(plan.get("producerReused")),
+    }
+    if plan.get("reuseNote"):
+        result["reuseNote"] = plan["reuseNote"]
+    return result

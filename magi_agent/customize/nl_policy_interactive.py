@@ -193,8 +193,14 @@ async def step_policy_compile(
     params_so_far: dict[str, Any] | None,
     answers: dict[str, str] | None,
     model_factory: Callable[[], Any] | None,
+    existing_producers: list[dict] | None = None,
 ) -> dict[str, Any]:
-    """Run one conversational turn of the multi-rule policy compiler."""
+    """Run one conversational turn of the multi-rule policy compiler.
+
+    ``existing_producers`` (already-authored dashboard-check producers as dicts)
+    lets the assembled plan reuse a producer that already emits the target
+    evidence type instead of duplicating it.
+    """
     validated_history = _validate_history(history)
     validated_answers = _validate_answers(answers)
     sanitized = _sanitize_params(params_so_far)
@@ -251,7 +257,10 @@ async def step_policy_compile(
     ready = False
     if not missing:
         try:
-            candidate = _build_plan({**params, "intent": _intent_from(history, params)})
+            candidate = _build_plan(
+                {**params, "intent": _intent_from(history, params)},
+                existing_producers=existing_producers,
+            )
             findings = validate_policy_plan(candidate)
             findings += [f"producer: {e}" for e in validate_dashboard_check(candidate["producer"])]
             findings += [f"gate: {e}" for e in validate_custom_rule(candidate["gate"])]
@@ -262,6 +271,9 @@ async def step_policy_compile(
                 ready = True
         except Exception as exc:  # noqa: BLE001
             schema_issues = [_to_plain_language(str(exc))]
+
+    reuse_note = plan.get("reuseNote") if isinstance(plan, dict) else None
+    producer_reused = bool(plan.get("producerReused")) if isinstance(plan, dict) else False
 
     if not llm_message:
         if llm_unavailable:
@@ -276,6 +288,11 @@ async def step_policy_compile(
         else:
             llm_message = "Got it. Refining the policy."
 
+    # Append the reuse note so the operator sees, in the chat, that the policy
+    # binds to an existing producer rather than creating a duplicate.
+    if ready and reuse_note:
+        llm_message = f"{llm_message} {reuse_note}"
+
     return {
         "assistant_message": _to_plain_language(llm_message),
         "params": params,
@@ -285,6 +302,7 @@ async def step_policy_compile(
         "needs_more": bool(missing or schema_issues),
         "ready_to_save": ready,
         "schema_issues": schema_issues,
+        "producer_reused": producer_reused,
     }
 
 

@@ -111,11 +111,22 @@ def persist_policy_plan(plan: Any, *, path: Path | None = None) -> dict[str, str
         raise PolicyPersistError(f"policy record invalid: {exc}") from exc
 
     # 1. Producer -> dashboard sidecar (upsert by id).
+    #
+    # When the plan reuses an already-authored producer, do NOT overwrite it:
+    # the gate binds to the existing producer by identity, and the operator may
+    # have customized its domains/label since. Only write when the producer is
+    # genuinely new OR the reused id has since vanished (TOCTOU) so the gate is
+    # never left bound to a producer that does not exist.
     root = _writable_dashboard_pack_root()
-    check = DashboardCheck.model_validate(producer)
-    checks = [c for c in read_sidecar(root) if c.id != check.id]
-    checks.append(check)
-    write_pack(root, checks)
+    existing_checks = read_sidecar(root)
+    producer_reused = bool(plan.get("producerReused"))
+    if producer_reused and any(c.id == producer_id for c in existing_checks):
+        pass  # reuse in place; leave the operator's existing producer untouched
+    else:
+        check = DashboardCheck.model_validate(producer)
+        checks = [c for c in existing_checks if c.id != check.id]
+        checks.append(check)
+        write_pack(root, checks)
 
     # 2. Gate -> custom_rules (upsert by id).
     set_custom_rule(gate, path=path)

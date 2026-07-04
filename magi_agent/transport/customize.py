@@ -148,6 +148,31 @@ def _resolve_policy_compile_factory(body: dict) -> Any:
     return _production_shacl_compiler_model_factory()
 
 
+def _load_existing_producers() -> list[dict]:
+    """Already-authored dashboard-check producers (as dicts) from the writable
+    sidecar, so the policy compiler can reuse one instead of duplicating it.
+
+    Fail-soft: any read/parse error yields ``[]`` (reuse simply does not fire;
+    the compiler mints a fresh producer). Scoped to the writable pack root (the
+    producers the operator actually authored and could duplicate), matching the
+    root :func:`persist_policy_plan` reuses in place."""
+    try:
+        from magi_agent.customize.policy_persist import (  # noqa: PLC0415
+            _writable_dashboard_pack_root,
+        )
+        from magi_agent.packs.dashboard_authored import read_sidecar  # noqa: PLC0415
+
+        # mode="json" so tuple fields (trigger.domainAllowlist) serialize to
+        # lists (the plan + validate_dashboard_check expect JSON-native lists,
+        # matching what the producer looked like when it came over the wire).
+        return [
+            c.model_dump(by_alias=True, mode="json")
+            for c in read_sidecar(_writable_dashboard_pack_root())
+        ]
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def _is_nl_interview_mode_enabled() -> bool:
     """Read ``MAGI_CUSTOMIZE_NL_INTERVIEW_MODE_ENABLED`` defensively (PR-F-UX6).
 
@@ -655,7 +680,9 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         try:
             result = await asyncio.wait_for(
                 compile_nl_to_policy(
-                    nl_text, model_factory=_resolve_policy_compile_factory(body)
+                    nl_text,
+                    model_factory=_resolve_policy_compile_factory(body),
+                    existing_producers=_load_existing_producers(),
                 ),
                 timeout=_LLM_CALL_TIMEOUT_S,
             )
@@ -698,6 +725,7 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
                     params_so_far=body.get("paramsSoFar"),
                     answers=body.get("answers"),
                     model_factory=_resolve_policy_compile_factory(body),
+                    existing_producers=_load_existing_producers(),
                 ),
                 timeout=_LLM_CALL_TIMEOUT_S,
             )
