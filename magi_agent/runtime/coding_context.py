@@ -36,6 +36,17 @@ _DEFAULT_FILE_LIMIT = 80
 _DEFAULT_TOKEN_BUDGET = 1500
 _DEFAULT_RECENT_LIMIT = 5
 
+# Hard ceilings for the per-directory file counter. ``_directory_stats`` only
+# needs an approximate "src/ (N files)" figure for the prompt block, so the walk
+# must NEVER enumerate a whole tree: on a large workspace (a big monorepo, or a
+# cwd like ``/tmp``/``$HOME`` full of unrelated files) an uncapped
+# ``sum(1 for _ in _walk_files(...))`` is millions of ``iterdir``/``is_dir``
+# syscalls and hangs runtime construction for minutes. Cap total entries visited
+# across the whole ``_directory_stats`` pass and the recursion depth; a count
+# that hits the cap is rendered as a floor (``N+``).
+_MAX_SCAN_ENTRIES = 4000
+_MAX_SCAN_DEPTH = 6
+
 # Noise directories the workspace scan skips entirely. Mirrors the conventions
 # the existing native ``repo_map`` tool already uses informally + the cargo /
 # go / .next / .venv variants common in heterogeneous repos.
@@ -139,7 +150,13 @@ def _directory_stats(workspace: Path) -> list[tuple[str, int]]:
         children = sorted(workspace.iterdir(), key=lambda p: p.name)
     except (OSError, PermissionError):
         return stats
+    # Shared scan budget across ALL top-level dirs so a workspace with many big
+    # subtrees still cannot blow past the ceiling (the cap is global, not
+    # per-dir). Mutable one-element list threaded into ``_walk_files``.
+    remaining = [_MAX_SCAN_ENTRIES]
     for child in children:
+        if remaining[0] <= 0:
+            break
         if not child.is_dir():
             continue
         if child.name.startswith(".") and child.name not in (".github",):
@@ -149,7 +166,7 @@ def _directory_stats(workspace: Path) -> list[tuple[str, int]]:
         if child.name in _EXCLUDE_DIR_NAMES:
             continue
         try:
-            count = sum(1 for _ in _walk_files(child))
+            count = sum(1 for _ in _walk_files(child, budget=remaining))
         except (OSError, PermissionError):
             continue
         if count:
@@ -157,23 +174,35 @@ def _directory_stats(workspace: Path) -> list[tuple[str, int]]:
     return stats
 
 
-def _walk_files(root: Path):
-    """Yield each file under ``root``, skipping noise directories."""
-    stack: list[Path] = [root]
+def _walk_files(root: Path, *, budget: list[int] | None = None, _depth: int = 0):
+    """Yield each file under ``root``, skipping noise directories.
+
+    ``budget`` (a mutable ``[remaining]``) and ``_MAX_SCAN_DEPTH`` bound the walk
+    so a pathologically large workspace cannot turn this into a multi-minute
+    (or effectively unbounded) enumeration — see ``_MAX_SCAN_ENTRIES``.
+    """
+    stack: list[tuple[Path, int]] = [(root, _depth)]
     while stack:
-        current = stack.pop()
+        if budget is not None and budget[0] <= 0:
+            return
+        current, depth = stack.pop()
         try:
             entries = list(current.iterdir())
         except (OSError, PermissionError):
             continue
         for entry in entries:
+            if budget is not None and budget[0] <= 0:
+                return
             name = entry.name
             if name in _EXCLUDE_DIR_NAMES:
                 continue
             try:
                 if entry.is_dir():
-                    stack.append(entry)
+                    if depth < _MAX_SCAN_DEPTH:
+                        stack.append((entry, depth + 1))
                 elif entry.is_file():
+                    if budget is not None:
+                        budget[0] -= 1
                     yield entry
             except OSError:
                 continue
