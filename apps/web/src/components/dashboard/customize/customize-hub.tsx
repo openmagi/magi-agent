@@ -54,6 +54,7 @@ import { AddRulePicker, type AddRuleChoice } from "./add-rule-modal";
 import { AddPolicyModePicker, type AddPolicyMode } from "./add-policy-mode-picker";
 import { GuidedWizard } from "./guided-wizard";
 import { NlRuleCompose } from "./nl-rule-compose";
+import { ConversationalPolicyCompose } from "./conversational-policy-compose";
 import {
   CustomRulesSection,
 } from "./verification-rule-modal";
@@ -728,7 +729,10 @@ function RulesSectionMount({
     | { phase: "nl"; nlPrefill?: string }
     | { phase: "guided" }
     | { phase: "raw_picking" }
-    | { phase: "raw_authoring"; choice: AddRuleChoice };
+    | { phase: "raw_authoring"; choice: AddRuleChoice }
+    // Multi-rule policy composer (producer + gate), reached via its own
+    // "Add policy" button rather than the single-rule mode picker.
+    | { phase: "policy" };
   const [addState, setAddState] = useState<AddState>({ phase: "idle" });
 
   type SubTab = "policies" | "evidence" | "conditions";
@@ -878,14 +882,25 @@ function RulesSectionMount({
           ))}
         </nav>
         {addState.phase === "idle" && subTab === "policies" ? (
-          <button
-            type="button"
-            onClick={() => setAddState({ phase: "picking_mode" })}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-primary/90"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Add rule
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setAddState({ phase: "picking_mode" })}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-primary/90"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add rule
+            </button>
+            <button
+              type="button"
+              onClick={() => setAddState({ phase: "policy" })}
+              title="Author a multi-step policy: a producer that records evidence + a gate that blocks a tool until that evidence exists this session."
+              className="inline-flex items-center gap-1.5 rounded-lg border border-primary/40 bg-white px-3 py-1.5 text-xs font-semibold text-primary shadow-sm hover:bg-primary/[0.06]"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add policy
+            </button>
+          </div>
         ) : null}
       </div>
 
@@ -984,6 +999,23 @@ function RulesSectionMount({
         </section>
       ) : null}
 
+      {addState.phase === "policy" ? (
+        <section className="space-y-2">
+          <AuthoringHeader
+            label="Link a policy (producer + gate)"
+            onClose={() => setAddState({ phase: "idle" })}
+          />
+          <ConversationalPolicyCompose
+            agentFetch={agentFetch}
+            onSaved={() => {
+              reload();
+              reloadDashboardChecks();
+              setAddState({ phase: "idle" });
+            }}
+          />
+        </section>
+      ) : null}
+
       {ruleError ? (
         <div className="rounded-lg border border-red-500/25 bg-red-500/[0.06] px-3 py-2 text-xs text-red-600">
           {ruleError}
@@ -1036,7 +1068,10 @@ function AuthoringHeader({
   onClose,
 }: {
   label: string;
-  onPickDifferent: () => void;
+  /** Optional; omit when the authoring surface has no sibling mode to
+   *  switch to (e.g. the policy composer, reached via its own button
+   *  rather than the NL/Guided/Raw mode picker). */
+  onPickDifferent?: () => void;
   onClose: () => void;
 }): React.ReactElement {
   return (
@@ -1048,13 +1083,15 @@ function AuthoringHeader({
         <h3 className="text-sm font-bold text-foreground">{label}</h3>
       </div>
       <div className="flex items-center gap-1">
-        <button
-          type="button"
-          onClick={onPickDifferent}
-          className="rounded-lg px-2 py-1 text-[11px] font-medium text-secondary hover:bg-black/[0.04]"
-        >
-          ← Pick different
-        </button>
+        {onPickDifferent ? (
+          <button
+            type="button"
+            onClick={onPickDifferent}
+            className="rounded-lg px-2 py-1 text-[11px] font-medium text-secondary hover:bg-black/[0.04]"
+          >
+            ← Pick different
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={onClose}
