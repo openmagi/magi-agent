@@ -4878,11 +4878,20 @@ class MagiEngineDriver:
         """
         if not final_text:
             return False
-        from magi_agent.evidence.ledger import (  # noqa: PLC0415
-            _BEARER_TOKEN_RE,
-            _GITHUB_TOKEN_RE,
-            _OPENAI_TOKEN_RE,
-            _STRIPE_TOKEN_RE,
+        # B2/#1228: the token/bearer regexes moved to the single home
+        # ``magi_agent.ops.safety`` (``evidence/ledger.py`` was rewired onto the
+        # kernel and no longer re-exports the ``_BEARER_TOKEN_RE`` etc. private
+        # names). Import them from the kernel directly — the patterns are
+        # byte-identical to the pre-move ledger copies, so the credential scan is
+        # unchanged. (Previously this import raised ``ImportError`` post-move and
+        # was swallowed by the ``except`` below, silently dropping the
+        # ``public_redaction`` / ``redaction_audit`` / ``no_raw_evidence_payload``
+        # satisfiers so every clean turn failed the hard redaction ref.)
+        from magi_agent.ops.safety import (  # noqa: PLC0415
+            BEARER_TOKEN_RE as _BEARER_TOKEN_RE,
+            GITHUB_TOKEN_RE as _GITHUB_TOKEN_RE,
+            OPENAI_TOKEN_RE as _OPENAI_TOKEN_RE,
+            STRIPE_TOKEN_RE as _STRIPE_TOKEN_RE,
         )
         from magi_agent.evidence.validator_taxonomy import _JWT_LIKE_RE  # noqa: PLC0415
 

@@ -8,9 +8,9 @@ import re
 
 from typing import TYPE_CHECKING
 
-from pydantic import ValidationError
-
 if TYPE_CHECKING:  # type-checker only — keep the public symbol visible
+    from pydantic import ValidationError
+
     from magi_agent.ops.authority import (
         FalseOnlyAuthorityModel as FalseOnlyAuthorityModel,
     )
@@ -449,6 +449,14 @@ def serialize_safe_value(value: object) -> object:
 
 
 def sanitize_validation_error(exc: ValidationError, *, title: str) -> ValidationError:
+    # Lazy import: pulling ``pydantic`` at module top-level dragged its transport
+    # deps (socket/asyncio/subprocess) into a bare ``import magi_agent.ops.safety``,
+    # tripping the redaction-kernel import-boundary probe
+    # (``test_kernel_import_pulls_no_transport_or_network``) and the
+    # message-builder locality probe. ValidationError is only needed on this rare
+    # error-sanitization path, so the import lives here.
+    from pydantic import ValidationError  # noqa: PLC0415
+
     sanitized_errors = []
     for error in exc.errors(include_input=False):
         _ = error

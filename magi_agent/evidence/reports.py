@@ -14,25 +14,17 @@ from magi_agent.evidence.types import (
     EvidenceRequirement,
 )
 from magi_agent.ops.authority import FalseOnlyAuthorityModel
+from magi_agent.ops.safety import (
+    SECRET_KEY_FRAGMENTS as _SECRET_FIELD_FRAGMENTS,
+    is_secret_key as _kernel_is_secret_key,
+)
 from magi_agent.shared.tool_preview import sanitize_tool_preview
 
 
-_SECRET_FIELD_FRAGMENTS = (
-    "api_key",
-    "apikey",
-    "auth_token",
-    "bearer_token",
-    "client_secret",
-    "id_token",
-    "password",
-    "passphrase",
-    "private_key",
-    "refresh_token",
-    "secret",
-    "service_role_key",
-    "session_token",
-    "token",
-)
+# B3: the secret-key grammar now lives in the single home
+# ``magi_agent.ops.safety`` (imported above). ``_SECRET_FIELD_FRAGMENTS`` is the
+# SAME object as ``safety.SECRET_KEY_FRAGMENTS`` and ``_is_secret_key`` delegates
+# to ``safety.is_secret_key`` with reports' always-on public-credential axis.
 _SECRET_FIELD_FAILURE_PAYLOAD_KEYS = frozenset(
     (
         "actual",
@@ -41,18 +33,6 @@ _SECRET_FIELD_FAILURE_PAYLOAD_KEYS = frozenset(
         "expectedPattern",
         "expectedValue",
         "value",
-    )
-)
-_PUBLIC_CREDENTIAL_FIELD_NAMES = frozenset(
-    (
-        "authorization",
-        "proxy_authorization",
-        "proxyauthorization",
-        "cookie",
-        "set_cookie",
-        "setcookie",
-        "credential",
-        "credentials",
     )
 )
 _PUBLIC_IDENTIFIER_FIELD_PREFIXES = {
@@ -267,12 +247,12 @@ def _redact_value(key: str, value: object) -> object:
 
 
 def _is_secret_key(key: str) -> bool:
-    normalized = key.replace("-", "_").lower()
-    if normalized in _PUBLIC_CREDENTIAL_FIELD_NAMES or normalized.replace("_", "") in (
-        _PUBLIC_CREDENTIAL_FIELD_NAMES
-    ):
-        return True
-    return any(fragment in normalized for fragment in _SECRET_FIELD_FRAGMENTS)
+    # Reports always redacts the public-credential names (authorization / cookie /
+    # credential(s)) in addition to the fragment grammar, so the kernel's
+    # public-credential axis is threaded always-on. Delegation is stricter-or-equal
+    # to the prior local grammar (the kernel adds compact matching + more
+    # fragments), never weaker.
+    return _kernel_is_secret_key(key, include_public_credential_keys=True)
 
 
 def _public_identifier_prefix(key: str) -> str | None:
