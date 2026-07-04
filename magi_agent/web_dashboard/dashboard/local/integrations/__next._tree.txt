@@ -1,5 +1,6 @@
-:HL["/_next/static/chunks/0vmgpyxapy0o-.css","style"]
-:HL["/_next/static/chunks/2wzu6u2pw50n1.css","style"]
+:HL["/_next/static/chunks/3ksk7sm54l1s0.css","style"]
+:HL["/_next/static/chunks/2r0be7gb3z7ch.css","style"]
 :HL["/_next/static/media/797e433ab948586e-s.p.0r6juujl39pe6.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
-:HL["/_next/static/media/fba5a26ea33df6a3-s.p.18rizl4rsrl42.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
+:HL["/_next/static/media/f06bf9da926bae75-s.p.2874ccu1_u7jf.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
+:HL["https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@500,700,800&display=swap","style"]
 0:{"tree":{"name":"","param":null,"prefetchHints":16,"slots":{"children":{"name":"dashboard","param":null,"prefetchHints":0,"slots":{"children":{"name":"botId","param":{"type":"d","key":"local","siblings":null},"prefetchHints":0,"slots":{"children":{"name":"integrations","param":null,"prefetchHints":0,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":0,"slots":null}}}}}}}}},"staleTime":300,"buildId":"magi-agent-local-dashboard"}
