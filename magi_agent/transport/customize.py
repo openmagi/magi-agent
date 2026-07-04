@@ -776,6 +776,49 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             return JSONResponse(status_code=400, content={"error": "save_failed"})
         return JSONResponse(content={"ok": True, **saved}, status_code=200)
 
+    @app.post("/v1/app/policies/review")
+    async def review_policy(request: Request) -> JSONResponse:
+        """Review an assembled policy plan: deterministic integrity findings +
+        an ADVISORY LLM intent-coverage verdict. Advisory only, never blocks a
+        save. Fail-open: LLM trouble degrades the verdict to ``unknown`` while
+        the deterministic ``structural`` findings are always returned."""
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        if not isinstance(body, dict):
+            return JSONResponse(status_code=400, content={"error": "object_required"})
+        plan = body.get("plan") if isinstance(body.get("plan"), dict) else body
+
+        from magi_agent.customize.policy_review import review_policy_plan  # noqa: PLC0415
+
+        try:
+            result = await asyncio.wait_for(
+                review_policy_plan(
+                    plan, model_factory=_resolve_policy_compile_factory(body)
+                ),
+                timeout=_LLM_CALL_TIMEOUT_S,
+            )
+        except TimeoutError:
+            # Timeout on the advisory LLM: still return the deterministic layer.
+            from magi_agent.customize.policy_plan import (  # noqa: PLC0415
+                validate_policy_plan,
+            )
+
+            structural = validate_policy_plan(plan)
+            return JSONResponse(
+                content={
+                    "structural": structural,
+                    "structurallySound": not structural,
+                    "review": {"verdict": "unknown", "issues": [], "confidence": 0.0, "coverage": ""},
+                },
+                status_code=200,
+            )
+        return JSONResponse(content=result, status_code=200)
+
     @app.get("/v1/app/customize/evidence/live-catalog")
     async def get_live_catalog(request: Request) -> JSONResponse:
         """Per-evidence-type live view fused from hints + ledger + WHAT-menu.
