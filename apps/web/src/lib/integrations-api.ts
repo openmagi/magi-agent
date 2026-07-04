@@ -18,6 +18,13 @@ export interface VaultStatus {
 
 export interface ComposioStatus {
   configured: boolean;
+  /**
+   * How Composio is credentialed. `platform` = brokered through Open Magi's
+   * master key (no user key needed); `env` = the operator's own key; `hosted`
+   * = in-pod master key; `missing` = nothing configured. Optional on the wire
+   * for back-compat.
+   */
+  credentialSource?: "platform" | "env" | "hosted" | "missing";
 }
 
 export interface TelegramStatus {

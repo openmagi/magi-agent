@@ -137,7 +137,11 @@ export function IntegrationsManager() {
 
       {data && (
         <>
-          <ComposioSection configured={data.composio.configured} onChange={reload} />
+          <ComposioSection
+            configured={data.composio.configured}
+            credentialSource={data.composio.credentialSource}
+            onChange={reload}
+          />
           <TelegramSection
             configured={data.telegram.configured}
             label={data.telegram.label}
@@ -189,12 +193,21 @@ function SectionCard({
 
 function ComposioSection({
   configured,
+  credentialSource,
   onChange,
 }: {
   configured: boolean;
+  credentialSource?: "platform" | "env" | "hosted" | "missing";
   onChange: () => void;
 }) {
   const agentFetch = useAgentFetch();
+  // Brokered ("platform") = Open Magi supplies Composio via its master key, no
+  // user key needed. That's the default path; a user's own key is the Advanced
+  // fallback. `usable` = the live catalog + connect are available (brokered OR
+  // the operator saved their own key).
+  const brokered = credentialSource === "platform";
+  const usable = configured || brokered;
+  const [showAdvanced, setShowAdvanced] = useState(configured && !brokered);
   const [apiKey, setApiKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -221,11 +234,11 @@ function ComposioSection({
   }, [agentFetch]);
 
   useEffect(() => {
-    if (configured) {
+    if (usable) {
       loadCatalog();
       refreshConnections();
     }
-  }, [configured, loadCatalog, refreshConnections]);
+  }, [usable, loadCatalog, refreshConnections]);
 
   async function saveKey() {
     if (!apiKey.trim()) return;
@@ -279,8 +292,10 @@ function ComposioSection({
   }
 
   function promptForKey() {
-    setErr("Add your Composio API key above to connect this app.");
-    keyInputRef.current?.focus();
+    // Brokered Composio isn't active on this runtime yet; open the Advanced
+    // BYO-key fallback so the user can connect with their own key meanwhile.
+    setErr(null);
+    setShowAdvanced(true);
   }
 
   const connectedSlugs = new Set(connections.map((c) => c.toolkit));
@@ -301,7 +316,7 @@ function ComposioSection({
     <SectionCard
       icon={<Plug className="w-5 h-5 text-foreground" />}
       title="Composio apps"
-      description="Connect Gmail, Slack, Notion, GitHub and 250+ apps via OAuth (BYO Composio API key)."
+      description="Connect Gmail, Slack, Notion, GitHub and 250+ apps via OAuth. Managed by Open Magi — no Composio key needed."
     >
       {err && (
         <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400">
@@ -309,54 +324,93 @@ function ComposioSection({
         </div>
       )}
 
-      {/* Key row — always present so it can be added/removed any time */}
       <div className="space-y-2">
-        {!configured ? (
-          <>
-            <p className="text-[11px] text-secondary">
-              Paste your Composio API key from{" "}
-              <a
-                href="https://app.composio.dev/developers"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary hover:underline"
-              >
-                app.composio.dev
-              </a>{" "}
-              to connect apps and browse all 250+.
-            </p>
-            <div className="flex gap-2">
-              <input
-                ref={keyInputRef}
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="comp_..."
-                className={INPUT}
-              />
-              <button
-                onClick={saveKey}
-                disabled={busy || !apiKey.trim()}
-                className="text-xs px-3 py-1.5 rounded-lg bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors disabled:opacity-40"
-              >
-                {busy ? "Saving…" : "Save key"}
-              </button>
-            </div>
-          </>
-        ) : (
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-              Key saved
-            </span>
-            <button
-              onClick={removeKey}
-              disabled={busy}
-              className="text-[11px] text-red-400 hover:text-red-300 transition-colors disabled:opacity-40"
-            >
-              Remove key
-            </button>
+        {/* Managed (brokered) is the default path — no key needed. */}
+        <div
+          className={`flex items-start gap-2 p-2.5 rounded-lg border text-[11px] ${
+            brokered
+              ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700"
+              : "bg-primary/5 border-primary/15 text-secondary"
+          }`}
+        >
+          <Lock className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+          <div>
+            {brokered ? (
+              <>
+                <span className="font-medium">Managed by Open Magi.</span> Composio
+                runs on our key — no key of your own needed. Connect any app below.
+              </>
+            ) : (
+              <>
+                <span className="font-medium">Managed by Open Magi.</span> Composio
+                is provided for you — no key of your own needed. It activates once
+                this runtime has a platform token; until then you can bring your own
+                key under Advanced.
+              </>
+            )}
           </div>
-        )}
+        </div>
+
+        {/* Advanced — bring your own Composio API key (fallback / override). */}
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowAdvanced((v) => !v)}
+            className="text-[11px] text-secondary hover:text-foreground transition-colors"
+          >
+            {showAdvanced ? "▾" : "▸"} Advanced — use your own Composio API key
+          </button>
+          {showAdvanced && (
+            <div className="mt-2 space-y-2">
+              {!configured ? (
+                <>
+                  <p className="text-[11px] text-secondary">
+                    Paste your Composio API key from{" "}
+                    <a
+                      href="https://app.composio.dev/developers"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary hover:underline"
+                    >
+                      app.composio.dev
+                    </a>{" "}
+                    to connect apps with your own account instead.
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      ref={keyInputRef}
+                      type="password"
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      placeholder="comp_..."
+                      className={INPUT}
+                    />
+                    <button
+                      onClick={saveKey}
+                      disabled={busy || !apiKey.trim()}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors disabled:opacity-40"
+                    >
+                      {busy ? "Saving…" : "Save key"}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                    Your key saved
+                  </span>
+                  <button
+                    onClick={removeKey}
+                    disabled={busy}
+                    className="text-[11px] text-red-400 hover:text-red-300 transition-colors disabled:opacity-40"
+                  >
+                    Remove key
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Search */}
@@ -365,13 +419,13 @@ function ComposioSection({
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder={configured ? "Search apps…" : "Search connectable apps…"}
+          placeholder={usable ? "Search apps…" : "Search connectable apps…"}
           className="w-full text-xs pl-8 pr-3 py-1.5 rounded-lg bg-white border border-gray-300 text-foreground placeholder:text-gray-400 focus:outline-none focus:border-primary/40"
         />
       </div>
 
       {/* Grid */}
-      {configured ? (
+      {usable ? (
         catalogLoading ? (
           <div className="flex items-center gap-2 text-xs text-secondary py-3">
             <Loader2 className="w-4 h-4 animate-spin" /> Loading catalog…
@@ -431,7 +485,7 @@ function ComposioSection({
                   onClick={promptForKey}
                   className="flex items-center gap-1 text-[10px] text-secondary hover:text-foreground transition-colors shrink-0"
                 >
-                  <Lock className="w-3 h-3" /> Key needed
+                  <Lock className="w-3 h-3" /> Set up
                 </button>
               }
             />
