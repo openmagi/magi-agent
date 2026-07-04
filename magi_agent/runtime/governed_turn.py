@@ -323,14 +323,22 @@ class _BookendCollector:
     Created only when ``MAGI_PERSIST_RUN_BOOKENDS_ENABLED`` is on. Fully
     fail-open: any error in observe/persist is swallowed so a turn never breaks
     because of bookend bookkeeping.
+
+    PR-U: multi-attempt turns emit multiple ``text_delta`` blocks separated by
+    ``turn_end`` (or, in the tool-loop preliminary shape, ``tool_end``). The
+    deferred boundary flag ensures ``_result_text`` reflects the FINAL block
+    only, not the concatenation. See
+    :mod:`magi_agent.runtime.child_governed_collector` module docstring for
+    the full rationale.
     """
 
-    __slots__ = ("_ctx", "_result_text", "_terminal")
+    __slots__ = ("_ctx", "_result_text", "_terminal", "_boundary_pending")
 
     def __init__(self, ctx: TurnContext) -> None:
         self._ctx = ctx
         self._result_text = ""
         self._terminal: object | None = None
+        self._boundary_pending = False
 
     @classmethod
     def maybe_create(cls, ctx: TurnContext) -> "_BookendCollector | None":
@@ -356,9 +364,18 @@ class _BookendCollector:
             kind = payload.get("type")
             if kind == "response_clear":
                 self._result_text = ""
+                self._boundary_pending = False
+            elif kind == "turn_end" or kind == "tool_end":
+                # PR-U: deferred response-block boundary. Clearing waits
+                # for the next non-empty text_delta so a boundary with no
+                # trailing text keeps the prior answer intact (fail-soft).
+                self._boundary_pending = True
             elif kind == "text_delta":
                 delta = payload.get("delta")
-                if isinstance(delta, str):
+                if isinstance(delta, str) and delta:
+                    if self._boundary_pending:
+                        self._result_text = ""
+                        self._boundary_pending = False
                     self._result_text += delta
         except Exception:
             return
@@ -607,7 +624,7 @@ class _SubagentStopCollector:
     governed turn never breaks because of audit bookkeeping.
     """
 
-    __slots__ = ("_ctx", "_result_text", "_evidence_collector")
+    __slots__ = ("_ctx", "_result_text", "_evidence_collector", "_boundary_pending")
 
     def __init__(
         self, ctx: TurnContext, evidence_collector: object | None = None
@@ -615,6 +632,7 @@ class _SubagentStopCollector:
         self._ctx = ctx
         self._result_text = ""
         self._evidence_collector = evidence_collector
+        self._boundary_pending = False
 
     @classmethod
     def maybe_create(
@@ -643,9 +661,16 @@ class _SubagentStopCollector:
             kind = payload.get("type")
             if kind == "response_clear":
                 self._result_text = ""
+                self._boundary_pending = False
+            elif kind == "turn_end" or kind == "tool_end":
+                # PR-U: deferred boundary. See _BookendCollector.observe.
+                self._boundary_pending = True
             elif kind == "text_delta":
                 delta = payload.get("delta")
-                if isinstance(delta, str):
+                if isinstance(delta, str) and delta:
+                    if self._boundary_pending:
+                        self._result_text = ""
+                        self._boundary_pending = False
                     self._result_text += delta
         except Exception:
             return
@@ -708,7 +733,7 @@ class _AfterTurnEndCollector:
     governed turn never breaks because of audit bookkeeping.
     """
 
-    __slots__ = ("_ctx", "_result_text", "_evidence_collector")
+    __slots__ = ("_ctx", "_result_text", "_evidence_collector", "_boundary_pending")
 
     def __init__(
         self, ctx: TurnContext, evidence_collector: object | None = None
@@ -716,6 +741,7 @@ class _AfterTurnEndCollector:
         self._ctx = ctx
         self._result_text = ""
         self._evidence_collector = evidence_collector
+        self._boundary_pending = False
 
     @classmethod
     def maybe_create(
@@ -745,9 +771,16 @@ class _AfterTurnEndCollector:
             kind = payload.get("type")
             if kind == "response_clear":
                 self._result_text = ""
+                self._boundary_pending = False
+            elif kind == "turn_end" or kind == "tool_end":
+                # PR-U: deferred boundary. See _BookendCollector.observe.
+                self._boundary_pending = True
             elif kind == "text_delta":
                 delta = payload.get("delta")
-                if isinstance(delta, str):
+                if isinstance(delta, str) and delta:
+                    if self._boundary_pending:
+                        self._result_text = ""
+                        self._boundary_pending = False
                     self._result_text += delta
         except Exception:
             return
@@ -827,11 +860,12 @@ class _OnTaskCompleteCollector:
     governed turn never breaks because of audit bookkeeping.
     """
 
-    __slots__ = ("_ctx", "_result_text")
+    __slots__ = ("_ctx", "_result_text", "_boundary_pending")
 
     def __init__(self, ctx: TurnContext) -> None:
         self._ctx = ctx
         self._result_text = ""
+        self._boundary_pending = False
 
     @classmethod
     def maybe_create(cls, ctx: TurnContext) -> "_OnTaskCompleteCollector | None":
@@ -859,9 +893,16 @@ class _OnTaskCompleteCollector:
             kind = payload.get("type")
             if kind == "response_clear":
                 self._result_text = ""
+                self._boundary_pending = False
+            elif kind == "turn_end" or kind == "tool_end":
+                # PR-U: deferred boundary. See _BookendCollector.observe.
+                self._boundary_pending = True
             elif kind == "text_delta":
                 delta = payload.get("delta")
-                if isinstance(delta, str):
+                if isinstance(delta, str) and delta:
+                    if self._boundary_pending:
+                        self._result_text = ""
+                        self._boundary_pending = False
                     self._result_text += delta
         except Exception:
             return
