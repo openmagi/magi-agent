@@ -16,7 +16,7 @@
 /* ===== @ds:core BEGIN ===== */
 @theme {
   /* ---- surfaces ---- */
-  --color-surface-base:    #EFEDE8; /* page background */
+  --color-surface-base:    #FFFFFF; /* page background */
   --color-surface-raised:  #FFFFFF; /* cards, sidebar, inputs-on-card */
   --color-surface-overlay: #E9F1EF; /* accent-tinted hover / nav-active */
   --color-surface-input:   #FFFFFF;
