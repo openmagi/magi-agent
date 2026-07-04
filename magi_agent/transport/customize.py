@@ -716,6 +716,38 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             )
         return JSONResponse(content=result, status_code=200)
 
+    @app.post("/v1/app/policies/from-plan")
+    async def save_policy_from_plan(request: Request) -> JSONResponse:
+        """Persist an assembled policy plan: the producer (dashboard-check
+        sidecar) + the gate (custom_rule) + the Policy record (with binding).
+        Idempotent upsert-by-id; a structurally-unsound plan is rejected (400)
+        before any store is written."""
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        if not isinstance(body, dict):
+            return JSONResponse(status_code=400, content={"error": "object_required"})
+        plan = body.get("plan") if isinstance(body.get("plan"), dict) else body
+
+        from magi_agent.customize.policy_persist import (  # noqa: PLC0415
+            PolicyPersistError,
+            persist_policy_plan,
+        )
+
+        try:
+            saved = persist_policy_plan(plan)
+        except PolicyPersistError as exc:
+            return JSONResponse(
+                status_code=400, content={"error": "invalid_plan", "message": str(exc)}
+            )
+        except Exception:  # noqa: BLE001
+            return JSONResponse(status_code=400, content={"error": "save_failed"})
+        return JSONResponse(content={"ok": True, **saved}, status_code=200)
+
     @app.get("/v1/app/customize/evidence/live-catalog")
     async def get_live_catalog(request: Request) -> JSONResponse:
         """Per-evidence-type live view fused from hints + ledger + WHAT-menu.
