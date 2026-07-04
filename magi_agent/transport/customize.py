@@ -131,6 +131,23 @@ def _resolve_nl_mode_compile_factory(body: dict) -> Any:
     return _production_shacl_compiler_model_factory()
 
 
+def _resolve_policy_compile_factory(body: dict) -> Any:
+    """Resolve the NL->policy compiler model factory.
+
+    Test injection via ``body["_policyModelFactory"]``; otherwise the shared
+    production model factory (same registration-time model the other NL
+    compilers use)."""
+    if isinstance(body, dict):
+        factory = body.get("_policyModelFactory")
+        if callable(factory):
+            return factory
+    from magi_agent.customize.shacl_compiler import (  # noqa: PLC0415
+        _production_shacl_compiler_model_factory,
+    )
+
+    return _production_shacl_compiler_model_factory()
+
+
 def _is_nl_interview_mode_enabled() -> bool:
     """Read ``MAGI_CUSTOMIZE_NL_INTERVIEW_MODE_ENABLED`` defensively (PR-F-UX6).
 
@@ -606,6 +623,95 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             # sibling routes' structured errors).
             return JSONResponse(
                 content={"ok": False, "error": "compile failed", "draft": None},
+                status_code=200,
+            )
+        return JSONResponse(content=result, status_code=200)
+
+    # --- POLICY compile (NL -> producer+gate+binding plan) ------------------
+    # One-shot + multi-turn conversational compile of a multi-rule policy. The
+    # LLM only extracts params; the plan is templated + validated server-side
+    # (see customize.policy_compiler / nl_policy_interactive). Registration-time
+    # preview only: the caller persists the assembled plan separately. Auth-gated;
+    # fail-open (structured error / notApplicable, never a raw 500).
+    @app.post("/v1/app/policies/compile")
+    async def compile_policy(request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        if not isinstance(body, dict):
+            return JSONResponse(status_code=400, content={"error": "object_required"})
+        nl_text = body.get("nlText")
+        if not isinstance(nl_text, str) or not nl_text.strip():
+            return JSONResponse(status_code=400, content={"error": "nlText_required"})
+        if len(nl_text.encode()) > _MAX_NL_TEXT_BYTES:
+            return JSONResponse(status_code=400, content={"error": "nlText_too_large"})
+
+        from magi_agent.customize.policy_compiler import compile_nl_to_policy  # noqa: PLC0415
+
+        try:
+            result = await asyncio.wait_for(
+                compile_nl_to_policy(
+                    nl_text, model_factory=_resolve_policy_compile_factory(body)
+                ),
+                timeout=_LLM_CALL_TIMEOUT_S,
+            )
+        except TimeoutError:
+            return JSONResponse(
+                content={"ok": False, "error": "compile timed out", "plan": None},
+                status_code=200,
+            )
+        except Exception:  # noqa: BLE001
+            return JSONResponse(
+                content={"ok": False, "error": "compile failed", "plan": None},
+                status_code=200,
+            )
+        return JSONResponse(content=result, status_code=200)
+
+    @app.post("/v1/app/policies/compile/interactive")
+    async def compile_policy_interactive(request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        if not isinstance(body, dict):
+            return JSONResponse(status_code=400, content={"error": "object_required"})
+
+        from magi_agent.customize.nl_policy_interactive import (  # noqa: PLC0415
+            step_policy_compile,
+        )
+        from magi_agent.customize.nl_compiler_interactive import (  # noqa: PLC0415
+            InteractiveInputError,
+            PrecheckError,
+        )
+
+        try:
+            result = await asyncio.wait_for(
+                step_policy_compile(
+                    history=body.get("history"),
+                    params_so_far=body.get("paramsSoFar"),
+                    answers=body.get("answers"),
+                    model_factory=_resolve_policy_compile_factory(body),
+                ),
+                timeout=_LLM_CALL_TIMEOUT_S,
+            )
+        except (InteractiveInputError, PrecheckError) as exc:
+            # Structural body violation / prompt-budget overflow -> 422.
+            return JSONResponse(status_code=422, content={"error": str(exc)})
+        except TimeoutError:
+            return JSONResponse(
+                content={"ready_to_save": False, "error": "compile timed out"},
+                status_code=200,
+            )
+        except Exception:  # noqa: BLE001
+            return JSONResponse(
+                content={"ready_to_save": False, "error": "compile failed"},
                 status_code=200,
             )
         return JSONResponse(content=result, status_code=200)
