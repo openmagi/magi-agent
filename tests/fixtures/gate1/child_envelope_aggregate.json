@@ -78,7 +78,9 @@
               ]
             },
             "observedAt": 1800000001,
+            "origin": "tool_declared",
             "preview": "synthetic child diff recorded",
+            "producingRuleId": "",
             "source": {
               "acknowledgementId": null,
               "artifactId": null,
@@ -120,7 +122,9 @@
               ]
             },
             "observedAt": 1800000001,
+            "origin": "tool_declared",
             "preview": "synthetic child tests passed",
+            "producingRuleId": "",
             "source": {
               "acknowledgementId": null,
               "artifactId": null,
@@ -178,7 +182,9 @@
           ]
         },
         "observedAt": 1800000001,
+        "origin": "tool_declared",
         "preview": "synthetic child diff recorded",
+        "producingRuleId": "",
         "source": {
           "acknowledgementId": null,
           "artifactId": null,
@@ -220,7 +226,9 @@
           ]
         },
         "observedAt": 1800000001,
+        "origin": "tool_declared",
         "preview": "synthetic child tests passed",
+        "producingRuleId": "",
         "source": {
           "acknowledgementId": null,
           "artifactId": null,
@@ -325,7 +333,9 @@
               ]
             },
             "observedAt": 1800000001,
+            "origin": "tool_declared",
             "preview": "synthetic child tests passed",
+            "producingRuleId": "",
             "source": {
               "acknowledgementId": null,
               "artifactId": null,
@@ -458,7 +468,9 @@
                   ]
                 },
                 "observedAt": 1800000001,
+                "origin": "tool_declared",
                 "preview": "synthetic child diff recorded",
+                "producingRuleId": "",
                 "source": {
                   "acknowledgementId": null,
                   "artifactId": null,
@@ -500,7 +512,9 @@
                   ]
                 },
                 "observedAt": 1800000001,
+                "origin": "tool_declared",
                 "preview": "synthetic child tests passed",
+                "producingRuleId": "",
                 "source": {
                   "acknowledgementId": null,
                   "artifactId": null,
@@ -558,7 +572,9 @@
               ]
             },
             "observedAt": 1800000001,
+            "origin": "tool_declared",
             "preview": "synthetic child diff recorded",
+            "producingRuleId": "",
             "source": {
               "acknowledgementId": null,
               "artifactId": null,
@@ -600,7 +616,9 @@
               ]
             },
             "observedAt": 1800000001,
+            "origin": "tool_declared",
             "preview": "synthetic child tests passed",
+            "producingRuleId": "",
             "source": {
               "acknowledgementId": null,
               "artifactId": null,
@@ -741,7 +759,9 @@
             ]
           },
           "observedAt": 1800000001,
+          "origin": "tool_declared",
           "preview": "synthetic child diff recorded",
+          "producingRuleId": "",
           "source": {
             "acknowledgementId": null,
             "artifactId": null,
@@ -794,7 +814,9 @@
             ]
           },
           "observedAt": 1800000001,
+          "origin": "tool_declared",
           "preview": "synthetic child tests passed",
+          "producingRuleId": "",
           "source": {
             "acknowledgementId": null,
             "artifactId": null,
