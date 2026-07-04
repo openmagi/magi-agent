@@ -88,6 +88,7 @@ Design notes
 from __future__ import annotations
 
 from collections.abc import Mapping
+import json
 import logging
 import os
 from typing import Any, ClassVar
@@ -340,10 +341,14 @@ def _build_cache_control_mixin() -> type:
     scope only when a Claude model is actually built.
     """
     from google.adk.models.anthropic_llm import (  # noqa: PLC0415
+        _ThinkingAccumulator,
+        _ToolUseAccumulator,
         _build_anthropic_thinking_param,
         function_declaration_to_tool_param,
         message_to_generate_content_response,
     )
+    from google.adk.models.llm_response import LlmResponse  # noqa: PLC0415
+    from google.genai import types as genai_types  # noqa: PLC0415
     from anthropic import NOT_GIVEN  # noqa: PLC0415
     from anthropic import types as anthropic_types  # noqa: PLC0415
 
@@ -496,6 +501,171 @@ def _build_cache_control_mixin() -> type:
                     llm_request, messages, tools, tool_choice, thinking
                 ):
                     yield response
+
+        async def _generate_content_streaming(
+            self, llm_request, messages, tools, tool_choice, thinking=NOT_GIVEN
+        ):
+            """Streaming helper mirroring ADK 1.33.0 with SignatureDelta capture.
+
+            ADK's ``AnthropicLlm._generate_content_streaming`` handles
+            ``ThinkingDelta`` / ``TextDelta`` / ``InputJSONDelta`` but SILENTLY
+            DROPS ``anthropic.types.SignatureDelta`` (present in anthropic
+            0.116.0). A streamed thinking block therefore aggregates to
+            ``Part(text=<thinking>, thought=True)`` with NO signature; a
+            signature-only interleaved thinking block collapses to the empty-
+            thinking shape that ADK's ``part_to_message_block`` raises on next
+            turn. This override adds the ``SignatureDelta`` branch (so streamed
+            thinking parts round-trip their signature and become convertible)
+            plus a warning for unknown ``content_block_start`` types. Everything
+            else mirrors ADK exactly, so non-thinking streams are unchanged.
+
+            Version-coupled to ADK 1.33.0. Remove once upstream ADK captures
+            SignatureDelta (see google/adk-python, ref adk-python#6195).
+            """
+            model_to_use = self._resolve_model_name(llm_request.model)
+            raw_stream = await self._anthropic_client.messages.create(
+                model=model_to_use,
+                system=llm_request.config.system_instruction,
+                messages=messages,
+                tools=tools,
+                tool_choice=tool_choice,
+                max_tokens=self.max_tokens,
+                stream=True,
+                thinking=thinking,
+            )
+
+            text_blocks: dict[int, str] = {}
+            tool_use_blocks: dict[int, _ToolUseAccumulator] = {}
+            thinking_blocks: dict[int, _ThinkingAccumulator] = {}
+            redacted_thinking_blocks: dict[int, str] = {}
+            input_tokens = 0
+            output_tokens = 0
+
+            async for event in raw_stream:
+                if event.type == "message_start":
+                    input_tokens = event.message.usage.input_tokens
+                    output_tokens = event.message.usage.output_tokens
+                elif event.type == "content_block_start":
+                    block = event.content_block
+                    if isinstance(block, anthropic_types.ThinkingBlock):
+                        thinking_blocks[event.index] = _ThinkingAccumulator(
+                            thinking=block.thinking,
+                            signature=block.signature,
+                        )
+                    elif isinstance(
+                        block, anthropic_types.RedactedThinkingBlock
+                    ):
+                        redacted_thinking_blocks[event.index] = block.data
+                    elif isinstance(block, anthropic_types.TextBlock):
+                        text_blocks[event.index] = block.text
+                    elif isinstance(block, anthropic_types.ToolUseBlock):
+                        tool_use_blocks[event.index] = _ToolUseAccumulator(
+                            id=block.id,
+                            name=block.name,
+                            args_json="",
+                        )
+                    else:
+                        _LOGGER.warning(
+                            "anthropic_stream unknown_content_block type=%s "
+                            "index=%s",
+                            type(block).__name__,
+                            event.index,
+                        )
+                elif event.type == "content_block_delta":
+                    delta = event.delta
+                    if isinstance(delta, anthropic_types.ThinkingDelta):
+                        thinking_blocks.setdefault(
+                            event.index,
+                            _ThinkingAccumulator(thinking="", signature=""),
+                        )
+                        thinking_blocks[event.index].thinking += delta.thinking
+                        yield LlmResponse(
+                            content=genai_types.Content(
+                                role="model",
+                                parts=[
+                                    genai_types.Part(
+                                        text=delta.thinking, thought=True
+                                    )
+                                ],
+                            ),
+                            partial=True,
+                        )
+                    elif isinstance(delta, anthropic_types.SignatureDelta):
+                        # The fix: accumulate the thinking-block signature that
+                        # ADK 1.33.0 drops, so the final aggregated part carries
+                        # thought_signature and is round-trippable / convertible.
+                        thinking_blocks.setdefault(
+                            event.index,
+                            _ThinkingAccumulator(thinking="", signature=""),
+                        )
+                        thinking_blocks[event.index].signature += delta.signature
+                    elif isinstance(delta, anthropic_types.TextDelta):
+                        text_blocks.setdefault(event.index, "")
+                        text_blocks[event.index] += delta.text
+                        yield LlmResponse(
+                            content=genai_types.Content(
+                                role="model",
+                                parts=[
+                                    genai_types.Part.from_text(text=delta.text)
+                                ],
+                            ),
+                            partial=True,
+                        )
+                    elif isinstance(delta, anthropic_types.InputJSONDelta):
+                        if event.index in tool_use_blocks:
+                            tool_use_blocks[
+                                event.index
+                            ].args_json += delta.partial_json
+                elif event.type == "message_delta":
+                    output_tokens = event.usage.output_tokens
+
+            all_parts: list[Any] = []
+            all_indices = sorted(
+                set(
+                    list(thinking_blocks.keys())
+                    + list(redacted_thinking_blocks.keys())
+                    + list(text_blocks.keys())
+                    + list(tool_use_blocks.keys())
+                )
+            )
+            for idx in all_indices:
+                if idx in thinking_blocks:
+                    acc = thinking_blocks[idx]
+                    part = genai_types.Part(text=acc.thinking, thought=True)
+                    if acc.signature:
+                        part.thought_signature = acc.signature.encode("utf-8")
+                    all_parts.append(part)
+                if idx in redacted_thinking_blocks:
+                    all_parts.append(
+                        genai_types.Part(
+                            thought=True,
+                            thought_signature=redacted_thinking_blocks[
+                                idx
+                            ].encode("utf-8"),
+                        )
+                    )
+                if idx in text_blocks:
+                    all_parts.append(
+                        genai_types.Part.from_text(text=text_blocks[idx])
+                    )
+                if idx in tool_use_blocks:
+                    acc = tool_use_blocks[idx]
+                    args = json.loads(acc.args_json) if acc.args_json else {}
+                    part = genai_types.Part.from_function_call(
+                        name=acc.name, args=args
+                    )
+                    part.function_call.id = acc.id
+                    all_parts.append(part)
+
+            yield LlmResponse(
+                content=genai_types.Content(role="model", parts=all_parts),
+                usage_metadata=genai_types.GenerateContentResponseUsageMetadata(
+                    prompt_token_count=input_tokens,
+                    candidates_token_count=output_tokens,
+                    total_token_count=input_tokens + output_tokens,
+                ),
+                partial=False,
+            )
 
     return _CacheControlMixin
 

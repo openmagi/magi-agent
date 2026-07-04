@@ -260,6 +260,82 @@ class TestThinkingDisabledStrip:
 
 
 # ---------------------------------------------------------------------------
+# Thinking-enabled round-trip (rule 5, faithful when thinking is on).
+# ---------------------------------------------------------------------------
+
+
+class TestThinkingEnabledRoundTrip:
+    def test_thinking_part_with_text_and_signature_round_trips(self) -> None:
+        pytest.importorskip("anthropic")
+        from google.genai import types as genai_types
+
+        sanitize = _sanitizer_module().safe_contents_to_message_params
+        contents = [
+            _content("user", [_text_part("q")]),
+            _content(
+                "model",
+                [
+                    genai_types.Part(
+                        text="reasoning",
+                        thought=True,
+                        thought_signature=b"sig",
+                    )
+                ],
+            ),
+        ]
+        out = sanitize(contents, thinking_enabled=True)
+        # Thinking enabled -> the thought part is preserved and ADK converts it
+        # to a thinking block with the signature carried through.
+        model_msg = out[1]
+        block = model_msg["content"][0]
+        assert block["type"] == "thinking"
+        assert block["thinking"] == "reasoning"
+        assert block["signature"] == "sig"
+
+    def test_signature_only_thought_round_trips_as_redacted(self) -> None:
+        pytest.importorskip("anthropic")
+        from google.genai import types as genai_types
+
+        sanitize = _sanitizer_module().safe_contents_to_message_params
+        contents = [
+            _content("user", [_text_part("q")]),
+            _content(
+                "model",
+                [genai_types.Part(thought=True, thought_signature=b"sig")],
+            ),
+        ]
+        out = sanitize(contents, thinking_enabled=True)
+        block = out[1]["content"][0]
+        assert block["type"] == "redacted_thinking"
+        assert block["data"] == "sig"
+
+    def test_signature_less_thought_still_dropped_when_enabled(self) -> None:
+        """Even with thinking on, a signature-less empty-thinking part drops.
+
+        It has no signature to preserve and would fall through ADK's raise.
+        """
+        pytest.importorskip("anthropic")
+        from google.genai import types as genai_types
+
+        sanitize = _sanitizer_module().safe_contents_to_message_params
+        contents = [
+            _content("user", [_text_part("q")]),
+            _content(
+                "model",
+                [
+                    genai_types.Part(text="", thought=True),  # drops
+                    _text_part("answer"),  # kept
+                ],
+            ),
+        ]
+        out = sanitize(contents, thinking_enabled=True)
+        blocks = out[1]["content"]
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "text"
+        assert blocks[0]["text"] == "answer"
+
+
+# ---------------------------------------------------------------------------
 # Golden pass-through: proves Opus 4.8 / Sonnet 4.6 / Haiku byte-identical.
 # ---------------------------------------------------------------------------
 
