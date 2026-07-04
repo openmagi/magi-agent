@@ -49,4 +49,30 @@ describe("customize-api: conversational policy compile + persist", () => {
     expect(src).toMatch(/PolicyInteractiveRequest[\s\S]{0,200}InteractiveHistoryTurn\[\]/);
     expect(src).toMatch(/PolicyInteractiveResponse[\s\S]{0,400}InteractiveQuestion\[\]/);
   });
+
+  it("exposes reviewPolicyPlan targeting the review endpoint (advisory)", () => {
+    expect(src).toContain("export async function reviewPolicyPlan");
+    expect(src).toContain("/v1/app/policies/review");
+    expect(src).toContain("export interface PolicyReviewResponse");
+    // The verdict shape carries the four intent-coverage verdicts + the
+    // deterministic structural findings.
+    expect(src).toContain("export interface PolicyReviewVerdict");
+    for (const v of ["aligned", "partial", "misaligned", "unknown"]) {
+      expect(src).toContain(`"${v}"`);
+    }
+    expect(src).toContain("structural");
+    expect(src).toContain("structurallySound");
+    // Non-throwing envelope, like the other policy helpers.
+    const review = src.slice(src.indexOf("export async function reviewPolicyPlan"));
+    expect(review).toMatch(/try\s*\{[\s\S]{0,900}catch/);
+    expect(review).toContain("ok: false");
+  });
+
+  it("declares producer_reused on the interactive response", () => {
+    // The field lands inside the PolicyInteractiveResponse interface (which
+    // carries long JSDoc), so assert presence + that the interface exists
+    // rather than a brittle proximity window.
+    expect(src).toContain("export interface PolicyInteractiveResponse");
+    expect(src).toContain("producer_reused");
+  });
 });
