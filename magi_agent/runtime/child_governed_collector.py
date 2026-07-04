@@ -14,27 +14,59 @@ Design notes
 - ``_MAX_SUMMARY_CHARS`` is re-exported from ``child_runner_live`` so the
   constant stays single-source.
 
-Response-block boundaries (PR-T)
---------------------------------
+Response-block boundaries (PR-T + PR-U)
+---------------------------------------
 A single child turn can contain multiple ADK response blocks: the model may
 emit a preliminary text_delta, request a tool, receive the result, and then
-emit a fresh text_delta as the final answer. ADK signals the boundary with a
-``response_clear`` payload. Both text_delta events survive to the stream, so
-a flat accumulator would concatenate ``"prelim" + "final"`` instead of
-returning the final answer.
+emit a fresh text_delta as the final answer. Also, the engine's outer
+re-invocation loop (recovery / grace / nudge) drives multiple attempts under
+one ``turn_id`` and each attempt drains a fresh ADK stream. A flat
+accumulator would concatenate ``"prelim" + "final"`` (or, on Kevin's real
+0.1.110 traces, ``"22"`` and ``"2\\n2"``) instead of returning the final
+answer.
 
-``_BookendCollector`` in :mod:`magi_agent.runtime.governed_turn` handles this
-correctly by resetting its in-progress text on ``response_clear``. This module
-mirrors the same semantic:
+PR-T introduced ``response_clear`` handling, which is CORRECT for the ADK
+rewind path (``adk_bridge/event_adapter.py:1050-1063``:
+``actions.rewind_before_invocation_id`` or explicit
+``custom_metadata["response_clear"]``). But normal engine re-invocations and
+tool_use loops never emit ``response_clear``, so PR-T never fired on the
+shipped traces.
 
-- ``response_clear`` clears the in-progress ``text_chunks`` accumulator so the
-  summary reflects only the final response block.
-- ``response_clear`` does NOT touch ``raw_refs``: evidence refs are collected
-  across the whole stream (tool receipts gathered mid-attempt remain valid
-  evidence for the terminal answer).
-- ``response_clear`` still counts toward ``items_yielded`` so the PR-K
-  ``terminal_consumed`` trace continues to detect silent-empty dispatches
-  honestly.
+PR-U adds the deferred-boundary path that DOES fire on the real trace:
+
+- ``turn_end`` (primary boundary) is emitted for every completed ADK
+  response block on this path (the driver constructs the bridge with
+  ``live_compatible=True`` unconditionally, ``driver.py:1523``, and
+  ``event_adapter.py:779-790`` projects one on every
+  ``_event_is_final_response`` event). Kevin's trace has this event twice,
+  once between the ``"2"`` blocks and once at the end.
+- ``turn_end`` is DELIBERATELY SUPPRESSED by the engine when a follow-up
+  attempt will continue (output-cap continuation,
+  ``driver.py:1746-1748``). That is exactly the multi-attempt case where
+  text concatenation IS correct. So ``turn_end`` is a semantically precise
+  "this response block is complete; any later text is a NEW answer" signal,
+  not a heuristic.
+- ``tool_end`` (secondary boundary) closes the classic
+  preliminary-text-before-tool shape: preliminary prose, function_call
+  (which is not final-response so no ``turn_end`` fires), function_response,
+  then final prose.
+
+Deferred reset (clear on the NEXT non-empty text_delta, not on the boundary
+event itself) is what makes this fail-soft:
+
+- Turns whose last event family is a boundary WITH no trailing text keep
+  their earlier text (empty follow-up attempts, tool-end-terminated turns).
+- Single-response turns stay byte-identical: the only ``turn_end`` is the
+  last one, no text follows it, the flag is set and never consumed.
+
+Untouched by the boundary:
+
+- ``raw_refs`` accumulation: evidence refs are collected across the whole
+  stream. Tool receipts gathered mid-attempt remain valid evidence for the
+  terminal answer.
+- ``items_yielded`` counting: every non-terminal event counts, including
+  boundaries. The PR-K ``terminal_consumed`` trace continues to detect
+  silent-empty dispatches honestly.
 """
 from __future__ import annotations
 
@@ -115,6 +147,13 @@ async def collect_governed_child_turn(
     # terminal_consumed trace can surface the silent-empty-dispatch
     # signature (items_yielded == 0).
     items_yielded = 0
+    # PR-U: deferred response-block boundary. Set on ``turn_end`` (primary)
+    # and ``tool_end`` (secondary); consumed by clearing ``text_chunks`` on
+    # the NEXT non-empty ``text_delta``. Deferred clearing is fail-soft: a
+    # boundary without following text (single-response turns, tool-end
+    # terminated turns, empty follow-up attempts) leaves the accumulated
+    # text intact. See module docstring for the full rationale.
+    boundary_pending = False
 
     async for item in stream:
         if isinstance(item, EngineResult):
@@ -129,15 +168,26 @@ async def collect_governed_child_turn(
 
         payload_type = payload.get("type")
         if payload_type == "response_clear":
-            # New ADK response block: drop the in-progress text_chunks so the
-            # summary reflects only the final block, not the concatenation of
-            # every intermediate one. Evidence refs are intentionally
+            # PR-T: ADK rewind or explicit clear. Immediate reset (not
+            # deferred): the rewind semantic says the prior text no longer
+            # exists in the invocation. Evidence refs are intentionally
             # preserved (see module docstring).
             text_chunks.clear()
+            boundary_pending = False
+            continue
+        if payload_type == "turn_end" or payload_type == "tool_end":
+            # PR-U: real-trace response-block boundary. Do NOT clear here;
+            # arm the flag so the NEXT non-empty ``text_delta`` clears
+            # first and starts a fresh block. Deferred so a turn that ends
+            # on this event keeps its accumulated text (fail-soft).
+            boundary_pending = True
             continue
         if payload_type == "text_delta":
             delta = payload.get("delta")
             if isinstance(delta, str) and delta:
+                if boundary_pending:
+                    text_chunks.clear()
+                    boundary_pending = False
                 text_chunks.append(delta)
 
     if terminal is None:
