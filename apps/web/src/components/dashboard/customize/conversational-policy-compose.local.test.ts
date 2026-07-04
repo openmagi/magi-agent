@@ -153,6 +153,31 @@ describe("ConversationalPolicyCompose source-level invariants", () => {
     expect(SRC).toContain('data-testid="policy-draft-save"');
   });
 
+  it("surfaces the reuse badge from producer_reused", () => {
+    // The backend echoes producer_reused when the plan binds an existing
+    // producer; the pane shows a badge so the operator sees no duplicate was
+    // created.
+    expect(SRC).toContain("body.producer_reused");
+    expect(SRC).toContain("setProducerReused");
+    expect(SRC).toContain('data-testid="policy-draft-reused-badge"');
+  });
+
+  it("offers an advisory review that never gates Save", () => {
+    // reviewPolicyPlan is called on demand; the verdict is displayed but the
+    // Save CTA stays gated only on readyToSave + saving (NOT on the verdict).
+    expect(SRC).toContain("reviewPolicyPlan");
+    expect(SRC).toContain('data-testid="policy-draft-review-run"');
+    expect(SRC).toContain("Advisory only");
+    // Save stays gated on readiness/saving alone, never on the review verdict.
+    expect(SRC).toContain("disabled={!readyToSave || saving}");
+    expect(SRC).not.toMatch(/disabled=\{[^}]*review[^}]*\}[\s\S]{0,40}policy-draft-save/);
+    // A fresh compile turn resets the review, and an in-flight review drops
+    // its verdict if the plan changed under it (monotonic reqId stale-drop,
+    // same pattern as sendTurn). Source-grep only asserts the guards exist.
+    expect(SRC).toContain("setReview(null)");
+    expect(SRC).toContain("if (myReqId === reqIdRef.current) setReview(result)");
+  });
+
   it("uses sub-path imports only (CLAUDE.md rule)", () => {
     expect(SRC).not.toMatch(/from\s+["']@\/components\/ui["']/);
   });

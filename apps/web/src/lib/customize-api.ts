@@ -605,6 +605,10 @@ export interface PolicyInteractiveResponse {
   needs_more?: boolean;
   ready_to_save?: boolean;
   schema_issues?: string[];
+  /** True when the assembled plan binds to a producer the operator already
+   *  authored (emitting the same evidence type) instead of a fresh one. The
+   *  human-readable note is appended to ``assistant_message`` by the backend. */
+  producer_reused?: boolean;
   ok?: boolean;
   error?: string;
 }
@@ -618,6 +622,28 @@ export interface PolicyFromPlanResponse {
   gateId?: string;
   error?: string;
   message?: string;
+}
+
+
+/** The advisory verdict half of a policy review (mirrors
+ *  ``policy_review.review_policy_plan``'s ``review`` field). */
+export interface PolicyReviewVerdict {
+  verdict?: "aligned" | "partial" | "misaligned" | "unknown";
+  issues?: string[];
+  confidence?: number;
+  coverage?: string;
+}
+
+
+/** Response of ``POST /v1/app/policies/review``: deterministic integrity
+ *  findings (the hard signal) + an advisory LLM verdict (guidance only). */
+export interface PolicyReviewResponse {
+  /** Deterministic structural findings; empty = structurally sound. */
+  structural?: string[];
+  structurallySound?: boolean;
+  review?: PolicyReviewVerdict;
+  ok?: boolean;
+  error?: string;
 }
 
 
@@ -681,6 +707,39 @@ export async function savePolicyFromPlan(
       return { ok: false, error: backendError };
     }
     return (await res.json()) as PolicyFromPlanResponse;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Network error";
+    return { ok: false, error: message };
+  }
+}
+
+
+/** Reviews an assembled policy plan: deterministic integrity findings plus an
+ *  advisory LLM intent-coverage verdict. Advisory only, never blocks a save.
+ *  Same non-throwing envelope contract as the compile/save helpers. */
+export async function reviewPolicyPlan(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  plan: Record<string, unknown>,
+): Promise<PolicyReviewResponse> {
+  try {
+    const res = await fetch(`/v1/app/policies/review`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan }),
+    });
+    if (!res.ok) {
+      let backendError = `Policy review failed (${res.status})`;
+      try {
+        const errBody = (await res.json()) as { error?: string };
+        if (typeof errBody.error === "string" && errBody.error.length > 0) {
+          backendError = errBody.error;
+        }
+      } catch {
+        /* ignore */
+      }
+      return { ok: false, error: backendError };
+    }
+    return (await res.json()) as PolicyReviewResponse;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Network error";
     return { ok: false, error: message };

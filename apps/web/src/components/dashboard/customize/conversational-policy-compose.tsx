@@ -42,10 +42,12 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   compilePolicyInteractive,
+  reviewPolicyPlan,
   savePolicyFromPlan,
   type InteractiveHistoryTurn,
   type InteractiveQuestion,
   type PolicyFromPlanResponse,
+  type PolicyReviewResponse,
 } from "@/lib/customize-api";
 
 
@@ -102,9 +104,15 @@ export function ConversationalPolicyCompose({
   const [plan, setPlan] = useState<Record<string, unknown> | null>(null);
   const [readyToSave, setReadyToSave] = useState(false);
   const [schemaIssues, setSchemaIssues] = useState<string[]>([]);
+  /** True when the assembled plan reuses an already-authored producer. */
+  const [producerReused, setProducerReused] = useState(false);
   const [pending, setPending] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  /** Advisory review of the ready plan (deterministic integrity + LLM verdict);
+   *  null until the operator runs a check. Never gates the Save CTA. */
+  const [review, setReview] = useState<PolicyReviewResponse | null>(null);
+  const [reviewing, setReviewing] = useState(false);
   const [input, setInput] = useState(initialUserMessage ?? "");
   /** Multi-select staging: qid maps to picked option values. */
   const [picks, setPicks] = useState<Record<string, string[]>>({});
@@ -218,6 +226,9 @@ export function ConversationalPolicyCompose({
         setPlan(body.plan ?? null);
         setReadyToSave(!!body.ready_to_save);
         setSchemaIssues(body.schema_issues ?? []);
+        setProducerReused(!!body.producer_reused);
+        // A new turn changed the plan; any prior review is stale.
+        setReview(null);
       } finally {
         if (mountedRef.current && myId === reqIdRef.current) {
           setPending(false);
@@ -298,6 +309,24 @@ export function ConversationalPolicyCompose({
       if (mountedRef.current) setSaving(false);
     }
   }, [agentFetch, onSaved, plan, readyToSave, saving]);
+
+  const onReviewClick = useCallback(async () => {
+    if (!plan || !readyToSave || reviewing) return;
+    setReviewing(true);
+    // Stale-drop: any compile turn started while this review is in flight
+    // bumps reqIdRef and sets a new plan, so a late verdict must not paint
+    // over it (the composer is not disabled during a review).
+    const myReqId = reqIdRef.current;
+    try {
+      const result = await reviewPolicyPlan(agentFetch, plan);
+      if (!mountedRef.current) return;
+      // Paint the verdict only if no compile turn superseded this plan; a
+      // superseded turn already reset `review` to null and set a new plan.
+      if (myReqId === reqIdRef.current) setReview(result);
+    } finally {
+      if (mountedRef.current) setReviewing(false);
+    }
+  }, [agentFetch, plan, readyToSave, reviewing]);
 
   return (
     <div
@@ -413,6 +442,10 @@ export function ConversationalPolicyCompose({
           saving={saving}
           saveError={saveError}
           plan={plan}
+          producerReused={producerReused}
+          review={review}
+          reviewing={reviewing}
+          onReview={onReviewClick}
           onSave={onSaveClick}
         />
       </div>
@@ -582,6 +615,10 @@ interface PolicyDraftPaneProps {
   saving: boolean;
   saveError: string | null;
   plan: Record<string, unknown> | null;
+  producerReused: boolean;
+  review: PolicyReviewResponse | null;
+  reviewing: boolean;
+  onReview: () => Promise<void> | void;
   onSave: () => Promise<void> | void;
 }
 
@@ -593,6 +630,10 @@ function PolicyDraftPane({
   saving,
   saveError,
   plan,
+  producerReused,
+  review,
+  reviewing,
+  onReview,
   onSave,
 }: PolicyDraftPaneProps): React.ReactElement {
   const view = summarizePolicyParams(params);
@@ -617,9 +658,20 @@ function PolicyDraftPane({
         className="rounded-md border border-secondary/15 bg-secondary/[0.03] px-3 py-2"
         data-testid="policy-draft-producer"
       >
-        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
-          Records
-        </p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+            Records
+          </p>
+          {producerReused ? (
+            <span
+              className="rounded-full bg-secondary/10 px-2 py-0.5 text-[10px] font-semibold text-secondary"
+              title="This policy binds to a producer you already authored, instead of creating a duplicate."
+              data-testid="policy-draft-reused-badge"
+            >
+              reuses existing
+            </span>
+          ) : null}
+        </div>
         <p className="mt-1 text-xs leading-relaxed text-foreground">
           {view.evidenceLabel ? (
             <>
@@ -702,6 +754,11 @@ function PolicyDraftPane({
         </div>
       ) : null}
 
+      {/* Advisory review: intent-coverage verdict. Never gates Save. */}
+      {readyToSave ? (
+        <ReviewPanel review={review} reviewing={reviewing} onReview={onReview} />
+      ) : null}
+
       <div className="mt-auto">
         <button
           type="button"
@@ -720,6 +777,114 @@ function PolicyDraftPane({
         </button>
       </div>
     </aside>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// ReviewPanel: advisory intent-coverage verdict (never gates Save)
+// ---------------------------------------------------------------------------
+
+
+const VERDICT_TONE: Record<string, string> = {
+  aligned: "text-emerald-700",
+  partial: "text-amber-700",
+  misaligned: "text-red-700",
+  unknown: "text-secondary",
+};
+
+
+interface ReviewPanelProps {
+  review: PolicyReviewResponse | null;
+  reviewing: boolean;
+  onReview: () => Promise<void> | void;
+}
+
+
+function ReviewPanel({
+  review,
+  reviewing,
+  onReview,
+}: ReviewPanelProps): React.ReactElement {
+  const verdict = review?.review?.verdict ?? "unknown";
+  const issues = review?.review?.issues ?? [];
+  const coverage = review?.review?.coverage ?? "";
+  const structural = review?.structural ?? [];
+  const confidence = review?.review?.confidence;
+  return (
+    <div
+      className="rounded-md border border-secondary/15 bg-secondary/[0.02] px-3 py-2"
+      data-testid="policy-draft-review"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/70">
+          Review
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            void onReview();
+          }}
+          disabled={reviewing}
+          data-testid="policy-draft-review-run"
+          className="rounded-full border border-primary/30 bg-white px-2.5 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/[0.06] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {reviewing ? "Checking…" : review ? "Re-check" : "Check this policy"}
+        </button>
+      </div>
+
+      {review?.ok === false ? (
+        <p className="mt-1 text-xs text-amber-800">
+          {review.error ?? "Review unavailable."}
+        </p>
+      ) : review ? (
+        <div className="mt-1.5 flex flex-col gap-1.5">
+          <p className="text-xs">
+            <span className="text-secondary/70">Intent coverage: </span>
+            <strong className={VERDICT_TONE[verdict] ?? "text-secondary"}>
+              {verdict}
+            </strong>
+            {typeof confidence === "number" && verdict !== "unknown" ? (
+              <span className="text-secondary/60">
+                {" "}
+                (confidence {confidence.toFixed(2)})
+              </span>
+            ) : null}
+          </p>
+          {coverage ? (
+            <p className="text-xs leading-relaxed text-foreground">{coverage}</p>
+          ) : null}
+          {structural.length > 0 ? (
+            <div className="text-xs text-red-700">
+              <p className="font-semibold">Integrity issues:</p>
+              <ul className="list-disc pl-4">
+                {structural.map((s, i) => (
+                  <li key={`${i}-${s}`}>{s}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {issues.length > 0 ? (
+            <div className="text-xs text-secondary">
+              <p className="font-semibold text-secondary/80">Suggestions:</p>
+              <ul className="list-disc pl-4">
+                {issues.map((s, i) => (
+                  <li key={`${i}-${s}`}>{s}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          <p className="text-[10px] italic text-secondary/50">
+            Advisory only. You can save regardless of this verdict.
+          </p>
+        </div>
+      ) : (
+        <p className="mt-1 text-[11px] leading-relaxed text-secondary/70">
+          Optional: check whether the assembled rules match what you asked for
+          before saving.
+        </p>
+      )}
+    </div>
   );
 }
 
