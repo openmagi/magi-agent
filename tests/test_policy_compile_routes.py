@@ -155,3 +155,88 @@ def test_interactive_structural_violation_422(tmp_path: Path, monkeypatch: pytes
         json={"history": "not-a-list"},
     )
     assert resp.status_code == 422
+
+
+# --- /v1/app/policies/review (deterministic integrity + advisory verdict) ---
+
+
+def _sound_plan() -> dict:
+    return {
+        "intent": "require a credible source before trading",
+        "producer": {
+            "id": "source-credibility",
+            "label": "records credibility",
+            "scope": "always",
+            "enabled": True,
+            "trigger": {"tool": "web_fetch", "domainAllowlist": ["sec.gov"]},
+            "action": "audit",
+            "emitsEvidenceType": "custom:SourceCredibility",
+        },
+        "gate": {
+            "id": "cr_source_credibility_execute_trade_gate",
+            "scope": "always",
+            "enabled": True,
+            "what": {
+                "kind": "tool_perm",
+                "payload": {
+                    "match": {"tool": "execute_trade"},
+                    "decision": "deny",
+                    "requireEvidence": {
+                        "evidenceType": "custom:SourceCredibility",
+                        "producerRuleId": "source-credibility",
+                        "scope": "session",
+                        "onEvidenceUnavailable": "deny",
+                    },
+                },
+            },
+            "firesAt": "before_tool_use",
+            "action": "block",
+        },
+        "binding": {
+            "producerRuleId": "source-credibility",
+            "gateRuleId": "cr_source_credibility_execute_trade_gate",
+            "evidenceType": "custom:SourceCredibility",
+        },
+    }
+
+
+def test_review_requires_auth(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
+    client = TestClient(create_app(_runtime()))
+    assert client.post("/v1/app/policies/review", json={"plan": {}}).status_code == 401
+
+
+def test_review_returns_structural_and_advisory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _authed(tmp_path, monkeypatch)
+    _patch_factory(
+        monkeypatch,
+        json.dumps({"verdict": "partial", "issues": ["only sec.gov trusted"], "confidence": 0.6, "coverage": "gates execute_trade"}),
+    )
+    resp = client.post("/v1/app/policies/review", json={"plan": _sound_plan()})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["structurallySound"] is True
+    assert body["structural"] == []
+    assert body["review"]["verdict"] == "partial"
+    assert body["review"]["issues"]
+
+
+def test_review_advisory_never_blocks_sound_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _authed(tmp_path, monkeypatch)
+    _patch_factory(monkeypatch, json.dumps({"verdict": "misaligned", "issues": ["x"], "confidence": 0.3}))
+    resp = client.post("/v1/app/policies/review", json={"plan": _sound_plan()})
+    body = resp.json()
+    # A "misaligned" advisory verdict does NOT make the plan structurally unsound.
+    assert body["structurallySound"] is True
+    assert body["review"]["verdict"] == "misaligned"
+
+
+def test_review_flags_unsound_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _authed(tmp_path, monkeypatch)
+    _patch_factory(monkeypatch, json.dumps({"verdict": "aligned", "confidence": 1.0}))
+    bad = _sound_plan()
+    bad["gate"]["what"]["payload"]["requireEvidence"]["producerRuleId"] = "ghost"
+    resp = client.post("/v1/app/policies/review", json={"plan": bad})
+    body = resp.json()
+    assert body["structurallySound"] is False
+    assert any("identity mismatch" in f for f in body["structural"])
