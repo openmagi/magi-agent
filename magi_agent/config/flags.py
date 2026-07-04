@@ -262,18 +262,18 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_GOAL_LOOP_ENABLED",
         summary="Enable the autonomous goal-loop scheduler.",
     ),
-    _b(
+    _pb(
         "MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED",
         summary=(
             "Enable PR4 R2 corrective recovery: when the main agent ends "
             "a turn with zero text after tool calls, the engine re-invokes "
-            "once with a 'produce your final answer now' nudge. Default-OFF "
-            "in the registry; LAB_EXPERIMENTAL_FLAGS opts it in for lab / "
-            "dogfood profiles so the dashboard stops showing the "
+            "once with a 'produce your final answer now' nudge. Profile-aware "
+            "default-ON (full/lab; OFF under the safe-family) so the dashboard "
+            "stops showing the "
             "'no final answer text arrived' fallback banner."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_EMPTY_RESPONSE_ESCALATION_ENABLED",
         stage="stage2",
         summary=(
@@ -282,9 +282,9 @@ FLAGS: tuple[FlagSpec, ...] = (
             "recovery whose final message asks the model to produce an answer "
             "OR state what is blocking it; if still empty, stream a "
             "deterministic blocked notice (an explicit non-answer) so the turn "
-            "ends honestly instead of completing blank. Default-OFF in the "
-            "registry; inert unless MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED is "
-            "also ON. The full self-host profile and lab opt in."
+            "ends honestly instead of completing blank. Profile-aware "
+            "default-ON (full/lab; OFF under the safe-family); inert unless "
+            "MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED is also ON."
         ),
     ),
     _b(
@@ -972,14 +972,14 @@ FLAGS: tuple[FlagSpec, ...] = (
             "OFF (route denials emit audit metadata and the turn continues)."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_RECIPE_INTENT_BINDING_ENABLED",
         stage="stage2",
         summary=(
             "Bind emit-only recipe intents (provider / channel / artifact / "
             "scheduler) to hint-level runner effects (doc 05 PR-3 / A1-G2). "
-            "Strict default-OFF (OFF byte-identical to today). Hard enforcement "
-            "stays deferred to 14-controlplane."
+            "Profile-aware default-ON (full/lab; OFF under the safe-family). "
+            "Hard enforcement stays deferred to 14-controlplane."
         ),
     ),
     # NOTE: flat default-ON; cli/wiring._first_party_tools_enabled treats unset
@@ -2247,12 +2247,13 @@ FLAGS: tuple[FlagSpec, ...] = (
     # ``MaxStepsBrakeControl`` as an inert no-op (max_iterations=0); H-9 may
     # delete this gate entirely. Keep the registration thin so the deletion is
     # a one-line follow-up.
-    _b(
+    _pb(
         "MAGI_MAX_STEPS_BRAKE_ENABLED",
         summary=(
             "Register the MaxStepsBrakeControl wrap-up brake on the control "
             "plane (the seam is wired with ``max_iterations=0``; H-9 audit may "
-            "delete the seam entirely). Strict default-OFF."
+            "delete the seam entirely). Profile-aware default-ON (full/lab; "
+            "OFF under the safe-family)."
         ),
     ),
     _b(
@@ -3040,13 +3041,14 @@ FLAGS: tuple[FlagSpec, ...] = (
     # Strict default-OFF; per their existing docstrings they intentionally do
     # NOT follow ``_runtime_feature_enabled`` profile-default-ON semantics so
     # benchmark/eval profiles can opt in explicitly.
-    _b(
+    _pb(
         "MAGI_TOOL_EXCEPTION_REFLECTION_ENABLED",
         summary=(
             "Convert a raising tool (except FileEdit/PatchApply, which keep "
             "their specialized edit-retry handler) into a model-visible "
             "corrective tool_result with retry guidance + per-invocation "
-            "attempt budget instead of killing the whole turn. Default-OFF."
+            "attempt budget instead of killing the whole turn. Profile-aware "
+            "default-ON (full/lab; OFF under the safe-family)."
         ),
     ),
     # PR-R: soft-fail unknown-tool as a tool_result so the model can retry.

@@ -471,12 +471,25 @@ class TestOrderingVsGoalNudge:
 
 
 class TestBuildConfigFromEnv:
-    def test_off_by_default_returns_none(self) -> None:
-        assert build_empty_response_recovery_config({}) is None
-
-    def test_runtime_profile_does_not_enable(self) -> None:
+    def test_explicit_off_returns_none(self) -> None:
+        # Explicit "0" disables recovery regardless of profile.
         assert (
-            build_empty_response_recovery_config({"MAGI_RUNTIME_PROFILE": "full"})
+            build_empty_response_recovery_config(
+                {"MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED": "0"}
+            )
+            is None
+        )
+
+    def test_unset_profile_default_on_returns_config(self) -> None:
+        # Unset under a non-safe profile: profile default ON gives a config.
+        cfg = build_empty_response_recovery_config({})
+        assert cfg is not None
+        assert cfg.enabled is True
+
+    def test_safe_runtime_profile_keeps_off(self) -> None:
+        # Safe profile ("eval") keeps the profile default OFF.
+        assert (
+            build_empty_response_recovery_config({"MAGI_RUNTIME_PROFILE": "eval"})
             is None
         )
 

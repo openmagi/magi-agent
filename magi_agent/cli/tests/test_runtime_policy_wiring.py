@@ -1159,6 +1159,10 @@ def test_engine_consumes_materialized_phase_route_for_local_runner_selection(
     _CapturedRunnerInput.captured = []
     # Phase routing is opt-in (default off); enable it to exercise the governance.
     monkeypatch.setenv("MAGI_RUNNER_POLICY_ROUTING_ENABLED", "1")
+    # Pin MAGI_RECIPE_INTENT_BINDING_ENABLED=0: the _pb flag causes
+    # compile_intent_bindings() to add an intentBindings key to the route
+    # selection event dict, which breaks the exact-equality assertion below.
+    monkeypatch.setenv("MAGI_RECIPE_INTENT_BINDING_ENABLED", "0")
     monkeypatch.setattr(engine_module, "_lazy_engine_deps", _route_capturing_engine_deps)
     runner = _RouteAwareRunner()
     assembly = RunnerPolicyAssembly(

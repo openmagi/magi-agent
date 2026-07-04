@@ -122,12 +122,20 @@ def test_pack_path_loads_all_three_features_when_flagged(monkeypatch, tmp_path) 
 
 def test_pack_path_all_off_loads_none(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))
-    # facts-replan + tool-synthesis-nudge are profile-aware default-ON (_pb), so
-    # disable them explicitly; the other two features are strict default-OFF.
+    # All four profile-aware default-ON (_pb) controls in this feature set must
+    # be disabled explicitly so the "all off" baseline holds:
+    #   - MAGI_FACTS_REPLAN_ENABLED: magi_facts_replan
+    #   - MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED: magi_tool_synthesis_nudge_plugin
+    #   - MAGI_TOOL_EXCEPTION_REFLECTION_ENABLED: magi_tool_exception_reflection_plugin
+    #   - MAGI_MAX_STEPS_BRAKE_ENABLED: magi_max_steps_brake
+    # The remaining two (tool-schema-feedback, loop-resilience) are strict
+    # default-OFF (_b) and load only when their explicit "1" is set.
     plane = _bundled_plane(
         {
             "MAGI_FACTS_REPLAN_ENABLED": "0",
             "MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED": "0",
+            "MAGI_TOOL_EXCEPTION_REFLECTION_ENABLED": "0",
+            "MAGI_MAX_STEPS_BRAKE_ENABLED": "0",
         },
         tool_synthesis_model_label=_FRONTIER_LABEL,
     )

@@ -279,28 +279,38 @@ def test_parse_runtime_env_requires_existing_identity_and_proxy_fields() -> None
 # ---------------------------------------------------------------------------
 
 
-def test_parse_tool_exception_reflection_env_defaults_off() -> None:
+def test_parse_tool_exception_reflection_env_defaults_on() -> None:
+    """Profile-aware default-ON: an unset flag under a non-safe profile
+    (empty env resolves to the non-safe default) enables reflection."""
     from magi_agent.config.env import parse_tool_exception_reflection_env
 
     cfg = parse_tool_exception_reflection_env({})
 
-    assert cfg.enabled is False
+    assert cfg.enabled is True
     assert cfg.max_attempts == 2
 
 
-def test_parse_tool_exception_reflection_env_is_profile_independent() -> None:
-    """Unlike _runtime_feature_enabled flags, the unset flag stays OFF even
-    under the full runtime profile (eval-profile benchmark runs opt in
-    explicitly)."""
+def test_parse_tool_exception_reflection_env_is_profile_dependent() -> None:
+    """Promoted to a profile-aware default-ON flag (``flag_profile_bool``):
+    ON under the full runtime profile, OFF under the safe-family (eval), with
+    an explicit value overriding the profile default either way."""
     from magi_agent.config.env import parse_tool_exception_reflection_env
 
-    assert parse_tool_exception_reflection_env({"MAGI_RUNTIME_PROFILE": "full"}).enabled is False
+    assert parse_tool_exception_reflection_env({"MAGI_RUNTIME_PROFILE": "full"}).enabled is True
     assert parse_tool_exception_reflection_env({"MAGI_RUNTIME_PROFILE": "eval"}).enabled is False
+    # explicit opt-in under a safe profile
     assert (
         parse_tool_exception_reflection_env(
             {"MAGI_RUNTIME_PROFILE": "eval", "MAGI_TOOL_EXCEPTION_REFLECTION_ENABLED": "1"}
         ).enabled
         is True
+    )
+    # explicit opt-out under the full profile
+    assert (
+        parse_tool_exception_reflection_env(
+            {"MAGI_RUNTIME_PROFILE": "full", "MAGI_TOOL_EXCEPTION_REFLECTION_ENABLED": "0"}
+        ).enabled
+        is False
     )
 
 

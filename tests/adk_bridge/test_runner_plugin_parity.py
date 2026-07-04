@@ -21,12 +21,16 @@ from magi_agent.adk_bridge.local_runner import LocalInertLlm, LOCAL_INERT_MODEL_
 
 
 # Every env var that, when truthy in the *process* ``os.environ``, promotes a
-# control into the plane. The core plane controls are ``flag_bool`` (profile-
-# INDEPENDENT): the conservative ``safe`` runtime profile does NOT turn them off,
-# so a value leaked into ``os.environ`` by a sibling test co-scheduled on the
-# same xdist worker survives ``monkeypatch`` teardown (monkeypatch only restores
-# keys the leaking test itself set) and populates the plane even under
-# ``MAGI_RUNTIME_PROFILE=safe``, breaking ``test_both_runners_empty_plane_in_safe_profile``
+# control into the plane. Most core plane controls are ``flag_bool`` (profile-
+# INDEPENDENT), but MAGI_MAX_STEPS_BRAKE_ENABLED and
+# MAGI_TOOL_EXCEPTION_REFLECTION_ENABLED are ``flag_profile_bool``
+# (profile-aware: ON by default under non-safe profiles, OFF under safe-family).
+# Under the ``safe`` runtime profile both kinds are suppressed, so the fixture
+# below still produces an empty plane for ``test_both_runners_empty_plane_in_safe_profile``.
+# A value leaked into ``os.environ`` by a sibling test co-scheduled on the same
+# xdist worker survives ``monkeypatch`` teardown (monkeypatch only restores keys
+# the leaking test itself set) and populates the plane even under
+# ``MAGI_RUNTIME_PROFILE=safe``, breaking the empty-plane invariant
 # (observed: ``assert [<ResilienceLoopControl>, ...] == []``).
 _PLANE_PROMOTING_ENV_VARS = (
     "MAGI_EDIT_RETRY_REFLECTION_ENABLED",
