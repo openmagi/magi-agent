@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useAuthFetch } from "@/hooks/use-auth-fetch";
 import { GlassCard } from "@/components/ui/glass-card";
 import { useMessages } from "@/lib/i18n";
+import { Switch } from "@/components/ui/_ds";
 import { SocialBrowserConnect } from "./social-browser-connect";
 
 function ChevronIcon({ expanded }: { expanded: boolean }) {
@@ -842,18 +843,15 @@ export function IntegrationsPanel({ botId }: IntegrationsPanelProps) {
             )}
             {notionStatus !== "active" && notionStatus !== "loading" && (
               <div className="mt-2 ml-11 space-y-2">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={notionWriteAccess}
-                    onClick={() => setNotionWriteAccess(!notionWriteAccess)}
-                    className={`relative inline-flex h-4 w-7 shrink-0 rounded-full border transition-colors cursor-pointer ${notionWriteAccess ? "bg-primary border-primary/40" : "bg-gray-200 border-gray-300"}`}
-                  >
-                    <span className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${notionWriteAccess ? "translate-x-3" : "translate-x-0.5"} mt-px`} />
-                  </button>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={notionWriteAccess}
+                    onToggle={async (next) => setNotionWriteAccess(next)}
+                    labelOn={t.settingsPage.notionIncludeWrite}
+                    labelOff={t.settingsPage.notionIncludeWrite}
+                  />
                   <span className="text-[11px] text-secondary">{t.settingsPage.notionIncludeWrite}</span>
-                </label>
+                </div>
                 <p className="text-[11px] text-secondary/70">{t.settingsPage.notionApprovedHint}</p>
               </div>
             )}
@@ -917,18 +915,15 @@ export function IntegrationsPanel({ botId }: IntegrationsPanelProps) {
             )}
             {twitterStatus !== "active" && twitterStatus !== "loading" && (
               <div className="mt-2 ml-11 space-y-2">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={twitterWriteAccess}
-                    onClick={() => setTwitterWriteAccess(!twitterWriteAccess)}
-                    className={`relative inline-flex h-4 w-7 shrink-0 rounded-full border transition-colors cursor-pointer ${twitterWriteAccess ? "bg-primary border-primary/40" : "bg-gray-200 border-gray-300"}`}
-                  >
-                    <span className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${twitterWriteAccess ? "translate-x-3" : "translate-x-0.5"} mt-px`} />
-                  </button>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={twitterWriteAccess}
+                    onToggle={async (next) => setTwitterWriteAccess(next)}
+                    labelOn={t.settingsPage.twitterIncludeWrite}
+                    labelOff={t.settingsPage.twitterIncludeWrite}
+                  />
                   <span className="text-[11px] text-secondary">{t.settingsPage.twitterIncludeWrite}</span>
-                </label>
+                </div>
                 <p className="text-[11px] text-secondary/70">{t.settingsPage.twitterApprovedHint}</p>
               </div>
             )}
@@ -995,18 +990,15 @@ export function IntegrationsPanel({ botId }: IntegrationsPanelProps) {
             )}
             {metaStatus !== "active" && metaStatus !== "loading" && (
               <div className="mt-2 ml-11 space-y-2">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={metaWriteAccess}
-                    onClick={() => setMetaWriteAccess(!metaWriteAccess)}
-                    className={`relative inline-flex h-4 w-7 shrink-0 rounded-full border transition-colors cursor-pointer ${metaWriteAccess ? "bg-primary border-primary/40" : "bg-gray-200 border-gray-300"}`}
-                  >
-                    <span className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${metaWriteAccess ? "translate-x-3" : "translate-x-0.5"} mt-px`} />
-                  </button>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={metaWriteAccess}
+                    onToggle={async (next) => setMetaWriteAccess(next)}
+                    labelOn={t.settingsPage.metaIncludeWrite}
+                    labelOff={t.settingsPage.metaIncludeWrite}
+                  />
                   <span className="text-[11px] text-secondary">{t.settingsPage.metaIncludeWrite}</span>
-                </label>
+                </div>
                 <p className="text-[11px] text-secondary/70">{t.settingsPage.metaApprovedHint}</p>
               </div>
             )}
@@ -1067,18 +1059,15 @@ export function IntegrationsPanel({ botId }: IntegrationsPanelProps) {
             )}
             {dropboxStatus !== "active" && dropboxStatus !== "loading" && (
               <div className="mt-2 ml-11 space-y-2">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={dropboxWriteAccess}
-                    onClick={() => setDropboxWriteAccess(!dropboxWriteAccess)}
-                    className={`relative inline-flex h-4 w-7 shrink-0 rounded-full border transition-colors cursor-pointer ${dropboxWriteAccess ? "bg-primary border-primary/40" : "bg-gray-200 border-gray-300"}`}
-                  >
-                    <span className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${dropboxWriteAccess ? "translate-x-3" : "translate-x-0.5"} mt-px`} />
-                  </button>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={dropboxWriteAccess}
+                    onToggle={async (next) => setDropboxWriteAccess(next)}
+                    labelOn={t.settingsPage.dropboxIncludeWrite}
+                    labelOff={t.settingsPage.dropboxIncludeWrite}
+                  />
                   <span className="text-[11px] text-secondary">{t.settingsPage.dropboxIncludeWrite}</span>
-                </label>
+                </div>
                 <p className="text-[11px] text-secondary/70">{t.settingsPage.dropboxApprovedHint}</p>
               </div>
             )}
