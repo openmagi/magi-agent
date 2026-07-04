@@ -26,6 +26,12 @@ from typing import AsyncGenerator
 
 from magi_agent.runtime.child_runner_live import RealLocalChildRunner
 
+# These tests exercise the LEGACY child tool-progress forwarding path.
+# MAGI_SUBAGENT_GOVERNED_TURN_ENABLED is now profile-default-ON, which routes
+# children through the governed path (its own tests cover it), so pin it OFF
+# here to keep exercising the legacy progress-event path.
+_GOVERNED_OFF_ENV = {"MAGI_SUBAGENT_GOVERNED_TURN_ENABLED": "0"}
+
 
 # --------------------------------------------------------------------------- #
 # Fakes (shape-mimic ADK ``event.content.parts``)                              #
@@ -100,6 +106,7 @@ def test_function_call_part_emits_tool_start_progress() -> None:
 
     progress_events: list[dict[str, object]] = []
     runner = RealLocalChildRunner(
+        env=_GOVERNED_OFF_ENV,
         provider_config=_provider_config(),
         runner=_CallRunner(),
         progress_sink=lambda event: progress_events.append(dict(event)),
@@ -130,6 +137,7 @@ def test_function_response_part_emits_tool_end_progress() -> None:
 
     progress_events: list[dict[str, object]] = []
     runner = RealLocalChildRunner(
+        env=_GOVERNED_OFF_ENV,
         provider_config=_provider_config(),
         runner=_ResponseRunner(),
         progress_sink=lambda event: progress_events.append(dict(event)),
@@ -170,6 +178,7 @@ def test_tool_args_and_results_never_leak_into_progress() -> None:
 
     progress_events: list[dict[str, object]] = []
     runner = RealLocalChildRunner(
+        env=_GOVERNED_OFF_ENV,
         provider_config=_provider_config(),
         runner=_PrivateRunner(),
         progress_sink=lambda event: progress_events.append(dict(event)),
@@ -199,6 +208,7 @@ def test_multiple_tools_in_sequence_all_emit_progress() -> None:
 
     progress_events: list[dict[str, object]] = []
     runner = RealLocalChildRunner(
+        env=_GOVERNED_OFF_ENV,
         provider_config=_provider_config(),
         runner=_SeqRunner(),
         progress_sink=lambda event: progress_events.append(dict(event)),
@@ -230,6 +240,7 @@ def test_tool_call_progress_event_type_is_child_progress() -> None:
 
     progress_events: list[dict[str, object]] = []
     runner = RealLocalChildRunner(
+        env=_GOVERNED_OFF_ENV,
         provider_config=_provider_config(),
         runner=_MinimalRunner(),
         progress_sink=lambda event: progress_events.append(dict(event)),
