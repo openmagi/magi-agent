@@ -8,6 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from magi_agent.ops.safety import is_secret_key as _kernel_is_secret_key
 from magi_agent.shared.tool_preview import sanitize_tool_preview
 
 
@@ -364,28 +365,14 @@ def _hash_public_ref(value: object) -> str:
 
 
 def _is_secret_key(normalized_key: str) -> bool:
-    compact = normalized_key.replace("_", "")
-    return any(
-        fragment in normalized_key or fragment in compact
-        for fragment in (
-            "authorization",
-            "cookie",
-            "apikey",
-            "api_key",
-            "secret",
-            "token",
-            "password",
-            "privatekey",
-            "private_key",
-            "servicekey",
-            "service_key",
-            "service_role_key",
-            "credential",
-            "credential_id",
-            "credentials",
-            "key",
-        )
-    )
+    # B3: delegate to the single-home kernel classifier. The kernel base fragment
+    # set is a superset of tool_boundary's prior fragments (authorization / cookie
+    # / credential(s) / service_key are all base fragments; the token/secret
+    # families match via the kernel's compact matching), so this is
+    # stricter-or-equal and never weaker. The bare ``"key"`` axis stays
+    # tool_boundary-only, threaded via ``extra_fragments`` so ledger/reports do not
+    # over-redact public keys like ``objectKey``.
+    return _kernel_is_secret_key(normalized_key, extra_fragments=("key",))
 
 
 def _redacted_summary_key(value: str) -> str:

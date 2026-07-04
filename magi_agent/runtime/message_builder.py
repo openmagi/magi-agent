@@ -52,18 +52,30 @@ _IDENTITY_SECTION_ORDER = (
     ("agents", "AGENTS"),
     ("soul", "SOUL"),
 )
-# E-4: ``_KNOWN_TOKEN_LIMITS`` was a byte-identical 35-entry duplicate of
-# ``context/token_tracker._KNOWN_TOKEN_LIMITS`` kept in lockstep by a
-# comment. Both now re-export from a stdlib-only leaf module
-# (``context/_token_window_table.py``) so the dict cannot drift and so
-# the message_builder import doesn't transitively pull in
-# ``token_estimation`` (which loads ``asyncio``/``socket``/``subprocess``,
-# forbidden by the message_builder import-purity contract). The
+# E-4: ``_KNOWN_TOKEN_LIMITS`` lives in ``context/_token_window_table.py``, which
+# now DERIVES the table from ``ModelCatalog.builtin()`` at import time (the leaf
+# is no longer stdlib-only — the catalog pulls ``pydantic`` ->
+# ``typing_extensions`` -> ``asyncio``/``socket``/``subprocess``, all forbidden by
+# the message_builder import-purity contract). So the table is imported LAZILY at
+# its single use site in ``_context_window_token_budget`` below, keeping the
+# top-level ``message_builder`` import free of the catalog/pydantic edge while the
 # structural follow-up routes everyone through ``ModelCatalog.context_window``
-# (E-1/E-3); this is the interim, byte-identical step.
-from magi_agent.context._token_window_table import (  # noqa: E402
-    _KNOWN_TOKEN_LIMITS,
-)
+# (E-1/E-3). External importers of ``message_builder._KNOWN_TOKEN_LIMITS`` keep
+# working via the lazy module ``__getattr__`` below, which resolves the SAME
+# object from the leaf on first access without eagerly importing it.
+
+
+def __getattr__(name: str) -> object:
+    # Lazy re-export of ``_KNOWN_TOKEN_LIMITS``. Only fires on explicit attribute /
+    # ``from ... import`` access, so the bare
+    # ``import magi_agent.runtime.message_builder`` stays free of the catalog edge.
+    if name == "_KNOWN_TOKEN_LIMITS":
+        from magi_agent.context._token_window_table import _KNOWN_TOKEN_LIMITS
+
+        return _KNOWN_TOKEN_LIMITS
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 _OPENAI_COMPAT_CONTEXT_WINDOW = 131_072
 _OPENAI_COMPAT_MODEL_PREFIXES = (
     "ollama/",
@@ -1270,6 +1282,10 @@ def token_limit_for_compaction(
         model_context_window = model_context_windows.get(model)
         if isinstance(model_context_window, int) and model_context_window > 0:
             return math.floor(model_context_window * 0.75)
+    from magi_agent.context._token_window_table import (  # noqa: PLC0415
+        _KNOWN_TOKEN_LIMITS,
+    )
+
     known_limit = _KNOWN_TOKEN_LIMITS.get(model)
     if known_limit is not None:
         return known_limit

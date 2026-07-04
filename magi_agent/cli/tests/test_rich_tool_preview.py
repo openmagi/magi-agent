@@ -14,9 +14,16 @@ from magi_agent.adk_bridge import event_adapter as ea
 
 def _preview(args: dict, tool: str, *, enabled: bool) -> str:
     env = {**os.environ}
-    # MAGI_RICH_TOOL_PREVIEW is profile-aware default-ON (_pb), so "off" must be
-    # an explicit "0" — unsetting it now resolves ON in the full runtime profile.
-    env["MAGI_RICH_TOOL_PREVIEW"] = "1" if enabled else "0"
+    if enabled:
+        env["MAGI_RICH_TOOL_PREVIEW"] = "1"
+    else:
+        # ``MAGI_RICH_TOOL_PREVIEW`` is a profile-aware default-ON (``_pb``) flag,
+        # so simply UNSETTING it leaves rich previews ON under the default/full
+        # runtime profile (which the cleared env below resolves to). To exercise
+        # the genuine "flag off -> digested, byte-identical" contract, disable it
+        # explicitly with ``"0"`` (an explicit falsy value wins over the profile
+        # default).
+        env["MAGI_RICH_TOOL_PREVIEW"] = "0"
     with mock.patch.dict(os.environ, env, clear=True):
         return ea._public_preview(args, safe_keys=ea._rich_preview_safe_keys(tool))
 

@@ -74,7 +74,7 @@ def test_scheduler_emits_when_enabled(monkeypatch: Any) -> None:
         captured.update(kwargs)
         return "emitted"
 
-    monkeypatch.setattr("magi_agent.transport.chat_routes.emit_runtime_direct_usage_receipt", _fake_emit)
+    monkeypatch.setattr("magi_agent.transport.gate5b_serving.emit_runtime_direct_usage_receipt", _fake_emit)
 
     async def _run() -> None:
         chat._schedule_runtime_direct_usage_receipt(
