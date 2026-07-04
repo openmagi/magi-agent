@@ -1,14 +1,14 @@
 import type { Metadata, Viewport } from "next";
-import { Plus_Jakarta_Sans, Geist_Mono } from "next/font/google";
+import { Instrument_Sans, Geist_Mono } from "next/font/google";
 import { I18nProvider } from "@/lib/i18n";
 import { PUBLIC_BRAND } from "@/lib/brand";
 import "katex/dist/katex.min.css";
 import "./globals.css";
 
-const plusJakarta = Plus_Jakarta_Sans({
+const bodySans = Instrument_Sans({
   variable: "--font-geist-sans",
   subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
+  weight: ["400", "500", "600", "700"],
 });
 
 const geistMono = Geist_Mono({
@@ -60,8 +60,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <link
+        rel="stylesheet"
+        href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@500,700,800&display=swap"
+      />
       <body
-        className={`${plusJakarta.variable} ${geistMono.variable} antialiased`}
+        className={`${bodySans.variable} ${geistMono.variable} antialiased`}
       >
         <I18nProvider>
           {children}

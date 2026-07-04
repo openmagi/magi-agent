@@ -16,28 +16,28 @@
 /* ===== @ds:core BEGIN ===== */
 @theme {
   /* ---- surfaces ---- */
-  --color-surface-base:    #FAFAFA; /* page background */
+  --color-surface-base:    #EFEDE8; /* page background */
   --color-surface-raised:  #FFFFFF; /* cards, sidebar, inputs-on-card */
-  --color-surface-overlay: #F4F0FF; /* accent-tinted hover / nav-active */
+  --color-surface-overlay: #E9F1EF; /* accent-tinted hover / nav-active */
   --color-surface-input:   #FFFFFF;
 
   /* ---- borders ---- */
   --color-border-subtle: rgba(0, 0, 0, 0.06);
   --color-border-strong: rgba(0, 0, 0, 0.10);
-  --color-border-focus:  #7C3AED;   /* = accent */
+  --color-border-focus:  #17635A;   /* = accent */
 
   /* ---- text ---- */
-  --color-text-primary:   #1A1A2E;
+  --color-text-primary:   #1B1D22;
   --color-text-secondary: #475569;
   --color-text-tertiary:  #64748B;
   --color-text-disabled:  #94A3B8;
   --color-text-on-accent: #FFFFFF;
 
-  /* ---- accent (purple) ---- */
-  --color-accent:       #7C3AED; /* purple-600 */
-  --color-accent-light: #6D28D9; /* purple-700 */
-  --color-accent-hover: #6D28D9;
-  --color-accent-press: #5B21B6;
+  /* ---- accent (oxide verdigris) ---- */
+  --color-accent:       #17635A; /* oxide verdigris */
+  --color-accent-light: #14564E; /* oxide dark */
+  --color-accent-hover: #14564E;
+  --color-accent-press: #0F4A43;
 
   /* ---- semantic status ---- */
   --color-pass-fg:   #047857; --color-pass-bg:   rgba(16, 185, 129, 0.10);
@@ -46,7 +46,7 @@
   --color-info-fg:   #2563EB; --color-info-bg:   #DBEAFE;
 
   /* ---- typography ---- */
-  --font-sans: "Plus Jakarta Sans", "Pretendard Variable", "Pretendard",
+  --font-sans: "Instrument Sans", "Pretendard Variable", "Pretendard",
                "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic",
                -apple-system, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
@@ -60,7 +60,7 @@
   --text-2xl:  32px; --text-2xl--line-height:  40px;
 
   /* ---- radius / shadow / motion ---- */
-  --radius-sm: 6px; --radius-md: 10px; --radius-lg: 14px; --radius-xl: 20px;
+  --radius-sm: 4px; --radius-md: 8px; --radius-lg: 12px; --radius-xl: 16px;
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
   --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
   --shadow-lg: 0 16px 32px rgba(15, 23, 42, 0.12);
