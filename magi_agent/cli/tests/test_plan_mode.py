@@ -118,6 +118,14 @@ def test_headless_plan_mode_does_not_attach_composio(monkeypatch, tmp_path) -> N
 def test_cli_mode_plan_reaches_tool_build(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
     monkeypatch.setenv("MAGI_CLI_SESSION_DIR", str(tmp_path))
+    # Hermetic provider resolution: a sibling test that leaks a
+    # ``MAGI_PROVIDER``/``MAGI_MODEL`` naming a keyless provider would force
+    # ``resolve_provider_config`` down the early ``None`` path, so the default
+    # runner is a stub and ``_build_first_party_adk_tools`` is never reached
+    # (captured stays ``{}``). Clear them so the injected ``ANTHROPIC_API_KEY``
+    # is the sole provider signal, making the spy fire regardless of worker.
+    monkeypatch.delenv("MAGI_PROVIDER", raising=False)
+    monkeypatch.delenv("MAGI_MODEL", raising=False)
 
     captured: dict[str, object] = {}
 
@@ -153,6 +161,14 @@ def test_cli_mode_plan_reaches_tool_build(monkeypatch, tmp_path) -> None:
 def test_cli_default_mode_is_act(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
     monkeypatch.setenv("MAGI_CLI_SESSION_DIR", str(tmp_path))
+    # Hermetic provider resolution: a sibling test that leaks a
+    # ``MAGI_PROVIDER``/``MAGI_MODEL`` naming a keyless provider would force
+    # ``resolve_provider_config`` down the early ``None`` path, so the default
+    # runner is a stub and ``_build_first_party_adk_tools`` is never reached
+    # (captured stays ``{}``). Clear them so the injected ``ANTHROPIC_API_KEY``
+    # is the sole provider signal, making the spy fire regardless of worker.
+    monkeypatch.delenv("MAGI_PROVIDER", raising=False)
+    monkeypatch.delenv("MAGI_MODEL", raising=False)
 
     captured: dict[str, object] = {}
 

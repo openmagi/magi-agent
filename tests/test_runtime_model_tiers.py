@@ -115,6 +115,26 @@ def _isolated_env(**extra: str) -> dict[str, str]:
     return {"MAGI_CONFIG": tmp, **extra}
 
 
+@pytest.fixture(autouse=True)
+def _neutralize_process_config(monkeypatch, tmp_path) -> None:
+    """Pin ``MAGI_CONFIG`` in the *process* environment to an empty file.
+
+    ``available_child_model_routes`` -> ``resolve_provider_config`` loads the
+    config file through ``_load_config_file()``, which reads ``MAGI_CONFIG``
+    from ``os.environ`` (NOT the injected ``env`` dict). A sibling test that
+    leaks ``MAGI_CONFIG`` pointing at a config naming a keyless provider would
+    otherwise send resolution down the early ``None`` path and drop the custom
+    route (test-isolation failure under xdist). Pinning it to an empty file
+    keeps the process-config load neutral regardless of worker or order, while
+    each test's injected ``env`` dict still supplies keys/model overrides.
+    """
+    empty = tmp_path / "empty_process_config.toml"
+    empty.write_text("")
+    monkeypatch.setenv("MAGI_CONFIG", str(empty))
+    monkeypatch.delenv("MAGI_PROVIDER", raising=False)
+    monkeypatch.delenv("MAGI_MODEL", raising=False)
+
+
 # Test 1 — gate OFF parity: without flag, anthropic/openai sota routes still present
 def test_gate_off_parity_advertised_routes_include_anthropic_and_openai() -> None:
     env = _isolated_env()  # no flag set at all
