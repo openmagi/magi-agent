@@ -3,7 +3,7 @@
 @import "../src/components/ui/_ds/tokens.css";
 
 :root {
-  --background: #FFFFFF;
+  --background: #FAFAFA;
   --foreground: #1B1D22;
   --text-secondary: #475569;
   --text-muted: #64748B;

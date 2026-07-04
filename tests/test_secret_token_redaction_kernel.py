@@ -146,10 +146,21 @@ def test_adk_bridge_now_covers_quoted_and_session_shapes() -> None:
 
 
 def test_kernel_import_pulls_no_transport_or_network() -> None:
+    # Assert on the sys.modules DELTA introduced by importing the kernel, not on
+    # absolute presence. The interpreter's own site initialization (e.g. a
+    # ``.pth`` startup hook) can preload ``urllib``/``urllib.parse`` before any
+    # first-party import runs; counting those pre-existing modules would falsely
+    # implicate the kernel. Snapshotting before/after proves the security
+    # property that matters: importing ``magi_agent.ops.safety`` itself pulls in
+    # no transport package and no network/http client.
     code = (
-        "import sys, magi_agent.ops.safety\n"
-        "bad = [m for m in sys.modules if m.startswith('magi_agent.transport')"
-        " or m in ('urllib', 'requests', 'httpx', 'socket')]\n"
+        "import sys\n"
+        "_before = set(sys.modules)\n"
+        "import magi_agent.ops.safety\n"
+        "_delta = set(sys.modules) - _before\n"
+        "bad = sorted(m for m in _delta if m.startswith('magi_agent.transport')"
+        " or m == 'urllib' or m.startswith('urllib.')"
+        " or m in ('requests', 'httpx', 'socket'))\n"
         "print(bad)\n"
     )
     result = subprocess.run(

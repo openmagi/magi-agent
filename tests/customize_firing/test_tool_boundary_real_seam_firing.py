@@ -290,6 +290,46 @@ def _output_rewrite_rule(*, rid: str, pattern: str, replacement: str) -> dict:
     }
 
 
+# Per-stage customize master flags. When any of these leaks into the *process*
+# ``os.environ`` from a sibling test co-scheduled on the same xdist worker, it
+# survives ``monkeypatch`` teardown (monkeypatch only restores keys the leaking
+# test set) and the tool-boundary bridge attaches that stage, mutating args /
+# rewriting the response even in ``test_flags_off_real_seam_byte_identical``,
+# whose whole point is that with the stage flags OFF the seam is byte-identical
+# (observed break: a leaked ``MAGI_CUSTOMIZE_PROMPT_INJECTION_ENABLED=1``
+# appended ``--dry-run`` to ``observed_args``).
+_CUSTOMIZE_STAGE_ENV_VARS = (
+    "MAGI_CUSTOMIZE_PROMPT_INJECTION_ENABLED",
+    "MAGI_CUSTOMIZE_OUTPUT_REWRITE_ENABLED",
+    "MAGI_CUSTOMIZE_SHELL_COMMAND_ENABLED",
+    "MAGI_CUSTOMIZE_LLM_CALL_HOOKS_ENABLED",
+    "MAGI_CUSTOMIZE_LIFECYCLE_SESSION_TASK_EMITTERS_ENABLED",
+)
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_customize_stage_env() -> "object":
+    """Snapshot + restore ``os.environ`` and clear per-stage customize flags.
+
+    Runs at setup, so tests that intentionally enable a stage via
+    ``monkeypatch.setenv`` still see their own value (the fixture clears leaked
+    ambient state first; the test body then sets what it needs; ``monkeypatch``
+    restores afterwards). This makes the ``flags off → byte-identical`` seam
+    invariant observe the true stage-OFF state regardless of scheduling. The
+    assertion itself is NOT weakened.
+    """
+    import os as _os  # local: this module otherwise avoids importing os
+
+    saved = dict(_os.environ)
+    for key in _CUSTOMIZE_STAGE_ENV_VARS:
+        _os.environ.pop(key, None)
+    try:
+        yield
+    finally:
+        _os.environ.clear()
+        _os.environ.update(saved)
+
+
 @pytest.fixture
 def cfg(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "1")

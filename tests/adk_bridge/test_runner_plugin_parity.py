@@ -20,6 +20,56 @@ from magi_agent.adk_bridge.control_plane import (
 from magi_agent.adk_bridge.local_runner import LocalInertLlm, LOCAL_INERT_MODEL_NAME
 
 
+# Every env var that, when truthy in the *process* ``os.environ``, promotes a
+# control into the plane. The core plane controls are ``flag_bool`` (profile-
+# INDEPENDENT): the conservative ``safe`` runtime profile does NOT turn them off,
+# so a value leaked into ``os.environ`` by a sibling test co-scheduled on the
+# same xdist worker survives ``monkeypatch`` teardown (monkeypatch only restores
+# keys the leaking test itself set) and populates the plane even under
+# ``MAGI_RUNTIME_PROFILE=safe``, breaking ``test_both_runners_empty_plane_in_safe_profile``
+# (observed: ``assert [<ResilienceLoopControl>, ...] == []``).
+_PLANE_PROMOTING_ENV_VARS = (
+    "MAGI_EDIT_RETRY_REFLECTION_ENABLED",
+    "MAGI_LOOP_GUARD_ENABLED",
+    "MAGI_ERROR_RECOVERY_ENABLED",
+    "MAGI_CONTEXT_COMPACTION_ENABLED",
+    "MAGI_MAX_STEPS_BRAKE_ENABLED",
+    "MAGI_SELF_REVIEW_ENABLED",
+    "MAGI_TOOL_EXCEPTION_REFLECTION_ENABLED",
+    "MAGI_TOOL_SCHEMA_FEEDBACK_ENABLED",
+    "MAGI_TOOL_NOT_FOUND_SOFT_FAIL_ENABLED",
+    "MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED",
+    "MAGI_FACTS_REPLAN_ENABLED",
+    "MAGI_CUSTOMIZE_LLM_CALL_HOOKS_ENABLED",
+    "MAGI_CUSTOMIZE_SHELL_COMMAND_ENABLED",
+    "MAGI_CUSTOMIZE_LIFECYCLE_SESSION_TASK_EMITTERS_ENABLED",
+    "MAGI_GA_LIVE_ENABLED",
+    "MAGI_PROVIDER_REPAIR_ENABLED",
+)
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_plane_env() -> "object":
+    """Snapshot + restore ``os.environ`` and clear plane-promoting flags.
+
+    Runs at setup (before each test body), so tests that intentionally set a
+    promoting flag via ``monkeypatch.setenv`` (e.g. ``MAGI_EDIT_RETRY_REFLECTION_ENABLED=1``)
+    still see their own value: the fixture clears leaked ambient state first, the
+    test body then sets what it needs, and ``monkeypatch`` restores afterwards.
+    This makes the ``safe`` profile's "empty plane" invariant observe the true
+    safe-profile state regardless of which sibling file ran first on the worker.
+    The safety assertion itself is NOT weakened.
+    """
+    saved = dict(os.environ)
+    for key in _PLANE_PROMOTING_ENV_VARS:
+        os.environ.pop(key, None)
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
+
+
 def _inert_model_factory(_cfg):
     """A fake model factory that returns a proper ADK-compatible inert model."""
     return LocalInertLlm(model=LOCAL_INERT_MODEL_NAME)
