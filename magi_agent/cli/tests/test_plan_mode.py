@@ -7,13 +7,64 @@ Plan mode must expose only read-only tools: the act-only mutating tools
 
 from __future__ import annotations
 
+import os
 import sys
 from unittest.mock import patch
 
+import pytest
 from typer.testing import CliRunner
 
 from magi_agent.cli.tool_runtime import build_cli_adk_tools
 from magi_agent.cli.wiring import build_headless_runtime, _build_first_party_adk_tools
+
+
+# ---------------------------------------------------------------------------
+# Hermetic provider resolution (xdist ``--dist loadfile`` isolation)
+# ---------------------------------------------------------------------------
+#
+# The CLI-level tests below assert that ``_build_first_party_adk_tools`` (the
+# real tool-build path) is reached when the runner is model-backed. Reaching it
+# requires ``resolve_provider_config`` to return a non-``None`` config so the
+# real ADK runner is built instead of the model-free stub.
+#
+# ``resolve_provider_config`` reads the *process* ``os.environ`` (and, via
+# ``MAGI_CONFIG``, a ``config.toml``) when no explicit ``env`` is injected. A
+# sibling test file co-scheduled on the same xdist worker that leaks (a) a
+# ``MAGI_PROVIDER``/``MAGI_MODEL`` naming a keyless provider, or (b) a
+# ``MAGI_CONFIG`` pointing at a ``config.toml`` whose ``[model] provider`` is a
+# keyless provider, forces resolution down the early ``None`` path. The default
+# runner then becomes the stub, ``_build_first_party_adk_tools`` is never
+# called, and the ``captured`` spy dict stays ``{}`` (the observed failure:
+# ``AssertionError: captured={}``).
+#
+# ``monkeypatch``/``CliRunner.invoke(env=...)`` do NOT undo those leaks: monkey-
+# patch only restores keys the *test* set, and ``invoke``'s ``env`` MERGES into
+# ``os.environ`` (a leaked explicit-provider signal still wins over the injected
+# ``ANTHROPIC_API_KEY``). This autouse fixture snapshots + restores the whole
+# ``os.environ`` for every test in this module and neutralizes the specific
+# provider-resolution inputs, so the injected key is the sole provider signal
+# regardless of which sibling ran first on the worker. The invariants under test
+# (mode threading) are unchanged; only the ambient provider-resolution path is
+# made deterministic.
+@pytest.fixture(autouse=True)
+def _hermetic_provider_resolution() -> "object":
+    saved = dict(os.environ)
+    # Clear the explicit-provider inputs so the injected ``ANTHROPIC_API_KEY``
+    # is the only provider signal (config's default provider can't leak in).
+    for key in ("MAGI_PROVIDER", "MAGI_MODEL"):
+        os.environ.pop(key, None)
+    # Point ``MAGI_CONFIG`` at a guaranteed-absent path so a leaked
+    # ``config.toml`` (real ``~/.magi/config.toml`` or a sibling's temp file
+    # naming a keyless provider) cannot flip resolution to the stub. A missing
+    # file makes ``_load_config_file`` return ``{}`` → env-only resolution.
+    os.environ["MAGI_CONFIG"] = os.path.join(
+        os.sep, "nonexistent-magi-config-plan-mode", "config.toml"
+    )
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
 
 _MUTATING = {"FileWrite", "FileEdit", "PatchApply", "Bash"}
 _FORBIDDEN_PLAN_TOOLHOST_TOOLS = {
@@ -118,6 +169,14 @@ def test_headless_plan_mode_does_not_attach_composio(monkeypatch, tmp_path) -> N
 def test_cli_mode_plan_reaches_tool_build(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
     monkeypatch.setenv("MAGI_CLI_SESSION_DIR", str(tmp_path))
+    # Hermetic provider resolution: a sibling test that leaks a
+    # ``MAGI_PROVIDER``/``MAGI_MODEL`` naming a keyless provider would force
+    # ``resolve_provider_config`` down the early ``None`` path, so the default
+    # runner is a stub and ``_build_first_party_adk_tools`` is never reached
+    # (captured stays ``{}``). Clear them so the injected ``ANTHROPIC_API_KEY``
+    # is the sole provider signal, making the spy fire regardless of worker.
+    monkeypatch.delenv("MAGI_PROVIDER", raising=False)
+    monkeypatch.delenv("MAGI_MODEL", raising=False)
 
     captured: dict[str, object] = {}
 
@@ -153,6 +212,14 @@ def test_cli_mode_plan_reaches_tool_build(monkeypatch, tmp_path) -> None:
 def test_cli_default_mode_is_act(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
     monkeypatch.setenv("MAGI_CLI_SESSION_DIR", str(tmp_path))
+    # Hermetic provider resolution: a sibling test that leaks a
+    # ``MAGI_PROVIDER``/``MAGI_MODEL`` naming a keyless provider would force
+    # ``resolve_provider_config`` down the early ``None`` path, so the default
+    # runner is a stub and ``_build_first_party_adk_tools`` is never reached
+    # (captured stays ``{}``). Clear them so the injected ``ANTHROPIC_API_KEY``
+    # is the sole provider signal, making the spy fire regardless of worker.
+    monkeypatch.delenv("MAGI_PROVIDER", raising=False)
+    monkeypatch.delenv("MAGI_MODEL", raising=False)
 
     captured: dict[str, object] = {}
 

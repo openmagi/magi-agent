@@ -36,7 +36,12 @@ jobs:
         env:
           # Hermetic: never read a developer/CI host ~/.magi/config.toml
           MAGI_CONFIG: ${{ runner.temp }}/magi-ci-config.toml
-        run: uv run --no-sync pytest -q
+        # Parallelised with pytest-xdist. ``--dist loadfile`` keeps every test in
+        # a file on the SAME worker, preserving module-level state and intra-file
+        # ordering (only cross-file isolation is parallelised, which pytest
+        # already assumes), so the suite stays safe without a per-test rewrite.
+        # This cuts the grown default-ON suite from ~45 min to well under the cap.
+        run: uv run --no-sync pytest -q -n auto --dist loadfile
 
   ws1-durable-on-path:
     # WS1 PR1e: mandatory ON-path job (flag-promotion rule; "OFF is

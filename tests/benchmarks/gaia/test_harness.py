@@ -2,11 +2,35 @@ from __future__ import annotations
 
 from typing import AsyncGenerator
 
+import pytest
 from google.adk.models import BaseLlm, LlmResponse
 from google.genai import types
 
 from benchmarks.gaia.dataset import GaiaQuestion
 from benchmarks.gaia.harness import run_gaia_question
+
+
+@pytest.fixture(autouse=True)
+def _isolate_memory_write_promotion_env(monkeypatch) -> None:
+    """Clear the memory-write "live" promotion env vars for every test here.
+
+    These tests root the agent at a ``.../workspace`` directory, which the
+    read-only memory guard's production-path regex intentionally rejects. When
+    a sibling test leaks ``MAGI_MEMORY_LOCAL_DEV`` +
+    ``MAGI_MEMORY_WRITE_READINESS_ENABLED`` + ``MAGI_MEMORY_WRITE_ENABLED`` into
+    ``os.environ`` (un-restored), the runner promotes the memory-write stack to
+    "live" and builds a ``LocalFileMemoryProvider`` on that path, raising
+    ``UnsafeMemoryPathError`` before the harness assertions run (test-isolation
+    failure under xdist). Deleting them keeps these harness tests hermetic
+    regardless of worker or order without weakening the guard itself.
+    """
+    for var in (
+        "MAGI_MEMORY_LOCAL_DEV",
+        "MAGI_MEMORY_WRITE_READINESS_ENABLED",
+        "MAGI_MEMORY_WRITE_ENABLED",
+        "MAGI_MEMORY_ALLOW_PRODUCTION_WORKSPACE",
+    ):
+        monkeypatch.delenv(var, raising=False)
 
 
 class _ScriptedLlm(BaseLlm):
