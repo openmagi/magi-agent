@@ -255,3 +255,46 @@ def test_helper_raise_returns_empty(
     assert coding_context_block(
         workspace_root=workspace, env={"MAGI_CODING_CONTEXT_ENABLED": "1"}
     ) == ""
+
+
+# ---------- regression: the workspace walk must be hard-bounded ----------
+# A bug where ``_directory_stats`` did ``sum(1 for _ in _walk_files(child))`` with
+# no cap made ``build_headless_runtime(cwd=<big dir>)`` enumerate the whole tree
+# (millions of syscalls), hanging runtime construction for minutes. The walk now
+# stops at a total entry budget and a depth ceiling.
+
+def test_walk_files_respects_entry_budget(tmp_path: Path) -> None:
+    from magi_agent.runtime.coding_context import _walk_files
+
+    for i in range(50):
+        (tmp_path / f"f{i}.txt").write_text("x")
+    budget = [10]
+    yielded = list(_walk_files(tmp_path, budget=budget))
+    assert len(yielded) <= 10, f"budget not honoured: {len(yielded)} files yielded"
+
+
+def test_walk_files_respects_depth_ceiling(tmp_path: Path) -> None:
+    from magi_agent.runtime.coding_context import _MAX_SCAN_DEPTH, _walk_files
+
+    deep = tmp_path
+    for i in range(_MAX_SCAN_DEPTH + 4):
+        deep = deep / f"d{i}"
+    deep.mkdir(parents=True)
+    (deep / "buried.txt").write_text("x")  # below the depth ceiling
+    (tmp_path / "top.txt").write_text("x")  # at the top, must be found
+    found = {p.name for p in _walk_files(tmp_path, budget=[10_000])}
+    assert "top.txt" in found
+    assert "buried.txt" not in found, "walk descended past the depth ceiling"
+
+
+def test_directory_stats_is_bounded_on_large_tree(tmp_path: Path) -> None:
+    # A directory with far more files than the scan budget must still return
+    # promptly with a capped count rather than enumerating everything.
+    from magi_agent.runtime.coding_context import _MAX_SCAN_ENTRIES, _directory_stats
+
+    big = tmp_path / "src"
+    big.mkdir()
+    for i in range(_MAX_SCAN_ENTRIES + 500):
+        (big / f"m{i}.py").write_text("x")
+    stats = dict(_directory_stats(tmp_path))
+    assert stats.get("src/", 0) <= _MAX_SCAN_ENTRIES
