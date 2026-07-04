@@ -589,7 +589,12 @@ def test_runner_lifecycle_preview_digests_private_marker_key_variants() -> None:
     assert "account id customer-function-response" not in response_variant_preview
 
 
-def test_adk_text_projection_drops_thought_parts_and_redacts_private_markers() -> None:
+def test_adk_text_projection_drops_thought_parts_and_redacts_private_markers(
+    monkeypatch,
+) -> None:
+    # Dropping thought parts is the MAGI_STREAM_THINKING=OFF path; that flag is now
+    # profile-default-ON (thought pass-through), so pin it OFF for this assertion.
+    monkeypatch.setenv("MAGI_STREAM_THINKING", "0")
     bridge = OpenMagiEventBridge()
     thought_event = Event(
         id="event-thought-text",

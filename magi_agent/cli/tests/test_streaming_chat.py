@@ -33,8 +33,11 @@ def test_sse_frames_for_events_and_terminal():
 # Additional focused test (a): suppressed event (thinking_delta) is skipped
 # ---------------------------------------------------------------------------
 
-def test_thinking_delta_events_are_skipped():
+def test_thinking_delta_events_are_skipped(monkeypatch):
     """Events whose sanitized payload is None (e.g. thinking_delta) must be dropped."""
+    # Drop behaviour is the MAGI_STREAM_THINKING=OFF path; the flag is now
+    # profile-default-ON (pass-through), so pin it OFF for this drop assertion.
+    monkeypatch.setenv("MAGI_STREAM_THINKING", "0")
     events = [
         RuntimeEvent(
             type="token",

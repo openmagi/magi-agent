@@ -427,6 +427,10 @@ def test_sanitizer_redacts_private_text_in_emitted_payload() -> None:
 
 
 def test_sanitizer_drops_thinking_events(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The drop-thinking behaviour is the MAGI_STREAM_THINKING=OFF path; that flag
+    # is now profile-default-ON (thinking pass-through), so pin it OFF here. The
+    # ON path has its own test (test_sanitizer_passes_thinking_when_flag_on).
+    monkeypatch.setenv("MAGI_STREAM_THINKING", "0")
     # Inject a thinking_delta projection; the sanitizer returns None => skipped.
     # We wrap the REAL bridge (via _lazy_engine_deps) so the sanitizer is still
     # the real one being exercised.
