@@ -1,6 +1,7 @@
 "use client";
 
 import type { ControlPlaneBehaviorItem } from "@/lib/customize-api";
+import { Switch } from "@/components/ui/_ds";
 
 interface BehaviorsPanelProps {
   behaviors: ControlPlaneBehaviorItem[];
@@ -11,38 +12,6 @@ interface BehaviorsPanelProps {
   pendingIds?: Set<string>;
   /** Transient error from the most recent failed PATCH. */
   error?: string | null;
-}
-
-function Toggle({
-  checked,
-  onChange,
-  label,
-  disabled,
-}: {
-  checked: boolean;
-  onChange: (next: boolean) => void;
-  label: string;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
-        checked ? "bg-primary" : "bg-black/15"
-      }`}
-    >
-      <span
-        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-200 ${
-          checked ? "translate-x-6" : "translate-x-1"
-        }`}
-      />
-    </button>
-  );
 }
 
 /**
@@ -90,10 +59,11 @@ export function BehaviorsPanel({
                     <p className="mt-1 text-xs leading-relaxed text-secondary">{b.description}</p>
                   ) : null}
                 </div>
-                <Toggle
+                <Switch
                   checked={enabled}
-                  onChange={(next) => onToggle(b.id, next)}
-                  label={`Toggle ${b.label}`}
+                  onToggle={async (next) => onToggle(b.id, next)}
+                  labelOn={`Disable ${b.label}`}
+                  labelOff={`Enable ${b.label}`}
                   disabled={isPending}
                 />
               </div>
