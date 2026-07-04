@@ -183,7 +183,10 @@ def test_public_events_keep_private_payload_attempts_in_dropped_fields_only() ->
         assert path[-1] in PRIVATE_ONLY_KEYS, ".".join(path)
 
 
-def test_malicious_private_payload_attempts_are_explicitly_drop_only() -> None:
+def test_malicious_private_payload_attempts_are_explicitly_drop_only(monkeypatch) -> None:
+    # The drop-only projection is the MAGI_STREAM_THINKING=OFF path; that flag is
+    # now profile-default-ON (thought/thinking pass-through), so pin it OFF here.
+    monkeypatch.setenv("MAGI_STREAM_THINKING", "0")
     fixture = _load_fixture()
     attempts = fixture["maliciousPrivatePayloadAttempts"]
 
