@@ -41,4 +41,16 @@ describe("BASE_MODEL_OPTIONS label fidelity", () => {
       /value: "gemini_3_5_flash",\s*label: "Gemini 3\.5 Flash \(Google\)"/,
     );
   });
+
+  it("offers the newer Fireworks models (kimi-k2p7-code, glm-5p2)", () => {
+    // Added to the catalog in #1255 but the chat picker is a hand-maintained
+    // slug list — without these entries the models only exist in the Settings
+    // provider presets, not the chat composer.
+    expect(source).toMatch(
+      /value: "kimi_k2_7_code",\s*label: "Kimi K2\.7 Code \(Fireworks AI\)"/,
+    );
+    expect(source).toMatch(
+      /value: "glm_5_2",\s*label: "GLM 5\.2 \(Fireworks AI\)"/,
+    );
+  });
 });

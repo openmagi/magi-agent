@@ -19,6 +19,8 @@ export const BASE_MODEL_OPTIONS = [
   { value: "gpt_5_5", label: "GPT-5.5" },
   { value: "gpt_5_5_pro", label: "GPT-5.5 Pro" },
   { value: "kimi_k2_5", label: "Kimi K2.6 (Fireworks AI)" },
+  { value: "kimi_k2_7_code", label: "Kimi K2.7 Code (Fireworks AI)" },
+  { value: "glm_5_2", label: "GLM 5.2 (Fireworks AI)" },
   { value: "minimax_m2_7", label: "MiniMax M2.7 (Fireworks AI)" },
   { value: "gemini_3_5_flash", label: "Gemini 3.5 Flash (Google)" },
   { value: "gemini_3_1_flash_lite", label: "Gemini 3.1 Flash Lite (Google)" },
