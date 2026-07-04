@@ -1121,7 +1121,7 @@ function TelegramEasyWizard({
     <div className="space-y-2">
       <p className="text-[10px] text-secondary/80">
         We log in to your Telegram account to create the bot via @BotFather. Your
-        login session is discarded right after — only the bot token is kept.
+        login session is discarded right after; only the bot token is kept.
       </p>
 
       {step === "phone" && (
@@ -1249,7 +1249,7 @@ async function pollUntilActive(
       const status = await composioConnectStatus(agentFetch, connectionId);
       if (status.status?.toUpperCase() === "ACTIVE") return;
     } catch {
-      // transient — keep polling
+      // transient, keep polling
     }
   }
 }
