@@ -50,6 +50,9 @@
                "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic",
                -apple-system, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  /* The Ledger display voice. Consumers may override to inject an
+     app-local next/font var ahead of the web fonts (see apps/web). */
+  --font-display: "Cabinet Grotesk", "Space Grotesk", system-ui, sans-serif;
 
   --text-xs:   11px; --text-xs--line-height:   16px;
   --text-sm:   13px; --text-sm--line-height:   20px;

@@ -1,6 +1,6 @@
 {
   "name": "@openmagi/design-system",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "bundle": "ui",
   "description": "Canonical Open Magi design tokens + primitives. Edit here, bump version, run scripts/sync-design-system.sh to propagate into clawy and magi-cp-dashboard.",
   "consumers": [
