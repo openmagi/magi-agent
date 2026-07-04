@@ -75,6 +75,14 @@ describe("channel model selection", () => {
       modelSelection: "gemini_3_1_flash_lite",
       routerType: "standard",
     })).toBe("google/gemini-3.1-flash-lite-preview");
+    expect(channelModelSelectionToRuntimeModel({
+      modelSelection: "kimi_k2_7_code",
+      routerType: "standard",
+    })).toBe("fireworks/kimi-k2p7-code");
+    expect(channelModelSelectionToRuntimeModel({
+      modelSelection: "glm_5_2",
+      routerType: "standard",
+    })).toBe("fireworks/glm-5p2");
   });
 
   it("returns an empty string for the unresolved sentinel under oss-local context", () => {

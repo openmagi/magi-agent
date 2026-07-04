@@ -49,6 +49,8 @@ const MODEL_SELECTION_TO_RUNTIME_MODEL: Record<string, string> = {
   gpt_5_5_pro: "openai/gpt-5.5-pro",
   codex: "openai-codex/gpt-5.5",
   kimi_k2_5: "fireworks/kimi-k2p6",
+  kimi_k2_7_code: "fireworks/kimi-k2p7-code",
+  glm_5_2: "fireworks/glm-5p2",
   minimax_m2_5: "fireworks/minimax-m2p7",
   minimax_m2_7: "fireworks/minimax-m2p7",
   gemini_3_5_flash: "google/gemini-3.5-flash",
