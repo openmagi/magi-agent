@@ -32,6 +32,16 @@ from magi_agent.runtime.child_runner_live import (
     RealLocalChildRunner,
 )
 
+# These tests exercise the LEGACY child turn-collection path. The governed-turn
+# primitive (MAGI_SUBAGENT_GOVERNED_TURN_ENABLED) is now profile-default-ON,
+# which ignores the injected ``runner=`` and returns the "no live model
+# provider is configured" fallback (status=completed) — masking the
+# empty-response failure these tests assert. Pin the flag OFF so the legacy
+# path (which honors the injected runner) is exercised; the governed path has
+# its own coverage (test_child_runner_governed_empty_response,
+# test_child_runner_collector_status_guard).
+_GOVERNED_OFF_ENV = {"MAGI_SUBAGENT_GOVERNED_TURN_ENABLED": "0"}
+
 _PROVIDER_ENV = (
     "ANTHROPIC_API_KEY",
     "OPENAI_API_KEY",
@@ -131,6 +141,7 @@ class _ThoughtOnlyRunner:
 @pytest.mark.asyncio
 async def test_zero_events_surfaces_as_failed_with_empty_response_reason() -> None:
     child = RealLocalChildRunner(
+        env=_GOVERNED_OFF_ENV,
         provider_config=_provider_config(),
         runner=_EmptyStreamRunner(),
     )
@@ -152,6 +163,7 @@ async def test_thought_only_events_also_fail_with_empty_response() -> None:
     # text). The current text-only collector skips them — same end result as
     # zero events — so this case must also surface as failed.
     child = RealLocalChildRunner(
+        env=_GOVERNED_OFF_ENV,
         provider_config=_provider_config(),
         runner=_ThoughtOnlyRunner(),
     )
@@ -163,6 +175,7 @@ async def test_thought_only_events_also_fail_with_empty_response() -> None:
 async def test_real_text_events_still_succeed() -> None:
     # Regression guard: a child that produces actual text must still complete.
     child = RealLocalChildRunner(
+        env=_GOVERNED_OFF_ENV,
         provider_config=_provider_config(),
         runner=_TextOnlyRunner(),
     )

@@ -117,7 +117,7 @@ class TestDefaultOffZeroBehaviorChange:
         # (a) exact call as today: main provider model + key, same caps.
         assert len(captured) == 1
         call = captured[0]
-        assert call["model"] == "anthropic/claude-sonnet-4-6"
+        assert call["model"] == "anthropic/claude-sonnet-5"
         assert call["api_key"] == _FAKE_ANTHROPIC_KEY
         assert call["timeout"] == 60
         assert call["max_tokens"] == 2048
@@ -263,7 +263,7 @@ class TestFailSoftFallback:
         assert result.status == "ok"
         assert len(calls) == 2
         assert calls[0]["model"] == "gemini/gemini-3.5-pro"
-        assert calls[1]["model"] == "anthropic/claude-sonnet-4-6"
+        assert calls[1]["model"] == "anthropic/claude-sonnet-5"
         assert isinstance(result.output, dict)
         assert result.output["description"] == "main path served"
         assert isinstance(result.metadata, dict)
@@ -315,7 +315,7 @@ class TestRouteSkipped:
 
         assert result.status == "ok"
         assert len(captured) == 1
-        assert captured[0]["model"] == "anthropic/claude-sonnet-4-6"
+        assert captured[0]["model"] == "anthropic/claude-sonnet-5"
         assert isinstance(result.metadata, dict)
         assert result.metadata["visionRouteSkipped"] == "vision_provider_unsupported"
 
@@ -334,7 +334,7 @@ class TestRouteSkipped:
 
         assert result.status == "ok"
         assert len(captured) == 1
-        assert captured[0]["model"] == "anthropic/claude-sonnet-4-6"
+        assert captured[0]["model"] == "anthropic/claude-sonnet-5"
         assert isinstance(result.metadata, dict)
         assert result.metadata["visionRouteSkipped"] == "no_api_key"
 
@@ -353,7 +353,7 @@ class TestRouteSkipped:
 
         assert result.status == "ok"
         assert len(captured) == 1
-        assert captured[0]["model"] == "anthropic/claude-sonnet-4-6"
+        assert captured[0]["model"] == "anthropic/claude-sonnet-5"
         assert captured[0]["api_key"] is None
         assert isinstance(result.metadata, dict)
         assert result.metadata["visionRouteSkipped"] == "no_main_provider"
@@ -374,7 +374,7 @@ class TestRouteSkipped:
 
         assert result.status == "ok"
         assert len(captured) == 1
-        assert captured[0]["model"] == "anthropic/claude-sonnet-4-6"
+        assert captured[0]["model"] == "anthropic/claude-sonnet-5"
         assert isinstance(result.metadata, dict)
         assert not any(key.startswith("vision") for key in result.metadata)
 

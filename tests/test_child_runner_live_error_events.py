@@ -38,6 +38,15 @@ from magi_agent.runtime.child_runner_live import (
     RealLocalChildRunner,
 )
 
+# These tests exercise the LEGACY child turn-collection path. The governed-turn
+# primitive (MAGI_SUBAGENT_GOVERNED_TURN_ENABLED) is now profile-default-ON,
+# which ignores the injected ``runner=`` and returns the "no live model
+# provider is configured" fallback (status=completed) — masking the
+# provider-error failure these tests assert. Pin the flag OFF so the legacy
+# path (which honors the injected runner) is exercised; the governed path has
+# its own coverage.
+_GOVERNED_OFF_ENV = {"MAGI_SUBAGENT_GOVERNED_TURN_ENABLED": "0"}
+
 _PROVIDER_ENV = (
     "ANTHROPIC_API_KEY",
     "OPENAI_API_KEY",
@@ -144,6 +153,7 @@ async def test_error_event_with_no_text_surfaces_as_failed() -> None:
         error_message="Anthropic API rate limit exceeded",
     )
     child = RealLocalChildRunner(
+        env=_GOVERNED_OFF_ENV,
         provider_config=_provider_config(),
         runner=runner,
     )
@@ -166,6 +176,7 @@ async def test_error_event_with_only_error_message_surfaces_as_failed() -> None:
         error_code="upstream_failure", error_message="model_invocation_failed"
     )
     child = RealLocalChildRunner(
+        env=_GOVERNED_OFF_ENV,
         provider_config=_provider_config(),
         runner=runner,
     )
@@ -179,6 +190,7 @@ async def test_benign_finish_signal_in_error_code_is_not_a_failure() -> None:
     # the error_code field on the last event. That is the normal envelope, not
     # a failure — the child must complete with the collected text.
     child = RealLocalChildRunner(
+        env=_GOVERNED_OFF_ENV,
         provider_config=_provider_config(),
         runner=_BenignFinishRunner(),
     )

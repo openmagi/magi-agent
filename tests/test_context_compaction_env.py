@@ -13,8 +13,13 @@ from magi_agent.config.env import (
 
 def test_default_local_profile_on() -> None:
     cfg = parse_context_compaction_env({})
+    # MAGI_CONTEXT_PROACTIVE_RECOVERY_ENABLED is now profile-default-ON
+    # (no-default-off), so the default local profile carries it True.
     assert cfg == ContextCompactionEnv(
-        enabled=True, token_threshold=24_000, tail_events=16
+        enabled=True,
+        token_threshold=24_000,
+        tail_events=16,
+        proactive_recovery_enabled=True,
     )
 
 

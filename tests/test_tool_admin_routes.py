@@ -65,6 +65,7 @@ EXPECTED_NATIVE_TOOL_NAMES = {
     "MissionLedger",
     "NotifyUser",
     "PackageDependencyResolve",
+    "PersistentPython",
     "ProjectVerificationPlanner",
     "RepoMap",
     "RepoTaskState",
