@@ -146,11 +146,20 @@ def test_adk_bridge_now_covers_quoted_and_session_shapes() -> None:
 
 
 def test_kernel_import_pulls_no_transport_or_network() -> None:
+    # Measure the *delta* introduced by importing the kernel, not the absolute
+    # module set. Some interpreter/venv startups (e.g. a setuptools ``.pth``
+    # shim on CI) pre-load ``urllib`` before any project code runs; that is not
+    # something the kernel import "pulls" in, so it must not fail this purity
+    # check. We snapshot ``sys.modules`` first, import the kernel, then inspect
+    # only what the import added.
     code = (
-        "import sys, magi_agent.ops.safety\n"
-        "bad = [m for m in sys.modules if m.startswith('magi_agent.transport')"
+        "import sys\n"
+        "baseline = set(sys.modules)\n"
+        "import magi_agent.ops.safety\n"
+        "added = set(sys.modules) - baseline\n"
+        "bad = [m for m in added if m.startswith('magi_agent.transport')"
         " or m in ('urllib', 'requests', 'httpx', 'socket')]\n"
-        "print(bad)\n"
+        "print(sorted(bad))\n"
     )
     result = subprocess.run(
         [sys.executable, "-c", code],
