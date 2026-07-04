@@ -11,10 +11,19 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-# Reuse the existing decision type — do NOT redefine.
-from magi_agent.adk_bridge.control_plane import ToolDecision
+# Reuse the existing decision type — do NOT redefine. Imported lazily at the two
+# instantiation sites (and under TYPE_CHECKING for annotations) because
+# ``adk_bridge.control_plane`` top-level-imports ``google.adk.plugins.base_plugin``
+# (its ``ControlPlanePlugin`` subclasses the ADK ``BasePlugin``). A top-level
+# import here dragged the entire ``google.adk`` runtime into default runtime
+# construction (pack loading imports this module), tripping the
+# import-boundary probe. ``ToolDecision`` itself is a light frozen dataclass; the
+# lazy import keeps the type identical while deferring the heavy ADK import to the
+# rare control-plane decision path.
+if TYPE_CHECKING:
+    from magi_agent.adk_bridge.control_plane import ToolDecision
 
 
 class PrimitiveType(str, Enum):
@@ -208,6 +217,8 @@ class BeforeToolCtx:
         self.evidence = evidence
         if capabilities is not None:  # hosted may restrict; local passes full set
             self.capabilities = capabilities
+        from magi_agent.adk_bridge.control_plane import ToolDecision  # noqa: PLC0415
+
         self._decision = ToolDecision(action="allow")
 
     def decide(self, action: Literal["allow", "deny", "rewrite"], *,
@@ -220,6 +231,8 @@ class BeforeToolCtx:
             _require(self.capabilities, Capability.REWRITE_TOOL_ARGS)
         if action == "deny" and deny_result is None:
             deny_result = {"error": reason or "denied by control-plane impl"}
+        from magi_agent.adk_bridge.control_plane import ToolDecision  # noqa: PLC0415
+
         self._decision = ToolDecision(
             action=action, deny_result=deny_result, updated_args=updated_args
         )
