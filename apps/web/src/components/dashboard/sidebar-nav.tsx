@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Activity,
+  BookOpen,
   Brain,
   Gauge,
   GraduationCap,
@@ -46,6 +47,7 @@ export function SidebarNav({ onNavigate, className }: SidebarNavProps) {
     { href: `${botPrefix}/learning`, label: "Learning", icon: GraduationCap },
     { href: `${botPrefix}/skills`, label: t.dashboard.skills, icon: Sparkles },
     { href: `${botPrefix}/memory`, label: t.dashboard.memory, icon: Brain },
+    { href: `${botPrefix}/knowledge`, label: t.dashboard.knowledge, icon: BookOpen },
   ];
 
   function isActive(item: { href: string; prefix?: string }): boolean {
