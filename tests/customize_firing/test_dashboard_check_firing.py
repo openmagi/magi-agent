@@ -53,10 +53,20 @@ class _CollectingCollector:
         self.calls: list[dict[str, Any]] = []
 
     def append_evidence_record_for_turn(
-        self, *, session_id: str, turn_id: str, record: object
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        record: object,
+        producing_rule_id: str = "",
     ) -> None:
         self.calls.append(
-            {"session_id": session_id, "turn_id": turn_id, "record": record}
+            {
+                "session_id": session_id,
+                "turn_id": turn_id,
+                "record": record,
+                "producing_rule_id": producing_rule_id,
+            }
         )
 
 

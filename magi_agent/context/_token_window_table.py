@@ -18,8 +18,6 @@ collision raises loudly at import.
 
 from __future__ import annotations
 
-from magi_agent.models.catalog import ModelCatalog
-
 # Legacy / pseudo model ids the catalog does not (yet) carry a record for.
 # These must stay disjoint from the catalog-derived keys; a collision means a
 # record was added to the catalog and the overlay entry is now redundant.
@@ -46,6 +44,10 @@ def _build_known_token_limits() -> dict[str, int]:
     different window values raises ``ValueError`` so catalog-internal drift is
     loud rather than silently resolved by iteration order.
     """
+    # Lazy import: keeps ``context`` off a top-level edge into ``models`` so
+    # ``models`` stays out of the cross-package import cycle (layering ratchet).
+    from magi_agent.models.catalog import ModelCatalog  # noqa: PLC0415
+
     catalog = ModelCatalog.builtin()
     table: dict[str, int] = {}
     for record in catalog.all_records():
