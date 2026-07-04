@@ -269,9 +269,9 @@ def test_flag_off_uses_gate5b4c3_boundary(monkeypatch, tmp_path: Any) -> None:
         collect_called["count"] += 1
         return _make_boundary_result()
 
-    monkeypatch.setattr("magi_agent.transport.chat_routes.run_gate5b4c3_live_runner_boundary_async", fake_boundary)
-    monkeypatch.setattr("magi_agent.transport.chat_routes.run_governed_turn", fake_governed_turn)
-    monkeypatch.setattr("magi_agent.transport.chat_routes.collect_engine_to_boundary_result", fake_collect)
+    monkeypatch.setattr("magi_agent.transport.gate5b_serving.run_gate5b4c3_live_runner_boundary_async", fake_boundary)
+    monkeypatch.setattr("magi_agent.transport.gate5b_serving.run_governed_turn", fake_governed_turn)
+    monkeypatch.setattr("magi_agent.transport.gate5b_serving.collect_engine_to_boundary_result", fake_collect)
 
     runtime = _make_canary_runtime(tmp_path)
     response = TestClient(create_app(runtime)).post(
@@ -318,9 +318,9 @@ def test_flag_on_uses_governed_turn(monkeypatch, tmp_path: Any) -> None:
         collect_called["count"] += 1
         return _make_boundary_result(output_text="governed answer")
 
-    monkeypatch.setattr("magi_agent.transport.chat_routes.run_gate5b4c3_live_runner_boundary_async", fail_boundary)
-    monkeypatch.setattr("magi_agent.transport.chat_routes.run_governed_turn", fake_governed_turn)
-    monkeypatch.setattr("magi_agent.transport.chat_routes.collect_engine_to_boundary_result", fake_collect)
+    monkeypatch.setattr("magi_agent.transport.gate5b_serving.run_gate5b4c3_live_runner_boundary_async", fail_boundary)
+    monkeypatch.setattr("magi_agent.transport.gate5b_serving.run_governed_turn", fake_governed_turn)
+    monkeypatch.setattr("magi_agent.transport.gate5b_serving.collect_engine_to_boundary_result", fake_collect)
 
     runtime = _make_canary_runtime(tmp_path)
     response = TestClient(create_app(runtime)).post(
@@ -362,9 +362,9 @@ def test_flag_off_and_on_produce_same_response_top_level_shape(monkeypatch) -> N
     async def fake_collect(*args: object, **kwargs: object) -> Gate5B4C3LiveRunnerBoundaryResult:
         return _make_boundary_result(output_text="shape test answer ON")
 
-    monkeypatch.setattr("magi_agent.transport.chat_routes.run_gate5b4c3_live_runner_boundary_async", fake_boundary)
-    monkeypatch.setattr("magi_agent.transport.chat_routes.run_governed_turn", fake_governed_turn)
-    monkeypatch.setattr("magi_agent.transport.chat_routes.collect_engine_to_boundary_result", fake_collect)
+    monkeypatch.setattr("magi_agent.transport.gate5b_serving.run_gate5b4c3_live_runner_boundary_async", fake_boundary)
+    monkeypatch.setattr("magi_agent.transport.gate5b_serving.run_governed_turn", fake_governed_turn)
+    monkeypatch.setattr("magi_agent.transport.gate5b_serving.collect_engine_to_boundary_result", fake_collect)
 
     # --- Flag OFF ---
     monkeypatch.delenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", raising=False)
