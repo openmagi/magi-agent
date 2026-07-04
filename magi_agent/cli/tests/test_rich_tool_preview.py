@@ -14,10 +14,9 @@ from magi_agent.adk_bridge import event_adapter as ea
 
 def _preview(args: dict, tool: str, *, enabled: bool) -> str:
     env = {**os.environ}
-    if enabled:
-        env["MAGI_RICH_TOOL_PREVIEW"] = "1"
-    else:
-        env.pop("MAGI_RICH_TOOL_PREVIEW", None)
+    # MAGI_RICH_TOOL_PREVIEW is profile-aware default-ON (_pb), so "off" must be
+    # an explicit "0" — unsetting it now resolves ON in the full runtime profile.
+    env["MAGI_RICH_TOOL_PREVIEW"] = "1" if enabled else "0"
     with mock.patch.dict(os.environ, env, clear=True):
         return ea._public_preview(args, safe_keys=ea._rich_preview_safe_keys(tool))
 
