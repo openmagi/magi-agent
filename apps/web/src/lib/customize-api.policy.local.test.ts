@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const src = readFileSync(new URL("./customize-api.ts", import.meta.url), "utf8");
 
-describe("customize-api — conversational policy compile + persist", () => {
+describe("customize-api: conversational policy compile + persist", () => {
   it("exposes compilePolicyInteractive targeting the interactive endpoint", () => {
     expect(src).toContain("export async function compilePolicyInteractive");
     expect(src).toContain("/v1/app/policies/compile/interactive");
