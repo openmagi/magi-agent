@@ -3014,3 +3014,247 @@ def test_stream_frames_bounded_under_token_stream(monkeypatch) -> None:
     # zero sort_keys keying dumps for the 500-token stream (delta frames are
     # never keyed).
     assert calls["sort_keys"] == 0
+
+
+# ---------------------------------------------------------------------------
+# T1: subagent lifecycle emitter on the /v1/chat/stream local-engine branch
+#
+# Root cause: the local-engine branch built the headless runtime WITHOUT an
+# ``agent_event_emitter``, so ``ToolContext.emit_agent_event`` was ``None`` and
+# SpawnAgent's child lifecycle emits no-op'd. The dashboard AGENTS panel then
+# only ever showed the hardcoded "Main" chip on local serve.
+#
+# Fix: the route now builds an emitter closure that wraps each child event dict
+# as a ``RuntimeEvent(type="status", payload=..., turn_id=...)`` and enqueues it
+# on the SAME shared queue the driver drains. The builder signature is extended
+# with ``agent_event_emitter``; dispatch is guarded by ``inspect.signature`` so a
+# legacy 3-arg builder still works.
+# ---------------------------------------------------------------------------
+
+
+def _child_started_event(
+    *,
+    task_id: str = "child-1",
+    turn_id: str = "t-child",
+) -> dict[str, object]:
+    return {
+        "type": "child_started",
+        "taskId": task_id,
+        "childReceiptRef": _sha256(f"receipt:{task_id}").replace("sha256:", "receipt:sha256:"),
+        "parentTurnId": turn_id,
+        "agentName": "researcher",
+        "model": "claude-opus-4-8",
+        "taskTitle": "Survey the codebase",
+        "detail": "spawning",
+    }
+
+
+def test_stream_local_engine_wires_agent_event_emitter_child_started(monkeypatch) -> None:
+    """A child_started emitted by the engine appears on /v1/chat/stream as an
+    ``event: agent`` frame with agentName/model/taskTitle/taskId/childReceiptRef
+    intact (sanitizer passthrough on this surface), ordered before turn_result."""
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+
+    captured: dict[str, object] = {}
+
+    class FakeEngine:
+        def __init__(self, emitter: object) -> None:
+            self._emitter = emitter
+
+        async def run_turn_stream(self, runtime, turn_input, *, cancel, gate):
+            # The tool boundary (SpawnAgent) would call the emitter from inside
+            # dispatch; simulate that here on the running loop.
+            self._emitter(_child_started_event(turn_id="t-child"))
+            yield _ev("text_delta", delta="post-child text")
+            yield EngineResult(
+                terminal=Terminal.completed,
+                session_id="s-child",
+                turn_id="t-child",
+            )
+
+    def builder(
+        session_id: str,
+        sink: object,
+        model_override: object = None,
+        *,
+        agent_event_emitter: object = None,
+    ) -> tuple[object, object]:
+        captured["emitter"] = agent_event_emitter
+        return FakeEngine(agent_event_emitter), None
+
+    client = TestClient(_make_app(engine_builder=builder))
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={
+            "sessionId": "s-child",
+            "turnId": "t-child",
+            "messages": [{"role": "user", "content": "spawn a subagent"}],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    # The route passed a callable emitter into the builder.
+    assert callable(captured.get("emitter"))
+
+    payloads = _data_lines(response.text)
+    types = [p["type"] for p in payloads]
+    assert "child_started" in types, types
+
+    child = next(p for p in payloads if p["type"] == "child_started")
+    assert child["taskId"] == "child-1"
+    assert child["agentName"] == "researcher"
+    assert child["model"] == "claude-opus-4-8"
+    assert child["taskTitle"] == "Survey the codebase"
+    assert child["childReceiptRef"].startswith("receipt:sha256:")
+
+    # Ordering: child_started before the terminal turn_result.
+    assert types.index("child_started") < types.index("turn_result")
+    assert types[-1] == "turn_result"
+
+
+def test_default_engine_builder_forwards_agent_event_emitter(monkeypatch) -> None:
+    """_default_engine_builder threads a non-None agent_event_emitter into
+    build_headless_runtime (parity with the chat_routes_local coverage)."""
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+
+    captured: dict[str, object] = {}
+
+    class _FakeRt:
+        engine = object()
+        gate = object()
+
+    def _fake_build_headless_runtime(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return _FakeRt()
+
+    import magi_agent.cli.wiring as wiring_module
+
+    monkeypatch.setattr(
+        wiring_module, "build_headless_runtime", _fake_build_headless_runtime
+    )
+
+    app = FastAPI(title="builder-test")
+    runtime = _make_runtime()
+    register_streaming_chat_routes(app, runtime, engine_builder=None)
+
+    def _sentinel_emitter(event: object) -> None:
+        return None
+
+    # Reach the module-private default builder via the same wiring the route
+    # uses: call the route with a stub engine returned from the real default
+    # builder. The default builder is closed over inside register_*; drive it
+    # through a live request so it runs with the real emitter.
+    client = TestClient(app)
+
+    # Patch the running-loop emitter capture: build_headless_runtime is patched
+    # to record kwargs, so any /v1/chat/stream turn that reaches the local
+    # engine branch must forward agent_event_emitter as a callable.
+    class _NoOpEngine:
+        async def run_turn_stream(self, runtime, turn_input, *, cancel, gate):
+            yield EngineResult(
+                terminal=Terminal.completed,
+                session_id="s-b",
+                turn_id="t-b",
+            )
+
+    _FakeRt.engine = _NoOpEngine()
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={
+            "sessionId": "s-b",
+            "turnId": "t-b",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert callable(captured.get("agent_event_emitter"))
+    _ = _sentinel_emitter  # keep reference; documents the emitter contract
+
+
+def test_stream_legacy_three_arg_builder_still_serves(monkeypatch) -> None:
+    """A legacy 3-parameter engine_builder (no agent_event_emitter) still serves
+    a turn without error; it simply gets no emitter."""
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+
+    class FakeEngine:
+        async def run_turn_stream(self, runtime, turn_input, *, cancel, gate):
+            yield _ev("text_delta", delta="legacy builder text")
+            yield EngineResult(
+                terminal=Terminal.completed,
+                session_id="s-legacy",
+                turn_id="t-legacy",
+            )
+
+    def legacy_builder(session_id: str, sink: object, model_override: object = None) -> tuple[object, object]:
+        return FakeEngine(), None
+
+    client = TestClient(_make_app(engine_builder=legacy_builder))
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={
+            "sessionId": "s-legacy",
+            "turnId": "t-legacy",
+            "messages": [{"role": "user", "content": "legacy path"}],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payloads = _data_lines(response.text)
+    assert "legacy builder text" in response.text
+    assert payloads[-1]["type"] == "turn_result"
+    assert payloads[-1]["terminal"] == "completed"
+
+
+def test_stream_emitter_malformed_child_event_does_not_crash(monkeypatch) -> None:
+    """An emitter called with a malformed child event (bad receipt ref) does not
+    crash the turn and yields either a blocked-projection frame or no child frame
+    (sanitizer contract)."""
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+
+    class FakeEngine:
+        def __init__(self, emitter: object) -> None:
+            self._emitter = emitter
+
+        async def run_turn_stream(self, runtime, turn_input, *, cancel, gate):
+            # Missing taskId + bad receipt -> sanitizer returns None (dropped)
+            # or a blocked projection; either way no crash.
+            self._emitter({"type": "child_started", "childReceiptRef": "not-a-receipt"})
+            yield _ev("text_delta", delta="survived malformed emit")
+            yield EngineResult(
+                terminal=Terminal.completed,
+                session_id="s-bad",
+                turn_id="t-bad",
+            )
+
+    def builder(
+        session_id: str,
+        sink: object,
+        model_override: object = None,
+        *,
+        agent_event_emitter: object = None,
+    ) -> tuple[object, object]:
+        return FakeEngine(agent_event_emitter), None
+
+    client = TestClient(_make_app(engine_builder=builder))
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={
+            "sessionId": "s-bad",
+            "turnId": "t-bad",
+            "messages": [{"role": "user", "content": "malformed"}],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert "survived malformed emit" in response.text
+    payloads = _data_lines(response.text)
+    assert payloads[-1]["type"] == "turn_result"
+    assert payloads[-1]["terminal"] == "completed"

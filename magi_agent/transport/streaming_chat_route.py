@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import inspect
 import json
 import os
 import uuid
@@ -555,6 +556,27 @@ def _runtime_event_frame(payload: Mapping[str, object], *, turn_id: str) -> byte
     )
 
 
+def _builder_accepts_agent_event_emitter(builder: object) -> bool:
+    """Return True when *builder* declares an ``agent_event_emitter`` parameter
+    (or accepts arbitrary ``**kwargs``).
+
+    Signature inspection (not TypeError probing) is used so a builder that
+    raises internally is never mistaken for one lacking the parameter. When the
+    signature cannot be read (C callables, some partials), assume the legacy
+    3-argument contract and skip the emitter.
+    """
+    try:
+        signature = inspect.signature(builder)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return False
+    for param in signature.parameters.values():
+        if param.name == "agent_event_emitter":
+            return True
+        if param.kind is inspect.Parameter.VAR_KEYWORD:
+            return True
+    return False
+
+
 def _runtime_scope_digest(value: object) -> str:
     if not isinstance(value, str) or not value:
         return ""
@@ -879,10 +901,24 @@ def register_streaming_chat_routes(
         :func:`~magi_agent.cli.wiring.build_headless_runtime` with
         ``permission_mode="default"`` and ``MAGI_AGENT_WORKSPACE`` or
         ``os.getcwd()`` as ``cwd``.
+
+        The local-engine branch of ``/v1/chat/stream`` calls the builder with an
+        optional keyword-only ``agent_event_emitter`` so SpawnAgent child
+        lifecycle events (``child_started`` / ``child_progress`` /
+        ``child_completed`` / ``child_cancelled`` / ``child_failed``) surface in
+        the dashboard AGENTS panel. A builder that does NOT declare
+        ``agent_event_emitter`` (or ``**kwargs``) is detected via
+        :func:`inspect.signature` and called with the legacy 3 positional args,
+        so pre-existing 3-parameter builders keep working unchanged and simply
+        receive no emitter.
     """
 
     def _default_engine_builder(
-        session_id: str, sink: object, model_override: str | None
+        session_id: str,
+        sink: object,
+        model_override: str | None,
+        *,
+        agent_event_emitter: Callable[..., object] | None = None,
     ) -> tuple[object, object]:
         # NOTE: build_headless_runtime(prompt_sink=...) wires a RulesPermissionGate
         # backed by an EMPTY RulesEngine, so the engine's `updated_input`
@@ -930,6 +966,7 @@ def register_streaming_chat_routes(
             prompt_sink=sink,
             runner_policy_routing_enabled=runner_policy_routing_enabled,
             memory_mode=current_memory_mode(),
+            agent_event_emitter=agent_event_emitter,
         )
         return rt.engine, rt.gate
 
@@ -1027,13 +1064,60 @@ def register_streaming_chat_routes(
 
         queue: asyncio.Queue[object] = asyncio.Queue()
         sink = build_streaming_prompt_sink(queue, turn_id=turn_id)
+
+        # Out-of-band child-lifecycle channel. SpawnAgent (and any tool that
+        # surfaces subagent lifecycle) calls this emitter from inside the tool
+        # dispatch; it wraps the child event dict as a RuntimeEvent and enqueues
+        # it on the SAME shared queue the driver already drains, so the
+        # dashboard AGENTS panel sees child_started / child_progress /
+        # child_completed alongside the engine events. Pre-fix the local-engine
+        # branch never wired this (ToolContext.emit_agent_event was None), which
+        # is why local serve only ever showed the hardcoded "Main" chip. The
+        # emitted event rides the existing sanitizer + framing (frame_for_event
+        # reads only .payload + .turn_id; the payload's own "type" drives
+        # sanitization).
+        emitter_loop = asyncio.get_running_loop()
+
+        def _emit_child_event(event: Mapping[str, object]) -> None:
+            # Never raise across the tool boundary (mirrors _push_agent_event in
+            # chat_routes_local.py): a bad event must not crash a tool call.
+            try:
+                if not isinstance(event, Mapping):
+                    return
+                runtime_event = RuntimeEvent(
+                    type="status",
+                    payload=dict(event),
+                    turn_id=turn_id,
+                )
+                # SpawnAgent dispatch runs on the dispatch event loop, so the
+                # direct put is the expected path. call_soon_threadsafe is a
+                # cheap backstop if a tool ever thread-offloads the emit.
+                try:
+                    running = asyncio.get_running_loop()
+                except RuntimeError:
+                    running = None
+                if running is emitter_loop:
+                    queue.put_nowait(runtime_event)
+                else:
+                    emitter_loop.call_soon_threadsafe(queue.put_nowait, runtime_event)
+            except Exception:  # noqa: BLE001 (emitter must never crash a tool call)
+                return
+
         # The engine build runs synchronously BEFORE the StreamingResponse is
         # created, so a build-time failure must not escape as a bare 500 mid-
         # contract. No SSE bytes have been sent yet, so returning a JSON 500
         # here is safe (the client has not started consuming an event stream).
         try:
             with memory_mode_request_scope(request.headers):
-                engine, gate = builder(session_id, sink, model_override)
+                if _builder_accepts_agent_event_emitter(builder):
+                    engine, gate = builder(
+                        session_id,
+                        sink,
+                        model_override,
+                        agent_event_emitter=_emit_child_event,
+                    )
+                else:
+                    engine, gate = builder(session_id, sink, model_override)
         except Exception:
             return JSONResponse(status_code=500, content={"error": "engine_build_failed"})
         cancel = asyncio.Event()
