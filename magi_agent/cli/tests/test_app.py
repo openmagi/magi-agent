@@ -227,10 +227,13 @@ class TestBuildTuiApp:
     def test_build_tui_app_at_provider_disabled_by_default(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
-        """With MAGI_TUI_FILE_MENTIONS unset, @ stays dead-but-silent (no provider)."""
+        """With MAGI_TUI_FILE_MENTIONS OFF, @ stays dead-but-silent (no provider)."""
         from magi_agent.cli.wiring import build_tui_app
 
-        monkeypatch.delenv("MAGI_TUI_FILE_MENTIONS", raising=False)
+        # MAGI_TUI_FILE_MENTIONS is now profile-default-ON (no-default-off), so a
+        # bare delenv leaves the file-mention provider active. This test covers
+        # the OFF path, so pin the flag explicitly OFF.
+        monkeypatch.setenv("MAGI_TUI_FILE_MENTIONS", "0")
         (tmp_path / "readme.md").write_text("x", encoding="utf-8")
         tui = build_tui_app(
             cwd=tmp_path, session_id="atoff", runner=MagicMock()
@@ -617,7 +620,7 @@ class TestAgentDefaultCommand:
         )
 
         assert result.exit_code == 0, result.output
-        assert "claude-sonnet-4-6" in result.output
+        assert "claude-sonnet-5" in result.output
         assert "not yet fully wired" not in result.output
         assert "claude-sonnet-4-5" not in result.output
 
@@ -631,7 +634,7 @@ class TestAgentDefaultCommand:
         )
 
         assert result.exit_code == 0, result.output
-        assert "claude-sonnet-4-6" in result.output
+        assert "claude-sonnet-5" in result.output
         assert "claude-sonnet-4-5" not in result.output
 
     def test_smart_approve_permission_mode_reaches_headless(

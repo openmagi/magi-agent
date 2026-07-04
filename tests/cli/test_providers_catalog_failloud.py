@@ -43,7 +43,7 @@ def test_catalog_known_default_resolves_without_raising(
     assert cfg is not None
     assert cfg.provider == "anthropic"
     # Default sourced from the catalog; must be the Anthropic flagship sota.
-    assert cfg.model == "claude-sonnet-4-6"
+    assert cfg.model == "claude-sonnet-5"
 
 
 def test_built_in_default_unknown_id_raises(
