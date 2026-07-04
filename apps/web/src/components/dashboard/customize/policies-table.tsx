@@ -313,8 +313,8 @@ function FilterChip({
     >
       <span>{label}</span>
       <span
-        className={`rounded px-1 tabular-nums ${
-          active ? "bg-white/20" : "opacity-60"
+        className={`tabular-nums ${
+          active ? "text-white/70" : "opacity-60"
         }`}
       >
         {count}

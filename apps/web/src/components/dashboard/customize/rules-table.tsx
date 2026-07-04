@@ -441,7 +441,7 @@ function FilterChip({
       }`}
     >
       <span>{label}</span>
-      <span className={`rounded px-1 ${active ? "bg-white/20" : "bg-white/40"}`}>
+      <span className={`tabular-nums ${active ? "text-white/70" : "opacity-60"}`}>
         {count}
       </span>
     </button>
