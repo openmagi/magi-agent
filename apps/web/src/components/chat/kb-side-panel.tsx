@@ -193,6 +193,57 @@ function DownloadIcon(): React.ReactElement {
   );
 }
 
+function WorkspaceDirRow({
+  node,
+  botId,
+  previewId,
+  onPreviewFile,
+}: {
+  node: Extract<WorkspaceFileTreeNode, { type: "directory" }>;
+  botId: string;
+  previewId: string | null;
+  onPreviewFile: (file: WorkspaceFileEntry) => void;
+}): React.ReactElement {
+  const [open, setOpen] = useState(true);
+  const hasChildren = node.children.length > 0;
+  return (
+    <div className="mb-0.5" role="treeitem" aria-expanded={open} aria-selected="false">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-foreground/75 hover:bg-black/[0.03] transition-colors cursor-pointer"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          className={`h-3 w-3 shrink-0 text-secondary/40 transition-transform ${open ? "rotate-90" : ""}`}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 6l6 6-6 6" />
+        </svg>
+        <FolderIcon />
+        <span className="min-w-0 flex-1 truncate text-[11px] font-medium">
+          {node.name}
+        </span>
+        <span className="text-[10px] text-secondary/35">
+          {node.fileCount}
+        </span>
+      </button>
+      {open && hasChildren && (
+        <div className="ml-3 border-l border-black/[0.05] pl-2" role="group">
+          <WorkspaceFileTreeRows
+            nodes={node.children}
+            botId={botId}
+            previewId={previewId}
+            onPreviewFile={onPreviewFile}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function WorkspaceFileTreeRows({
   nodes,
   botId,
@@ -209,27 +260,13 @@ function WorkspaceFileTreeRows({
       {nodes.map((node) => {
         if (node.type === "directory") {
           return (
-            <div key={`dir:${node.path}`} className="mb-0.5" role="treeitem" aria-expanded="true" aria-selected="false">
-              <div className="flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-foreground/75">
-                <FolderIcon />
-                <span className="min-w-0 flex-1 truncate text-[11px] font-medium">
-                  {node.name}
-                </span>
-                <span className="text-[10px] text-secondary/35">
-                  {node.fileCount}
-                </span>
-              </div>
-              {node.children.length > 0 && (
-                <div className="ml-3 border-l border-black/[0.05] pl-2" role="group">
-                  <WorkspaceFileTreeRows
-                    nodes={node.children}
-                    botId={botId}
-                    previewId={previewId}
-                    onPreviewFile={onPreviewFile}
-                  />
-                </div>
-              )}
-            </div>
+            <WorkspaceDirRow
+              key={`dir:${node.path}`}
+              node={node}
+              botId={botId}
+              previewId={previewId}
+              onPreviewFile={onPreviewFile}
+            />
           );
         }
 
