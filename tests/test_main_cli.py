@@ -87,7 +87,15 @@ HOSTED_OVERLAY_TEST_ENV_FLAGS = (
 
 
 @pytest.fixture(autouse=True)
-def _restore_process_env_after_test():
+def _restore_process_env_after_test(monkeypatch):
+    # These tests drive ``main(["serve", ...])`` with uvicorn mocked. The local
+    # credential vault proxy is default-ON in the local-full overlay, so with the
+    # optional ``[vault]`` extra installed (as on CI) serve would start a REAL
+    # mitmproxy DumpMaster whose ClientPlayback asyncio task is never torn down —
+    # it leaks past the test and surfaces as "RuntimeError: Event loop is closed"
+    # that fails this file's tests (and pollutes later ones). The proxy has its
+    # own dedicated tests; pin it OFF here so no real proxy is spawned.
+    monkeypatch.setenv("MAGI_LOCAL_VAULT_PROXY_ENABLED", "0")
     original = dict(os.environ)
     yield
     os.environ.clear()

@@ -45,6 +45,17 @@ _INSTALL_DEFAULT_ENV_VARS = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _disable_local_vault_proxy(monkeypatch):
+    # The serve tests below drive ``main(["serve", ...])`` with uvicorn mocked.
+    # The local credential vault proxy is default-ON in the local-full overlay,
+    # so with the optional ``[vault]`` extra installed (as on CI) serve starts a
+    # real mitmproxy DumpMaster whose asyncio ClientPlayback task is never torn
+    # down and leaks past the test ("RuntimeError: Event loop is closed"). Pin it
+    # OFF; the proxy has its own tests.
+    monkeypatch.setenv("MAGI_LOCAL_VAULT_PROXY_ENABLED", "0")
+
+
 # ---------------------------------------------------------------------------
 # Bootstrap unit behaviour
 # ---------------------------------------------------------------------------
