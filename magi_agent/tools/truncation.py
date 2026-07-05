@@ -33,15 +33,15 @@ _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})  # mirrors config/env.py
 
 
 def is_headtail_truncation_enabled(env: Mapping[str, str] | None = None) -> bool:
-    """Strict opt-in: True only for an explicit truthy value (default OFF).
-
-    Deliberately uses the ``_is_true`` pattern (cf. ``env.py``
-    ``is_goal_nudge_enabled``), NOT ``_runtime_feature_enabled``, so the
-    eval/full runtime profiles do NOT flip this on implicitly. Unparsable
-    values are treated as OFF.
+    """Profile-aware default-ON: head+tail (middle-elision) truncation is used
+    under the full/lab (non-safe) runtime profile and disabled under the
+    safe-family or an explicit ``"0"``. Promoted from the former strict opt-in
+    so document/page tails stay visible by default.
     """
+    from magi_agent.config.flags import flag_profile_bool  # noqa: PLC0415
+
     source = os.environ if env is None else env
-    return (source.get(HEADTAIL_TRUNCATION_ENV) or "").strip().lower() in _TRUE_VALUES
+    return flag_profile_bool(HEADTAIL_TRUNCATION_ENV, env=source)
 
 
 def truncate_middle(content: str, max_chars: int) -> str:

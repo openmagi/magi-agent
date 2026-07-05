@@ -263,7 +263,8 @@ def _compiled_assembly() -> RunnerPolicyAssembly:
             taskProfile={"taskType": "research"},
             runtimeContext=runtime_context,
             recipePackConfig={},
-        )
+        ),
+        env={"MAGI_RECIPE_DEFAULT_PACKS_EXPANDED": "0"},
     )
     plan = RecipeMaterializer.with_reliability_defaults().materialize(
         snapshot,

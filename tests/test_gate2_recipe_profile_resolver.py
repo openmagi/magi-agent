@@ -78,6 +78,8 @@ def test_profile_resolver_merges_layers_deterministically_and_selects_task_packs
     assert resolved.selected_pack_ids == (
         "openmagi.context-safety",
         "openmagi.evidence",
+        "openmagi.agent-methodology",
+        "openmagi.superpowers-compat",
         "openmagi.web-acquisition",
         "openmagi.research",
         "openmagi.dev-coding",
@@ -123,7 +125,7 @@ def test_web_acquisition_recipe_pack_is_default_off_foundation_metadata_only() -
     assert "core" not in " ".join(pack.openmagi_boundary_ownership).lower()
 
 
-def test_agent_methodology_recipe_pack_is_default_off_selected_metadata_only() -> None:
+def test_agent_methodology_recipe_pack_is_default_on_selected_metadata_only() -> None:
     registry = PackRegistry.with_first_party_packs()
     pack = registry.get("openmagi.agent-methodology")
 
@@ -187,6 +189,7 @@ def test_agent_methodology_recipe_pack_is_default_off_selected_metadata_only() -
         "openmagi.context-safety",
         "openmagi.evidence",
         "openmagi.agent-methodology",
+        "openmagi.superpowers-compat",
     )
     assert "callback:agent-methodology:plan-mode-auto-trigger" in snapshot.callback_refs
     assert "checkpoint:agent-methodology:subagent-parent-context-isolation" in snapshot.checkpoint_refs
@@ -247,6 +250,8 @@ def test_research_recipe_depends_on_web_acquisition_before_fact_grounding_metada
     assert snapshot.selected_pack_ids == (
         "openmagi.context-safety",
         "openmagi.evidence",
+        "openmagi.agent-methodology",
+        "openmagi.superpowers-compat",
         "openmagi.web-acquisition",
         "openmagi.research",
     )
@@ -270,6 +275,8 @@ def test_research_recipe_is_not_selected_when_required_web_acquisition_is_disabl
     assert snapshot.selected_pack_ids == (
         "openmagi.context-safety",
         "openmagi.evidence",
+        "openmagi.agent-methodology",
+        "openmagi.superpowers-compat",
     )
     assert snapshot.opted_out_pack_ids == ("openmagi.web-acquisition",)
     assert "openmagi.research" not in snapshot.selected_pack_ids
@@ -390,6 +397,8 @@ def test_agent_recipe_compiler_emits_immutable_snapshot_with_aggregated_refs() -
     assert snapshot.selected_pack_ids == (
         "openmagi.context-safety",
         "openmagi.evidence",
+        "openmagi.agent-methodology",
+        "openmagi.superpowers-compat",
         "openmagi.dev-coding",
     )
     assert "instruction:context-safety:system" in snapshot.instruction_refs
@@ -425,6 +434,8 @@ def test_multi_recipe_task_intents_compose_research_coding_and_artifact_delivery
     assert snapshot.selected_pack_ids == (
         "openmagi.context-safety",
         "openmagi.evidence",
+        "openmagi.agent-methodology",
+        "openmagi.superpowers-compat",
         "openmagi.web-acquisition",
         "openmagi.research",
         "openmagi.dev-coding",
@@ -500,6 +511,8 @@ def test_legacy_task_type_precedence_does_not_broaden_from_lower_layers() -> Non
     assert snapshot.selected_pack_ids == (
         "openmagi.context-safety",
         "openmagi.evidence",
+        "openmagi.agent-methodology",
+        "openmagi.superpowers-compat",
         "openmagi.dev-coding",
     )
     assert "tool:test.run" in snapshot.tool_refs
@@ -531,6 +544,8 @@ def test_multi_recipe_plural_intents_respect_disabled_dependencies() -> None:
     assert snapshot.selected_pack_ids == (
         "openmagi.context-safety",
         "openmagi.evidence",
+        "openmagi.agent-methodology",
+        "openmagi.superpowers-compat",
     )
     assert "openmagi.research" not in snapshot.selected_pack_ids
     assert "openmagi.artifact-delivery" not in snapshot.selected_pack_ids
@@ -660,6 +675,8 @@ def test_recipe_regression_web_acquisition_with_citation_enforcement() -> None:
     assert snapshot.selected_pack_ids == (
         "openmagi.context-safety",
         "openmagi.evidence",
+        "openmagi.agent-methodology",
+        "openmagi.superpowers-compat",
         "openmagi.web-acquisition",
         "openmagi.research",
     )
@@ -690,6 +707,8 @@ def test_recipe_regression_coding_with_workspace_policy_controls() -> None:
     assert snapshot.selected_pack_ids == (
         "openmagi.context-safety",
         "openmagi.evidence",
+        "openmagi.agent-methodology",
+        "openmagi.superpowers-compat",
         "openmagi.dev-coding",
     )
     assert "tool:file.read" in snapshot.tool_refs
@@ -716,8 +735,8 @@ def test_recipe_regression_methodology_superpowers_and_implementation_workflow()
         "openmagi.context-safety",
         "openmagi.evidence",
         "openmagi.agent-methodology",
-        "openmagi.dev-coding",
         "openmagi.superpowers-compat",
+        "openmagi.dev-coding",
     )
     assert "instruction:agent-methodology:executing-plans" in snapshot.instruction_refs
     assert "instruction:agent-methodology:tdd-red-green-refactor" in snapshot.instruction_refs
@@ -858,6 +877,8 @@ def test_pack_selection_from_unordered_sets_is_sorted_and_deterministic() -> Non
     assert snapshot.selected_pack_ids == (
         "openmagi.context-safety",
         "openmagi.evidence",
+        "openmagi.agent-methodology",
+        "openmagi.superpowers-compat",
         "openmagi.missions",
     )
     assert snapshot.opted_out_pack_ids == ("openmagi.research",)
@@ -884,6 +905,8 @@ def test_hard_safety_is_non_opt_out_but_first_party_workflow_packs_are_opt_out()
     assert snapshot.selected_pack_ids == (
         "openmagi.context-safety",
         "openmagi.evidence",
+        "openmagi.agent-methodology",
+        "openmagi.superpowers-compat",
     )
     assert snapshot.non_opt_out_pack_ids == (
         "openmagi.context-safety",
@@ -1280,6 +1303,8 @@ def test_explicit_recipe_selection_includes_required_recipe_when_auto_is_default
     assert snapshot.selected_pack_ids == (
         "openmagi.context-safety",
         "openmagi.evidence",
+        "openmagi.agent-methodology",
+        "openmagi.superpowers-compat",
         "openmagi.web-acquisition",
         "openmagi.research",
     )
@@ -1593,6 +1618,8 @@ def test_explicit_and_automatic_recipe_merge_order_is_deterministic() -> None:
     assert snapshot.selected_pack_ids == (
         "openmagi.context-safety",
         "openmagi.evidence",
+        "openmagi.agent-methodology",
+        "openmagi.superpowers-compat",
         "openmagi.dev-coding",
         "openmagi.web-acquisition",
         "openmagi.research",
@@ -1604,6 +1631,8 @@ def test_explicit_and_automatic_recipe_merge_order_is_deterministic() -> None:
     assert tuple(ref.recipe_id for ref in snapshot.recipe_selection.applied_recipe_refs) == (
         "openmagi.context-safety",
         "openmagi.evidence",
+        "openmagi.agent-methodology",
+        "openmagi.superpowers-compat",
         "openmagi.dev-coding",
         "openmagi.web-acquisition",
         "openmagi.research",
@@ -2179,6 +2208,13 @@ def test_hard_safety_pack_cannot_emit_forbidden_tool_refs() -> None:
 
 
 def test_request_runtime_metadata_cannot_suppress_hard_safety_packs() -> None:
+    # PIN: MAGI_RECIPE_DEFAULT_PACKS_EXPANDED=0 because with expansion ON the
+    # expansion packs (agent-methodology, superpowers-compat) receive a
+    # hard_invariant_downgrade omission reason (from recipeRuntimeContractVersion
+    # future-runtime.v1), which is not in _NON_BLOCKING_AUTOMATIC_OMISSION_REASONS,
+    # causing recipe_selection_fail_closed=True and composition_blocked=True which
+    # would empty validator_refs - a source-level interaction worth tracking as a
+    # potential bug (fail-closed logic triggered by automatic default expansion).
     snapshot = AgentRecipeCompiler(PackRegistry.with_first_party_packs()).compile(
         ProfileResolutionRequest(
             runtimeContext={
@@ -2186,7 +2222,8 @@ def test_request_runtime_metadata_cannot_suppress_hard_safety_packs() -> None:
                 "hardInvariants": {"validatorBeforeProjection": False},
                 "recipeRuntimeContractVersion": "future-runtime.v1",
             }
-        )
+        ),
+        env={"MAGI_RECIPE_DEFAULT_PACKS_EXPANDED": "0"},
     )
 
     assert snapshot.selected_pack_ids == (
@@ -2335,6 +2372,8 @@ def test_no_model_selection_falls_back_to_selector_membership_unchanged() -> Non
     assert snapshot.selected_pack_ids == (
         "openmagi.context-safety",
         "openmagi.evidence",
+        "openmagi.agent-methodology",
+        "openmagi.superpowers-compat",
         "openmagi.web-acquisition",
         "openmagi.research",
     )

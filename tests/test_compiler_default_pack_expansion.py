@@ -1,9 +1,10 @@
 """Tests for ``MAGI_RECIPE_DEFAULT_PACKS_EXPANDED`` (doc 05 PR-2).
 
 The expansion promotes a *safe* subset of first-party packs to be selected by
-default (without an explicit task-profile selector) **only when the stage gate
-is ON**.  When the gate is OFF the compiled snapshot must be byte-identical to
-``origin/main`` — i.e. only the two ``hardSafety`` packs are default-selected.
+default (without an explicit task-profile selector) under the profile-aware
+default-ON semantics.  When the gate is explicitly OFF (MAGI_RECIPE_DEFAULT_PACKS_EXPANDED=0)
+the compiled snapshot must be byte-identical to ``origin/main`` - i.e. only
+the two ``hardSafety`` packs are default-selected.
 
 The "safe" criterion (doc 05 §6 open-decision (1)) is:
 
@@ -58,18 +59,23 @@ def _minimal_request() -> ProfileResolutionRequest:
 
 
 # --------------------------------------------------------------------------- #
-# Gate parser (default-OFF)                                                    #
+# Gate parser (profile-aware default-ON)                                       #
 # --------------------------------------------------------------------------- #
 
 
-def test_default_packs_expanded_flag_is_default_off() -> None:
-    assert parse_recipe_default_packs_expanded({}) is False
+def test_default_packs_expanded_flag_is_profile_aware_default_on() -> None:
+    # Unset resolves to ON in full runtime profile.
+    assert parse_recipe_default_packs_expanded({}) is True
+    # Safe/eval/minimal/conservative/off profiles resolve to OFF.
+    assert parse_recipe_default_packs_expanded({"MAGI_RUNTIME_PROFILE": "safe"}) is False
+    # Explicit "0" always resolves to OFF regardless of profile.
+    assert parse_recipe_default_packs_expanded({"MAGI_RECIPE_DEFAULT_PACKS_EXPANDED": "0"}) is False
 
 
 def test_default_packs_expanded_flag_honours_truthy_values() -> None:
-    for value in ("1", "true", "yes", "on", "TRUE", " On "):
+    for value in ("1", "true", "yes", "on", "TRUE", " On ", "garbage"):
         assert parse_recipe_default_packs_expanded({"MAGI_RECIPE_DEFAULT_PACKS_EXPANDED": value}) is True
-    for value in ("0", "false", "no", "off", "", "garbage"):
+    for value in ("0", "false", "no", "off", ""):
         assert parse_recipe_default_packs_expanded({"MAGI_RECIPE_DEFAULT_PACKS_EXPANDED": value}) is False
 
 
@@ -198,7 +204,7 @@ def test_no_side_effect_or_authority_pack_is_promoted() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Gate OFF => byte-identical snapshot (regression guard)                       #
+# Gate explicit-OFF => byte-identical snapshot (regression guard)              #
 # --------------------------------------------------------------------------- #
 
 
@@ -209,15 +215,18 @@ def _compile_minimal(env: Mapping[str, str]) -> tuple[str, ...]:
     return snapshot.selected_pack_ids
 
 
-def test_gate_off_keeps_baseline_default_selection(monkeypatch) -> None:
-    monkeypatch.delenv("MAGI_RECIPE_DEFAULT_PACKS_EXPANDED", raising=False)
-    assert _compile_minimal({}) == _BASELINE_DEFAULT_PACK_IDS
+def test_gate_unset_uses_expanded_default_selection() -> None:
+    # Unset env = profile-aware ON: expansion packs are selected by default.
+    result = _compile_minimal({})
+    assert result == _BASELINE_DEFAULT_PACK_IDS + SAFE_DEFAULT_PACK_EXPANSION_IDS
+    # Explicit OFF reverts to baseline only.
+    assert _compile_minimal({"MAGI_RECIPE_DEFAULT_PACKS_EXPANDED": "0"}) == _BASELINE_DEFAULT_PACK_IDS
 
 
-def test_gate_off_snapshot_id_is_unchanged() -> None:
+def test_gate_explicit_off_keeps_baseline_default_selection() -> None:
     registry = PackRegistry.with_first_party_packs()
     compiler = AgentRecipeCompiler(registry)
-    off_snapshot = compiler.compile(_minimal_request(), env={})
+    off_snapshot = compiler.compile(_minimal_request(), env={"MAGI_RECIPE_DEFAULT_PACKS_EXPANDED": "0"})
     assert off_snapshot.selected_pack_ids == _BASELINE_DEFAULT_PACK_IDS
     # snapshot id is derived from selected_pack_ids; recompute to confirm parity.
     from magi_agent.recipes.compiler import build_recipe_snapshot_id
@@ -245,7 +254,7 @@ def test_gate_on_adds_safe_packs_to_default_selection() -> None:
 
 
 def test_gate_on_is_superset_of_gate_off() -> None:
-    off = set(_compile_minimal({}))
+    off = set(_compile_minimal({"MAGI_RECIPE_DEFAULT_PACKS_EXPANDED": "0"}))
     on = set(_compile_minimal({"MAGI_RECIPE_DEFAULT_PACKS_EXPANDED": "1"}))
     assert off <= on
     assert on - off == set(SAFE_DEFAULT_PACK_EXPANSION_IDS)

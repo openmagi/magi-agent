@@ -49,6 +49,10 @@ def _instruction(
         "MAGI_SELF_INTROSPECTION_ENABLED",
         "true" if self_introspection else "false",
     )
+    # Pin the multi-file-join guidance block OFF so its text (which mentions tool
+    # names like "DocumentRead" and "XLSXInfo") cannot false-match tests that verify
+    # those names are absent when the file-tools gate is off.
+    monkeypatch.setenv("MAGI_MULTI_FILE_JOIN_ENABLED", "0")
     return build_cli_instruction(
         session_id="test-session",
         workspace_root=str(workspace_root) if workspace_root is not None else None,

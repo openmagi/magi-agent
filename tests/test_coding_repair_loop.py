@@ -289,9 +289,10 @@ class TestLiveRepairHelpers:
                 "MAGI_CODING_REPAIR_LOOP_ENABLED": "0",
             }
         ) is False
+        # Unrecognized value falls back to profile default (ON under no safe profile).
         assert coding_repair_loop_enabled(
             {"MAGI_CODING_REPAIR_LOOP_ENABLED": "definitely"}
-        ) is False
+        ) is True
 
     def test_repair_max_attempts_is_bounded(self) -> None:
         assert repair_max_attempts({}) == 3

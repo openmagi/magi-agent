@@ -145,18 +145,37 @@ class TestFlagReader:
     def test_truthy_values(self, value: str) -> None:
         assert is_headtail_truncation_enabled({HEADTAIL_TRUNCATION_ENV: value}) is True
 
-    @pytest.mark.parametrize("value", ["", "0", "false", "no", "off", "banana"])
+    # Explicit FALSE_VALUES: always off regardless of profile.
+    @pytest.mark.parametrize("value", ["", "0", "false", "no", "off"])
     def test_falsy_values(self, value: str) -> None:
         assert is_headtail_truncation_enabled({HEADTAIL_TRUNCATION_ENV: value}) is False
 
-    def test_unset_is_off(self) -> None:
-        assert is_headtail_truncation_enabled({}) is False
+    @pytest.mark.parametrize("value", ["banana", "yes_please", "definitely"])
+    def test_unrecognized_value_falls_back_to_profile_default(self, value: str) -> None:
+        # Unrecognized value -> profile default: ON under no profile / full, OFF under safe.
+        assert is_headtail_truncation_enabled({HEADTAIL_TRUNCATION_ENV: value}) is True
+        assert is_headtail_truncation_enabled({
+            HEADTAIL_TRUNCATION_ENV: value,
+            "MAGI_RUNTIME_PROFILE": "eval",
+        }) is False
+
+    def test_unset_is_on(self) -> None:
+        # Profile-aware default-ON: unset resolves True under no-profile / full profile.
+        assert is_headtail_truncation_enabled({}) is True
+        # Safe profile flips the default to OFF.
+        assert is_headtail_truncation_enabled({"MAGI_RUNTIME_PROFILE": "eval"}) is False
 
     def test_reads_os_environ_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Profile-aware default-ON: unset flag with no safe profile resolves True.
         monkeypatch.delenv(HEADTAIL_TRUNCATION_ENV, raising=False)
-        assert is_headtail_truncation_enabled() is False
+        monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
+        assert is_headtail_truncation_enabled() is True
+        # Explicit "1" still wins.
         monkeypatch.setenv(HEADTAIL_TRUNCATION_ENV, "1")
         assert is_headtail_truncation_enabled() is True
+        # Explicit "0" turns it off.
+        monkeypatch.setenv(HEADTAIL_TRUNCATION_ENV, "0")
+        assert is_headtail_truncation_enabled() is False
 
 
 # ---------------------------------------------------------------------------
@@ -165,12 +184,17 @@ class TestFlagReader:
 
 
 class TestCapTextDefaultOff:
-    def test_flag_unset_byte_identical_to_legacy_slice(
+    def test_flag_unset_defaults_on(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        # Profile-aware default-ON: unset flag means middle truncation, not legacy head-only.
         monkeypatch.delenv(HEADTAIL_TRUNCATION_ENV, raising=False)
-        long = "w" * 10_000
-        assert cap_text(long, 100) == (long[:100], True)
+        monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
+        long = ("h" * 5000) + ("t" * 5000)
+        capped, truncated = cap_text(long, 100)
+        assert truncated is True
+        assert capped == truncate_middle(long, 100)  # profile-default ON path
+        assert capped.endswith("t" * 40)  # tail preserved
 
     def test_flag_zero_byte_identical_to_legacy_slice(
         self, monkeypatch: pytest.MonkeyPatch
@@ -225,11 +249,11 @@ class TestCapTextFlagOn:
 
 
 class TestWebFetchCallSite:
-    def test_default_off_truncates_to_exactly_12000(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Flag unset → byte-identical to legacy head-only cap (len == 12 000)."""
+    def test_explicitly_off_truncates_to_exactly_12000(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Explicit "0" → byte-identical to legacy head-only cap (len == 12 000)."""
         from magi_agent.tools.web_search_tools import web_fetch
 
-        monkeypatch.delenv(HEADTAIL_TRUNCATION_ENV, raising=False)
+        monkeypatch.setenv(HEADTAIL_TRUNCATION_ENV, "0")
         monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-" + "test-key")
         long_md = "x" * 20_000
         monkeypatch.setattr("urllib.request.urlopen", _FakeOpener({"data": {"markdown": long_md}}))
@@ -301,10 +325,10 @@ class TestResearchFactCallSite:
         assert sentinel in brief
         assert "elided - output truncated" in brief
 
-    def test_default_off_brief_head_only(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_explicitly_off_brief_head_only(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from magi_agent.tools.web_search_tools import research_fact
 
-        monkeypatch.delenv(HEADTAIL_TRUNCATION_ENV, raising=False)
+        monkeypatch.setenv(HEADTAIL_TRUNCATION_ENV, "0")
         sentinel = "CLOSING-BALANCE-987654"
         content = ("y" * 6000) + sentinel
 
@@ -344,12 +368,12 @@ class TestDocumentReadCallSite:
         assert text.endswith("ZZZ-END-SENTINEL")
         assert "elided - output truncated" in text
 
-    def test_default_off_text_is_head_only(
+    def test_explicitly_off_text_is_head_only(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         from magi_agent.tools.document_tools import document_read
 
-        monkeypatch.delenv(HEADTAIL_TRUNCATION_ENV, raising=False)
+        monkeypatch.setenv(HEADTAIL_TRUNCATION_ENV, "0")
         body = ("alpha " * 200) + "ZZZ-END-SENTINEL"
         (tmp_path / "long.txt").write_text(body, encoding="utf-8")
 
@@ -439,12 +463,12 @@ class TestArchiveExtractCallSite:
         assert entry.endswith(sentinel)
         assert "elided - output truncated" in entry
 
-    def test_default_off_entry_content_head_only(
+    def test_explicitly_off_entry_content_head_only(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         from magi_agent.tools.archive_tools import _MAX_ENTRY_CHARS, archive_extract
 
-        monkeypatch.delenv(HEADTAIL_TRUNCATION_ENV, raising=False)
+        monkeypatch.setenv(HEADTAIL_TRUNCATION_ENV, "0")
         content = "c" * (_MAX_ENTRY_CHARS + 5000)
         self._make_zip(tmp_path, content)
 

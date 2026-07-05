@@ -796,7 +796,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_DEFERRED_TOOLS_ENABLED",
         summary="Enable deferred (lazily-loaded) tool schemas.",
     ),
-    _b(
+    _pb(
         "MAGI_HEADTAIL_TRUNCATION_ENABLED",
         summary=(
             "Use head+tail (middle-elision) truncation for tool output caps "
@@ -837,11 +837,11 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_EDIT_FORMAT_ON_WRITE_ENABLED",
         summary="Run a formatter on files written by the coding harness (default-ON full profile).",
     ),
-    _b(
+    _pb(
         "MAGI_EDIT_RETRY_REFLECTION_ENABLED",
         summary="Reflect on failed edits before retrying (coding repair loop).",
     ),
-    _b(
+    _pb(
         "MAGI_CODING_REPAIR_LOOP_ENABLED",
         summary="Enable the iterative coding repair loop on failing edits.",
     ),
@@ -1041,7 +1041,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "rounding precision, names, and answer format."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_MULTI_FILE_JOIN_ENABLED",
         summary=(
             "Append multi-file cross-reference guidance: enumerate archives, "
@@ -3148,12 +3148,13 @@ FLAGS: tuple[FlagSpec, ...] = (
             "``EVAL_RUNTIME_ENV_DEFAULTS``."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_RECIPE_DEFAULT_PACKS_EXPANDED",
         summary=(
             "When ON, expand the default-selected first-party pack set to "
-            "include additional ``openmagi.evidence`` etc. Default-OFF "
-            "preserves the minimal default selection."
+            "include additional ``openmagi.evidence`` etc. Profile-aware "
+            "default-ON (full/lab; OFF under the safe-family keeps the minimal "
+            "default selection)."
         ),
     ),
     _b(

@@ -1,21 +1,24 @@
 "use client";
 
 /**
- * PacksPanel (PR-P3): read-only "what's in each installed pack" view.
+ * PacksPanel: installed-pack inventory with install/remove management.
  *
- * Round-2 gap 1: the Packs tab used to show only a pack id ("packs:
- * openmagi.research") with no way to see what it contributes. This lists the
- * installed packs (first-party + user) and, per pack, groups its `provides`
- * refs under friendly category labels (Rules / Behaviors / Tools / …) so the
- * operator can see the contents at a glance. Enable/disable is a follow-up;
- * this is read-only (the `enabled` badge reflects the resolved runtime state).
+ * A pack is an INSTALL unit (availability), not a per-turn on/off. Framing it
+ * as "enabled/disabled" implied liveness it does not have: a pack being present
+ * only means its refs are contributed to the catalog. Whether a contributed
+ * rule/behavior actually fires is decided elsewhere (globally in Rules, or per
+ * turn in Modes). So the control here is Remove / Install, not a toggle.
+ *
+ * Remove is reversible (it writes a dashboard override, never the operator's
+ * config.toml), so first-party packs are always recoverable via Install. Each
+ * pack still expands to show what it contributes (rules / behaviors / tools).
  */
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Layers, Check } from "lucide-react";
 
 import { useAgentFetch } from "@/lib/local-api";
-import { getPacks, type PackInfo, type PackProvide } from "@/lib/packs-api";
+import { getPacks, setPackState, type PackInfo, type PackProvide } from "@/lib/packs-api";
 
 /** Map the 12 ProvidesType kinds to the operator-facing category vocabulary. */
 const PROVIDE_CATEGORY: Record<string, string> = {
@@ -53,6 +56,9 @@ export function PacksPanel(): React.ReactElement {
   const [packs, setPacks] = useState<PackInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /** packId whose install/remove request is in flight (disables its button). */
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     getPacks(agentFetch)
@@ -62,6 +68,22 @@ export function PacksPanel(): React.ReactElement {
       )
       .finally(() => setLoading(false));
   }, [agentFetch]);
+
+  const handleSetState = useCallback(
+    (packId: string, enabled: boolean) => {
+      setBusyId(packId);
+      setActionError(null);
+      setPackState(agentFetch, packId, enabled)
+        .then((resp) => setPacks(resp.packs))
+        .catch((err: unknown) =>
+          setActionError(
+            err instanceof Error ? err.message : "Failed to update pack",
+          ),
+        )
+        .finally(() => setBusyId(null));
+    },
+    [agentFetch],
+  );
 
   const firstParty = useMemo(() => packs.filter((p) => p.origin === "first_party"), [packs]);
   const user = useMemo(() => packs.filter((p) => p.origin === "user"), [packs]);
@@ -84,15 +106,23 @@ export function PacksPanel(): React.ReactElement {
   return (
     <div className="space-y-5">
       <p className="text-xs leading-relaxed text-secondary">
-        Installed packs and what each contributes. A pack bundles rules,
-        behaviors, tools, and more; expand one to see its contents. Disabled
-        packs contribute nothing this turn.
+        Installed packs and what each contributes. <strong>Remove</strong> a pack
+        to drop everything it contributes; <strong>Install</strong> restores it
+        (first-party packs are always recoverable). Installing makes a pack&apos;s
+        rules, behaviors, and tools <em>available</em>; whether a rule actually
+        runs is set globally in Rules or per turn in Modes.
       </p>
 
-      {user.length > 0 ? (
-        <PackGroup title="Your packs" packs={user} />
+      {actionError ? (
+        <div className="rounded-lg border border-red-500/25 bg-red-500/[0.06] px-3 py-2 text-xs text-red-600">
+          {actionError}
+        </div>
       ) : null}
-      <PackGroup title="First-party" packs={firstParty} />
+
+      {user.length > 0 ? (
+        <PackGroup title="Your packs" packs={user} busyId={busyId} onSetState={handleSetState} />
+      ) : null}
+      <PackGroup title="First-party" packs={firstParty} busyId={busyId} onSetState={handleSetState} />
 
       {packs.length === 0 ? (
         <p className="rounded-xl border border-dashed border-black/[0.10] bg-gray-50/80 px-4 py-6 text-center text-xs text-secondary">
@@ -103,7 +133,17 @@ export function PacksPanel(): React.ReactElement {
   );
 }
 
-function PackGroup({ title, packs }: { title: string; packs: PackInfo[] }): React.ReactElement | null {
+function PackGroup({
+  title,
+  packs,
+  busyId,
+  onSetState,
+}: {
+  title: string;
+  packs: PackInfo[];
+  busyId: string | null;
+  onSetState: (packId: string, enabled: boolean) => void;
+}): React.ReactElement | null {
   if (packs.length === 0) return null;
   return (
     <div className="space-y-2">
@@ -111,13 +151,26 @@ function PackGroup({ title, packs }: { title: string; packs: PackInfo[] }): Reac
         {title} ({packs.length})
       </p>
       {packs.map((pack) => (
-        <PackCard key={pack.packId} pack={pack} />
+        <PackCard
+          key={pack.packId}
+          pack={pack}
+          busy={busyId === pack.packId}
+          onSetState={onSetState}
+        />
       ))}
     </div>
   );
 }
 
-function PackCard({ pack }: { pack: PackInfo }): React.ReactElement {
+function PackCard({
+  pack,
+  busy,
+  onSetState,
+}: {
+  pack: PackInfo;
+  busy: boolean;
+  onSetState: (packId: string, enabled: boolean) => void;
+}): React.ReactElement {
   const groups = groupProvides(pack.provides);
   return (
     <details className="rounded-xl border border-black/[0.06] bg-white px-4 py-3">
@@ -126,16 +179,46 @@ function PackCard({ pack }: { pack: PackInfo }): React.ReactElement {
         <span className="truncate text-sm font-semibold text-foreground">{pack.displayName}</span>
         {pack.enabled ? (
           <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
-            <Check className="h-3 w-3" /> enabled
+            <Check className="h-3 w-3" /> installed
           </span>
         ) : (
           <span className="rounded-full bg-black/5 px-2 py-0.5 text-[10px] font-medium text-secondary">
-            disabled
+            removed
           </span>
         )}
         <span className="ml-auto shrink-0 text-[11px] text-secondary/70">
           {pack.provides.length} item{pack.provides.length === 1 ? "" : "s"}
         </span>
+        {pack.enabled ? (
+          <button
+            type="button"
+            disabled={busy}
+            data-testid={`pack-remove-${pack.packId}`}
+            onClick={(e) => {
+              // Inside <summary>: don't toggle the disclosure on click.
+              e.preventDefault();
+              e.stopPropagation();
+              onSetState(pack.packId, false);
+            }}
+            className="shrink-0 rounded-lg border border-red-500/30 bg-white px-2.5 py-1 text-[11px] font-medium text-red-600 hover:bg-red-500/[0.06] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {busy ? "Removing…" : "Remove"}
+          </button>
+        ) : (
+          <button
+            type="button"
+            disabled={busy}
+            data-testid={`pack-install-${pack.packId}`}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onSetState(pack.packId, true);
+            }}
+            className="shrink-0 rounded-lg bg-primary px-2.5 py-1 text-[11px] font-medium text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {busy ? "Installing…" : "Install"}
+          </button>
+        )}
       </summary>
       <p className="mt-1 font-mono text-[10px] text-secondary/70">{pack.packId}</p>
       {pack.description ? (
