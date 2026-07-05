@@ -33,8 +33,9 @@ def _assembly() -> RunnerPolicyAssembly:
 # --- gate parser -----------------------------------------------------------
 
 
-def test_intent_binding_gate_default_off() -> None:
-    assert parse_recipe_intent_binding_enabled({}) is False
+def test_intent_binding_gate_profile_default_on() -> None:
+    # Unset under a non-safe profile: profile default ON.
+    assert parse_recipe_intent_binding_enabled({}) is True
 
 
 def test_intent_binding_gate_explicit_on() -> None:
@@ -168,8 +169,8 @@ def _route_selection(monkeypatch, *, routing: str, binding: str | None):
     )
 
 
-def test_route_selection_omits_bindings_when_gate_off(monkeypatch) -> None:
-    sel = _route_selection(monkeypatch, routing="1", binding=None)
+def test_route_selection_omits_bindings_when_gate_explicitly_off(monkeypatch) -> None:
+    sel = _route_selection(monkeypatch, routing="1", binding="0")
     assert sel is not None
     assert "intentBindings" not in sel
 

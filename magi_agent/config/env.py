@@ -228,9 +228,9 @@ def parse_tool_exception_reflection_env(
     env: Mapping[str, str],
 ) -> ToolExceptionReflectionEnv:
     # I-1: route the enabled bool through the typed flag registry.
-    from .flags import flag_bool  # noqa: PLC0415
+    from .flags import flag_profile_bool  # noqa: PLC0415
 
-    enabled = flag_bool(TOOL_EXCEPTION_REFLECTION_ENABLED_ENV, env=env)
+    enabled = flag_profile_bool(TOOL_EXCEPTION_REFLECTION_ENABLED_ENV, env=env)
     max_attempts = _int_env(
         env,
         TOOL_EXCEPTION_MAX_ATTEMPTS_ENV,
@@ -585,10 +585,10 @@ def parse_empty_response_recovery_env(
     env: Mapping[str, str],
 ) -> EmptyResponseRecoveryEnv:
     # I-1: route the enabled bool through the typed flag registry.
-    from .flags import flag_bool  # noqa: PLC0415
+    from .flags import flag_profile_bool  # noqa: PLC0415
 
-    enabled = flag_bool(EMPTY_RESPONSE_RECOVERY_ENABLED_ENV, env=env)
-    escalate = flag_bool(EMPTY_RESPONSE_ESCALATION_ENABLED_ENV, env=env)
+    enabled = flag_profile_bool(EMPTY_RESPONSE_RECOVERY_ENABLED_ENV, env=env)
+    escalate = flag_profile_bool(EMPTY_RESPONSE_ESCALATION_ENABLED_ENV, env=env)
     # Under escalation the default max becomes 2. ``_int_env`` returns the
     # passed default ONLY when the key is absent, so an operator who sets
     # MAGI_EMPTY_RESPONSE_MAX_RECOVERIES always wins (including an explicit =1),
@@ -3368,9 +3368,9 @@ def parse_recipe_intent_binding_enabled(env: Mapping[str, str]) -> bool:
     byte-identical to origin/main.
     """
     # I-1: route through the typed flag registry.
-    from .flags import flag_bool  # noqa: PLC0415
+    from .flags import flag_profile_bool  # noqa: PLC0415
 
-    return flag_bool("MAGI_RECIPE_INTENT_BINDING_ENABLED", env=env)
+    return flag_profile_bool("MAGI_RECIPE_INTENT_BINDING_ENABLED", env=env)
 
 
 # Single source of truth for the CLI session-log write path (PR-04-PR1).

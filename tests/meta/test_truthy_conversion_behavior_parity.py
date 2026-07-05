@@ -22,7 +22,7 @@ Sites covered
 * ``cli/headless._cli_enabled``                      (default-ON)
 * ``cli/engine._runner_policy_routing_enabled``      (default-OFF)
 * ``cli/engine._runner_policy_route_blocking_enabled`` (default-OFF)
-* ``cli/engine._recipe_intent_binding_enabled``      (default-OFF)
+* ``cli/engine._recipe_intent_binding_enabled``      (profile_bool, now covered by TestProfileAwareDefaultOnReaders)
 * ``cli/wiring.local_runner_policy_routing_enabled_from_env`` (default-OFF)
 * ``cli/wiring._first_party_tools_enabled``           (default-ON)
 * ``harness/self_review._self_review_shadow``         (default-ON)
@@ -48,8 +48,12 @@ import pytest
 
 _TRUTHY_INPUTS = ("1", "true", "yes", "on", "TRUE", "Yes")
 _EXPLICIT_FALSEY_INPUTS = ("0", "false", "no", "off", "FALSE")
-# These were ON under the dangerous denylist and now (correctly) OFF.
+# These were ON under the dangerous denylist and now (correctly) OFF for flag_bool.
 _UNKNOWN_INPUTS = ("disabled", "enabled", "random_garbage", "yes please", " ", "")
+# For profile_bool: unrecognized non-empty values fall back to the non-safe profile
+# default (ON). Empty/whitespace-only values are still treated as explicit falsy.
+_PROFILE_UNRECOGNIZED_ON = ("disabled", "enabled", "random_garbage", "yes please")
+_PROFILE_EMPTY_FALSE = (" ", "")
 
 
 # ---------------------------------------------------------------------------
@@ -68,11 +72,8 @@ _UNKNOWN_INPUTS = ("disabled", "enabled", "random_garbage", "yes please", " ", "
             "_runner_policy_route_blocking_enabled",
             "MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED",
         ),
-        (
-            "magi_agent.cli.engine",
-            "_recipe_intent_binding_enabled",
-            "MAGI_RECIPE_INTENT_BINDING_ENABLED",
-        ),
+        # _recipe_intent_binding_enabled is profile_bool (default-ON under non-safe
+        # profiles). It is covered by TestProfileAwareDefaultOnReaders below.
         (
             "magi_agent.cli.wiring",
             "local_runner_policy_routing_enabled_from_env",
@@ -204,5 +205,96 @@ class TestDefaultOnReaders:
         value like ``MAGI_X=enabled`` no longer accidentally keeps the gate
         on; the operator must use the canonical truthy spelling to keep it on.
         """
+        monkeypatch.setenv(env_name, value)
+        assert self._read(module_path, attr) is False
+
+
+# ---------------------------------------------------------------------------
+# Profile-aware default-ON gates (flag_profile_bool, kind="profile_bool").
+#
+# Contract differs from flag_bool:
+#   unset                        -> True  (non-safe profile default)
+#   truthy ("1"/"true"/...)      -> True
+#   explicit falsy ("0"/"false") -> False
+#   unrecognized non-empty       -> True  (profile default, NOT strict-False)
+#   empty / whitespace-only      -> False (treated as explicit falsy after trim)
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    ("module_path", "attr", "env_name"),
+    [
+        (
+            "magi_agent.cli.engine",
+            "_recipe_intent_binding_enabled",
+            "MAGI_RECIPE_INTENT_BINDING_ENABLED",
+        ),
+    ],
+)
+class TestProfileAwareDefaultOnReaders:
+    def _read(self, module_path: str, attr: str) -> bool:
+        import importlib
+
+        module = importlib.import_module(module_path)
+        return getattr(module, attr)()
+
+    def test_unset_reads_true(
+        self,
+        module_path: str,
+        attr: str,
+        env_name: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Unset under a non-safe profile uses the profile default: ON.
+        monkeypatch.delenv(env_name, raising=False)
+        assert self._read(module_path, attr) is True
+
+    @pytest.mark.parametrize("value", _TRUTHY_INPUTS)
+    def test_truthy_reads_true(
+        self,
+        module_path: str,
+        attr: str,
+        env_name: str,
+        value: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv(env_name, value)
+        assert self._read(module_path, attr) is True
+
+    @pytest.mark.parametrize("value", _EXPLICIT_FALSEY_INPUTS)
+    def test_explicit_falsey_reads_false(
+        self,
+        module_path: str,
+        attr: str,
+        env_name: str,
+        value: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv(env_name, value)
+        assert self._read(module_path, attr) is False
+
+    @pytest.mark.parametrize("value", _PROFILE_UNRECOGNIZED_ON)
+    def test_unrecognized_value_reads_true_profile_default(
+        self,
+        module_path: str,
+        attr: str,
+        env_name: str,
+        value: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """profile_bool: unrecognized non-empty values fall back to the non-safe
+        profile default (ON). This is different from flag_bool which treats them
+        as strict-False."""
+        monkeypatch.setenv(env_name, value)
+        assert self._read(module_path, attr) is True
+
+    @pytest.mark.parametrize("value", _PROFILE_EMPTY_FALSE)
+    def test_empty_or_whitespace_reads_false(
+        self,
+        module_path: str,
+        attr: str,
+        env_name: str,
+        value: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Empty string and whitespace-only are treated as explicit falsy.
         monkeypatch.setenv(env_name, value)
         assert self._read(module_path, attr) is False

@@ -382,9 +382,12 @@ class TestEscalationExplicitMax:
 
 class TestEscalationRequiresMaster:
     def test_escalation_requires_master(self) -> None:
-        # Master OFF -> config is None regardless of escalation flag.
+        # Master explicitly OFF -> config is None regardless of escalation flag.
         cfg = build_empty_response_recovery_config(
-            {"MAGI_EMPTY_RESPONSE_ESCALATION_ENABLED": "1"}
+            {
+                "MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED": "0",
+                "MAGI_EMPTY_RESPONSE_ESCALATION_ENABLED": "1",
+            }
         )
         assert cfg is None
 
@@ -553,10 +556,13 @@ class TestEscalationGoalLoopInteraction:
 
 
 class TestBuildConfigEscalate:
-    def test_config_off_is_byte_identical_dataclass(self) -> None:
-        # Master ON, escalation absent -> config exactly equals today's.
+    def test_config_escalation_explicitly_off_is_byte_identical_dataclass(self) -> None:
+        # Master ON, escalation explicitly OFF -> config exactly pins today's escalate=False shape.
         cfg = build_empty_response_recovery_config(
-            {"MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED": "1"}
+            {
+                "MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED": "1",
+                "MAGI_EMPTY_RESPONSE_ESCALATION_ENABLED": "0",
+            }
         )
         assert cfg == EmptyResponseRecoveryConfig(
             enabled=True,

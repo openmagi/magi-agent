@@ -1,9 +1,10 @@
-"""Tests for MaxStepsBrakeControl — default-OFF, behind MAGI_MAX_STEPS_BRAKE_ENABLED.
+"""Tests for MaxStepsBrakeControl — profile-aware default-ON, behind MAGI_MAX_STEPS_BRAKE_ENABLED.
 
 Verifies:
 - With flag on and iteration at the final step, on_before_model injects the wrap-up
   message into llm_request.contents and clears tools.
-- With flag off (default), control is not registered in the plane.
+- With flag explicitly OFF ("0"), control is not registered in the plane.
+- With flag unset (no profile), profile default ON applies: control IS registered.
 - Before the final iteration, no mutation occurs.
 """
 
@@ -170,16 +171,22 @@ def test_brake_clears_adk_llm_request_tools(monkeypatch: pytest.MonkeyPatch) -> 
 # ---------------------------------------------------------------------------
 
 
-def test_max_steps_brake_not_registered_when_flag_off(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("MAGI_MAX_STEPS_BRAKE_ENABLED", raising=False)
+def test_max_steps_brake_not_registered_when_flag_explicitly_off() -> None:
+    # Explicit "0" overrides the profile default ON.
+    from magi_agent.adk_bridge.control_plane import build_default_plane
 
+    plane = build_default_plane(os_environ={"MAGI_MAX_STEPS_BRAKE_ENABLED": "0"})
+    control_names = {c.name for c in plane._controls}
+    assert not any("max_steps" in name for name in control_names)
+
+
+def test_max_steps_brake_registered_by_profile_default() -> None:
+    # Unset (no explicit value, no safe profile) takes the profile default ON.
     from magi_agent.adk_bridge.control_plane import build_default_plane
 
     plane = build_default_plane(os_environ={})
     control_names = {c.name for c in plane._controls}
-    assert not any("max_steps" in name for name in control_names)
+    assert any("max_steps" in name for name in control_names)
 
 
 def test_max_steps_brake_registered_when_flag_on(
@@ -199,11 +206,11 @@ def test_max_steps_brake_registered_when_flag_on(
 # ---------------------------------------------------------------------------
 
 
-def test_max_steps_brake_not_in_local_runner_by_default(
+def test_max_steps_brake_not_in_local_runner_when_explicitly_off(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CORE_AGENT_PYTHON_LOCAL_ADK_RUNNER", "1")
-    monkeypatch.delenv("MAGI_MAX_STEPS_BRAKE_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_MAX_STEPS_BRAKE_ENABLED", "0")
 
     from magi_agent.adk_bridge import local_runner
 
@@ -261,10 +268,10 @@ def test_max_steps_brake_on_before_model_delegates_to_apply() -> None:
     assert req.config.tools == []
 
 
-def test_max_steps_brake_not_in_real_runner_by_default(
+def test_max_steps_brake_not_in_real_runner_when_explicitly_off(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("MAGI_MAX_STEPS_BRAKE_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_MAX_STEPS_BRAKE_ENABLED", "0")
 
     from magi_agent.cli.providers import ProviderConfig
     from magi_agent.cli.real_runner import build_cli_model_runner

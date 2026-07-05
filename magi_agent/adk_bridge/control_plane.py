@@ -1621,7 +1621,7 @@ def build_core_default_plane(
     # 4. MaxStepsBrake (MAGI_MAX_STEPS_BRAKE_ENABLED, default OFF — new seam).
     # I-4 follow-up: registry-backed via ``flag_bool``; the flag is documented
     # in ``magi_agent/config/flags.py`` FLAGS.
-    from magi_agent.config.flags import flag_bool as _flag_bool  # noqa: PLC0415
+    from magi_agent.config.flags import flag_profile_bool as _flag_bool  # noqa: PLC0415
 
     if _flag_bool(MAX_STEPS_BRAKE_ENABLED_ENV, env=env):
         # Iteration tracking is per-invocation; default max_iterations is 0 (no-op)
