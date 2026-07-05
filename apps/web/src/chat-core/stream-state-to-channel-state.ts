@@ -152,6 +152,10 @@ export function streamStateToChannelState(
     inspectedSources: state.inspectedSources,
     citationGate: state.citationGate,
     runtimeTraces: state.runtimeTraces,
+    // Ordered interleaved segments. Tool segment ids reference `activeTools` by
+    // the same reducer tool-card id, so the interleaved renderer can look each
+    // tool up in the sibling activity list.
+    segments: state.segments,
     liveTranscriptItems: [],
     fileProcessing: false,
     reconnecting: false,

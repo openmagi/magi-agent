@@ -17,6 +17,49 @@ export interface ReplyTo {
   role: "user" | "assistant";
 }
 
+/**
+ * A single ordered slice of an assistant turn, captured in true chronological
+ * order so a completed message can render think -> tool -> think -> tool -> text
+ * exactly as it happened rather than one flattened thinking block + one tool
+ * timeline + one text block.
+ *
+ * The flat fields (`thinkingContent`, `activities`, `content`) remain the source
+ * of truth for every existing consumer (dedupe, export, copy, empty-response
+ * heuristics) and are DERIVED-EQUAL to these segments: concatenating all text
+ * segments yields `content`, concatenating all thinking segments yields
+ * `thinkingContent`, and each `tool` segment references a `ToolActivity` by id.
+ */
+export type TranscriptSegment =
+  | ThinkingSegment
+  | ToolSegment
+  | TextSegment;
+
+export interface ThinkingSegment {
+  kind: "thinking";
+  /** Reasoning text accumulated for this contiguous thinking phase. */
+  text: string;
+  /** Client timestamp when this thinking phase opened. */
+  openedAt: number;
+  /** Client timestamp when this thinking phase closed (a non-thinking event
+   *  arrived). Absent while the phase is still live. */
+  closedAt?: number;
+}
+
+export interface ToolSegment {
+  kind: "tool";
+  /** References a `ToolActivity.id` in the sibling `activities` / `activeTools`
+   *  list. The tool's full state is NOT duplicated here; the renderer looks it
+   *  up so a single source of truth drives both the flat timeline and the
+   *  interleaved view. */
+  toolId: string;
+}
+
+export interface TextSegment {
+  kind: "text";
+  /** User-visible assistant text accumulated for this contiguous text phase. */
+  text: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant" | "system";
@@ -29,6 +72,15 @@ export interface ChatMessage {
   thinkingDuration?: number;
   /** Tool/skill activities captured during the streaming phase. */
   activities?: ToolActivity[];
+  /**
+   * Ordered interleaved transcript segments for this assistant turn. When
+   * present, the renderer drives the interleaved think/tool/text layout from
+   * here; when absent (legacy messages, or content mutated after capture by a
+   * catch-up/error path) the renderer falls back to the flat layout derived
+   * from `thinkingContent` + `activities` + `content`. Derived-equal to the flat
+   * fields (see `TranscriptSegment`).
+   */
+  segments?: TranscriptSegment[];
   /** Persisted TaskBoard snapshot captured during the streaming phase. */
   taskBoard?: TaskBoardSnapshot;
   /** Durable research/source evidence captured with the finalized assistant message. */
@@ -404,6 +456,13 @@ export interface ChannelState {
   pendingInjectionCount?: number;
   /** Live tool activity feed during streaming */
   activeTools?: ToolActivity[];
+  /**
+   * Ordered interleaved transcript segments for the live turn, captured in true
+   * chronological order (think -> tool -> think -> tool -> text). Derived-equal
+   * to `thinkingText` (all thinking segments), `streamingText` (all text
+   * segments), and `activeTools` (referenced by `tool` segment ids).
+   */
+  segments?: TranscriptSegment[];
   /** Latest safe browser preview frame from parent or subagent browser work. */
   browserFrame?: BrowserFrame | null;
   /** Latest live markdown/text draft preview from an in-flight document write. */

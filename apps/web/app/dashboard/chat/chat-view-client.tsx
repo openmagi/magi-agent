@@ -37,6 +37,11 @@ import {
 } from "@/chat-core";
 import { applyMissionEvent } from "@/chat-core";
 import {
+  appendSegmentText,
+  appendSegmentThinking,
+  appendNewToolSegments,
+} from "@/chat-core";
+import {
   findLatestAssistantServerMessage,
   shouldPatchAssistantTextFromServer,
 } from "@/chat-core";
@@ -741,6 +746,7 @@ export function ChatViewClient({
         runtimeTraces: [],
         turnUsage: undefined,
         liveTranscriptItems: [],
+        segments: [],
         responseLanguage,
       }, { botId });
       if (!isCurrentBot()) return;
@@ -769,6 +775,7 @@ export function ChatViewClient({
               store.setChannelState(channel, {
                 streamingText: (s?.streamingText ?? "") + delta,
                 hasTextContent: true,
+                segments: appendSegmentText(s?.segments, delta),
                 liveTranscriptItems: appendLiveTranscriptText(s?.liveTranscriptItems, delta),
                 ...(s?.fileProcessing ? { fileProcessing: false } : {}),
               }, { botId });
@@ -778,6 +785,7 @@ export function ChatViewClient({
               const s = useChatStore.getState().channelStates[channel];
               store.setChannelState(channel, {
                 thinkingText: (s?.thinkingText ?? "") + delta,
+                segments: appendSegmentThinking(s?.segments, delta),
                 ...(s?.fileProcessing ? { fileProcessing: false } : {}),
               }, { botId });
             },
@@ -786,6 +794,7 @@ export function ChatViewClient({
               const current = store.getChannelState(channel);
               store.setChannelState(channel, {
                 activeTools,
+                segments: appendNewToolSegments(current.segments, activeTools),
                 liveTranscriptItems: appendLiveWorkSnapshot(
                   current,
                   { activeTools },
@@ -930,6 +939,7 @@ export function ChatViewClient({
                   pendingInjectionCount: 0,
                   turnUsage: undefined,
                   liveTranscriptItems: [],
+                  segments: [],
                   error: `Connecting to bot... (${nextRetry}/${MAX_RETRIES})`,
                 }, { botId });
                 window.setTimeout(() => {
@@ -1032,6 +1042,7 @@ export function ChatViewClient({
                   documentDraft: null,
                   turnUsage: undefined,
                   liveTranscriptItems: [],
+                  segments: [],
                   error: `Connecting to bot... (${retryCount + 1}/${MAX_RETRIES})`,
                 }, { botId });
                 await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
