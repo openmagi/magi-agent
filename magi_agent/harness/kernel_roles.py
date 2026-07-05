@@ -52,7 +52,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from magi_agent.config.flags import flag_bool
+from magi_agent.config.flags import flag_profile_bool
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +147,7 @@ def known_agent_role_ids(env: Mapping[str, str] | None = None) -> frozenset[str]
     """
 
     base = frozenset(FIRST_PARTY_AGENT_ROLE_IDS)
-    if not flag_bool(MAGI_KERNEL_ROLE_PROVIDES_ENABLED_ENV, env=env):
+    if not flag_profile_bool(MAGI_KERNEL_ROLE_PROVIDES_ENABLED_ENV, env=env):
         return base
     try:
         return base | _discover_external_role_ids()

@@ -412,8 +412,6 @@ _INTENTIONALLY_NOT_IN_FULL_PROFILE: dict[str, str] = {
     "MAGI_VERIFY_RESPONSE_LANGUAGE": "block gate; needs a configured language policy first",
     "MAGI_VERIFY_TASKBOARD_COMPLETION": "block gate; enable behind a measured false-positive pass",
     "MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED": "block gate; measure FP first (see VERIFY family)",
-    "MAGI_KERNEL_RECIPE_PACKS_ENABLED": "needs ON-path re-verify (the #641 default-ON flip broke ~10 policy tests)",
-    "MAGI_KERNEL_ROLE_PROVIDES_ENABLED": "needs ON-path re-verify (the #641 default-ON flip broke ~10 policy tests)",
     "MAGI_SHACL_VERIFIER_ENABLED": "pre-final block gate; inert without compiler + authored SHACL rules",
     "MAGI_SHACL_COMPILER_ENABLED": "NL->SHACL endpoint only; no runtime effect without authored rules",
     "MAGI_CUSTOMIZE_SEAM_SPEC_ENABLED": "NL-spec endpoints only; no runtime effect",

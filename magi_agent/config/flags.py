@@ -889,7 +889,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "byte-identical to today)."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_KERNEL_RECIPE_PACKS_ENABLED",
         stage="stage2",
         summary=(
@@ -899,8 +899,9 @@ FLAGS: tuple[FlagSpec, ...] = (
             "recipe spec into a genuine RecipePackManifest; this flag makes the "
             "compiler consume them. First-party packs register first and win on a "
             "colliding pack_id (a kernel pack cannot shadow first-party); discovery "
-            "failures fail closed to the first-party-only registry. Strict "
-            "default-OFF (OFF is byte-identical to today)."
+            "failures fail closed to the first-party-only registry. Profile-aware "
+            "default-ON (full/lab; OFF under the safe-family, which is "
+            "byte-identical to today)."
         ),
     ),
     _b(
@@ -934,7 +935,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "authority. Strict default-OFF (OFF is byte-identical)."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_KERNEL_ROLE_PROVIDES_ENABLED",
         stage="stage2",
         summary=(
@@ -945,8 +946,8 @@ FLAGS: tuple[FlagSpec, ...] = (
             "first-party role or claim hard-safety, and the harness always keeps "
             "hard-safety in its effective packs. Contained: the engine/parallel/"
             "inference/evidence AgentRole literals are NOT widened, so an external "
-            "role is a scope label only. Strict default-OFF (OFF is byte-identical "
-            "to today)."
+            "role is a scope label only. Profile-aware default-ON (full/lab; OFF "
+            "under the safe-family, which is byte-identical to today)."
         ),
     ),
     _b(
@@ -3109,14 +3110,14 @@ FLAGS: tuple[FlagSpec, ...] = (
     # eval/benchmark or a bare ``MAGI_RUNTIME_PROFILE=full`` does not silently
     # enable it unless a profile/overlay dict explicitly sets ``=1``. Mirrors
     # the ``MAGI_TOOL_EXCEPTION_REFLECTION_ENABLED`` precedent above.
-    _b(
+    _pb(
         "MAGI_MCP_RESILIENCE_ENABLED",
         summary=(
             "Wrap MCP provider tool calls in a reusable resilience primitive: a "
             "per-attempt call timeout, bounded reconnect with exponential "
             "backoff, a per-server circuit breaker, and non-retryable auth "
             "handling that surfaces a model-visible reconnect signal. When OFF "
-            "the call boundary is byte-identical to today. Default-OFF."
+            "the call boundary is byte-identical to today. Profile-aware default-ON (full/lab; OFF under the safe-family)."
         ),
     ),
     # I-1: register the seven 1-liner ``parse_*_*`` flags so the typed

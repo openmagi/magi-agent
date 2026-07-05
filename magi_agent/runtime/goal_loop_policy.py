@@ -48,17 +48,12 @@ DEFAULT_CONTINUATION_TEMPLATE = (
     "describe what you will do — just do it."
 )
 
-#: ``MAGI_GOAL_LOOP_ENABLED`` — master kill-switch flag. Already present in
-#: ``LAB_EXPERIMENTAL_FLAGS`` (default-OFF for non-lab profiles). PR-B reads
-#: it as a strict-truthy admission to mirror existing magi flag patterns.
-_GOAL_LOOP_ENABLED_ENV = "MAGI_GOAL_LOOP_ENABLED"
 _GOAL_LOOP_MAX_TURNS_ENV = "MAGI_GOAL_LOOP_MAX_TURNS"
 _GOAL_LOOP_JUDGE_PROVIDER_ENV = "MAGI_GOAL_LOOP_JUDGE_PROVIDER"
 _GOAL_LOOP_JUDGE_MODEL_ENV = "MAGI_GOAL_LOOP_JUDGE_MODEL"
 _GOAL_LOOP_JUDGE_PARSE_FAILURES_BUDGET_ENV = (
     "MAGI_GOAL_LOOP_JUDGE_PARSE_FAILURES_BUDGET"
 )
-_TRUTHY = frozenset({"1", "true", "yes", "on"})
 
 
 @dataclass(frozen=True)
@@ -94,11 +89,6 @@ class GoalLoopPolicy:
     #: Generic continuation prompt re-fed when the judge says not-complete.
     continuation_template: str
 
-
-def _is_truthy(value: object) -> bool:
-    if not isinstance(value, str):
-        return False
-    return value.strip().lower() in _TRUTHY
 
 
 def _parse_max_turns(raw: object) -> int:
@@ -144,8 +134,9 @@ def build_goal_loop_policy_from_request(
     to today") in any of:
 
     * ``goal_mode_requested`` is false (the toggle was off — Phase 1 opt-in).
-    * ``MAGI_GOAL_LOOP_ENABLED`` is not strictly truthy in *env* (master
-      kill-switch; default-OFF outside lab/dogfood profiles).
+    * ``MAGI_GOAL_LOOP_ENABLED`` resolves OFF for *env* (the profile-aware
+      master gate: ON under the full/lab profile, OFF under the safe-family or
+      an explicit ``"0"``).
     * ``objective`` is empty after trimming (nothing meaningful to judge).
 
     Otherwise returns a populated policy. Provider/model selection for the
@@ -155,7 +146,14 @@ def build_goal_loop_policy_from_request(
     """
     if not goal_mode_requested:
         return None
-    if not _is_truthy(env.get(_GOAL_LOOP_ENABLED_ENV)):
+    # Route through the canonical profile-aware accessor so this call-site
+    # agrees with ``config.env.is_goal_loop_enabled`` (the flag is a registered
+    # ``profile_bool``). The former inline strict-truthy env read resolved OFF
+    # whenever the profile default (ON) was left unset, disagreeing with the
+    # rest of the runtime.
+    from magi_agent.config.env import is_goal_loop_enabled  # noqa: PLC0415
+
+    if not is_goal_loop_enabled(env):
         return None
     cleaned_objective = (objective or "").strip()
     if not cleaned_objective:
