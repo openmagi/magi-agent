@@ -122,7 +122,6 @@ _STRICT_BOOL_FLAGS_ENABLED = (
     "MAGI_DEEP_WEB_RESEARCH_ENABLED",
     "MAGI_BROWSER_TOOL_ENABLED",
     "MAGI_FILE_DELIVERY_LIVE_ENABLED",
-    "MAGI_DOCUMENT_QA_ENABLED",
     "MAGI_OBSERVABILITY_ENABLED",
     "MAGI_COMPUTE_VIA_CODE_ENABLED",
     "MAGI_FORMAT_ADHERENCE_ENABLED",
@@ -158,6 +157,9 @@ def test_strict_bool_flag_enabled_under_profile(
 # unset under MAGI_RUNTIME_PROFILE=full; the profile reaffirms them explicitly.)
 # ---------------------------------------------------------------------------
 _PROFILE_BOOL_FLAGS_ENABLED = (
+    "MAGI_DOCUMENT_QA_ENABLED",
+    "MAGI_PLAN_ACT_GATE_ENABLED",
+    "MAGI_PLAN_MODE_TOOLS_ENABLED",
     "MAGI_FACTS_REPLAN_ENABLED",
     "MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED",
     "MAGI_STEP_DECOMPOSITION_ENABLED",

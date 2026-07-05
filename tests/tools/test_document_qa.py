@@ -301,7 +301,7 @@ class TestCallQaModel:
 
 
 class TestDocumentQaGating:
-    def test_default_off_zero_behavior_change(
+    def test_explicit_off_zero_behavior_change(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from magi_agent.config.env import document_qa_enabled
@@ -313,7 +313,9 @@ class TestDocumentQaGating:
         from magi_agent.tools.registry import ToolRegistry
 
         monkeypatch.setenv("MAGI_FILE_TOOLS_ENABLED", "1")
-        monkeypatch.delenv("MAGI_DOCUMENT_QA_ENABLED", raising=False)
+        # The gate is now profile-aware default-ON, so exercise the zero-change
+        # (tool-absent) path by disabling it explicitly.
+        monkeypatch.setenv("MAGI_DOCUMENT_QA_ENABLED", "0")
 
         registry = ToolRegistry()
         registered = register_file_tool_manifests(registry)
@@ -328,9 +330,11 @@ class TestDocumentQaGating:
         assert len(manifests) == 9
         assert {m.name for m in manifests} == _EXISTING_FILE_TOOL_NAMES
 
-        # Strict gate: unset is OFF, and runtime profiles must NOT flip it.
-        assert document_qa_enabled({}) is False
-        assert document_qa_enabled({"MAGI_RUNTIME_PROFILE": "local-full"}) is False
+        # Explicit "0" forces OFF; a safe profile also keeps it OFF; the non-safe
+        # profile default is now ON.
+        assert document_qa_enabled({"MAGI_DOCUMENT_QA_ENABLED": "0"}) is False
+        assert document_qa_enabled({"MAGI_RUNTIME_PROFILE": "safe"}) is False
+        assert document_qa_enabled({"MAGI_RUNTIME_PROFILE": "full"}) is True
         assert document_qa_enabled({"MAGI_DOCUMENT_QA_ENABLED": "0"}) is False
 
     def test_flag_on_registers_and_binds_document_qa(
