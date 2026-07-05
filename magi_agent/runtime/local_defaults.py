@@ -158,6 +158,19 @@ LOCAL_FULL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     # scheduling is a separate unbuilt surface (scheduled_work.py:59,77,83).
     "MAGI_BACKGROUND_TASK_TOOL_ENABLED": "1",
     "MAGI_BACKGROUND_TASKS_ATTACHED": "1",
+    # M9 (missions x serve process-model): the gateway daemon supervises the
+    # watcher fleet (work_queue_executor + notify + mission_action_reconciler).
+    # M4 above flips the work-queue EXECUTOR gate ON, but nothing hosts the
+    # daemon on the serve path, so the executor never actually runs. M9 co-locates
+    # the daemon in the ``create_app`` serve lifespan; this flag turns it ON so a
+    # fresh ``magi serve`` runs the executor in the same process as uvicorn.
+    # Raw env read (NOT a registered flag; read via ``is_gateway_daemon_enabled``
+    # -> ``config._truthy.env_bool``), so the local overlay is the only thing that
+    # turns it on for a served install. setdefault semantics keep an explicit
+    # operator "0" winning; safe/eval/off never apply this overlay. Hosted
+    # enablement is C1's job (setting the env on the pod); M9 does not touch the
+    # hosted tpl.
+    "MAGI_GATEWAY_DAEMON_ENABLED": "1",
     # WS3 PR3c: durable cross-turn plan/todo ledger + evidence-first goal
     # completion, activated for the full local (self-host) profile.
     # MAGI_PLAN_LEDGER_DURABLE_ENABLED appends each TodoWrite full-snapshot to
