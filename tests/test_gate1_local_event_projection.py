@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from google.adk.events import Event
@@ -19,6 +20,19 @@ FIXTURES = Path(__file__).parent / "fixtures" / "gate1"
 
 def _fixture(name: str) -> str:
     return (FIXTURES / name).read_text(encoding="utf-8")
+
+
+# ``durationMs`` on the local ``tool_end`` projection is a real ``time.monotonic``
+# wall-clock measurement between the projected tool_start and tool_end. In this
+# synthetic golden the two events are projected back-to-back, so the value only
+# reflects projection-layer CPU time and is nondeterministic (0..~30ms across
+# runs). Normalize it to a fixed sentinel so the redaction golden stays
+# byte-stable while still asserting the field is present and integer-typed.
+_DURATION_MS_RE = re.compile(r'"durationMs":\d+')
+
+
+def _normalize_duration_ms(body: str) -> str:
+    return _DURATION_MS_RE.sub('"durationMs":0', body)
 
 
 def _append_projection_transcript(
@@ -152,11 +166,15 @@ def test_tool_call_result_matches_gate1_redacted_jsonl_and_sse_golden(
     assert "synthetic-result-token" not in body
     assert "synthetic result password" not in body
     assert "..." in body
+    # The local tool_end carries a real (non-hardcoded) wall-clock duration; the
+    # exact value is nondeterministic here, so assert the key is present and then
+    # normalize it before the byte-exact golden comparison.
+    assert '"durationMs":' in body
     transcript_body = transcript.file_path.read_text(encoding="utf-8")
     assert "synthetic-call-token" in transcript_body
     assert "synthetic-result-token" in transcript_body
-    assert transcript_body == _fixture("tool_redacted.jsonl")
-    assert body == _fixture("tool_redacted.sse")
+    assert _normalize_duration_ms(transcript_body) == _fixture("tool_redacted.jsonl")
+    assert _normalize_duration_ms(body) == _fixture("tool_redacted.sse")
 
 
 def test_adk_error_matches_gate1_redacted_sse_and_private_reason_jsonl_golden(
