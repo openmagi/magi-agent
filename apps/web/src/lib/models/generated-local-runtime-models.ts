@@ -40,6 +40,7 @@ export const GENERATED_LOCAL_RUNTIME_MODEL_PRESETS: Record<
   ],
   fireworks: [
     { value: "kimi-k2p6", label: "Kimi K2.6" },
+    { value: "kimi-k2p7", label: "Kimi K2.7" },
     { value: "kimi-k2p7-code", label: "Kimi K2.7 Code" },
     { value: "glm-5p2", label: "GLM 5.2" },
     { value: "kimi-k2p5", label: "Kimi K2.5" },
