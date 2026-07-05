@@ -181,6 +181,22 @@ async function localRuntimeFetch(path: string, options?: RequestInit): Promise<R
   return fetch(await localRuntimeUrl(path), options);
 }
 
+/**
+ * Bearer header for local-serve GET reads (active-snapshot / channel-messages).
+ * Mirrors the auth the local `/v1/chat/stream` send attaches: the loopback
+ * token that satisfies the serve route's `_auth_ok`. Best-effort: on a token
+ * failure it returns no Authorization so the caller's `res.ok`/try-catch path
+ * degrades to "nothing to resume" rather than throwing.
+ */
+async function localAuthHeaders(): Promise<Record<string, string>> {
+  try {
+    const token = await getToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  } catch {
+    return {};
+  }
+}
+
 function sessionKeyHeaders(sessionKey: string): Record<string, string> {
   return {
     "x-core-agent-session-key": sessionKey,
@@ -763,7 +779,13 @@ export async function fetchChannelMessages(
   since?: string,
   limit = 50,
 ): Promise<ServerMessage[]> {
-  if (isLocalBot(botId)) return [];
+  if (isLocalBot(botId)) {
+    // Local serve has no Supabase channel history; the runtime process holds a
+    // just-committed turn under a generous TTL so a refresh that lands after a
+    // turn finished can rehydrate the delivered assistant text. Route to the
+    // serve endpoint keyed by the reset-aware session id. Never throws.
+    return fetchLocalChannelMessages(botId, channelName);
+  }
 
   const params = new URLSearchParams();
   if (since) params.set("since", since);
@@ -773,6 +795,53 @@ export async function fetchChannelMessages(
   );
   const data = await res.json();
   return data.messages ?? [];
+}
+
+/**
+ * Local-serve variant of {@link fetchChannelMessages}. Reads the completed-turn
+ * record the runtime holds in its process-local store via
+ * `GET /v1/chat/channel-messages?sessionId=`, mapping the serve payload
+ * (`{role, content, createdAt, turnId}`) onto the {@link ServerMessage} shape
+ * the UI consumes. Returns `[]` for every "nothing to rehydrate" path.
+ */
+async function fetchLocalChannelMessages(
+  botId: string,
+  channelName: string,
+): Promise<ServerMessage[]> {
+  try {
+    const sessionId = buildSessionKey(botId, channelName);
+    const res = await localRuntimeFetch(
+      `/v1/chat/channel-messages?sessionId=${encodeURIComponent(sessionId)}`,
+      { headers: await localAuthHeaders() },
+    );
+    if (!res.ok) return [];
+    const data = (await res.json().catch(() => null)) as {
+      messages?: Array<{
+        role?: string;
+        content?: string;
+        createdAt?: number;
+        turnId?: string | null;
+      }>;
+    } | null;
+    const messages = Array.isArray(data?.messages) ? data.messages : [];
+    return messages
+      .filter((m) => typeof m?.content === "string" && m.content.length > 0)
+      .map((m, index) => ({
+        id:
+          typeof m.turnId === "string" && m.turnId
+            ? `local-turn-${m.turnId}`
+            : `local-turn-${sessionId}-${index}`,
+        role: m.role === "system" ? "system" : "assistant",
+        content: m.content as string,
+        created_at: new Date(
+          typeof m.createdAt === "number" && Number.isFinite(m.createdAt)
+            ? m.createdAt
+            : Date.now(),
+        ).toISOString(),
+      }));
+  } catch {
+    return [];
+  }
 }
 
 // --- Mid-turn injection (#86) ---
@@ -938,13 +1007,44 @@ export async function getActiveSnapshot(
   botId: string,
   channelName: string,
 ): Promise<ActiveSnapshot | null> {
-  if (isLocalBot(botId)) return null;
+  if (isLocalBot(botId)) {
+    // Local serve exposes the in-flight snapshot from its process-local turn
+    // store (kept alive by the detached pump even across a browser refresh) at
+    // `GET /v1/chat/active-snapshot?sessionId=`, keyed by the reset-aware
+    // session id. Returns null in every "nothing to resume" path. Never throws.
+    return getLocalActiveSnapshot(botId, channelName);
+  }
 
   try {
     const token = await getToken();
     const res = await fetch(
       `${CHAT_PROXY_URL}/v1/chat/${botId}/active-snapshot/${encodeURIComponent(channelName)}`,
       { headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (!res.ok) return null;
+    const data = (await res.json().catch(() => null)) as {
+      snapshot?: ActiveSnapshot | null;
+    } | null;
+    return data?.snapshot ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Local-serve variant of {@link getActiveSnapshot}. The serve payload is the
+ * same `{snapshot}` envelope the hosted route returns (the runtime reducer
+ * produces a field-compatible ActiveSnapshot), so no reshaping is needed.
+ */
+async function getLocalActiveSnapshot(
+  botId: string,
+  channelName: string,
+): Promise<ActiveSnapshot | null> {
+  try {
+    const sessionId = buildSessionKey(botId, channelName);
+    const res = await localRuntimeFetch(
+      `/v1/chat/active-snapshot?sessionId=${encodeURIComponent(sessionId)}`,
+      { headers: await localAuthHeaders() },
     );
     if (!res.ok) return null;
     const data = (await res.json().catch(() => null)) as {
