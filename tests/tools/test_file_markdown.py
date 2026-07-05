@@ -57,7 +57,13 @@ class TestTextRouting:
         assert conversion.content_digest is not None
         assert conversion.content_digest.startswith("sha256:")
 
-    def test_text_conversion_reports_delegate_truncation(self, tmp_path: Path) -> None:
+    def test_text_conversion_reports_delegate_truncation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Pin head+tail truncation OFF: the elision marker is additive and would
+        # push len(markdown) above the max_chars budget.  This test verifies
+        # delegate routing and truncated-flag propagation, not HEADTAIL mechanics.
+        monkeypatch.setenv("MAGI_HEADTAIL_TRUNCATION_ENABLED", "0")
         (tmp_path / "big.txt").write_text("x" * 5_000, encoding="utf-8")
 
         conversion = convert_file_to_markdown("big.txt", _ctx(tmp_path), max_chars=100)

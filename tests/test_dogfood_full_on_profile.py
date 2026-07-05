@@ -121,15 +121,11 @@ _STRICT_BOOL_FLAGS_ENABLED = (
     "MAGI_CROSS_VERIFY_ENABLED",
     "MAGI_DEEP_WEB_RESEARCH_ENABLED",
     "MAGI_BROWSER_TOOL_ENABLED",
-    "MAGI_HEADTAIL_TRUNCATION_ENABLED",
     "MAGI_FILE_DELIVERY_LIVE_ENABLED",
     "MAGI_DOCUMENT_QA_ENABLED",
     "MAGI_OBSERVABILITY_ENABLED",
-    "MAGI_EDIT_RETRY_REFLECTION_ENABLED",
-    "MAGI_CODING_REPAIR_LOOP_ENABLED",
     "MAGI_COMPUTE_VIA_CODE_ENABLED",
     "MAGI_FORMAT_ADHERENCE_ENABLED",
-    "MAGI_MULTI_FILE_JOIN_ENABLED",
     "MAGI_LEARNING_ENABLED",
     "MAGI_LEARNING_LIVE_ENABLED",
     "MAGI_LEARNING_INJECTION_ENABLED",
@@ -182,6 +178,10 @@ _PROFILE_BOOL_FLAGS_ENABLED = (
     # Promoted _b -> _pb (default-ON in the full profile; OFF only under
     # safe/eval or an explicit "0"). No longer seeded into the dogfood profile
     # since they self-enable under MAGI_RUNTIME_PROFILE=full.
+    "MAGI_HEADTAIL_TRUNCATION_ENABLED",
+    "MAGI_EDIT_RETRY_REFLECTION_ENABLED",
+    "MAGI_CODING_REPAIR_LOOP_ENABLED",
+    "MAGI_MULTI_FILE_JOIN_ENABLED",
     "MAGI_DEFERRED_TOOLS_ENABLED",
     # Ledger-first auto-continue authority. Promoted _b -> _pb so the engine
     # builds ambient auto-continue for every turn in the full profile.

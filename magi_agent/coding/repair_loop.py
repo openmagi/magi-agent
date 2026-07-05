@@ -258,18 +258,9 @@ def coding_repair_loop_enabled(env: Mapping[str, str] | None = None) -> bool:
     profiles keep the projection-only behavior unless explicitly overridden.
     """
 
-    if env is None:
-        env = os.environ
-    raw = env.get(_REPAIR_LOOP_ENV)
-    if raw is not None:
-        normalized = raw.strip().lower()
-        if normalized in _FALSE_VALUES:
-            return False
-        if normalized in _TRUE_VALUES:
-            return True
-        return False
-    profile = (env.get(_RUNTIME_PROFILE_ENV) or "").strip().lower()
-    return profile not in _SAFE_RUNTIME_PROFILES
+    from magi_agent.config.flags import flag_profile_bool  # noqa: PLC0415
+
+    return flag_profile_bool(_REPAIR_LOOP_ENV, env=env)
 
 
 def repair_max_attempts(

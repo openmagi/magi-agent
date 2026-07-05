@@ -21,8 +21,10 @@ from __future__ import annotations
 from magi_agent.config.env import multi_file_join_enabled
 
 
-def test_multi_file_join_parser_default_off() -> None:
-    assert multi_file_join_enabled({}) is False
+def test_multi_file_join_parser_default_on() -> None:
+    # Profile-aware default-ON: no-profile env resolves True.
+    assert multi_file_join_enabled({}) is True
+    # Explicit FALSE_VALUES always turn it off.
     assert multi_file_join_enabled({"MAGI_MULTI_FILE_JOIN_ENABLED": "0"}) is False
     assert multi_file_join_enabled({"MAGI_MULTI_FILE_JOIN_ENABLED": "false"}) is False
     assert multi_file_join_enabled({"MAGI_MULTI_FILE_JOIN_ENABLED": ""}) is False
@@ -34,12 +36,12 @@ def test_multi_file_join_parser_explicit_on() -> None:
     assert multi_file_join_enabled({"MAGI_MULTI_FILE_JOIN_ENABLED": "on"}) is True
 
 
-def test_multi_file_join_parser_does_not_follow_runtime_profile() -> None:
-    # Unlike file_tools_enabled, this is a strict opt-in gate (like
-    # parse_eval_autonomy_enabled): a non-safe runtime profile must NOT flip it
-    # on. Only explicit truthy values enable it.
+def test_multi_file_join_parser_follows_runtime_profile() -> None:
+    # Safe-family profiles flip the profile default to OFF.
     assert multi_file_join_enabled({"MAGI_RUNTIME_PROFILE": "eval"}) is False
-    assert multi_file_join_enabled({"MAGI_RUNTIME_PROFILE": "full"}) is False
+    assert multi_file_join_enabled({"MAGI_RUNTIME_PROFILE": "safe"}) is False
+    # Non-safe profile keeps the default ON.
+    assert multi_file_join_enabled({"MAGI_RUNTIME_PROFILE": "full"}) is True
 
 
 # ---------------------------------------------------------------------------
@@ -50,8 +52,12 @@ from magi_agent.cli.tool_runtime import multi_file_join_block
 
 
 def test_block_empty_when_disabled() -> None:
-    assert multi_file_join_block({}) == ""
+    # Explicit "0" disables the block.
     assert multi_file_join_block({"MAGI_MULTI_FILE_JOIN_ENABLED": "0"}) == ""
+    # Safe profile also disables.
+    assert multi_file_join_block({"MAGI_RUNTIME_PROFILE": "eval"}) == ""
+    # Profile-aware default-ON: unset env under no safe profile returns the block.
+    assert multi_file_join_block({}) != ""
 
 
 def test_block_content_when_enabled() -> None:
@@ -122,16 +128,17 @@ def _build_instruction_fixed_clock(tmp_path, env: dict[str, str]) -> str:
 
 def test_build_cli_instruction_byte_identical_when_off(tmp_path) -> None:
     off = _build_instruction_fixed_clock(tmp_path, {"MAGI_MULTI_FILE_JOIN_ENABLED": "0"})
-    unset = _build_instruction_fixed_clock(tmp_path, {})
     assert "<multi_file_join>" not in off
-    # Full-string equality, not just substring absence (per review).
-    assert off == unset
+    # Profile-aware default-ON: unset instruction DOES include the block.
+    unset = _build_instruction_fixed_clock(tmp_path, {})
+    assert "<multi_file_join>" in unset
 
 
 def test_build_cli_instruction_appends_block_when_on(tmp_path) -> None:
-    off = _build_instruction_fixed_clock(tmp_path, {})
+    # Use explicit "0" as the baseline to isolate the block append.
+    explicitly_off = _build_instruction_fixed_clock(tmp_path, {"MAGI_MULTI_FILE_JOIN_ENABLED": "0"})
     on = _build_instruction_fixed_clock(tmp_path, {"MAGI_MULTI_FILE_JOIN_ENABLED": "1"})
     assert "<multi_file_join>" in on
-    # The ON string is exactly the OFF string plus the appended block.
+    # The ON string is exactly the explicit-off string plus the appended block.
     appended = multi_file_join_block({"MAGI_MULTI_FILE_JOIN_ENABLED": "1"})
-    assert on == off + "\n\n" + appended
+    assert on == explicitly_off + "\n\n" + appended

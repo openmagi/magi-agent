@@ -267,6 +267,9 @@ def test_web_fetch_truncates_long_content(
     """Content longer than 12 000 chars must be truncated to exactly 12 000 chars."""
     from magi_agent.tools.web_search_tools import web_fetch
 
+    # Pin head+tail truncation OFF so the result length is exactly max_chars and
+    # not max_chars + elision marker (this test is not about HEADTAIL mechanics).
+    monkeypatch.setenv("MAGI_HEADTAIL_TRUNCATION_ENABLED", "0")
     long_md = "x" * 20_000
     opener = _CapturingOpener(_firecrawl_response(long_md))
     monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-key")
