@@ -324,6 +324,7 @@ _DEFAULT_PUBLIC_EVENT_TYPES = frozenset(
         "context_end",
         "task_board",
         "rule_check",
+        "reasoning_promoted",
     }
 )
 
@@ -368,6 +369,7 @@ _DEFAULT_PUBLIC_STRING_FIELDS: dict[str, tuple[str, ...]] = {
         "detail",
         "requiredAction",
     ),
+    "reasoning_promoted": ("turnId", "severity", "reason", "contentDigest"),
 }
 _PUBLIC_RESPONSE_CLEAR_REASONS = frozenset(
     {

@@ -61,9 +61,17 @@ def test_errors_kinds():
 
 
 def test_other_kinds():
-    """B2: child_started (subagent spawn) added alongside child_progress."""
+    """B2: child_started (subagent spawn) added alongside child_progress.
+
+    PR-3: reasoning_promoted (a reasoning-only terminal promoted to the final
+    answer) is a visible, non-noise anomaly marker in the 'other' group.
+    """
     assert set(CATEGORIES["other"]) == {
-        "child_progress", "child_started", "artifact_created", "task_board"
+        "child_progress",
+        "child_started",
+        "artifact_created",
+        "reasoning_promoted",
+        "task_board",
     }
 
 

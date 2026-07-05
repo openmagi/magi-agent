@@ -72,6 +72,7 @@ CATEGORIES: dict[str, list[str]] = {
         "artifact_created",
         "child_progress",
         "child_started",  # subagent spawn event; co-located with child_progress
+        "reasoning_promoted",  # a reasoning-only terminal was promoted to the answer
         "task_board",
     ],
 }
