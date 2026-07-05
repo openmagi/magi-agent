@@ -485,11 +485,17 @@ def build_headless_runtime(
     # constructed exactly as pre-WS3.
     from magi_agent.config.env import (  # noqa: PLC0415
         is_goal_completion_evidence_first_enabled,
+        is_goal_loop_enabled,
         is_plan_ledger_durable_enabled,
         read_goal_required_evidence,
     )
 
     evidence_first = is_goal_completion_evidence_first_enabled()
+    # Ledger-first auto-continue authority (profile-aware default-ON). Resolved
+    # here so the engine ctor stays env-pure. When ON, SEAM 2's already-computed
+    # "continue" verdict re-invokes (bounded by the measurable-progress gate)
+    # instead of degrading to a bare break; OFF keeps the historic behaviour.
+    auto_continue_enabled = is_goal_loop_enabled()
     # plan_ledger_reader reads the durable todo snapshot off the runner-attribute
     # handler set surfaced by PR3a (section 5.1). ``None`` for stub /
     # caller-supplied-tools / child-containment runners and when the durable
@@ -553,6 +559,10 @@ def build_headless_runtime(
         evidence_first=evidence_first,
         plan_ledger_reader=plan_ledger_reader,
         required_evidence=goal_required_evidence,
+        # Ledger-first auto-continue authority. ON (profile-aware default) gives
+        # SEAM 2 re-invocation authority; the per-turn composer Goal-mission
+        # toggle raises the budget ceiling (read from the intensity ContextVar).
+        auto_continue_enabled=auto_continue_enabled,
     )
 
     # (C) Permission gate — default stays sink-less and therefore fail-safe on

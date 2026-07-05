@@ -58,6 +58,10 @@ async def _local_adk_chat_sse(
         reset_per_turn_goal_loop_policy,
         set_per_turn_goal_loop_policy,
     )
+    from magi_agent.runtime.per_turn_goal_intensity import (
+        reset_per_turn_goal_mission,
+        set_per_turn_goal_mission,
+    )
     from magi_agent.runtime.per_turn_agent_mode_context import (
         reset_per_turn_agent_mode,
         set_per_turn_agent_mode,
@@ -171,6 +175,11 @@ async def _local_adk_chat_sse(
         env=os.environ,
     )
     _goal_loop_token = set_per_turn_goal_loop_policy(_goal_loop_policy)
+    # Auto-continue intensity: the composer Goal-mission toggle no longer gates
+    # the loop on/off (that is the profile-aware MAGI_GOAL_LOOP_ENABLED flag);
+    # it raises the ambient budget ceiling. Publish it on the per-turn intensity
+    # ContextVar so SEAM 2 picks MISSION vs AMBIENT budgets. Reset in the finally.
+    _goal_mission_token = set_per_turn_goal_mission(_payload_goal_mode_requested)
     # PR-4c: publish the per-send agent mode. An explicit request mode wins over
     # the operator's stored sticky default (customize.active_agent_mode); absence
     # (None) keeps PR-4b behavior. Reset in the finally below.
@@ -385,6 +394,7 @@ async def _local_adk_chat_sse(
     finally:
         reset_per_turn_reasoning_effort(_reasoning_token)
         reset_per_turn_goal_loop_policy(_goal_loop_token)
+        reset_per_turn_goal_mission(_goal_mission_token)
         reset_per_turn_agent_mode(_agent_mode_token)
     # ── TURN-END MEMORY HOOK (PR-B) ─────────────────────────────────────────
     # This is the turn-finalization point of the live local chat path: the

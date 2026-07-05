@@ -148,10 +148,13 @@ LOCAL_FULL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     # ``done`` and a clean stop short of verifiable completion emits an honest
     # ``goal_paused`` (SEAM 2, hoisted outside the goal-loop guard, so it is
     # reachable with the lab judge loop OFF and adds ZERO model calls).
-    # MAGI_GOAL_LOOP_ENABLED is deliberately NOT seeded here: promoting the
-    # cost-bearing judge continuation loop from lab (LAB_EXPERIMENTAL_FLAGS) to
-    # the full default changes per-turn latency/cost and is a separate decision,
-    # not part of WS3. MAGI_GOAL_NUDGE_REQUIRED_EVIDENCE stays unset globally so
+    # MAGI_GOAL_LOOP_ENABLED is now a profile-aware default-ON flag (the ledger-
+    # first auto-continue authority), so it self-enables under the full profile
+    # via the profile resolver and does not need an explicit seed here. The brake
+    # is a deterministic measurable-progress gate (ok tool end OR ledger delta OR
+    # new evidence), NOT the cost-bearing LLM judge, so ambient auto-continue adds
+    # no per-turn model calls in the common open-todo case.
+    # MAGI_GOAL_NUDGE_REQUIRED_EVIDENCE stays unset globally so
     # free-form chat is never forced to provide evidence (it is recipe-scoped).
     # Safe / eval / off profiles keep all WS3 flags OFF; the registry defaults
     # stay default-OFF so a fresh import is byte-identical.
@@ -428,7 +431,10 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     "MAGI_FORMAT_ADHERENCE_ENABLED",
     "MAGI_GATE5B_GOVERNANCE_ENABLED",
     "MAGI_GA_DELIVERABLE_GATE_ENABLED",
-    "MAGI_GOAL_LOOP_ENABLED",
+    # (MAGI_GOAL_LOOP_ENABLED was promoted to a profile-aware default-ON flag:
+    # the ledger-first auto-continue authority is ambient for every turn in the
+    # lab / full profile via the profile resolver, so it no longer belongs in
+    # this strict-bool lab-opt-in list.)
     "MAGI_HEADTAIL_TRUNCATION_ENABLED",
     "MAGI_KERNEL_RECIPE_PACKS_ENABLED",
     "MAGI_KERNEL_ROLE_PROVIDES_ENABLED",

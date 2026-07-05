@@ -264,6 +264,26 @@ _EDIT_CLASS_TOOLS = frozenset(
     {"FileEdit", "FileWrite", "Edit", "Write", "ApplyPatch", "PatchApply"}
 )
 
+#: Auto-continue re-invocation prompt fed back to the SAME session when the
+#: durable ledger still has open todos. Deliberately short + generic so the model
+#: does not anchor on the wording and re-describe its plan; the original system
+#: prompt + tool catalog + the durable ledger carry the objective. Mirrors the
+#: goal-loop judge's continuation template shape (prefix-cache friendly).
+_AUTO_CONTINUE_PROMPT = (
+    "There are still open items in your task list. Continue executing the next "
+    "concrete step now, using the available tools. Do not restate the plan or "
+    "describe what you will do, just do it."
+)
+
+#: The single wrap-up prompt spent after two consecutive no-progress
+#: continuations. Asks the model to REPORT (done vs not done) rather than keep
+#: attempting, so a stalled loop ends with an honest account instead of silence.
+_AUTO_CONTINUE_WRAP_UP_PROMPT = (
+    "You have made no measurable progress on the last two attempts. Stop "
+    "attempting further steps. In your final message, report concisely what is "
+    "done, what is not done, and what is blocking the remaining work."
+)
+
 
 def _is_turn_end_event(event: Mapping[str, object]) -> bool:
     return event.get("type") == "turn_end"
@@ -540,6 +560,18 @@ class MagiEngineDriver:
         evidence_first: bool = False,
         plan_ledger_reader: Callable[[str], Sequence[object]] | None = None,
         required_evidence: tuple[str, ...] = (),
+        # Ledger-first auto-continue authority (profile-aware default-ON via
+        # MAGI_GOAL_LOOP_ENABLED, resolved at the wiring site so the ctor stays
+        # env-pure). When True, SEAM 2's already-computed "continue" verdict
+        # actually re-invokes the runner (bounded by the measurable-progress
+        # gate + generous ambient budgets) instead of degrading to a bare break.
+        # False -> SEAM 2 keeps its historic bare-break behaviour byte-for-byte.
+        auto_continue_enabled: bool = False,
+        # Intensity of the auto-continue loop for THIS driver's turns. ``mission``
+        # (the composer Goal-mission toggle) selects the higher MISSION budgets;
+        # ambient (the default) uses the generous AMBIENT budgets. The toggle is
+        # an intensity control, not the on/off master (that is the flag above).
+        auto_continue_mission: bool = False,
     ) -> None:
         self._runner = runner
         # Optional wire profile for the HOSTED path (T4). ``None`` (default) keeps
@@ -580,6 +612,10 @@ class MagiEngineDriver:
             plan_ledger_reader
         )
         self._required_evidence: tuple[str, ...] = tuple(required_evidence)
+        # Ledger-first auto-continue (the highest-leverage fix). Presence gives
+        # SEAM 2 re-invocation authority; the intensity picks the budget set.
+        self._auto_continue_enabled: bool = auto_continue_enabled
+        self._auto_continue_mission: bool = auto_continue_mission
         # Output-continuation: resume a response truncated at the model's
         # per-response output-token cap by re-invoking and appending. ``None``
         # (default) -> no continuation logic; streaming is byte-identical.
@@ -1615,6 +1651,29 @@ class MagiEngineDriver:
         goal_loop_continuations = 0
         goal_loop_judge_parse_failures = 0
         goal_loop_judge_caller: object | None = None
+        # Ledger-first auto-continue state (the highest-leverage fix). Gives
+        # SEAM 2's already-computed "continue" verdict re-invocation authority so
+        # a mid-multi-step-task clean break resumes instead of stopping with
+        # "I'll continue...". Only advances when ``_auto_continue_enabled`` (the
+        # profile-aware MAGI_GOAL_LOOP_ENABLED flag) is on; otherwise the SEAM 2
+        # code below is byte-identical to the historic bare break.
+        auto_continue_used = 0
+        auto_continue_no_progress_streak = 0
+        auto_continue_wrap_up_spent = False
+        # Snapshots captured BEFORE each attempt so the progress gate can compute
+        # a ledger delta / new-evidence delta across the just-finished attempt.
+        auto_continue_prev_ledger: tuple[object, ...] = ()
+        auto_continue_prev_evidence_count = 0
+        # Per-attempt ok / blocked tool-end counters. Reset at the top of every
+        # attempt; folded into the progress signal at the clean break. A blocked
+        # or needs-approval tool end projects (public_events) as status != "ok",
+        # so it never counts as progress.
+        auto_continue_ok_tool_ends = 0
+        auto_continue_blocked_tool_ends = 0
+        # Monotonic turn clock for the wall-clock budget backstop.
+        import time as _auto_continue_time  # noqa: PLC0415
+
+        auto_continue_turn_start = _auto_continue_time.monotonic()
         # Output-continuation budget: how many times we've resumed a response
         # truncated at the model's per-response output-token cap this turn.
         continuations_used = 0
@@ -1687,6 +1746,20 @@ class MagiEngineDriver:
                 attempt_tool_ran = False
                 attempt_text_seen = False
                 budget_exhausted = False
+                # Auto-continue: reset the per-attempt ok / blocked tool-end
+                # counters and capture the pre-attempt ledger + evidence-count
+                # snapshots so the clean-break progress gate can diff them.
+                auto_continue_ok_tool_ends = 0
+                auto_continue_blocked_tool_ends = 0
+                if self._auto_continue_enabled:
+                    auto_continue_prev_ledger = (
+                        tuple(plan_ledger_reader(session_id))
+                        if plan_ledger_reader is not None
+                        else ()
+                    )
+                    auto_continue_prev_evidence_count = len(
+                        self._collect_evidence(turn_id)
+                    )
                 # Per-attempt token usage. ADK usage_metadata is cumulative WITHIN
                 # one run_async stream, so we last-writer-wins into this dict here
                 # and SUM it into the turn-level ``usage`` in the finally below.
@@ -1764,6 +1837,17 @@ class MagiEngineDriver:
                             # nudge again (re-arm).
                             if goal_nudge is not None and safe.get("type") == "tool_start":
                                 goal_check_pending = False
+                            # Auto-continue progress gate: count ok vs blocked /
+                            # needs-approval tool ends this attempt. The public
+                            # projection normalizes tool_end.status to "ok" | "error"
+                            # (a blocked / needs-approval / failed tool end is
+                            # "error"), so an "error" status is exactly the
+                            # non-progress family the gate must NOT count as work.
+                            if self._auto_continue_enabled and safe.get("type") == "tool_end":
+                                if safe.get("status") == "ok":
+                                    auto_continue_ok_tool_ends += 1
+                                else:
+                                    auto_continue_blocked_tool_ends += 1
                             # R2: classify this attempt's activity for the
                             # empty-response decision. Tool events are tracked
                             # separately; "text seen" reuses the continuation
@@ -2295,8 +2379,150 @@ class MagiEngineDriver:
                                 open_todos=self._open_todo_count(seam2_snapshot),
                             )
                             break
-                        # "continue" / "defer_to_judge" -> bare break (no judge to
-                        # re-loop without a policy).
+                        # "continue" -> give the ledger-first verdict re-invocation
+                        # authority (the highest-leverage fix). Historically this
+                        # degraded to a bare break because continuation authority
+                        # lived only in the goal-loop judge (double-gated OFF); the
+                        # agent stopped mid-multi-step-task and said "I'll
+                        # continue...". Now, when auto-continue is enabled, a
+                        # measurable-progress gate decides whether the computed
+                        # "continue" actually re-invokes. "defer_to_judge" (no
+                        # ledger signal, no evidence requirement) keeps the bare
+                        # break so the no-ledger case is unchanged.
+                        if (
+                            seam2_outcome == "continue"
+                            and self._auto_continue_enabled
+                        ):
+                            from magi_agent.runtime.goal_loop_auto_continue import (  # noqa: PLC0415
+                                AttemptProgress,
+                                budgets_for_intensity,
+                                decide_auto_continue,
+                                ledger_changed,
+                            )
+                            from magi_agent.runtime.per_turn_goal_intensity import (  # noqa: PLC0415
+                                current_per_turn_goal_mission,
+                            )
+
+                            # Mission intensity: the composer Goal-mission toggle
+                            # (per-turn context) raises the budget ceiling; the
+                            # constructor default is the ambient fallback.
+                            auto_continue_mission = (
+                                current_per_turn_goal_mission()
+                                or self._auto_continue_mission
+                            )
+                            evidence_now = self._collect_evidence(turn_id)
+                            progress = AttemptProgress(
+                                ok_tool_ends=auto_continue_ok_tool_ends,
+                                blocked_tool_ends=auto_continue_blocked_tool_ends,
+                                ledger_changed=ledger_changed(
+                                    auto_continue_prev_ledger, seam2_snapshot
+                                ),
+                                new_evidence_records=max(
+                                    0,
+                                    len(evidence_now)
+                                    - auto_continue_prev_evidence_count,
+                                ),
+                            )
+                            decision = decide_auto_continue(
+                                ledger_wants_continue=True,
+                                progress=progress,
+                                continuations_used=auto_continue_used,
+                                prior_no_progress_streak=(
+                                    auto_continue_no_progress_streak
+                                ),
+                                elapsed_seconds=(
+                                    _auto_continue_time.monotonic()
+                                    - auto_continue_turn_start
+                                ),
+                                budgets=budgets_for_intensity(
+                                    mission=auto_continue_mission
+                                ),
+                                wrap_up_already_spent=auto_continue_wrap_up_spent,
+                            )
+                            auto_continue_no_progress_streak = (
+                                decision.no_progress_streak
+                            )
+                            open_todos_now = self._open_todo_count(seam2_snapshot)
+                            if decision.outcome == "stop_budget":
+                                yield RuntimeEvent(
+                                    type="status",
+                                    payload={
+                                        "type": "goal_loop_exhausted",
+                                        "reason": decision.reason,
+                                        "continuations": auto_continue_used,
+                                    },
+                                    turn_id=turn_id,
+                                )
+                                yield self._goal_paused_event(
+                                    turn_id=turn_id,
+                                    reason="budget_exhausted",
+                                    objective=None,
+                                    open_todos=open_todos_now,
+                                )
+                                break
+                            if (
+                                decision.outcome
+                                == "paused_waiting_on_approvals"
+                            ):
+                                yield self._goal_paused_event(
+                                    turn_id=turn_id,
+                                    reason="waiting_on_approvals",
+                                    objective=None,
+                                    open_todos=open_todos_now,
+                                )
+                                break
+                            if decision.outcome == "paused_no_progress":
+                                yield self._goal_paused_event(
+                                    turn_id=turn_id,
+                                    reason="no_progress",
+                                    objective=None,
+                                    open_todos=open_todos_now,
+                                )
+                                break
+                            if decision.outcome in {"continue", "wrap_up"}:
+                                is_wrap_up = decision.outcome == "wrap_up"
+                                if is_wrap_up:
+                                    auto_continue_wrap_up_spent = True
+                                auto_continue_used += 1
+                                yield RuntimeEvent(
+                                    type="status",
+                                    payload={
+                                        "type": (
+                                            "goal_loop_wrap_up"
+                                            if is_wrap_up
+                                            else "goal_loop_continuation"
+                                        ),
+                                        "reason": decision.reason,
+                                        "continuation": auto_continue_used,
+                                        "openTodos": open_todos_now,
+                                        "source": "auto_continue",
+                                    },
+                                    turn_id=turn_id,
+                                )
+                                runner_input = runner_turn_input_cls(
+                                    userId=self._user_id,
+                                    sessionId=session_id,
+                                    turnId=turn_id,
+                                    invocationId=turn_id,
+                                    newMessage=types.Content(  # type: ignore[attr-defined]
+                                        role="user",
+                                        parts=[
+                                            types.Part(  # type: ignore[attr-defined]
+                                                text=(
+                                                    _AUTO_CONTINUE_WRAP_UP_PROMPT
+                                                    if is_wrap_up
+                                                    else _AUTO_CONTINUE_PROMPT
+                                                )
+                                            )
+                                        ],
+                                    ),
+                                    harnessState=effective_harness_state,
+                                )
+                                continue  # re-invoke run_async (genuine model call)
+                            # decision.outcome == "stop" (ledger_wants_continue was
+                            # True here so this is unreachable in practice) -> fall
+                            # through to the bare break.
+                        # "defer_to_judge" / auto-continue disabled -> bare break.
                     break
 
                 # The run invocation raised. Decide whether to GENUINELY retry.

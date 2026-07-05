@@ -258,9 +258,20 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     # --- Channels / always-on ----------------------------------------------
-    _b(
+    _pb(
         "MAGI_GOAL_LOOP_ENABLED",
-        summary="Enable the autonomous goal-loop scheduler.",
+        summary=(
+            "Autonomous goal-loop / auto-continue authority. Profile-aware "
+            "default-ON: the engine builds an ambient GoalLoopPolicy for EVERY "
+            "turn so a mid-multi-step-task clean break can re-invoke instead of "
+            "stopping with 'I'll continue...'. Completion is judged by the "
+            "evidence-first ledger ladder (no LLM call for the common open-todo "
+            "case); the brake is a measurable-progress gate (ok tool end OR "
+            "ledger delta OR new evidence), NOT model judgment. The composer "
+            "Goal-mission toggle becomes an INTENSITY control (ambient vs "
+            "mission budgets), not this on/off master. OFF under safe / eval "
+            "profiles or an explicit MAGI_GOAL_LOOP_ENABLED=0."
+        ),
     ),
     _pb(
         "MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED",
