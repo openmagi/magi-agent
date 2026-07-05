@@ -1262,6 +1262,16 @@ class RealLocalChildRunner:
             # (default deny/ask) instead of a hard-coded bypass.
             permission_mode=ctx.permission_mode,
             pinned_recipe_pack_ids=pinned_refs,
+            # #1329 regression fix: a SpawnAgent child is a bounded, parent
+            # orchestrated single-objective execution. It must answer the
+            # delegated subtask once and return, NEVER auto-continue /
+            # self-check-goal / re-invoke. Force auto-continue OFF for the child
+            # engine regardless of MAGI_GOAL_LOOP_ENABLED (a top-level / parent
+            # concern). Without this the child answered e.g. "2", the
+            # auto-continue loop fired a goal-completion self-check, the model
+            # replied "Yes." / "The goal has been fully met.", and the collector
+            # took that last block as the child summary -> parent got "Yes."
+            auto_continue_allowed=False,
         )
 
         # --- Drive the governed turn + collect summary + evidence_refs -------
