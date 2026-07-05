@@ -285,6 +285,12 @@ class OpenMagiEventBridge:
         # tool_end to compute durationMs — mirrors gate5b4c3's
         # ``live_tool_started_at_by_id``.  Never referenced in the CLI/None path.
         self._hosted_tool_started_at: dict[str, float] = {}
+        # Local (CLI/None) path start-time tracker: populated at tool_start and
+        # consumed at tool_end to compute a real ``durationMs`` for the local
+        # projection. Kept separate from the hosted tracker so the hosted wire
+        # shape stays byte-for-byte identical. The local path previously
+        # hardcoded ``durationMs: 0`` (the "every tool shows 0ms" bug).
+        self._local_tool_started_at: dict[str, float] = {}
 
     # D-10: seven pure pass-throughs (``project_runner_{start,phase,
     # heartbeat,model_fallback,retry,llm_progress,end}_event``) used to
@@ -370,6 +376,7 @@ class OpenMagiEventBridge:
             hosted_tool_started_at=(
                 self._hosted_tool_started_at if self._wire_profile is not None else None
             ),
+            local_tool_started_at=self._local_tool_started_at,
         )
         self._streamed_partial_text = partial_run[0]
         self._streamed_partial_public_text = partial_public_text[0]
@@ -616,6 +623,7 @@ def _project_content_parts(
     hosted_tool_ids_by_adk_id: dict[str, str] | None = None,
     pending_hosted_ids_by_name: dict[str, list[str]] | None = None,
     hosted_tool_started_at: dict[str, float] | None = None,
+    local_tool_started_at: dict[str, float] | None = None,
 ) -> EventProjection:
     agent_events: list[dict[str, object]] = []
     legacy_deltas: list[str] = []
@@ -750,6 +758,7 @@ def _project_content_parts(
                 hosted_tool_ids_by_adk_id=hosted_tool_ids_by_adk_id,
                 pending_hosted_ids_by_name=pending_hosted_ids_by_name,
                 hosted_tool_started_at=hosted_tool_started_at,
+                local_tool_started_at=local_tool_started_at,
             )
             agent_events.extend(tool_projection.agent_events)
             transcript_entries.extend(tool_projection.transcript_entries)
@@ -770,6 +779,7 @@ def _project_content_parts(
                 hosted_tool_ids_by_adk_id=hosted_tool_ids_by_adk_id,
                 pending_hosted_ids_by_name=pending_hosted_ids_by_name,
                 hosted_tool_started_at=hosted_tool_started_at,
+                local_tool_started_at=local_tool_started_at,
             )
             agent_events.extend(tool_projection.agent_events)
             transcript_entries.extend(tool_projection.transcript_entries)
@@ -808,6 +818,7 @@ def _project_function_call_part(
     hosted_tool_ids_by_adk_id: dict[str, str] | None = None,
     pending_hosted_ids_by_name: dict[str, list[str]] | None = None,
     hosted_tool_started_at: dict[str, float] | None = None,
+    local_tool_started_at: dict[str, float] | None = None,
 ) -> EventProjection:
     name = getattr(function_call, "name", None) or "unknown_tool"
     args = getattr(function_call, "args", None) or {}
@@ -854,6 +865,9 @@ def _project_function_call_part(
                 suffix=f"tool-start-{index}",
             )
             agent_event["inputDigest"] = input_digest
+        # Record local-path start time so tool_end can compute a real duration.
+        if local_tool_started_at is not None:
+            local_tool_started_at[tool_use_id] = time.monotonic()
 
     # HOSTED path: emit a tool_progress "in_progress" event immediately after
     # tool_start — mirrors gate5b4c3's ``tool_progress_event(... status="in_progress",
@@ -907,6 +921,7 @@ def _project_function_response_part(
     hosted_tool_ids_by_adk_id: dict[str, str] | None = None,
     pending_hosted_ids_by_name: dict[str, list[str]] | None = None,
     hosted_tool_started_at: dict[str, float] | None = None,
+    local_tool_started_at: dict[str, float] | None = None,
 ) -> EventProjection:
     name = getattr(function_response, "name", None) or "unknown_tool"
     adk_id = getattr(function_response, "id", None)
@@ -961,8 +976,8 @@ def _project_function_response_part(
             receipt_refs=(f"result:{digest}",),
             duration_ms=_elapsed_ms(start),
         )
+        local_duration_ms: int | None = None
     else:
-        # EXISTING code, byte-for-byte unchanged
         tool_use_id = _tool_use_id(
             event,
             turn_id=turn_id,
@@ -971,13 +986,25 @@ def _project_function_response_part(
             adk_id=adk_id,
             kind="response",
         )
+        # Thread a real wall-clock duration from the correlated tool_start when
+        # available; omit ``durationMs`` when unknown rather than hardcoding 0
+        # (the "every tool shows 0ms" dashboard bug).
+        local_start = (
+            local_tool_started_at.get(tool_use_id)
+            if local_tool_started_at is not None
+            else None
+        )
+        local_duration_ms = _elapsed_ms(local_start)
+        if local_tool_started_at is not None:
+            local_tool_started_at.pop(tool_use_id, None)
         agent_event = {
             "type": "tool_end",
             "id": tool_use_id,
             "status": status,
             "output_preview": _public_preview(response),
-            "durationMs": 0,
         }
+        if local_duration_ms is not None:
+            agent_event["durationMs"] = local_duration_ms
         if live_compatible:
             agent_event["eventId"] = _public_event_id(
                 event,
@@ -988,6 +1015,12 @@ def _project_function_response_part(
             if transcript_refs:
                 agent_event["transcriptRefs"] = list(transcript_refs)
 
+    normalized_payload: dict[str, object] = {
+        "outputPreview": _public_preview(response),
+        "status": status,
+    }
+    if local_duration_ms is not None:
+        normalized_payload["latencyMs"] = local_duration_ms
     return EventProjection(
         agent_events=[agent_event],
         transcript_entries=[
@@ -998,6 +1031,7 @@ def _project_function_response_part(
                 status=status,
                 output=output,
                 is_error=is_error,
+                duration_ms=local_duration_ms,
             )
         ],
         normalized_events=[
@@ -1009,7 +1043,7 @@ def _project_function_response_part(
                 callId=tool_use_id,
                 source="adk",
                 toolName=public_name,
-                payload={"outputPreview": _public_preview(response), "status": status},
+                payload=normalized_payload,
                 metadata=normalized_metadata,
             )
         ],
