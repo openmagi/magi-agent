@@ -12,9 +12,11 @@ import { AgentActivityTimeline } from "./agent-activity-timeline";
 import { ThinkingBlock } from "./thinking-block";
 import { EChartRenderer } from "./echart-renderer";
 import { CitationLinkChip } from "./citation-link-chip";
+import { SegmentedTranscript } from "./segmented-transcript";
 import { parseMarkers } from "@/chat-core";
 import { parseKbContextMarker } from "@/chat-core";
 import { buildMessageCopyText } from "@/chat-core/message-copy";
+import { segmentsMatchContent } from "@/chat-core";
 import { getAttachmentUrl, getKnowledgeDocumentUrl, fetchAttachmentBlob } from "@/chat-core/attachments";
 import {
   stripAssistantMetadataPreamble,
@@ -27,6 +29,7 @@ import type {
   ResponseUsage,
   ToolActivity,
   TaskBoardSnapshot,
+  TranscriptSegment,
   LiveTranscriptItem,
 } from "@/chat-core";
 
@@ -48,6 +51,12 @@ interface MessageBubbleProps {
   thinkingDuration?: number;
   /** Persisted tool/skill activities (shown in the activity timeline). */
   activities?: ToolActivity[];
+  /**
+   * Ordered interleaved transcript segments. When present AND content-
+   * authoritative, they drive the interleaved think/tool/text layout; otherwise
+   * the flat layout renders.
+   */
+  segments?: TranscriptSegment[];
   /** Persisted / live TaskBoard snapshot rendered above the message body. */
   taskBoard?: TaskBoardSnapshot;
   /** Durable source/citation evidence captured with the finalized assistant message. */
@@ -694,7 +703,7 @@ function ContextMenu({ x, y, onAction, onClose }: {
   );
 }
 
-export function MessageBubble({ role, content, timestamp, isStreaming, inlineBeforeContent, inlineAfterContent, liveTranscriptItems, liveAssistantTurn, thinkingContent, thinkingDuration, activities, taskBoard, researchEvidence, usage, botId, replyTo, injected, selectionMode, selected, onSelect, onContextAction }: MessageBubbleProps) {
+export function MessageBubble({ role, content, timestamp, isStreaming, inlineBeforeContent, inlineAfterContent, liveTranscriptItems, liveAssistantTurn, thinkingContent, thinkingDuration, activities, segments, taskBoard, researchEvidence, usage, botId, replyTo, injected, selectionMode, selected, onSelect, onContextAction }: MessageBubbleProps) {
   const timeStr = useMemo(() => (timestamp ? formatTime(timestamp) : null), [timestamp]);
   const { download, downloadingId } = useAuthDownload();
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -770,6 +779,23 @@ export function MessageBubble({ role, content, timestamp, isStreaming, inlineBef
   // and finalized assistant messages — independent of showLiveWorkDetails so it
   // persists after the turn ends.
   const hasThinkingBlock = !isUser && !!thinkingContent;
+  // Interleaved layout gate. Use the ordered segments only when:
+  //  - this is an assistant message with segments present,
+  //  - the segments are content-authoritative (derived text === raw content), so
+  //    no catch-up/error path mutated the visible text after capture, and
+  //  - the visible body equals the raw content (no attachment/KB markers or
+  //    metadata preamble were stripped; those need whole-content handling, so
+  //    we fall back to the flat layout in that case), and
+  //  - we are NOT rendering the live-transcript-items streaming view (that has
+  //    its own receive-order rendering during the live turn).
+  const segmentBodyMatches = safeTextContent === content;
+  const useSegmentedLayout =
+    !isUser &&
+    !hasLiveTranscriptItems &&
+    !!segments &&
+    segments.length > 0 &&
+    segmentBodyMatches &&
+    segmentsMatchContent(segments, content);
   const hasVisiblePayload =
     hasMessageBody ||
     kbRefs.length > 0 ||
@@ -798,6 +824,70 @@ export function MessageBubble({ role, content, timestamp, isStreaming, inlineBef
 
   if (!hasVisiblePayload) return null;
 
+  // Shared assistant markdown pipeline (charts, citations, KaTeX, streaming
+  // cursor). Used by BOTH the flat body branch and the interleaved
+  // SegmentedTranscript so text renders identically in either layout.
+  const renderAssistantMarkdown = (text: string, showCursor: boolean): ReactNode => (
+    <div className="prose-chat">
+      <ReactMarkdown
+        remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath]}
+        rehypePlugins={[rehypeKatex]}
+        components={{
+          del: ({ children }) => <>{children}</>,
+          pre: ({ children }) => {
+            const child = Children.only(children);
+            if (isValidElement<{ className?: string; children?: ReactNode }>(child)) {
+              const source = String(child.props.children ?? "").replace(/\n$/, "");
+              const language = /language-(\w+)/.exec(child.props.className ?? "")?.[1]?.toLowerCase();
+              const shouldRenderChart =
+                language === "echarts" ||
+                ((language === "json" || !language) && looksLikeEChartOption(source));
+
+              if (shouldRenderChart) {
+                return <EChartRenderer source={source} />;
+              }
+            }
+
+            return <pre>{children}</pre>;
+          },
+          code: ({ className, children, ...props }) => {
+            const language = /language-(\w+)/.exec(className ?? "")?.[1]?.toLowerCase();
+            const shouldRenderChart =
+              language === "echarts" ||
+              language === "json";
+
+            if (shouldRenderChart) {
+              return <code className={className} {...props}>{children}</code>;
+            }
+
+            return (
+              <code className={className} {...props}>
+                {children}
+              </code>
+            );
+          },
+          ...(evidenceSources.length > 0 ? {
+            p: ({ children }) => <p>{injectCitationsIntoChildren(children, evidenceSources)}</p>,
+            li: ({ children, ...props }) => <li {...props}>{injectCitationsIntoChildren(children, evidenceSources)}</li>,
+            td: ({ children, ...props }) => <td {...props}>{injectCitationsIntoChildren(children, evidenceSources)}</td>,
+            th: ({ children, ...props }) => <th {...props}>{injectCitationsIntoChildren(children, evidenceSources)}</th>,
+            strong: ({ children }) => <strong>{injectCitationsIntoChildren(children, evidenceSources)}</strong>,
+            a: ({ href, children }) => (
+              <CitationLinkChip href={href} sources={evidenceSources}>
+                {children}
+              </CitationLinkChip>
+            ),
+          } : {}),
+        }}
+      >
+        {text}
+      </ReactMarkdown>
+      {showCursor && (
+        <span className="ml-0.5 inline-block h-3.5 w-[3px] animate-pulse rounded-full bg-foreground/40 align-middle" />
+      )}
+    </div>
+  );
+
   return (
     <div
       className={`flex ${isUser ? "justify-end" : "justify-start"} mb-4 group ${selectionMode ? "cursor-pointer" : ""}`}
@@ -820,7 +910,7 @@ export function MessageBubble({ role, content, timestamp, isStreaming, inlineBef
         </div>
       )}
       <div className={`min-w-0 ${isUser ? "max-w-[88%] sm:max-w-[75%] items-end" : "w-full max-w-full items-start"} flex flex-col gap-1`}>
-        {hasThinkingBlock && (
+        {hasThinkingBlock && !useSegmentedLayout && (
           <ThinkingBlock
             content={thinkingContent}
             duration={thinkingDuration}
@@ -828,7 +918,7 @@ export function MessageBubble({ role, content, timestamp, isStreaming, inlineBef
             activities={showLiveWorkDetails ? activities : undefined}
           />
         )}
-        {!isUser && hasActivityTimeline && (
+        {!isUser && hasActivityTimeline && !useSegmentedLayout && (
           <AgentActivityTimeline
             live={showLiveWorkDetails}
             activities={timelineActivities}
@@ -886,65 +976,21 @@ export function MessageBubble({ role, content, timestamp, isStreaming, inlineBef
             </p>
           ) : !isUser && hasLiveTranscriptItems ? (
             <InlineLiveTranscript items={liveTranscriptItems} isStreaming={isStreaming} />
+          ) : !isUser && useSegmentedLayout ? (
+            <SegmentedTranscript
+              segments={segments!}
+              activities={activities}
+              isStreaming={isStreaming}
+              live={showLiveWorkDetails}
+              renderText={(text, { isLast }) =>
+                renderAssistantMarkdown(text, Boolean(isStreaming) && isLast)
+              }
+            />
           ) : !isUser && hasDisplayContent ? (
-            <div className="prose-chat">
-              <ReactMarkdown
-                remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath]}
-                rehypePlugins={[rehypeKatex]}
-                components={{
-                  del: ({ children }) => <>{children}</>,
-                  pre: ({ children }) => {
-                    const child = Children.only(children);
-                    if (isValidElement<{ className?: string; children?: ReactNode }>(child)) {
-                      const source = String(child.props.children ?? "").replace(/\n$/, "");
-                      const language = /language-(\w+)/.exec(child.props.className ?? "")?.[1]?.toLowerCase();
-                      const shouldRenderChart =
-                        language === "echarts" ||
-                        ((language === "json" || !language) && looksLikeEChartOption(source));
-
-                      if (shouldRenderChart) {
-                        return <EChartRenderer source={source} />;
-                      }
-                    }
-
-                    return <pre>{children}</pre>;
-                  },
-                  code: ({ className, children, ...props }) => {
-                    const language = /language-(\w+)/.exec(className ?? "")?.[1]?.toLowerCase();
-                    const shouldRenderChart =
-                      language === "echarts" ||
-                      language === "json";
-
-                    if (shouldRenderChart) {
-                      return <code className={className} {...props}>{children}</code>;
-                    }
-
-                    return (
-                      <code className={className} {...props}>
-                        {children}
-                      </code>
-                    );
-                  },
-                  ...(evidenceSources.length > 0 ? {
-                    p: ({ children }) => <p>{injectCitationsIntoChildren(children, evidenceSources)}</p>,
-                    li: ({ children, ...props }) => <li {...props}>{injectCitationsIntoChildren(children, evidenceSources)}</li>,
-                    td: ({ children, ...props }) => <td {...props}>{injectCitationsIntoChildren(children, evidenceSources)}</td>,
-                    th: ({ children, ...props }) => <th {...props}>{injectCitationsIntoChildren(children, evidenceSources)}</th>,
-                    strong: ({ children }) => <strong>{injectCitationsIntoChildren(children, evidenceSources)}</strong>,
-                    a: ({ href, children }) => (
-                      <CitationLinkChip href={href} sources={evidenceSources}>
-                        {children}
-                      </CitationLinkChip>
-                    ),
-                  } : {}),
-                }}
-              >
-                {isStreaming ? displayContentWithoutCursor : displayContent}
-              </ReactMarkdown>
-              {isStreaming && (
-                <span className="ml-0.5 inline-block h-3.5 w-[3px] animate-pulse rounded-full bg-foreground/40 align-middle" />
-              )}
-            </div>
+            renderAssistantMarkdown(
+              isStreaming ? displayContentWithoutCursor : displayContent,
+              Boolean(isStreaming),
+            )
           ) : null}
           {!isUser && inlineAfterContent}
         </div>

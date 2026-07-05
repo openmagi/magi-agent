@@ -10,7 +10,12 @@
 // `encodeHistoryPlaintext` so the history loader can decode thinking/usage back.
 
 import { encodeHistoryPlaintext } from "./history-envelope";
-import type { ResearchEvidenceSnapshot, ResponseUsage, ToolActivity } from "./types";
+import type {
+  ResearchEvidenceSnapshot,
+  ResponseUsage,
+  ToolActivity,
+  TranscriptSegment,
+} from "./types";
 
 /** A single plaintext row accepted by POST /api/chat/messages. */
 export interface PlaintextPersistRow {
@@ -28,6 +33,8 @@ export interface CompletedAssistantMessage {
   usage?: ResponseUsage;
   /** Tool/skill activities captured during the turn (persisted only when opted in). */
   activities?: ToolActivity[];
+  /** Ordered interleaved transcript segments (persisted as an optional envelope key). */
+  segments?: TranscriptSegment[];
 }
 
 export interface BuildPlaintextPersistRowsOptions {
@@ -101,6 +108,9 @@ export function buildPlaintextPersistRows(
             : {}),
           ...(opts.persistToolActivity && opts.assistant.activities?.length
             ? { activities: opts.assistant.activities }
+            : {}),
+          ...(opts.assistant.segments?.length
+            ? { segments: opts.assistant.segments }
             : {}),
         })
       : assistantText;
