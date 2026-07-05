@@ -236,6 +236,12 @@ def run_in_background(arguments: dict[str, object], context: ToolContext) -> Too
     # PR-M5 seam 1: emit the create-time live mission event (best-effort).
     _emit_mission_created(context, stored)
 
+    # PR-M7 hosted projection: create seam (section 7.2). Fail-open and
+    # non-blocking; inert (no-op) unless the projector config is present.
+    from magi_agent.missions.projector import notify_task_created  # noqa: PLC0415
+
+    notify_task_created(stored)
+
     short_id = stored.id[:6]
     ack = (
         f"Started in background (task {short_id}) — track on the work-queue board "

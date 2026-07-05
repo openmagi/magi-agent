@@ -1143,6 +1143,78 @@ class SqliteWorkQueueStore:
             (task_id, None, kind, json.dumps(payload) if payload else None, int(time.time())),
         )
 
+    # ------------------------------------------------------------------
+    # PR-M7 hosted-projection identity mapping (mission_projection table).
+    #
+    # These helpers are the ONLY writers/readers of the ``mission_projection``
+    # table (design section 5.4). The hosted ``MissionProjector`` uses
+    # ``get_mission_projection`` / ``upsert_mission_projection`` to keep the
+    # ``wq:<task_id>`` -> mission-id mapping durable so a lost mapping row is
+    # recovered idempotently on the next create. ``task_id_for_mission`` is the
+    # reverse resolution PR-M8's reconciler needs (mission-id -> task-id) and is
+    # supported here by the ``idx_mission_projection_mission`` index.
+    # ------------------------------------------------------------------
+
+    def get_mission_projection(self, task_id: str) -> dict | None:
+        """Return the mission-projection mapping row for *task_id*, or None.
+
+        Shape: ``{task_id, mission_id, last_projected_status, updated_at}``.
+        """
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT task_id, mission_id, last_projected_status, updated_at "
+            "FROM mission_projection WHERE task_id=?",
+            (task_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "task_id": row["task_id"],
+            "mission_id": row["mission_id"],
+            "last_projected_status": row["last_projected_status"],
+            "updated_at": row["updated_at"],
+        }
+
+    def upsert_mission_projection(
+        self,
+        task_id: str,
+        *,
+        mission_id: str | None,
+        last_projected_status: str | None,
+    ) -> None:
+        """Insert-or-update the mission-projection mapping for *task_id*.
+
+        Idempotent by ``task_id`` primary key: a repeated create with the same
+        ``wq:<task_id>`` idempotency key re-lands the same ``mission_id`` here
+        without duplicating rows.
+        """
+        conn = self._get_conn()
+        conn.execute(
+            "INSERT INTO mission_projection (task_id, mission_id, last_projected_status, updated_at) "
+            "VALUES (?,?,?,?) "
+            "ON CONFLICT(task_id) DO UPDATE SET "
+            "mission_id=excluded.mission_id, "
+            "last_projected_status=excluded.last_projected_status, "
+            "updated_at=excluded.updated_at",
+            (task_id, mission_id, last_projected_status, int(time.time())),
+        )
+        conn.commit()
+
+    def task_id_for_mission(self, mission_id: str) -> str | None:
+        """Return the ``task_id`` mapped to *mission_id*, or None (PR-M8 reverse)."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT task_id FROM mission_projection WHERE mission_id=? LIMIT 1",
+            (mission_id,),
+        ).fetchone()
+        return row["task_id"] if row else None
+
+    def delete_mission_projection(self, task_id: str) -> None:
+        """Delete the mapping row for *task_id* (test seam: simulate a lost row)."""
+        conn = self._get_conn()
+        conn.execute("DELETE FROM mission_projection WHERE task_id=?", (task_id,))
+        conn.commit()
+
 
 __all__ = [
     "CLAIM_HEARTBEAT_MAX_STALE_SECONDS",

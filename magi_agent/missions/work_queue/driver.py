@@ -99,6 +99,20 @@ def _emit_task_checkpoint_sync(
             checkpoint_kind=checkpoint_kind,
             summary_text=summary_text,
         )
+
+        # PR-M7 hosted projection: transition seam (section 7.2). Reuses this
+        # single checkpoint chokepoint so every current and future transition
+        # is projected by construction. Fail-open and non-blocking (enqueue
+        # only); inert unless the hosted projector config is present.
+        from magi_agent.missions.projector import (  # noqa: PLC0415
+            notify_task_checkpoint,
+        )
+
+        notify_task_checkpoint(
+            task_id=task_id,
+            checkpoint_kind=checkpoint_kind,
+            summary_text=summary_text,
+        )
     except Exception:
         # Fail-open: never break dispatch.
         return None
