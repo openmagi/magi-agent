@@ -1418,4 +1418,10 @@ def _build_runtime(ctx: TurnContext) -> object:
         permission_mode=ctx.permission_mode,
         session_id=ctx.session_id,
         model=ctx.model,
+        # #1329 regression fix: gate ledger-first auto-continue on depth in the
+        # runtime=None fallback. depth>0 is a child / delegated turn that must
+        # not auto-continue / self-check-goal; only the top-level turn (depth==0)
+        # keeps the parent auto-continue authority (still bounded by
+        # MAGI_GOAL_LOOP_ENABLED inside build_headless_runtime).
+        auto_continue_allowed=(ctx.depth == 0),
     )

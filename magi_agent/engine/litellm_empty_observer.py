@@ -32,6 +32,102 @@ from google.adk.models.llm_response import LlmResponse
 #: Lowercased + slugified there into ``child_llm_empty_provider_stream``.
 EMPTY_PROVIDER_STREAM_ERROR_CODE = "EMPTY_PROVIDER_STREAM"
 
+
+def _is_mergeable_thought_part(part: Any) -> bool:
+    """A thought part that may be merged with its neighbours.
+
+    ``True`` only for UNSIGNED, text-only reasoning fragments: ``thought`` is
+    truthy, it carries ``text`` (not ``None``), and it has NO signature and NO
+    non-text payload. Anthropic's final thinking part carries a
+    ``thought_signature`` (lite_llm.py:431-433, anthropic_llm.py:620-622) which
+    MUST survive verbatim, so a signed part is never mergeable. Parts carrying
+    inline_data / function_call / function_response are structural, not
+    reasoning text, and are likewise excluded.
+    """
+    if not getattr(part, "thought", False):
+        return False
+    if getattr(part, "text", None) is None:
+        return False
+    if getattr(part, "thought_signature", None) is not None:
+        return False
+    if getattr(part, "inline_data", None) is not None:
+        return False
+    if getattr(part, "function_call", None) is not None:
+        return False
+    if getattr(part, "function_response", None) is not None:
+        return False
+    return True
+
+
+def _coalesce_unsigned_thought_parts(parts: list[Any]) -> tuple[list[Any], bool]:
+    """Merge each ADJACENT run of mergeable (unsigned, text-only) thought parts
+    into a SINGLE ``Part(text="".join(texts), thought=True)``.
+
+    ADK streams Kimi/OpenAI reasoning one ``Part(thought=True)`` per token; the
+    request rebuild joins those per-token parts with a newline
+    (lite_llm.py:928), shredding the model's own history one-token-per-line.
+    Collapsing each adjacent run to one part means that join has a single
+    element and injects nothing. The join here is ``""`` (verbatim
+    concatenation) so a fragment that legitimately contains a real newline is
+    preserved exactly and NO separator is introduced.
+
+    Signed thought parts, non-thought parts, and structural parts (inline_data
+    / function_call / function_response) break the run and pass through
+    untouched, order preserved. Returns ``(new_parts, changed)`` where
+    ``changed`` is ``False`` when nothing merged (so the caller can leave the
+    response object byte-identical).
+    """
+    from google.genai import types  # noqa: PLC0415 (keep module import cold)
+
+    merged: list[Any] = []
+    changed = False
+    run: list[Any] = []
+
+    def _flush_run() -> None:
+        nonlocal changed
+        if not run:
+            return
+        if len(run) == 1:
+            merged.append(run[0])
+        else:
+            merged.append(
+                types.Part(text="".join(p.text for p in run), thought=True)
+            )
+            changed = True
+        run.clear()
+
+    for part in parts:
+        if _is_mergeable_thought_part(part):
+            run.append(part)
+            continue
+        _flush_run()
+        merged.append(part)
+    _flush_run()
+    return merged, changed
+
+
+def _coalesce_response_thought_parts(resp: Any) -> None:
+    """In-place coalesce the thought parts of a NON-PARTIAL ``LlmResponse``.
+
+    Partial responses (live thinking deltas) are left untouched by the caller;
+    this only runs on the aggregated, non-partial responses ADK stores as
+    session events. Mutates ``resp.content.parts`` in place (via slice
+    assignment on the existing list) so no pydantic field is reassigned and the
+    surrounding response object stays otherwise identical. Fail-soft: any
+    structural surprise leaves the response unchanged.
+    """
+    try:
+        content = getattr(resp, "content", None)
+        parts = getattr(content, "parts", None)
+        if not parts:
+            return
+        merged, changed = _coalesce_unsigned_thought_parts(list(parts))
+        if changed:
+            parts[:] = merged
+    except Exception:  # noqa: BLE001 (never break the stream on coalescing)
+        return
+
+
 #: Hard cap on diagnostic text we attach to the error message — provider
 #: errors / model ids can balloon if not bounded.
 _DIAG_MAX_CHARS = 600
@@ -269,6 +365,13 @@ class EmptyProviderStreamObserverLiteLlm(LiteLlm):
         yielded = 0
         async for resp in super().generate_content_async(*args, **kwargs):
             yielded += 1
+            # Root fix: on the NON-PARTIAL aggregate (the shape ADK stores as
+            # the session event and later rebuilds requests from), collapse each
+            # adjacent run of unsigned per-token thought parts into one part so
+            # ADK's request-rebuild newline-join (lite_llm.py:928) becomes a
+            # no-op. Live partial thinking deltas stream through verbatim.
+            if not getattr(resp, "partial", False):
+                _coalesce_response_thought_parts(resp)
             yield resp
         if yielded == 0:
             base_msg = (
@@ -293,4 +396,6 @@ __all__ = [
     "EmptyProviderStreamObserverLiteLlm",
     "_LiteLlmCallSnapshot",
     "_LiteLlmResponseTap",
+    "_coalesce_unsigned_thought_parts",
+    "_is_mergeable_thought_part",
 ]
