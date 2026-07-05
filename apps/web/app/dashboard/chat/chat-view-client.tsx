@@ -1148,7 +1148,7 @@ export function ChatViewClient({
               // the self-host runtime does not implement yet. Fail with a clear
               // message instead of a raw 404 (tracked as a follow-up).
               throw new Error(
-                "Image attachments are not supported in local mode yet — attach documents instead.",
+                "Image attachments are not supported in local mode yet; attach documents instead.",
               );
             }
             const markers = await uploadImagesAsAttachmentMarkers(botId, channel, imageFiles);
