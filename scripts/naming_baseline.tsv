@@ -15,10 +15,11 @@ CORE_AGENT_	magi_agent/evidence/observed_egress.py	3
 CORE_AGENT_	magi_agent/harness/presets.py	15
 CORE_AGENT_	magi_agent/hooks/builtin/prompt_transforms.py	3
 CORE_AGENT_	magi_agent/main.py	6
+CORE_AGENT_	magi_agent/missions/projector.py	7
 CORE_AGENT_	magi_agent/research/research_first_canary.py	2
 CORE_AGENT_	magi_agent/shadow/fixture_runner.py	1
 CORE_AGENT_	magi_agent/transport/app_api.py	2
-CORE_AGENT_	magi_agent/transport/chat_routes.py	5
+CORE_AGENT_	magi_agent/transport/chat_routes.py	2
 CORE_AGENT_	magi_agent/transport/chat_routes_local.py	1
 CORE_AGENT_	magi_agent/transport/chat_shared.py	49
 CORE_AGENT_	magi_agent/transport/gate2_sandbox_canary.py	10
@@ -30,6 +31,7 @@ clawy	magi_agent/credentials_admin/vault_local.py	1
 clawy	magi_agent/customize/modes.py	1
 clawy	magi_agent/customize/policies.py	1
 clawy	magi_agent/customize/store.py	1
+clawy	magi_agent/missions/projector.py	1
 clawy	magi_agent/plugins/native/_hosted_knowledge.py	1
 clawy	magi_agent/tools/memory_mode_guard.py	1
 clawy	magi_agent/transport/credentials.py	1
@@ -237,7 +239,7 @@ openmagi	magi_agent/tools/schema_projection.py	1
 openmagi	magi_agent/transport/app_api.py	6
 openmagi	magi_agent/transport/chat.py	1
 openmagi	magi_agent/transport/chat_authority.py	8
-openmagi	magi_agent/transport/chat_routes.py	55
+openmagi	magi_agent/transport/chat_routes.py	3
 openmagi	magi_agent/transport/chat_routes_local.py	4
 openmagi	magi_agent/transport/chat_shared.py	6
 openmagi	magi_agent/transport/control_requests.py	3
