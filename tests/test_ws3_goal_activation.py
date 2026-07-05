@@ -9,20 +9,19 @@ which layers on top of ``full``):
     resolver: all-complete ledger short-circuits to ``done`` and a clean stop
     short of verifiable completion emits an honest ``goal_paused``).
 
-It deliberately does NOT promote ``MAGI_GOAL_LOOP_ENABLED`` (the cost-bearing lab
-judge continuation loop) into the full profile, and leaves
-``MAGI_GOAL_NUDGE_REQUIRED_EVIDENCE`` unset globally (recipe-scoped, so free-form
-chat is never forced to provide evidence). The safe / eval / off / hosted
-profiles keep every WS3 flag OFF.
+``MAGI_GOAL_LOOP_ENABLED`` has since been promoted to a profile-aware default-ON
+(``_pb``) flag: it is the ledger-first auto-continue authority, ambient for every
+turn in the full / lab profile via the profile resolver, with a deterministic
+measurable-progress brake (ok tool end OR ledger delta OR new evidence), NOT the
+cost-bearing LLM judge. ``MAGI_GOAL_NUDGE_REQUIRED_EVIDENCE`` stays unset globally
+(recipe-scoped, so free-form chat is never forced to provide evidence). The safe
+/ eval / off / hosted profiles keep every WS3 / auto-continue flag OFF.
 
 The arch-tdd trap (design 4.4 / 4.5): the headline "full" deliverable is reached
-via SEAM 2, which is hoisted OUTSIDE the goal-loop guard, so it fires with
-``goal_loop_policy is None`` (the lab loop OFF). The two end-to-end driver tests
-here apply the REAL full profile, derive ``evidence_first`` FROM that resolved
-env (never hardcoded), and assert the deliverable fires with
-``MAGI_GOAL_LOOP_ENABLED`` UNSET and ``MAGI_GOAL_NUDGE_ENABLED`` UNSET. A GREEN
-that only works by setting the loop flag would deliver nothing to "full" users
-and is exactly what these tests forbid.
+via SEAM 2, which is hoisted OUTSIDE the goal-loop policy guard, so it fires with
+``goal_loop_policy is None``. The two end-to-end driver tests here apply the REAL
+full profile, derive ``evidence_first`` FROM that resolved env (never hardcoded),
+and assert the deliverable fires with ``MAGI_GOAL_NUDGE_ENABLED`` UNSET.
 """
 from __future__ import annotations
 
@@ -36,7 +35,7 @@ from magi_agent.config.env import (
     is_plan_ledger_durable_enabled,
     read_goal_required_evidence,
 )
-from magi_agent.config.flags import flag_bool, flag_profile_bool
+from magi_agent.config.flags import flag_profile_bool
 from magi_agent.runtime.local_defaults import (
     apply_local_eval_runtime_defaults,
     apply_local_full_runtime_defaults,
@@ -137,13 +136,16 @@ def test_full_profile_enables_plan_ledger_and_evidence_first(
     assert is_goal_completion_evidence_first_enabled(env) is True
 
 
-def test_full_profile_does_not_enable_goal_loop(hermetic_env: None) -> None:
+def test_full_profile_enables_goal_loop_auto_continue(hermetic_env: None) -> None:
     env: dict[str, str] = {}
     apply_local_full_runtime_defaults(env)
-    # The cost-bearing judge continuation loop stays lab-only; promoting it is a
-    # separate decision and is NOT part of WS3.
+    # MAGI_GOAL_LOOP_ENABLED is now the ledger-first auto-continue authority,
+    # promoted to profile-aware default-ON (_pb). It self-enables under the full
+    # profile via the profile resolver (no explicit seed needed) so a mid-multi-
+    # step-task clean break re-invokes instead of stopping with "I'll continue".
+    # The brake is a deterministic measurable-progress gate, not the LLM judge.
     assert _GOAL_LOOP_FLAG not in env
-    assert flag_bool(_GOAL_LOOP_FLAG, env=env) is False
+    assert flag_profile_bool(_GOAL_LOOP_FLAG, env=env) is True
 
 
 def test_full_profile_does_not_force_required_evidence(hermetic_env: None) -> None:
@@ -167,14 +169,9 @@ def test_safe_profile_keeps_ws3_off(hermetic_env: None, profile: str) -> None:
     apply_local_full_runtime_defaults(env)
     for flag in (_LEDGER_FLAG, _EVIDENCE_FIRST_FLAG, _GOAL_LOOP_FLAG):
         assert flag not in env, f"{profile}:{flag}"
-        # The two WS3 flags are profile-aware default-ON (_pb) and read False
-        # under a safe profile; the cost-bearing loop stays a strict bool.
-        reader = (
-            flag_profile_bool
-            if flag in (_LEDGER_FLAG, _EVIDENCE_FIRST_FLAG)
-            else flag_bool
-        )
-        assert reader(flag, env=env) is False, f"{profile}:{flag}"
+        # All three WS3 / auto-continue flags are profile-aware default-ON (_pb)
+        # and read False under a safe profile.
+        assert flag_profile_bool(flag, env=env) is False, f"{profile}:{flag}"
     assert is_plan_ledger_durable_enabled(env) is False, profile
     assert is_goal_completion_evidence_first_enabled(env) is False, profile
 
@@ -209,8 +206,11 @@ def test_lab_profile_inherits_ws3_on(hermetic_env: None) -> None:
     apply_lab_runtime_defaults(env)
     assert env.get(_LEDGER_FLAG) == "1"
     assert env.get(_EVIDENCE_FIRST_FLAG) == "1"
-    # The lab seed DOES turn the judge loop on (it is in LAB_EXPERIMENTAL_FLAGS).
-    assert env.get(_GOAL_LOOP_FLAG) == "1"
+    # MAGI_GOAL_LOOP_ENABLED is now profile-aware default-ON (_pb): the lab
+    # overlay no longer seeds it explicitly (it left LAB_EXPERIMENTAL_FLAGS), but
+    # it self-enables under the lab / full profile resolver.
+    assert _GOAL_LOOP_FLAG not in env
+    assert flag_profile_bool(_GOAL_LOOP_FLAG, env=env) is True
 
 
 def test_hosted_resilience_keeps_ws3_off() -> None:

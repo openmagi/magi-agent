@@ -2453,6 +2453,27 @@ def is_goal_completion_evidence_first_enabled(
     return flag_profile_bool(MAGI_GOAL_COMPLETION_EVIDENCE_FIRST_ENABLED_ENV, env=source)
 
 
+MAGI_GOAL_LOOP_ENABLED_ENV = "MAGI_GOAL_LOOP_ENABLED"
+
+
+def is_goal_loop_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the ledger-first auto-continue authority flag.
+
+    Profile-aware default-ON (``flag_profile_bool``): in the full runtime profile
+    the engine builds ambient auto-continue authority for EVERY turn, so a
+    mid-multi-step-task clean break with open todos re-invokes (bounded by the
+    measurable-progress gate + generous budgets) instead of stopping with "I'll
+    continue...". OFF under ``MAGI_RUNTIME_PROFILE`` in safe / eval / minimal /
+    conservative / off, or an explicit ``MAGI_GOAL_LOOP_ENABLED=0``. When OFF the
+    engine is constructed with ``auto_continue_enabled=False`` and SEAM 2 keeps
+    its historic bare-break behaviour byte-for-byte.
+    """
+    from .flags import flag_profile_bool  # noqa: PLC0415
+
+    source = os.environ if env is None else env
+    return flag_profile_bool(MAGI_GOAL_LOOP_ENABLED_ENV, env=source)
+
+
 MAGI_GOAL_NUDGE_REQUIRED_EVIDENCE_ENV = "MAGI_GOAL_NUDGE_REQUIRED_EVIDENCE"
 
 

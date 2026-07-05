@@ -124,7 +124,6 @@ _STRICT_BOOL_FLAGS_ENABLED = (
     "MAGI_HEADTAIL_TRUNCATION_ENABLED",
     "MAGI_FILE_DELIVERY_LIVE_ENABLED",
     "MAGI_DOCUMENT_QA_ENABLED",
-    "MAGI_GOAL_LOOP_ENABLED",
     "MAGI_OBSERVABILITY_ENABLED",
     "MAGI_EDIT_RETRY_REFLECTION_ENABLED",
     "MAGI_CODING_REPAIR_LOOP_ENABLED",
@@ -184,6 +183,9 @@ _PROFILE_BOOL_FLAGS_ENABLED = (
     # safe/eval or an explicit "0"). No longer seeded into the dogfood profile
     # since they self-enable under MAGI_RUNTIME_PROFILE=full.
     "MAGI_DEFERRED_TOOLS_ENABLED",
+    # Ledger-first auto-continue authority. Promoted _b -> _pb so the engine
+    # builds ambient auto-continue for every turn in the full profile.
+    "MAGI_GOAL_LOOP_ENABLED",
     # Orchestrator pattern: per-spawn tool ceiling + recipe-gate binding consumers.
     "MAGI_SPAWN_RECIPE_CAP_ENABLED",
     "MAGI_SPAWN_RECIPE_BIND_ENABLED",
