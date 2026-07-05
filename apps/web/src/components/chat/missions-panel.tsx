@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { agentFetch } from "@/lib/local-api";
 import type { MissionActivity } from "@/chat-core";
 import {
   buildMissionWorkQueue,
@@ -84,6 +85,39 @@ export function buildMissionListUrl({
 
 export function shouldLoadRemoteMissions(botId: string): boolean {
   return botId !== "local";
+}
+
+// Local (OSS self-host) runtime surface. Mirrors the Knowledge/Workspace
+// panels: when the bot is the local runtime we hit the FastAPI `/v1/app/*`
+// routes through `agentFetch` instead of the hosted Next.js `/api/bots/*`
+// routes. The hosted branch stays byte-compatible so the same component keeps
+// working in the clawy app.
+export function buildLocalMissionListUrl(limit: number): string {
+  const params = new URLSearchParams({ limit: String(limit) });
+  return `/v1/app/missions?${params.toString()}`;
+}
+
+export function buildLocalMissionDetailUrl(missionId: string): string {
+  return `/v1/app/missions/${encodeURIComponent(missionId)}`;
+}
+
+export interface MissionListRequestPlan {
+  local: boolean;
+  url: string;
+}
+
+// Single seam that decides local vs hosted for the list load, so the branch
+// selection is unit-testable without mounting the component.
+export function planMissionListRequest(args: {
+  botId: string;
+  limit: number;
+  channelType?: MissionChannelType;
+  channelId?: string | null;
+}): MissionListRequestPlan {
+  if (args.botId === "local") {
+    return { local: true, url: buildLocalMissionListUrl(args.limit) };
+  }
+  return { local: false, url: buildMissionListUrl(args) };
 }
 
 function countForFilter(
@@ -345,24 +379,16 @@ export function MissionsPanel({
 
   const loadMissions = useCallback(async () => {
     if (!botId) return;
-    if (!shouldLoadRemoteMissions(botId)) {
-      setMissions([]);
-      setError(null);
-      setLoading(false);
-      return;
-    }
     setLoading(true);
     setError(null);
     try {
-      const token = await getAccessToken?.();
-      const response = await fetch(buildMissionListUrl({
-        botId,
-        limit: 50,
-        channelType,
-        channelId,
-      }), {
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      });
+      const plan = planMissionListRequest({ botId, limit: 50, channelType, channelId });
+      const token = plan.local ? null : await getAccessToken?.();
+      const response = plan.local
+        ? await agentFetch(plan.url)
+        : await fetch(plan.url, {
+            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+          });
       const body = (await response.json().catch(() => null)) as {
         missions?: MissionSummary[];
         error?: string;
@@ -394,11 +420,14 @@ export function MissionsPanel({
     setDetailLoading(true);
     setDetailError(null);
     try {
-      const token = await getAccessToken?.();
-      const response = await fetch(
-        `/api/bots/${encodeURIComponent(botId)}/missions/${encodeURIComponent(missionId)}`,
-        { headers: token ? { Authorization: `Bearer ${token}` } : undefined },
-      );
+      const local = botId === "local";
+      const token = local ? null : await getAccessToken?.();
+      const response = local
+        ? await agentFetch(buildLocalMissionDetailUrl(missionId))
+        : await fetch(
+            `/api/bots/${encodeURIComponent(botId)}/missions/${encodeURIComponent(missionId)}`,
+            { headers: token ? { Authorization: `Bearer ${token}` } : undefined },
+          );
       const body = (await response.json().catch(() => null)) as
         | (MissionDetail & { error?: string })
         | null;
@@ -406,7 +435,14 @@ export function MissionsPanel({
         throw new Error(body?.error ?? "Failed to load mission detail");
       }
       if (detailRequestSeq.current === requestSeq) {
-        setDetail(body);
+        // The local mission detail route returns `{ mission, events, runs }`
+        // with no artifacts section; default to an empty list so the ledger
+        // renders without crashing. The hosted payload already includes it.
+        setDetail(
+          local
+            ? { ...body, artifacts: Array.isArray(body.artifacts) ? body.artifacts : [] }
+            : body,
+        );
       }
     } catch (err) {
       if (detailRequestSeq.current === requestSeq) {
@@ -482,19 +518,26 @@ export function MissionsPanel({
     setBusyAction(`${missionId}:${action}`);
     setError(null);
     try {
-      const token = await getAccessToken?.();
+      const local = botId === "local";
+      const token = local ? null : await getAccessToken?.();
       const trimmedMessage = message?.trim() ?? "";
-      const response = await fetch(
-        `/api/bots/${encodeURIComponent(botId)}/missions/${encodeURIComponent(missionId)}/${action}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({ message: trimmedMessage }),
-        },
-      );
+      const response = local
+        ? await agentFetch(`${buildLocalMissionDetailUrl(missionId)}/${action}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: trimmedMessage }),
+          })
+        : await fetch(
+            `/api/bots/${encodeURIComponent(botId)}/missions/${encodeURIComponent(missionId)}/${action}`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+              },
+              body: JSON.stringify({ message: trimmedMessage }),
+            },
+          );
       const body = (await response.json().catch(() => null)) as { error?: string } | null;
       if (!response.ok) {
         throw new Error(body?.error ?? `Failed to ${action} mission`);
@@ -515,18 +558,25 @@ export function MissionsPanel({
     setBusyAction(`${selectedMissionId}:comment`);
     setDetailError(null);
     try {
-      const token = await getAccessToken?.();
-      const response = await fetch(
-        `/api/bots/${encodeURIComponent(botId)}/missions/${encodeURIComponent(selectedMissionId)}/comments`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({ message }),
-        },
-      );
+      const local = botId === "local";
+      const token = local ? null : await getAccessToken?.();
+      const response = local
+        ? await agentFetch(`${buildLocalMissionDetailUrl(selectedMissionId)}/comments`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message }),
+          })
+        : await fetch(
+            `/api/bots/${encodeURIComponent(botId)}/missions/${encodeURIComponent(selectedMissionId)}/comments`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+              },
+              body: JSON.stringify({ message }),
+            },
+          );
       const body = (await response.json().catch(() => null)) as { error?: string } | null;
       if (!response.ok) {
         throw new Error(body?.error ?? "Failed to add comment");

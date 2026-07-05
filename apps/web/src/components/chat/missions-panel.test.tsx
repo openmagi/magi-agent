@@ -1,8 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import {
+  buildLocalMissionDetailUrl,
+  buildLocalMissionListUrl,
   buildMissionListUrl,
   MissionsPanel,
+  planMissionListRequest,
   shouldLoadRemoteMissions,
   shouldReloadMissionDetailForEvent,
 } from "./missions-panel";
@@ -207,6 +210,46 @@ describe("MissionsPanel", () => {
   it("does not load cloud mission APIs for the OSS local bot", () => {
     expect(shouldLoadRemoteMissions("local")).toBe(false);
     expect(shouldLoadRemoteMissions("bot-1")).toBe(true);
+  });
+
+  it("builds local runtime mission URLs against the FastAPI /v1/app surface", () => {
+    expect(buildLocalMissionListUrl(50)).toBe("/v1/app/missions?limit=50");
+    expect(buildLocalMissionDetailUrl("task-1")).toBe("/v1/app/missions/task-1");
+    // ids are URL-encoded exactly as the hosted list builder encodes botId.
+    expect(buildLocalMissionDetailUrl("task 1")).toBe("/v1/app/missions/task%201");
+    // action/comment routes compose off the detail URL.
+    expect(`${buildLocalMissionDetailUrl("task-1")}/cancel`).toBe(
+      "/v1/app/missions/task-1/cancel",
+    );
+    expect(`${buildLocalMissionDetailUrl("task-1")}/comments`).toBe(
+      "/v1/app/missions/task-1/comments",
+    );
+  });
+
+  it("routes the mission list load to the local runtime only for the local bot", () => {
+    // Local bot: agentFetch against /v1/app/missions (no channel scoping).
+    expect(
+      planMissionListRequest({
+        botId: "local",
+        limit: 50,
+        channelType: "app",
+        channelId: "stock",
+      }),
+    ).toEqual({ local: true, url: "/v1/app/missions?limit=50" });
+
+    // Hosted bot: unchanged Next.js /api/bots route with channel scoping,
+    // identical to buildMissionListUrl.
+    expect(
+      planMissionListRequest({
+        botId: "bot-1",
+        limit: 50,
+        channelType: "app",
+        channelId: "stock",
+      }),
+    ).toEqual({
+      local: false,
+      url: "/api/bots/bot-1/missions?limit=50&channelType=app&channelId=stock",
+    });
   });
 
   it("renders live durable mission state as a compact work queue", () => {
