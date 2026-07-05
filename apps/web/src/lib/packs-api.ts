@@ -36,3 +36,24 @@ export async function getPacks(fetch: Fetcher): Promise<PacksResponse> {
   if (!res.ok) throw new Error(`Failed to load packs (${res.status})`);
   return (await res.json()) as PacksResponse;
 }
+
+/**
+ * Install (`enabled=true`) or remove (`enabled=false`) a pack via
+ * `POST /v1/app/packs/{id}/state`. The runtime persists a dashboard override
+ * (never rewrites the operator's config.toml), so "Remove" is reversible:
+ * installing again restores it, so first-party packs stay recoverable. Returns
+ * the updated inventory. Throws on non-2xx so the caller can surface it.
+ */
+export async function setPackState(
+  fetch: Fetcher,
+  packId: string,
+  enabled: boolean,
+): Promise<PacksResponse> {
+  const res = await fetch(`/v1/app/packs/${encodeURIComponent(packId)}/state`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!res.ok) throw new Error(`Failed to update pack (${res.status})`);
+  return (await res.json()) as PacksResponse;
+}
