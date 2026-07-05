@@ -92,6 +92,7 @@ export async function rowToMessage(
     ...(decoded.researchEvidence !== undefined ? { researchEvidence: decoded.researchEvidence } : {}),
     ...(decoded.usage !== undefined ? { usage: decoded.usage } : {}),
     ...(decoded.activities !== undefined ? { activities: decoded.activities } : {}),
+    ...(decoded.segments !== undefined ? { segments: decoded.segments } : {}),
   };
 }
 
