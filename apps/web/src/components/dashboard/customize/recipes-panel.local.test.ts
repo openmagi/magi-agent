@@ -46,12 +46,13 @@ describe("RecipesPanel — F-UX10 write-surface structural assertions", () => {
     expect(src).toMatch(/<RecipesPanel[\s\S]*?error=\{recipeError\}/);
   });
 
-  it("renders a real role=switch toggle per recipe row (not a static read-only list)", () => {
-    // RecipeToggle uses role="switch" so screen readers announce the
-    // enable/disable affordance; this is the assertion that catches a
-    // regression to the read-only pre-F-UX10 surface.
-    expect(src).toContain('role="switch"');
-    expect(src).toContain("RecipeToggle");
+  it("renders a real toggle switch per recipe row (not a static read-only list)", () => {
+    // Each recipe row renders the shared _ds/Switch primitive (which carries
+    // role="switch" so screen readers announce the enable/disable affordance);
+    // this is the assertion that catches a regression to the read-only
+    // pre-F-UX10 surface.
+    expect(src).toContain('import { Switch } from "@/components/ui/_ds"');
+    expect(src).toMatch(/<Switch[\s\S]*?onToggle=/);
   });
 
   it("disables the toggle for unmapped recipes with an explanatory tooltip", () => {
@@ -94,7 +95,7 @@ describe("RecipesPanel — F-UX10 write-surface structural assertions", () => {
     // The user-visible copy must explain the two states (no-override vs
     // explicit allowlist) and the first-disable seed behaviour so the
     // operator understands the toggle did not silently flip back.
-    expect(src).toMatch(/first opt-out seeds the allowlist/);
+    expect(src).toMatch(/seed the allowlist with every OTHER/);
   });
 
   it("reverts to an empty set on first-disable seed failure", () => {

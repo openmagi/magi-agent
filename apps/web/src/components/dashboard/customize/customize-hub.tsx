@@ -25,6 +25,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Switch } from "@/components/ui/_ds";
 import { ShieldCheck, Wrench, Layers, Webhook, Plus, SlidersHorizontal, Gauge, Drama } from "lucide-react";
 import {
   useCustomize,
@@ -1136,41 +1137,6 @@ const LABEL_FOR_CHOICE: Record<AddRuleChoice, string> = {
  * row and surfaces the error banner so the operator never sees a silent
  * disagreement between UI state and disk state.
  */
-function RecipeToggle({
-  checked,
-  onChange,
-  label,
-  disabled,
-  title,
-}: {
-  checked: boolean;
-  onChange: (next: boolean) => void;
-  label: string;
-  disabled?: boolean;
-  title?: string;
-}): React.ReactElement {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      title={title}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
-        checked ? "bg-primary" : "bg-black/15"
-      }`}
-    >
-      <span
-        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-200 ${
-          checked ? "translate-x-6" : "translate-x-1"
-        }`}
-      />
-    </button>
-  );
-}
-
 function RecipesPanel({
   recipes,
   enabledRecipeIds,
@@ -1246,13 +1212,15 @@ function RecipesPanel({
                 </p>
               ) : null}
             </div>
-            <RecipeToggle
-              checked={checked}
-              onChange={(next) => onToggle(r.id, next)}
-              label={`Toggle recipe ${r.title}`}
-              disabled={toggleDisabled}
-              title={tooltip}
-            />
+            <span title={tooltip} className="shrink-0">
+              <Switch
+                checked={checked}
+                onToggle={async (next) => onToggle(r.id, next)}
+                labelOn={`Disable recipe ${r.title}`}
+                labelOff={`Enable recipe ${r.title}`}
+                disabled={toggleDisabled}
+              />
+            </span>
           </div>
         );
       })}
