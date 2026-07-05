@@ -35,13 +35,48 @@ export interface SegmentedTranscriptProps {
   renderText: (text: string, opts: { isLast: boolean }) => ReactNode;
 }
 
+/**
+ * Live-only: a thinking segment shorter than this (trimmed) is treated as a
+ * between-tool micro-burst rather than a real reasoning phase. Some models
+ * (e.g. Kimi) emit a one-liner or a whitespace-only placeholder thought before
+ * each tool call. Rendering each as its own collapsible `ThinkingBlock` (header
+ * + `mb-3` margin) turns a streaming turn into a ladder of tiny "Thought" rows
+ * AND, worse, splits every tool into its own "Ran 1 action" timeline because a
+ * thinking group breaks the contiguous tool run. During streaming we suppress
+ * these so consecutive tools re-coalesce into a single "Ran N actions" row,
+ * matching the completed view. Empty/whitespace-only thoughts (length 0) are
+ * always below this floor, so they never render a header. Nothing is lost: the
+ * finalized message re-renders from the full segment list once the turn ends,
+ * and the compaction is disabled entirely (`compact === false`) off the live
+ * path, so the completed/persisted view is byte-identical to before.
+ */
+const LIVE_MICRO_THINKING_MAX_CHARS = 40;
+
+/**
+ * A thinking segment we drop from the LIVE segmented layout: a short/empty burst
+ * that would otherwise ladder. Only ever true when `compact` (streaming).
+ */
+function isSuppressedLiveThinking(
+  segment: TranscriptSegment,
+  compact: boolean,
+): boolean {
+  if (!compact || segment.kind !== "thinking") return false;
+  return segment.text.trim().length < LIVE_MICRO_THINKING_MAX_CHARS;
+}
+
 function buildGroups(
   segments: TranscriptSegment[],
   activityById: Map<string, ToolActivity>,
+  compact: boolean,
 ): RenderGroup[] {
   const groups: RenderGroup[] = [];
   for (let i = 0; i < segments.length; i += 1) {
     const segment = segments[i];
+    if (isSuppressedLiveThinking(segment, compact)) {
+      // Drop the micro-burst entirely so the surrounding tool run stays
+      // contiguous (the next tool segment coalesces into the prior tools group).
+      continue;
+    }
     if (segment.kind === "thinking") {
       groups.push({ kind: "thinking", key: `thinking-${i}`, text: segment.text });
     } else if (segment.kind === "text") {
@@ -83,7 +118,7 @@ export function SegmentedTranscript({
   const activityById = new Map<string, ToolActivity>();
   for (const activity of activities ?? []) activityById.set(activity.id, activity);
 
-  const groups = buildGroups(segments, activityById);
+  const groups = buildGroups(segments, activityById, Boolean(isStreaming));
   const lastTextKey = [...groups].reverse().find((g) => g.kind === "text")?.key;
 
   return (
@@ -91,11 +126,9 @@ export function SegmentedTranscript({
       {groups.map((group) => {
         if (group.kind === "thinking") {
           return (
-            <ThinkingBlock
-              key={group.key}
-              content={group.text ?? ""}
-              isLive={Boolean(isStreaming)}
-            />
+            <div key={group.key} data-chat-segment="thinking">
+              <ThinkingBlock content={group.text ?? ""} isLive={Boolean(isStreaming)} />
+            </div>
           );
         }
         if (group.kind === "tools") {

@@ -60,6 +60,108 @@ describe("SegmentedTranscript", () => {
     // "between" text splits the two tool runs.
     expect(splitHtml).toContain("between");
   });
+
+  it("(a) suppresses an empty/whitespace thinking segment on the LIVE turn (no header)", () => {
+    const segments: TranscriptSegment[] = [
+      { kind: "thinking", text: "   \n  ", openedAt: 0, closedAt: 1 },
+      { kind: "tool", toolId: "call-1" },
+      { kind: "tool", toolId: "call-2" },
+      { kind: "text", text: "Body." },
+    ];
+    const html = renderToStaticMarkup(
+      <SegmentedTranscript
+        segments={segments}
+        activities={activities}
+        isStreaming
+        live
+        renderText={(t) => <p data-text>{t}</p>}
+      />,
+    );
+    // The whitespace-only thought renders NO thinking block header.
+    const thinkingBlocks = (html.match(/data-chat-segment="thinking"/g) ?? []).length;
+    expect(thinkingBlocks).toBe(0);
+    // And the two tools stay coalesced into a single timeline (not split by the
+    // now-suppressed thought).
+    const toolTimelines = (html.match(/data-chat-segment="tools"/g) ?? []).length;
+    expect(toolTimelines).toBe(1);
+    expect(html).toContain("Body.");
+  });
+
+  it("(b) short between-tool thinking bursts do not ladder on the LIVE turn", () => {
+    // Kimi-style: a tiny thought before each tool call.
+    const segments: TranscriptSegment[] = [
+      { kind: "thinking", text: "peek", openedAt: 0, closedAt: 1 },
+      { kind: "tool", toolId: "call-1" },
+      { kind: "thinking", text: "poke", openedAt: 2, closedAt: 3 },
+      { kind: "tool", toolId: "call-2" },
+      { kind: "text", text: "Done." },
+    ];
+    const html = renderToStaticMarkup(
+      <SegmentedTranscript
+        segments={segments}
+        activities={activities}
+        isStreaming
+        live
+        renderText={(t) => <p data-text>{t}</p>}
+      />,
+    );
+    // No ladder of tiny "Thought" headers.
+    const thinkingBlocks = (html.match(/data-chat-segment="thinking"/g) ?? []).length;
+    expect(thinkingBlocks).toBe(0);
+    expect(html).not.toContain("peek");
+    expect(html).not.toContain("poke");
+    // The two tools re-coalesce into one "Ran N actions" timeline.
+    const toolTimelines = (html.match(/data-chat-segment="tools"/g) ?? []).length;
+    expect(toolTimelines).toBe(1);
+    expect(html).toContain("Done.");
+  });
+
+  it("(b') a SUBSTANTIVE thinking phase still renders its own block on the LIVE turn", () => {
+    const longThought =
+      "I need to reconcile the two search results before deciding which file to edit, so let me reason about it.";
+    const segments: TranscriptSegment[] = [
+      { kind: "thinking", text: longThought, openedAt: 0, closedAt: 1 },
+      { kind: "tool", toolId: "call-1" },
+      { kind: "text", text: "Answer." },
+    ];
+    const html = renderToStaticMarkup(
+      <SegmentedTranscript
+        segments={segments}
+        activities={activities}
+        isStreaming
+        live
+        renderText={(t) => <p data-text>{t}</p>}
+      />,
+    );
+    const thinkingBlocks = (html.match(/data-chat-segment="thinking"/g) ?? []).length;
+    expect(thinkingBlocks).toBe(1);
+    expect(html).toContain(longThought);
+  });
+
+  it("(c) COMPLETED view (not streaming) is unchanged: short thoughts render and split tool runs", () => {
+    const segments: TranscriptSegment[] = [
+      { kind: "thinking", text: "peek", openedAt: 0, closedAt: 1 },
+      { kind: "tool", toolId: "call-1" },
+      { kind: "thinking", text: "poke", openedAt: 2, closedAt: 3 },
+      { kind: "tool", toolId: "call-2" },
+      { kind: "text", text: "Done." },
+    ];
+    const html = renderToStaticMarkup(
+      <SegmentedTranscript
+        segments={segments}
+        activities={activities}
+        renderText={(t) => <p data-text>{t}</p>}
+      />,
+    );
+    // Both short thoughts still render (compaction is LIVE-only).
+    const thinkingBlocks = (html.match(/data-chat-segment="thinking"/g) ?? []).length;
+    expect(thinkingBlocks).toBe(2);
+    expect(html).toContain("peek");
+    expect(html).toContain("poke");
+    // And they still split the tool runs into two timelines (unchanged grouping).
+    const toolTimelines = (html.match(/data-chat-segment="tools"/g) ?? []).length;
+    expect(toolTimelines).toBe(2);
+  });
 });
 
 describe("MessageBubble interleaved vs flat layout", () => {
