@@ -37,6 +37,12 @@ whole package for ``_append_event`` / ``INSERT INTO work_queue_task_events``):
     failed           line 891  (record_failure: retry remaining)
     completed        line 918  (complete)
 
+Control-action kinds added by PR-M3 (``store.request_cancel`` /
+``request_retry`` / ``request_unblock`` / ``append_comment``): ``cancel_requested``,
+``retry_requested``, ``unblocked``, ``comment``. These were already present as
+forward-compat entries in ``STORE_EVENT_KIND_TO_MISSION_EVENT`` below; the store
+is now a real writer, so they are also members of ``STORE_EVENT_KINDS``.
+
 Pinned store run-status vocabulary (``work_queue_task_runs.status``, same
 file): ``running`` (claim, :720/709), ``released`` (reclaim, :765/803),
 ``failed`` (record_failure, :872), ``done`` (complete, :907).
@@ -123,6 +129,7 @@ def map_task_status(task_status: str) -> MissionStatus:
 # for file:line). The exhaustiveness test asserts this set matches the store.
 STORE_EVENT_KINDS: frozenset[str] = frozenset(
     {
+        # driver / lifecycle kinds
         "promoted",
         "claim_rejected",
         "claimed",
@@ -131,6 +138,14 @@ STORE_EVENT_KINDS: frozenset[str] = frozenset(
         "blocked",
         "failed",
         "completed",
+        # control-action kinds written by the local control routes
+        # (PR-M3 store.request_cancel / request_retry / request_unblock /
+        # append_comment). Already present in the mapping below as
+        # forward-compat entries; now the store is a real writer.
+        "cancel_requested",
+        "retry_requested",
+        "unblocked",
+        "comment",
     }
 )
 

@@ -1365,7 +1365,7 @@ graph LR
 | cron_policy.py | — | cron_fields, receipts | missions/schedule_grammar.py, missions/scheduler_adapter.py |
 | events.py | — | receipts | transport/sse.py |
 | lifecycle.py | — | receipts | missions/__init__.py |
-| projection.py | Pure mapping kernel: work_queue substrate -> hosted "mission" shape. | models | — |
+| projection.py | Pure mapping kernel: work_queue substrate -> hosted "mission" shape. | models | transport/app_api.py |
 | receipts.py | — | receipt_redaction, runtime | missions/__init__.py, missions/cron_policy.py, missions/events.py, missions/lifecycle.py |
 | schedule_grammar.py | A1 — ScheduleSpec: once / interval / cron grammar (preview-only). | cron_fields, cron_policy | harness/scheduler_executor.py |
 | scheduler_adapter.py | — | cron_policy | — |
@@ -1382,7 +1382,7 @@ graph LR
 | notifier.py | Work-queue terminal-event notifier — tail-from-now delivery via injected sink. | — | gateway/watchers.py |
 | recovery.py | WS1 PR1b - thin boot-sweep glue for durable background-task crash-resume. | driver, store | runtime/durable_recovery.py |
 | runner.py | — | child_runner_boundary, goal_judge, models, work_queue | gateway/watchers.py, missions/work_queue/driver.py |
-| store.py | — | flags, migrations, models | cli/commands/builtins.py, gateway/watchers.py, missions/work_queue/board_api.py, missions/work_queue/driver.py, missions/work_queue/recovery.py, plugins/native/scheduled_work.py, runtime/durable_recovery.py, storage/durable_checkpoint_store.py |
+| store.py | — | flags, migrations, models | cli/commands/builtins.py, gateway/watchers.py, missions/work_queue/board_api.py, missions/work_queue/driver.py, missions/work_queue/recovery.py, plugins/native/scheduled_work.py, runtime/durable_recovery.py, storage/durable_checkpoint_store.py, transport/app_api.py |
 
 ### models/
 
@@ -1992,7 +1992,7 @@ graph LR
 |---|---|---|---|
 | __init__.py | — | health | cli/tests/test_sse_sanitize_control_request.py |
 | active_turn.py | Process-local registry of in-flight streaming-chat turns. | permissions | cli/tests/test_streaming_driver.py, transport/chat_routes.py, transport/gate5b_serving.py, transport/streaming_chat_route.py, transport/streaming_driver.py |
-| app_api.py | Dashboard ``/v1/app/*`` API surface. | config, engine, openmagi_runtime, providers, search, session_store, skills, tools | (root)/app.py, customize/catalog.py, transport/streaming_chat_route.py |
+| app_api.py | Dashboard ``/v1/app/*`` API surface. | config, engine, openmagi_runtime, projection, providers, search, session_store, skills, store, tools | (root)/app.py, customize/catalog.py, transport/streaming_chat_route.py |
 | chat.py | Re-export shim for the decomposed Gate5B chat serving stack (08-PR1). | chat_routes, chat_shared, compiler, egress_critic, egress_gate, env, gate1a_egress_correlation, gate1a_readonly_tools, gate2_activation_loop_a, gate2_durable_evidence, gate2_readiness, gate2_sandbox_canary, gate5b4c3_live_runner_boundary, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, gate5b_full_toolhost, gate8_readiness, generation_request, materializer, message_builder, observed_egress, openmagi_runtime, public_events, research_first_canary, session_identity, shadow_generations, usage_receipt_emit, user_visible_model_routing | (root)/app.py, (root)/main.py, transport/health.py, transport/streaming_chat_route.py |
 | chat_authority.py | Runner-error diagnostics, public-safe redaction and authority/tooling | chat_shared, child_runner_status, egress_gate, gate1a_egress_correlation, gate1a_readonly_tools, gate2_sandbox_canary, gate5b4c3_shadow_counter_store, gate5b_full_toolhost, gate8_readiness, generation_request, observed_egress, openmagi_runtime, shadow_generations, user_visible_model_routing | transport/chat_routes.py, transport/gate5b_serving.py |
 | chat_routes.py | Chat route registration and the Gate5B user-visible serving engine. | active_turn, chat_authority, chat_routes_local, chat_shared, child_runner_status, compiler, egress_critic, egress_gate, env, flags, gate1a_egress_correlation, gate1a_readonly_tools, gate2_sandbox_canary, gate5b4c3_live_runner_boundary, gate5b4c3_runner_input_adapter, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, gate5b_full_toolhost, gate5b_governance, gate5b_serving, gate8_readiness, generation_request, governed_turn, hosted_engine_result, hosted_runtime, hosted_turn_context, materializer, observed_egress, openmagi_runtime, public_events, research_first_canary, session_identity, shadow_generations, turn_context, usage_receipt_emit, user_visible_model_routing, work_queue | transport/chat.py |
