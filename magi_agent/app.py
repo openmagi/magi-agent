@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
@@ -30,6 +31,13 @@ from magi_agent.missions.work_queue.board_api import register_work_queue_board
 from magi_agent.egress_proxy.config import EgressProxyConfig
 
 logger = logging.getLogger(__name__)
+
+# Bounded wait for the co-located gateway daemon to drain on shutdown. The
+# daemon's ``run`` returns promptly once ``stop_event`` is set (it cancels +
+# gathers its watcher tasks), so this ceiling only guards against a wedged
+# watcher; on timeout the task is cancelled by ``asyncio.wait_for`` so shutdown
+# never hangs.
+_GATEWAY_SHUTDOWN_TIMEOUT_SECONDS = 10.0
 
 
 def _build_learning_bootstrap(runtime: OpenMagiRuntime) -> LearningBootstrap | None:
@@ -77,9 +85,56 @@ def create_app(runtime: OpenMagiRuntime) -> FastAPI:
                     "learning bootstrap start failed; learning layer inert",
                     exc_info=True,
                 )
+        # M9: co-locate the gateway daemon in the serve process. When
+        # MAGI_GATEWAY_DAEMON_ENABLED is on, supervise the watcher fleet
+        # (work_queue_executor + notify + mission_action_reconciler) in the SAME
+        # event loop as uvicorn, so ``python -m magi_agent`` actually runs the
+        # background executor (previously ONLY the ``magi gateway`` CLI started
+        # it). Each watcher does its blocking work via ``asyncio.to_thread`` so
+        # co-running with the server never blocks the loop. Gated + fail-open:
+        # gate off -> byte-identical (no daemon built); a build/start failure
+        # logs and leaves the app serving. Lazy import mirrors the module's
+        # lazy-import discipline and avoids a new import-map edge.
+        gateway_stop_event: asyncio.Event | None = None
+        gateway_task: asyncio.Task[None] | None = None
+        try:
+            from magi_agent.gateway.daemon import (  # noqa: PLC0415
+                build_default_gateway_daemon,
+                is_gateway_daemon_enabled,
+            )
+
+            if is_gateway_daemon_enabled():
+                daemon = build_default_gateway_daemon()
+                gateway_stop_event = asyncio.Event()
+                gateway_task = asyncio.create_task(
+                    daemon.run(stop_event=gateway_stop_event),
+                    name="gateway-daemon",
+                )
+        except Exception:  # noqa: BLE001 - fail-open: never block startup
+            logger.warning(
+                "gateway daemon start failed; watcher fleet inert",
+                exc_info=True,
+            )
+            gateway_stop_event = None
+            gateway_task = None
         try:
             yield
         finally:
+            # Stop the co-located gateway daemon first: signal the stop event and
+            # await the supervised task with a bounded timeout so a wedged watcher
+            # cannot hang shutdown. ``wait_for`` cancels the task on timeout;
+            # swallow Timeout/Cancelled and any error so shutdown never raises.
+            if gateway_task is not None:
+                if gateway_stop_event is not None:
+                    gateway_stop_event.set()
+                try:
+                    await asyncio.wait_for(
+                        gateway_task, timeout=_GATEWAY_SHUTDOWN_TIMEOUT_SECONDS
+                    )
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    pass
+                except Exception:  # noqa: BLE001 - never raise on shutdown
+                    logger.warning("gateway daemon stop failed", exc_info=True)
             # Serve session-end memory extraction: the local serve path has no
             # per-conversation end / shared session service, so we flush the
             # in-process per-session transcript buffer once on shutdown. Gated

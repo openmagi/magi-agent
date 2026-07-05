@@ -382,7 +382,7 @@ graph LR
 |---|---|---|---|
 | __init__.py | — | — | (root)/main.py, cli/tui/app.py |
 | __main__.py | — | main | — |
-| app.py | — | active_sessions, app_api, board_api, bootstrap, chat, composio_broker, config, control_requests, credentials, customize, debug_trace, health, integrations, learning_dashboard, observability, openmagi_runtime, packs_dashboard, plugins, shadow_invocations, streaming_chat_route, tools, web_dashboard | (root)/main.py |
+| app.py | — | active_sessions, app_api, board_api, bootstrap, chat, composio_broker, config, control_requests, credentials, customize, daemon, debug_trace, health, integrations, learning_dashboard, observability, openmagi_runtime, packs_dashboard, plugins, shadow_invocations, streaming_chat_route, tools, web_dashboard | (root)/main.py |
 | facades.py | High-level entry-point facades that compose existing modules. | bus, context, dispatcher, flags, lifecycle_audit, lifecycle_shell_command_control, manifest, output_rewrite, prompt_injection, replace_payloads, resolved, result, store, verification_policy | cli/customize_tool_wiring.py |
 | main.py | — | _truthy, app, chat, control_plane_overrides, env, flags, hosted_defaults, install_profile_bootstrap, local_defaults, local_proxy, local_vault, memory_bootstrap, models, observed_egress, openmagi_runtime, otel_noise, providers, store, vault_local, vault_server | (root)/__main__.py, cli/tests/test_app.py |
 
@@ -1123,7 +1123,7 @@ graph LR
 |---|---|---|---|
 | __init__.py | Track F — the ``magi gateway`` always-on daemon package. | — | — |
 | channel_watchers.py | Operator wiring: tie a concrete channel provider to a gateway poll watcher. | channel_credentials, daemon, discord_adapter, discord_gateway, discord_live, poll_resilience, scheduler_delivery, slack_live, slack_socketmode, slack_urllib, telegram_adapter, telegram_credentials, telegram_httpx, telegram_live, turn_bridge, watchers | gateway/watchers.py |
-| daemon.py | GatewayDaemon — the supervised asyncio watcher fleet (Track F). | _truthy, health, watchers | cli/app.py, gateway/channel_watchers.py, gateway/watchers.py, ops/health.py |
+| daemon.py | GatewayDaemon — the supervised asyncio watcher fleet (Track F). | _truthy, health, watchers | (root)/app.py, cli/app.py, gateway/channel_watchers.py, gateway/watchers.py, ops/health.py |
 | poll_resilience.py | WS8 PR8a-1: pure Telegram poll-resilience policy (default-OFF). | _truthy | gateway/channel_watchers.py, gateway/watchers.py |
 | service_install.py | OS service install for the ``magi gateway`` daemon (Track F). | — | cli/app.py |
 | watchers.py | Watcher-fleet builders — COMPOSE the existing always-on blocks (Track F). | _truthy, action_reconciler, channel_watchers, child_runner_live, daemon, driver, flags, goal_judge, notifier, poll_resilience, projector, runner, scheduler_job_execution, scheduler_job_store, scheduler_loop_driver, store, telegram_live, turn_engine | cli/app.py, gateway/channel_watchers.py, gateway/daemon.py, runtime/durable_recovery.py |
