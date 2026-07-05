@@ -317,6 +317,33 @@ CITATION_CONVENTION_BLOCK = "\n".join(
     ]
 )
 
+# Static ``<source_citation>`` system-prompt block (source-citation feature).
+# FIXED BYTES: no session ids, no source lists, no counts, so the cached prompt
+# prefix stays hit-stable across turns. This is the registry-backed ``[src_N]``
+# convention that REPLACES ``CITATION_CONVENTION_BLOCK`` when
+# MAGI_SOURCE_CITATION_ENABLED is on (the two are mutually exclusive; see the swap
+# in ``_assemble_prompt_sections``). The canonical bytes live here (the layer that
+# owns system-prompt blocks) because message_builder may not import
+# ``magi_agent.tools``; ``tools.web_search_tools._SOURCE_CITATION_GUIDANCE`` is
+# kept byte-identical by a drift-guard test.
+SOURCE_CITATION_GUIDANCE_BLOCK = (
+    "<source_citation>\n"
+    "External reads (web search, web fetch, knowledge base, browser, document\n"
+    "reads) are tagged with a stable citation id shown in the tool result, of\n"
+    "the form [src_N] (for example [src_3]). When you state a fact you got from\n"
+    "one of those sources, cite it inline as [src_N] immediately after the\n"
+    "claim.\n"
+    "Rules:\n"
+    "1. Only cite an id that actually appeared in a tool result this session.\n"
+    "   Never invent an id.\n"
+    "2. Prefer searching before asserting specific figures, dates, names, or\n"
+    "   quoted statistics. If you do not have a source for a specific figure,\n"
+    "   look it up first, then cite it.\n"
+    "3. Attach the id to the sentence that uses the figure, not to a distant\n"
+    "   sentence.\n"
+    "</source_citation>"
+)
+
 ACTION_SAFETY_BLOCK = "\n".join(
     [
         "<action-safety>",
@@ -758,6 +785,7 @@ def _assemble_prompt_sections(
     model_aware_prompts_enabled: bool,
     memory_snapshot_block: str = "",
     okf_guidance_block: str = "",
+    env: Mapping[str, str] | None = None,
 ) -> tuple[list[str], list[str]]:
     """Single source of truth for system-prompt section assembly.
 
@@ -788,10 +816,34 @@ def _assemble_prompt_sections(
     rendered_project_context = _render_project_context(identity or {})
     if rendered_project_context:
         static_parts.append(rendered_project_context)
+    # Single citation convention (source-citation reconciliation). When
+    # MAGI_SOURCE_CITATION_ENABLED is on the runtime instructs the registry-backed
+    # ``[src_N]`` convention (stable ids for dedup + verification), so the older
+    # markdown-link ``CITATION_CONVENTION_BLOCK`` must NOT also ship: two mutually
+    # exclusive conventions confuse the model and lower ``[src_N]`` compliance
+    # (the Wave 3/4 render + gate only scan for canonical ``[src_N]``). The static
+    # ``<source_citation>`` block takes the EXACT slot the markdown block held, so
+    # the section count and ordering are unchanged (cache-prefix stable). When the
+    # flag is off the markdown block is kept, byte-identical to before. This makes
+    # EVERY assembler that routes through this helper (``build_system_prompt`` and
+    # ``build_system_prompt_blocks``) carry exactly one convention.
+    from magi_agent.config.flags import flag_profile_bool  # noqa: PLC0415
+
+    try:
+        _source_citation_on = flag_profile_bool(
+            "MAGI_SOURCE_CITATION_ENABLED", env=env
+        )
+    except Exception:  # noqa: BLE001 -- prompt assembly must never break
+        _source_citation_on = False
+    citation_convention_block = (
+        SOURCE_CITATION_GUIDANCE_BLOCK
+        if _source_citation_on
+        else CITATION_CONVENTION_BLOCK
+    )
     static_parts.extend([
         DEFERRAL_PREVENTION_BLOCK,
         OUTPUT_RULES_BLOCK,
-        CITATION_CONVENTION_BLOCK,
+        citation_convention_block,
         OUTPUT_EFFICIENCY_BLOCK,
         ACTION_SAFETY_BLOCK,
     ])
@@ -1056,6 +1108,7 @@ def build_system_prompt(
     evidence_sink: "Callable[[Mapping[str, object]], None] | None" = None,
     memory_snapshot_block: str = "",
     okf_guidance_block: str = "",
+    env: Mapping[str, str] | None = None,
 ) -> str:
     runtime_now = _coerce_utc(now)
     static_parts, dynamic_parts = _assemble_prompt_sections(
@@ -1071,6 +1124,7 @@ def build_system_prompt(
         model_aware_prompts_enabled=model_aware_prompts_enabled,
         memory_snapshot_block=memory_snapshot_block,
         okf_guidance_block=okf_guidance_block,
+        env=env,
     )
 
     static_parts = _apply_prompt_transform(
@@ -1107,6 +1161,7 @@ def build_system_prompt_blocks(
     evidence_sink: "Callable[[Mapping[str, object]], None] | None" = None,
     memory_snapshot_block: str = "",
     okf_guidance_block: str = "",
+    env: Mapping[str, str] | None = None,
 ) -> list[dict[str, object]]:
     """Build the system prompt as a list of structured blocks with optional cache markers.
 
@@ -1173,6 +1228,7 @@ def build_system_prompt_blocks(
         model_aware_prompts_enabled=model_aware_prompts_enabled,
         memory_snapshot_block=memory_snapshot_block,
         okf_guidance_block=okf_guidance_block,
+        env=env,
     )
     static_parts = _apply_prompt_transform(
         static_parts,

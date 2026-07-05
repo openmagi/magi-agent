@@ -164,6 +164,61 @@ def test_truncation_before_injection_header_not_cut() -> None:
     assert md.endswith(capped_body)
 
 
+def test_web_fetch_cap_then_inject_integration(monkeypatch) -> None:
+    """Cap-then-inject WIRING, end to end through the real web_fetch handler.
+
+    The handler caps the provider markdown to _FIRECRAWL_MAX_CHARS BEFORE the
+    wrap point injects the citation header, so the injected result carries BOTH a
+    [source: src_N] header AND an already-capped body (the header is never the
+    thing that gets truncated). test_truncation_before_injection_header_not_cut
+    asserts the unit invariant on a pre-capped body; this asserts the real
+    handler + collector wiring produces it.
+    """
+    import asyncio
+
+    monkeypatch.setenv("MAGI_SOURCE_CITATION_ENABLED", "1")
+
+    from magi_agent.evidence.local_tool_collector import LocalToolEvidenceCollector
+    from magi_agent.plugins.native import web as web_plugin
+    from magi_agent.tools.context import ToolContext
+    from magi_agent.tools.web_search_tools import _FIRECRAWL_MAX_CHARS
+
+    oversize = "x" * (_FIRECRAWL_MAX_CHARS + 5000)
+    monkeypatch.setattr(
+        "magi_agent.tools.web_search_tools.web_fetch_raw",
+        lambda url: {"data": {"markdown": oversize}},
+    )
+
+    url = "https://example.com/big"
+    result = asyncio.run(
+        web_plugin.handle_web_fetch({"url": url}, ToolContext(bot_id="b"))
+    )
+    assert result.status == "ok"
+    # The handler capped the provider bytes BEFORE injection (cap_text keeps a
+    # head+tail around a "..." elision, so the capped length hugs the cap rather
+    # than the oversize input).
+    assert len(result.output["markdown"]) <= _FIRECRAWL_MAX_CHARS + 200
+    assert len(result.output["markdown"]) < len(oversize)
+
+    collector = LocalToolEvidenceCollector()
+    injected, _records = collector.register_and_inject_sources(
+        session_id="sid-fetch",
+        turn_id="turn-fetch",
+        tool_call_id="call-fetch",
+        tool_name="web_fetch",
+        result=result.model_dump(by_alias=True),
+        arguments={"url": url},
+    )
+    body = injected["output"]["markdown"]
+    header = f"[source: src_1] {url}\n\n"
+    # Header present...
+    assert body.startswith(header)
+    # ...AND the body is capped: injection only prepends the header, so the total
+    # hugs cap + header, never the pre-cap oversize length.
+    assert len(body) <= _FIRECRAWL_MAX_CHARS + len(header) + 200
+    assert len(body) < len(oversize)
+
+
 def test_empty_sources_returns_result_untouched() -> None:
     """No registered sources -> no injection, no citation metadata, same dict."""
     from magi_agent.evidence.citation_injection import inject_citation_headers

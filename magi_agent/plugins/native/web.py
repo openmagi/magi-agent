@@ -253,6 +253,15 @@ def _citation_assign_id(context: ToolContext):
         return None
     turn_id = getattr(context, "turn_id", None) or "research-fact"
     tool_use_id = getattr(context, "tool_use_id", None)
+    # Collector-bound sink that lands each registered source in the SAME
+    # producer_control corpus web_fetch uses. The ambient wrap-point classifier
+    # returns [] for research_fact (its output is a synthesized brief, not a
+    # per-source result shape), so without this a research_fact src_N would live
+    # in the registry but be absent from the evidence corpus the pre-final gate
+    # reads. This is the ONLY evidence path for research_fact sources, so there is
+    # no double-registration. Fail-quiet: a None sink (citation off) or an emit
+    # error never breaks the brief.
+    evidence_sink = getattr(context, "citation_evidence_sink", None)
 
     def _assign(kind: str, url: str, title: str | None):
         try:
@@ -267,7 +276,14 @@ def _citation_assign_id(context: ToolContext):
             )
         except Exception:
             return None
-        return getattr(record, "source_id", None) if record is not None else None
+        if record is None:
+            return None
+        if callable(evidence_sink):
+            try:
+                evidence_sink(turn_id, record.to_evidence_record())
+            except Exception:
+                pass
+        return getattr(record, "source_id", None)
 
     return _assign
 

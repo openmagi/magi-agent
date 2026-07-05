@@ -68,8 +68,12 @@ def test_block_exported_as_module_constant() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_citation_block_appears_in_assembled_static_sections() -> None:
-    static_parts, _dynamic = _assemble_prompt_sections(
+_FLAG_OFF = {"MAGI_SOURCE_CITATION_ENABLED": "0"}
+_FLAG_ON = {"MAGI_SOURCE_CITATION_ENABLED": "1"}
+
+
+def _assemble(env):
+    return _assemble_prompt_sections(
         session_key="s1",
         turn_id="t1",
         identity={},
@@ -80,27 +84,51 @@ def test_citation_block_appears_in_assembled_static_sections() -> None:
         coding_agent=False,
         model="claude-opus-4-8",
         model_aware_prompts_enabled=False,
+        env=env,
     )
+
+
+def test_citation_block_appears_in_assembled_static_sections() -> None:
+    # Flag OFF: the markdown-link convention ships (byte-identical to pre-change).
+    static_parts, _dynamic = _assemble(_FLAG_OFF)
     joined = "\n".join(static_parts)
     assert "<citation-convention>" in joined
+    assert "<source_citation>" not in joined
 
 
 def test_citation_block_appears_after_output_rules_for_priming() -> None:
-    static_parts, _dynamic = _assemble_prompt_sections(
-        session_key="s1",
-        turn_id="t1",
-        identity={},
-        channel=None,
-        user_message=None,
-        runtime_now=_utc("2026-06-27T00:00:00Z"),
-        timezone=None,
-        coding_agent=False,
-        model="claude-opus-4-8",
-        model_aware_prompts_enabled=False,
-    )
+    static_parts, _dynamic = _assemble(_FLAG_OFF)
     joined = "\n".join(static_parts)
     citation_pos = joined.index("<citation-convention>")
     output_rules_pos = joined.index("<output-rules>")
     # Output rules first (general output discipline), then citation convention
     # (specific guidance for sourced facts).
     assert output_rules_pos < citation_pos
+
+
+def test_flag_on_swaps_markdown_convention_for_src_n_block() -> None:
+    # Flag ON: exactly one convention -- the [src_N] block replaces the
+    # markdown-link block IN PLACE (never both, never neither).
+    static_parts, _dynamic = _assemble(_FLAG_ON)
+    joined = "\n".join(static_parts)
+    assert "<source_citation>" in joined
+    assert "<citation-convention>" not in joined
+
+
+def test_flag_on_off_preserve_static_section_count() -> None:
+    # The swap keeps the same number of static sections in both states, so the
+    # cache-prefix layout (and downstream splitter indices) is unchanged.
+    off_parts, _ = _assemble(_FLAG_OFF)
+    on_parts, _ = _assemble(_FLAG_ON)
+    assert len(off_parts) == len(on_parts)
+
+
+def test_source_citation_block_bytes_match_web_search_tools_copy() -> None:
+    # Drift guard: message_builder owns the canonical <source_citation> bytes
+    # (its layer may not import magi_agent.tools), while web_search_tools keeps a
+    # copy for the CLI-era guidance helper. They MUST stay byte-identical so the
+    # model never sees two slightly different instructions for the same feature.
+    from magi_agent.runtime.message_builder import SOURCE_CITATION_GUIDANCE_BLOCK
+    from magi_agent.tools.web_search_tools import _SOURCE_CITATION_GUIDANCE
+
+    assert SOURCE_CITATION_GUIDANCE_BLOCK == _SOURCE_CITATION_GUIDANCE

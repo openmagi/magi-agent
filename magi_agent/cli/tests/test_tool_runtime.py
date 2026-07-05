@@ -107,6 +107,12 @@ def test_cli_adk_tools_record_local_tool_receipts_for_engine_collector(tmp_path)
 
     records = collector.collect_for_turn("turn-local")
     assert result["status"] == "ok"
+    # With MAGI_SOURCE_CITATION_ENABLED default-ON, the wrap point re-injects a
+    # per-source header into the MODEL-FACING content (design 7.4), so the read
+    # content carries a [source: src_N] tag while still ending with the original
+    # bytes. This locks the re-injection wiring, not just the receipt count.
+    assert result["output"]["content"].startswith("[source: src_")
+    assert result["output"]["content"].rstrip().endswith("real content here")
     # A FileRead of a pre-existing (non-authored) file also registers a
     # source-citation SourceInspection record now that MAGI_SOURCE_CITATION_ENABLED
     # is default-ON, so filter to the execution receipt rather than asserting a
