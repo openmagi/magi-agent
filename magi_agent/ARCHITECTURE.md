@@ -1126,7 +1126,7 @@ graph LR
 | daemon.py | GatewayDaemon — the supervised asyncio watcher fleet (Track F). | _truthy, health, watchers | cli/app.py, gateway/channel_watchers.py, gateway/watchers.py, ops/health.py |
 | poll_resilience.py | WS8 PR8a-1: pure Telegram poll-resilience policy (default-OFF). | _truthy | gateway/channel_watchers.py, gateway/watchers.py |
 | service_install.py | OS service install for the ``magi gateway`` daemon (Track F). | — | cli/app.py |
-| watchers.py | Watcher-fleet builders — COMPOSE the existing always-on blocks (Track F). | _truthy, channel_watchers, child_runner_live, daemon, driver, flags, goal_judge, notifier, poll_resilience, runner, scheduler_job_execution, scheduler_job_store, scheduler_loop_driver, store, telegram_live, turn_engine | cli/app.py, gateway/channel_watchers.py, gateway/daemon.py, runtime/durable_recovery.py |
+| watchers.py | Watcher-fleet builders — COMPOSE the existing always-on blocks (Track F). | _truthy, action_reconciler, channel_watchers, child_runner_live, daemon, driver, flags, goal_judge, notifier, poll_resilience, projector, runner, scheduler_job_execution, scheduler_job_store, scheduler_loop_driver, store, telegram_live, turn_engine | cli/app.py, gateway/channel_watchers.py, gateway/daemon.py, runtime/durable_recovery.py |
 
 ### harness/
 
@@ -1361,12 +1361,13 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | Default-off mission lifecycle contract boundaries. | lifecycle, receipts | — |
+| action_reconciler.py | Hosted ``MissionActionReconciler`` — inbound UI actions -> work_queue. | models, projector, store | gateway/watchers.py |
 | background_tasks.py | — | long_running_activity, receipt_utils | — |
 | cron_policy.py | — | cron_fields, receipts | missions/schedule_grammar.py, missions/scheduler_adapter.py |
 | events.py | — | receipts | transport/sse.py |
 | lifecycle.py | — | receipts | missions/__init__.py |
 | projection.py | Pure mapping kernel: work_queue substrate -> hosted "mission" shape. | models | missions/projector.py, plugins/native/scheduled_work.py, transport/app_api.py |
-| projector.py | Hosted ``MissionProjector`` — outbound work_queue -> chat-proxy projection. | flags, models, projection, store | missions/work_queue/driver.py, plugins/native/scheduled_work.py, runtime/durable_recovery.py |
+| projector.py | Hosted ``MissionProjector`` — outbound work_queue -> chat-proxy projection. | flags, models, projection, store | gateway/watchers.py, missions/action_reconciler.py, missions/work_queue/driver.py, plugins/native/scheduled_work.py, runtime/durable_recovery.py |
 | receipts.py | — | receipt_redaction, runtime | missions/__init__.py, missions/cron_policy.py, missions/events.py, missions/lifecycle.py |
 | schedule_grammar.py | A1 — ScheduleSpec: once / interval / cron grammar (preview-only). | cron_fields, cron_policy | harness/scheduler_executor.py |
 | scheduler_adapter.py | — | cron_policy | — |
@@ -1379,11 +1380,11 @@ graph LR
 | board_api.py | Read-only FastAPI board router for the durable work-queue. | flags, store | (root)/app.py |
 | driver.py | WorkQueueDriver — the periodic dispatcher tick for the durable work-queue. | lifecycle_audit, lifecycle_llm_call_control, lifecycle_shell_command_control, projector, runner, store | gateway/watchers.py, missions/work_queue/recovery.py, runtime/durable_recovery.py |
 | inject_buffer.py | Per-session inject buffer shared by chat-routes and the background-task sink. | — | — |
-| models.py | — | — | missions/projection.py, missions/projector.py, missions/work_queue/__init__.py, missions/work_queue/runner.py, missions/work_queue/store.py, plugins/native/scheduled_work.py |
+| models.py | — | — | missions/action_reconciler.py, missions/projection.py, missions/projector.py, missions/work_queue/__init__.py, missions/work_queue/runner.py, missions/work_queue/store.py, plugins/native/scheduled_work.py |
 | notifier.py | Work-queue terminal-event notifier — tail-from-now delivery via injected sink. | — | gateway/watchers.py |
 | recovery.py | WS1 PR1b - thin boot-sweep glue for durable background-task crash-resume. | driver, store | runtime/durable_recovery.py |
 | runner.py | — | child_runner_boundary, goal_judge, models, work_queue | gateway/watchers.py, missions/work_queue/driver.py |
-| store.py | — | flags, migrations, models | cli/commands/builtins.py, gateway/watchers.py, missions/projector.py, missions/work_queue/board_api.py, missions/work_queue/driver.py, missions/work_queue/recovery.py, plugins/native/scheduled_work.py, runtime/durable_recovery.py, storage/durable_checkpoint_store.py, transport/app_api.py |
+| store.py | — | flags, migrations, models | cli/commands/builtins.py, gateway/watchers.py, missions/action_reconciler.py, missions/projector.py, missions/work_queue/board_api.py, missions/work_queue/driver.py, missions/work_queue/recovery.py, plugins/native/scheduled_work.py, runtime/durable_recovery.py, storage/durable_checkpoint_store.py, transport/app_api.py |
 
 ### models/
 
