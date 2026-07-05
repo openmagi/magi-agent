@@ -188,10 +188,9 @@ class EditRetryReflectionEnv:
 def parse_edit_retry_reflection_env(
     env: Mapping[str, str],
 ) -> EditRetryReflectionEnv:
-    enabled = _runtime_feature_enabled(
-        env,
-        EDIT_RETRY_REFLECTION_ENABLED_ENV,
-    )
+    from .flags import flag_profile_bool  # noqa: PLC0415
+
+    enabled = flag_profile_bool(EDIT_RETRY_REFLECTION_ENABLED_ENV, env=env)
     max_attempts = _int_env(
         env,
         EDIT_RETRY_MAX_ATTEMPTS_ENV,
@@ -3342,7 +3341,9 @@ def multi_file_join_enabled(env: Mapping[str, str] | None = None) -> bool:
     path is byte-identical to origin/main when unset.
     """
     source = os.environ if env is None else env
-    return _is_true(source.get("MAGI_MULTI_FILE_JOIN_ENABLED"))
+    from .flags import flag_profile_bool  # noqa: PLC0415
+
+    return flag_profile_bool("MAGI_MULTI_FILE_JOIN_ENABLED", env=source)
 
 
 def parse_recipe_default_packs_expanded(env: Mapping[str, str]) -> bool:

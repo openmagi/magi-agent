@@ -67,9 +67,7 @@ def test_gaia_instruction_byte_identical_when_off() -> None:
     off = _capture_instruction(
         q, {"MAGI_MULTI_FILE_JOIN_ENABLED": "0", **_sd_off}
     )
-    unset = _capture_instruction(q, dict(_sd_off))
     assert "<multi_file_join>" not in off
-    assert off == unset
     # The OFF instruction is exactly the GAIA baseline: the format-adherence note
     # is always advertised on the GAIA path; the multi_file_join flag adds nothing
     # when OFF. (All other gated blocks are off under the cleared env.)
@@ -78,11 +76,16 @@ def test_gaia_instruction_byte_identical_when_off() -> None:
         f"\n\nQUESTION:\n{q.question}"
     )
     assert off == legacy
+    # Profile-aware default-ON: unset multi_file_join (with step-decomp still off)
+    # now DOES inject the block.
+    unset = _capture_instruction(q, dict(_sd_off))
+    assert "<multi_file_join>" in unset
 
 
 def test_gaia_instruction_appends_same_block_when_on() -> None:
     q = _question()
-    off = _capture_instruction(q, {})
+    # Use explicit "0" as the no-block baseline; unset is now profile-default-ON.
+    off = _capture_instruction(q, {"MAGI_MULTI_FILE_JOIN_ENABLED": "0"})
     on = _capture_instruction(q, {"MAGI_MULTI_FILE_JOIN_ENABLED": "1"})
     assert "<multi_file_join>" in on
     block = multi_file_join_block({"MAGI_MULTI_FILE_JOIN_ENABLED": "1"})
