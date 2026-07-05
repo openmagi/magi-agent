@@ -91,7 +91,6 @@ def test_parse_runtime_env_derives_false_authority_from_gate5b_disabled_env() ->
         "CORE_AGENT_PYTHON_DB_WRITE",
         "CORE_AGENT_PYTHON_WORKSPACE_MUTATION",
         "CORE_AGENT_PYTHON_CHILD_EXECUTION",
-        "CORE_AGENT_PYTHON_MISSION_RUNTIME",
         "CORE_AGENT_PYTHON_EVIDENCE_BLOCK_MODE",
     ),
 )
@@ -102,6 +101,25 @@ def test_parse_runtime_env_rejects_enabled_authority_flags(env_name: str) -> Non
         parse_runtime_env(env)
 
     assert env_name in str(excinfo.value)
+
+
+def test_parse_runtime_env_permits_mission_runtime_flag_truthy() -> None:
+    # ``CORE_AGENT_PYTHON_MISSION_RUNTIME`` is a permitted hosted authority
+    # flag (gates the missions projector/reconciler), so a truthy value must
+    # NOT raise at boot. It was removed from ``false_only_flags`` in env.py.
+    env = minimal_env() | {"CORE_AGENT_PYTHON_MISSION_RUNTIME": "1"}
+
+    config = parse_runtime_env(env)
+
+    # The ``mission_runtime_allowed`` descriptor stays a ``Literal[False]``
+    # seam (D3, deferred) regardless of the env flag.
+    assert config.authority.mission_runtime_allowed is False
+
+    # The neighbouring authority guards remain intact: a truthy DB-write flag
+    # still raises at boot.
+    with pytest.raises(RuntimeEnvError) as excinfo:
+        parse_runtime_env(minimal_env() | {"CORE_AGENT_PYTHON_DB_WRITE": "1"})
+    assert "CORE_AGENT_PYTHON_DB_WRITE" in str(excinfo.value)
 
 
 def test_parse_runtime_env_context_continuity_local_diagnostic_is_not_gate8_ready() -> None:
