@@ -3148,12 +3148,13 @@ FLAGS: tuple[FlagSpec, ...] = (
             "``EVAL_RUNTIME_ENV_DEFAULTS``."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_RECIPE_DEFAULT_PACKS_EXPANDED",
         summary=(
             "When ON, expand the default-selected first-party pack set to "
-            "include additional ``openmagi.evidence`` etc. Default-OFF "
-            "preserves the minimal default selection."
+            "include additional ``openmagi.evidence`` etc. Profile-aware "
+            "default-ON (full/lab; OFF under the safe-family keeps the minimal "
+            "default selection)."
         ),
     ),
     _b(
