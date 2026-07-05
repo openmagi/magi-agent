@@ -8,6 +8,11 @@
 // for the frame shapes this UI actually folds.
 
 import { normalizeInspectedSource } from "./research-evidence";
+import {
+  appendSegmentText,
+  appendSegmentThinking,
+  appendSegmentTool,
+} from "./transcript-segments";
 import type {
   CitationGateStatus,
   InspectedSource,
@@ -16,6 +21,7 @@ import type {
   SubagentActivityStatus,
   TaskBoardSnapshot,
   TaskBoardTask,
+  TranscriptSegment,
 } from "./types";
 
 /** A tool/todo card, correlated across tool_start → tool_progress → tool_end by id. */
@@ -85,6 +91,14 @@ export interface StreamChatState {
   turnId: string | null;
   streaming: boolean;
   heartbeatElapsedMs: number | null;
+  /**
+   * Ordered interleaved transcript segments captured in true chronological
+   * order (think -> tool -> think -> tool -> text). Derived-equal to
+   * `assistantText` (text segments), `thinkingText` (thinking segments), and the
+   * `tools` map (referenced by `tool` segment ids). Drives the interleaved
+   * completed-message layout via the bridge to `ChannelState.segments`.
+   */
+  segments: TranscriptSegment[];
 }
 
 export function initialStreamChatState(): StreamChatState {
@@ -106,6 +120,7 @@ export function initialStreamChatState(): StreamChatState {
     turnId: null,
     streaming: false,
     heartbeatElapsedMs: null,
+    segments: [],
   };
 }
 
@@ -283,6 +298,7 @@ function cloneState(state: StreamChatState): StreamChatState {
     activities: state.activities.slice(),
     inspectedSources: state.inspectedSources.slice(),
     runtimeTraces: state.runtimeTraces.slice(),
+    segments: state.segments.slice(),
   };
 }
 
@@ -567,6 +583,7 @@ export function foldRuntimeEvent(
         // A new text chunk re-opens the in-flight bubble.
         next.textCommitted = false;
         next.assistantText += chunk;
+        next.segments = appendSegmentText(next.segments, chunk);
         next.streaming = true;
       }
       return next;
@@ -576,6 +593,7 @@ export function foldRuntimeEvent(
       const chunk = str(p.delta) ?? str(p.text);
       if (chunk) {
         next.thinkingText += chunk;
+        next.segments = appendSegmentThinking(next.segments, chunk);
         next.streaming = true;
       }
       return next;
@@ -600,6 +618,10 @@ export function foldRuntimeEvent(
         kind: name === "TodoWrite" ? "todo" : "tool",
         rejected: false,
       });
+      // Record the tool in the ordered segment list AFTER commitText above has
+      // committed any in-flight text, so the segment order is text-then-tool.
+      // Synthetic model-progress / heartbeat ids ("llm:") never reach this case.
+      next.segments = appendSegmentTool(next.segments, id);
       next.streaming = true;
       return next;
     }

@@ -138,6 +138,17 @@ export interface StreamingTextSmootherOptions {
 export interface StreamingTextSmoother {
   push(text: string): void;
   flush(): Promise<void>;
+  /**
+   * Synchronously emit ALL pending buffered text right now and cancel the paced
+   * timer. Unlike `flush()` (which resolves asynchronously after the timer
+   * drains), `drain()` returns after the emit completes so the caller can then
+   * record a real tool boundary knowing every earlier text delta has already
+   * been committed. Fixes the wire-order != store-order bug: the smoother paces
+   * text over timer ticks while `tool_start` fires synchronously, so without a
+   * synchronous drain a tool could be recorded BEFORE text that logically
+   * preceded it.
+   */
+  drain(): void;
   clear(): void;
 }
 
@@ -558,6 +569,17 @@ export function createStreamingTextSmoother(
         flushResolvers.push(resolve);
         schedule();
       });
+    },
+    drain(): void {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      if (pending.length > 0) {
+        const chunk = take(pending.length);
+        if (chunk) emit(chunk);
+      }
+      resolveFlushers();
     },
     clear(): void {
       if (timer) {
@@ -1995,6 +2017,12 @@ export async function sendMessage(
         break;
       }
       case "tool_start": {
+        // Wire-order != store-order fix: synchronously drain any buffered text
+        // so every earlier text delta reaches the store (onDelta) BEFORE this
+        // tool boundary is recorded. Without this, the paced smoother could
+        // deliver the tool activity ahead of the text that logically preceded
+        // it, corrupting the interleaved segment order.
+        visibleText.drain();
         const id = typeof ev.id === "string" ? ev.id : `ag-${activities.size}`;
         const name = typeof ev.name === "string" ? ev.name : "tool";
         const inputPreview = typeof ev.input_preview === "string" ? ev.input_preview : undefined;

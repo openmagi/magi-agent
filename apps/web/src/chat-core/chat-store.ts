@@ -21,6 +21,7 @@ import {
   mergeAssistantMessageCopies,
   shouldMergeAssistantMessageCopies,
 } from "./assistant-dedupe";
+import { finalizedSegmentsForMessage } from "./transcript-segments";
 
 const DEFAULT_CHANNEL_STATE: ChannelState = {
   streaming: false,
@@ -897,6 +898,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
           ? streamErrorFallback(state)
           : "";
       if (finalContent) {
+        // Attach the ordered interleaved segments only when they are a faithful
+        // decomposition of finalContent (content-authority check). If a
+        // catch-up/error path mutated the visible text, this yields undefined
+        // and the message renders via the flat fallback.
+        const segments = finalizedSegmentsForMessage(state.segments, finalContent);
         get().addMessage(channel, {
           id: msgId ?? `assistant-${Date.now()}`,
           role: "assistant",
@@ -905,6 +911,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           thinkingContent: hasThinking ? state.thinkingText : undefined,
           thinkingDuration,
           activities: activities.length > 0 ? activities : undefined,
+          ...(segments ? { segments } : {}),
           taskBoard: taskBoard && taskBoard.tasks.length > 0 ? taskBoard : undefined,
           researchEvidence,
           usage,

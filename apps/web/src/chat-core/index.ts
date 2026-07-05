@@ -36,6 +36,7 @@ export * from "./kb-uploads";
 export * from "./live-run";
 export * from "./live-soft-wrap";
 export * from "./live-transcript";
+export * from "./transcript-segments";
 export * from "./load-channel-history";
 export * from "./local-cancel-suppression";
 export * from "./message-copy";
