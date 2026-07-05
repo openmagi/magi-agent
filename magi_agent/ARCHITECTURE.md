@@ -1365,7 +1365,7 @@ graph LR
 | cron_policy.py | — | cron_fields, receipts | missions/schedule_grammar.py, missions/scheduler_adapter.py |
 | events.py | — | receipts | transport/sse.py |
 | lifecycle.py | — | receipts | missions/__init__.py |
-| projection.py | Pure mapping kernel: work_queue substrate -> hosted "mission" shape. | models | transport/app_api.py |
+| projection.py | Pure mapping kernel: work_queue substrate -> hosted "mission" shape. | models | plugins/native/scheduled_work.py, transport/app_api.py |
 | receipts.py | — | receipt_redaction, runtime | missions/__init__.py, missions/cron_policy.py, missions/events.py, missions/lifecycle.py |
 | schedule_grammar.py | A1 — ScheduleSpec: once / interval / cron grammar (preview-only). | cron_fields, cron_policy | harness/scheduler_executor.py |
 | scheduler_adapter.py | — | cron_policy | — |
@@ -1499,7 +1499,7 @@ graph LR
 | knowledge.py | — | _common, _hosted_knowledge, config, context, local_index, policy, provider_boundary, qmd_index, result, source_tools | — |
 | missions.py | — | _common, context, env, flags, policy, result | — |
 | okf.py | The redaction-free ``OkfLookup`` native tool (PR2). | _common, bundle_loader, config, context, result | — |
-| scheduled_work.py | — | _common, context, env, models, policy, result, store | — |
+| scheduled_work.py | — | _common, context, env, models, policy, projection, result, store | — |
 | skills.py | — | _common, context, env, result | cli/commands/builtins.py, transport/app_api.py |
 | source_ledger.py | — | _common, context, result | — |
 | subagents.py | — | _common, child_runner_boundary, child_runner_live, child_toolset, context, public_events, result | — |

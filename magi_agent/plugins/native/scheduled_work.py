@@ -138,6 +138,59 @@ def _clamp(value: object, max_chars: int) -> str:
     return redact_public_text(raw, max_chars=max_chars)
 
 
+def _emit_mission_created(context: ToolContext, task: object) -> None:
+    """PR-M5 seam 1 (live bridge, create-time): surface the durable WorkTask
+    as a ``mission_created`` agent event on the live turn stream.
+
+    Rides the SAME pending-agent-events path SpawnAgent uses
+    (``chat_routes_local._push_agent_event`` -> SSE ``agent`` frame ->
+    ``local_turn_store._upsert_mission``), so the chat "Work" tab (live) and
+    the "Missions" tab (durable ledger) are two views of the same row from the
+    moment the task is created. No new channel: it reuses
+    ``context.emit_agent_event``.
+
+    Best-effort and non-blocking: a missing emitter (no live turn wired the
+    emitter, e.g. a hosted non-serve path) or a raising emitter must never
+    affect the tool result. The mission status is projected through the M1
+    kernel (``projection.map_task_status``), never the raw ``TaskStatus``, and
+    the id is the BARE durable task id (the ephemeral ``goal:{turn_id}`` scheme
+    belongs only to the in-memory goal mission in ``chat_routes_local``).
+    """
+    emitter = getattr(context, "emit_agent_event", None)
+    if not callable(emitter):
+        return
+    try:
+        import inspect
+        import time as _time
+
+        from magi_agent.missions.projection import project_task_to_mission_summary
+
+        mission = project_task_to_mission_summary(task)
+        event = {
+            "type": "mission_created",
+            "mission": {
+                "id": mission["id"],
+                "title": mission["title"],
+                "kind": mission["kind"],
+                "status": mission["status"],
+                "createdAt": int(_time.time() * 1000),
+                "metadata": {
+                    "workTaskId": mission["id"],
+                    "workQueueStatus": mission["metadata"]["work_queue_status"],
+                },
+            },
+        }
+        result = emitter(dict(event))
+        # The wired serve emitter (``_push_agent_event``) is sync and returns
+        # None. run_in_background is a sync tool so we cannot await; if a future
+        # emitter returns a coroutine, close it to avoid an unawaited warning
+        # rather than block (best-effort progress event).
+        if inspect.iscoroutine(result):
+            result.close()
+    except Exception:  # noqa: BLE001 - a progress emit must never fail the tool.
+        return
+
+
 def run_in_background(arguments: dict[str, object], context: ToolContext) -> ToolResult:
     title = _clamp(arguments.get("title"), _MAX_TITLE_CHARS).strip()
     body = _clamp(arguments.get("body"), _MAX_BODY_CHARS).strip() or None
@@ -179,6 +232,9 @@ def run_in_background(arguments: dict[str, object], context: ToolContext) -> Too
 
     store = SqliteWorkQueueStore(work_queue_db_path_from_env())
     stored = store.create_idempotent(task)
+
+    # PR-M5 seam 1: emit the create-time live mission event (best-effort).
+    _emit_mission_created(context, stored)
 
     short_id = stored.id[:6]
     ack = (
