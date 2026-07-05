@@ -2024,9 +2024,14 @@ def parse_python_runtime_authority_env(env: Mapping[str, str]) -> PythonRuntimeA
         "CORE_AGENT_PYTHON_DB_WRITE",
         "CORE_AGENT_PYTHON_WORKSPACE_MUTATION",
         "CORE_AGENT_PYTHON_CHILD_EXECUTION",
-        "CORE_AGENT_PYTHON_MISSION_RUNTIME",
         "CORE_AGENT_PYTHON_EVIDENCE_BLOCK_MODE",
     )
+    # ``CORE_AGENT_PYTHON_MISSION_RUNTIME`` is intentionally NOT in the
+    # false-only set: it is a permitted hosted authority flag that gates
+    # the missions projector/reconciler and must be allowed truthy at
+    # boot. The ``mission_runtime_allowed`` config descriptor stays a
+    # ``Literal[False]`` seam (D3, deferred); no consumer hard-blocks the
+    # projector on it.
     for name in false_only_flags:
         if flag_bool(name, env=env):
             raise RuntimeEnvError(f"{name} is not approved")
