@@ -1137,6 +1137,23 @@ def register_streaming_chat_routes(
         # ``transport.local_turn_pump``. There is no separate flag: the local serve
         # profile force-enables ``MAGI_STREAMING_CHAT`` so this branch is the live
         # local chat path.
+        # Wave 3a source-citation: reach the live SessionSourceRegistry through
+        # the engine's collector so the terminal frame can carry a citations
+        # payload. ``source_registry_for`` itself gates on
+        # MAGI_SOURCE_CITATION_ENABLED (returns None when off), so this provider
+        # yields None on the default-OFF path and the terminal frame stays
+        # byte-identical.
+        _citation_collector = getattr(engine, "local_tool_evidence_collector", None)
+
+        def _citation_registry_provider(sid: str) -> object | None:
+            accessor = getattr(_citation_collector, "source_registry_for", None)
+            if accessor is None:
+                return None
+            try:
+                return accessor(sid)
+            except Exception:
+                return None
+
         undetached = drive_streaming_chat(
             engine,
             gate,
@@ -1148,6 +1165,7 @@ def register_streaming_chat_routes(
             session_id=session_id,
             turn_id=turn_id,
             usage_recorder=_usage_recorder,
+            citation_registry_provider=_citation_registry_provider,
         )
         return _streaming_response(
             _wrap_handler_exit_trace(

@@ -28,7 +28,7 @@ existing SSE writer uses.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 
 from magi_agent.engine.contracts import EngineResult
 from magi_agent.runtime.events import RuntimeEvent
@@ -111,12 +111,56 @@ def _reconcile_missing_receipt_turn_end(
     return safe
 
 
-def frame_for_terminal(terminal: EngineResult) -> Iterator[bytes]:
+def _scrub_citations(citations: Mapping[str, object]) -> dict[str, object]:
+    """Scrub the terminal ``citations`` payload for secret markers.
+
+    This is the LOCAL dashboard surface, so ``uri`` ships unredacted by design
+    (Section 8) EXCEPT when it carries a private-text marker: then the SAME
+    redaction the terminal error / visible text gets applies. Only the free-text
+    fields (``uri`` / ``title``) can carry a leak; structural fields
+    (``sourceId`` / ``kind`` / ``trustTier`` / ``inspected`` / ``n``) are
+    passed through untouched.
+    """
+
+    def _scrub_text(value: object) -> object:
+        if isinstance(value, str) and value and _has_private_text_marker(value):
+            return "[redacted-private]"
+        return value
+
+    scrubbed = dict(citations)
+    raw_sources = scrubbed.get("sources")
+    if isinstance(raw_sources, (list, tuple)):
+        clean_sources: list[object] = []
+        for entry in raw_sources:
+            if isinstance(entry, Mapping):
+                clean_entry = dict(entry)
+                if "uri" in clean_entry:
+                    clean_entry["uri"] = _scrub_text(clean_entry["uri"])
+                if "title" in clean_entry:
+                    clean_entry["title"] = _scrub_text(clean_entry["title"])
+                clean_sources.append(clean_entry)
+            else:
+                clean_sources.append(entry)
+        scrubbed["sources"] = clean_sources
+    return scrubbed
+
+
+def frame_for_terminal(
+    terminal: EngineResult,
+    *,
+    citations: Mapping[str, object] | None = None,
+) -> Iterator[bytes]:
     """Yield the terminal ``turn_result`` frame followed by the ``[DONE]`` sentinel.
 
     The ``turn_result`` frame is always emitted (never sanitized away) and guards
     non-finite floats so :func:`_json` (``allow_nan=False``) never raises
     mid-stream.
+
+    When ``citations`` is provided (Wave 3a source-citation payload, computed by
+    the caller only while ``MAGI_SOURCE_CITATION_ENABLED`` is on), it rides the
+    frame under a ``citations`` key after passing through the secret-marker
+    scrub. When ``citations`` is ``None`` the frame is BYTE-IDENTICAL to the
+    pre-citation frame (no ``citations`` key at all, not ``null``).
     """
     # Guard non-finite floats so _json (allow_nan=False) never raises mid-stream.
     # EngineResult.cost_usd is always a float and .usage always a dict (non-Optional
@@ -145,6 +189,8 @@ def frame_for_terminal(terminal: EngineResult) -> Iterator[bytes]:
         "session_id": terminal.session_id,
         "turn_id": terminal.turn_id,
     }
+    if citations is not None:
+        turn_result["citations"] = _scrub_citations(citations)
     yield _frame(turn_result)
 
     # SSE sentinel frame.

@@ -1157,6 +1157,18 @@ class MagiEngineDriver:
         return self._runner
 
     @property
+    def local_tool_evidence_collector(self) -> object | None:
+        """The session-scoped ``LocalToolEvidenceCollector``, if the runner has one.
+
+        Wave 3a source-citation: the transport terminal-frame composer reaches
+        the live ``SessionSourceRegistry`` through this collector (via
+        ``source_registry_for(session_id)``) to project citations onto the frame,
+        rather than threading a collector through the streaming driver. Returns
+        ``None`` when the runner exposes no collector (test stubs, child agents).
+        """
+        return getattr(self._runner, "local_tool_evidence_collector", None)
+
+    @property
     def runner_policy_assembly(self) -> RunnerPolicyAssembly | None:
         return self._runner_policy_assembly
 
