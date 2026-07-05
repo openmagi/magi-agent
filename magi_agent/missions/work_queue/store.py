@@ -1215,6 +1215,58 @@ class SqliteWorkQueueStore:
         conn.execute("DELETE FROM mission_projection WHERE task_id=?", (task_id,))
         conn.commit()
 
+    # ------------------------------------------------------------------
+    # PR-M8 hosted MissionActionReconciler poll cursor (design section 7.4).
+    #
+    # A single durable row records where the inbound action poll left off so the
+    # reconciler resumes across restart (never reprocesses from zero) and dedupes
+    # the inclusive ``created_at >= since`` boundary the chat-proxy actions
+    # endpoint returns. ``get_mission_action_cursor`` / ``set_mission_action_cursor``
+    # are the only readers/writers of the ``mission_action_cursor`` table.
+    # ------------------------------------------------------------------
+
+    def get_mission_action_cursor(self) -> dict | None:
+        """Return the reconciler poll cursor, or None when never set.
+
+        Shape: ``{last_created_at: str | None, processed_ids: list[str]}``.
+        """
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT last_created_at, processed_ids FROM mission_action_cursor WHERE id=1"
+        ).fetchone()
+        if row is None:
+            return None
+        raw = row["processed_ids"]
+        try:
+            processed = json.loads(raw) if raw else []
+        except (ValueError, TypeError):
+            processed = []
+        if not isinstance(processed, list):
+            processed = []
+        return {
+            "last_created_at": row["last_created_at"],
+            "processed_ids": [str(x) for x in processed],
+        }
+
+    def set_mission_action_cursor(
+        self,
+        *,
+        last_created_at: str | None,
+        processed_ids: list[str],
+    ) -> None:
+        """Insert-or-update the single reconciler poll cursor row (idempotent)."""
+        conn = self._get_conn()
+        conn.execute(
+            "INSERT INTO mission_action_cursor (id, last_created_at, processed_ids, updated_at) "
+            "VALUES (1,?,?,?) "
+            "ON CONFLICT(id) DO UPDATE SET "
+            "last_created_at=excluded.last_created_at, "
+            "processed_ids=excluded.processed_ids, "
+            "updated_at=excluded.updated_at",
+            (last_created_at, json.dumps(list(processed_ids)), int(time.time())),
+        )
+        conn.commit()
+
 
 __all__ = [
     "CLAIM_HEARTBEAT_MAX_STALE_SECONDS",

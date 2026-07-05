@@ -148,6 +148,23 @@ MIGRATIONS: Sequence[tuple[int, str]] = (
             ON mission_projection(mission_id);
         """,
     ),
+    (
+        7,
+        # PR-M8 hosted MissionActionReconciler poll cursor (design section 7.4).
+        # A single durable row (id CHECK(id=1)) holding the last processed action
+        # ``created_at`` plus a bounded JSON list of recently processed action
+        # event ids. The reconciler resumes from this cursor across restart so it
+        # never reprocesses from zero and dedupes the inclusive
+        # ``created_at >= since`` boundary the chat-proxy actions endpoint returns.
+        """
+        CREATE TABLE IF NOT EXISTS mission_action_cursor (
+            id              INTEGER PRIMARY KEY CHECK (id = 1),
+            last_created_at TEXT,
+            processed_ids   TEXT NOT NULL DEFAULT '[]',
+            updated_at      INTEGER NOT NULL
+        );
+        """,
+    ),
 )
 
 
