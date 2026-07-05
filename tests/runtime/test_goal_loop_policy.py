@@ -50,14 +50,15 @@ def test_factory_returns_none_when_goal_mode_not_requested() -> None:
 
 
 def test_factory_returns_none_when_master_flag_disabled() -> None:
-    # MAGI_GOAL_LOOP_ENABLED is the deployment kill-switch. With the flag OFF
-    # (default for non-lab profiles), the policy never activates regardless of
-    # what the request says — operators control rollout.
+    # MAGI_GOAL_LOOP_ENABLED is the deployment kill-switch. It is now a
+    # profile-aware default-ON flag, so exercise the OFF path with an explicit
+    # "0" (or a safe profile): the policy never activates regardless of what the
+    # request says.
     assert (
         build_goal_loop_policy_from_request(
             goal_mode_requested=True,
             objective="anything",
-            env={},
+            env={"MAGI_GOAL_LOOP_ENABLED": "0"},
         )
         is None
     )

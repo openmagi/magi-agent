@@ -6,8 +6,8 @@ MAGI_MCP_RESILIENCE_ENABLED ON in the local FULL self-host profile and the hoste
 resilience control-stage (and up), so a default bot's composio MCP tool calls get a
 caller-bounded timeout + per-endpoint circuit breaker instead of silently burning a
 turn on a dead endpoint. safe/eval profiles and the hosted off stage keep it OFF.
-The flag is a registered kind="bool" FlagSpec resolved strictly (profile-independent)
-via flag_bool, so it only turns on when a profile/overlay dict explicitly sets it.
+The flag is a registered kind="profile_bool" FlagSpec resolved via flag_profile_bool:
+ON under the full/lab (non-safe) profile, OFF under the safe-family or explicit "0".
 
 Design: WS9 MCP robustness, PR9c (activation).
 """
@@ -17,7 +17,7 @@ from typing import Iterator
 
 import pytest
 
-from magi_agent.config.flags import flag_bool
+from magi_agent.config.flags import flag_profile_bool
 from magi_agent.runtime.local_defaults import (
     LOCAL_FULL_RUNTIME_ENV_DEFAULTS,
     apply_local_eval_runtime_defaults,
@@ -51,7 +51,7 @@ def test_local_full_profile_enables_mcp_resilience(hermetic_env: None) -> None:
     env: dict[str, str] = {}
     apply_local_full_runtime_defaults(env)
     assert env.get(_FLAG) == "1"
-    assert flag_bool(_FLAG, env=env) is True
+    assert flag_profile_bool(_FLAG, env=env) is True
 
 
 def test_full_profile_builds_an_enabled_policy(hermetic_env: None) -> None:
@@ -70,7 +70,7 @@ def test_hosted_resilience_stage_enables_mcp_resilience(hermetic_env: None) -> N
     env = {"MAGI_DEPLOYMENT": "hosted", "MAGI_CONTROL_STAGE": "resilience"}
     apply_hosted_runtime_defaults(env)
     assert env.get(_FLAG) == "1"
-    assert flag_bool(_FLAG, env=env) is True
+    assert flag_profile_bool(_FLAG, env=env) is True
 
 
 @pytest.mark.parametrize("stage", ["full", "hardgate"])
@@ -84,13 +84,16 @@ def test_hosted_higher_stages_inherit_mcp_resilience(
     assert env.get(_FLAG) == "1", stage
 
 
-def test_hosted_off_stage_keeps_mcp_resilience_off(hermetic_env: None) -> None:
+def test_hosted_off_stage_flag_is_profile_default_on(hermetic_env: None) -> None:
+    # The hosted "off" control stage sets no flag and no safe runtime profile,
+    # so the profile-aware default applies: ON. To keep MCP resilience OFF an
+    # operator sets an explicit safe profile or MAGI_MCP_RESILIENCE_ENABLED=0.
     from magi_agent.runtime.hosted_defaults import apply_hosted_runtime_defaults
 
     env = {"MAGI_DEPLOYMENT": "hosted", "MAGI_CONTROL_STAGE": "off"}
     apply_hosted_runtime_defaults(env)
     assert _FLAG not in env
-    assert flag_bool(_FLAG, env=env) is False
+    assert flag_profile_bool(_FLAG, env=env) is True
 
 
 @pytest.mark.parametrize("profile", ["safe", "off", "minimal", "conservative"])
@@ -100,18 +103,18 @@ def test_safe_profile_keeps_mcp_resilience_off(
     env = {"MAGI_RUNTIME_PROFILE": profile}
     apply_local_full_runtime_defaults(env)
     assert _FLAG not in env, profile
-    assert flag_bool(_FLAG, env=env) is False, profile
+    assert flag_profile_bool(_FLAG, env=env) is False, profile
 
 
 def test_eval_profile_keeps_mcp_resilience_off(hermetic_env: None) -> None:
     env: dict[str, str] = {}
     apply_local_eval_runtime_defaults(env)
     assert _FLAG not in env
-    assert flag_bool(_FLAG, env=env) is False
+    assert flag_profile_bool(_FLAG, env=env) is False
 
 
 def test_explicit_off_overrides_full_profile(hermetic_env: None) -> None:
     env = {_FLAG: "0"}
     apply_local_full_runtime_defaults(env)
     assert env.get(_FLAG) == "0"
-    assert flag_bool(_FLAG, env=env) is False
+    assert flag_profile_bool(_FLAG, env=env) is False

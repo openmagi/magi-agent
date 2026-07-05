@@ -344,10 +344,10 @@ def parse_mcp_resilience_env(env: Mapping[str, str]) -> "McpResiliencePolicy":
     raise ``RuntimeEnvError`` at parse so an operator fails loud at startup; a
     malformed numeric on an OFF runtime never raises.
     """
-    from .flags import flag_bool  # noqa: PLC0415
+    from .flags import flag_profile_bool  # noqa: PLC0415
     from ..plugins.mcp_resilience import McpResiliencePolicy  # noqa: PLC0415
 
-    enabled = flag_bool(MCP_RESILIENCE_ENABLED_ENV, env=env)
+    enabled = flag_profile_bool(MCP_RESILIENCE_ENABLED_ENV, env=env)
     if not enabled:
         return McpResiliencePolicy()
 

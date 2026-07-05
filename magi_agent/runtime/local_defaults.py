@@ -467,8 +467,6 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     # the ledger-first auto-continue authority is ambient for every turn in the
     # lab / full profile via the profile resolver, so it no longer belongs in
     # this strict-bool lab-opt-in list.)
-    "MAGI_KERNEL_RECIPE_PACKS_ENABLED",
-    "MAGI_KERNEL_ROLE_PROVIDES_ENABLED",
     "MAGI_LEARNING_ENABLED",
     "MAGI_LEARNING_INJECTION_ENABLED",
     "MAGI_LEARNING_LIVE_ENABLED",
