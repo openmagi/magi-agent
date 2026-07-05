@@ -390,7 +390,8 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | — | cli/tests/test_rich_tool_preview.py |
-| anthropic_cache_model.py | Cache-aware Anthropic (Claude) model for the ADK runner boundary — PR11. | env, metrics | engine/model_runner.py, prompt/injection.py, runtime/model_factory.py |
+| anthropic_cache_model.py | Cache-aware Anthropic (Claude) model for the ADK runner boundary — PR11. | anthropic_part_sanitizer, env, metrics | engine/model_runner.py, prompt/injection.py, runtime/model_factory.py |
+| anthropic_part_sanitizer.py | Sanitizer for native-Anthropic part conversion on the cache-aware ADK path. | — | adk_bridge/anthropic_cache_model.py |
 | artifact_service.py | — | — | — |
 | callback_adapter.py | — | bus, context, manifest, resolved | — |
 | context_compaction.py | Live context-compaction wiring for the ADK Runner (PR13). | auto_compact, collapse_drain, context, context_lifecycle, lifecycle_audit, lifecycle_shell_command_control, manual_compaction_context, protected_tools, providers, query_state, reactive_compact, readonly_classifier, session_service, token_estimation, token_tracker, transcript_render, types, usage_metadata, wiring | adk_bridge/control_plane.py |

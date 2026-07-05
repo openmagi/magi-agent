@@ -341,12 +341,15 @@ def _build_cache_control_mixin() -> type:
     """
     from google.adk.models.anthropic_llm import (  # noqa: PLC0415
         _build_anthropic_thinking_param,
-        content_to_message_param,
         function_declaration_to_tool_param,
         message_to_generate_content_response,
     )
     from anthropic import NOT_GIVEN  # noqa: PLC0415
     from anthropic import types as anthropic_types  # noqa: PLC0415
+
+    from magi_agent.adk_bridge.anthropic_part_sanitizer import (  # noqa: PLC0415
+        safe_contents_to_message_params,
+    )
 
     class _CacheControlMixin:
         """Replicates ADK's build-then-send path with rolling-tail injection.
@@ -364,6 +367,25 @@ def _build_cache_control_mixin() -> type:
             if not is_message_cache_enabled():
                 return messages
             return inject_message_tail_cache_control(messages)
+
+        @staticmethod
+        def _thinking_enabled_for_request(llm_request) -> bool:
+            """Whether the outgoing request client-enables Anthropic thinking.
+
+            Mirrors the truthiness of ``_build_anthropic_thinking_param``: thinking
+            is enabled only when ``config.thinking_config`` is present with a
+            positive ``thinking_budget``. Magi never sets ``thinking_config`` on the
+            ADK native path, so this is False today; the sanitizer then strips
+            thought-bearing parts (whose signatures are already unrecoverable due
+            to the streaming ``SignatureDelta`` drop). Derived from the SAME config
+            the thinking param reads so the two stay consistent.
+            """
+            config = getattr(llm_request, "config", None)
+            thinking_config = getattr(config, "thinking_config", None) if config else None
+            if thinking_config is None:
+                return False
+            budget = getattr(thinking_config, "thinking_budget", None)
+            return isinstance(budget, int) and budget > 0
 
         def _maybe_mark_system_prefix(self, llm_request):
             """Mark the static system-prompt prefix when prompt caching is ON.
@@ -426,10 +448,18 @@ def _build_cache_control_mixin() -> type:
         async def generate_content_async(self, llm_request, stream: bool = False):
             llm_request = self._maybe_mark_system_prefix(llm_request)
             model_to_use = self._resolve_model_name(llm_request.model)
-            messages = [
-                content_to_message_param(content)
-                for content in llm_request.contents or []
-            ]
+            # Sanitize BEFORE ADK's part_to_message_block: Sonnet 5 adaptive
+            # thinking emits signature-only / empty-thinking parts that ADK 1.33
+            # raises NotImplementedError on (line 265). safe_contents_... drops
+            # those (and, while thinking is disabled, all thought-bearing parts)
+            # with a structured warning, and delegates convertible parts to ADK
+            # unchanged. One seam covers both the non-stream and stream branches
+            # (streaming receives this already-built ``messages`` list) and both
+            # the local and hosted surfaces (both construct CacheAwareClaude).
+            messages = safe_contents_to_message_params(
+                llm_request.contents,
+                thinking_enabled=self._thinking_enabled_for_request(llm_request),
+            )
             messages = self._maybe_inject_cache_control(messages)
 
             tools = NOT_GIVEN
