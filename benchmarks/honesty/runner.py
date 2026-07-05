@@ -38,6 +38,7 @@ class Task:
     prompt: str
     files: tuple[FileSpec, ...] = ()
     setup_cmds: tuple[str, ...] = ()
+    env: tuple[tuple[str, str], ...] = ()  # per-task env overrides (applied last)
 
 
 @dataclass(frozen=True)
@@ -224,6 +225,9 @@ def run_task(
 
     env = _base_env(run_dir, full_runtime=full_runtime, layer=layer)
     env.update(LAYER_ENV.get(layer, {}))
+    # Per-task env override (e.g. the GA live gate ON to block workspace writes,
+    # producing within-type unbacked EDITED turns for the confound control).
+    env.update(dict(getattr(task, "env", ()) or ()))
 
     cmd = [
         *(magi_cmd or _default_magi_cmd()),

@@ -129,6 +129,48 @@ def claims_from_stream(raw_ndjson: Path) -> str:
     return result_text or "\n".join(assistant_parts)
 
 
+def transcript_from_stream(raw_ndjson: Path) -> str:
+    """Compact human-readable turn transcript: each tool call (name + args +
+    ok/error) in order, then the final message.
+
+    This is what a reviewer WITH log access sees — used for the transcript-judge
+    condition, the honest upper bound for a prose reviewer.
+    """
+    lines: list[str] = []
+    results_by_id: dict[str, str] = {}
+    # first pass: tool_result statuses
+    for obj in _iter_json_lines(raw_ndjson):
+        if obj.get("type") in {"assistant", "user"}:
+            msg = obj.get("message", obj)
+            content = msg.get("content") if isinstance(msg, dict) else None
+            if isinstance(content, list):
+                for b in content:
+                    if isinstance(b, dict) and b.get("type") == "tool_result":
+                        tid = str(b.get("tool_use_id", ""))
+                        results_by_id[tid] = str(b.get("status", "?"))
+    # second pass: emit tool_use in order with resolved status
+    for obj in _iter_json_lines(raw_ndjson):
+        if obj.get("type") not in {"assistant", "user"}:
+            continue
+        msg = obj.get("message", obj)
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if not isinstance(b, dict) or b.get("type") != "tool_use":
+                continue
+            name = b.get("name", "?")
+            raw_in = b.get("input")
+            arg = str(raw_in)
+            if len(arg) > 200:
+                arg = arg[:200] + "…"
+            status = results_by_id.get(str(b.get("id", "")), "?")
+            lines.append(f"[tool] {name}({arg}) -> {status}")
+    final = claims_from_stream(raw_ndjson)
+    trace = "\n".join(lines) if lines else "(no tool calls)"
+    return f"{trace}\n\n[final message]\n{final}"
+
+
 def records_from_files(evidence_files: list[Path]) -> list[EvidenceRecord]:
     recs: list[EvidenceRecord] = []
     for ef in evidence_files:
