@@ -43,7 +43,7 @@ from pathlib import Path
 
 import pytest
 
-from magi_agent.config.flags import FLAGS_BY_NAME, flag_bool, flag_str
+from magi_agent.config.flags import FLAGS_BY_NAME, flag_bool, flag_profile_bool, flag_str
 from magi_agent.transport.chat_routes import (
     _gate1a_workspace_root,
     _gate5b_full_toolhost_workspace_root,
@@ -245,12 +245,34 @@ def test_gate1a_workspace_root_empty_env_falls_back_to_cwd(
 
 
 # ---------------------------------------------------------------------------
-# MAGI_MAX_STEPS_BRAKE_ENABLED — registry membership + flag_bool parity.
+# MAGI_MAX_STEPS_BRAKE_ENABLED — registry membership + flag_profile_bool parity.
 # ---------------------------------------------------------------------------
 
+# Profile-aware default-ON semantics under a non-safe (default) profile:
+# unset/unrecognized fall back to the profile default (ON), an explicit truthy
+# value stays ON, and an explicit falsy value (incl. empty string) forces OFF.
+_MAX_STEPS_BRAKE_PROFILE_PARITY: tuple[tuple[str | None, bool], ...] = (
+    (None, True),         # unset -> profile default ON
+    ("1", True),
+    ("true", True),
+    ("on", True),
+    ("yes", True),
+    ("TRUE", True),
+    ("Yes", True),
+    ("0", False),
+    ("false", False),
+    ("off", False),
+    ("", False),
+    ("garbage", True),    # unrecognized -> profile default ON (not strict-OFF)
+    ("  on  ", True),     # whitespace + case-fold
+)
 
-def test_max_steps_brake_is_registered_as_public_bool() -> None:
+
+def test_max_steps_brake_is_registered_as_public_profile_bool() -> None:
     """Pin the registration so a future rename cannot silently downgrade kind.
+
+    Promoted to a profile-aware default-ON flag (``profile_bool``): ON under
+    the full/non-safe profile, OFF under the safe-family.
 
     Coordination note: H-9 audit flags ``MaxStepsBrakeControl`` as an inert
     no-op (max_iterations=0). If H-9 deletes the seam the FlagSpec should be
@@ -258,23 +280,19 @@ def test_max_steps_brake_is_registered_as_public_bool() -> None:
     is the desired loud signal that the cleanup is incomplete.
     """
     spec = FLAGS_BY_NAME["MAGI_MAX_STEPS_BRAKE_ENABLED"]
-    assert spec.kind == "bool"
+    assert spec.kind == "profile_bool"
     assert spec.scope == "public"
-    assert spec.default is False
+    assert spec.default is None
 
 
-@pytest.mark.parametrize(("raw", "expected"), _LOCAL_CHAT_ROUTE_PARITY)
-def test_max_steps_brake_flag_bool_parity(raw: str | None, expected: bool) -> None:
-    """The new ``flag_bool`` consumer matches the legacy ``_is_true(env.get(...))``.
-
-    Same 13-input table as the local-chat-route helper above; the underlying
-    parser is identical (``config._truthy.is_true``) so this is a structural
-    pin that catches a future kind downgrade.
-    """
+@pytest.mark.parametrize(("raw", "expected"), _MAX_STEPS_BRAKE_PROFILE_PARITY)
+def test_max_steps_brake_flag_profile_bool_parity(raw: str | None, expected: bool) -> None:
+    """The ``flag_profile_bool`` consumer resolves each input under the default
+    (non-safe) profile per the profile-aware default-ON convention."""
     env: dict[str, str] = (
         {} if raw is None else {"MAGI_MAX_STEPS_BRAKE_ENABLED": raw}
     )
-    assert flag_bool("MAGI_MAX_STEPS_BRAKE_ENABLED", env=env) is expected
+    assert flag_profile_bool("MAGI_MAX_STEPS_BRAKE_ENABLED", env=env) is expected
 
 
 def test_default_env_resolves_workspace_helpers_to_cwd(

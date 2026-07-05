@@ -474,10 +474,11 @@ def test_build_default_plugin_flag_on_reflects_generic_tool_raise() -> None:
     assert "command exploded" in result["error_message"]
 
 
-def test_build_default_plugin_flag_unset_generic_tool_raise_returns_none() -> None:
+def test_build_default_plugin_flag_explicitly_off_generic_tool_raise_returns_none() -> None:
+    # Explicit "0" disables the reflection; on_tool_error_callback returns None.
     from magi_agent.adk_bridge.control_plane import build_default_plugin
 
-    plugin = build_default_plugin({})
+    plugin = build_default_plugin({"MAGI_TOOL_EXCEPTION_REFLECTION_ENABLED": "0"})
 
     result = _run(
         plugin.on_tool_error_callback(
@@ -488,7 +489,25 @@ def test_build_default_plugin_flag_unset_generic_tool_raise_returns_none() -> No
         )
     )
 
-    assert result is None, "flag unset must keep byte-identical fan-out (None)"
+    assert result is None, "flag explicitly off must keep byte-identical fan-out (None)"
+
+
+def test_build_default_plugin_flag_unset_profile_default_on_reflects_generic_tool_raise() -> None:
+    # Unset under a non-safe profile: profile default ON, reflection is active.
+    from magi_agent.adk_bridge.control_plane import build_default_plugin
+
+    plugin = build_default_plugin({})
+
+    result = _run(
+        plugin.on_tool_error_callback(
+            tool=_FakeTool("Bash"),
+            tool_args={"command": "ls"},
+            tool_context=_FakeCtx("inv-generic-on"),
+            error=ValueError("command exploded"),
+        )
+    )
+
+    assert result is not None, "flag unset (profile default ON) must reflect tool raise"
 
 
 def test_build_default_plugin_edit_retry_keeps_priority_over_generic() -> None:

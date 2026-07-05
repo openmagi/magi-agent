@@ -432,9 +432,9 @@ def _recipe_intent_binding_enabled() -> bool:
 
     Reads through the canonical registry (I-2 PR A); strict allowlist semantics.
     """
-    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+    from magi_agent.config.flags import flag_profile_bool  # noqa: PLC0415
 
-    return flag_bool(_RECIPE_INTENT_BINDING_ENV)
+    return flag_profile_bool(_RECIPE_INTENT_BINDING_ENV)
 
 
 def compile_intent_bindings(

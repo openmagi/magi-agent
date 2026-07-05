@@ -211,9 +211,19 @@ class TestSelectRecoveryMessage:
 
 
 class TestEnvParsing:
-    def test_default_off(self) -> None:
+    def test_explicit_off_returns_disabled(self) -> None:
+        # Explicit "0" disables recovery regardless of profile.
+        parsed = parse_empty_response_recovery_env(
+            {"MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED": "0"}
+        )
+        assert parsed.enabled is False
+
+    def test_profile_default_on_with_unset(self) -> None:
+        # Unset under a non-safe profile: both RECOVERY and ESCALATION default ON.
         parsed = parse_empty_response_recovery_env({})
-        assert parsed == EmptyResponseRecoveryEnv(enabled=False, max_recoveries=1)
+        assert parsed.enabled is True
+        assert parsed.escalate is True
+        assert parsed.max_recoveries == 2
 
     def test_strict_truthy_on(self) -> None:
         for value in ("1", "true", "yes", "on", " TRUE "):
@@ -222,19 +232,26 @@ class TestEnvParsing:
             )
             assert parsed.enabled is True
 
-    def test_non_truthy_stays_off(self) -> None:
-        # Strict opt-in: junk values do NOT enable (unlike the runtime-profile
-        # default-ON convention used by output-continuation).
-        for value in ("0", "false", "off", "", "enable", "2"):
+    def test_explicit_falsy_stays_off(self) -> None:
+        # Explicit falsy values disable recovery.
+        for value in ("0", "false", "off", ""):
             parsed = parse_empty_response_recovery_env(
                 {"MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED": value}
             )
-            assert parsed.enabled is False
+            assert parsed.enabled is False, f"value={value!r}"
 
-    def test_runtime_profile_does_not_enable(self) -> None:
-        # No profile-based default-ON: absent flag is OFF even in the full
-        # local profile.
-        parsed = parse_empty_response_recovery_env({"MAGI_RUNTIME_PROFILE": "full"})
+    def test_unrecognized_value_takes_profile_default_on(self) -> None:
+        # profile_bool: unrecognized values fall back to the non-safe profile
+        # default (ON). Different from flag_bool which treats them as strict-False.
+        for value in ("enable", "2"):
+            parsed = parse_empty_response_recovery_env(
+                {"MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED": value}
+            )
+            assert parsed.enabled is True, f"value={value!r}"
+
+    def test_safe_runtime_profile_keeps_off(self) -> None:
+        # Safe profile ("eval") keeps the profile default OFF.
+        parsed = parse_empty_response_recovery_env({"MAGI_RUNTIME_PROFILE": "eval"})
         assert parsed.enabled is False
 
     def test_max_recoveries_knob(self) -> None:
@@ -258,16 +275,23 @@ class TestEnvParsing:
 
 
 class TestEscalationEnvParsing:
-    def test_escalation_default_off(self) -> None:
+    def test_escalation_explicitly_off(self) -> None:
+        # Explicit "0" on escalation disables it even when recovery is ON.
         parsed = parse_empty_response_recovery_env(
-            {"MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED": "1"}
+            {
+                "MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED": "1",
+                "MAGI_EMPTY_RESPONSE_ESCALATION_ENABLED": "0",
+            }
         )
         assert parsed.escalate is False
 
-    def test_escalation_off_max_one(self) -> None:
+    def test_escalation_explicitly_off_max_one(self) -> None:
         # Regression: without escalation the default max stays 1.
         parsed = parse_empty_response_recovery_env(
-            {"MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED": "1"}
+            {
+                "MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED": "1",
+                "MAGI_EMPTY_RESPONSE_ESCALATION_ENABLED": "0",
+            }
         )
         assert parsed.max_recoveries == 1
 
@@ -303,14 +327,26 @@ class TestEscalationEnvParsing:
             )
             assert parsed.max_recoveries == expected
 
-    def test_escalation_non_truthy_stays_off(self) -> None:
-        for value in ("0", "false", "off", "", "enable", "2"):
+    def test_escalation_explicit_falsy_stays_off(self) -> None:
+        # Explicit falsy values disable escalation.
+        for value in ("0", "false", "off", ""):
             parsed = parse_empty_response_recovery_env(
                 {
                     "MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED": "1",
                     "MAGI_EMPTY_RESPONSE_ESCALATION_ENABLED": value,
                 }
             )
-            assert parsed.escalate is False
-            # And the max default falls back to 1 when escalation is OFF.
-            assert parsed.max_recoveries == 1
+            assert parsed.escalate is False, f"value={value!r}"
+            # Max default falls back to 1 when escalation is OFF.
+            assert parsed.max_recoveries == 1, f"value={value!r}"
+
+    def test_escalation_unrecognized_value_takes_profile_default_on(self) -> None:
+        # profile_bool: unrecognized values fall back to non-safe profile default (ON).
+        for value in ("enable", "2"):
+            parsed = parse_empty_response_recovery_env(
+                {
+                    "MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED": "1",
+                    "MAGI_EMPTY_RESPONSE_ESCALATION_ENABLED": value,
+                }
+            )
+            assert parsed.escalate is True, f"value={value!r}"
