@@ -1,8 +1,6 @@
 """Tests for magi_agent/evidence/citation_capture.py (Wave 1)."""
 from __future__ import annotations
 
-import pytest
-
 
 def test_classify_web_search_extracts_urls_from_result() -> None:
     """web_search result with URL list extracts sources."""
@@ -46,6 +44,32 @@ def test_classify_fileread_extracts_path() -> None:
     assert len(specs) == 1
     assert specs[0].kind == "file"
     assert "README.md" in specs[0].uri
+
+
+def test_classify_glob_returns_empty() -> None:
+    """Glob is a pattern match, not a citable external read (design 7.3): it
+    must register ZERO citation sources so a mere glob cannot look like a source."""
+    from magi_agent.evidence.citation_capture import classify_tool_result_for_citation
+
+    for name in ("Glob", "glob"):
+        specs = classify_tool_result_for_citation(
+            name, {"output": ["/workspace/a.py", "/workspace/b.py"]},
+            {"pattern": "**/*.py"},
+        )
+        assert specs == [], f"{name!r} must register zero citation sources"
+
+
+def test_classify_grep_returns_empty() -> None:
+    """Grep is a search, not a citable external read (design 7.3): it must
+    register ZERO citation sources even when a path argument is present."""
+    from magi_agent.evidence.citation_capture import classify_tool_result_for_citation
+
+    for name in ("Grep", "grep"):
+        specs = classify_tool_result_for_citation(
+            name, {"output": "README.md:1: TODO"},
+            {"pattern": "TODO", "path": "/workspace"},
+        )
+        assert specs == [], f"{name!r} must register zero citation sources"
 
 
 def test_classify_memory_tool_returns_empty() -> None:

@@ -18,15 +18,22 @@ byte-identical.
 
 from __future__ import annotations
 
-import pytest
-
 from magi_agent.evidence.local_tool_collector import (
     _projected_source_inspection_records,
 )
 from magi_agent.tools.core_toolhost import _tool_result_from_outcome
 
 
-def _make_filread_outcome():
+def _make_source_outcome(
+    tool_name: str = "FileRead",
+    path: str = "README.md",
+    call_digest: str = "b",
+):
+    """Build a Gate5B outcome for a read-only source tool.
+
+    ``call_digest`` seeds the ``toolCallDigest`` so distinct source reads (which
+    have distinct tool call digests in production) can be simulated in tests.
+    """
     from magi_agent.gates.gate5b_full_toolhost import (
         Gate5BFullToolOutcome,
         Gate5BFullToolReceipt,
@@ -35,8 +42,8 @@ def _make_filread_outcome():
     receipt = Gate5BFullToolReceipt.model_validate(
         {
             "requestDigest": "sha256:" + "a" * 64,
-            "toolCallDigest": "sha256:" + "b" * 64,
-            "toolName": "FileRead",
+            "toolCallDigest": "sha256:" + (call_digest * 64)[:64],
+            "toolName": tool_name,
             "status": "ok",
             "boundedOutputDigest": "sha256:" + "c" * 64,
             "outputByteCount": 42,
@@ -47,10 +54,14 @@ def _make_filread_outcome():
             "status": "ok",
             "reason": "ok",
             "receipt": receipt,
-            "outputPreview": {"path": "README.md", "content": "# hi"},
+            "outputPreview": {"path": path, "content": "# hi"},
             "handlerCalled": True,
         }
     )
+
+
+def _make_filread_outcome():
+    return _make_source_outcome()
 
 
 def test_gate5b_fileread_outcome_carries_source_projection_when_flag_on(
@@ -139,25 +150,92 @@ def test_collector_projects_source_inspection_from_fileread_shaped_result(
     assert source_records, "record_tool_result must project a SourceInspection record"
 
 
-def test_src_1_id_collision_exists_on_multiple_fileread_calls_legacy_flag_on(
+def test_projection_allocates_distinct_ids_for_distinct_sources_legacy_flag_on(
     monkeypatch,
 ) -> None:
-    """RED: _synthesized_source_projection hardcodes src_1 on every call.
+    """The old src_1 hardcode collision is RESOLVED even on the legacy-only path.
 
-    Two FileRead outcomes both get src_1 in their sourceProjection when
-    only the LEGACY flag (MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED) is on.
-    This demonstrates the collision that the citation-path fix addresses.
+    Two DISTINCT source reads (distinct tool call digests) now get DISTINCT
+    projection ids, and the same read stays stable (deterministic, no counter),
+    when only MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED is on.
     """
     monkeypatch.setenv("MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED", "1")
     monkeypatch.delenv("MAGI_SOURCE_CITATION_ENABLED", raising=False)
-    result1 = _tool_result_from_outcome(_make_filread_outcome())
-    result2 = _tool_result_from_outcome(_make_filread_outcome())
+
+    result1 = _tool_result_from_outcome(
+        _make_source_outcome(path="README.md", call_digest="b")
+    )
+    result2 = _tool_result_from_outcome(
+        _make_source_outcome(path="src/main.py", call_digest="d")
+    )
     id1 = result1.metadata["sourceProjection"]["sources"][0]["sourceId"]
     id2 = result2.metadata["sourceProjection"]["sources"][0]["sourceId"]
-    # Both hardcoded to src_1 -- this is the known collision
-    assert id1 == "src_1"
-    assert id2 == "src_1"
-    assert id1 == id2, "collision: two FileRead calls get the same src_1"
+
+    assert not (id1 == "src_1" and id2 == "src_1"), "id must no longer be hardcoded"
+    assert id1 != id2, "distinct sources must get distinct projection ids"
+
+    # Same read (same tool call digest) must be stable across evaluations.
+    result1_again = _tool_result_from_outcome(
+        _make_source_outcome(path="README.md", call_digest="b")
+    )
+    id1_again = result1_again.metadata["sourceProjection"]["sources"][0]["sourceId"]
+    assert id1 == id1_again, "same source read must get a stable, deterministic id"
+
+
+def test_gitdiff_projection_kind_is_external_repo(monkeypatch) -> None:
+    """A GitDiff projection must carry kind='external_repo', not the old
+    hardcoded 'file' (which was the source of the both-flags-on remap miss)."""
+    monkeypatch.setenv("MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED", "1")
+    result = _tool_result_from_outcome(
+        _make_source_outcome(tool_name="GitDiff", path=".", call_digest="e")
+    )
+    source = result.metadata["sourceProjection"]["sources"][0]
+    assert source["kind"] == "external_repo"
+
+
+def test_both_flags_on_distinct_ids_across_fileread_and_gitdiff(
+    monkeypatch,
+) -> None:
+    """Invariant: no two DISTINCT sources ever share an id in ANY flag combo.
+
+    With BOTH the legacy source-ledger gate and the citation flag on, two
+    FileReads plus one GitDiff driven through record_tool_result yield distinct
+    projected SourceInspection source ids (the old src_1 collision, including the
+    GitDiff kind mismatch that the removed remap could not resolve, is gone).
+    """
+    monkeypatch.setenv("MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED", "1")
+    monkeypatch.setenv("MAGI_SOURCE_CITATION_ENABLED", "1")
+    from magi_agent.evidence.local_tool_collector import LocalToolEvidenceCollector
+
+    collector = LocalToolEvidenceCollector()
+    outcomes = [
+        _make_source_outcome(tool_name="FileRead", path="a.md", call_digest="b"),
+        _make_source_outcome(tool_name="FileRead", path="b.md", call_digest="d"),
+        _make_source_outcome(tool_name="GitDiff", path=".", call_digest="e"),
+    ]
+
+    source_ids: list[str] = []
+    for i, outcome in enumerate(outcomes):
+        result = _tool_result_from_outcome(outcome)
+        records = collector.record_tool_result(
+            session_id="sess-both",
+            turn_id="turn-1",
+            tool_call_id=f"c{i}",
+            tool_name=outcome.receipt.tool_name,
+            result=result,
+        )
+        for rec in records:
+            if getattr(rec, "type", None) != "SourceInspection":
+                continue
+            fields = getattr(rec, "fields", None)
+            get_fn = getattr(fields, "get", None)
+            if callable(get_fn):
+                sid = get_fn("sourceId")
+                if isinstance(sid, str):
+                    source_ids.append(sid)
+
+    assert len(source_ids) == 3, f"expected 3 SourceInspection ids, got {source_ids}"
+    assert len(set(source_ids)) == 3, f"ids must be distinct, got {source_ids}"
 
 
 def test_citation_capture_produces_unique_ids_for_multiple_fileread_calls(

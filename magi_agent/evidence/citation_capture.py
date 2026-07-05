@@ -32,9 +32,13 @@ _WEB_FETCH_TOOL_NAMES: frozenset[str] = frozenset({
     "research_fact", "ResearchFact",
 })
 
+# Design 7.3: the citable ``file`` kind is FileRead/DocumentRead only. Glob and
+# Grep are NOT citable external reads (a pattern match is not a source), so they
+# are deliberately absent here and register zero citation sources. GitDiff is a
+# repository read (external_repo).
 _FILE_READ_TOOL_NAMES: frozenset[str] = frozenset({
     "FileRead", "file_read", "DocumentRead", "document_read",
-    "Glob", "glob", "Grep", "grep", "GitDiff", "git_diff",
+    "GitDiff", "git_diff",
 })
 
 _BROWSER_TOOL_NAMES: frozenset[str] = frozenset({
@@ -96,7 +100,7 @@ def classify_tool_result_for_citation(
             return _classify_web_fetch(result, args, output, metadata)
 
         if tool_name in _FILE_READ_TOOL_NAMES or normalized in (
-            "fileread", "documentread", "glob", "grep", "gitdiff"
+            "fileread", "documentread", "gitdiff"
         ):
             return _classify_file_read(tool_name, args, output, authored_paths)
 
@@ -193,8 +197,6 @@ def _classify_file_read(
 ) -> list[CaptureSpec]:
     path = _first_string(args, "path", "file", "filepath", "file_path")
     if not path:
-        path = _first_string(args, "pattern", "directory", "dir")
-    if not path:
         return []
 
     if authored_paths and path in authored_paths:
@@ -208,8 +210,6 @@ def _classify_file_read(
     kind_map: dict[str, SourceLedgerKind] = {
         "FileRead": "file", "file_read": "file", "DocumentRead": "file",
         "document_read": "file",
-        "Glob": "file", "glob": "file",
-        "Grep": "file", "grep": "file",
         "GitDiff": "external_repo", "git_diff": "external_repo",
     }
     kind: SourceLedgerKind = kind_map.get(tool_name, "file")

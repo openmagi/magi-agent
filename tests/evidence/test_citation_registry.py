@@ -1,8 +1,6 @@
 """Tests for magi_agent/evidence/citation_registry.py (Wave 1)."""
 from __future__ import annotations
 
-import pytest
-
 
 def test_registry_allocates_unique_ids_per_registration() -> None:
     """Same URI registered twice returns the SAME record/id (dedup)."""
@@ -123,7 +121,9 @@ def test_registry_dedup_hit_at_cap_still_returns_record() -> None:
 
 
 def test_registry_revision_on_content_hash_change() -> None:
-    """Same URL with different content hash keeps same id."""
+    """Same URL with a different content hash keeps the same id AND records a
+    revision entry (design 7.2). Id stability alone is guaranteed by dedup, so
+    this asserts the revision was actually appended."""
     from magi_agent.evidence.citation_registry import SessionSourceRegistry
 
     reg = SessionSourceRegistry(session_id="sess-rev")
@@ -144,6 +144,38 @@ def test_registry_revision_on_content_hash_change() -> None:
     assert r1 is not None
     assert r2 is not None
     assert r1.source_id == r2.source_id, "content-hash change must not change id"
+
+    snap = reg.snapshot()
+    rec = next((r for r in snap if r.source_id == r1.source_id), None)
+    assert rec is not None
+    revisions = rec.metadata.get("revisions")
+    assert revisions, "a content-hash change must append a revisions entry"
+    assert any(
+        entry.get("contentHash") == "hash-v2" for entry in revisions
+    ), "the revision entry must record the changed content hash"
+    assert all(
+        entry.get("contentHash") != "hash-v1" for entry in revisions
+    ), "the original hash is the record hash, not a revision"
+
+
+def test_registry_no_revision_when_content_hash_unchanged() -> None:
+    """Re-reading the same URL with the SAME content hash records no revision."""
+    from magi_agent.evidence.citation_registry import SessionSourceRegistry
+
+    reg = SessionSourceRegistry(session_id="sess-rev-noop")
+    r1 = reg.register(
+        "web_fetch", "https://example.com", turn_id="t1",
+        tool_name="web_fetch", content_hash="hash-v1",
+    )
+    reg.register(
+        "web_fetch", "https://example.com", turn_id="t2",
+        tool_name="web_fetch", content_hash="hash-v1",
+    )
+    assert r1 is not None
+    snap = reg.snapshot()
+    rec = next((r for r in snap if r.source_id == r1.source_id), None)
+    assert rec is not None
+    assert not rec.metadata.get("revisions"), "identical hash must not add a revision"
 
 
 def test_registry_snapshot_returns_all_records() -> None:

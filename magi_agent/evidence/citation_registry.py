@@ -86,6 +86,10 @@ class SessionSourceRegistry:
         })
         # (kind, canonical_uri) -> source_id
         self._by_key: dict[tuple[str, str], str] = {}
+        # source_id -> list of revision entries (content-hash changes on a
+        # re-read of the same URI). Kept as registry side metadata because
+        # SourceLedgerRecord is frozen; folded into snapshot() output.
+        self._revisions: dict[str, list[dict[str, object]]] = {}
         self._saturated: bool = False
         self._saturation_logged: bool = False
 
@@ -119,6 +123,10 @@ class SessionSourceRegistry:
             existing = self._ledger.source_by_id(existing_id)
             if existing is None:
                 return None
+            # Design 7.2: a dedup hit whose content_hash differs from the
+            # recorded one keeps the SAME id and appends a revision entry (the
+            # id names the source, not the snapshot).
+            self._maybe_record_revision(existing, content_hash, turn_id)
             return existing
 
         # Cap check for new registrations
@@ -168,9 +176,51 @@ class SessionSourceRegistry:
             return None
         return self._ledger.source_by_id(source_id)
 
+    def _maybe_record_revision(
+        self,
+        existing: SourceLedgerRecord,
+        content_hash: str | None,
+        turn_id: str,
+    ) -> None:
+        """Append a revision entry when a re-read carries a new content hash.
+
+        No-op when ``content_hash`` is absent or matches the latest known hash
+        for this source (the original record hash, or the most recent revision).
+        Records stay immutable: the revision list lives in registry side
+        metadata and is surfaced by ``snapshot()``.
+        """
+        if not content_hash:
+            return
+        revisions = self._revisions.get(existing.source_id, [])
+        latest = revisions[-1]["contentHash"] if revisions else existing.content_hash
+        if content_hash == latest:
+            return
+        revisions.append({
+            "contentHash": content_hash,
+            "turnId": turn_id,
+            "recordedAt": time.time(),
+        })
+        self._revisions[existing.source_id] = revisions
+
     def snapshot(self) -> tuple[SourceLedgerRecord, ...]:
-        """Return an immutable snapshot of all registered sources."""
-        return self._ledger.snapshot()
+        """Return an immutable snapshot of all registered sources.
+
+        Records that accrued content-hash revisions (7.2) carry a ``revisions``
+        entry in their ``metadata``, folded in here as an immutable copy so the
+        stored records stay untouched.
+        """
+        records = self._ledger.snapshot()
+        if not self._revisions:
+            return records
+        folded: list[SourceLedgerRecord] = []
+        for record in records:
+            revisions = self._revisions.get(record.source_id)
+            if not revisions:
+                folded.append(record)
+                continue
+            new_metadata = {**dict(record.metadata), "revisions": tuple(revisions)}
+            folded.append(record.model_copy(update={"metadata": new_metadata}))
+        return tuple(folded)
 
     @property
     def is_saturated(self) -> bool:
