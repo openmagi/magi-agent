@@ -136,6 +136,28 @@ LOCAL_FULL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     "MAGI_DURABLE_STARTUP_RECOVERY_ENABLED": "1",
     # The durable work-queue dispatcher tick loop that re-runs reclaimed tasks.
     "MAGI_WORK_QUEUE_EXECUTOR_ENABLED": "1",
+    # M4 (missions x work-queue unification): the work-queue IS the mission
+    # substrate, so a self-host install surfaces its background tasks by default.
+    # BOARD_API/NOTIFY are profile-aware default-ON (_pb) and would self-enable
+    # under MAGI_RUNTIME_PROFILE=full anyway; seed them explicitly here to match
+    # the EXECUTOR line above (belt-and-suspenders, setdefault semantics keep an
+    # explicit operator "0" winning).
+    #   * MAGI_WORK_QUEUE_BOARD_API_ENABLED - the read-only board HTTP API. Auth
+    #     is fail-closed Bearer against the gateway token (board_api.py:38-45), so
+    #     ON is safe.
+    #   * MAGI_WORK_QUEUE_NOTIFY_ENABLED - the terminal-event notifier so a
+    #     completed background task announces into the next reply.
+    "MAGI_WORK_QUEUE_BOARD_API_ENABLED": "1",
+    "MAGI_WORK_QUEUE_NOTIFY_ENABLED": "1",
+    # The agent-facing background-task tool. Both flags are required before
+    # run_in_background creates a real WorkTask (scheduled_work.py:145-181): the
+    # TOOL flag exposes the entrypoint live, ATTACHED tells the honest gate a real
+    # SqliteWorkQueueStore is wired. The store IS real and the executor is
+    # default-ON locally, so the honest-block precondition ("until a real job
+    # store is wired") is satisfied. MAGI_SCHEDULER_ATTACHED stays UNSET: cron
+    # scheduling is a separate unbuilt surface (scheduled_work.py:59,77,83).
+    "MAGI_BACKGROUND_TASK_TOOL_ENABLED": "1",
+    "MAGI_BACKGROUND_TASKS_ATTACHED": "1",
     # WS3 PR3c: durable cross-turn plan/todo ledger + evidence-first goal
     # completion, activated for the full local (self-host) profile.
     # MAGI_PLAN_LEDGER_DURABLE_ENABLED appends each TodoWrite full-snapshot to
