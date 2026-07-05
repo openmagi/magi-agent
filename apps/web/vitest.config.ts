@@ -21,6 +21,7 @@ export default {
     include: [
       "src/components/onboarding/**/*.test.{ts,tsx}",
       "src/lib/local-auth.test.ts",
+      "src/lib/chat/local-kb-upload.test.ts",
     ],
   },
 };
