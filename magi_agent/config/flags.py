@@ -770,11 +770,12 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_FILE_DELIVERY_LIVE_ENABLED",
         summary="Enable the live file-delivery tool (vs receipt-only).",
     ),
-    _b(
+    _pb(
         "MAGI_DOCUMENT_QA_ENABLED",
         summary=(
             "Expose the question-conditioned DocumentQA file-QA sidecar tool "
-            "(requires MAGI_FILE_TOOLS_ENABLED); strict default-OFF in all profiles."
+            "(requires MAGI_FILE_TOOLS_ENABLED). Profile-aware default-ON "
+            "(full/lab; OFF under the safe-family)."
         ),
     ),
     FlagSpec(
@@ -3157,19 +3158,22 @@ FLAGS: tuple[FlagSpec, ...] = (
             "default selection)."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_PLAN_ACT_GATE_ENABLED",
         summary=(
             "Live ``plan_gate -> plan_act_switch -> delegation`` chain "
-            "activation. Default-OFF leaves the chain inert and "
-            "byte-identical to main."
+            "activation. Profile-aware default-ON (full/lab; OFF under the "
+            "safe-family). Downstream delegation still enforces "
+            "MAGI_GA_LIVE_ENABLED + an approved control, so activating the seam "
+            "does not auto-delegate."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_PLAN_MODE_TOOLS_ENABLED",
         summary=(
-            "Plan-mode read-only toolset activation. Default-OFF keeps the "
-            "full toolset on every turn regardless of declared mode."
+            "Plan-mode read-only toolset activation. Profile-aware default-ON "
+            "(full/lab; OFF under the safe-family); OFF keeps the full toolset "
+            "on every turn regardless of declared mode."
         ),
     ),
     _b(

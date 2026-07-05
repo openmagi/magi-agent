@@ -3507,21 +3507,22 @@ def plan_act_gate_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Return True when the plan_act runner-wiring gate is explicitly enabled.
 
     Single source of truth for ``MAGI_PLAN_ACT_GATE_ENABLED`` (cluster 06 PR4 /
-    inventory B9). This is a **strict default-OFF** gate: unlike the
-    profile-aware ``MAGI_*_ENABLED`` flags, it never defaults ON in the full
-    runtime profile. It only flips to ``True`` for an explicit truthy value
-    (``"1"``/``"true"``/``"yes"``/``"on"``), so the GA
-    ``plan_gate -> plan_act_switch -> delegation`` chain stays inert (and
-    byte-identical to ``main``) unless an operator opts in.
+    inventory B9). This is now a **profile-aware default-ON** gate: it defaults
+    ON under the full/lab (non-safe) runtime profile and OFF under the
+    safe-family (``safe``/``eval``/``minimal``/``conservative``/``off``) or an
+    explicit ``"0"``. Activating this seam wires the GA
+    ``plan_gate -> plan_act_switch -> delegation`` chain, but the downstream
+    delegation still enforces ``MAGI_GA_LIVE_ENABLED`` + a general role + an
+    approved/matching control, so turning this ON does not auto-delegate.
     """
     if env is None:
         import os as _os
 
         env = _os.environ
     # I-1: route through the typed flag registry.
-    from .flags import flag_bool  # noqa: PLC0415
+    from .flags import flag_profile_bool  # noqa: PLC0415
 
-    return flag_bool("MAGI_PLAN_ACT_GATE_ENABLED", env=env)
+    return flag_profile_bool("MAGI_PLAN_ACT_GATE_ENABLED", env=env)
 
 
 def parse_ga_deliverable_gate_enabled(env: Mapping[str, str]) -> bool:
@@ -3835,37 +3836,34 @@ def plan_mode_tools_enabled(env: Mapping[str, str] | None = None) -> bool:
     (:mod:`magi_agent.harness.general_automation.question_tool` /
     :mod:`~magi_agent.harness.general_automation.plan_act_switch`).
 
-    Like :func:`plan_act_gate_enabled` this is a **strict default-OFF** gate: it
-    never defaults ON in the full runtime profile and flips to ``True`` only for
-    an explicit truthy value (``"1"``/``"true"``/``"yes"``/``"on"``). When OFF
-    the three tools stay manifest-only (no handler bound, not advertised), so
-    exposure is byte-identical to ``main``.
+    This is now a **profile-aware default-ON** gate: it defaults ON under the
+    full/lab (non-safe) runtime profile and OFF under the safe-family or an
+    explicit ``"0"``. When OFF the three tools stay manifest-only (no handler
+    bound, not advertised).
     """
     if env is None:
         import os as _os
 
         env = _os.environ
     # I-1: route through the typed flag registry.
-    from .flags import flag_bool  # noqa: PLC0415
+    from .flags import flag_profile_bool  # noqa: PLC0415
 
-    return flag_bool("MAGI_PLAN_MODE_TOOLS_ENABLED", env=env)
+    return flag_profile_bool("MAGI_PLAN_MODE_TOOLS_ENABLED", env=env)
 
 
 def document_qa_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Return True when the question-conditioned DocumentQA sidecar tool is enabled.
 
-    Single source of truth for ``MAGI_DOCUMENT_QA_ENABLED``. Like
-    :func:`plan_mode_tools_enabled` this is a **strict default-OFF** gate: it
-    never defaults ON in any runtime profile (the outer
-    ``MAGI_FILE_TOOLS_ENABLED`` suite gate is profile-default-ON locally, so
-    riding only that gate would silently flip the new tool ON for local users)
-    and flips to ``True`` only for an explicit truthy value. When OFF the
-    ``DocumentQA`` manifest is not registered and no handler is bound, so
-    registry contents stay byte-identical to before.
+    Single source of truth for ``MAGI_DOCUMENT_QA_ENABLED``. Now a
+    **profile-aware default-ON** gate: it defaults ON under the full/lab
+    (non-safe) runtime profile and OFF under the safe-family or an explicit
+    ``"0"`` (it no longer merely rides the ``MAGI_FILE_TOOLS_ENABLED`` suite
+    gate; it resolves its own profile default directly). When OFF the
+    ``DocumentQA`` manifest is not registered and no handler is bound.
     """
-    from .flags import flag_bool
+    from .flags import flag_profile_bool
 
-    return flag_bool("MAGI_DOCUMENT_QA_ENABLED", env=env)
+    return flag_profile_bool("MAGI_DOCUMENT_QA_ENABLED", env=env)
 
 
 MAGI_MESSAGE_CACHE_ENABLED_ENV = "MAGI_MESSAGE_CACHE_ENABLED"
