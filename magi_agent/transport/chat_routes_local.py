@@ -69,6 +69,14 @@ async def _local_adk_chat_sse(
 
     session_id = _local_chat_string(payload, "sessionId", "local-dashboard")
     turn_id = _local_chat_string(payload, "turnId", f"{session_id}:turn")
+    # Self-host KB attachments: the dashboard prepends a ``[KB_CONTEXT: ...]``
+    # marker when files are attached. Hosted deployments resolve this in the
+    # chat-proxy (``infra/docker/chat-proxy/kb-context.js``); locally we inline
+    # the attached documents' text into this turn and strip the marker so the
+    # agent sees the content directly. Runs BEFORE background inject so the
+    # marker is still at prompt position 0 for the parser. Fail-soft: a bad
+    # attachment becomes a short note, never an exception.
+    prompt = _apply_local_kb_context(runtime, session_id, turn_id, prompt)
     # Background-task completion injection (default-OFF). When on and the
     # session has pending injections enqueued by a finished background task,
     # fold them onto the prompt so the next assistant turn surfaces the result.
@@ -511,6 +519,37 @@ def _format_background_inject_block(notes: list[str]) -> str:
         f"{rendered}\n"
         "[end background-task completions]"
     )
+
+
+def _apply_local_kb_context(
+    runtime: object,
+    session_id: str,
+    turn_id: str,
+    prompt: str,
+) -> str:
+    """Resolve a leading ``[KB_CONTEXT: ...]`` marker against the workspace KB.
+
+    Byte-identical to ``prompt`` when there is no marker. See
+    :mod:`magi_agent.transport.kb_context` for the resolution contract.
+    """
+    if "[KB_CONTEXT:" not in prompt:
+        return prompt
+    from pathlib import Path  # noqa: PLC0415
+
+    from magi_agent.transport.kb_context import apply_kb_context  # noqa: PLC0415
+
+    workspace_root = flag_str("MAGI_AGENT_WORKSPACE") or os.getcwd()
+    bot_id = str(getattr(getattr(runtime, "config", None), "bot_id", None) or "local")
+    try:
+        return apply_kb_context(
+            prompt,
+            workspace_root=Path(workspace_root),
+            bot_id=bot_id,
+            session_id=session_id,
+            turn_id=turn_id,
+        )
+    except Exception:  # noqa: BLE001 — attachment resolution must never kill the turn
+        return prompt
 
 
 def _apply_background_inject(session_id: str, prompt: str) -> str:

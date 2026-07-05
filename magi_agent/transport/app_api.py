@@ -32,6 +32,7 @@ from importlib import resources
 from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -1173,6 +1174,56 @@ def register_app_api_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             return JSONResponse(status_code=500, content={"error": str(exc)})
         return JSONResponse(content={"path": rel})
 
+    @app.post("/v1/app/knowledge/upload")
+    async def app_knowledge_upload(request: Request) -> JSONResponse:
+        """Ingest a chat-attached file into the workspace KB (self-host).
+
+        The hosted dashboard uploads chat attachments to Supabase Storage via
+        ``/api/knowledge/*``; those routes do not exist locally. The self-host
+        equivalent writes the raw bytes under ``knowledge/<collection>/`` so the
+        file is listed by ``_knowledge_index`` and readable by the runtime's
+        document tools (and inlined by the local KB_CONTEXT resolver).
+
+        Raw body (``application/octet-stream``) instead of ``multipart/form-data``
+        keeps this dependency-free (no ``python-multipart``) and avoids base64
+        bloat for large binaries. Filename/collection arrive as headers.
+        """
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        filename = _safe_kb_filename(unquote(request.headers.get("x-filename", "")))
+        if not filename:
+            return JSONResponse(status_code=400, content={"error": "filename_required"})
+        collection = _safe_kb_collection(request.headers.get("x-collection", "Downloads"))
+        body = await request.body()
+        if len(body) > _KB_UPLOAD_MAX_BYTES:
+            return JSONResponse(status_code=413, content={"error": "file_too_large"})
+        target = _resolve_in_workspace_for_write(f"knowledge/{collection}/{filename}")
+        if target is None or _is_protected(target):
+            return JSONResponse(status_code=403, content={"error": "forbidden_path"})
+        target = _dedupe_write_target(target)
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(body)
+        except OSError as exc:
+            return JSONResponse(status_code=500, content={"error": str(exc)})
+        try:
+            rel = target.relative_to(_workspace_write_root()).as_posix()
+        except ValueError:
+            rel = f"knowledge/{collection}/{target.name}"
+        mime = request.headers.get("content-type") or "application/octet-stream"
+        return JSONResponse(
+            content={
+                "doc_id": rel,
+                "collection_id": collection,
+                "collection": collection,
+                "filename": target.name,
+                "mime_type": mime,
+                "storage_path": rel,
+                "status": "ready",
+            }
+        )
+
     @app.get("/v1/app/knowledge/search")
     def app_knowledge_search(
         request: Request, q: str = "", limit: int = 25, collection: str | None = None
@@ -1194,6 +1245,39 @@ def register_app_api_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             doc["snippet"] = hit["context"]
             results.append(doc)
         return JSONResponse(content={"results": results})
+
+
+_KB_UPLOAD_MAX_BYTES = 50 * 1024 * 1024
+# Path separators + Windows-reserved + control chars. Unicode letters (Korean,
+# etc.) are preserved: traversal safety is enforced by _resolve_in_workspace_for_write.
+_UNSAFE_FILENAME_CHARS = re.compile(r"[\x00-\x1f/\\<>:\"|?*]")
+
+
+def _safe_kb_filename(name: str) -> str:
+    """Reduce an untrusted upload name to a safe basename (no path escape)."""
+    base = str(name or "").replace("\\", "/").split("/")[-1]
+    base = _UNSAFE_FILENAME_CHARS.sub("_", base).strip().strip(".")
+    return base[:255]
+
+
+def _safe_kb_collection(name: str) -> str:
+    """Sanitize the target collection dir name; default ``Downloads``."""
+    base = _UNSAFE_FILENAME_CHARS.sub("_", str(name or "").replace("\\", "/").split("/")[-1])
+    base = base.strip().strip(".")
+    return base[:128] or "Downloads"
+
+
+def _dedupe_write_target(target: Path) -> Path:
+    """Return a non-colliding path (``name (2).ext``) so re-attaches never clobber."""
+    if not target.exists():
+        return target
+    stem, suffix, parent = target.stem, target.suffix, target.parent
+    index = 2
+    while True:
+        candidate = parent / f"{stem} ({index}){suffix}"
+        if not candidate.exists():
+            return candidate
+        index += 1
 
 
 def _knowledge_index(collection: str | None) -> dict[str, Any]:

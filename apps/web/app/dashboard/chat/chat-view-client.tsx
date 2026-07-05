@@ -77,6 +77,7 @@ import {
 } from "@/chat-core";
 import type { ChatExportMessage } from "@/chat-core";
 import { kbUploadKey, uploadChatFilesToKb, splitImageAndOtherFiles, uploadImagesAsAttachmentMarkers } from "@/chat-core";
+import { uploadChatFilesToLocalKb } from "@/lib/chat/local-kb-upload";
 import type { PendingKbUpload } from "@/chat-core";
 import type { KbDocReference } from "@/chat-core";
 import {
@@ -298,7 +299,10 @@ export function ChatViewClient({
 
     if (missingFiles.length === 0) return existingRefs;
 
-    const uploadedRefs = await uploadChatFilesToKb(botId, missingFiles, handleUploadUpdate);
+    const uploadedRefs =
+      botId === "local"
+        ? await uploadChatFilesToLocalKb(missingFiles, handleUploadUpdate)
+        : await uploadChatFilesToKb(botId, missingFiles, handleUploadUpdate);
     return [...existingRefs, ...uploadedRefs];
   }, [botId, handleUploadUpdate, preparedUploadRefs]);
 
@@ -1139,6 +1143,14 @@ export function ChatViewClient({
         if (files && files.length > 0) {
           const { imageFiles, otherFiles } = splitImageAndOtherFiles(files);
           if (imageFiles.length > 0) {
+            if (botId === "local") {
+              // Image attachments ride the chat-proxy attachment path, which
+              // the self-host runtime does not implement yet. Fail with a clear
+              // message instead of a raw 404 (tracked as a follow-up).
+              throw new Error(
+                "Image attachments are not supported in local mode yet — attach documents instead.",
+              );
+            }
             const markers = await uploadImagesAsAttachmentMarkers(botId, channel, imageFiles);
             messageText = markers + (messageText ? `\n${messageText}` : "");
           }
