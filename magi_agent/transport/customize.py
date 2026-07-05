@@ -565,6 +565,41 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             packs = []
         return JSONResponse(content={"packs": packs})
 
+    @app.post("/v1/app/packs/{pack_id}/state")
+    async def set_pack_state(pack_id: str, request: Request) -> JSONResponse:
+        """Install (``enabled=true``) or remove (``enabled=false``) a pack.
+
+        Persists a dashboard override to ``packs-state.json`` (never touches the
+        operator's config.toml). "Remove" is reversible: installing again just
+        clears the removal, so first-party packs are always recoverable. Returns
+        the updated inventory. Self-host only, auth-gated."""
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        if not isinstance(body, dict) or not isinstance(body.get("enabled"), bool):
+            return JSONResponse(status_code=400, content={"error": "enabled_bool_required"})
+
+        from magi_agent.packs.discovery import set_pack_runtime_state  # noqa: PLC0415
+        from magi_agent.packs.inventory import installed_packs_view  # noqa: PLC0415
+
+        try:
+            packs = installed_packs_view()
+        except Exception:  # noqa: BLE001
+            packs = []
+        if not any(p.get("packId") == pack_id for p in packs):
+            return JSONResponse(status_code=404, content={"error": "unknown_pack"})
+
+        set_pack_runtime_state(pack_id, bool(body["enabled"]))
+        try:
+            packs = installed_packs_view()
+        except Exception:  # noqa: BLE001
+            pass
+        return JSONResponse(content={"packs": packs})
+
     @app.post("/v1/app/modes/compile")
     async def compile_agent_mode(request: Request) -> JSONResponse:
         """PR-U3.4: NL → agent-mode draft compile preview.

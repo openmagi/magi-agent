@@ -142,7 +142,7 @@ const SECTIONS: ReadonlyArray<{
     label: "Packs",
     icon: <Layers className="h-4 w-4" />,
     description:
-      "First-party packs that contribute rules, behaviors, and tools. Opt a pack in or out (allowlist semantics); opting out drops the refs it contributes.",
+      "Packs bundle rules, behaviors, and tools. Install a pack to make its contributions available, or remove it to drop them (first-party packs are always recoverable). Installing does not activate a rule by itself: turn it on globally in Rules, or scope it per turn in Modes.",
   },
   {
     id: "hooks",

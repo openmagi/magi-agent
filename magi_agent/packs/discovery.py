@@ -11,6 +11,7 @@ Mirrors the disk-discovery pattern in ``magi_agent/plugins/native/skills.py``
 
 from __future__ import annotations
 
+import json
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -114,8 +115,8 @@ def _config_path() -> Path:
     return Path.home() / ".magi" / "config.toml"
 
 
-def load_packs_config() -> PacksConfig:
-    """Load ``[packs]`` from config.toml. Missing/malformed -> empty config.
+def _load_packs_config_file() -> PacksConfig:
+    """The static ``[packs]`` section from config.toml. Missing/malformed -> empty.
 
     Mirrors ``magi_agent/cli/providers.py``'s tolerant loader: a bad config must
     not crash discovery.
@@ -135,6 +136,85 @@ def load_packs_config() -> PacksConfig:
         return PacksConfig.model_validate(section)
     except Exception:
         return PacksConfig()
+
+
+def _packs_state_path() -> Path:
+    """Dashboard-written runtime pack install/remove overrides, a JSON sidecar
+    next to config.toml. Separate from config.toml so the operator's hand-edited
+    file is never rewritten by the dashboard."""
+    return _config_path().parent / "packs-state.json"
+
+
+def load_packs_runtime_state() -> dict[str, bool]:
+    """Load the dashboard install/remove overrides: ``{pack_id: enabled}``.
+
+    ``enabled=False`` = the operator removed the pack from the dashboard;
+    ``enabled=True`` = installed/kept (and re-enables a ``default_enabled=False``
+    pack). Missing/malformed -> ``{}`` (tolerant, like the config loader)."""
+    path = _packs_state_path()
+    try:
+        with open(path, "rb") as handle:
+            raw = json.load(handle)
+    except (FileNotFoundError, NotADirectoryError, IsADirectoryError):
+        return {}
+    except (OSError, ValueError):
+        return {}
+    packs = raw.get("packs") if isinstance(raw, dict) else None
+    if not isinstance(packs, dict):
+        return {}
+    return {
+        str(pid): bool(val)
+        for pid, val in packs.items()
+        if isinstance(pid, str) and isinstance(val, bool)
+    }
+
+
+def set_pack_runtime_state(pack_id: str, enabled: bool) -> dict[str, bool]:
+    """Persist a single dashboard install/remove decision. Returns the new
+    full override map. Read-modify-write of the JSON sidecar."""
+    state = load_packs_runtime_state()
+    state[pack_id] = enabled
+    path = _packs_state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps({"packs": state}, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
+    return state
+
+
+def load_packs_config() -> PacksConfig:
+    """Effective ``[packs]`` config: the config.toml section merged with the
+    dashboard install/remove overrides (``packs-state.json``).
+
+    This is the single source of truth every discovery consumer resolves
+    through, so a dashboard remove/install takes real effect (not just display):
+    ``enabled=False`` adds the id to ``disable`` (dropped in
+    :func:`resolve_enabled_packs`); ``enabled=True`` drops it from ``disable``
+    and adds it to ``order`` (an explicit opt-in that also re-enables a
+    ``default_enabled=False`` pack). The operator's config.toml still wins as
+    the base; the override only layers on top.
+    """
+    base = _load_packs_config_file()
+    overrides = load_packs_runtime_state()
+    if not overrides:
+        return base
+
+    disable = list(base.disable)
+    order = list(base.order)
+    disable_set = set(disable)
+    order_set = set(order)
+    for pack_id, want_on in overrides.items():
+        if want_on:
+            if pack_id in disable_set:
+                disable = [d for d in disable if d != pack_id]
+                disable_set.discard(pack_id)
+            if pack_id not in order_set:
+                order.append(pack_id)
+                order_set.add(pack_id)
+        elif pack_id not in disable_set:
+            disable.append(pack_id)
+            disable_set.add(pack_id)
+    return base.model_copy(update={"disable": tuple(disable), "order": tuple(order)})
 
 
 def resolve_enabled_packs(
