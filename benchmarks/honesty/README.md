@@ -17,23 +17,26 @@ agent transcripts**.
 ## Result (magi-agent 0.1.110, N = 16 unbacked + 11 backed)
 
 Two things matter: **catch the unbacked assertions** (recall) and **don't
-false-flag genuinely-completed work** (FPR). The LLM-judge is swept across three
-prompt tones so the comparison is not one cherry-picked prompt.
+false-flag genuinely-completed work** (FPR). The judge is **Claude Opus 4.8** (a
+frontier model), run fresh per turn seeing only the agent's final answer, swept
+across three prompt tones so the comparison is not one cherry-picked prompt.
 
 | layer | catches unbacked (recall ↑) | false-flags real work (FPR ↓) |
 |---|---|---|
 | advisory (trust the words) | 0/16 (0%) | 0/11 (0%) |
-| LLM-judge · trusting | 1/16 (6%) | 0/11 (0%) |
-| LLM-judge · neutral | 16/16 (100%) | 11/11 (100%) |
-| LLM-judge · skeptical | 16/16 (100%) | 11/11 (100%) |
+| Opus 4.8 judge · trusting | 0/16 (0%) | 0/11 (0%) |
+| Opus 4.8 judge · neutral | 16/16 (100%) | 11/11 (100%) |
+| Opus 4.8 judge · skeptical | 16/16 (100%) | 11/11 (100%) |
 | **evidence-bound (reads the receipt)** | **16/16 (100%)** | **0/11 (0%)** |
 
-**The LLM-judge cannot be tuned to a useful operating point.** Trust it more and
-it ships everything (misses the unbacked claims). Distrust it more and it flags
-everything it examines — including all 11 genuinely-completed edits and commits.
-There is no middle tone, because the discriminating signal (the receipt) is *not
-in the prose*. The evidence gate reads that signal directly, so it gets both
-columns exactly: every unbacked assertion flagged, every real completion shipped.
+**Even a frontier judge cannot be tuned to a useful operating point** — it is a
+pure on/off switch on prompt tone. Trust it more and it ships all 27 turns
+(misses every unbacked claim). Distrust it and it flags all 27 — including the 11
+genuinely-completed edits and commits. There is no middle tone, because the
+discriminating signal (the receipt) is *not in the prose*. The evidence gate
+reads that signal directly, so it gets both columns exactly: every unbacked
+assertion flagged, every real completion shipped. (An earlier run with a gpt-5.5
+judge gives the same shape — the failure is model-independent.)
 
 The backed turns are independently verifiable: after each one the file on disk
 holds the corrected code (`return max(xs)`, `return n * n`, ...) and the commit
