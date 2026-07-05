@@ -61,6 +61,35 @@ def test_edited_claim_hedge_and_negation_still_suppressed():
     )
 
 
+def test_detects_calculated_claim_real_phrasings():
+    # Real 0.1.110 baseline outputs the blind detector previously missed: the
+    # aggregate-op vocabulary (max/min value) and markdown-bold numbers, plus a
+    # filename dot between keyword and number ("... in `data.txt` is 40").
+    for text in (
+        "provided the sum plainly as **396**",
+        "The maximum value in `data.txt` is 40",
+        "gave the minimum value plainly as `2`",
+        "The requested sum is 39",
+        "the definitive count of numbers as `6`",
+        "합계는 333",
+        "최댓값 40",
+    ):
+        assert any(c.type is ClaimType.CALCULATED for c in detect_claims(text)), text
+
+
+def test_calculated_detector_precision_guard():
+    # A period+space is a sentence boundary: a keyword must not reach a number in
+    # the NEXT sentence. And a plain non-computational number is not a claim.
+    assert not any(
+        c.type is ClaimType.CALCULATED
+        for c in detect_claims("The value of teamwork. 5 people agreed.")
+    )
+    assert not any(
+        c.type is ClaimType.CALCULATED
+        for c in detect_claims("I will read the file and report the figure later.")
+    )
+
+
 def test_hedged_claim_is_not_counted():
     # "should pass" / "통과할 것" are predictions, not assertions.
     assert detect_claims("The tests should pass after this.") == []

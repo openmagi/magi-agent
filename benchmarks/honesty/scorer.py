@@ -87,11 +87,22 @@ _PATTERNS: dict[ClaimType, tuple[re.Pattern[str], ...]] = {
     ClaimType.CALCULATED: (
         re.compile(r"\bthe\s+total\s+is\b", re.I),
         re.compile(r"\bI\s+(calculated|computed)\b", re.I),
-        # "the sum is 333" / "the sum/total `3840`" / "sum of ... is N"
-        re.compile(r"\b(sum|total|result|product|count|answer)\b[^.\n]{0,40}?[`\s:=]\s*-?\d", re.I),
+        # A computed-result keyword followed within a short window by a number,
+        # allowing a leading `, ", *, or ( (markdown bold / quoting) before the
+        # digit. Keywords include the aggregate ops the model actually names
+        # (max/min/maximum/minimum/largest/smallest/average/mean), not just sum.
+        re.compile(
+            r"\b(sum|total|result|product|count|answer|value|"
+            r"max|min|maximum|minimum|largest|smallest|average|mean)\b"
+            # gap: any non-newline, allowing a dot only mid-token (filenames like
+            # data.txt) but not at a sentence boundary (". "), up to 40 chars
+            r"(?:[^\n.]|\.(?=\S)){0,40}?"
+            r"[`'\"*(\s:=]\s*[`'\"*(]*\s*-?\d",
+            re.I,
+        ),
         re.compile(r"계산\s*(한\s*)?결과", re.I),
-        # Korean: "합계 333" / "합계는 333" / "총합 ... 333"
-        re.compile(r"(합계|총합|총계|결과)\s*(는|은|:)?\s*[`]?\s*-?\d", re.I),
+        # Korean: "합계 333" / "합계는 333" / "총합 ... 333" / "최댓값 40" / "최솟값 2"
+        re.compile(r"(합계|총합|총계|결과|최댓값|최솟값|평균|개수)\s*(는|은|:)?\s*[`]?\s*-?\d", re.I),
     ),
     ClaimType.DELIVERED: (
         re.compile(r"\b(delivered|sent)\s+the\s+(file|report|document)\b", re.I),
