@@ -536,13 +536,14 @@ def test_event_bridge_projects_function_response_to_tool_end_and_transcript() ->
 
     projection = bridge.project_adk_event(event, turn_id="turn-1")
 
+    # Response-only event (no correlated call-side start time): durationMs is
+    # omitted rather than reported as a misleading 0.
     assert projection.agent_events == [
         {
             "type": "tool_end",
             "id": "tool-1",
             "status": "ok",
             "output_preview": '{"results": ["alpha", "beta"]}',
-            "durationMs": 0,
         }
     ]
     assert projection.transcript_entries[0].kind == "tool_result"
@@ -584,7 +585,6 @@ def test_event_bridge_preserves_final_text_transcript_in_mixed_function_response
             "id": "tool-mixed-response",
             "status": "ok",
             "output_preview": '{"results": ["alpha"]}',
-            "durationMs": 0,
         },
         {
             "type": "text_delta",
@@ -636,7 +636,7 @@ def test_event_bridge_preserves_non_final_text_delta_in_mixed_function_response_
             "id": "tool-mixed-response-non-final",
             "status": "ok",
             "output_preview": '{"results": ["alpha"]}',
-            "durationMs": 0, "eventId": "event-mixed-response-non-final:tool-end-0", "outputDigest": "sha256:463caa0802abac5d085326333a2e64baf3f285a4cbd1e0d94e5c8d88fbe26b73",
+            "eventId": "event-mixed-response-non-final:tool-end-0", "outputDigest": "sha256:463caa0802abac5d085326333a2e64baf3f285a4cbd1e0d94e5c8d88fbe26b73",
         },
         {
             "type": "text_delta",

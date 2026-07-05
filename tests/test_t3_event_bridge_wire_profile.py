@@ -236,8 +236,13 @@ def test_none_profile_bridge_tool_start_id_is_not_tu_hash() -> None:
     )
 
 
-def test_none_profile_bridge_tool_end_has_duration_ms() -> None:
-    """CLI (None) path still includes durationMs: 0 on tool_end."""
+def test_none_profile_bridge_tool_end_omits_duration_when_unknown() -> None:
+    """CLI (None) path omits durationMs on a response with no correlated start.
+
+    Previously the CLI path hardcoded ``durationMs: 0`` (the "every tool shows
+    0ms" dashboard bug). With no prior tool_start to correlate against, the
+    duration is genuinely unknown, so the key is omitted.
+    """
     bridge = OpenMagiEventBridge()
     event = _make_response_event(
         adk_tool_id="fc-cli-001",
@@ -247,7 +252,7 @@ def test_none_profile_bridge_tool_end_has_duration_ms() -> None:
     projection = bridge.project_adk_event(event, turn_id="turn-cli")
     tool_end = projection.agent_events[0]
 
-    assert tool_end["durationMs"] == 0
+    assert "durationMs" not in tool_end
 
 
 def test_none_profile_bridge_passes_existing_snapshot_exact() -> None:

@@ -638,15 +638,19 @@ def transcript_entries_to_agent_events(
                 }
             )
         elif kind == "tool_result":
-            agent_events.append(
-                {
-                    "type": "tool_end",
-                    "id": _public_entry_ref(entry.tool_use_id, prefix="call"),
-                    "status": _public_tool_status(entry.status),
-                    "output_preview": _public_tool_output_preview(entry.output),
-                    "durationMs": 0,
-                }
-            )
+            # Thread the real recorded duration through. Omit the key when the
+            # duration is genuinely unknown rather than reporting a misleading 0
+            # (the "every tool shows 0ms" dashboard bug).
+            duration_ms = getattr(entry, "duration_ms", None)
+            tool_end_event: dict[str, object] = {
+                "type": "tool_end",
+                "id": _public_entry_ref(entry.tool_use_id, prefix="call"),
+                "status": _public_tool_status(entry.status),
+                "output_preview": _public_tool_output_preview(entry.output),
+            }
+            if isinstance(duration_ms, int) and duration_ms >= 0:
+                tool_end_event["durationMs"] = duration_ms
+            agent_events.append(tool_end_event)
         elif kind == "turn_committed":
             agent_events.append(
                 {
@@ -920,6 +924,18 @@ def _tool_progress_agent_event(event: NormalizedEvent) -> dict[str, object]:
     return public_event
 
 
+def _first_non_negative_int(*values: object) -> int | None:
+    """Return the first value that is a non-negative int (bools excluded)."""
+    for value in values:
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int) and value >= 0:
+            return value
+        if isinstance(value, float) and value >= 0 and value.is_integer():
+            return int(value)
+    return None
+
+
 def _tool_terminal_agent_event(event: NormalizedEvent) -> dict[str, object]:
     public_event: dict[str, object] = {
         "type": "tool_end",
@@ -927,6 +943,19 @@ def _tool_terminal_agent_event(event: NormalizedEvent) -> dict[str, object]:
         "id": event.call_id or "call:unknown",
         "status": _tool_status_from_normalized(event),
     }
+    # Thread the real recorded tool duration through when present. Read both the
+    # camelCase ``latencyMs``/``durationMs`` and snake_case variants from payload
+    # or metadata. Omit the key when unknown rather than emitting a misleading 0.
+    duration_ms = _first_non_negative_int(
+        event.payload.get("latencyMs"),
+        event.payload.get("durationMs"),
+        event.payload.get("latency_ms"),
+        event.payload.get("duration_ms"),
+        event.metadata.get("latencyMs"),
+        event.metadata.get("durationMs"),
+    )
+    if duration_ms is not None:
+        public_event["durationMs"] = duration_ms
     output_preview = event.payload.get("outputPreview")
     if isinstance(output_preview, str) and output_preview.strip():
         public_event["output_preview"] = _bounded_public_text(

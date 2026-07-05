@@ -43,6 +43,11 @@ class ToolResultEntry(TranscriptEntryBase):
     status: str
     output: str | None = None
     is_error: bool | None = Field(default=None, alias="isError")
+    # Real wall-clock tool duration in milliseconds. ``None`` when unknown (a
+    # response with no correlated call-side start time); history replay omits the
+    # ``durationMs`` field entirely in that case rather than reporting a
+    # misleading ``0``.
+    duration_ms: int | None = Field(default=None, alias="durationMs")
     metadata: dict[str, object] | None = None
 
 
