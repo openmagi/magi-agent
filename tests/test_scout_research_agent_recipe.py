@@ -102,7 +102,8 @@ def test_scout_external_repo_profile_remains_blocked_without_live_network_author
 
 def test_scout_recipe_pack_compiles_metadata_only_prompt_and_fixture_refs() -> None:
     snapshot = AgentRecipeCompiler(PackRegistry.with_first_party_packs()).compile(
-        ProfileResolutionRequest(taskProfile={"taskType": "scout_repo_fixture"})
+        ProfileResolutionRequest(taskProfile={"taskType": "scout_repo_fixture"}),
+        env={"MAGI_RECIPE_DEFAULT_PACKS_EXPANDED": "0"},
     )
 
     assert snapshot.selected_pack_ids == (
@@ -140,7 +141,8 @@ def test_unsupported_scout_profiles_do_not_select_repo_fixture_recipe_pack() -> 
 
     for task_type in ("scout_external_repo", "scout_web_docs"):
         snapshot = compiler.compile(
-            ProfileResolutionRequest(taskProfile={"taskType": task_type})
+            ProfileResolutionRequest(taskProfile={"taskType": task_type}),
+            env={"MAGI_RECIPE_DEFAULT_PACKS_EXPANDED": "0"},
         )
 
         assert snapshot.selected_pack_ids == (

@@ -3363,9 +3363,9 @@ def parse_recipe_default_packs_expanded(env: Mapping[str, str]) -> bool:
     ``openmagi.evidence``) are default-selected.
     """
     # I-1: route through the typed flag registry.
-    from .flags import flag_bool  # noqa: PLC0415
+    from .flags import flag_profile_bool  # noqa: PLC0415
 
-    return flag_bool("MAGI_RECIPE_DEFAULT_PACKS_EXPANDED", env=env)
+    return flag_profile_bool("MAGI_RECIPE_DEFAULT_PACKS_EXPANDED", env=env)
 
 
 def parse_recipe_intent_binding_enabled(env: Mapping[str, str]) -> bool:

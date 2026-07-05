@@ -25,7 +25,8 @@ def _plan(
             taskProfile=task_profile,
             runtimeContext=runtime_context or {},
             recipePackConfig=recipe_pack_config or {},
-        )
+        ),
+        env={"MAGI_RECIPE_DEFAULT_PACKS_EXPANDED": "0"},
     )
     return RecipeMaterializer.with_reliability_defaults().materialize(
         snapshot,
