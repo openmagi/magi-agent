@@ -3244,7 +3244,7 @@ wheels = [
 
 [[package]]
 name = "magi-agent"
-version = "0.1.109"
+version = "0.1.113"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
