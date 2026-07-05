@@ -1681,6 +1681,16 @@ FLAGS: tuple[FlagSpec, ...] = (
             "blocks. Strict default-OFF and inert unless explicitly set."
         ),
     ),
+    _pb(
+        "MAGI_SOURCE_CITATION_ENABLED",
+        stage="stage1",
+        summary=(
+            "Master switch for the session source-citation substrate: registry, "
+            "capture, and producer_control evidence emission for all external-read "
+            "tool results. Default-ON in the full runtime profile; OFF under "
+            "safe/eval. Wave 1 of 4 (loop/surface/governance follow)."
+        ),
+    ),
     _b(
         "MAGI_GATE5B_GOVERNANCE_ENABLED",
         stage="stage2",

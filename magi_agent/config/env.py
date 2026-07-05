@@ -3740,6 +3740,24 @@ def parse_source_ledger_evidence_gate_enabled(env: Mapping[str, str]) -> bool:
     return flag_bool("MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED", env=env)
 
 
+def parse_source_citation_enabled(env: Mapping[str, str]) -> bool:
+    """MAGI_SOURCE_CITATION_ENABLED -- session source-citation substrate.
+
+    Master switch for the citation capture substrate: session-scoped
+    SessionSourceRegistry, per-tool-result capture classifier, and
+    ``producer_control`` EvidenceRecord emission for all external-read tools.
+    Profile-aware default-ON (full runtime profile); OFF under
+    ``MAGI_RUNTIME_PROFILE`` in ``safe``/``eval`` so scored benchmarks and evals
+    run with a clean, unmodified tool corpus.
+
+    This is the Wave 1 master switch (capture only). Re-injection, render,
+    gate, and policy surface follow in waves 2-4.
+    """
+    from .flags import flag_profile_bool
+
+    return flag_profile_bool("MAGI_SOURCE_CITATION_ENABLED", env=env)
+
+
 def parse_taskboard_completion_verification_enabled(env: Mapping[str, str]) -> bool:
     """MAGI_VERIFY_TASKBOARD_COMPLETION — block completion while tasks remain.
 

@@ -98,6 +98,14 @@ class LocalToolEvidenceCollector:
         # the first-party turn count WITHOUT touching non-first-party (tool
         # receipt) records that share the same (session, turn) key.
         self._first_party_turns: dict[tuple[str, str], None] = {}
+        # Session-scoped source registries for MAGI_SOURCE_CITATION_ENABLED.
+        # Keyed by session_id. One registry per session, created lazily on first
+        # tool result with citation enabled.
+        self._session_source_registries: dict[str, object] = {}
+        # Per-session authored paths: files created/edited by the agent this
+        # session. FileRead of an authored path is NOT registered as a source.
+        # Fed by codingMutationReceipt entries and write tool arguments.
+        self._session_authored_paths: dict[str, set[str]] = {}
 
     def record_tool_result(
         self,
@@ -124,6 +132,32 @@ class LocalToolEvidenceCollector:
         )
         records.extend(explicit_records)
 
+        # UPDATE authored-paths set from coding mutation receipts (for file exclusion).
+        # Must happen BEFORE citation capture so a FileRead in the same batch
+        # after an edit correctly excludes the edited file.
+        _update_authored_paths(
+            authored_paths=self._session_authored_paths.setdefault(session_id, set()),
+            tool_result=tool_result,
+            tool_name=tool_name,
+            arguments=arguments or {},
+        )
+
+        # Citation capture (MAGI_SOURCE_CITATION_ENABLED, profile-aware default-ON).
+        # Classifies the tool result for external-read sources, registers each in
+        # the session registry, and emits producer_control EvidenceRecords.
+        # Fail-quiet: any error leaves records unchanged and does not break the tool path.
+        citation_records = _citation_capture_records(
+            session_id=session_id,
+            turn_id=turn_id,
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            tool_result=tool_result,
+            arguments=arguments or {},
+            registries=self._session_source_registries,
+            authored_paths=frozenset(self._session_authored_paths.get(session_id, set())),
+        )
+        records.extend(citation_records)
+
         # Source-ledger projection (default-OFF
         # MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED). A read-only source tool
         # (FileRead / DocumentRead / Glob / Grep / GitDiff) records inspected
@@ -133,11 +167,24 @@ class LocalToolEvidenceCollector:
         # pre-final gate's source-evidence ref had no live producer and a real
         # source-read still blocked. This projects each inspected SourceInspection
         # source into an EvidenceRecord using the EXISTING
-        # ``SourceLedgerRecord.to_evidence_record()`` — no new evidence shape.
+        # ``SourceLedgerRecord.to_evidence_record()`` -- no new evidence shape.
         # When the flag is OFF this is skipped entirely so ``_records`` is
         # byte-identical to main.
+        # When MAGI_SOURCE_CITATION_ENABLED is also ON, sourceProjection ids are
+        # remapped to registry-allocated ids so SourceInspection records carry
+        # unique src_N instead of the hardcoded src_1.
+        source_projection_metadata: Mapping[str, object] = tool_result.metadata
+        if citation_records and _source_citation_enabled():
+            source_projection_metadata = _remap_source_projection_ids(
+                metadata=tool_result.metadata,
+                session_id=session_id,
+                turn_id=turn_id,
+                tool_name=tool_name,
+                arguments=arguments or {},
+                registries=self._session_source_registries,
+            )
         records.extend(
-            _projected_source_inspection_records(tool_result.metadata)
+            _projected_source_inspection_records(source_projection_metadata)
         )
 
         receipt = None
@@ -672,6 +719,187 @@ def _source_ledger_evidence_gate_enabled() -> bool:
     )
 
     return parse_source_ledger_evidence_gate_enabled(os.environ)
+
+
+def _source_citation_enabled() -> bool:
+    import os  # noqa: PLC0415
+
+    from magi_agent.config.env import parse_source_citation_enabled  # noqa: PLC0415
+
+    return parse_source_citation_enabled(os.environ)
+
+
+def _update_authored_paths(
+    authored_paths: set[str],
+    tool_result: ToolResult,
+    tool_name: str,
+    arguments: Mapping[str, object],
+) -> None:
+    """Add file paths written/edited by the agent to the authored-paths set.
+
+    Called BEFORE citation capture so a FileRead after an edit correctly
+    excludes the just-edited file from source registration.
+    """
+    if tool_result.status != "ok":
+        return
+    # From codingMutationReceipt in tool metadata
+    receipt = tool_result.metadata.get("codingMutationReceipt")
+    if isinstance(receipt, Mapping):
+        path = (
+            receipt.get("filePath")
+            or receipt.get("file_path")
+            or receipt.get("path")
+        )
+        if isinstance(path, str) and path:
+            authored_paths.add(path)
+    # From arguments for write tools
+    if tool_name in {"FileWrite", "FileEdit", "PatchApply", "file_write", "file_edit"}:
+        path = (
+            arguments.get("path")
+            or arguments.get("file_path")
+            or arguments.get("filepath")
+        )
+        if isinstance(path, str) and path:
+            authored_paths.add(path)
+
+
+def _citation_capture_records(
+    *,
+    session_id: str,
+    turn_id: str,
+    tool_call_id: str,
+    tool_name: str,
+    tool_result: ToolResult,
+    arguments: Mapping[str, object],
+    registries: dict[str, object],
+    authored_paths: frozenset[str],
+) -> list[object]:
+    """Classify + register sources and return producer_control EvidenceRecords.
+
+    Returns [] when citation is disabled or an error occurs (fail-quiet).
+    """
+    try:
+        if not _source_citation_enabled():
+            return []
+        if tool_result.status != "ok":
+            return []
+        from magi_agent.evidence.citation_registry import SessionSourceRegistry  # noqa: PLC0415
+        from magi_agent.evidence.citation_capture import (  # noqa: PLC0415
+            classify_tool_result_for_citation,
+        )
+
+        registry: SessionSourceRegistry = registries.setdefault(  # type: ignore[assignment]
+            session_id, SessionSourceRegistry(session_id=session_id)
+        )
+        specs = classify_tool_result_for_citation(
+            tool_name,
+            tool_result,
+            arguments,
+            authored_paths=authored_paths,
+        )
+        citation_ev_records: list[object] = []
+        for spec in specs:
+            record = registry.register(
+                spec.kind,
+                spec.uri,
+                turn_id=turn_id,
+                tool_name=tool_name,
+                tool_use_id=tool_call_id,
+                title=spec.title,
+                content_hash=spec.content_hash,
+                trust_tier=spec.trust_tier,
+                snippets=spec.snippets,
+                metadata=spec.metadata,
+                inspected=spec.inspected,
+            )
+            if record is None:
+                continue
+            ev = record.to_evidence_record()
+            citation_ev_records.append(
+                _as_producer_control(ev, "source_citation.capture")
+            )
+        return citation_ev_records
+    except Exception:
+        return []
+
+
+def _remap_source_projection_ids(
+    *,
+    metadata: Mapping[str, object],
+    session_id: str,
+    turn_id: str,
+    tool_name: str,
+    arguments: Mapping[str, object],
+    registries: dict[str, object],
+) -> Mapping[str, object]:
+    """Remap hardcoded src_1 ids in sourceProjection to registry-allocated ids.
+
+    When MAGI_SOURCE_CITATION_ENABLED is ON and _tool_result_from_outcome has
+    synthesized a sourceProjection with hardcoded 'src_1', this replaces the
+    id with the registry-allocated id for the same source. Returns the original
+    metadata unchanged if there is nothing to remap or on any error.
+    """
+    try:
+        projection = metadata.get("sourceProjection")
+        if not isinstance(projection, Mapping):
+            return metadata
+        sources = projection.get("sources")
+        if not isinstance(sources, (list, tuple)):
+            return metadata
+
+        registry = registries.get(session_id)
+        if registry is None:
+            return metadata
+
+        remapped = []
+        changed = False
+        for source_entry in sources:
+            if not isinstance(source_entry, Mapping):
+                remapped.append(source_entry)
+                continue
+            original_id = source_entry.get("sourceId")
+            kind = source_entry.get("kind", "file")
+
+            uri = _infer_uri_for_source_projection(kind, tool_name, arguments)
+            if uri:
+                from magi_agent.evidence.citation_registry import SessionSourceRegistry  # noqa: PLC0415
+                if isinstance(registry, SessionSourceRegistry):
+                    src_record = registry.lookup(kind, uri)
+                    if src_record is not None and src_record.source_id != original_id:
+                        remapped.append(
+                            {**dict(source_entry), "sourceId": src_record.source_id}
+                        )
+                        changed = True
+                        continue
+            remapped.append(source_entry)
+
+        if not changed:
+            return metadata
+
+        new_projection = {**dict(projection), "sources": remapped}
+        return {**dict(metadata), "sourceProjection": new_projection}
+    except Exception:
+        return metadata
+
+
+def _infer_uri_for_source_projection(
+    kind: str,
+    tool_name: str,
+    arguments: Mapping[str, object],
+) -> str | None:
+    """Infer the URI used by citation_capture for this tool call."""
+    if kind in ("file", "external_repo"):
+        path = (
+            arguments.get("path")
+            or arguments.get("file")
+            or arguments.get("filepath")
+            or arguments.get("file_path")
+            or arguments.get("pattern")
+            or arguments.get("directory")
+        )
+        if isinstance(path, str) and path:
+            return f"file://{path}" if path.startswith("/") else f"file://{path}"
+    return None
 
 
 def _projected_source_inspection_records(

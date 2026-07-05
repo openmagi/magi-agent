@@ -137,3 +137,88 @@ def test_collector_projects_source_inspection_from_fileread_shaped_result(
         rec for rec in records if getattr(rec, "type", None) == "SourceInspection"
     ]
     assert source_records, "record_tool_result must project a SourceInspection record"
+
+
+def test_src_1_id_collision_exists_on_multiple_fileread_calls_legacy_flag_on(
+    monkeypatch,
+) -> None:
+    """RED: _synthesized_source_projection hardcodes src_1 on every call.
+
+    Two FileRead outcomes both get src_1 in their sourceProjection when
+    only the LEGACY flag (MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED) is on.
+    This demonstrates the collision that the citation-path fix addresses.
+    """
+    monkeypatch.setenv("MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED", "1")
+    monkeypatch.delenv("MAGI_SOURCE_CITATION_ENABLED", raising=False)
+    result1 = _tool_result_from_outcome(_make_filread_outcome())
+    result2 = _tool_result_from_outcome(_make_filread_outcome())
+    id1 = result1.metadata["sourceProjection"]["sources"][0]["sourceId"]
+    id2 = result2.metadata["sourceProjection"]["sources"][0]["sourceId"]
+    # Both hardcoded to src_1 -- this is the known collision
+    assert id1 == "src_1"
+    assert id2 == "src_1"
+    assert id1 == id2, "collision: two FileRead calls get the same src_1"
+
+
+def test_citation_capture_produces_unique_ids_for_multiple_fileread_calls(
+    monkeypatch,
+) -> None:
+    """GREEN: with MAGI_SOURCE_CITATION_ENABLED ON and distinct file paths,
+    two FileRead calls in the same session get unique source ids via the
+    session registry (not via _synthesized_source_projection).
+    """
+    monkeypatch.setenv("MAGI_SOURCE_CITATION_ENABLED", "1")
+    monkeypatch.delenv("MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED", raising=False)
+    from magi_agent.evidence.local_tool_collector import LocalToolEvidenceCollector
+    from magi_agent.tools.result import ToolResult
+
+    collector = LocalToolEvidenceCollector()
+    result = ToolResult(status="ok", output={"content": "hello"}, metadata={})
+
+    records1 = collector.record_tool_result(
+        session_id="sess-1",
+        turn_id="turn-1",
+        tool_call_id="c1",
+        tool_name="FileRead",
+        result=result,
+        arguments={"path": "/workspace/README.md"},
+    )
+    records2 = collector.record_tool_result(
+        session_id="sess-1",
+        turn_id="turn-1",
+        tool_call_id="c2",
+        tool_name="FileRead",
+        result=result,
+        arguments={"path": "/workspace/src/main.py"},
+    )
+
+    # Each call should produce at least one citation evidence record
+    citation1 = [
+        r for r in records1
+        if getattr(r, "producing_rule_id", None) == "source_citation.capture"
+    ]
+    citation2 = [
+        r for r in records2
+        if getattr(r, "producing_rule_id", None) == "source_citation.capture"
+    ]
+    assert citation1, "first FileRead must produce a citation record"
+    assert citation2, "second FileRead must produce a citation record"
+
+    # Extract source ids from the evidence records
+    def _get_source_id(rec: object) -> str | None:
+        fields = getattr(rec, "fields", None)
+        get_fn = getattr(fields, "get", None)
+        if callable(get_fn):
+            sid = get_fn("sourceId")
+            if isinstance(sid, str):
+                return sid
+            sids = get_fn("sourceIds")
+            if isinstance(sids, (list, tuple)) and sids:
+                return str(sids[0])
+        return None
+
+    id1 = _get_source_id(citation1[0])
+    id2 = _get_source_id(citation2[0])
+    assert id1 is not None, "first citation record must have a sourceId"
+    assert id2 is not None, "second citation record must have a sourceId"
+    assert id1 != id2, f"expected unique ids, got {id1!r} and {id2!r}"
