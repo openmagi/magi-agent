@@ -70,6 +70,8 @@ from magi_agent.transport.chat import (
     gate5b_user_visible_chat_gate_active,
     run_gate5b_user_visible_chat_response,
 )
+from magi_agent.transport.local_turn_pump import drive_detached_local_stream
+from magi_agent.transport.local_turn_store import LOCAL_TURN_STORE
 from magi_agent.transport.streaming_chat import frame_for_event, frame_for_terminal
 from magi_agent.transport.streaming_driver import drive_streaming_chat
 from magi_agent.transport.streaming_sink import build_streaming_prompt_sink
@@ -199,7 +201,7 @@ def _normalize_model_provider(model: str | None) -> str | None:
         from magi_agent.engine.providers import _infer_provider_for_model
 
         provider = _infer_provider_for_model(model)
-    except Exception:  # noqa: BLE001 — never break the build over inference.
+    except Exception:  # noqa: BLE001 -- never break the build over inference.
         provider = None
     if provider and provider != "anthropic":
         return f"{provider}/{model}"
@@ -234,7 +236,7 @@ def _qualified_litellm_model(model: str | None) -> str | None:
         from magi_agent.engine.providers import resolve_provider_config
 
         cfg = resolve_provider_config(model_override=model)
-    except Exception:  # noqa: BLE001 — resolution is best-effort
+    except Exception:  # noqa: BLE001 -- resolution is best-effort
         return model
     if cfg is None:
         return model
@@ -271,7 +273,7 @@ def _persist_local_turn_usage(
     per-session usage the ``/v1/app/runtime`` reader surfaces; nothing else
     persists it (the ADK session service is wired without a store). Best-effort:
     a bad model name, an unwritable workspace, or a missing optional dependency
-    must never affect the live turn — the caller already swallows exceptions, and
+    must never affect the live turn -- the caller already swallows exceptions, and
     this body adds its own guards.
     """
     usage = getattr(terminal, "usage", None) or {}
@@ -471,7 +473,7 @@ def _hosted_serve_gate_refusal(
     Mirrors the ``/v1/chat/completions`` wrapper + ``run_gate5b_user_visible_
     chat_response`` entry gates so a hosted caller gets the exact same JSON
     failure surface (status / fallbackStatus / responseAuthority) BEFORE any
-    SSE bytes are sent — chat-proxy uses that shape for typescript-authority
+    SSE bytes are sent -- chat-proxy uses that shape for typescript-authority
     fallback. Gate2 sandbox-workspace canary payloads are dispatched to the
     same gate2 chat boundary as completions (JSON response, not SSE). Returns
     ``None`` only when the selected gate5b canary gate is fully active. Never
@@ -887,7 +889,7 @@ def register_streaming_chat_routes(
         # NOTE: build_headless_runtime(prompt_sink=...) wires a RulesPermissionGate
         # backed by an EMPTY RulesEngine, so the engine's `updated_input`
         # re-validation (which would re-check a rewritten tool's args against deny
-        # rules) is a no-op for this streaming surface — a control-response
+        # rules) is a no-op for this streaming surface -- a control-response
         # `updated_input` is applied verbatim. This is acceptable because the
         # control-response comes from the gateway-token holder (full bot access).
         # If multi-user / shared-token control-responses are ever introduced here,
@@ -944,7 +946,7 @@ def register_streaming_chat_routes(
         return hmac.compare_digest(presented, f"Bearer {token}")
 
     # ------------------------------------------------------------------
-    # Route 1 — POST /v1/chat/stream
+    # Route 1 -- POST /v1/chat/stream
     # ------------------------------------------------------------------
     @app.post("/v1/chat/stream", response_model=None)
     async def streaming_chat_stream(request: Request) -> Response:
@@ -1041,19 +1043,35 @@ def register_streaming_chat_routes(
         def _usage_recorder(terminal: object) -> None:
             _persist_local_turn_usage(runtime, session_id, terminal)
 
+        # LOCAL streaming branch only (hosted gate5b returned above). Detach the
+        # turn into a background pump so a browser refresh / disconnect no longer
+        # tears down the turn via ``drive_streaming_chat``'s finally-cancel. The
+        # pump fans SSE frames to the subscriber AND a snapshot reducer, keyed by
+        # the reset-aware session key in LOCAL_TURN_STORE, so the two refresh
+        # endpoints (``/v1/chat/active-snapshot`` + ``/v1/chat/channel-messages``)
+        # can rehydrate the in-flight or just-finished turn. See
+        # ``transport.local_turn_pump``. There is no separate flag: the local serve
+        # profile force-enables ``MAGI_STREAMING_CHAT`` so this branch is the live
+        # local chat path.
+        undetached = drive_streaming_chat(
+            engine,
+            gate,
+            {"prompt": prompt, "session_id": session_id, "turn_id": turn_id},
+            cancel=cancel,
+            queue=queue,
+            sink=sink,
+            registry=ACTIVE_TURNS,
+            session_id=session_id,
+            turn_id=turn_id,
+            usage_recorder=_usage_recorder,
+        )
         return _streaming_response(
             _wrap_handler_exit_trace(
-                drive_streaming_chat(
-                    engine,
-                    gate,
-                    {"prompt": prompt, "session_id": session_id, "turn_id": turn_id},
-                    cancel=cancel,
-                    queue=queue,
-                    sink=sink,
-                    registry=ACTIVE_TURNS,
+                drive_detached_local_stream(
+                    undetached,
                     session_id=session_id,
                     turn_id=turn_id,
-                    usage_recorder=_usage_recorder,
+                    cancel=cancel,
                 ),
                 session_id=session_id,
                 turn_id=turn_id,
@@ -1061,7 +1079,7 @@ def register_streaming_chat_routes(
         )
 
     # ------------------------------------------------------------------
-    # Route 2 — POST /v1/chat/control-response
+    # Route 2 -- POST /v1/chat/control-response
     # ------------------------------------------------------------------
     @app.post("/v1/chat/control-response", response_model=None)
     async def streaming_chat_control_response(request: Request) -> JSONResponse:
@@ -1117,7 +1135,7 @@ def register_streaming_chat_routes(
         )
 
     # ------------------------------------------------------------------
-    # Route 3 — POST /v1/chat/cancel
+    # Route 3 -- POST /v1/chat/cancel
     # ------------------------------------------------------------------
     @app.post("/v1/chat/cancel", response_model=None)
     async def streaming_chat_cancel(request: Request) -> JSONResponse:
@@ -1179,3 +1197,53 @@ def register_streaming_chat_routes(
                 "handoffRequested": handoff,
             },
         )
+
+    # ------------------------------------------------------------------
+    # Route 4 -- GET /v1/chat/active-snapshot?sessionId=
+    #
+    # Refresh/reconnect: return the LIVE snapshot of the in-flight (detached)
+    # turn for a session, or a detached background-work snapshot after the
+    # parent turn ended. Absorbs the chat-proxy ``active-snapshot`` role for the
+    # LOCAL streaming branch. Returns ``{"snapshot": null}`` for every
+    # "nothing to resume" path (no turn, TTL expired) so the browser reducer
+    # falls back to committed history. Never a hard error on missing data.
+    # ------------------------------------------------------------------
+    @app.get("/v1/chat/active-snapshot", response_model=None)
+    async def streaming_chat_active_snapshot(request: Request) -> JSONResponse:
+        if not _auth_ok(request):
+            return JSONResponse(status_code=401, content={"error": "unauthorized"})
+        if not _streaming_chat_enabled():
+            return JSONResponse(
+                status_code=503,
+                content={"error": "streaming_chat_disabled"},
+            )
+        session_id = request.query_params.get("sessionId", "").strip()
+        if not session_id:
+            return JSONResponse(status_code=400, content={"error": "missing_session_id"})
+        snapshot = LOCAL_TURN_STORE.active_snapshot(session_id)
+        return JSONResponse(status_code=200, content={"snapshot": snapshot})
+
+    # ------------------------------------------------------------------
+    # Route 5 -- GET /v1/chat/channel-messages?sessionId=
+    #
+    # Refresh/reconnect fallback: return the just-committed assistant
+    # message(s) for a session whose turn finished while the browser was away
+    # (the completed-turn record held under a generous TTL). Absorbs the
+    # chat-proxy ``channel-messages`` role for the LOCAL streaming branch.
+    # Errored/aborted turns deliver no content. Always returns
+    # ``{"messages": [...]}`` (possibly empty); never a hard error.
+    # ------------------------------------------------------------------
+    @app.get("/v1/chat/channel-messages", response_model=None)
+    async def streaming_chat_channel_messages(request: Request) -> JSONResponse:
+        if not _auth_ok(request):
+            return JSONResponse(status_code=401, content={"error": "unauthorized"})
+        if not _streaming_chat_enabled():
+            return JSONResponse(
+                status_code=503,
+                content={"error": "streaming_chat_disabled"},
+            )
+        session_id = request.query_params.get("sessionId", "").strip()
+        if not session_id:
+            return JSONResponse(status_code=400, content={"error": "missing_session_id"})
+        messages = LOCAL_TURN_STORE.completed_messages(session_id)
+        return JSONResponse(status_code=200, content={"messages": messages})
