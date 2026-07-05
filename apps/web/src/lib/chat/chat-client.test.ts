@@ -1815,6 +1815,76 @@ describe("sendMessage SSE agent events", () => {
     });
   });
 
+  it("finalizes a still-running subagent to done at [DONE] (T2)", async () => {
+    // No child_completed arrives; the subagent is still running when the
+    // stream terminates. It must be finalized to `done` (no stale running dot).
+    mockSseFetch(
+      [
+        "event: agent",
+        'data: {"type":"child_started","taskId":"blue","agentName":"researcher","model":"claude-opus-4-8","taskTitle":"Survey"}',
+        "",
+        "event: agent",
+        'data: {"type":"text_delta","delta":"done"}',
+        "",
+        "data: [DONE]",
+        "",
+      ].join("\n"),
+    );
+
+    const snapshots: SubagentActivity[][] = [];
+
+    await sendMessage("bot-abc", "general", [], {
+      onDelta: () => {},
+      onSubagentActivity: (subagents) => {
+        snapshots.push(subagents.map((subagent) => ({ ...subagent })));
+      },
+      onDone: () => {},
+      onError: () => {},
+    });
+
+    // Live it was running, terminal snapshot finalizes to done while keeping
+    // the label / model / task fields for the chip.
+    expect(snapshots.some((snapshot) => snapshot[0]?.status === "running")).toBe(true);
+    expect(snapshots.at(-1)?.[0]).toMatchObject({
+      taskId: "blue",
+      status: "done",
+      agentName: "researcher",
+      model: "claude-opus-4-8",
+      taskTitle: "Survey",
+    });
+  });
+
+  it("finalizes a still-running subagent to error on terminal agent error (T2)", async () => {
+    mockSseFetch(
+      [
+        "event: agent",
+        'data: {"type":"child_started","taskId":"blue","agentName":"researcher"}',
+        "",
+        "event: agent",
+        'data: {"type":"error","message":"model overloaded, please retry"}',
+        "",
+        "data: [DONE]",
+        "",
+      ].join("\n"),
+    );
+
+    const snapshots: SubagentActivity[][] = [];
+
+    await sendMessage("bot-abc", "general", [], {
+      onDelta: () => {},
+      onSubagentActivity: (subagents) => {
+        snapshots.push(subagents.map((subagent) => ({ ...subagent })));
+      },
+      onDone: () => {},
+      onError: () => {},
+    });
+
+    expect(snapshots.at(-1)?.[0]).toMatchObject({
+      taskId: "blue",
+      status: "error",
+    });
+  });
+
   it("keeps concrete delegated task details for subagents instead of replacing them with iteration noise", async () => {
     mockSseFetch(
       [
