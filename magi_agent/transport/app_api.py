@@ -37,9 +37,28 @@ from urllib.parse import unquote
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from magi_agent.missions.projection import (
+    map_task_event,
+    map_task_run,
+    map_task_status,
+    project_task_to_mission_summary,
+)
+from magi_agent.missions.work_queue.store import (
+    SqliteWorkQueueStore,
+    work_queue_db_path_from_env,
+)
 from magi_agent.plugins.native.skills import _skill_candidates
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 from magi_agent.transport.tools import _unauthorized_response
+
+# Local mission list: how many tasks to scan before a mission-status filter is
+# applied in-process (5.1 collapses several TaskStatus values onto one
+# MissionStatus, so filtering happens after projection). Generous bound for
+# self-host scale; unfiltered listing pages through ``limit`` directly.
+_MISSION_LIST_FETCH_CAP = 500
+
+# Human-readable verb for the 409 illegal-transition message per control action.
+_MISSION_ACTION_VERB = {"cancel": "cancelled", "retry": "retried", "unblock": "unblocked"}
 
 # Operator-owned files that must never be overwritten through the dashboard.
 _SEALED_BASENAMES = {
@@ -886,6 +905,19 @@ def _vector_memory_search(query: str, limit: int) -> list[dict[str, Any]] | None
 
 
 # --------------------------------------------------------------------------- #
+# Missions (durable work-queue projection) helpers
+# --------------------------------------------------------------------------- #
+def _work_queue_store() -> SqliteWorkQueueStore:
+    """Open the durable work-queue store at the env-resolved DB path.
+
+    A fresh store per call so the DB path env (``MAGI_WORK_QUEUE_DB_PATH`` /
+    ``MAGI_STATE_DIR``) is honored at request time, mirroring ``board_api``'s
+    env resolution. The caller is responsible for closing it.
+    """
+    return SqliteWorkQueueStore(work_queue_db_path_from_env())
+
+
+# --------------------------------------------------------------------------- #
 # Route registration
 # --------------------------------------------------------------------------- #
 def register_app_api_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
@@ -1245,6 +1277,152 @@ def register_app_api_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             doc["snippet"] = hit["context"]
             results.append(doc)
         return JSONResponse(content={"results": results})
+
+    # ---- missions (durable work-queue projection) ---------------------- #
+    # OSS-local product surface: the work_queue SQLite store IS the mission
+    # source of truth, projected into the MissionSummary shape the chat
+    # "Missions" panel already renders. The raw ``/api/work-queue/v1`` board
+    # API stays untouched for operators. Presence-gated like knowledge /
+    # workspace (no capability flag). Design section 6.2 / 6.3.
+    @app.get("/v1/app/missions")
+    def app_missions(
+        request: Request, status: str | None = None, limit: int = 50
+    ) -> JSONResponse:
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        limit = max(1, min(100, limit))
+        store = _work_queue_store()
+        try:
+            if status:
+                # ``status`` is a mission-status value (5.1 collapses several
+                # TaskStatus values onto one MissionStatus): project, then
+                # filter, then clamp to ``limit``.
+                tasks = store.list_tasks(limit=_MISSION_LIST_FETCH_CAP)
+                missions = [
+                    project_task_to_mission_summary(
+                        task, run_count=len(store.list_task_runs(task.id))
+                    )
+                    for task in tasks
+                ]
+                missions = [m for m in missions if m["status"] == status][:limit]
+            else:
+                tasks = store.list_tasks(limit=limit)
+                missions = [
+                    project_task_to_mission_summary(
+                        task, run_count=len(store.list_task_runs(task.id))
+                    )
+                    for task in tasks
+                ]
+            return JSONResponse(content={"missions": missions})
+        finally:
+            store.close()
+
+    @app.get("/v1/app/missions/{mission_id}")
+    def app_mission_detail(request: Request, mission_id: str) -> JSONResponse:
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        store = _work_queue_store()
+        try:
+            task = store.get(mission_id)
+            if task is None:
+                return JSONResponse(status_code=404, content={"error": "not_found"})
+            events = [
+                mapped
+                for ev in store.list_task_events(mission_id)
+                if (mapped := map_task_event(ev)) is not None
+            ]
+            runs = [map_task_run(run) for run in store.list_task_runs(mission_id)]
+            mission = project_task_to_mission_summary(task, run_count=len(runs))
+            return JSONResponse(
+                content={"mission": mission, "events": events, "runs": runs}
+            )
+        finally:
+            store.close()
+
+    def _apply_mission_transition(mission_id: str, action: str) -> JSONResponse:
+        """Apply a guarded control transition (5.2) directly to the store.
+
+        Locally the store IS the source of truth, so this is the authoritative
+        mutation (not a cache edit). ``404`` when the task is absent, ``409``
+        when the transition is illegal for the task's current status.
+        """
+        store = _work_queue_store()
+        try:
+            task = store.get(mission_id)
+            if task is None:
+                return JSONResponse(status_code=404, content={"error": "not_found"})
+            if action == "cancel":
+                updated = store.request_cancel(mission_id)
+            elif action == "retry":
+                updated = store.request_retry(mission_id)
+            else:  # unblock
+                updated = store.request_unblock(mission_id)
+            if updated is None:
+                verb = _MISSION_ACTION_VERB.get(action, action)
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "error": "invalid_transition",
+                        "detail": f"Mission cannot be {verb} while {map_task_status(task.status)}",
+                        "status": map_task_status(task.status),
+                    },
+                )
+            mission = project_task_to_mission_summary(
+                updated, run_count=len(store.list_task_runs(mission_id))
+            )
+            return JSONResponse(content={"mission": mission})
+        finally:
+            store.close()
+
+    @app.post("/v1/app/missions/{mission_id}/cancel")
+    def app_mission_cancel(request: Request, mission_id: str) -> JSONResponse:
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        return _apply_mission_transition(mission_id, "cancel")
+
+    @app.post("/v1/app/missions/{mission_id}/retry")
+    def app_mission_retry(request: Request, mission_id: str) -> JSONResponse:
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        return _apply_mission_transition(mission_id, "retry")
+
+    @app.post("/v1/app/missions/{mission_id}/unblock")
+    def app_mission_unblock(request: Request, mission_id: str) -> JSONResponse:
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        return _apply_mission_transition(mission_id, "unblock")
+
+    @app.post("/v1/app/missions/{mission_id}/comments")
+    async def app_mission_comment(request: Request, mission_id: str) -> JSONResponse:
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        try:
+            payload = await request.json()
+        except Exception:  # noqa: BLE001
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        message = payload.get("message") if isinstance(payload, dict) else None
+        author = payload.get("author") if isinstance(payload, dict) else None
+        if not isinstance(message, str) or not message.strip():
+            return JSONResponse(status_code=400, content={"error": "message_required"})
+        author = author.strip() if isinstance(author, str) and author.strip() else "user"
+        store = _work_queue_store()
+        try:
+            ok = store.append_comment(mission_id, author=author, message=message.strip())
+            if not ok:
+                return JSONResponse(status_code=404, content={"error": "not_found"})
+            task = store.get(mission_id)
+            mission = project_task_to_mission_summary(
+                task, run_count=len(store.list_task_runs(mission_id))
+            )
+            return JSONResponse(content={"mission": mission})
+        finally:
+            store.close()
 
 
 _KB_UPLOAD_MAX_BYTES = 50 * 1024 * 1024

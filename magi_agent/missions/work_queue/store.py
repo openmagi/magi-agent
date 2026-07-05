@@ -921,6 +921,119 @@ class SqliteWorkQueueStore:
         assert task is not None
         return task
 
+    # ------------------------------------------------------------------
+    # Control-action transitions (PR-M3 local mission control routes).
+    #
+    # Each applies design doc table 5.2 with a fresh-read + CAS-guarded
+    # ``UPDATE ... WHERE status IN (...)`` so an illegal transition (or a
+    # concurrent transition that already moved the row) is rejected by
+    # returning ``None`` rather than clobbering state. The status change and
+    # the task-event append happen in the SAME transaction.
+    # ------------------------------------------------------------------
+
+    def request_cancel(self, task_id: str, *, actor: str = "user") -> WorkTask | None:
+        """Cancel a task: release any held claim and move it to ``archived``.
+
+        Legal source statuses (5.2, mirroring the hosted ``validateMissionAction``
+        cancel guard): every non-closed status
+        (``triage``/``todo``/``ready``/``running``/``blocked``). Returns ``None``
+        when the task is already closed (``completed``/``failed``/``archived``)
+        or the CAS loses to a concurrent transition.
+        """
+        now = int(time.time())
+        conn = self._get_conn()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            # Release the claim: close any open run row for this task.
+            conn.execute(
+                "UPDATE work_queue_task_runs SET status='released', outcome='cancelled', ended_at=? "
+                "WHERE task_id=? AND ended_at IS NULL",
+                (now, task_id),
+            )
+            cur = conn.execute(
+                "UPDATE work_queue_tasks "
+                "SET status='archived', claim_lock=NULL, claim_expires=NULL, worker_pid=NULL, "
+                "    current_run_id=NULL "
+                "WHERE id=? AND status IN ('triage','todo','ready','running','blocked')",
+                (task_id,),
+            )
+            if cur.rowcount != 1:
+                conn.rollback()
+                return None
+            self._append_event(conn, task_id, "cancel_requested", {"actor": actor})
+            conn.commit()
+            return self.get(task_id)
+        except Exception:
+            conn.rollback()
+            raise
+
+    def request_retry(self, task_id: str, *, actor: str = "user") -> WorkTask | None:
+        """Retry a task: reset failures and move it back to ``ready`` (5.2).
+
+        Legal source statuses: ``failed`` or ``blocked`` only. Returns ``None``
+        otherwise (e.g. retry on a ``running`` task) or on CAS loss.
+        """
+        conn = self._get_conn()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            cur = conn.execute(
+                "UPDATE work_queue_tasks "
+                "SET status='ready', consecutive_failures=0, last_failure_error=NULL, "
+                "    current_run_id=NULL "
+                "WHERE id=? AND status IN ('failed','blocked')",
+                (task_id,),
+            )
+            if cur.rowcount != 1:
+                conn.rollback()
+                return None
+            self._append_event(conn, task_id, "retry_requested", {"actor": actor})
+            conn.commit()
+            return self.get(task_id)
+        except Exception:
+            conn.rollback()
+            raise
+
+    def request_unblock(self, task_id: str, *, actor: str = "user") -> WorkTask | None:
+        """Unblock a task: move it from ``blocked`` back to ``ready`` (5.2).
+
+        Legal source status: ``blocked`` only. Returns ``None`` otherwise or on
+        CAS loss.
+        """
+        conn = self._get_conn()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            cur = conn.execute(
+                "UPDATE work_queue_tasks SET status='ready' "
+                "WHERE id=? AND status='blocked'",
+                (task_id,),
+            )
+            if cur.rowcount != 1:
+                conn.rollback()
+                return None
+            self._append_event(conn, task_id, "unblocked", {"actor": actor})
+            conn.commit()
+            return self.get(task_id)
+        except Exception:
+            conn.rollback()
+            raise
+
+    def append_comment(self, task_id: str, *, author: str, message: str) -> bool:
+        """Append a ``comment`` task event (ledger-only, design D5).
+
+        Returns ``False`` when the task does not exist (no event written);
+        otherwise appends the event and returns ``True``. Does not change task
+        status and never touches the inject buffer (D5: ledger-only in v1).
+        """
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT 1 FROM work_queue_tasks WHERE id=?", (task_id,)
+        ).fetchone()
+        if row is None:
+            return False
+        self._append_event(conn, task_id, "comment", {"author": author, "message": message})
+        conn.commit()
+        return True
+
     def ready_tasks(self, limit: int) -> list[WorkTask]:
         conn = self._get_conn()
         rows = conn.execute(
