@@ -262,6 +262,13 @@ def build_cli_tool_runtime(
                 local_tool_evidence_collector,
                 session_id,
             ),
+            # Wave 2: thread the live SessionSourceRegistry so research_fact can
+            # allocate session-global src_N ids. ``source_registry_for`` returns
+            # None when citation is off, keeping the handler on its no-op path.
+            citation_registry=_citation_registry_for_session(
+                local_tool_evidence_collector,
+                session_id,
+            ),
             adk_tool_context=adk_tool_context,
             adk_context=adk_tool_context,
             parent_tool_names=parent_tool_names_snapshot,
@@ -459,6 +466,13 @@ def wrap_cli_adk_tools_with_evidence_collector(
     record_tool_result = getattr(collector, "record_tool_result", None)
     if not callable(record_tool_result):
         return tools
+    # Wave 2 (design 7.4/9.2): re-injection must mutate the MODEL-FACING result
+    # BEFORE it returns to the model, so it runs at THIS wrap point, before
+    # record_tool_result. ``register_and_inject_sources`` classifies + registers
+    # (assigning src_N exactly once) + rewrites the result, then hands the
+    # producer_control records back so record_tool_result records the
+    # ALREADY-injected result without re-registering.
+    register_and_inject = getattr(collector, "register_and_inject_sources", None)
 
     for tool in tools:
         original = getattr(tool, "func", None)
@@ -481,14 +495,36 @@ def wrap_cli_adk_tools_with_evidence_collector(
             result = _original(arguments, tool_context)
             if isawaitable(result):
                 result = await result
+            turn_id = _adk_tool_context_turn_id(tool_context)
+            tool_call_id = _tool_call_id(tool_context, result)
+            tool_name = _tool_name(_tool, result)
+            # (2) classify + register (L1) + (3) re-inject ids (L2) on the
+            # model-facing result. Fail-quiet: on any error the uninjected
+            # result flows on and citation records are None.
+            citation_records: list[object] | None = None
+            if callable(register_and_inject):
+                try:
+                    result, citation_records = register_and_inject(
+                        session_id=session_id,
+                        turn_id=turn_id,
+                        tool_call_id=tool_call_id,
+                        tool_name=tool_name,
+                        result=result,
+                        arguments=arguments,
+                    )
+                except Exception:
+                    citation_records = None
+            # (4) record the ALREADY-injected result; precomputed records keep the
+            # single-registration invariant (no re-register inside the collector).
             try:
                 record_tool_result(
                     session_id=session_id,
-                    turn_id=_adk_tool_context_turn_id(tool_context),
-                    tool_call_id=_tool_call_id(tool_context, result),
-                    tool_name=_tool_name(_tool, result),
+                    turn_id=turn_id,
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
                     result=result,
                     arguments=arguments,
+                    precomputed_citation_records=citation_records,
                 )
             except Exception:
                 pass
@@ -576,6 +612,25 @@ def _source_ledger_for_session(
         return tuple(ledgers_for_session(session_id))
     except Exception:
         return ()
+
+
+def _citation_registry_for_session(
+    collector: "LocalToolEvidenceCollector | None",
+    session_id: str,
+) -> object | None:
+    """Return the collector's live SessionSourceRegistry for ``session_id``.
+
+    Fail-open: ``None`` when the collector is absent, exposes no accessor, or
+    citation is disabled (``source_registry_for`` itself gates on the flag), so
+    the ToolContext stays byte-identical on the flag-off path.
+    """
+    try:
+        accessor = getattr(collector, "source_registry_for", None)
+        if not callable(accessor):
+            return None
+        return accessor(session_id)
+    except Exception:
+        return None
 
 
 def build_tool_advertisement_block(*, workspace_root: str | None = None) -> str:
@@ -1110,9 +1165,19 @@ def build_cli_instruction(
     # tool that is not registered. Returns "" when off/unavailable/on error,
     # keeping the default prompt byte-identical (same pattern as
     # _file_tools_block / build_tool_advertisement_block fail-open).
-    from magi_agent.tools.web_search_tools import web_research_guidance_block  # noqa: PLC0415
+    from magi_agent.tools.web_search_tools import (  # noqa: PLC0415
+        source_citation_guidance_block,
+        web_research_guidance_block,
+    )
 
     _web_research_block = web_research_guidance_block()
+
+    # Source-citation static guidance (Wave 2, design 9.3/13), gated on
+    # MAGI_SOURCE_CITATION_ENABLED (profile-aware default-ON). FIXED bytes: no
+    # session ids / counts / source lists, so it sits in the stable
+    # system-prompt region without thrashing the prompt cache. Returns "" when
+    # off (safe/eval profile), keeping the prompt byte-identical.
+    _source_citation_block = source_citation_guidance_block()
 
     # Multi-step decomposition guidance — gated on MAGI_STEP_DECOMPOSITION_ENABLED.
     # Returns "" when off (default), keeping the prompt byte-identical to baseline
@@ -1205,6 +1270,8 @@ def build_cli_instruction(
         parts.append(_file_tools_block)
     if _web_research_block:
         parts.append(_web_research_block)
+    if _source_citation_block:
+        parts.append(_source_citation_block)
     if _decomposition_block:
         # Strip the leading "\n\n" separator the helper carries (so it composes
         # standalone, like eval_autonomy_block) before appending into the

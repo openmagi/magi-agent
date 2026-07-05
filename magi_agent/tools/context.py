@@ -85,10 +85,23 @@ class ToolContext(BaseModel):
     secret_broker: object | None = Field(default=None, alias="secretBroker")
     adk_tool_context: object | None = Field(default=None, alias="adkToolContext")
     adk_context: object | None = Field(default=None, alias="adkContext")
+    # Wave 2 source-citation: the live SessionSourceRegistry for this session,
+    # threaded by the CLI/serve tool_context_factory when citation is enabled.
+    # Handlers that render their own per-source ids (research_fact) read this to
+    # allocate session-global ``src_N``. A live object like ``secret_broker`` /
+    # ``abort_signal``; never serialized (see ``serialize_citation_registry``).
+    citation_registry: object | None = Field(default=None, alias="citationRegistry")
 
     @field_serializer("memory_mode")
     def serialize_memory_mode(self, value: MemoryMode) -> str:
         return value.value
+
+    @field_serializer("citation_registry")
+    def serialize_citation_registry(self, value: object) -> None:
+        # A live registry object is transport-local plumbing, not serializable
+        # state. Drop it from any model_dump so a serialized ToolContext stays
+        # JSON-safe (mirrors the intent of the source_ledger serializer).
+        return None
 
     @field_validator("source_ledger", mode="before")
     @classmethod

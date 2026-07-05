@@ -116,6 +116,7 @@ class LocalToolEvidenceCollector:
         tool_name: str,
         result: ToolResult | Mapping[str, object],
         arguments: Mapping[str, object] | None = None,
+        precomputed_citation_records: list[object] | None = None,
     ) -> tuple[object, ...]:
         tool_result = (
             result if isinstance(result, ToolResult) else ToolResult.model_validate(result)
@@ -143,20 +144,29 @@ class LocalToolEvidenceCollector:
         )
 
         # Citation capture (MAGI_SOURCE_CITATION_ENABLED, profile-aware default-ON).
-        # Classifies the tool result for external-read sources, registers each in
-        # the session registry, and emits producer_control EvidenceRecords.
-        # Fail-quiet: any error leaves records unchanged and does not break the tool path.
-        citation_records = _citation_capture_records(
-            session_id=session_id,
-            turn_id=turn_id,
-            tool_call_id=tool_call_id,
-            tool_name=tool_name,
-            tool_result=tool_result,
-            arguments=arguments or {},
-            registries=self._session_source_registries,
-            authored_paths=frozenset(self._session_authored_paths.get(session_id, set())),
-        )
-        records.extend(citation_records)
+        # Single-registration invariant (Wave 2): the wrap point may have already
+        # classified + registered + re-injected this result via
+        # ``register_and_inject_sources`` and passed the producer_control records
+        # in as ``precomputed_citation_records``. In that case DO NOT re-register
+        # (dedup would return the same ids, but re-running register is wasteful and
+        # could trip revision tracking); just append the precomputed records. An
+        # already-injected result reaching here WITHOUT precomputed records (a
+        # belt-and-suspenders case) is likewise skipped. Only the Wave 1 direct
+        # path (no injection, no precomputed) classifies + registers here.
+        if precomputed_citation_records is not None:
+            records.extend(precomputed_citation_records)
+        elif not _result_already_injected(tool_result):
+            citation_records = _citation_capture_records(
+                session_id=session_id,
+                turn_id=turn_id,
+                tool_call_id=tool_call_id,
+                tool_name=tool_name,
+                tool_result=tool_result,
+                arguments=arguments or {},
+                registries=self._session_source_registries,
+                authored_paths=frozenset(self._session_authored_paths.get(session_id, set())),
+            )
+            records.extend(citation_records)
 
         # Source-ledger projection (default-OFF
         # MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED). A read-only source tool
@@ -212,6 +222,114 @@ class LocalToolEvidenceCollector:
             status=tool_result.status,
         )
         return tuple(records)
+
+    def register_and_inject_sources(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        tool_call_id: str,
+        tool_name: str,
+        result: ToolResult | Mapping[str, object],
+        arguments: Mapping[str, object] | None = None,
+    ) -> tuple[object, list[object]]:
+        """Wave 2 wrap-point entry: classify + register (once) + re-inject ids.
+
+        Called at the tool-dispatch wrap point AFTER the tool runs and BEFORE
+        ``record_tool_result``. It (1) classifies the external-read sources,
+        (2) registers each in the session registry assigning a stable ``src_N``
+        EXACTLY once, (3) rewrites the model-facing result dict to carry those
+        ids (per design 7.4), and returns ``(injected_result, records)`` where
+        ``records`` are the producer_control EvidenceRecords. The caller then
+        passes ``records`` to ``record_tool_result`` as
+        ``precomputed_citation_records`` so the single-registration invariant
+        holds (record_tool_result never re-registers).
+
+        Fail-quiet: on any error, or when citation is disabled, or when the tool
+        failed, returns ``(result, [])`` unchanged (byte-identical)."""
+        try:
+            if not _source_citation_enabled():
+                return result, []
+            status = (
+                result.get("status")
+                if isinstance(result, Mapping)
+                else getattr(result, "status", None)
+            )
+            if status != "ok":
+                return result, []
+            tool_result = (
+                result
+                if isinstance(result, ToolResult)
+                else ToolResult.model_validate(result)
+            )
+            # Mirror record_tool_result ordering: refresh authored paths BEFORE
+            # citation classification so a read of a just-authored file is
+            # excluded. Sets are idempotent, so record_tool_result re-adding is
+            # harmless.
+            _update_authored_paths(
+                authored_paths=self._session_authored_paths.setdefault(session_id, set()),
+                tool_result=tool_result,
+                tool_name=tool_name,
+                arguments=arguments or {},
+            )
+            pairs, records = _classify_register_and_records(
+                session_id=session_id,
+                turn_id=turn_id,
+                tool_call_id=tool_call_id,
+                tool_name=tool_name,
+                tool_result=tool_result,
+                arguments=arguments or {},
+                registries=self._session_source_registries,
+                authored_paths=frozenset(
+                    self._session_authored_paths.get(session_id, set())
+                ),
+            )
+            if not pairs:
+                return result, records
+            from magi_agent.evidence.citation_injection import (  # noqa: PLC0415
+                InjectedSource,
+                inject_citation_headers,
+            )
+
+            entries = [
+                InjectedSource(
+                    source_id=record.source_id,
+                    kind=spec.kind,
+                    uri=spec.uri,
+                    title=spec.title,
+                    snippet=(spec.snippets[0] if spec.snippets else None),
+                )
+                for spec, record in pairs
+            ]
+            result_dict = (
+                dict(result)
+                if isinstance(result, Mapping)
+                else tool_result.model_dump(by_alias=True)
+            )
+            injected = inject_citation_headers(tool_name, result_dict, entries)
+            return injected, records
+        except Exception:
+            return result, []
+
+    def source_registry_for(self, session_id: str) -> object | None:
+        """Return the session's ``SessionSourceRegistry`` (creating it) when
+        citation is enabled; ``None`` otherwise.
+
+        Threaded onto ``ToolContext.citation_registry`` so handlers that render
+        their own per-source ids (``research_fact``) can allocate session-global
+        ``src_N`` through the same registry. Fail-quiet -> ``None``."""
+        try:
+            if not _source_citation_enabled():
+                return None
+            from magi_agent.evidence.citation_registry import (  # noqa: PLC0415
+                SessionSourceRegistry,
+            )
+
+            return self._session_source_registries.setdefault(
+                session_id, SessionSourceRegistry(session_id=session_id)
+            )
+        except Exception:
+            return None
 
     def record_first_party_activity(
         self,
@@ -753,7 +871,20 @@ def _update_authored_paths(
             authored_paths.add(path)
 
 
-def _citation_capture_records(
+def _result_already_injected(tool_result: ToolResult) -> bool:
+    """True when a result already carries the Wave 2 ``citation.injected`` marker.
+
+    Guards the single-registration invariant: an already-injected result must
+    never be classified + registered a second time by ``record_tool_result``.
+    """
+    try:
+        citation = tool_result.metadata.get("citation")
+        return isinstance(citation, Mapping) and bool(citation.get("injected"))
+    except Exception:
+        return False
+
+
+def _classify_register_and_records(
     *,
     session_id: str,
     turn_id: str,
@@ -763,16 +894,17 @@ def _citation_capture_records(
     arguments: Mapping[str, object],
     registries: dict[str, object],
     authored_paths: frozenset[str],
-) -> list[object]:
-    """Classify + register sources and return producer_control EvidenceRecords.
+) -> tuple[list[tuple[object, object]], list[object]]:
+    """Classify + register sources (assigning ids ONCE) and build records.
 
-    Returns [] when citation is disabled or an error occurs (fail-quiet).
+    Returns ``(pairs, records)`` where ``pairs`` is a list of
+    ``(CaptureSpec, SourceLedgerRecord)`` for the sources that registered, and
+    ``records`` is the matching list of producer_control EvidenceRecords. The
+    single site that calls ``registry.register`` for the ambient capture path,
+    so both the Wave 1 direct path and the Wave 2 wrap point register exactly
+    once. Fail-quiet: returns ``([], [])`` on any error.
     """
     try:
-        if not _source_citation_enabled():
-            return []
-        if tool_result.status != "ok":
-            return []
         from magi_agent.evidence.citation_registry import SessionSourceRegistry  # noqa: PLC0415
         from magi_agent.evidence.citation_capture import (  # noqa: PLC0415
             classify_tool_result_for_citation,
@@ -787,6 +919,7 @@ def _citation_capture_records(
             arguments,
             authored_paths=authored_paths,
         )
+        pairs: list[tuple[object, object]] = []
         citation_ev_records: list[object] = []
         for spec in specs:
             record = registry.register(
@@ -804,11 +937,47 @@ def _citation_capture_records(
             )
             if record is None:
                 continue
+            pairs.append((spec, record))
             ev = record.to_evidence_record()
             citation_ev_records.append(
                 _as_producer_control(ev, "source_citation.capture")
             )
-        return citation_ev_records
+        return pairs, citation_ev_records
+    except Exception:
+        return [], []
+
+
+def _citation_capture_records(
+    *,
+    session_id: str,
+    turn_id: str,
+    tool_call_id: str,
+    tool_name: str,
+    tool_result: ToolResult,
+    arguments: Mapping[str, object],
+    registries: dict[str, object],
+    authored_paths: frozenset[str],
+) -> list[object]:
+    """Wave 1 direct path: classify + register + return producer_control records.
+
+    Returns [] when citation is disabled or an error occurs (fail-quiet).
+    """
+    try:
+        if not _source_citation_enabled():
+            return []
+        if tool_result.status != "ok":
+            return []
+        _pairs, records = _classify_register_and_records(
+            session_id=session_id,
+            turn_id=turn_id,
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            tool_result=tool_result,
+            arguments=arguments,
+            registries=registries,
+            authored_paths=authored_paths,
+        )
+        return records
     except Exception:
         return []
 

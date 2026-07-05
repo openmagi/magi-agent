@@ -225,13 +225,51 @@ async def handle_research_fact(
             error_message="question is required",
             metadata={"tool": DIRECT_RESEARCH_FACT_TOOL_NAME},
         )
-    brief = research_fact(question)
+    # Wave 2 (design 7.4): thread a registry-backed id-assigner so each brief
+    # line carries a session-scoped src_N the model can cite. The registry is
+    # None (no-op assigner -> baseline [i] lines) when citation is off.
+    assign_id = _citation_assign_id(context)
+    brief = research_fact(question, assign_id=assign_id)
     return ToolResult(
         status="ok",
         output={"brief": brief},
         llm_output=brief,
         metadata={"tool": DIRECT_RESEARCH_FACT_TOOL_NAME},
     )
+
+
+def _citation_assign_id(context: ToolContext):
+    """Build a research_fact id-assigner bound to the session registry.
+
+    Returns ``None`` (keep the baseline ``[i]`` brief lines) when no registry is
+    threaded on the context, which is the case whenever
+    ``MAGI_SOURCE_CITATION_ENABLED`` is off. Otherwise returns a callable
+    ``(kind, url, title) -> src_N | None`` that registers the source and returns
+    its stable id. Fail-quiet: a registry error degrades to ``None`` per source.
+    """
+    registry = getattr(context, "citation_registry", None)
+    register = getattr(registry, "register", None)
+    if not callable(register):
+        return None
+    turn_id = getattr(context, "turn_id", None) or "research-fact"
+    tool_use_id = getattr(context, "tool_use_id", None)
+
+    def _assign(kind: str, url: str, title: str | None):
+        try:
+            record = register(
+                kind,
+                url,
+                turn_id=turn_id,
+                tool_name=DIRECT_RESEARCH_FACT_TOOL_NAME,
+                tool_use_id=tool_use_id,
+                title=title,
+                inspected=True,
+            )
+        except Exception:
+            return None
+        return getattr(record, "source_id", None) if record is not None else None
+
+    return _assign
 
 
 _DIRECT_WEB_HANDLERS = {
