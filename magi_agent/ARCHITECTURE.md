@@ -1365,6 +1365,7 @@ graph LR
 | cron_policy.py | — | cron_fields, receipts | missions/schedule_grammar.py, missions/scheduler_adapter.py |
 | events.py | — | receipts | transport/sse.py |
 | lifecycle.py | — | receipts | missions/__init__.py |
+| projection.py | Pure mapping kernel: work_queue substrate -> hosted "mission" shape. | models | — |
 | receipts.py | — | receipt_redaction, runtime | missions/__init__.py, missions/cron_policy.py, missions/events.py, missions/lifecycle.py |
 | schedule_grammar.py | A1 — ScheduleSpec: once / interval / cron grammar (preview-only). | cron_fields, cron_policy | harness/scheduler_executor.py |
 | scheduler_adapter.py | — | cron_policy | — |
@@ -1377,7 +1378,7 @@ graph LR
 | board_api.py | Read-only FastAPI board router for the durable work-queue. | flags, store | (root)/app.py |
 | driver.py | WorkQueueDriver — the periodic dispatcher tick for the durable work-queue. | lifecycle_audit, lifecycle_llm_call_control, lifecycle_shell_command_control, runner, store | gateway/watchers.py, missions/work_queue/recovery.py, runtime/durable_recovery.py |
 | inject_buffer.py | Per-session inject buffer shared by chat-routes and the background-task sink. | — | — |
-| models.py | — | — | missions/work_queue/__init__.py, missions/work_queue/runner.py, missions/work_queue/store.py, plugins/native/scheduled_work.py |
+| models.py | — | — | missions/projection.py, missions/work_queue/__init__.py, missions/work_queue/runner.py, missions/work_queue/store.py, plugins/native/scheduled_work.py |
 | notifier.py | Work-queue terminal-event notifier — tail-from-now delivery via injected sink. | — | gateway/watchers.py |
 | recovery.py | WS1 PR1b - thin boot-sweep glue for durable background-task crash-resume. | driver, store | runtime/durable_recovery.py |
 | runner.py | — | child_runner_boundary, goal_judge, models, work_queue | gateway/watchers.py, missions/work_queue/driver.py |
