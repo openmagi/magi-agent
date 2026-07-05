@@ -128,6 +128,26 @@ MIGRATIONS: Sequence[tuple[int, str]] = (
         CREATE INDEX IF NOT EXISTS idx_wq_runs_task    ON work_queue_task_runs(task_id, started_at);
         """,
     ),
+    (
+        6,
+        # PR-M7 hosted MissionProjector identity mapping (design section 5.4).
+        # One row per projected WorkTask: the hosted mission id chat-proxy
+        # generated for ``idempotencyKey = "wq:<task_id>"`` plus the last mission
+        # status we projected (so re-projection is idempotent). Consumed by the
+        # projector (task_id -> mission_id) and later by PR-M8's reconciler
+        # (mission_id -> task_id resolution + poll cursor), hence the reverse
+        # index on mission_id.
+        """
+        CREATE TABLE IF NOT EXISTS mission_projection (
+            task_id               TEXT PRIMARY KEY,
+            mission_id            TEXT,
+            last_projected_status TEXT,
+            updated_at            INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_mission_projection_mission
+            ON mission_projection(mission_id);
+        """,
+    ),
 )
 
 
