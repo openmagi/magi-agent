@@ -211,6 +211,32 @@ def _fold_usage(turn_usage: dict[str, object], attempt_usage: Mapping[str, objec
             continue
 
 
+def _turn_is_substantive(
+    *,
+    tool_ends_total: int,
+    open_todos: int | None,
+    new_evidence_records: int,
+) -> bool:
+    """Ambient continuation substance gate (design section 4.2, S1/S2/S3).
+
+    A turn earns AMBIENT continuation authority iff it did real work:
+
+    - S1: at least one ``tool_end`` occurred this turn (ok OR blocked), OR
+    - S2: the durable plan ledger has at least one open todo, OR
+    - S3: at least one new evidence record was collected this turn.
+
+    Pure and I/O-free: the driver computes the three raw inputs at the call
+    site (wired in a later unit); this helper only combines them via OR.
+    ``open_todos`` is ``None`` when the ledger snapshot is empty (the shape
+    returned by ``_open_todo_count``), which is NOT substantive on the S2 axis.
+    """
+    if tool_ends_total >= 1:
+        return True
+    if open_todos is not None and open_todos >= 1:
+        return True
+    return new_evidence_records >= 1
+
+
 # A sane default cap so a runaway stream can't yield forever; headless can
 # tolerate a generous bound on ADK events consumed per turn.
 _DEFAULT_MAX_EVENT_COUNT = 4096
@@ -1660,6 +1686,15 @@ class MagiEngineDriver:
         auto_continue_used = 0
         auto_continue_no_progress_streak = 0
         auto_continue_wrap_up_spent = False
+        # U2 substance signal S1 (design 4.2): turn-cumulative tool_end counter.
+        # Counts every tool_end this turn (ok OR blocked), across ALL
+        # re-invocations (recovery / nudge / continuation), and is NEVER reset
+        # per attempt. Inert in this unit; the ambient substance gate (U5) reads
+        # it later. ``_last_turn_tool_ends_total`` mirrors it as a private
+        # test-observation seam; no live branch reads it, so turn output stays
+        # byte-identical.
+        turn_tool_ends_total = 0
+        self._last_turn_tool_ends_total = 0
         # Snapshots captured BEFORE each attempt so the progress gate can compute
         # a ledger delta / new-evidence delta across the just-finished attempt.
         auto_continue_prev_ledger: tuple[object, ...] = ()
@@ -1848,6 +1883,16 @@ class MagiEngineDriver:
                                     auto_continue_ok_tool_ends += 1
                                 else:
                                     auto_continue_blocked_tool_ends += 1
+                            # U2 substance signal S1 (inert until U5): count every
+                            # tool_end this turn, ok OR blocked, ungated by the
+                            # auto-continue flag, and NEVER reset per attempt so
+                            # the count stays turn-cumulative across re-invocations.
+                            # Mirrored to a private attr purely so the inert counter
+                            # is unit-testable; no live branch reads it, so turn
+                            # output is byte-identical.
+                            if safe.get("type") == "tool_end":
+                                turn_tool_ends_total += 1
+                                self._last_turn_tool_ends_total = turn_tool_ends_total
                             # R2: classify this attempt's activity for the
                             # empty-response decision. Tool events are tracked
                             # separately; "text seen" reuses the continuation
