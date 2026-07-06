@@ -134,6 +134,9 @@ async def collect_engine_to_boundary_result(
     event_stream: AsyncGenerator[object, None],  # type: ignore[type-arg]
     started_at_monotonic: float,
     timeout_ms: int = 0,
+    session_reused: bool = False,
+    session_event_count: int = 0,
+    seeded_message_count: int = 0,
 ) -> Gate5B4C3LiveRunnerBoundaryResult:
     """Consume the engine event stream and return a boundary result.
 
@@ -233,6 +236,13 @@ async def collect_engine_to_boundary_result(
         failOpen=True,
         # --- events ---
         eventCount=len(events),
+        # --- continuity (U8 / B4): the #1364 dashboard fields. Defaults keep
+        # every existing caller/test byte-identical (False / 0 / 0). The flag-ON
+        # serving call site populates these from the B3 lease verdict and the B2
+        # probe / seed verdict.
+        sessionReused=session_reused,
+        sessionEventCount=session_event_count,
+        seededMessageCount=seeded_message_count,
         # --- kwargs keys (engine constructs internally) ---
         agentKwargsKeys=(),
         runnerKwargsKeys=(),
