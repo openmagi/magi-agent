@@ -14,6 +14,7 @@ from magi_agent.config.env import (
     model_aware_prompts_enabled,
     parse_lsp_diagnostics_env,
     parse_provider_repair_enabled,
+    parse_verify_before_replying_enabled,
     ripgrep_enabled,
     tool_concurrency_enabled,
 )
@@ -37,6 +38,7 @@ FULL_PROFILE_FLAGS = {
     "MAGI_BROWSER_TOOL_ENABLED": browser_tool_enabled,
     "MAGI_SELF_INTROSPECTION_ENABLED": is_self_introspection_enabled,
     "MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED": is_evidence_ledger_lifecycle_enabled,
+    "MAGI_VERIFY_BEFORE_REPLYING_ENABLED": parse_verify_before_replying_enabled,
 }
 
 
