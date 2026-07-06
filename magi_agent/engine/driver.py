@@ -3186,6 +3186,12 @@ class MagiEngineDriver:
             return
 
         repair_token_buffer: list[RuntimeEvent] = []
+        # Wave 4b P0 (fail-open no-blank): the most recent repair attempt's
+        # buffered tokens, retained when the loop suppresses them on a re-block.
+        # A live response_clear from that round may have blanked the UI, so the
+        # citation fail-open branch flushes this to restore a coherent answer
+        # (the no-blank invariant) before appending the hedge notice.
+        last_repair_buffer: list[RuntimeEvent] = []
         # WS6 PR6a (MINOR-2): the soft notice may only append a suffix when the
         # live answer is on the wire. A repair-suppressed turn discards its
         # buffered answer, so the suffix invariant fails. Track suppression and
@@ -3210,6 +3216,20 @@ class MagiEngineDriver:
                 live_selected_pack_ids=live_selected,
             )
             if pre_final_gate is None:
+                # Wave 4b P0: a successful citation repair on a turn with no
+                # coding gate (assembly is None OR the gate does not apply) clears
+                # the violation, so ``_citation_only_gate_payload`` returns None
+                # and the loop breaks HERE rather than through the pass-branch
+                # below. Mirror that flush so the re-generated CITED tokens
+                # buffered during the repair reach the consumer. Without it the
+                # user keeps the original UNCITED streamed answer (or a blank one
+                # when a repair round emitted a live response_clear) while the
+                # CitationVerdict record, computed on the final emitted_text,
+                # reports ``cited`` (answer/verdict divergence). Flush then clear
+                # so a later break can never re-emit a stale buffer.
+                for buffered in repair_token_buffer:
+                    yield buffered
+                repair_token_buffer = []
                 break
             yield RuntimeEvent(type="status", payload=pre_final_gate, turn_id=turn_id)
             if pre_final_gate["decision"] != "block":
@@ -3228,6 +3248,9 @@ class MagiEngineDriver:
                     },
                     turn_id=turn_id,
                 )
+                # Retain the suppressed attempt so a subsequent citation
+                # fail-open can restore a coherent answer (never blank).
+                last_repair_buffer = list(repair_token_buffer)
                 repair_token_buffer = []
                 repair_output_suppressed = True
 
@@ -3250,6 +3273,12 @@ class MagiEngineDriver:
                 # notice (soft-append precedent). The turn always completes.
                 citation_repair = pre_final_gate.get("citationRepair")
                 if isinstance(citation_repair, Mapping) and citation_repair.get("kind"):
+                    # P2 follow-up: if ``_evaluate_citation_gate_for_turn``
+                    # returns None here (registry vanished mid-turn), the notice
+                    # still streams but ``_emit_citation_verdict_record`` writes
+                    # nothing (no CitationGateResult). A minimal synthetic
+                    # failOpen record would close that observability gap; left as
+                    # a follow-up to avoid widening this branch.
                     final_result = self._evaluate_citation_gate_for_turn(
                         session_id=session_id,
                         turn_id=turn_id,
@@ -3265,27 +3294,37 @@ class MagiEngineDriver:
                         fail_open=True,
                     )
                     citation_record_emitted = True
-                    if not repair_output_suppressed:
+                    # Fail-open keeps a coherent answer. A prior repair round's
+                    # LIVE response_clear may have blanked the UI while that
+                    # round's tokens were suppressed on the re-block; flush the
+                    # last attempt so the hedge notice follows a real answer
+                    # rather than leaving a blank turn (answer==verdict, no-blank
+                    # invariant). When no repair round ran (buffer never
+                    # suppressed) this is empty and the primary live answer
+                    # already stands, so the notice is a pure suffix as before.
+                    for buffered in last_repair_buffer:
+                        yield buffered
+                    last_repair_buffer = []
+                    yield RuntimeEvent(
+                        type="status",
+                        payload={
+                            "type": "source_citation_fail_open",
+                            "turnId": turn_id,
+                            "repairAttempts": citation_repair_attempts,
+                            "inducedSearch": citation_induced_search,
+                        },
+                        turn_id=turn_id,
+                    )
+                    notice = str(citation_repair.get("failOpenNotice") or "")
+                    if notice:
                         yield RuntimeEvent(
-                            type="status",
+                            type="token",
                             payload={
-                                "type": "source_citation_fail_open",
-                                "turnId": turn_id,
-                                "repairAttempts": citation_repair_attempts,
-                                "inducedSearch": citation_induced_search,
+                                "type": "text_delta",
+                                "delta": "\n\n" + notice,
                             },
                             turn_id=turn_id,
                         )
-                        notice = str(citation_repair.get("failOpenNotice") or "")
-                        if notice:
-                            yield RuntimeEvent(
-                                type="token",
-                                payload={
-                                    "type": "text_delta",
-                                    "delta": "\n\n" + notice,
-                                },
-                                turn_id=turn_id,
-                            )
                     yield EngineResult(  # type: ignore[misc]
                         terminal=Terminal.completed,
                         usage=usage,
