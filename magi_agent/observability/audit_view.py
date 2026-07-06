@@ -117,6 +117,15 @@ def _project_verdict(event: Mapping[str, Any]) -> dict[str, Any]:
     status = _first_str(raw_status, verdict_hint) or "unknown"
 
     source_type = _first_str(payload.get("sourceType"), payload.get("source_type"))
+    # source_citation.gate rows (Wave 4b): the event ``verdict`` stays a valid
+    # RuleVerdict for the generic rule_check machinery, while the raw citation
+    # verdict (cited/partial/uncited) rides a dedicated ``citationVerdict``
+    # scalar. Prefer it for label selection so the Audit tab renders the
+    # citation-governance vocabulary rather than generic pass/violation.
+    if source_type == "citation":
+        citation_status = _first_str(payload.get("citationVerdict"))
+        if citation_status is not None:
+            status = citation_status
     display_label = verdict_to_display_label(status, source_type=source_type)
 
     subject_raw = _first_str(
@@ -133,6 +142,14 @@ def _project_verdict(event: Mapping[str, Any]) -> dict[str, Any]:
         payload.get("public_summary"),
     )
 
+    # Citation gate affordances (repaired / induced search / fail-open) ride a
+    # dedicated ``affordances`` list, glanceable next to the verdict badge rather
+    # than buried in the collapsed detail region. Empty for every non-citation
+    # row, so generic rows are unaffected.
+    affordances = (
+        _citation_affordance_codes(payload) if source_type == "citation" else []
+    )
+
     return {
         "id": str(event.get("id")) if event.get("id") is not None else None,
         "kind": event.get("kind"),
@@ -141,9 +158,28 @@ def _project_verdict(event: Mapping[str, Any]) -> dict[str, Any]:
         "severity": classify_verdict_severity(display_label),
         "subject": public_projection_safe_text(subject_raw) if subject_raw else None,
         "reasonCodes": _reason_codes(payload),
+        "affordances": affordances,
         "summary": public_projection_safe_text(summary_raw) if summary_raw else "",
         "evidenceRefs": _evidence_refs(payload),
     }
+
+
+def _citation_affordance_codes(payload: Mapping[str, Any]) -> list[str]:
+    """Human-readable chips for the citation gate's scalar affordances.
+
+    Reads only the flat scalar fields the observability projector preserves
+    (``project_public_event`` drops nested structures), so ``violations`` (a
+    list of dicts) is intentionally NOT surfaced here.
+    """
+    codes: list[str] = []
+    attempts = payload.get("repairAttempts")
+    if isinstance(attempts, int) and not isinstance(attempts, bool) and attempts > 0:
+        codes.append(f"repaired ({attempts})" if attempts > 1 else "repaired")
+    if payload.get("inducedSearch") is True:
+        codes.append("induced search")
+    if payload.get("failOpen") is True:
+        codes.append("fail-open")
+    return codes
 
 
 def _reason_codes(payload: Mapping[str, Any]) -> list[str]:

@@ -42,9 +42,28 @@ MISSING = "MISSING"
 PENDING = "PENDING"
 UNKNOWN = "UNKNOWN"
 
+# Source-citation gate labels (Wave 4b). The source_citation.gate producer emits
+# a rule_check-family observability event tagged source_type="citation"; its raw
+# citation verdict (cited/partial/uncited) projects to these dedicated labels so
+# the Audit tab renders the same citation-governance vocabulary the Wave 3b
+# client projection used, rather than the generic pass/violation labels.
+SOURCES_CITED = "SOURCES CITED"
+PARTIALLY_CITED = "PARTIALLY CITED"
+UNCITED_CLAIMS = "UNCITED CLAIMS"
+
 # Statuses that count as a "pass" for the reviewer special-case below. A reviewer
 # event with any NON-pass status projects to REJECTED BY REVIEWER.
 _PASS_STATUSES: frozenset[str] = frozenset({"pass", "passed", "ok"})
+
+# Raw citation-verdict value (source_type == "citation") -> canonical label. The
+# source_citation gate never emits ``not_applicable`` to the Audit surface (a
+# no-source turn produces no enforcement row), so only the three actionable
+# verdicts are mapped here.
+_CITATION_VERDICT_TO_LABEL: dict[str, str] = {
+    "cited": SOURCES_CITED,
+    "partial": PARTIALLY_CITED,
+    "uncited": UNCITED_CLAIMS,
+}
 
 # Normalized (lowercased) status string -> canonical display label.
 _STATUS_TO_LABEL: dict[str, str] = {
@@ -94,6 +113,11 @@ _SEVERITY_BY_LABEL: dict[str, str] = {
     MISSING: "review",
     PENDING: "info",
     UNKNOWN: "info",
+    # Source-citation gate: a fully cited answer passes; partial or uncited are
+    # review-worthy (never a hard deny, the gate is advisory/fail-open).
+    SOURCES_CITED: "pass",
+    PARTIALLY_CITED: "review",
+    UNCITED_CLAIMS: "review",
 }
 
 # ---------------------------------------------------------------------------
@@ -146,9 +170,17 @@ def verdict_to_display_label(status: str, *, source_type: str | None = None) -> 
     statuses project to ``UNKNOWN``.
     """
     normalized = (status or "").strip().lower()
-    if source_type is not None and source_type.strip().lower() == "reviewer":
+    source = source_type.strip().lower() if source_type is not None else ""
+    if source == "reviewer":
         if normalized not in _PASS_STATUSES:
             return REJECTED_BY_REVIEWER
+    if source == "citation":
+        # ``normalized`` is the raw citation verdict (cited/partial/uncited). An
+        # unrecognized value falls back to the generic status map so the row is
+        # never lost.
+        citation_label = _CITATION_VERDICT_TO_LABEL.get(normalized)
+        if citation_label is not None:
+            return citation_label
     return _STATUS_TO_LABEL.get(normalized, UNKNOWN)
 
 

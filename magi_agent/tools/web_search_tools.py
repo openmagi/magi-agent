@@ -383,6 +383,18 @@ def web_fetch(url: str) -> str:
 _SearchFn = Callable[[str], dict[str, object]]
 #: Type alias for the injectable fetch callable used by research_fact.
 _FetchFn = Callable[[str], dict[str, object]]
+#: Type alias for the injectable citation id-assigner (kind, url, title) -> src_N
+#: or None. Wave 2 (design 7.4): when the source-citation harness is on the
+#: handler passes a registry-backed assigner so each brief line carries a
+#: session-scoped ``src_N`` the model can cite. Default is a no-op (None) that
+#: preserves the numeric ``[i]`` brief lines byte-identically.
+_AssignIdFn = Callable[[str, str, "str | None"], "str | None"]
+
+#: One-line instruction added to the brief header when ids were assigned. Static
+#: text; the example id is illustrative and never a real assigned id.
+_RESEARCH_FACT_CITATION_LINE = (
+    "Cite these ids inline when you use a figure, e.g. [src_12]."
+)
 
 
 def research_fact(
@@ -392,6 +404,7 @@ def research_fact(
     fetch_fn: _FetchFn = web_fetch_raw,
     n: int = 3,
     per_fetch_timeout: float = 30.0,
+    assign_id: _AssignIdFn | None = None,
 ) -> str:
     """Research a factual question by consulting multiple web sources in parallel.
 
@@ -491,12 +504,27 @@ def research_fact(
 
     # Assemble brief from successful fetches (preserve original order)
     successful = 0
+    cited_any = False
     for entry in fetch_results:
         if entry is None:
             continue
         idx, url, content, latency = entry
         if content is not None:
-            header = f"[{successful + 1}] {url}"
+            # Wave 2: ask the injected assigner for a session-scoped src_N. A
+            # truthy id replaces the numeric index; a None (or no assigner)
+            # falls back to the baseline ``[i]`` line so flag-off is
+            # byte-identical.
+            marker = None
+            if assign_id is not None:
+                try:
+                    marker = assign_id("web_fetch", url, None)
+                except Exception:  # noqa: BLE001
+                    marker = None
+            if marker:
+                header = f"[{marker}] {url}"
+                cited_any = True
+            else:
+                header = f"[{successful + 1}] {url}"
             if receipts_on and latency is not None:
                 header += f" (latency_ms={latency})"
             source_briefs.append(f"{header}\n{content}")
@@ -504,7 +532,13 @@ def research_fact(
 
     if source_briefs:
         body = "\n\n---\n\n".join(source_briefs)
+        # Wave 2: the one-line citation instruction rides ALONGSIDE the existing
+        # guidance header/footer (compose, not fight). It appears only when at
+        # least one line carries an assigned src_N.
+        citation_line = _RESEARCH_FACT_CITATION_LINE if cited_any else ""
         if not _guidance_enabled():
+            if citation_line:
+                return f"{citation_line}\n\n{body}"
             return body  # baseline bytes, default path
         header = (
             f"research_fact brief — question: {question}\n"
@@ -515,6 +549,8 @@ def research_fact(
                 else ""
             )
         )
+        if citation_line:
+            header = f"{header}\n{citation_line}"
         footer = (
             "Cross-check: compare the specific values/claims across the sources above "
             "BEFORE answering. If sources disagree, state the disagreement and prefer "
@@ -574,6 +610,51 @@ _WEB_RESEARCH_GUIDANCE = (
     "Never present a single-source value as settled fact when sources conflict.\n"
     "</web_research>"
 )
+
+
+#: Static ``<source_citation>`` system-prompt fragment (Wave 2, design 9.3/13).
+#: FIXED BYTES: no session ids, no source lists, no counts, so the cached prompt
+#: prefix stays hit-stable across turns and sessions. Dynamic ids only ever
+#: enter through post-prefix tool-result content, never here.
+_SOURCE_CITATION_GUIDANCE = (
+    "<source_citation>\n"
+    "External reads (web search, web fetch, knowledge base, browser, document\n"
+    "reads) are tagged with a stable citation id shown in the tool result, of\n"
+    "the form [src_N] (for example [src_3]). When you state a fact you got from\n"
+    "one of those sources, cite it inline as [src_N] immediately after the\n"
+    "claim.\n"
+    "Rules:\n"
+    "1. Only cite an id that actually appeared in a tool result this session.\n"
+    "   Never invent an id.\n"
+    "2. Prefer searching before asserting specific figures, dates, names, or\n"
+    "   quoted statistics. If you do not have a source for a specific figure,\n"
+    "   look it up first, then cite it.\n"
+    "3. Attach the id to the sentence that uses the figure, not to a distant\n"
+    "   sentence.\n"
+    "</source_citation>"
+)
+
+
+def source_citation_guidance_block(env: Mapping[str, str] | None = None) -> str:
+    """Static ``<source_citation>`` system-prompt fragment.
+
+    Returns the FIXED guidance bytes when ``MAGI_SOURCE_CITATION_ENABLED`` is
+    truthy (profile-aware default-ON), else ``""``. The block carries no session
+    ids, source lists, or counts, so appending it to the stable system-prompt
+    region does not thrash the prompt-cache prefix (design 13). Fail-open:
+    ``""`` on any error so prompt assembly never breaks.
+    """
+    try:
+        from magi_agent.config.env import (  # noqa: PLC0415
+            parse_source_citation_enabled,
+        )
+
+        source: Mapping[str, str] = os.environ if env is None else env
+        if not parse_source_citation_enabled(source):
+            return ""
+        return _SOURCE_CITATION_GUIDANCE
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def web_research_guidance_block(env: Mapping[str, str] | None = None) -> str:

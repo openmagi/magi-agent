@@ -194,3 +194,34 @@ def test_enforcement_kinds_membership() -> None:
 )
 def test_non_enforcement_kinds(kind: str) -> None:
     assert is_enforced_kind(kind) is False
+
+
+# ---------------------------------------------------------------------------
+# Source-citation gate labels (Wave 4b Piece E)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "citation_verdict,expected_label,expected_severity",
+    [
+        ("cited", "SOURCES CITED", "pass"),
+        ("partial", "PARTIALLY CITED", "review"),
+        ("uncited", "UNCITED CLAIMS", "review"),
+    ],
+)
+def test_citation_source_type_labels(
+    citation_verdict: str, expected_label: str, expected_severity: str
+) -> None:
+    label = verdict_to_display_label(citation_verdict, source_type="citation")
+    assert label == expected_label
+    assert classify_verdict_severity(label) == expected_severity
+
+
+def test_citation_source_type_case_insensitive() -> None:
+    assert verdict_to_display_label("CITED", source_type="Citation") == "SOURCES CITED"
+
+
+def test_citation_unknown_verdict_falls_back_to_status_map() -> None:
+    # An unrecognized citation value degrades to the generic status map rather
+    # than dropping the row (ok -> VERIFIED).
+    assert verdict_to_display_label("ok", source_type="citation") == "VERIFIED"

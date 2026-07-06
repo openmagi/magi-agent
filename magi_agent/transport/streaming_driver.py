@@ -85,6 +85,7 @@ async def drive_streaming_chat(
     session_id: str,
     turn_id: str,
     usage_recorder: "Callable[[EngineResult], None] | None" = None,
+    citation_registry_provider: "Callable[[str], object | None] | None" = None,
 ) -> AsyncIterator[bytes]:
     """Drive one turn and yield its SSE byte frames, interleaving control events.
 
@@ -193,6 +194,7 @@ async def drive_streaming_chat(
         if phase_frame is not None:
             yield phase_frame
 
+        visible_text_parts: list[str] = []
         while True:
             item = await queue.get()
             if item is _END:
@@ -204,6 +206,18 @@ async def drive_streaming_chat(
             # mid-stream): skip anything unexpected and keep draining.
             if not isinstance(item, RuntimeEvent):
                 continue
+            # Wave 3a source-citation: accumulate the model's visible text so the
+            # terminal frame can project inline ``src_N`` markers into a
+            # ``citations`` payload. Cheap append; only used when a citation
+            # registry provider is wired (else discarded).
+            if citation_registry_provider is not None and item.type == "token":
+                from magi_agent.engine.event_projection import (  # noqa: PLC0415
+                    token_text,
+                )
+
+                piece = token_text(item.payload)
+                if piece:
+                    visible_text_parts.append(piece)
             frame = frame_for_event(item)
             if frame is not None:
                 yield frame
@@ -221,7 +235,25 @@ async def drive_streaming_chat(
             # Usage accounting must never break the live stream — swallow any fault.
             with contextlib.suppress(Exception):
                 usage_recorder(terminal)
-        for chunk in frame_for_terminal(terminal):
+        # Wave 3a source-citation: compose the terminal ``citations`` payload
+        # from the accumulated visible text and the live session registry. Every
+        # step is fail-quiet: a citation fault must never break the terminal
+        # frame. ``citation_registry_provider`` returns None when the flag is off
+        # (the collector gates ``source_registry_for``), so this stays
+        # byte-identical to the pre-citation frame on the default-OFF path.
+        citations = None
+        if citation_registry_provider is not None:
+            with contextlib.suppress(Exception):
+                registry_obj = citation_registry_provider(session_id)
+                if registry_obj is not None:
+                    from magi_agent.evidence.citation_render import (  # noqa: PLC0415
+                        citations_payload_for,
+                    )
+
+                    citations = citations_payload_for(
+                        "".join(visible_text_parts), registry_obj
+                    )
+        for chunk in frame_for_terminal(terminal, citations=citations):
             yield chunk
     finally:
         # If the CLIENT disconnected / the generator was closed early, request a

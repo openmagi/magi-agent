@@ -98,6 +98,14 @@ class LocalToolEvidenceCollector:
         # the first-party turn count WITHOUT touching non-first-party (tool
         # receipt) records that share the same (session, turn) key.
         self._first_party_turns: dict[tuple[str, str], None] = {}
+        # Session-scoped source registries for MAGI_SOURCE_CITATION_ENABLED.
+        # Keyed by session_id. One registry per session, created lazily on first
+        # tool result with citation enabled.
+        self._session_source_registries: dict[str, object] = {}
+        # Per-session authored paths: files created/edited by the agent this
+        # session. FileRead of an authored path is NOT registered as a source.
+        # Fed by codingMutationReceipt entries and write tool arguments.
+        self._session_authored_paths: dict[str, set[str]] = {}
 
     def record_tool_result(
         self,
@@ -108,6 +116,7 @@ class LocalToolEvidenceCollector:
         tool_name: str,
         result: ToolResult | Mapping[str, object],
         arguments: Mapping[str, object] | None = None,
+        precomputed_citation_records: list[object] | None = None,
     ) -> tuple[object, ...]:
         tool_result = (
             result if isinstance(result, ToolResult) else ToolResult.model_validate(result)
@@ -124,6 +133,51 @@ class LocalToolEvidenceCollector:
         )
         records.extend(explicit_records)
 
+        # UPDATE authored-paths set from coding mutation receipts (for file exclusion).
+        # Must happen BEFORE citation capture so a FileRead in the same batch
+        # after an edit correctly excludes the edited file. Wave 4b (Piece F):
+        # the authored-paths bookkeeping only matters for citation capture, so
+        # gate it on the citation master switch (byte-identical OFF path: no
+        # authored-paths mutation) and wrap it in its own fail-quiet try/except
+        # so a malformed receipt can never break a tool result.
+        if _source_citation_enabled():
+            try:
+                _update_authored_paths(
+                    authored_paths=self._session_authored_paths.setdefault(
+                        session_id, set()
+                    ),
+                    tool_result=tool_result,
+                    tool_name=tool_name,
+                    arguments=arguments or {},
+                )
+            except Exception:
+                pass
+
+        # Citation capture (MAGI_SOURCE_CITATION_ENABLED, profile-aware default-ON).
+        # Single-registration invariant (Wave 2): the wrap point may have already
+        # classified + registered + re-injected this result via
+        # ``register_and_inject_sources`` and passed the producer_control records
+        # in as ``precomputed_citation_records``. In that case DO NOT re-register
+        # (dedup would return the same ids, but re-running register is wasteful and
+        # could trip revision tracking); just append the precomputed records. An
+        # already-injected result reaching here WITHOUT precomputed records (a
+        # belt-and-suspenders case) is likewise skipped. Only the Wave 1 direct
+        # path (no injection, no precomputed) classifies + registers here.
+        if precomputed_citation_records is not None:
+            records.extend(precomputed_citation_records)
+        elif not _result_already_injected(tool_result):
+            citation_records = _citation_capture_records(
+                session_id=session_id,
+                turn_id=turn_id,
+                tool_call_id=tool_call_id,
+                tool_name=tool_name,
+                tool_result=tool_result,
+                arguments=arguments or {},
+                registries=self._session_source_registries,
+                authored_paths=frozenset(self._session_authored_paths.get(session_id, set())),
+            )
+            records.extend(citation_records)
+
         # Source-ledger projection (default-OFF
         # MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED). A read-only source tool
         # (FileRead / DocumentRead / Glob / Grep / GitDiff) records inspected
@@ -133,9 +187,12 @@ class LocalToolEvidenceCollector:
         # pre-final gate's source-evidence ref had no live producer and a real
         # source-read still blocked. This projects each inspected SourceInspection
         # source into an EvidenceRecord using the EXISTING
-        # ``SourceLedgerRecord.to_evidence_record()`` — no new evidence shape.
+        # ``SourceLedgerRecord.to_evidence_record()`` -- no new evidence shape.
         # When the flag is OFF this is skipped entirely so ``_records`` is
-        # byte-identical to main.
+        # byte-identical to main. The projection's ``sourceId`` is allocated
+        # per call by ``core_toolhost._synthesized_source_projection`` (unique,
+        # deterministic, correct per-tool kind), so no id remap is needed in ANY
+        # flag combination.
         records.extend(
             _projected_source_inspection_records(tool_result.metadata)
         )
@@ -175,6 +232,114 @@ class LocalToolEvidenceCollector:
             status=tool_result.status,
         )
         return tuple(records)
+
+    def register_and_inject_sources(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        tool_call_id: str,
+        tool_name: str,
+        result: ToolResult | Mapping[str, object],
+        arguments: Mapping[str, object] | None = None,
+    ) -> tuple[object, list[object]]:
+        """Wave 2 wrap-point entry: classify + register (once) + re-inject ids.
+
+        Called at the tool-dispatch wrap point AFTER the tool runs and BEFORE
+        ``record_tool_result``. It (1) classifies the external-read sources,
+        (2) registers each in the session registry assigning a stable ``src_N``
+        EXACTLY once, (3) rewrites the model-facing result dict to carry those
+        ids (per design 7.4), and returns ``(injected_result, records)`` where
+        ``records`` are the producer_control EvidenceRecords. The caller then
+        passes ``records`` to ``record_tool_result`` as
+        ``precomputed_citation_records`` so the single-registration invariant
+        holds (record_tool_result never re-registers).
+
+        Fail-quiet: on any error, or when citation is disabled, or when the tool
+        failed, returns ``(result, [])`` unchanged (byte-identical)."""
+        try:
+            if not _source_citation_enabled():
+                return result, []
+            status = (
+                result.get("status")
+                if isinstance(result, Mapping)
+                else getattr(result, "status", None)
+            )
+            if status != "ok":
+                return result, []
+            tool_result = (
+                result
+                if isinstance(result, ToolResult)
+                else ToolResult.model_validate(result)
+            )
+            # Mirror record_tool_result ordering: refresh authored paths BEFORE
+            # citation classification so a read of a just-authored file is
+            # excluded. Sets are idempotent, so record_tool_result re-adding is
+            # harmless.
+            _update_authored_paths(
+                authored_paths=self._session_authored_paths.setdefault(session_id, set()),
+                tool_result=tool_result,
+                tool_name=tool_name,
+                arguments=arguments or {},
+            )
+            pairs, records = _classify_register_and_records(
+                session_id=session_id,
+                turn_id=turn_id,
+                tool_call_id=tool_call_id,
+                tool_name=tool_name,
+                tool_result=tool_result,
+                arguments=arguments or {},
+                registries=self._session_source_registries,
+                authored_paths=frozenset(
+                    self._session_authored_paths.get(session_id, set())
+                ),
+            )
+            if not pairs:
+                return result, records
+            from magi_agent.evidence.citation_injection import (  # noqa: PLC0415
+                InjectedSource,
+                inject_citation_headers,
+            )
+
+            entries = [
+                InjectedSource(
+                    source_id=record.source_id,
+                    kind=spec.kind,
+                    uri=spec.uri,
+                    title=spec.title,
+                    snippet=(spec.snippets[0] if spec.snippets else None),
+                )
+                for spec, record in pairs
+            ]
+            result_dict = (
+                dict(result)
+                if isinstance(result, Mapping)
+                else tool_result.model_dump(by_alias=True)
+            )
+            injected = inject_citation_headers(tool_name, result_dict, entries)
+            return injected, records
+        except Exception:
+            return result, []
+
+    def source_registry_for(self, session_id: str) -> object | None:
+        """Return the session's ``SessionSourceRegistry`` (creating it) when
+        citation is enabled; ``None`` otherwise.
+
+        Threaded onto ``ToolContext.citation_registry`` so handlers that render
+        their own per-source ids (``research_fact``) can allocate session-global
+        ``src_N`` through the same registry. Fail-quiet -> ``None``."""
+        try:
+            if not _source_citation_enabled():
+                return None
+            from magi_agent.evidence.citation_registry import (  # noqa: PLC0415
+                SessionSourceRegistry,
+            )
+
+            return self._session_source_registries.setdefault(
+                session_id, SessionSourceRegistry(session_id=session_id)
+            )
+        except Exception:
+            return None
 
     def record_first_party_activity(
         self,
@@ -538,6 +703,7 @@ class LocalToolEvidenceCollector:
         tool_name: str,
         record: object,
         tool_call_id: str | None = None,
+        producing_rule_id: str = "",
     ) -> None:
         """Append a pre-built audit ``EvidenceRecord`` AND durably persist it.
 
@@ -553,11 +719,16 @@ class LocalToolEvidenceCollector:
         append always happens so the gate still sees the record.
 
         Runtime-control write path, so the record is stamped
-        ``origin="producer_control"`` with an empty ``producing_rule_id`` (an
-        audit record is not a producer binding, so it can never satisfy a
-        session gate's producer-id match).
+        ``origin="producer_control"``. ``producing_rule_id`` defaults to empty
+        (the historical audit posture: an audit record is not a producer binding
+        and can never satisfy a session gate's producer-id match). A caller may
+        pass a NON-unlock rule identity (e.g. ``source_citation.gate``, a verdict
+        producer that no gate ever unlocks on) so the durable record carries its
+        first-party rule id for audit/display; this stays safe because the unlock
+        join in :meth:`has_unlock_evidence` matches only the specific bound
+        producer id, which is never a verdict rule id.
         """
-        stamped = _as_producer_control(record)
+        stamped = _as_producer_control(record, producing_rule_id)
         self._records.setdefault((session_id, turn_id), []).append(stamped)
         try:
             status = str(getattr(stamped, "status", "ok"))
@@ -674,14 +845,171 @@ def _source_ledger_evidence_gate_enabled() -> bool:
     return parse_source_ledger_evidence_gate_enabled(os.environ)
 
 
+def _source_citation_enabled() -> bool:
+    import os  # noqa: PLC0415
+
+    from magi_agent.config.env import parse_source_citation_enabled  # noqa: PLC0415
+
+    return parse_source_citation_enabled(os.environ)
+
+
+def _update_authored_paths(
+    authored_paths: set[str],
+    tool_result: ToolResult,
+    tool_name: str,
+    arguments: Mapping[str, object],
+) -> None:
+    """Add file paths written/edited by the agent to the authored-paths set.
+
+    Called BEFORE citation capture so a FileRead after an edit correctly
+    excludes the just-edited file from source registration.
+    """
+    if tool_result.status != "ok":
+        return
+    # From codingMutationReceipt in tool metadata
+    receipt = tool_result.metadata.get("codingMutationReceipt")
+    if isinstance(receipt, Mapping):
+        path = (
+            receipt.get("filePath")
+            or receipt.get("file_path")
+            or receipt.get("path")
+        )
+        if isinstance(path, str) and path:
+            authored_paths.add(path)
+    # From arguments for write tools
+    if tool_name in {"FileWrite", "FileEdit", "PatchApply", "file_write", "file_edit"}:
+        path = (
+            arguments.get("path")
+            or arguments.get("file_path")
+            or arguments.get("filepath")
+        )
+        if isinstance(path, str) and path:
+            authored_paths.add(path)
+
+
+def _result_already_injected(tool_result: ToolResult) -> bool:
+    """True when a result already carries the Wave 2 ``citation.injected`` marker.
+
+    Guards the single-registration invariant: an already-injected result must
+    never be classified + registered a second time by ``record_tool_result``.
+    """
+    try:
+        citation = tool_result.metadata.get("citation")
+        return isinstance(citation, Mapping) and bool(citation.get("injected"))
+    except Exception:
+        return False
+
+
+def _classify_register_and_records(
+    *,
+    session_id: str,
+    turn_id: str,
+    tool_call_id: str,
+    tool_name: str,
+    tool_result: ToolResult,
+    arguments: Mapping[str, object],
+    registries: dict[str, object],
+    authored_paths: frozenset[str],
+) -> tuple[list[tuple[object, object]], list[object]]:
+    """Classify + register sources (assigning ids ONCE) and build records.
+
+    Returns ``(pairs, records)`` where ``pairs`` is a list of
+    ``(CaptureSpec, SourceLedgerRecord)`` for the sources that registered, and
+    ``records`` is the matching list of producer_control EvidenceRecords. The
+    single site that calls ``registry.register`` for the ambient capture path,
+    so both the Wave 1 direct path and the Wave 2 wrap point register exactly
+    once. Fail-quiet: returns ``([], [])`` on any error.
+    """
+    try:
+        from magi_agent.evidence.citation_registry import SessionSourceRegistry  # noqa: PLC0415
+        from magi_agent.evidence.citation_capture import (  # noqa: PLC0415
+            classify_tool_result_for_citation,
+        )
+
+        registry: SessionSourceRegistry = registries.setdefault(  # type: ignore[assignment]
+            session_id, SessionSourceRegistry(session_id=session_id)
+        )
+        specs = classify_tool_result_for_citation(
+            tool_name,
+            tool_result,
+            arguments,
+            authored_paths=authored_paths,
+        )
+        pairs: list[tuple[object, object]] = []
+        citation_ev_records: list[object] = []
+        for spec in specs:
+            record = registry.register(
+                spec.kind,
+                spec.uri,
+                turn_id=turn_id,
+                tool_name=tool_name,
+                tool_use_id=tool_call_id,
+                title=spec.title,
+                content_hash=spec.content_hash,
+                trust_tier=spec.trust_tier,
+                snippets=spec.snippets,
+                metadata=spec.metadata,
+                inspected=spec.inspected,
+            )
+            if record is None:
+                continue
+            pairs.append((spec, record))
+            ev = record.to_evidence_record()
+            citation_ev_records.append(
+                _as_producer_control(ev, "source_citation.capture")
+            )
+        return pairs, citation_ev_records
+    except Exception:
+        return [], []
+
+
+def _citation_capture_records(
+    *,
+    session_id: str,
+    turn_id: str,
+    tool_call_id: str,
+    tool_name: str,
+    tool_result: ToolResult,
+    arguments: Mapping[str, object],
+    registries: dict[str, object],
+    authored_paths: frozenset[str],
+) -> list[object]:
+    """Wave 1 direct path: classify + register + return producer_control records.
+
+    Returns [] when citation is disabled or an error occurs (fail-quiet).
+    """
+    try:
+        if not _source_citation_enabled():
+            return []
+        if tool_result.status != "ok":
+            return []
+        _pairs, records = _classify_register_and_records(
+            session_id=session_id,
+            turn_id=turn_id,
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            tool_result=tool_result,
+            arguments=arguments,
+            registries=registries,
+            authored_paths=authored_paths,
+        )
+        return records
+    except Exception:
+        return []
+
+
 def _projected_source_inspection_records(
     metadata: Mapping[str, object],
 ) -> list[object]:
     """Project a read-only tool's source-ledger report into EvidenceRecords.
 
-    Default-OFF behind ``MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED``; returns
-    ``[]`` (byte-identical to main) when the flag is off, when the result has no
-    ``sourceProjection``, or when nothing was inspected.
+    Active when EITHER the legacy research-recipe gate
+    ``MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED`` OR the citation master switch
+    ``MAGI_SOURCE_CITATION_ENABLED`` is on (design 14, Wave 1 deferral): the
+    citation capture path wants read-only-host SourceInspection sources projected
+    into the corpus the pre-final gate reads, without depending on the legacy
+    research flag. Returns ``[]`` (byte-identical to main) when BOTH are off, when
+    the result has no ``sourceProjection``, or when nothing was inspected.
 
     Reuses the EXISTING ``SourceLedgerRecord.to_evidence_record()`` (which
     returns ``EvidenceRecord(type="SourceInspection")``) — it reconstructs a
@@ -689,7 +1017,7 @@ def _projected_source_inspection_records(
     Only ``inspected`` ``SourceInspection`` sources are surfaced. Fail-open: any
     error yields ``[]`` so a malformed projection can never wedge the turn.
     """
-    if not _source_ledger_evidence_gate_enabled():
+    if not (_source_ledger_evidence_gate_enabled() or _source_citation_enabled()):
         return []
     projection = metadata.get("sourceProjection")
     if not isinstance(projection, Mapping):

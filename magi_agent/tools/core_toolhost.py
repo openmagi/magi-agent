@@ -309,6 +309,18 @@ def _tool_call_id(
 # attached for the live path. Mirrors ``LOCAL_READONLY_TOOL_NAMES``.
 _SOURCE_INSPECTION_TOOL_NAMES = frozenset({"FileRead", "Glob", "Grep", "GitDiff"})
 
+# Per-tool SourceLedgerKind for the synthesized projection. FileRead/Glob/Grep
+# inspect workspace files (design 7.3 file row), GitDiff reads a repository
+# (external_repo). Hardcoding kind="file" for GitDiff was the old collision bug:
+# the citation classifier stores GitDiff under external_repo, so a downstream
+# lookup keyed on the projection's kind missed and the id fell back to src_1.
+_SOURCE_PROJECTION_KIND_BY_TOOL: dict[str, str] = {
+    "FileRead": "file",
+    "Glob": "file",
+    "Grep": "file",
+    "GitDiff": "external_repo",
+}
+
 
 def _source_ledger_evidence_gate_enabled() -> bool:
     from magi_agent.config.env import (  # noqa: PLC0415
@@ -318,21 +330,40 @@ def _source_ledger_evidence_gate_enabled() -> bool:
     return parse_source_ledger_evidence_gate_enabled(os.environ)
 
 
+def _synthesized_source_projection_id(outcome) -> str:
+    """Deterministic, collision-free ``src_N`` id for one source inspection.
+
+    Derived purely from the receipt tool name and ``toolCallDigest`` (which
+    encodes the tool call arguments, e.g. the file path), so two DISTINCT source
+    reads get distinct ids while the same call stays stable across evaluations.
+    No mutable counter, so it is pure and cannot collide across flag
+    combinations. Constrained to the ``src_[1-9][0-9]*`` shape the
+    SourceLedgerRecord validator and the collector projector require: the
+    56-bit hash plus one is always a positive integer with no leading zero.
+    """
+    receipt = outcome.receipt
+    seed = f"{receipt.tool_name}|{receipt.tool_call_digest}".encode()
+    digest_int = int.from_bytes(hashlib.blake2b(seed, digest_size=7).digest(), "big")
+    return f"src_{digest_int + 1}"
+
+
 def _synthesized_source_projection(outcome) -> dict[str, object] | None:
     """Build a minimal ``sourceProjection`` for a successful read-only source
     tool's Gate5BFullToolHost outcome.
 
     Root cause 2: a live FileRead runs through Gate5BFullToolHost, whose outcome
-    carries no source-ledger projection — so ``record_tool_result`` saw
+    carries no source-ledger projection, so ``record_tool_result`` saw
     ``hasSourceProj=False`` and the source-ledger gate had no SourceInspection
     record. This synthesizes exactly the shape
     ``local_tool_collector._projected_source_inspection_records`` reads (one
-    ``SourceInspection`` source with a stable ``src_N`` id, ``kind='file'``,
-    ``inspected=True``). Default-OFF behind
-    ``MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED`` so the flag-OFF metadata shape
-    is byte-identical to main. Returns ``None`` (no projection attached) when
-    the flag is off, the tool is not a source tool, or the status is not ``ok``.
-    Fail-open: any error yields ``None``.
+    ``SourceInspection`` source, ``inspected=True``). The id is allocated per
+    call by ``_synthesized_source_projection_id`` (design 9.2: no more hardcoded
+    ``src_1``), so distinct reads never share an id in ANY flag combination, and
+    the ``kind`` is the correct per-tool kind (GitDiff is ``external_repo``, not
+    ``file``). Default-OFF behind ``MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED`` so
+    the flag-OFF metadata shape is byte-identical to main. Returns ``None`` (no
+    projection attached) when the flag is off, the tool is not a source tool, or
+    the status is not ``ok``. Fail-open: any error yields ``None``.
     """
     try:
         if not _source_ledger_evidence_gate_enabled():
@@ -342,15 +373,14 @@ def _synthesized_source_projection(outcome) -> dict[str, object] | None:
             return None
         if outcome.status != "ok":
             return None
-        # ``src_N`` is the only id shape the SourceLedgerRecord validator + the
-        # collector projector accept. One inspected source per successful read.
+        kind = _SOURCE_PROJECTION_KIND_BY_TOOL.get(receipt.tool_name, "file")
         return {
             "schemaVersion": "openmagi.coreToolhostSourceProjection.v1",
             "sources": [
                 {
-                    "sourceId": "src_1",
+                    "sourceId": _synthesized_source_projection_id(outcome),
                     "evidenceType": "SourceInspection",
-                    "kind": "file",
+                    "kind": kind,
                     "inspected": True,
                     "inspectedAt": 1,
                 }

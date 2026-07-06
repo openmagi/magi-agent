@@ -8,6 +8,7 @@
 // for the frame shapes this UI actually folds.
 
 import { normalizeInspectedSource } from "./research-evidence";
+import { parseCitationsPayload } from "./citation-markers";
 import {
   appendSegmentText,
   appendSegmentThinking,
@@ -15,6 +16,7 @@ import {
 } from "./transcript-segments";
 import type {
   CitationGateStatus,
+  CitationsPayload,
   InspectedSource,
   RuntimeTrace,
   SubagentActivity,
@@ -58,6 +60,8 @@ export interface TerminalState {
   costUsd: number | null;
   error: string | null;
   sessionId: string | null;
+  /** Source-citation payload (Wave 3a), present only when the feature is on. */
+  citations: CitationsPayload | null;
 }
 
 /** Low-priority artifact / subagent / status frames, surfaced as an activity feed. */
@@ -856,6 +860,9 @@ export function foldRuntimeEvent(
         costUsd: num(p.cost_usd),
         error: str(p.error),
         sessionId: str(p.session_id),
+        // Wave 3a source-citation payload. Absent when the feature is off (no
+        // `citations` key on the frame) -> null, byte-identical to before.
+        citations: parseCitationsPayload(p.citations),
       };
       next.streaming = false;
       next.controlRequest = null;

@@ -19,6 +19,7 @@ import type {
   TaskBoardSnapshot,
   TaskBoardTask,
   CitationGateStatus,
+  CitationsPayload,
   ControlEvent,
   ControlRequestRecord,
   ControlRequestResponse,
@@ -28,7 +29,7 @@ import type {
   RuntimeTrace,
   ReasoningEffort,
 } from "@/chat-core";
-import { getResetCounter } from "@/chat-core";
+import { getResetCounter, parseCitationsPayload } from "@/chat-core";
 import { getLocalAgentBaseUrl } from "../local-auth";
 
 type LiveTurnPhase = NonNullable<ChannelState["turnPhase"]>;
@@ -1290,6 +1291,8 @@ export interface SendMessageOptions {
   onStreamActivity?: () => void;
   onPendingInjectionCount?: (queuedCount: number) => void;
   onUsage?: (usage: ResponseUsage) => void;
+  /** Source-citation payload from the terminal `turn_result` frame (Wave 3a). */
+  onCitations?: (citations: CitationsPayload) => void;
   onDone: () => void;
   onError: (error: Error) => void;
   signal?: AbortSignal;
@@ -1532,6 +1535,7 @@ export async function sendMessage(
     onStreamActivity,
     onPendingInjectionCount,
     onUsage,
+    onCitations,
     onDone,
     onError,
     signal,
@@ -2694,6 +2698,13 @@ export async function sendMessage(
         }
         try {
           const event = JSON.parse(payload);
+          // Terminal turn_result frame (Wave 3a) may carry a source-citation
+          // payload; the key is absent when the feature is off. Parse defensively
+          // so a malformed payload never breaks the stream.
+          if (event.type === "turn_result" && event.citations !== undefined) {
+            const citations = parseCitationsPayload(event.citations);
+            if (citations) onCitations?.(citations);
+          }
           // OpenAI format
           const delta = event.choices?.[0]?.delta;
           if (delta?.content && !sawAgentChannel) {

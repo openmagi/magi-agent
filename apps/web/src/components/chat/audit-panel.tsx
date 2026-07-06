@@ -15,6 +15,15 @@ interface AuditPanelProps {
   sessionId?: string | null;
 }
 
+// Source-citation governance now rides the BACKEND gate record (Wave 4b Piece
+// E). The driver's source_citation.gate producer emits a rule_check-family
+// observability event that the audit feed already carries, so it renders as a
+// normal VerdictRow keyed by subject "source_citation.gate" with its richer
+// affordances (repaired / induced search / fail-open) surfaced as reason-code
+// chips by the backend projection. The Wave 3b client-side render-verdict
+// projection was removed here so the verdict is never double-shown; the inline
+// [src_N] chips and the Sources tab (Wave 3 render, unaffected) stay as-is.
+
 // Severity → design-system badge variant. The backend (evidence/audit_labels.py)
 // is the single source of truth that maps every verdict label to one of these
 // four severities, so the panel never re-classifies — it only skins.
@@ -88,6 +97,18 @@ function VerdictRow({ verdict }: { verdict: AuditVerdict }): React.ReactElement 
               title={verdict.subject}
             >
               {elideSubject(verdict.subject)}
+            </div>
+          )}
+          {verdict.affordances.length > 0 && (
+            <div className="mt-0.5 flex flex-wrap gap-1" data-audit-affordances="true">
+              {verdict.affordances.map((affordance) => (
+                <span
+                  key={affordance}
+                  className="rounded bg-black/[0.04] px-1.5 py-0.5 text-[10px] font-medium text-secondary/60"
+                >
+                  {affordance}
+                </span>
+              ))}
             </div>
           )}
           {hasDetails && (

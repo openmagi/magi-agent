@@ -107,9 +107,24 @@ def test_cli_adk_tools_record_local_tool_receipts_for_engine_collector(tmp_path)
 
     records = collector.collect_for_turn("turn-local")
     assert result["status"] == "ok"
-    assert len(records) == 1
-    assert records[0]["schemaVersion"] == "openmagi.localToolEvidenceReceipt.v1"
-    assert records[0]["receipts"]["toolExecutionReceipt"]["toolName"] == "FileRead"
+    # With MAGI_SOURCE_CITATION_ENABLED default-ON, the wrap point re-injects a
+    # per-source header into the MODEL-FACING content (design 7.4), so the read
+    # content carries a [source: src_N] tag while still ending with the original
+    # bytes. This locks the re-injection wiring, not just the receipt count.
+    assert result["output"]["content"].startswith("[source: src_")
+    assert result["output"]["content"].rstrip().endswith("real content here")
+    # A FileRead of a pre-existing (non-authored) file also registers a
+    # source-citation SourceInspection record now that MAGI_SOURCE_CITATION_ENABLED
+    # is default-ON, so filter to the execution receipt rather than asserting a
+    # single record.
+    receipts = [
+        record
+        for record in records
+        if isinstance(record, dict)
+        and record.get("schemaVersion") == "openmagi.localToolEvidenceReceipt.v1"
+    ]
+    assert len(receipts) == 1
+    assert receipts[0]["receipts"]["toolExecutionReceipt"]["toolName"] == "FileRead"
 
 
 def test_tool_context_factory_carries_workspace_root(tmp_path, monkeypatch) -> None:

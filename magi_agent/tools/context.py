@@ -85,10 +85,41 @@ class ToolContext(BaseModel):
     secret_broker: object | None = Field(default=None, alias="secretBroker")
     adk_tool_context: object | None = Field(default=None, alias="adkToolContext")
     adk_context: object | None = Field(default=None, alias="adkContext")
+    # Wave 2 source-citation: the live SessionSourceRegistry for this session,
+    # threaded by the CLI/serve tool_context_factory when citation is enabled.
+    # Handlers that render their own per-source ids (research_fact) read this to
+    # allocate session-global ``src_N``. A live object like ``secret_broker`` /
+    # ``abort_signal``; never serialized (see ``serialize_citation_registry``).
+    citation_registry: object | None = Field(default=None, alias="citationRegistry")
+    # Wave 2 source-citation: a collector-bound sink that routes a registered
+    # source's ``EvidenceRecord`` into the same producer_control corpus web_fetch
+    # uses. Threaded by the tool_context_factory when citation is enabled; None
+    # otherwise. Handlers that register their own sources (research_fact) call it
+    # so those sources are gate-visible, not just registry-visible. A live
+    # callable like ``emit_progress``; never serialized (see serializer below).
+    citation_evidence_sink: Callable[..., object] | None = Field(
+        default=None, alias="citationEvidenceSink"
+    )
 
     @field_serializer("memory_mode")
     def serialize_memory_mode(self, value: MemoryMode) -> str:
         return value.value
+
+    @field_serializer("citation_registry")
+    def serialize_citation_registry(self, value: object) -> None:
+        # A live registry object is transport-local plumbing, not serializable
+        # state. Returning None makes ``model_dump`` emit ``citationRegistry:
+        # null`` (the key is retained with a null value, NOT dropped), which keeps
+        # a serialized ToolContext JSON-safe: the live object never leaks into
+        # serialization. (Mirrors the intent of the source_ledger serializer.)
+        return None
+
+    @field_serializer("citation_evidence_sink")
+    def serialize_citation_evidence_sink(self, value: object) -> None:
+        # Same posture as ``citation_registry``: a live callable is transport-local
+        # plumbing. Serializes as null so ``model_dump`` stays JSON-safe and the
+        # callable never leaks into serialization.
+        return None
 
     @field_validator("source_ledger", mode="before")
     @classmethod

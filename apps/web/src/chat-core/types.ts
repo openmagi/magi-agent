@@ -85,6 +85,12 @@ export interface ChatMessage {
   taskBoard?: TaskBoardSnapshot;
   /** Durable research/source evidence captured with the finalized assistant message. */
   researchEvidence?: ResearchEvidenceSnapshot;
+  /**
+   * Source-citation payload that rode the terminal ``turn_result`` frame
+   * (Wave 3a wire contract). Present only when ``MAGI_SOURCE_CITATION_ENABLED``
+   * was on for the turn; absent otherwise so flag-OFF rendering is unchanged.
+   */
+  citations?: CitationsPayload | null;
   /** Token/cost totals for the turn that produced this assistant message. */
   usage?: ResponseUsage;
   /** If present, this message was authored as a reply to another. */
@@ -209,7 +215,11 @@ export type InspectedSourceKind =
   | "file"
   | "external_repo"
   | "external_doc"
-  | "subagent_result";
+  | "subagent_result"
+  // Defensive: the Python capture classifier never emits "clock" into a
+  // citations payload, but the shared SourceLedgerKind includes it, so the
+  // display kind mirrors it to avoid a silent "external_doc" mislabel.
+  | "clock";
 
 export interface InspectedSource {
   sourceId: string;
@@ -231,6 +241,45 @@ export interface CitationGateStatus {
   verdict: "pending" | "ok" | "violation";
   detail?: string;
   checkedAt: number;
+}
+
+/**
+ * Source-citation wire contract (Wave 3a).
+ *
+ * The terminal ``turn_result`` SSE frame (and the headless NDJSON ``result``
+ * record) carry an OPTIONAL ``citations`` object, present ONLY when
+ * ``MAGI_SOURCE_CITATION_ENABLED`` is on (the key is omitted otherwise). All
+ * keys are camelCase and every field below is consumed verbatim from the wire;
+ * see ``magi_agent/evidence/citation_render.py::build_citations_payload``.
+ */
+export type CitationVerdict =
+  | "cited"
+  | "partial"
+  | "uncited"
+  | "not_applicable";
+
+/** ``[src_N, displayIndex]`` pair, first-appearance order. */
+export type CitationMarker = readonly [string, number];
+
+export interface CitationSourceEntry {
+  /** Display index ``n`` shown as ``[n]`` in the transcript. */
+  n: number;
+  /** Canonical ``src_N`` id. */
+  sourceId: string;
+  uri: string;
+  title: string | null;
+  kind: InspectedSourceKind;
+  trustTier: "primary" | "official" | "secondary" | "unknown" | null;
+  /** ``false`` = search pointer (not fetched); ``true`` = fetched / read. */
+  inspected: boolean;
+}
+
+export interface CitationsPayload {
+  markers: CitationMarker[];
+  sources: CitationSourceEntry[];
+  /** Cited ids with NO marker and NO source entry; rendered as plain text. */
+  danglingRefs: string[];
+  verdict: CitationVerdict;
 }
 
 export type ClaimSupportStatus =
@@ -502,6 +551,8 @@ export interface ChannelState {
   recipeSelection?: RecipeSelectionSummary;
   /** Final token/cost totals once the runtime commits the turn. */
   turnUsage?: ResponseUsage;
+  /** Source-citation payload from the terminal frame for the current turn. */
+  turnCitations?: CitationsPayload | null;
   /** Live public transcript items in the exact client receive order. */
   liveTranscriptItems?: LiveTranscriptItem[];
   /** True while chat-proxy is processing file attachments (KB ingest) before bot receives the message */

@@ -1683,6 +1683,62 @@ FLAGS: tuple[FlagSpec, ...] = (
             "blocks. Strict default-OFF and inert unless explicitly set."
         ),
     ),
+    _pb(
+        "MAGI_SOURCE_CITATION_ENABLED",
+        stage="stage1",
+        summary=(
+            "Master switch for the session source-citation substrate: registry, "
+            "capture, and producer_control evidence emission for all external-read "
+            "tool results. Default-ON in the full runtime profile; OFF under "
+            "safe/eval. Wave 1 of 4 (loop/surface/governance follow)."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_SOURCE_CITATION_GATE_MODE",
+        # Initial fleet default is `audit` (observe-only): capture + re-injection
+        # + inline citations + Sources panel + verdict recording all stay on, but
+        # the turn-intervening repair/induce-search is off by default. Flipping
+        # this default to `repair` is a documented follow-up once audit-mode
+        # telemetry validates the gate on the fleet.
+        default="audit",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Deterministic pre-final source-citation gate mode. `off` skips the "
+            "gate entirely; `audit` (the initial fleet default) runs the gate "
+            "observe-only (emits a custom:CitationVerdict record, never alters "
+            "the turn); `repair` additionally drives attribution / induce-search "
+            "repair with a bounded budget, then fails open with a hedge notice. "
+            "Only runs when MAGI_SOURCE_CITATION_ENABLED is on."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_SOURCE_CITATION_REPAIR_MAX_ATTEMPTS",
+        default="2",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Bounded pre-final citation repair budget (shared across attribution "
+            "and induce-search repair kinds) before the gate fails open with a "
+            "hedge notice and a failOpen:true verdict. Clamps to [1, 5]; unset / "
+            "unparseable falls back to 2. Only meaningful when "
+            "MAGI_SOURCE_CITATION_GATE_MODE=repair."
+        ),
+        kind="int",
+    ),
+    _pb(
+        "MAGI_SOURCE_CITATION_INDUCE_SEARCH_ENABLED",
+        stage="stage1",
+        summary=(
+            "Whether the citation gate may direct a web/KB search before "
+            "re-answering when high-risk claims have zero external-read sources "
+            "(the Tesla case). Profile default-ON (full); OFF under safe/eval. "
+            "The one deliberate latency-adder; fires only on that failure mode "
+            "and auto-degrades to the advisory `uncited` verdict when OFF or when "
+            "no search tool is bound (keyless install)."
+        ),
+    ),
     _b(
         "MAGI_GATE5B_GOVERNANCE_ENABLED",
         stage="stage2",

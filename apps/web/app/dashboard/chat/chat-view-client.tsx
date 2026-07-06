@@ -891,6 +891,10 @@ export function ChatViewClient({
               if (!isCurrentBot()) return;
               store.setChannelState(channel, { turnUsage: usage }, { botId });
             },
+            onCitations: (citations) => {
+              if (!isCurrentBot()) return;
+              store.setChannelState(channel, { turnCitations: citations }, { botId });
+            },
             onControlEvent: (event) => {
               useChatStore.getState().applyControlEvent(channel, event);
             },

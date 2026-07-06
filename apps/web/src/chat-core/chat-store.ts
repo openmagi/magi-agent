@@ -878,6 +878,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         activities: activities.length > 0 ? activities : undefined,
         taskBoard: taskBoard && taskBoard.tasks.length > 0 ? taskBoard : undefined,
         researchEvidence,
+        citations: state.turnCitations ?? undefined,
         usage,
       });
     }
@@ -966,6 +967,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           ...(segments ? { segments } : {}),
           taskBoard: taskBoard && taskBoard.tasks.length > 0 ? taskBoard : undefined,
           researchEvidence,
+          citations: state.turnCitations ?? undefined,
           usage,
         });
       }

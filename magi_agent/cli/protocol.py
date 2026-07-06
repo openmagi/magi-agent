@@ -14,7 +14,7 @@ from __future__ import annotations
 import uuid as _uuid
 from typing import Literal, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_serializer
 
 
 def _new_uuid() -> str:
@@ -77,6 +77,18 @@ class ResultFrame(_FrameBase):
     total_cost_usd: float = 0.0
     is_error: bool = False
     errors: list = Field(default_factory=list)
+    # Wave 3a source-citation: optional structured citations for the terminal
+    # record (same wire shape as the SSE turn_result.citations payload). Dropped
+    # entirely when None (see the serializer below) so a flag-OFF run is
+    # BYTE-IDENTICAL to the pre-citation frame, NOT ``citations: null``.
+    citations: dict | None = None
+
+    @model_serializer(mode="wrap")
+    def _drop_none_citations(self, handler):  # type: ignore[no-untyped-def]
+        data = handler(self)
+        if data.get("citations") is None:
+            data.pop("citations", None)
+        return data
 
 
 class ControlRequestFrame(_FrameBase):

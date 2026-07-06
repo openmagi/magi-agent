@@ -7,6 +7,7 @@ import remarkGfm from "remark-gfm";
 import { WorkConsolePanel } from "./work-console-panel";
 import { MissionsPanel, type MissionChannelType, type MissionFocusRequest } from "./missions-panel";
 import { AuditPanel } from "./audit-panel";
+import { SourcesPanel, type SessionCitationGroup } from "./sources-panel";
 import { useAuditEnabled } from "@/hooks/use-audit-events";
 import {
   OPEN_MISSION_LEDGER_EVENT,
@@ -58,7 +59,7 @@ const MIN_PREVIEW_HEIGHT = 80;
 const KB_PANEL_ROW_LIMIT = 20;
 
 type PanelScope = KbPanelScope | "workspace";
-export type RightInspectorView = "work" | "missions" | "knowledge" | "audit";
+export type RightInspectorView = "work" | "missions" | "knowledge" | "audit" | "sources";
 
 interface KbSidePanelProps {
   botId: string;
@@ -77,6 +78,8 @@ interface KbSidePanelProps {
   missionChannelId?: string | null;
   /** Backend observability session id for the active channel (Audit tab). */
   auditSessionId?: string | null;
+  /** Cited-source payloads for the active channel's assistant messages (Sources tab). */
+  sessionCitations?: SessionCitationGroup[];
   channelState?: ChannelState;
   queuedMessages?: QueuedMessage[];
   controlRequests?: ControlRequestRecord[];
@@ -136,7 +139,8 @@ function parseRightInspectorView(value: string | null): RightInspectorView | nul
     value === "work" ||
     value === "missions" ||
     value === "knowledge" ||
-    value === "audit"
+    value === "audit" ||
+    value === "sources"
   ) {
     return value;
   }
@@ -331,6 +335,7 @@ export function KbSidePanel({
   missionChannelType,
   missionChannelId,
   auditSessionId,
+  sessionCitations = [],
   channelState = EMPTY_CHANNEL_STATE,
   queuedMessages = [],
   controlRequests = [],
@@ -364,19 +369,30 @@ export function KbSidePanel({
   });
   const [activeView, setActiveView] =
     useState<RightInspectorView>(getInitialRightInspectorView);
-  // Fall back to "work" when a stale localStorage value selects the Audit tab
-  // but the feature is off (flag off, or bootstrap not yet resolved). The
-  // stored state is left untouched so the tab restores once the flag is on.
+  // The Sources tab appears only once the session has at least one cited source
+  // (data-driven, so flag-OFF sessions keep the existing tab set unchanged).
+  const hasSessionSources = sessionCitations.some(
+    (group) => group.citations.sources.length > 0,
+  );
+  // Fall back to "work" when a stale localStorage value selects a tab whose
+  // feature is currently off (Audit flag off, or Sources with nothing cited).
+  // The stored state is left untouched so the tab restores once it is available.
   const effectiveView: RightInspectorView =
-    activeView === "audit" && !auditEnabled ? "work" : activeView;
-  // The Audit tab only appears when the backend feature flag is on (read from
-  // the local bootstrap). Default-OFF: 3 tabs unless audit is enabled.
+    (activeView === "audit" && !auditEnabled) ||
+    (activeView === "sources" && !hasSessionSources)
+      ? "work"
+      : activeView;
+  // The Audit tab appears when the backend feature flag is on; the Sources tab
+  // appears when the session has cited sources. Default: 3 tabs.
   const inspectorTabs: Array<[RightInspectorView, string]> = [
     ["work", "Work"],
     ["missions", "Missions"],
     ["knowledge", "Knowledge"],
     ...(auditEnabled
       ? [["audit", "Audit"] as [RightInspectorView, string]]
+      : []),
+    ...(hasSessionSources
+      ? [["sources", "Sources"] as [RightInspectorView, string]]
       : []),
   ];
   const [missionFocusRequest, setMissionFocusRequest] = useState<MissionFocusRequest | null>(null);
@@ -876,7 +892,9 @@ export function KbSidePanel({
               ? "Missions"
               : effectiveView === "audit"
                 ? "Audit"
-                : "Knowledge Base"}
+                : effectiveView === "sources"
+                  ? "Sources"
+                  : "Knowledge Base"}
         </span>
         <div className="flex items-center gap-0.5">
           {/* Refresh button */}
@@ -914,7 +932,13 @@ export function KbSidePanel({
 
       <div className="px-2 pt-2">
         <div
-          className={`grid ${inspectorTabs.length === 4 ? "grid-cols-4" : "grid-cols-3"} rounded-lg bg-black/[0.04] p-0.5`}
+          className={`grid ${
+            inspectorTabs.length === 5
+              ? "grid-cols-5"
+              : inspectorTabs.length === 4
+                ? "grid-cols-4"
+                : "grid-cols-3"
+          } rounded-lg bg-black/[0.04] p-0.5`}
           role="tablist"
           aria-label="Right inspector"
         >
@@ -954,6 +978,10 @@ export function KbSidePanel({
 
       {auditEnabled && effectiveView === "audit" && (
         <AuditPanel botId={botId} sessionId={auditSessionId} />
+      )}
+
+      {effectiveView === "sources" && (
+        <SourcesPanel sessionCitations={sessionCitations} />
       )}
 
       <div

@@ -1295,7 +1295,10 @@ async def run_headless(
                     )
                 )
         result_frame = _build_result_frame(
-            session_id=sid, assistant_text=assistant_text, terminal=terminal
+            session_id=sid,
+            assistant_text=assistant_text,
+            terminal=terminal,
+            citations=_headless_citations(active_driver, sid, assistant_text),
         )
         # Turn-end memory hook (compaction + daily-log parity with the hosted SSE
         # seam). Gated + fail-soft + offloaded; no-op on the default-OFF config.
@@ -1444,7 +1447,10 @@ async def run_headless(
                     governance_mode=governance_mode,
                 )
         result_frame = _build_result_frame(
-            session_id=sid, assistant_text=assistant_text, terminal=terminal
+            session_id=sid,
+            assistant_text=assistant_text,
+            terminal=terminal,
+            citations=_headless_citations(active_driver, sid, assistant_text),
         )
         await writer.write(result_frame)
         # Turn-end memory hook (compaction + daily-log parity with the hosted SSE
@@ -1488,6 +1494,16 @@ def _text_mode_body(result_frame: ResultFrame) -> str:
     """
 
     if result_frame.result:
+        # Wave 3a source-citation: append the markdown Sources footer for the
+        # cited sources (design 12.2). Empty string when there is nothing cited,
+        # so a plain reply is unchanged. ``[src_N]`` stays inline in the reply.
+        from magi_agent.evidence.citation_render import (  # noqa: PLC0415
+            render_cli_sources_footer,
+        )
+
+        footer = render_cli_sources_footer(result_frame.citations)
+        if footer:
+            return f"{result_frame.result}\n\n{footer}"
         return result_frame.result
     if result_frame.is_error:
         detail = next((e for e in (result_frame.errors or []) if e), "unknown error")
@@ -1513,8 +1529,51 @@ def _text_mode_body(result_frame: ResultFrame) -> str:
     return ""
 
 
+def _headless_citations(
+    active_driver: object,
+    session_id: str,
+    assistant_text: str,
+) -> dict | None:
+    """Project the terminal citations payload for the CLI / headless result.
+
+    Reaches the live ``SessionSourceRegistry`` through the driver's collector
+    (``source_registry_for`` returns None when MAGI_SOURCE_CITATION_ENABLED is
+    off, so this yields None on the default-OFF path and the result frame stays
+    byte-identical). Fail-quiet: a citation fault never breaks the result frame.
+    """
+    try:
+        collector = getattr(active_driver, "local_tool_evidence_collector", None)
+        accessor = getattr(collector, "source_registry_for", None)
+        if accessor is None:
+            return None
+        registry = accessor(session_id)
+        if registry is None:
+            return None
+        from magi_agent.evidence.citation_render import (  # noqa: PLC0415
+            citations_payload_for,
+        )
+        # Route the headless payload through the SAME secret-marker scrub the SSE
+        # terminal frame uses (streaming_chat._scrub_citations), so a private-text
+        # marker in a uri/title is redacted on the headless NDJSON result frame
+        # AND the text-mode Sources footer (which is built from this payload).
+        from magi_agent.transport.streaming_chat import (  # noqa: PLC0415
+            _scrub_citations,
+        )
+
+        payload = citations_payload_for(assistant_text, registry)
+        if payload is None:
+            return None
+        return _scrub_citations(payload)
+    except Exception:
+        return None
+
+
 def _build_result_frame(
-    *, session_id: str, assistant_text: str, terminal: EngineResult
+    *,
+    session_id: str,
+    assistant_text: str,
+    terminal: EngineResult,
+    citations: dict | None = None,
 ) -> ResultFrame:
     subtype = _result_subtype(terminal.terminal, terminal.error)
     is_error = _is_error(terminal.terminal, terminal.error)
@@ -1532,6 +1591,7 @@ def _build_result_frame(
         total_cost_usd=terminal.cost_usd,
         is_error=is_error,
         errors=errors,
+        citations=citations,
     )
 
 
