@@ -734,6 +734,16 @@ async def _run_live_chat_runner(
                         user_id=GATE5B_SHADOW_USER_ID,
                         session_service=governed_session_service,
                         num_recent_events=_num_recent_events,
+                        # U9 (P1-1): mirror the legacy truncated-output
+                        # auto-continue wiring. Resolved from env at the serving
+                        # seam, gated on ``selected_full_toolhost`` exactly as the
+                        # legacy boundary (gate5b4c3:834-836). ``None`` for
+                        # non-full-toolhost routes and under the safe profile /
+                        # explicit MAGI_OUTPUT_CONTINUATION_ENABLED=0, byte-identical
+                        # to pre-U9 on those paths. The driver ctor stays env-pure.
+                        output_continuation=_resolve_output_continuation_config(
+                            generation
+                        ),
                     )
                     # 5. Build TurnContext (PR2). Suppress inline history when the
                     # durable session already holds it (U4 seed-on-empty verdict).
@@ -1193,6 +1203,35 @@ async def _client_disconnected(
 def gate5b_user_visible_chat_gate_active(runtime: OpenMagiRuntime) -> bool:
     route_config = _route_config(runtime)
     return route_config.enabled is True and _canary_gate_error(runtime, route_config) is None
+
+
+def _resolve_output_continuation_config(generation: object) -> object | None:
+    """Resolve the truncated-output continuation config for the governed path.
+
+    U9 (P1-1) parity. The legacy boundary enables output continuation ONLY for
+    ``selected_full_toolhost`` requests, reading the config from env
+    (``gate5b4c3:834-836`` -> ``_output_continuation_config_from_env`` ->
+    ``MAGI_OUTPUT_CONTINUATION_ENABLED``, profile-aware default-ON). The governed
+    ``build_hosted_runtime`` path dropped it, so long answers hitting
+    ``maxOutputTokens`` truncated mid-sentence under the flip.
+
+    This mirrors the legacy activation condition EXACTLY: gate on
+    ``selected_full_toolhost`` first, then reuse the shared env-reader
+    (``build_output_continuation_config``, identical parse to the legacy
+    ``_output_continuation_config_from_env``). The env read lives here at the
+    serving seam so ``build_hosted_runtime`` / ``MagiEngineDriver`` stay
+    env-pure and simply forward the resolved object.
+    """
+    tools_policy = getattr(
+        getattr(generation, "recipe_profile", None), "tools_policy", None
+    )
+    if tools_policy != "selected_full_toolhost":
+        return None
+    from magi_agent.engine.engine_recovery import (  # noqa: PLC0415
+        build_output_continuation_config,
+    )
+
+    return build_output_continuation_config()
 
 
 def _model_attempt_digest(
