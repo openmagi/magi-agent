@@ -53,7 +53,7 @@ from magi_agent.runtime.per_turn_goal_loop_context import (
 )
 from magi_agent.runtime.public_events import tool_end_event, tool_progress_event, tool_start_event, turn_phase_event
 from magi_agent.runtime.session_identity import _memory_mode_from_header
-from magi_agent.runtime.session_ownership import acquire_hosted_session_lease
+from magi_agent.runtime.session_ownership import acquire_hosted_session_lease, probe_session_event_count, resolve_include_history, seeded_history_message_count
 from magi_agent.shadow.gate5b4c3_live_runner_boundary import _gate1a_correlated_model_or_label, _shadow_session_id, run_gate5b4c3_live_runner_boundary_async
 from magi_agent.shadow.gate5b4c3_runner_input_adapter import build_gate5b4c3_runner_input
 from magi_agent.shadow.gate5b4c3_shadow_generation_contract import build_gate5b4c3_shadow_generation_diagnostic
@@ -664,12 +664,37 @@ async def _run_live_chat_runner(
                     governed_session_service = primitives.InMemorySessionService()
                 else:
                     governed_session_service = lease.service
-                # Capture the registry reuse verdict for later units: U4 feeds it
-                # into the seed-on-empty history probe and U8 into the continuity
-                # result fields (sessionReused). U3 stays scoped to lease acquire
-                # and release plumbing, so the local is intentionally not wired
-                # into the mapper or result yet.
-                session_reused = lease.reused if lease is not None else False  # noqa: F841
+                # Registry reuse verdict, consumed by the seed-on-empty probe
+                # (U4) below and by U8 for the continuity result field
+                # (sessionReused).
+                session_reused = lease.reused if lease is not None else False
+                # Seed-on-empty (U4 / B2): decide ONCE, at the serving seam,
+                # whether this turn's inline history must be seeded. Probe the
+                # SAME service instance the governed runner will front
+                # (governed_session_service) under the SAME legacy identity
+                # triple it runs with (app_name GATE5B_SHADOW_APP_NAME, user_id
+                # GATE5B_SHADOW_USER_ID, session_id _shadow_session_id) so the
+                # probe reads the exact row the ADK Runner reads/writes. Probing
+                # under the wrong identity would always read 0 and always seed,
+                # re-opening the #1364 double-seed (history via persisted session
+                # events AND via an inline resume prefix). The probe is fully
+                # fail-open (None -> registry verdict), and resolve_include_history
+                # suppresses only when the durable session already holds events.
+                session_event_count = await probe_session_event_count(
+                    governed_session_service,
+                    app_name=GATE5B_SHADOW_APP_NAME,
+                    user_id=GATE5B_SHADOW_USER_ID,
+                    session_id=_shadow_session_id(generation),
+                )
+                include_history = resolve_include_history(
+                    session_reused=session_reused,
+                    session_event_count=session_event_count,
+                )
+                # Observability count for U8 (the number of history messages this
+                # turn actually seeds); U8 threads it into the boundary result.
+                _seeded_message_count = (  # noqa: F841
+                    seeded_history_message_count(runner_input) if include_history else 0
+                )
                 boundary_result = None
                 try:
                     hosted_rt = build_hosted_runtime(
@@ -684,8 +709,11 @@ async def _run_live_chat_runner(
                         user_id=GATE5B_SHADOW_USER_ID,
                         session_service=governed_session_service,
                     )
-                    # 5. Build TurnContext (PR2).
-                    ctx = hosted_request_to_turn_context(generation)
+                    # 5. Build TurnContext (PR2). Suppress inline history when the
+                    # durable session already holds it (U4 seed-on-empty verdict).
+                    ctx = hosted_request_to_turn_context(
+                        generation, include_history=include_history
+                    )
                     # 6. Reuse the already-built diagnostic (built earlier in the
                     # function; same object the legacy boundary would compute).
                     # 7. Drive the turn via run_governed_turn.
