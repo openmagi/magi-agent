@@ -958,6 +958,18 @@ def register_streaming_chat_routes(
             build_headless_runtime,
             local_runner_policy_routing_enabled_from_env,
         )
+        from magi_agent.transport.local_session_registry import (  # noqa: PLC0415
+            acquire_local_session_service,
+        )
+
+        # Reuse ONE session service per channel across the per-turn engine
+        # rebuilds so ADK session events accumulate and turn N+1 sees turn N.
+        # The registry is a process-level singleton, so this per-request closure
+        # resolves to the SAME service for every turn on ``session_id``.
+        def _session_service_factory(app_name: str) -> object:
+            return acquire_local_session_service(
+                app_name=app_name, session_id=session_id
+            )
 
         # The dashboard-selected model (when present) wins over the process
         # serve config; ``None``/absent falls back to ``runtime.config.model``
@@ -993,6 +1005,7 @@ def register_streaming_chat_routes(
             runner_policy_routing_enabled=runner_policy_routing_enabled,
             memory_mode=current_memory_mode(),
             agent_event_emitter=agent_event_emitter,
+            session_service_factory=_session_service_factory,
         )
         return rt.engine, rt.gate
 
