@@ -1953,7 +1953,9 @@ def _invoke_session_reuse_turn(
 def test_session_reuse_flag_off_default_builds_fresh_service_and_never_touches_registry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("MAGI_HOSTED_SESSION_REUSE", raising=False)
+    # Reuse is profile-aware default-ON now; assert the explicit-OFF path keeps
+    # the fresh-service-per-turn behavior and never consults the registry.
+    monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "0")
     boundary = _session_reuse_boundary(_MustNotTouchRegistry())
 
     first_result, first_service, first_text = _invoke_session_reuse_turn(boundary)

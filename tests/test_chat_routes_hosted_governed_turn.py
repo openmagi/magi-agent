@@ -341,6 +341,113 @@ def test_flag_on_uses_governed_turn(monkeypatch, tmp_path: Any) -> None:
     assert response.status_code == 200, response.json()
 
 
+def test_governed_fork_fronts_durable_session_service_when_db_flag_on(
+    monkeypatch, tmp_path: Any
+) -> None:
+    """PR-3 parity: the governed fork must front the durable SqliteSessionService
+    (not a fresh per-turn InMemory) so flipping the governed flag on does not
+    regress server-side continuity."""
+    from magi_agent.shadow.hosted_session_substrate import (
+        reset_durable_hosted_session_service,
+    )
+
+    reset_durable_hosted_session_service()
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "1")
+    monkeypatch.setenv("MAGI_HOSTED_SESSION_DB", "1")
+    monkeypatch.setenv("MAGI_STATE_DIR", str(tmp_path))
+
+    captured: dict[str, object] = {}
+
+    def fake_build_hosted_runtime(**kwargs: object) -> object:
+        captured["session_service"] = kwargs.get("session_service")
+        return SimpleNamespace()
+
+    async def _noop_gen():  # noqa: ANN202
+        yield EngineResult(terminal=Terminal.completed, session_id="s", turn_id="t")
+
+    def fake_governed_turn(ctx: object, *, runtime: object, cancel: object = None):  # noqa: ANN201
+        return _noop_gen()
+
+    async def fake_collect(*args: object, **kwargs: object) -> Gate5B4C3LiveRunnerBoundaryResult:
+        return _make_boundary_result(output_text="governed answer")
+
+    monkeypatch.setattr(
+        "magi_agent.transport.gate5b_serving.build_hosted_runtime",
+        fake_build_hosted_runtime,
+    )
+    monkeypatch.setattr(
+        "magi_agent.transport.gate5b_serving.run_governed_turn", fake_governed_turn
+    )
+    monkeypatch.setattr(
+        "magi_agent.transport.gate5b_serving.collect_engine_to_boundary_result",
+        fake_collect,
+    )
+
+    runtime = _make_canary_runtime(tmp_path)
+    response = TestClient(create_app(runtime)).post(
+        "/v1/chat/completions",
+        headers=_canary_headers("b" * 64),
+        json=_CANARY_BODY,
+    )
+    assert response.status_code == 200, response.json()
+
+    from magi_agent.shadow.hosted_session_substrate import (
+        get_durable_hosted_session_service,
+    )
+
+    durable = get_durable_hosted_session_service(str(tmp_path / "adk_sessions.db"))
+    assert captured["session_service"] is durable
+    assert captured["session_service"] is not None
+    reset_durable_hosted_session_service()
+
+
+def test_governed_fork_leaves_session_service_none_when_db_flag_off(
+    monkeypatch, tmp_path: Any
+) -> None:
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "1")
+    monkeypatch.setenv("MAGI_HOSTED_SESSION_DB", "0")
+
+    captured: dict[str, object] = {"session_service": "unset"}
+
+    def fake_build_hosted_runtime(**kwargs: object) -> object:
+        captured["session_service"] = kwargs.get("session_service")
+        return SimpleNamespace()
+
+    async def _noop_gen():  # noqa: ANN202
+        yield EngineResult(terminal=Terminal.completed, session_id="s", turn_id="t")
+
+    def fake_governed_turn(ctx: object, *, runtime: object, cancel: object = None):  # noqa: ANN201
+        return _noop_gen()
+
+    async def fake_collect(*args: object, **kwargs: object) -> Gate5B4C3LiveRunnerBoundaryResult:
+        return _make_boundary_result(output_text="governed answer")
+
+    monkeypatch.setattr(
+        "magi_agent.transport.gate5b_serving.build_hosted_runtime",
+        fake_build_hosted_runtime,
+    )
+    monkeypatch.setattr(
+        "magi_agent.transport.gate5b_serving.run_governed_turn", fake_governed_turn
+    )
+    monkeypatch.setattr(
+        "magi_agent.transport.gate5b_serving.collect_engine_to_boundary_result",
+        fake_collect,
+    )
+
+    runtime = _make_canary_runtime(tmp_path)
+    response = TestClient(create_app(runtime)).post(
+        "/v1/chat/completions",
+        headers=_canary_headers("b" * 64),
+        json=_CANARY_BODY,
+    )
+    assert response.status_code == 200, response.json()
+    # DB flag OFF: no durable service wired -> build_hosted_runtime falls back to
+    # a fresh InMemorySessionService per turn (today's behavior).
+    assert captured["session_service"] is None
+
+
 # ---------------------------------------------------------------------------
 # 3. Same response shape — both paths produce compatible JSON for downstream
 # ---------------------------------------------------------------------------

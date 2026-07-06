@@ -29,6 +29,15 @@ def pytest_configure(config: pytest.Config) -> None:
     # every leaker's setdefault is a no-op; tests that exercise memory-ON
     # behavior opt in explicitly via monkeypatch.setenv (which still wins).
     os.environ.setdefault("MAGI_MEMORY_ENABLED", "0")
+    # PR-3: the hosted session-reuse lease + durable SQLite substrate flip to
+    # profile-aware default-ON. The large boundary/serving suites were written
+    # against the default-OFF (fresh-service-per-turn) behavior and share the
+    # process-global lease registry, so leaving these ON by default would leak
+    # session state across tests. Pin them OFF at configure time (same hygiene
+    # as MAGI_MEMORY_ENABLED above); tests exercising reuse / the durable
+    # substrate opt in explicitly via monkeypatch.setenv (which still wins).
+    os.environ.setdefault("MAGI_HOSTED_SESSION_REUSE", "0")
+    os.environ.setdefault("MAGI_HOSTED_SESSION_DB", "0")
 
 
 @pytest.hookimpl(tryfirst=True)

@@ -760,6 +760,18 @@ class Gate5B4C3LiveRunnerBoundary:
             "session_event_count": int(session_event_count or 0),
             "seeded_message_count": seeded_message_count,
         }
+        # Bound the durable-session history the runner loads (PR-3). None when
+        # the in-memory substrate is active -> ADK default (byte-identical).
+        from magi_agent.shadow.hosted_session_substrate import (
+            DEFAULT_NUM_RECENT_EVENTS,
+            durable_hosted_session_factory,
+        )
+
+        session_num_recent_events = (
+            DEFAULT_NUM_RECENT_EVENTS
+            if durable_hosted_session_factory() is not None
+            else None
+        )
         try:
             message = primitives.Content(
                 parts=_build_user_message_parts(
@@ -799,6 +811,7 @@ class Gate5B4C3LiveRunnerBoundary:
         run_config = _selected_full_toolhost_run_config(
             selected_full_toolhost,
             max_llm_calls=request.budgets.max_adk_llm_calls,
+            num_recent_events=session_num_recent_events,
         )
         if run_config is not None:
             run_kwargs["run_config"] = run_config
@@ -1342,10 +1355,28 @@ class Gate5B4C3LiveRunnerBoundary:
         if registry is None:
             registry = default_session_service_registry()
         session_key = (request.selection.bot_id_digest, _shadow_session_id(request))
-        session_service, session_reused = registry.try_acquire(
-            session_key,
-            primitives.InMemorySessionService,
+        # Durable substrate (PR-3): when MAGI_HOSTED_SESSION_DB is ON and the
+        # SqliteSessionService is constructible, the lease registry fronts a
+        # process-singleton durable service so sessions/events survive restart,
+        # image bump, LRU eviction and TTL. A busy-overlap gets a DISTINCT fresh
+        # in-memory fallback so two turns never mutate one durable session
+        # concurrently. Fail-open: None keeps today's in-memory behavior.
+        from magi_agent.shadow.hosted_session_substrate import (
+            durable_hosted_session_factory,
         )
+
+        durable_factory = durable_hosted_session_factory()
+        if durable_factory is not None:
+            session_service, session_reused = registry.try_acquire(
+                session_key,
+                durable_factory,
+                fallback_factory=primitives.InMemorySessionService,
+            )
+        else:
+            session_service, session_reused = registry.try_acquire(
+                session_key,
+                primitives.InMemorySessionService,
+            )
         seed_completed = {"value": session_reused}
 
         def mark_session_seeded() -> None:
@@ -2984,17 +3015,22 @@ def _selected_full_toolhost_run_config(
     enabled: bool,
     *,
     max_llm_calls: int,
+    num_recent_events: int | None = None,
 ) -> object | None:
     if not enabled:
         return None
-    return _run_config(max_llm_calls=max_llm_calls)
+    return _run_config(max_llm_calls=max_llm_calls, num_recent_events=num_recent_events)
 
 
-def _no_tool_finalizer_run_config() -> object | None:
-    return _run_config(max_llm_calls=2)
+def _no_tool_finalizer_run_config(num_recent_events: int | None = None) -> object | None:
+    return _run_config(max_llm_calls=2, num_recent_events=num_recent_events)
 
 
-def _run_config(*, max_llm_calls: int) -> object | None:
+def _run_config(
+    *,
+    max_llm_calls: int,
+    num_recent_events: int | None = None,
+) -> object | None:
     try:
         from google.adk.agents import RunConfig
     except Exception:
@@ -3010,6 +3046,19 @@ def _run_config(*, max_llm_calls: int) -> object | None:
         kwargs: dict[str, object] = {"max_llm_calls": max_llm_calls}
         if StreamingMode is not None:
             kwargs["streaming_mode"] = StreamingMode.SSE
+        # Bound the durable-session history the runner loads into the prompt so
+        # an old long session cannot blow the context; the model call itself
+        # remains the hard bound. None (in-memory substrate) leaves ADK's
+        # default (all events), byte-identical to the pre-durable behavior.
+        if num_recent_events is not None:
+            try:
+                from google.adk.sessions.base_session_service import GetSessionConfig
+
+                kwargs["get_session_config"] = GetSessionConfig(
+                    num_recent_events=num_recent_events
+                )
+            except Exception:
+                pass
         return RunConfig(**kwargs)
     except Exception:
         return None
