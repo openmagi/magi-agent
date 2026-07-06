@@ -107,6 +107,12 @@ def test_build_headless_runtime_injects_goal_nudge(
     """The flag must actually reach the constructed engine."""
     from magi_agent.cli.wiring import build_headless_runtime
 
+    # U5 goal_nudge supersession (design 6.5 / KD-6): when the goal loop resolves
+    # ON, wiring passes goal_nudge=None so the unified ambient ladder owns the
+    # turn. The legacy nudge stays live only on the explicit escape hatch, so this
+    # "flag reaches the engine" test exercises MAGI_GOAL_LOOP_ENABLED=0. The
+    # loop-ON -> None contract is covered by test_build_headless_runtime_off_is_none.
+    monkeypatch.setenv("MAGI_GOAL_LOOP_ENABLED", "0")
     monkeypatch.setenv("MAGI_GOAL_NUDGE_ENABLED", "1")
     monkeypatch.setenv("MAGI_GOAL_NUDGE_MODE", "grind")
 

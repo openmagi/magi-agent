@@ -515,6 +515,27 @@ def build_headless_runtime(
     # for depth>0), so the env flag ALONE can never re-enable auto-continue for a
     # child. Parent builds keep the default True -> unchanged behaviour.
     auto_continue_enabled = is_goal_loop_enabled() and auto_continue_allowed
+    # U5 ambient goal-loop synthesis factory (design 5.1 / 6.3, KD-1). Built ONCE
+    # here so the engine ctor stays env-pure. The engine synthesizes an ambient
+    # GoalLoopPolicy at the clean break (finish-the-job baseline) ONLY when the
+    # toggle published no policy; the factory reads the live env each call. It is
+    # ``None`` for the exact configurations where auto-continue is off (safe /
+    # eval / explicit flag 0, and SpawnAgent children / depth>0 via
+    # ``auto_continue_allowed``), so ambient synthesis is structurally impossible
+    # there and those paths are byte-identical to pre-U5.
+    from magi_agent.runtime.goal_loop_policy import (  # noqa: PLC0415
+        build_ambient_goal_loop_policy,
+    )
+
+    ambient_goal_policy_factory: Callable[[str], object | None] | None = (
+        (
+            lambda objective: build_ambient_goal_loop_policy(
+                objective=objective, env=os.environ
+            )
+        )
+        if auto_continue_enabled
+        else None
+    )
     # plan_ledger_reader reads the durable todo snapshot off the runner-attribute
     # handler set surfaced by PR3a (section 5.1). ``None`` for stub /
     # caller-supplied-tools / child-containment runners and when the durable
@@ -555,7 +576,17 @@ def build_headless_runtime(
         # (MAGI_GOAL_NUDGE_ENABLED) → build_goal_nudge_from_env returns None →
         # engine streaming is byte-identical to pre-PR4. When ON, a clean stop
         # short of the goal triggers a bounded continuation (default mode "goal").
-        goal_nudge=build_goal_nudge_from_env(),
+        #
+        # U5 goal_nudge supersession (design 6.5, KD-6): whenever the goal loop
+        # resolves ON (profile-aware MAGI_GOAL_LOOP_ENABLED), the unified ambient
+        # ladder OWNS the turn, so the legacy per-turn self-check nudge is passed
+        # ``None`` and its ``_drive`` branch is structurally dead (no double-drive,
+        # and children no longer receive profile-ON nudges). It stays live ONLY as
+        # the escape hatch for an operator who explicitly disables the goal loop
+        # (``MAGI_GOAL_LOOP_ENABLED=0``) while keeping ``MAGI_GOAL_NUDGE_ENABLED``.
+        # Uses the ENV-level master (NOT ``auto_continue_enabled``) so a contained
+        # child under a goal-loop-ON deployment still gets ``None`` here.
+        goal_nudge=None if is_goal_loop_enabled() else build_goal_nudge_from_env(),
         # PR2 (cluster 11): production user-hook wiring. Default OFF
         # (MAGI_USER_HOOKS_ENABLED) → build_user_hook_bus returns None → engine
         # never attaches the HookBus tool-callback bridge and streaming is
@@ -572,6 +603,10 @@ def build_headless_runtime(
         # for the turn; absent that, this argument is dormant and streaming
         # behavior is byte-identical to pre-PR-C.
         goal_loop_judge_factory=_build_goal_loop_judge_factory(),
+        # U5 ambient synthesis DI (design 6.3). ``None`` when auto-continue is off
+        # -> the engine never synthesizes an ambient policy and is byte-identical
+        # to pre-U5 on every OFF path.
+        ambient_goal_policy_factory=ambient_goal_policy_factory,
         # WS3 PR3b: evidence-first goal completion. OFF (default) -> evidence_first
         # False + reader None + required_evidence () -> all three _drive seams are
         # inert and streaming is byte-identical to pre-WS3.
