@@ -38,6 +38,23 @@ GATE5B_SHADOW_APP_NAME: str = "openmagi-gate5b4c3-shadow-generation"
 GATE5B_SHADOW_USER_ID: str = "gate5b4c3-shadow-user"
 
 
+def _agent_identifier(app_name: str) -> str:
+    """Coerce ``app_name`` into a valid identifier for ``Agent(name=...)``.
+
+    Real ADK validates ``Agent.name.isidentifier()`` (rejecting hyphens),
+    while the Runner's visible ``app_name`` (which keys durable session rows)
+    may contain hyphens. The legacy boundary keeps a hyphenated app_name for
+    session keying but a distinct identifier-safe Agent name. We derive the
+    Agent name from the app_name so the two never drift, without introducing a
+    second literal to keep in sync. Mirrors ``model_runner._app_identifier``.
+    """
+
+    sanitized = "".join(c if c.isalnum() or c == "_" else "_" for c in app_name)
+    if not sanitized or (not sanitized[0].isalpha() and sanitized[0] != "_"):
+        sanitized = f"_{sanitized}"
+    return sanitized if sanitized.isidentifier() else "hosted_governed_turn_agent"
+
+
 # ---------------------------------------------------------------------------
 # No-op gate (hosted enforcement is at the pod / egress level)
 # ---------------------------------------------------------------------------
@@ -156,7 +173,7 @@ def build_hosted_runtime(
 
     # Build ADK agent.
     agent = primitives.Agent(
-        name=app_name,
+        name=_agent_identifier(app_name),
         description="OpenMagi hosted governed-turn agent.",
         model=model,
         instruction=instruction,
