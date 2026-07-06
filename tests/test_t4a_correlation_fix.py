@@ -180,8 +180,16 @@ def test_cli_path_unaffected_by_correlation_store() -> None:
     # CLI path should still produce "adk-tool-call:search-001" / "adk-tool-response:search-001"
     # (different kinds, so ids differ — that is the existing behaviour we must not break).
     assert not tool_start["id"].startswith("tu_"), "CLI must NOT produce tu_ ids"
-    # durationMs: 0 is still present on CLI path
-    assert tool_end.get("durationMs") == 0, "CLI tool_end must still have durationMs: 0"
+    # Post-#1328 (tool-latency-duration-passthrough): the CLI path threads a REAL
+    # wall-clock duration from the correlated tool_start (via local_tool_started_at)
+    # instead of the old hardcoded ``durationMs: 0``. Because a call was seen first,
+    # the duration is measurable, so the key is present and a non-negative int
+    # (its value is the elapsed ms, which is only 0 when <1ms passes between the two
+    # projections, so asserting == 0 was flaky under CI load). This mirrors
+    # test_tool_latency_duration_passthrough::test_local_tool_end_threads_real_duration_when_call_seen_first.
+    assert "durationMs" in tool_end, "CLI tool_end must carry durationMs when call seen first"
+    assert isinstance(tool_end["durationMs"], int), "CLI durationMs must be an int"
+    assert tool_end["durationMs"] >= 0, "CLI durationMs must be a non-negative real elapsed value"
 
 
 def test_multiple_tool_calls_correlate_independently() -> None:
