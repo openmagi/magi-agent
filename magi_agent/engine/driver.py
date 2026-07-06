@@ -2579,14 +2579,18 @@ class MagiEngineDriver:
                                 turn_id=turn_id,
                             )
                             continue  # re-invoke run_async (genuine new model call)
-                    # PR-C goal-loop clean-break judge. Fires AFTER the legacy
-                    # goal_nudge branch (above) and BEFORE the final break.
-                    # Reads the per-turn policy ContextVar (PR-B). Absent
-                    # policy → byte-identical to pre-PR-C (the existing
-                    # ``break`` runs). Present policy → ask the cheap judge
-                    # whether the original objective is complete and either
-                    # terminate normally, drive a continuation, or terminate
-                    # on the parse-failure budget.
+                    # U4 unified clean-break ladder (design 5.2). Fires AFTER the
+                    # legacy goal_nudge branch (above) and BEFORE the final break.
+                    # Reads the per-turn policy ContextVar (PR-B). When a policy is
+                    # present (mission intensity today) the branch runs ONE ladder:
+                    # the evidence-first pre-judge resolves done/pause/continue/
+                    # defer_to_judge; a "continue" outcome takes the shared
+                    # DETERMINISTIC executor (no judge call, GAP-2), while the
+                    # bounded LLM judge is confined to "defer_to_judge" (the
+                    # no-ledger / ambiguous case) and is itself progress-braked
+                    # (design 5.4). Absent policy falls through to SEAM 2 (ambient
+                    # ledger authority) and then the bare break. The OFF path (no
+                    # policy) is byte-identical to pre-PR-C.
                     from magi_agent.runtime.per_turn_goal_loop_context import (  # noqa: PLC0415
                         current_per_turn_goal_loop_policy,
                     )
@@ -2634,8 +2638,65 @@ class MagiEngineDriver:
                                     ),
                                 )
                                 break
-                            # "continue" / "defer_to_judge" -> fall through to the
-                            # bounded judge below (unchanged).
+                            # U4 unified ladder (design 5.2): a pre-judge
+                            # "continue" outcome (open ledger) is DETERMINISTIC
+                            # authority. Route it to the shared executor with NO
+                            # judge call so the mission path stops burning one
+                            # judge call per ledger step (GAP-2), matching how the
+                            # ambient / SEAM 2 path already continues. The bounded
+                            # judge below is reserved for "defer_to_judge" (no
+                            # ledger signal, no evidence contract). Gated on
+                            # auto_continue_enabled so contained turns (SpawnAgent
+                            # children / depth>0) and the historic no-auto-continue
+                            # configuration fall through to the judge exactly as
+                            # before (byte-identical).
+                            if (
+                                pre_judge_outcome == "continue"
+                                and self._auto_continue_enabled
+                            ):
+                                (
+                                    ac_events,
+                                    ac_result,
+                                ) = self._run_deterministic_auto_continue(
+                                    turn_id=turn_id,
+                                    session_id=session_id,
+                                    seam2_snapshot=pre_judge_snapshot,
+                                    ok_tool_ends=auto_continue_ok_tool_ends,
+                                    blocked_tool_ends=(
+                                        auto_continue_blocked_tool_ends
+                                    ),
+                                    prev_ledger=auto_continue_prev_ledger,
+                                    prev_evidence_count=(
+                                        auto_continue_prev_evidence_count
+                                    ),
+                                    continuations_used=auto_continue_used,
+                                    no_progress_streak=(
+                                        auto_continue_no_progress_streak
+                                    ),
+                                    wrap_up_spent=auto_continue_wrap_up_spent,
+                                    turn_start=auto_continue_turn_start,
+                                    effective_harness_state=(
+                                        effective_harness_state
+                                    ),
+                                    runner_turn_input_cls=runner_turn_input_cls,
+                                    types_mod=types,
+                                )
+                                for _ac_event in ac_events:
+                                    yield _ac_event
+                                auto_continue_used = ac_result.used
+                                auto_continue_no_progress_streak = (
+                                    ac_result.no_progress_streak
+                                )
+                                auto_continue_wrap_up_spent = (
+                                    ac_result.wrap_up_spent
+                                )
+                                if ac_result.action == "continue":
+                                    runner_input = ac_result.runner_input
+                                    continue  # re-invoke (genuine model call)
+                                break  # terminal deterministic outcome
+                            # "continue" (auto-continue disabled) /
+                            # "defer_to_judge" -> fall through to the bounded judge
+                            # below (unchanged).
                         from magi_agent.runtime.goal_loop_judge import (  # noqa: PLC0415
                             evaluate_goal_completion,
                         )
@@ -2770,6 +2831,160 @@ class MagiEngineDriver:
                                     ),
                                 )
                             break
+                        # U4 progress brake on judge continuations (design 5.4):
+                        # a judge "not complete" verdict that drives a
+                        # continuation is gated through the SAME measurable-
+                        # progress logic as the deterministic path, so a stalling
+                        # mission spends its single wrap-up and pauses honestly
+                        # instead of running to max_turns with zero progress. The
+                        # judge keeps authority over COMPLETION; the brake removes
+                        # its authority over UNBOUNDED SPEND. The no_progress
+                        # streak / wrap-up / wall-clock state is SHARED with the
+                        # deterministic path (one brake). Gated on
+                        # auto_continue_enabled so the historic no-auto-continue
+                        # configuration is byte-identical (raw continuation).
+                        if self._auto_continue_enabled:
+                            from magi_agent.runtime.goal_loop_auto_continue import (  # noqa: PLC0415
+                                AttemptProgress,
+                                budgets_for_intensity,
+                                decide_auto_continue,
+                                ledger_changed,
+                            )
+                            from magi_agent.runtime.per_turn_goal_intensity import (  # noqa: PLC0415
+                                current_per_turn_goal_mission,
+                            )
+                            import time as _judge_brake_time  # noqa: PLC0415
+
+                            judge_mission = (
+                                current_per_turn_goal_mission()
+                                or self._auto_continue_mission
+                            )
+                            judge_ledger_now = (
+                                tuple(plan_ledger_reader(session_id))
+                                if plan_ledger_reader is not None
+                                else ()
+                            )
+                            judge_evidence_now = self._collect_evidence(turn_id)
+                            judge_progress = AttemptProgress(
+                                ok_tool_ends=auto_continue_ok_tool_ends,
+                                blocked_tool_ends=auto_continue_blocked_tool_ends,
+                                ledger_changed=ledger_changed(
+                                    auto_continue_prev_ledger, judge_ledger_now
+                                ),
+                                new_evidence_records=max(
+                                    0,
+                                    len(judge_evidence_now)
+                                    - auto_continue_prev_evidence_count,
+                                ),
+                            )
+                            judge_brake = decide_auto_continue(
+                                ledger_wants_continue=True,
+                                progress=judge_progress,
+                                continuations_used=goal_loop_continuations,
+                                prior_no_progress_streak=(
+                                    auto_continue_no_progress_streak
+                                ),
+                                elapsed_seconds=(
+                                    _judge_brake_time.monotonic()
+                                    - auto_continue_turn_start
+                                ),
+                                budgets=budgets_for_intensity(
+                                    mission=judge_mission
+                                ),
+                                wrap_up_already_spent=(
+                                    auto_continue_wrap_up_spent
+                                ),
+                            )
+                            auto_continue_no_progress_streak = (
+                                judge_brake.no_progress_streak
+                            )
+                            judge_open_todos = self._open_todo_count(
+                                judge_ledger_now
+                            )
+                            if judge_brake.outcome == "stop_budget":
+                                yield RuntimeEvent(
+                                    type="status",
+                                    payload={
+                                        "type": "goal_loop_exhausted",
+                                        "reason": judge_brake.reason,
+                                        "continuations": goal_loop_continuations,
+                                    },
+                                    turn_id=turn_id,
+                                )
+                                yield self._goal_paused_event(
+                                    turn_id=turn_id,
+                                    reason="budget_exhausted",
+                                    objective=goal_loop_policy.objective,
+                                    open_todos=judge_open_todos,
+                                )
+                                break
+                            if (
+                                judge_brake.outcome
+                                == "paused_waiting_on_approvals"
+                            ):
+                                yield self._goal_paused_event(
+                                    turn_id=turn_id,
+                                    reason="waiting_on_approvals",
+                                    objective=goal_loop_policy.objective,
+                                    open_todos=judge_open_todos,
+                                )
+                                break
+                            if judge_brake.outcome == "paused_no_progress":
+                                yield self._goal_paused_event(
+                                    turn_id=turn_id,
+                                    reason="no_progress",
+                                    objective=goal_loop_policy.objective,
+                                    open_todos=judge_open_todos,
+                                )
+                                break
+                            # "continue" / "wrap_up" -> drive the judge
+                            # continuation with the policy template, or spend the
+                            # single honest wrap-up.
+                            judge_is_wrap_up = (
+                                judge_brake.outcome == "wrap_up"
+                            )
+                            if judge_is_wrap_up:
+                                auto_continue_wrap_up_spent = True
+                            goal_loop_continuations += 1
+                            yield RuntimeEvent(
+                                type="status",
+                                payload={
+                                    "type": (
+                                        "goal_loop_wrap_up"
+                                        if judge_is_wrap_up
+                                        else "goal_loop_continuation"
+                                    ),
+                                    "continuation": goal_loop_continuations,
+                                    "max": goal_loop_policy.max_turns,
+                                    "judgeReason": verdict.reason,
+                                    "reason": judge_brake.reason,
+                                    "openTodos": judge_open_todos,
+                                    "source": "judge",
+                                },
+                                turn_id=turn_id,
+                            )
+                            runner_input = runner_turn_input_cls(
+                                userId=self._user_id,
+                                sessionId=session_id,
+                                turnId=turn_id,
+                                invocationId=turn_id,
+                                newMessage=types.Content(  # type: ignore[attr-defined]
+                                    role="user",
+                                    parts=[
+                                        types.Part(  # type: ignore[attr-defined]
+                                            text=(
+                                                _AUTO_CONTINUE_WRAP_UP_PROMPT
+                                                if judge_is_wrap_up
+                                                else goal_loop_policy.continuation_template
+                                            )
+                                        )
+                                    ],
+                                ),
+                                harnessState=effective_harness_state,
+                            )
+                            continue  # re-invoke run_async (genuine model call)
+                        # Historic (auto-continue disabled) raw continuation:
+                        # byte-identical to pre-U4.
                         goal_loop_continuations += 1
                         yield RuntimeEvent(
                             type="status",
