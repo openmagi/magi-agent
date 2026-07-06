@@ -1691,6 +1691,20 @@ FLAGS: tuple[FlagSpec, ...] = (
             "safe/eval. Wave 1 of 4 (loop/surface/governance follow)."
         ),
     ),
+    FlagSpec(
+        name="MAGI_SOURCE_CITATION_GATE_MODE",
+        default="audit",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Deterministic pre-final source-citation gate mode. `off` skips the "
+            "gate entirely; `audit` runs the gate observe-only (emits a "
+            "custom:CitationVerdict record, never alters the turn); `repair` is "
+            "accepted but behaves as `audit` until Wave 4b wires repair. Only "
+            "runs when MAGI_SOURCE_CITATION_ENABLED is on."
+        ),
+        kind="str",
+    ),
     _b(
         "MAGI_GATE5B_GOVERNANCE_ENABLED",
         stage="stage2",

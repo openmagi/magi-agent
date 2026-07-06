@@ -3758,6 +3758,22 @@ def parse_source_citation_enabled(env: Mapping[str, str]) -> bool:
     return flag_profile_bool("MAGI_SOURCE_CITATION_ENABLED", env=env)
 
 
+def parse_source_citation_gate_mode(env: Mapping[str, str]) -> str:
+    """MAGI_SOURCE_CITATION_GATE_MODE -- deterministic pre-final citation gate.
+
+    Returns ``"off"`` / ``"audit"`` / ``"repair"``. ``off`` skips the gate.
+    ``audit`` runs the gate observe-only: it emits a ``custom:CitationVerdict``
+    evidence record and NEVER alters the turn. ``repair`` is accepted as a value
+    but, in Wave 4a, behaves as ``audit`` (repair / induce-search land in Wave
+    4b). Unknown values fall back to the FlagSpec default (``audit``). The gate
+    only runs when :func:`parse_source_citation_enabled` is also on.
+    """
+    raw = (env.get("MAGI_SOURCE_CITATION_GATE_MODE") or "").strip().lower()
+    if raw in ("off", "audit", "repair"):
+        return raw
+    return "audit"
+
+
 def parse_taskboard_completion_verification_enabled(env: Mapping[str, str]) -> bool:
     """MAGI_VERIFY_TASKBOARD_COMPLETION — block completion while tasks remain.
 

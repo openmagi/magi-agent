@@ -693,6 +693,7 @@ class LocalToolEvidenceCollector:
         tool_name: str,
         record: object,
         tool_call_id: str | None = None,
+        producing_rule_id: str = "",
     ) -> None:
         """Append a pre-built audit ``EvidenceRecord`` AND durably persist it.
 
@@ -708,11 +709,16 @@ class LocalToolEvidenceCollector:
         append always happens so the gate still sees the record.
 
         Runtime-control write path, so the record is stamped
-        ``origin="producer_control"`` with an empty ``producing_rule_id`` (an
-        audit record is not a producer binding, so it can never satisfy a
-        session gate's producer-id match).
+        ``origin="producer_control"``. ``producing_rule_id`` defaults to empty
+        (the historical audit posture: an audit record is not a producer binding
+        and can never satisfy a session gate's producer-id match). A caller may
+        pass a NON-unlock rule identity (e.g. ``source_citation.gate``, a verdict
+        producer that no gate ever unlocks on) so the durable record carries its
+        first-party rule id for audit/display; this stays safe because the unlock
+        join in :meth:`has_unlock_evidence` matches only the specific bound
+        producer id, which is never a verdict rule id.
         """
-        stamped = _as_producer_control(record)
+        stamped = _as_producer_control(record, producing_rule_id)
         self._records.setdefault((session_id, turn_id), []).append(stamped)
         try:
             status = str(getattr(stamped, "status", "ok"))

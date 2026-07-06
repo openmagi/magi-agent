@@ -1168,6 +1168,136 @@ class MagiEngineDriver:
         """
         return getattr(self._runner, "local_tool_evidence_collector", None)
 
+    def _maybe_citation_gate_audit(
+        self, *, session_id: str, turn_id: str, prompt: str, final_text: str
+    ) -> None:
+        """Wave 4a AUDIT-mode source-citation gate (design 11.2).
+
+        The deterministic pre-final citation gate in OBSERVE-ONLY mode: it emits
+        one ``custom:CitationVerdict`` evidence record for the turn and NEVER
+        alters the turn (no repair, no induce-search, no block). It runs BEFORE
+        the LLM criterion pre-final rules (cheap first, ~0 model cost). Fully
+        fail-soft: any error is a silent no-op, so the gate can never wedge a
+        turn.
+
+        Gated on ``MAGI_SOURCE_CITATION_ENABLED`` being on AND
+        ``MAGI_SOURCE_CITATION_GATE_MODE`` != ``off``. In Wave 4a ``repair`` is
+        accepted but treated as ``audit`` (repair / induce-search land in Wave
+        4b, whose repair-decision seam is the ``repairDecision`` handling in the
+        pre-final loop below). Flag-OFF or mode ``off`` => byte-identical: no
+        registry read, no record.
+        """
+        try:
+            import os  # noqa: PLC0415
+
+            from magi_agent.config.env import (  # noqa: PLC0415
+                parse_source_citation_enabled,
+                parse_source_citation_gate_mode,
+            )
+
+            if not parse_source_citation_enabled(os.environ):
+                return
+            if parse_source_citation_gate_mode(os.environ) == "off":
+                return
+
+            collector = self.local_tool_evidence_collector
+            if collector is None:
+                return
+            registry_getter = getattr(collector, "source_registry_for", None)
+            if not callable(registry_getter):
+                return
+            registry = registry_getter(session_id)
+            if registry is None:
+                return
+            snapshot = registry.snapshot()
+
+            per_turn_ids: list[str] = []
+            for record in snapshot:
+                source_id = str(getattr(record, "source_id", ""))
+                if not source_id:
+                    continue
+                record_turn = str(getattr(record, "turn_id", ""))
+                if record_turn == turn_id or record_turn.startswith(
+                    f"{turn_id}::spawn::"
+                ):
+                    per_turn_ids.append(source_id)
+
+            from magi_agent.evidence.citation_gate import (  # noqa: PLC0415
+                evaluate_citation_gate,
+            )
+
+            result = evaluate_citation_gate(
+                final_text,
+                registry_snapshot=snapshot,
+                per_turn_source_ids=tuple(per_turn_ids),
+                user_input=prompt or "",
+            )
+            self._emit_citation_verdict_record(
+                session_id=session_id, turn_id=turn_id, result=result
+            )
+        except Exception:
+            return
+
+    def _emit_citation_verdict_record(
+        self, *, session_id: str, turn_id: str, result: object
+    ) -> None:
+        """Emit the ``custom:CitationVerdict`` record (design Section 8).
+
+        In Wave 4a (audit) ``repairAttempts``/``inducedSearch``/``failOpen`` are
+        fixed 0/False; Wave 4b sets them. Durably persisted + gate-readable via
+        ``record_audit_evidence_for_turn``. The Audit tab currently projects the
+        terminal render verdict; switching it to read THIS backend verdict is the
+        Wave 4b/UI step (see apps/web audit-panel.tsx wave-4 note)."""
+        try:
+            import time  # noqa: PLC0415
+
+            from magi_agent.evidence.citation_gate import CitationGateResult  # noqa: PLC0415
+            from magi_agent.evidence.types import EvidenceRecord  # noqa: PLC0415
+
+            if not isinstance(result, CitationGateResult):
+                return
+            collector = self.local_tool_evidence_collector
+            if collector is None:
+                return
+            record = EvidenceRecord.model_validate(
+                {
+                    "type": "custom:CitationVerdict",
+                    "status": "ok",
+                    "observedAt": int(time.time() * 1000),
+                    "source": {"kind": "custom_extractor"},
+                    "fields": {
+                        "verdict": result.verdict,
+                        "highRiskClaims": len(result.high_risk_claims),
+                        "citedClaims": result.cited_claims,
+                        "danglingRefs": list(result.dangling_refs),
+                        "repairAttempts": 0,
+                        "inducedSearch": False,
+                        "failOpen": False,
+                    },
+                    "metadata": {
+                        "producingRuleId": "source_citation.gate",
+                        "zeroSourceTurn": result.zero_source_turn,
+                        "highRiskClasses": [
+                            claim.claim_class for claim in result.high_risk_claims
+                        ],
+                        "violations": [
+                            {"kind": violation.kind, "detail": violation.detail}
+                            for violation in result.violations
+                        ],
+                    },
+                }
+            )
+            collector.record_audit_evidence_for_turn(
+                session_id=session_id,
+                turn_id=turn_id,
+                tool_name="source_citation.gate",
+                record=record,
+                tool_call_id=f"source-citation-gate:{turn_id}",
+                producing_rule_id="source_citation.gate",
+            )
+        except Exception:
+            return
+
     @property
     def runner_policy_assembly(self) -> RunnerPolicyAssembly | None:
         return self._runner_policy_assembly
@@ -2723,6 +2853,18 @@ class MagiEngineDriver:
         # the synthetic repair continuation) — leaking it concatenated the whole
         # exchange into the user-visible reply.
         live_selected = await self._read_live_selected_recipe_pack_ids(session_id)
+
+        # Wave 4a: deterministic source-citation gate in AUDIT (observe-only)
+        # mode. Runs BEFORE the LLM criterion rules (cheap first). Emits a
+        # custom:CitationVerdict record and NEVER alters the turn; flag-OFF or
+        # gate-mode off is a byte-identical no-op. Wave 4b adds the repair
+        # decision at the repairDecision seam in the pre-final loop below.
+        self._maybe_citation_gate_audit(
+            session_id=session_id,
+            turn_id=turn_id,
+            prompt=prompt,
+            final_text=emitted_text,
+        )
 
         # P3: custom llm_criterion gate (pre-final). Independent of the
         # deterministic verifier-bus loop below + the coding-repair loop. A clear
