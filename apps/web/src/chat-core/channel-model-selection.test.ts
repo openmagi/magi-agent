@@ -83,6 +83,10 @@ describe("channel model selection", () => {
       modelSelection: "glm_5_2",
       routerType: "standard",
     })).toBe("fireworks/glm-5p2");
+    expect(channelModelSelectionToRuntimeModel({
+      modelSelection: "fable_5",
+      routerType: "standard",
+    })).toBe("anthropic/claude-fable-5");
   });
 
   it("returns an empty string for the unresolved sentinel under oss-local context", () => {

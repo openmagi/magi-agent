@@ -22,6 +22,21 @@
     },
     {
       "provider": "anthropic",
+      "model": "claude-fable-5",
+      "label": "Claude Fable 5",
+      "source": "direct",
+      "tier": "sota",
+      "capabilities": ["streaming", "tool_use", "long_context", "coding", "reasoning"],
+      "context_window": 150000,
+      "max_output_tokens": 32000,
+      "litellm_prefix": "anthropic",
+      "deprecated": false,
+      "replacement": null,
+      "last_verified": "2026-07-06",
+      "reasoning_style": "adaptive"
+    },
+    {
+      "provider": "anthropic",
       "model": "claude-sonnet-4-6",
       "label": "Claude Sonnet 4.6",
       "source": "direct",

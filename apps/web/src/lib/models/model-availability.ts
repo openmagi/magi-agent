@@ -14,6 +14,7 @@ const OPTION_PROVIDER: Record<string, string> = {
   haiku: "anthropic",
   sonnet: "anthropic",
   opus: "anthropic",
+  fable_5: "anthropic",
   gpt_5_nano: "openai",
   gpt_5_mini: "openai",
   gpt_5_5: "openai",
