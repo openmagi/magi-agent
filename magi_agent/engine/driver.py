@@ -704,10 +704,21 @@ class MagiEngineDriver:
         # ambient (the default) uses the generous AMBIENT budgets. The toggle is
         # an intensity control, not the on/off master (that is the flag above).
         auto_continue_mission: bool = False,
+        # B5: driver-owned durable-session fetch bound (anti-side-channel safe).
+        # ``None`` (default) -> the CLI path and every non-durable hosted path
+        # are byte-identical to pre-B5 (no GetSessionConfig on RunConfig).
+        # Set by ``build_hosted_runtime`` when the durable session substrate is
+        # active (mirroring the legacy gate5b4c3 activation condition). The
+        # adapter receives this value at each turn invocation via
+        # ``_drive``; external ``run_config`` is still blocked at the adapter.
+        num_recent_events: int | None = None,
     ) -> None:
         self._runner = runner
+        # B5: driver-owned fetch bound, threaded to the adapter at construction
+        # time. ``None`` keeps the CLI and non-durable hosted paths unchanged.
+        self._num_recent_events: int | None = num_recent_events
         # Optional wire profile for the HOSTED path (T4). ``None`` (default) keeps
-        # the CLI path byte-for-byte unchanged — bridge is constructed without
+        # the CLI path byte-for-byte unchanged -- bridge is constructed without
         # wire_profile.  When set (e.g. HOSTED_PROFILE), each turn's bridge is
         # constructed with ``wire_profile=self._wire_profile`` so projected events
         # carry the hosted wire shape (tu_<hash> ids, public_events field shapes).
@@ -2551,7 +2562,13 @@ class MagiEngineDriver:
         )
 
         types = deps["types"]
-        adapter = deps["OpenMagiRunnerAdapter"](runner=runner)  # type: ignore[operator]
+        # B5: pass the driver-owned num_recent_events knob so the adapter can
+        # inject GetSessionConfig on its RunConfig. ``None`` (default) keeps the
+        # CLI and non-durable hosted paths byte-identical to pre-B5.
+        adapter = deps["OpenMagiRunnerAdapter"](  # type: ignore[operator]
+            runner=runner,
+            num_recent_events=self._num_recent_events,
+        )
         # Pass ``wire_profile`` ONLY when one is set (hosted path). On the CLI
         # path (``None``) we omit the kwarg entirely so the construction is
         # byte-identical to pre-wire-profile — and test doubles injected via the

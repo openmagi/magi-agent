@@ -298,14 +298,37 @@ class RunnerTurnInput(BaseModel):
 
 
 class OpenMagiRunnerAdapter:
-    def __init__(self, *, runner: object) -> None:
+    def __init__(self, *, runner: object, num_recent_events: int | None = None) -> None:
         self.runner = runner
+        # Driver-owned knob: how many durable-session events to load per turn.
+        # ``None`` (default) -> no bound, RunConfig carries no GetSessionConfig
+        # (byte-identical to the pre-B5 path). Set by ``MagiEngineDriver`` when
+        # the durable session substrate is active; never accepted from external
+        # run_config (the anti-side-channel check at _build_adk_runner_kwargs
+        # remains intact for all caller-supplied run_config fields).
+        self._num_recent_events: int | None = num_recent_events
 
     def _adapter_run_config(self) -> "object | None":
         # Lazy import keeps ADK off the cold-start critical path.
         from google.adk.agents.run_config import RunConfig, StreamingMode  # noqa: PLC0415
 
-        return RunConfig(streaming_mode=StreamingMode.SSE)
+        kwargs: dict[str, object] = {"streaming_mode": StreamingMode.SSE}
+        if self._num_recent_events is not None:
+            # B5: thread the driver-owned bound through GetSessionConfig so the
+            # ADK session service fetches at most N events per turn for a durable
+            # session. GetSessionConfig is imported lazily (same fail-open
+            # pattern as the legacy gate5b4c3 _run_config helper).
+            try:
+                from google.adk.sessions.base_session_service import (  # noqa: PLC0415
+                    GetSessionConfig,
+                )
+
+                kwargs["get_session_config"] = GetSessionConfig(
+                    num_recent_events=self._num_recent_events
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        return RunConfig(**kwargs)
 
     def _build_adk_runner_kwargs(self, turn_input: RunnerTurnInput) -> dict[str, object]:
         # Caller-provided run_config/state_delta remain blocked — they must not
