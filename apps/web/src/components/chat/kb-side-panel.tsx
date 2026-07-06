@@ -977,7 +977,7 @@ export function KbSidePanel({
       )}
 
       {auditEnabled && effectiveView === "audit" && (
-        <AuditPanel botId={botId} sessionId={auditSessionId} citationGroups={sessionCitations} />
+        <AuditPanel botId={botId} sessionId={auditSessionId} />
       )}
 
       {effectiveView === "sources" && (

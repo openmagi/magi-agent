@@ -272,6 +272,10 @@ class _FakeDriver:
     local_tool_evidence_collector = MagiEngineDriver.local_tool_evidence_collector
     _maybe_citation_gate_audit = MagiEngineDriver._maybe_citation_gate_audit
     _emit_citation_verdict_record = MagiEngineDriver._emit_citation_verdict_record
+    _emit_citation_verdict_observability = (
+        MagiEngineDriver._emit_citation_verdict_observability
+    )
+    _observe_event = MagiEngineDriver._observe_event
     _evaluate_citation_gate_for_turn = (
         MagiEngineDriver._evaluate_citation_gate_for_turn
     )
@@ -279,8 +283,9 @@ class _FakeDriver:
     _citation_induce_availability = MagiEngineDriver._citation_induce_availability
     _citation_repair_overlay = MagiEngineDriver._citation_repair_overlay
 
-    def __init__(self, collector: object) -> None:
+    def __init__(self, collector: object, event_sink: object | None = None) -> None:
         self._runner = SimpleNamespace(local_tool_evidence_collector=collector)
+        self._event_sink = event_sink
 
 
 def _citation_records(collector: LocalToolEvidenceCollector, turn_id: str) -> list[object]:
@@ -466,6 +471,56 @@ def test_emit_record_carries_repair_fields() -> None:
     assert fields["repairAttempts"] == 2
     assert fields["inducedSearch"] is True
     assert fields["failOpen"] is True
+
+
+def test_emit_record_surfaces_observability_rule_check() -> None:
+    # Wave 4b Piece E: the durable evidence record alone never reaches the
+    # observability store, so the emit path ALSO fires a rule_check-family
+    # public event so the Audit tab can read the backend verdict.
+    events: list[tuple[dict, object, object]] = []
+
+    def sink(payload: dict, session_id: object, turn_id: object) -> None:
+        events.append((payload, session_id, turn_id))
+
+    collector = LocalToolEvidenceCollector()
+    _register_zero_source_turn(collector)
+    driver = _FakeDriver(collector, event_sink=sink)
+    result = evaluate_citation_gate(TESLA_REPORT, registry_snapshot=())
+    driver._emit_citation_verdict_record(
+        session_id="sess",
+        turn_id="turn",
+        result=result,
+        repair_attempts=2,
+        induced_search=True,
+        fail_open=True,
+    )
+    assert len(events) == 1
+    payload, session_id, turn_id = events[0]
+    assert session_id == "sess"
+    assert turn_id == "turn"
+    assert payload["type"] == "rule_check"
+    assert payload["ruleId"] == "source_citation.gate"
+    # TESLA_REPORT is uncited -> RuleVerdict violation.
+    assert payload["verdict"] == "violation"
+    assert payload["sourceType"] == "citation"
+    assert payload["citationVerdict"] == "uncited"
+    assert payload["repairAttempts"] == 2
+    assert payload["inducedSearch"] is True
+    assert payload["failOpen"] is True
+
+
+def test_emit_record_no_sink_no_observability() -> None:
+    # No sink wired (byte-identical OFF path): the durable record still lands,
+    # the observability emit is a silent no-op.
+    collector = LocalToolEvidenceCollector()
+    _register_zero_source_turn(collector)
+    driver = _FakeDriver(collector, event_sink=None)
+    result = evaluate_citation_gate(TESLA_REPORT, registry_snapshot=())
+    driver._emit_citation_verdict_record(
+        session_id="sess", turn_id="turn", result=result
+    )
+    # Record persisted; no crash despite the absent sink.
+    assert len(_citation_records(collector, "turn")) == 1
 
 
 def test_flag_off_emits_no_record(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -28,6 +28,11 @@ export interface AuditVerdict {
   severity: AuditSeverity;
   subject: string | null;
   reasonCodes: string[];
+  /**
+   * Glanceable affordance chips for the source-citation gate verdict (repaired /
+   * induced search / fail-open). Empty for every non-citation verdict.
+   */
+  affordances: string[];
   summary: string;
   evidenceRefs: string[];
 }
@@ -104,6 +109,7 @@ function normalizeVerdict(value: unknown): AuditVerdict {
       : "info",
     subject: typeof r.subject === "string" ? r.subject : null,
     reasonCodes: asStringArray(r.reasonCodes),
+    affordances: asStringArray(r.affordances),
     summary: asString(r.summary),
     evidenceRefs: asStringArray(r.evidenceRefs),
   };

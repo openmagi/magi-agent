@@ -337,3 +337,111 @@ def test_all_none_ts_run_still_appears():
     assert len(out["runs"]) == 1
     assert out["runs"][0]["startedAt"] is None
     assert out["runs"][0]["policyCount"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Source-citation gate verdict (Wave 4b Piece E)
+# ---------------------------------------------------------------------------
+
+
+def _citation_event(*, session_id, run_id, ts, citation_verdict, verdict, **scalars):
+    payload = {
+        "verdict": verdict,
+        "ruleId": "source_citation.gate",
+        "sourceType": "citation",
+        "citationVerdict": citation_verdict,
+    }
+    payload.update(scalars)
+    return ActivityEvent(
+        kind="rule_check",
+        session_id=session_id,
+        run_id=run_id,
+        ts=ts,
+        payload=payload,
+    )
+
+
+def test_citation_gate_verdict_projects_dedicated_label(tmp_path):
+    store = _store(tmp_path)
+    store.record_event(
+        _citation_event(
+            session_id="s1",
+            run_id="r",
+            ts=1.0,
+            citation_verdict="cited",
+            verdict="ok",
+        )
+    )
+    out = build_session_audit("s1", store=store)
+    verdict = out["runs"][0]["verdicts"][0]
+    assert verdict["subject"] == "source_citation.gate"
+    assert verdict["displayLabel"] == "SOURCES CITED"
+    assert verdict["severity"] == "pass"
+
+
+def test_citation_gate_partial_is_review(tmp_path):
+    store = _store(tmp_path)
+    store.record_event(
+        _citation_event(
+            session_id="s1",
+            run_id="r",
+            ts=1.0,
+            citation_verdict="partial",
+            verdict="pending",
+        )
+    )
+    verdict = build_session_audit("s1", store=store)["runs"][0]["verdicts"][0]
+    assert verdict["displayLabel"] == "PARTIALLY CITED"
+    assert verdict["severity"] == "review"
+
+
+def test_citation_gate_affordances_project_as_reason_codes(tmp_path):
+    store = _store(tmp_path)
+    store.record_event(
+        _citation_event(
+            session_id="s1",
+            run_id="r",
+            ts=1.0,
+            citation_verdict="uncited",
+            verdict="violation",
+            repairAttempts=2,
+            inducedSearch=True,
+            failOpen=True,
+        )
+    )
+    verdict = build_session_audit("s1", store=store)["runs"][0]["verdicts"][0]
+    assert verdict["displayLabel"] == "UNCITED CLAIMS"
+    assert verdict["severity"] == "review"
+    assert "repaired (2)" in verdict["affordances"]
+    assert "induced search" in verdict["affordances"]
+    assert "fail-open" in verdict["affordances"]
+    # Affordances ride their own list, not the generic reason-code chips.
+    assert verdict["reasonCodes"] == []
+
+
+def test_citation_gate_no_affordances_no_extra_codes(tmp_path):
+    store = _store(tmp_path)
+    store.record_event(
+        _citation_event(
+            session_id="s1",
+            run_id="r",
+            ts=1.0,
+            citation_verdict="cited",
+            verdict="ok",
+            repairAttempts=0,
+            inducedSearch=False,
+            failOpen=False,
+        )
+    )
+    verdict = build_session_audit("s1", store=store)["runs"][0]["verdicts"][0]
+    assert verdict["reasonCodes"] == []
+    assert verdict["affordances"] == []
+
+
+def test_non_citation_row_has_no_affordances(tmp_path):
+    store = _store(tmp_path)
+    store.record_event(
+        _rule_check(session_id="s1", run_id="r", ts=1.0, verdict="ok", rule_id="verifier:sha256:a")
+    )
+    verdict = build_session_audit("s1", store=store)["runs"][0]["verdicts"][0]
+    assert verdict["affordances"] == []

@@ -264,6 +264,17 @@ _EDIT_CLASS_TOOLS = frozenset(
     {"FileEdit", "FileWrite", "Edit", "Write", "ApplyPatch", "PatchApply"}
 )
 
+#: source_citation.gate verdict -> RuleVerdict for the observability rule_check
+#: event (Wave 4b). A fully cited answer passes; a partially cited answer is
+#: advisory-pending (never a hard block, the gate is fail-open); an uncited
+#: answer with high-risk claims is a violation. ``not_applicable`` is never
+#: surfaced (no enforcement signal).
+_CITATION_VERDICT_TO_RULE_VERDICT: dict[str, str] = {
+    "cited": "ok",
+    "partial": "pending",
+    "uncited": "violation",
+}
+
 #: Auto-continue re-invocation prompt fed back to the SAME session when the
 #: durable ledger still has open todos. Deliberately short + generic so the model
 #: does not anchor on the wording and re-describe its plan; the original system
@@ -1463,6 +1474,77 @@ class MagiEngineDriver:
                 tool_call_id=f"source-citation-gate:{turn_id}",
                 producing_rule_id="source_citation.gate",
             )
+            self._emit_citation_verdict_observability(
+                session_id=session_id,
+                turn_id=turn_id,
+                verdict=verdict,
+                cited_claims=result.cited_claims,
+                high_risk_claims=len(result.high_risk_claims),
+                dangling_refs=len(result.dangling_refs),
+                repair_attempts=int(repair_attempts),
+                induced_search=bool(induced_search),
+                fail_open=bool(fail_open),
+            )
+        except Exception:
+            return
+
+    def _emit_citation_verdict_observability(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        verdict: str,
+        cited_claims: int,
+        high_risk_claims: int,
+        dangling_refs: int,
+        repair_attempts: int,
+        induced_search: bool,
+        fail_open: bool,
+    ) -> None:
+        """Surface the citation gate verdict on the observability audit feed.
+
+        Emits a ``rule_check``-family public event (the durable evidence record
+        alone never reaches the observability store, only the JSONL ledger /
+        gate corpus). The Audit tab reads THIS event as a normal verdict row
+        (design 12.1). ``not_applicable`` turns carry no enforcement signal, so
+        they are not surfaced. The event ``verdict`` stays a valid RuleVerdict
+        for the generic rule_check machinery while the raw citation verdict
+        rides ``citationVerdict`` (source_type == "citation"); the affordance
+        scalars ride flat fields the projector preserves. Fully fail-soft."""
+        if getattr(self, "_event_sink", None) is None:
+            return
+        if verdict == "not_applicable":
+            return
+        try:
+            from magi_agent.runtime.public_events import rule_check_event  # noqa: PLC0415
+
+            rule_verdict = _CITATION_VERDICT_TO_RULE_VERDICT.get(verdict, "pending")
+            affordances = []
+            if repair_attempts > 0:
+                affordances.append(f"repaired={repair_attempts}")
+            if induced_search:
+                affordances.append("induced_search")
+            if fail_open:
+                affordances.append("fail_open")
+            detail = (
+                f"source citation verdict={verdict}: "
+                f"cited={cited_claims} high_risk={high_risk_claims} "
+                f"dangling={dangling_refs}"
+            )
+            if affordances:
+                detail = f"{detail} ({', '.join(affordances)})"
+            event = rule_check_event(
+                rule_id="source_citation.gate",
+                verdict=rule_verdict,
+                detail=detail,
+                event_family="citation_gate_alias",
+            )
+            event["sourceType"] = "citation"
+            event["citationVerdict"] = verdict
+            event["repairAttempts"] = int(repair_attempts)
+            event["inducedSearch"] = bool(induced_search)
+            event["failOpen"] = bool(fail_open)
+            self._observe_event(dict(event), session_id, turn_id)
         except Exception:
             return
 
