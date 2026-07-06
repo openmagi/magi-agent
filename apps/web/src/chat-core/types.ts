@@ -450,6 +450,13 @@ export interface ChannelState {
   turnPhase?: "pending" | "planning" | "executing" | "verifying" | "committing" | "compacting" | "committed" | "aborted" | null;
   /** Latest heartbeat elapsed time while the current iteration is still alive. */
   heartbeatElapsedMs?: number | null;
+  /**
+   * Client wall-clock timestamp (ms) of the last SSE frame of ANY kind for the
+   * live turn, including chat-proxy heartbeats. Drives the stuck-live-run
+   * watchdog: sustained silence past the generous window means the SSE
+   * connection is gone even though the fetch reader never saw the close.
+   */
+  lastFrameAt?: number | null;
   /** Best-effort user-facing goal for the current live turn. */
   currentGoal?: string | null;
   /** Count of explicit mid-turn injections accepted by the runtime. */

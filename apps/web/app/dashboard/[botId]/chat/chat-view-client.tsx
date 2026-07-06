@@ -51,6 +51,10 @@ import {
   channelStateFromActiveSnapshot,
   isLiveActiveSnapshot,
 } from "@/chat-core";
+import {
+  shouldReconcileStuckLiveRun,
+  stuckLiveRunResolvedChannelState,
+} from "@/chat-core";
 import { shouldHandlePageFileDrop } from "@/chat-core";
 import type {
   Channel,
@@ -168,6 +172,13 @@ const ASSISTANT_CATCHUP_PAST_WINDOW_MS = 15_000;
 const ASSISTANT_CATCHUP_FUTURE_WINDOW_MS = 60_000;
 const HISTORY_PREVIEW_LIMIT = 5;
 const HISTORY_PAGE_SIZE = 100;
+// Stuck live-run watchdog cadence. The silence threshold itself lives in
+// chat-core (STUCK_LIVERUN_SILENCE_MS, 90s); these govern how often we check
+// and how long the mid-session snapshot reconcile polls before settling to
+// committed history.
+const STUCK_WATCHDOG_TICK_MS = 5_000;
+const STUCK_WATCHDOG_POLL_INTERVAL_MS = 2_000;
+const STUCK_WATCHDOG_MAX_POLLS = 30;
 const HISTORY_AUTO_BACKFILL_PAGES = 4;
 const CUSTOM_CATEGORIES_KEY = (botId: string) => `magi:customCategories:${botId}`;
 
@@ -730,6 +741,103 @@ export function ChatViewClient({
     };
   }, [botId, initialChannel, isCurrentBot, ready, authenticated]);
 
+  // Stuck live-run watchdog + mid-session resume. A hosted turn can leave the
+  // browser wedged on "Processing tool result" when the terminal SSE frame is
+  // lost: the backend commits turn_end, but a half-open socket never delivers
+  // [DONE], so neither onDone nor onError fires and the reducer never settles.
+  // chat-proxy heartbeats every 15s keep `lastFrameAt` fresh on any live
+  // connection (onStreamActivity stamps it on every byte), so sustained silence
+  // past the generous window (STUCK_LIVERUN_SILENCE_MS) means the connection is
+  // gone. On trigger we reuse the EXISTING snapshot-resume machinery mid-session
+  // rather than inventing new state: abort the dead fetch (sendMessage returns
+  // silently on an aborted signal, so no competing onError fires), hydrate/poll
+  // the active snapshot, then reconcile to the committed message and clear the
+  // stuck agent-panel chips via stuckLiveRunResolvedChannelState.
+  const stuckReconcileInFlight = useRef<Set<string>>(new Set());
+  const reconcileStuckLiveRun = useCallback(
+    async (channel: string): Promise<void> => {
+      // Kill the dead fetch and mark recovery so the watchdog does not re-fire
+      // (shouldReconcileStuckLiveRun returns false while reconnecting).
+      useChatStore.getState().abortControllers[channel]?.abort();
+      useChatStore.getState().setChannelState(
+        channel,
+        { reconnecting: true, error: null, heartbeatElapsedMs: null },
+        { botId },
+      );
+      // Same poll the mount-resume / mid-stream-recovery paths use: while the
+      // server still reports a live snapshot, hydrate from it; once it is gone
+      // the turn is committed server-side, so fetch the committed history and
+      // settle.
+      for (let poll = 0; poll < STUCK_WATCHDOG_MAX_POLLS; poll += 1) {
+        if (!isCurrentBot()) return;
+        try {
+          const snap = await chatApi.getActiveSnapshot(botId, channel);
+          if (!isCurrentBot()) return;
+          if (isLiveActiveSnapshot(snap)) {
+            const existing = useChatStore.getState().channelStates[channel];
+            useChatStore
+              .getState()
+              .setChannelState(channel, channelStateFromActiveSnapshot(snap, existing), { botId });
+          } else {
+            const msgs = await chatApi.fetchChannelMessages(botId, channel, undefined, 50);
+            if (!isCurrentBot()) return;
+            if (msgs?.length) mergeFetchedServerMessages(botId, channel, msgs);
+            useChatStore
+              .getState()
+              .setChannelState(channel, stuckLiveRunResolvedChannelState(), { botId });
+            return;
+          }
+        } catch {
+          // Best-effort recovery loop.
+        }
+        await new Promise((resolve) => setTimeout(resolve, STUCK_WATCHDOG_POLL_INTERVAL_MS));
+      }
+      // Recovery exhausted: settle to committed history so the UI never stays
+      // wedged, even if the snapshot lingered.
+      try {
+        const msgs = await chatApi.fetchChannelMessages(botId, channel, undefined, 50);
+        if (isCurrentBot() && msgs?.length) mergeFetchedServerMessages(botId, channel, msgs);
+      } catch {
+        // Best-effort.
+      }
+      if (isCurrentBot()) {
+        useChatStore
+          .getState()
+          .setChannelState(channel, stuckLiveRunResolvedChannelState(), { botId });
+      }
+    },
+    [botId, isCurrentBot],
+  );
+
+  useEffect(() => {
+    if (!ready || !authenticated) return;
+    const inFlight = stuckReconcileInFlight.current;
+    const interval = setInterval(() => {
+      if (!isCurrentBot()) return;
+      const now = Date.now();
+      const channelStates = useChatStore.getState().channelStates;
+      for (const [channel, cs] of Object.entries(channelStates)) {
+        if (inFlight.has(channel)) continue;
+        if (
+          !shouldReconcileStuckLiveRun({
+            streaming: cs.streaming,
+            reconnecting: cs.reconnecting,
+            turnPhase: cs.turnPhase,
+            lastFrameAt: cs.lastFrameAt,
+            now,
+          })
+        ) {
+          continue;
+        }
+        inFlight.add(channel);
+        void reconcileStuckLiveRun(channel).finally(() => {
+          inFlight.delete(channel);
+        });
+      }
+    }, STUCK_WATCHDOG_TICK_MS);
+    return () => clearInterval(interval);
+  }, [botId, isCurrentBot, ready, authenticated, reconcileStuckLiveRun]);
+
   // Poll for server messages
   useEffect(() => {
     if (!ready || !authenticated) return;
@@ -927,6 +1035,7 @@ export function ChatViewClient({
         fileProcessing: false,
         turnPhase: "pending",
         heartbeatElapsedMs: null,
+        lastFrameAt: Date.now(),
         currentGoal: text.trim() || messageText.trim(),
         pendingGoalMissionTitle: sendOptions?.goalMode ? (text.trim() || messageText.trim()) : null,
         pendingInjectionCount: 0,
@@ -1071,7 +1180,15 @@ export function ChatViewClient({
               }
             },
             onHeartbeat: (elapsedMs) => {
-              store.setChannelState(channel, { heartbeatElapsedMs: elapsedMs }, { botId });
+              store.setChannelState(channel, {
+                heartbeatElapsedMs: elapsedMs,
+                lastFrameAt: Date.now(),
+              }, { botId });
+            },
+            onStreamActivity: () => {
+              // Raw byte-level liveness (incl `: heartbeat` comments). Keeps the
+              // stuck-run watchdog from reconciling a slow-but-alive turn.
+              store.setChannelState(channel, { lastFrameAt: Date.now() }, { botId });
             },
             onPendingInjectionCount: (queuedCount) => {
               store.setChannelState(channel, {

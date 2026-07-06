@@ -1280,6 +1280,14 @@ export interface SendMessageOptions {
   onControlReplayComplete?: (lastSeq: number) => void;
   onTurnPhase?: (phase: LiveTurnPhase) => void;
   onHeartbeat?: (elapsedMs: number) => void;
+  /**
+   * Raw liveness signal: fires once per SSE reader chunk (every `reader.read()`
+   * that yields bytes), INCLUDING the `: heartbeat` comments chat-proxy injects
+   * every 15s that never surface as a parsed callback. The stuck-live-run
+   * watchdog stamps `lastFrameAt` from this so a long silent-but-alive tool call
+   * (heartbeats only) is never mistaken for a dead connection.
+   */
+  onStreamActivity?: () => void;
   onPendingInjectionCount?: (queuedCount: number) => void;
   onUsage?: (usage: ResponseUsage) => void;
   onDone: () => void;
@@ -1521,6 +1529,7 @@ export async function sendMessage(
     onControlReplayComplete,
     onTurnPhase,
     onHeartbeat,
+    onStreamActivity,
     onPendingInjectionCount,
     onUsage,
     onDone,
@@ -2629,6 +2638,9 @@ export async function sendMessage(
       // SSE comments from chat-proxy every 15s). Only fires on real
       // stream death, not on long tool calls.
       resetIdle();
+      // Raw liveness for the client stuck-run watchdog: any byte, including a
+      // `: heartbeat` comment, proves the SSE connection is still open.
+      onStreamActivity?.();
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
