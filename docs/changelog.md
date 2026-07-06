@@ -1,3 +1,13 @@
+# Unreleased
+
+## Ambient goal loop (finish-the-job baseline)
+- "Finish the job" is now ambient: on every substantive turn (under the profile-aware `MAGI_GOAL_LOOP_ENABLED` master) the engine can keep going instead of stopping with an "I'll continue..." message, no toggle required.
+- The composer Goal Mission toggle (`goalMode`) becomes an INTENSITY control: it raises the continuation budget ceiling (mission vs ambient budgets), it is no longer the on/off master.
+- The toggle-gated judge branch and the toggle-independent ledger branch are unified into one clean-break ladder with one measurable-progress brake; judge continuations are now progress-braked.
+- New tunable `MAGI_GOAL_LOOP_AMBIENT_MAX_TURNS` (default 3) bounds the no-ledger ambient judge path; the deterministic ledger path keeps the generous ambient budgets.
+- Legacy `MAGI_GOAL_NUDGE_ENABLED` is superseded (still the escape hatch when the goal loop resolves OFF), retiring one extra model call per clean-break turn in the full profile.
+- Stale `strict default-OFF` docstrings for the profile-ON goal-loop / plan-ledger / evidence-first flags corrected (behavior unchanged).
+
 # 0.1.87 (2026-06-26)
 
 ## Customize follow-ups
