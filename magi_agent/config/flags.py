@@ -1695,16 +1695,21 @@ FLAGS: tuple[FlagSpec, ...] = (
     ),
     FlagSpec(
         name="MAGI_SOURCE_CITATION_GATE_MODE",
-        default="repair",
+        # Initial fleet default is `audit` (observe-only): capture + re-injection
+        # + inline citations + Sources panel + verdict recording all stay on, but
+        # the turn-intervening repair/induce-search is off by default. Flipping
+        # this default to `repair` is a documented follow-up once audit-mode
+        # telemetry validates the gate on the fleet.
+        default="audit",
         scope="public",
         stage="stage1",
         summary=(
             "Deterministic pre-final source-citation gate mode. `off` skips the "
-            "gate entirely; `audit` runs the gate observe-only (emits a "
-            "custom:CitationVerdict record, never alters the turn); `repair` (the "
-            "default) additionally drives attribution / induce-search repair with "
-            "a bounded budget, then fails open with a hedge notice. Only runs when "
-            "MAGI_SOURCE_CITATION_ENABLED is on."
+            "gate entirely; `audit` (the initial fleet default) runs the gate "
+            "observe-only (emits a custom:CitationVerdict record, never alters "
+            "the turn); `repair` additionally drives attribution / induce-search "
+            "repair with a bounded budget, then fails open with a hedge notice. "
+            "Only runs when MAGI_SOURCE_CITATION_ENABLED is on."
         ),
         kind="str",
     ),

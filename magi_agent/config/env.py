@@ -3797,19 +3797,22 @@ def parse_source_citation_gate_mode(env: Mapping[str, str]) -> str:
     """MAGI_SOURCE_CITATION_GATE_MODE -- deterministic pre-final citation gate.
 
     Returns ``"off"`` / ``"audit"`` / ``"repair"``. ``off`` skips the gate.
-    ``audit`` runs the gate observe-only: it emits a ``custom:CitationVerdict``
-    evidence record and NEVER alters the turn. ``repair`` (the Wave 4b default)
-    additionally drives the pre-final repair loop: attribution repair for
-    dangling / uncited-with-sources claims, induce-search repair for high-risk
+    ``audit`` (the initial fleet default) runs the gate observe-only: it emits a
+    ``custom:CitationVerdict`` evidence record and NEVER alters the turn.
+    ``repair`` additionally drives the pre-final repair loop: attribution repair
+    for dangling / uncited-with-sources claims, induce-search repair for high-risk
     claims on a zero-external-read turn, a bounded budget, then fail-open with a
     hedge notice so the turn always completes. Unknown values fall back to the
-    FlagSpec default (``repair``). The gate only runs when
-    :func:`parse_source_citation_enabled` is also on.
+    FlagSpec default (``audit``). Flipping the default to ``repair`` is a
+    documented follow-up once audit-mode telemetry validates the gate on the
+    fleet. The gate only runs when :func:`parse_source_citation_enabled` is on.
     """
     raw = (env.get("MAGI_SOURCE_CITATION_GATE_MODE") or "").strip().lower()
     if raw in ("off", "audit", "repair"):
         return raw
-    return "repair"
+    # Initial fleet default: observe-only. See parse_source_citation_gate_mode
+    # docstring and the MAGI_SOURCE_CITATION_GATE_MODE FlagSpec.
+    return "audit"
 
 
 def parse_source_citation_repair_max_attempts(env: Mapping[str, str]) -> int:
