@@ -16,6 +16,7 @@ import type {
 import { ChatModelPicker } from "@/components/chat/chat-model-picker";
 import { KbContextBar } from "@/components/chat/kb-context-bar";
 import { KbSidePanel } from "@/components/chat/kb-side-panel";
+import type { SessionCitationGroup } from "@/components/chat/sources-panel";
 import { useChatStore, syncResetCounters } from "@/chat-core";
 import {
   modelSupportsReasoningEffort,
@@ -1998,6 +1999,17 @@ export function ChatViewClient({
     () => channels.find((c) => c.name === activeChannel) ?? null,
     [activeChannel, channels],
   );
+  // Cited-source payloads for the active channel's assistant messages, feeding
+  // the Sources tab and the Audit citation-verdict projection (Wave 3b).
+  const sessionCitations = useMemo<SessionCitationGroup[]>(
+    () =>
+      (messages[activeChannel] ?? []).flatMap((message) =>
+        message.role === "assistant" && message.citations
+          ? [{ messageId: message.id, timestamp: message.timestamp, citations: message.citations }]
+          : [],
+      ),
+    [messages, activeChannel],
+  );
   const activeChannelTitle = useMemo(() => {
     if (!hasActiveChannel) return t.chat.channelsTitle;
     return formatChannelBaseLabel({
@@ -2372,6 +2384,7 @@ export function ChatViewClient({
         missionChannelType="app"
         missionChannelId={activeChannel}
         auditSessionId={chatApi.buildSessionKey(botId, activeChannel)}
+        sessionCitations={sessionCitations}
         channelState={channelState}
         uiLanguage={locale}
         queuedMessages={queuedMessages[activeChannel] ?? []}

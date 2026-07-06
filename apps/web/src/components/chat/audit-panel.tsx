@@ -9,10 +9,88 @@ import {
   type AuditSource,
   type AuditVerdict,
 } from "@/hooks/use-audit-events";
+import type { SessionCitationGroup } from "./sources-panel";
+import type { CitationVerdict } from "@/chat-core";
 
 interface AuditPanelProps {
   botId: string;
   sessionId?: string | null;
+  /** Cited-source payloads whose terminal `verdict` projects into this tab. */
+  citationGroups?: SessionCitationGroup[];
+}
+
+// Render-provisional citation-governance projection (Wave 3b, Piece C).
+//
+// Wave 3b projects the deterministic terminal render `verdict` into the Audit
+// tab so citation governance is visible alongside every other rule verdict.
+// Wave 4 emits a richer `custom:CitationVerdict` gate record into the
+// observability store that the audit feed already carries; when that lands this
+// section should switch to the backend-produced verdict (superseding the client
+// projection) rather than assume this label shape.
+const CITATION_VERDICT_LABEL: Record<CitationVerdict, string> = {
+  cited: "Sources cited",
+  partial: "Partially cited",
+  uncited: "Uncited claims",
+  not_applicable: "No sources",
+};
+
+const CITATION_VERDICT_VARIANT: Record<CitationVerdict, BadgeVariant> = {
+  cited: "ok",
+  partial: "review",
+  uncited: "review",
+  not_applicable: "muted",
+};
+
+function CitationVerdictSection({
+  groups,
+}: {
+  groups: SessionCitationGroup[];
+}): React.ReactElement | null {
+  // Only surface turns that actually engaged citation (drop `not_applicable`,
+  // i.e. turns with no external-read sources at all).
+  const rows = groups.filter((group) => group.citations.verdict !== "not_applicable");
+  if (rows.length === 0) return null;
+  return (
+    <section className="rounded-lg border border-black/[0.06] bg-white/75 px-2 py-2">
+      <div className="mb-1.5 px-1">
+        <h3 className="text-[11px] font-semibold text-secondary/70">
+          Source citation
+        </h3>
+      </div>
+      <ul className="space-y-1.5">
+        {rows.map((group, index) => {
+          const verdict = group.citations.verdict;
+          const dangling = group.citations.danglingRefs.length;
+          return (
+            <li
+              key={group.messageId}
+              className="rounded-lg border border-black/[0.06] bg-white/85 px-2.5 py-2"
+              data-citation-verdict={verdict}
+            >
+              <div className="flex min-w-0 items-start gap-2">
+                <Badge variant={CITATION_VERDICT_VARIANT[verdict]} className="shrink-0">
+                  {CITATION_VERDICT_LABEL[verdict]}
+                </Badge>
+                <div className="min-w-0 flex-1 text-[11px] text-secondary/60">
+                  <div className="truncate">
+                    {rows.length > 1 ? `Response ${index + 1}` : "This response"}
+                    {" · "}
+                    {group.citations.sources.length}{" "}
+                    {group.citations.sources.length === 1 ? "source" : "sources"}
+                  </div>
+                  {dangling > 0 && (
+                    <div className="mt-0.5 text-amber-600">
+                      {dangling} dangling reference{dangling === 1 ? "" : "s"}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
 }
 
 // Severity → design-system badge variant. The backend (evidence/audit_labels.py)
@@ -231,11 +309,15 @@ function SourcesBox({ sources }: { sources: AuditSource[] }): React.ReactElement
 export function AuditPanel({
   botId,
   sessionId,
+  citationGroups = [],
 }: AuditPanelProps): React.ReactElement {
   const { data, loading, error } = useAuditEvents(botId, sessionId);
   const runs = data?.runs ?? [];
   const sources = data?.sources ?? [];
   const showInitialLoading = loading && !data;
+  const hasCitationVerdicts = citationGroups.some(
+    (group) => group.citations.verdict !== "not_applicable",
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" aria-label="Policy audit log">
@@ -266,14 +348,15 @@ export function AuditPanel({
           </div>
         )}
 
-        {!showInitialLoading && !error && runs.length === 0 && (
+        {!showInitialLoading && !error && runs.length === 0 && !hasCitationVerdicts && (
           <div className="rounded-lg border border-black/[0.06] bg-white/70 px-3 py-3 text-[11.5px] text-secondary/55">
             No policies enforced yet.
           </div>
         )}
 
-        {!error && runs.length > 0 && (
+        {!error && (runs.length > 0 || hasCitationVerdicts) && (
           <div className="space-y-2">
+            <CitationVerdictSection groups={citationGroups} />
             {runs.map((group, index) => (
               <RunGroup key={group.runId ?? `run:${index}`} group={group} />
             ))}
