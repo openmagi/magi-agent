@@ -76,6 +76,15 @@ from magi_agent.transport.local_turn_store import LOCAL_TURN_STORE
 from magi_agent.transport.streaming_chat import frame_for_event, frame_for_terminal
 from magi_agent.transport.streaming_driver import drive_streaming_chat
 from magi_agent.transport.streaming_sink import build_streaming_prompt_sink
+from magi_agent.runtime.goal_loop_policy import build_goal_loop_policy_from_request
+from magi_agent.runtime.per_turn_goal_intensity import (
+    reset_per_turn_goal_mission,
+    set_per_turn_goal_mission,
+)
+from magi_agent.runtime.per_turn_goal_loop_context import (
+    reset_per_turn_goal_loop_policy,
+    set_per_turn_goal_loop_policy,
+)
 from magi_agent.runtime.public_events import turn_phase_event
 # PR-H: main-turn finalize-path TRACE helpers (gated on the existing
 # MAGI_CHILD_RUNNER_EMPTY_DEBUG env; default-OFF; helpers swallow their own
@@ -1204,14 +1213,48 @@ def register_streaming_chat_routes(
             usage_recorder=_usage_recorder,
             citation_registry_provider=_citation_registry_provider,
         )
-        return _streaming_response(
-            _wrap_handler_exit_trace(
-                drive_detached_local_stream(
+        # U6 (local-engine goal-loop wiring): the composer Goal-mission toggle
+        # rides the body as ``goalMode``. Publish the mission-intensity
+        # ContextVar and, when the toggle is on, the mission GoalLoopPolicy so
+        # the engine driver reads them. The driver runs inside the detach pump
+        # task (``drive_detached_local_stream`` -> ``ensure_future`` in
+        # ``local_turn_pump``), which snapshots the context at task creation, so
+        # the vars MUST be set BEFORE that task is created. Setting them at the
+        # top of the body generator below (which iterates
+        # ``drive_detached_local_stream``, creating the pump task on its first
+        # step) satisfies that ordering; the ``finally`` resets both so
+        # back-to-back / concurrent turns never leak state. ``goalMode`` absent
+        # keeps both ContextVars at their defaults (byte-identical to pre-U6).
+        # This branch is ACTIVE immediately for self-host streaming users
+        # (unlike the hosted gate5b path, which stays inert until the
+        # governed-turn flip). Mirrors ``chat_routes_local`` set/reset.
+        _goal_mode_requested = (
+            bool(body.get("goalMode")) if isinstance(body, Mapping) else False
+        )
+        _goal_loop_policy = build_goal_loop_policy_from_request(
+            goal_mode_requested=_goal_mode_requested,
+            objective=prompt,
+            env=os.environ,
+        )
+
+        async def _goal_scoped_local_body() -> AsyncIterator[bytes]:
+            _goal_loop_token = set_per_turn_goal_loop_policy(_goal_loop_policy)
+            _goal_mission_token = set_per_turn_goal_mission(_goal_mode_requested)
+            try:
+                async for _frame in drive_detached_local_stream(
                     undetached,
                     session_id=session_id,
                     turn_id=turn_id,
                     cancel=cancel,
-                ),
+                ):
+                    yield _frame
+            finally:
+                reset_per_turn_goal_loop_policy(_goal_loop_token)
+                reset_per_turn_goal_mission(_goal_mission_token)
+
+        return _streaming_response(
+            _wrap_handler_exit_trace(
+                _goal_scoped_local_body(),
                 session_id=session_id,
                 turn_id=turn_id,
             )

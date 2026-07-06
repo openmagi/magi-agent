@@ -35,9 +35,18 @@ from magi_agent.introspection.egress_gate import EgressVerifierStatus
 from magi_agent.recipes.compiler import AgentRecipeCompiler, ProfileResolutionRequest
 from magi_agent.recipes.materializer import RecipeMaterializer
 from magi_agent.research.research_first_canary import build_research_first_selected_response, research_first_selected_canary_active
+from magi_agent.runtime.goal_loop_policy import build_goal_loop_policy_from_request
 from magi_agent.runtime.governed_turn import run_governed_turn
 from magi_agent.runtime.hosted_runtime import build_hosted_runtime
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.runtime.per_turn_goal_intensity import (
+    reset_per_turn_goal_mission,
+    set_per_turn_goal_mission,
+)
+from magi_agent.runtime.per_turn_goal_loop_context import (
+    reset_per_turn_goal_loop_policy,
+    set_per_turn_goal_loop_policy,
+)
 from magi_agent.runtime.public_events import tool_end_event, tool_progress_event, tool_start_event, turn_phase_event
 from magi_agent.runtime.session_identity import _memory_mode_from_header
 from magi_agent.shadow.gate5b4c3_live_runner_boundary import _gate1a_correlated_model_or_label, run_gate5b4c3_live_runner_boundary_async
@@ -49,7 +58,7 @@ from magi_agent.transport.chat_routes_local import _NoopChatSink
 from magi_agent.transport.chat_shared import Gate5BUserVisibleChatRouteConfig, _bounded_public_text, _context_continuity_chat_diagnostic, _fallback_response, _is_sha256_digest, _local_chat_string, _reason_for_gate_error, _resolve_session_key, _route_config, _route_tool_bundle_full, _route_tool_bundle_names, _route_tool_bundle_readonly, _route_tool_bundle_ready, _sha256_digest, _shadow_generation_route_config
 from magi_agent.transport.egress_critic import _maybe_run_egress_critic_gate
 from magi_agent.transport.gate5b_governance import build_gate5b_control_plane_plugins, gate5b_governance_enabled, gate5b_pre_final_grounding_status
-from magi_agent.transport.generation_request import _build_user_visible_generation_request, build_gate5b_user_visible_canary_runner_request, sanitize_gate5b_model_visible_identity_text
+from magi_agent.transport.generation_request import _build_user_visible_generation_request, _extract_last_user_text, build_gate5b_user_visible_canary_runner_request, sanitize_gate5b_model_visible_identity_text
 from magi_agent.transport.hosted_engine_result import collect_engine_to_boundary_result
 from magi_agent.transport.hosted_turn_context import hosted_request_to_turn_context
 from magi_agent.transport.usage_receipt_emit import emit_runtime_direct_usage_receipt, usage_receipt_enabled
@@ -98,7 +107,55 @@ async def run_gate5b_user_visible_chat_response(
     additive surfaces such as ``/v1/chat/stream`` can reuse the same selected
     canary gates, ToolHost attachment, evidence, counters, and fallback
     diagnostics without minting a second runtime path.
+
+    U6 (hosted goal-loop wiring): the composer Goal-mission toggle rides the
+    chat body as ``goalMode``. Publish the mission-intensity ContextVar and,
+    when the toggle is on, the mission ``GoalLoopPolicy`` here -- the SINGLE
+    dispatch chokepoint for the governed turn in EVERY gate5b path. Both the
+    streaming ``/v1/chat/stream`` gate5b branch (which awaits this coroutine
+    inside ``asyncio.create_task`` in ``_drive_selected_gate5b_stream``) and the
+    ``/v1/chat/completions`` route reach the driver through this function, so a
+    single set/reset here keeps the ContextVars live for the governed turn in
+    both. ``goalMode`` absent leaves both ContextVars at their defaults, so
+    behavior is byte-identical to pre-U6. Inert on hosted until
+    ``MAGI_HOSTED_GOVERNED_TURN_ENABLED`` flips (only then does the hosted turn
+    reach ``MagiEngineDriver._drive``); active immediately for the local-engine
+    branch of the streaming route. Mirrors ``chat_routes_local`` set/reset.
     """
+    _goal_mode_requested = (
+        bool(payload.get("goalMode")) if isinstance(payload, Mapping) else False
+    )
+    _goal_loop_policy = build_goal_loop_policy_from_request(
+        goal_mode_requested=_goal_mode_requested,
+        objective=(
+            _extract_last_user_text(payload) if isinstance(payload, Mapping) else ""
+        ),
+        env=os.environ,
+    )
+    _goal_loop_token = set_per_turn_goal_loop_policy(_goal_loop_policy)
+    _goal_mission_token = set_per_turn_goal_mission(_goal_mode_requested)
+    try:
+        return await _run_gate5b_user_visible_chat_response_inner(
+            runtime,
+            payload,
+            request=request,
+            public_event_sink=public_event_sink,
+        )
+    finally:
+        reset_per_turn_goal_loop_policy(_goal_loop_token)
+        reset_per_turn_goal_mission(_goal_mission_token)
+
+
+async def _run_gate5b_user_visible_chat_response_inner(
+    runtime: OpenMagiRuntime,
+    payload: object,
+    *,
+    request: Request,
+    public_event_sink: Callable[[Mapping[str, object]], None] | None = None,
+) -> JSONResponse:
+    """Selected Gate5B user-visible chat body (behavior-preserving split of the
+    public entry above so U6 can wrap it with the goal-mode ContextVar
+    set/reset without churning the body's indentation)."""
     route_config = _route_config(runtime)
     if not route_config.enabled:
         return _fallback_response(
