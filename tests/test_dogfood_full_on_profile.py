@@ -457,6 +457,16 @@ _INTENTIONALLY_NOT_IN_FULL_PROFILE: dict[str, str] = {
     # LOCAL_FULL_RUNTIME_ENV_DEFAULTS), so they are no longer recorded as
     # deliberate omissions. MAGI_GOAL_LOOP_ENABLED (the cost-bearing lab judge
     # loop) stays in LAB_EXPERIMENTAL_FLAGS and is NOT promoted to full by WS3.
+    # Verify-before-replying PR-V2: skeptic stays _b (strict default-OFF, D3);
+    # backstop is a str flag (not a _b), kept here for documentation only.
+    "MAGI_VERIFY_BEFORE_REPLYING_SKEPTIC_ENABLED": (
+        "LLM skeptic member; default-OFF even in full profile (D3: not-yet-trusted; "
+        "adds per-turn critic call; graduate via skeptic_findings_dropped + advisory ignore-rate)"
+    ),
+    "MAGI_VERIFY_BEFORE_REPLYING_BACKSTOP_MODE": (
+        "reserved backstop seam (Section 13 of design); non-off values not implemented; "
+        "str flag excluded from bool completeness gate"
+    ),
 }
 
 

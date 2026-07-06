@@ -3860,6 +3860,60 @@ def parse_source_citation_induce_search_enabled(env: Mapping[str, str]) -> bool:
     return flag_profile_bool("MAGI_SOURCE_CITATION_INDUCE_SEARCH_ENABLED", env=env)
 
 
+def parse_verify_before_replying_enabled(env: Mapping[str, str]) -> bool:
+    """MAGI_VERIFY_BEFORE_REPLYING_ENABLED -- master switch for the policy.
+
+    Profile-aware default-ON (full runtime profile); OFF under
+    ``MAGI_RUNTIME_PROFILE`` in ``safe``/``eval`` so scored benchmarks run with
+    a clean, unmodified tool corpus.
+
+    Naming note: distinct from the legacy ``MAGI_VERIFY_*`` single-preset
+    LLM-judge family (``MAGI_VERIFY_CLAIM_CITATION`` etc.); do not add this
+    flag to ``customize/preset_map.py``.
+    """
+    from .flags import flag_profile_bool
+
+    return flag_profile_bool("MAGI_VERIFY_BEFORE_REPLYING_ENABLED", env=env)
+
+
+def parse_verify_before_replying_skeptic_enabled(env: Mapping[str, str]) -> bool:
+    """MAGI_VERIFY_BEFORE_REPLYING_SKEPTIC_ENABLED -- LLM skeptic member.
+
+    Strict default-OFF including the full profile (D3): adds one critic-model
+    call per audited final answer.  Advisory findings only.  Enable
+    deliberately after measuring skeptic_findings_dropped and advisory
+    ignore-rate.
+    """
+    from .flags import flag_bool
+
+    return flag_bool("MAGI_VERIFY_BEFORE_REPLYING_SKEPTIC_ENABLED", env=env)
+
+
+def parse_verify_before_replying_backstop_mode(env: Mapping[str, str]) -> str:
+    """MAGI_VERIFY_BEFORE_REPLYING_BACKSTOP_MODE -- reserved backstop seam.
+
+    Returns ``"off"`` (the sole shipped value).  Reserved values
+    ``"block_high"`` and ``"repair_high"`` are registered in the flag registry
+    but not yet implemented; any non-off value logs a WARNING and falls back to
+    ``"off"`` so that a mis-configured environment is safe and auditable.
+
+    See Section 13 of the verify-before-replying policy design for the
+    backstop promotion criteria.
+    """
+    import logging
+
+    raw = (env.get("MAGI_VERIFY_BEFORE_REPLYING_BACKSTOP_MODE") or "").strip().lower()
+    if not raw or raw == "off":
+        return "off"
+    logging.getLogger(__name__).warning(
+        "MAGI_VERIFY_BEFORE_REPLYING_BACKSTOP_MODE=%r is not implemented in "
+        "this release; the backstop seam is reserved but non-off values are "
+        "no-ops. Falling back to 'off'.",
+        raw,
+    )
+    return "off"
+
+
 def parse_taskboard_completion_verification_enabled(env: Mapping[str, str]) -> bool:
     """MAGI_VERIFY_TASKBOARD_COMPLETION — block completion while tasks remain.
 
