@@ -228,7 +228,20 @@ def _copy_validated_adk_content(value: types.Content) -> types.Content:
     if type(value) is not types.Content:
         raise ValueError("new_message must be google.genai.types.Content")
 
-    _validate_json_like_value(value.model_dump(by_alias=True, exclude_none=True))
+    # Validate JSON-like compatibility per-part so that image parts (which carry
+    # binary ``inline_data.data`` bytes -- a valid ADK blob type) are exempted
+    # while non-image parts (text, function_call, function_response) are still
+    # checked for JSON-like safety.  The function_call.args check is the
+    # primary guard: tool input values must be JSON-native so they can be
+    # passed to tools as JSON; bytes in args are rejected here even though
+    # Pydantic would silently base64-encode them under ``mode="json"``.
+    for part in value.parts or ():
+        if getattr(part, "inline_data", None) is not None:
+            # Image part -- ``inline_data.data`` is binary (bytes); this is a
+            # legitimate ADK content type.  Skip JSON-like check; the mode=json
+            # dump below handles serialisation correctly via base64 encoding.
+            continue
+        _validate_json_like_value(part.model_dump(by_alias=True, exclude_none=True))
 
     try:
         dumped = value.model_dump(by_alias=True, exclude_none=True, mode="json")

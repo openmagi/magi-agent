@@ -73,6 +73,25 @@ def hosted_request_to_turn_context(
         if include_history
         else ()
     )
+    # U5 (B1): thread image blocks from the generation into TurnContext so the
+    # driver's _build_opening_parts can emit them as ADK Part.from_bytes parts.
+    # Shape mirrors the legacy boundary at gate5b4c3:1497-1506: each element is
+    # the converter-dict that image_blocks_to_parts expects.
+    # ``getattr`` fallback: production Gate5B4C3ShadowGenerationTurn always has
+    # ``sanitized_image_blocks`` (Pydantic default ``()``), but lightweight test
+    # fakes (SimpleNamespace) may omit it.
+    _raw_image_blocks = getattr(generation.turn, "sanitized_image_blocks", ()) or ()
+    image_blocks: tuple[dict[str, object], ...] = tuple(
+        {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": b.media_type,
+                "data": b.data,
+            },
+        }
+        for b in _raw_image_blocks
+    )
     return TurnContext(
         prompt=generation.turn.sanitized_current_turn_text,
         session_id=_shadow_session_id(generation),
@@ -80,6 +99,7 @@ def hosted_request_to_turn_context(
         provider=generation.model_routing.provider_label,
         model=generation.model_routing.model_label,
         initial_messages=initial_messages,
+        image_blocks=image_blocks,
         recipe=None,
         memory_mode="normal",
         permission_mode="default",
