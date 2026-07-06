@@ -357,10 +357,17 @@ FLAGS: tuple[FlagSpec, ...] = (
     _pb(
         "MAGI_GOAL_NUDGE_ENABLED",
         summary=(
-            "Enable the production goal-nudge: a bounded continuation that "
-            "fires when MagiEngineDriver detects a clean stop short of the "
-            "stated goal (strict default-OFF; OFF injects goal_nudge=None and "
-            "the driver behaves byte-identically to pre-PR4)."
+            "Legacy self-check goal-nudge: a bounded continuation that fires "
+            "when MagiEngineDriver detects a clean stop short of the stated "
+            "goal. SUPERSEDED by the ambient goal loop: the wiring consults "
+            "this nudge ONLY when MAGI_GOAL_LOOP_ENABLED resolves OFF, so the "
+            "stronger unified ladder owns finish-the-job whenever the loop is "
+            "ON. It remains the escape hatch (and the "
+            "MAGI_GOAL_NUDGE_REQUIRED_EVIDENCE reader) for goal-loop-OFF "
+            "operators. Profile-aware default-ON (full/lab; OFF under the "
+            "safe-family); when the nudge is inactive the wiring injects "
+            "goal_nudge=None and the driver behaves byte-identically to "
+            "pre-PR4."
         ),
     ),
     _pb(
@@ -371,9 +378,11 @@ FLAGS: tuple[FlagSpec, ...] = (
             "<workspace_root>/.magi/durable/plan_ledger/<session_id>.jsonl and "
             "the per-turn handler-set build re-seeds the in-memory todo list "
             "from the JSONL last line so the plan survives across turns / a "
-            "process restart (strict default-OFF; OFF attaches no sink, runs no "
-            "restore, writes no file, byte-identical to pre-WS3). The durable "
-            "index half additionally requires MAGI_DURABLE_LOCAL_WRITES_ENABLED."
+            "process restart. Profile-aware default-ON (full/lab; OFF under the "
+            "safe-family or an explicit MAGI_PLAN_LEDGER_DURABLE_ENABLED=0); "
+            "when OFF the wiring attaches no sink, runs no restore, writes no "
+            "file, byte-identical to pre-WS3. The durable index half "
+            "additionally requires MAGI_DURABLE_LOCAL_WRITES_ENABLED."
         ),
     ),
     _pb(
@@ -386,9 +395,11 @@ FLAGS: tuple[FlagSpec, ...] = (
             "circuiting an all-complete ledger to done with no model call and "
             "routing a hard evidence failure or a clean stop short of confirmed "
             "completion to a user-visible goal_paused status instead of letting "
-            "it masquerade as success (strict default-OFF; OFF builds the engine "
-            "with evidence_first=False so all three seams are inert and _drive is "
-            "byte-identical to pre-WS3)."
+            "it masquerade as success. Profile-aware default-ON (full/lab; OFF "
+            "under the safe-family or an explicit "
+            "MAGI_GOAL_COMPLETION_EVIDENCE_FIRST_ENABLED=0); when OFF the engine "
+            "is built with evidence_first=False so all three seams are inert and "
+            "_drive is byte-identical to pre-WS3."
         ),
     ),
     _b(

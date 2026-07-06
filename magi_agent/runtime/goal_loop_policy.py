@@ -71,8 +71,12 @@ class GoalLoopPolicy:
     Fields are minimal by design — anything not strictly needed by the judge
     call lives elsewhere (e.g. recipe / persona / model selection comes from
     the request's existing model overlay, not from this policy). The engine
-    treats this object as opaque: presence ⇒ goal mode is on for this turn,
-    absence ⇒ existing single-turn behavior is byte-identical.
+    treats this object as opaque: presence ⇒ goal mode is on for this turn.
+    Absence of a per-turn (ContextVar-published) policy no longer implies
+    single-turn: under a profile-ON goal loop the driver may synthesize an
+    ambient policy at the clean break (design 5.1); it falls back to the prior
+    single-turn behavior only when synthesis is inert (loop OFF / child / empty
+    objective).
     """
 
     #: Always ``True`` when this object exists (a falsy ``enabled`` would mean
@@ -152,12 +156,17 @@ def build_goal_loop_policy_from_request(
     objective: str,
     env: Mapping[str, str],
 ) -> GoalLoopPolicy | None:
-    """Construct a ``GoalLoopPolicy`` for this request, or ``None`` if disabled.
+    """Construct the MISSION-intensity ``GoalLoopPolicy``, or ``None`` when no
+    explicit mission was requested / the loop is disabled.
 
-    Returns ``None`` (which the engine treats as "single-turn, byte-identical
-    to today") in any of:
+    This is the explicit-toggle (mission) builder used by transports. Returning
+    ``None`` means the transport publishes no per-turn policy; the engine may
+    then synthesize an ambient (finish-the-job baseline) policy driver-side
+    (design 5.1), so ``None`` here is NOT "single-turn" in general, it just means
+    "no explicit mission intensity for this turn". Returns ``None`` in any of:
 
-    * ``goal_mode_requested`` is false (the toggle was off — Phase 1 opt-in).
+    * ``goal_mode_requested`` is false (no explicit Goal-mission toggle; the
+      ambient baseline is synthesized in the driver, not here).
     * ``MAGI_GOAL_LOOP_ENABLED`` resolves OFF for *env* (the profile-aware
       master gate: ON under the full/lab profile, OFF under the safe-family or
       an explicit ``"0"``).

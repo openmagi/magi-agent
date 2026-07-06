@@ -2368,15 +2368,20 @@ MAGI_GOAL_NUDGE_ENABLED_ENV = "MAGI_GOAL_NUDGE_ENABLED"
 def is_goal_nudge_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Single source of truth for the production goal-nudge activation flag.
 
-    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF, the
-    production CLI/serve engine wiring injects ``goal_nudge=None`` so
-    ``MagiEngineDriver._drive`` behaves byte-identically to pre-PR4. When ON,
+    Profile-aware default-ON (``flag_profile_bool``): ON under the full/lab
+    profile, OFF under the safe-family or an explicit
+    ``MAGI_GOAL_NUDGE_ENABLED=0``. The legacy nudge is SUPERSEDED by the ambient
+    goal loop: ``cli.wiring`` injects ``goal_nudge=None`` whenever
+    ``is_goal_loop_enabled()`` resolves ON, so the unified ladder owns
+    finish-the-job and the nudge is consulted ONLY when the goal loop resolves
+    OFF (the escape hatch, carrying the ``MAGI_GOAL_NUDGE_REQUIRED_EVIDENCE``
+    reader). When the nudge IS active,
     ``cli.goal_nudge_wiring.build_goal_nudge_from_env`` constructs a
     :class:`~magi_agent.runtime.goal_nudge.GoalNudge` (default ``mode="goal"``)
     and threads it onto the engine so a clean stop short of the goal triggers a
-    bounded continuation. Like ``is_egress_gate_enabled`` this deliberately does
-    NOT follow the runtime-profile default-ON convention — it is an additive,
-    default-disabled seam.
+    bounded continuation; when it is inactive the wiring injects
+    ``goal_nudge=None`` and ``MagiEngineDriver._drive`` behaves byte-identically
+    to pre-PR4.
 
     Delegates to the canonical ``config.flags`` registry (``flag_bool``) backed
     by the ``MAGI_GOAL_NUDGE_ENABLED`` ``FlagSpec``: byte-identical to the raw
@@ -2396,16 +2401,16 @@ MAGI_PLAN_LEDGER_DURABLE_ENABLED_ENV = "MAGI_PLAN_LEDGER_DURABLE_ENABLED"
 def is_plan_ledger_durable_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Single source of truth for the durable plan/todo ledger activation flag.
 
-    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF, the CLI
-    wiring attaches no ledger sink and calls no ``restore_into``, so
-    ``TodoWriteHandlerSet`` and ``MagiEngineDriver`` behave byte-identically to
-    pre-WS3. When ON, every ``TodoWrite`` mutation appends a full snapshot to
+    Profile-aware default-ON (``flag_profile_bool``): ON under the full/lab
+    profile, OFF under the safe-family or an explicit
+    ``MAGI_PLAN_LEDGER_DURABLE_ENABLED=0``. When OFF, the CLI wiring attaches no
+    ledger sink and calls no ``restore_into``, so ``TodoWriteHandlerSet`` and
+    ``MagiEngineDriver`` behave byte-identically to pre-WS3. When ON, every
+    ``TodoWrite`` mutation appends a full snapshot to
     ``<workspace_root>/.magi/durable/plan_ledger/<session_id>.jsonl`` and the
     per-turn handler-set build re-seeds the in-memory todo list from that JSONL
     (the durable index half additionally requires WS1's
-    ``MAGI_DURABLE_LOCAL_WRITES_ENABLED``). Like ``is_goal_nudge_enabled`` this
-    deliberately does NOT follow the runtime-profile default-ON convention; it is
-    an additive, default-disabled seam.
+    ``MAGI_DURABLE_LOCAL_WRITES_ENABLED``).
 
     Design: WS3 Goal/Completion + Durable Cross-Turn Todo Ledger, PR3a.
 
@@ -2431,17 +2436,17 @@ def is_goal_completion_evidence_first_enabled(
 ) -> bool:
     """Single source of truth for the evidence-first goal-completion flag (WS3 PR3b).
 
-    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF, the CLI
-    wiring constructs ``MagiEngineDriver`` with ``evidence_first=False`` so all
-    three goal-completion seams (the pre-judge short-circuit, the loop-OFF "full"
+    Profile-aware default-ON (``flag_profile_bool``): ON under the full/lab
+    profile, OFF under the safe-family or an explicit
+    ``MAGI_GOAL_COMPLETION_EVIDENCE_FIRST_ENABLED=0``. When OFF, the CLI wiring
+    constructs ``MagiEngineDriver`` with ``evidence_first=False`` so all three
+    goal-completion seams (the pre-judge short-circuit, the loop-OFF "full"
     short-circuit, and the honest ``goal_paused`` wrap) are inert and ``_drive``
     is byte-identical to pre-WS3. When ON, ``resolve_pre_judge_outcome`` decides
     completion from the durable todo ledger + (when declared) the evidence gate
     BEFORE the model's say-so, and a clean stop short of confirmed completion
     emits a user-visible ``goal_paused`` status instead of masquerading as
-    success. Like ``is_goal_nudge_enabled`` this deliberately does NOT follow the
-    runtime-profile default-ON convention; it is an additive, default-disabled
-    seam (profile activation is WS3 PR3c).
+    success.
 
     Design: WS3 Goal/Completion + Durable Cross-Turn Todo Ledger, PR3b.
 

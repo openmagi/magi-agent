@@ -11,8 +11,14 @@ This module is the env→``GoalNudge | None`` builder. It is intentionally tiny
 and import-clean (no ADK / textual / provider imports) so importing
 ``cli.wiring`` stays cold-start safe.
 
+This nudge is now SUPERSEDED by the ambient goal loop: ``cli.wiring`` passes
+``goal_nudge=None`` whenever ``is_goal_loop_enabled()`` resolves ON, so this
+builder is consulted ONLY when the goal loop resolves OFF (the escape hatch for
+goal-loop-OFF operators).
+
 Flags (registered in ``config.env``):
-- ``MAGI_GOAL_NUDGE_ENABLED`` — master gate, **default OFF** (strict truthy).
+- ``MAGI_GOAL_NUDGE_ENABLED`` -- master gate, profile-aware **default-ON**
+  (full/lab; OFF under the safe-family), superseded when the goal loop is ON.
 - ``MAGI_GOAL_NUDGE_MODE`` — ``"goal"`` (default, conservative) | ``"grind"``.
 - ``MAGI_GOAL_NUDGE_MAX`` — integer hard cap on re-invocations (default 3).
 - ``MAGI_GOAL_NUDGE_GOAL`` — objective text embedded in the nudge message.
