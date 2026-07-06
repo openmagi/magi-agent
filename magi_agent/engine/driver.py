@@ -1024,6 +1024,12 @@ class MagiEngineDriver:
         Gated by ``MAGI_VERIFY_CLAIM_CITATION`` OR the ``claim-citation``
         Customize preset, AND a critic model present (``MAGI_EGRESS_GATE_ENABLED``
         — the cost gate). Inactive / no model / any error ⇒ ``None`` (fail-open).
+
+        Wave 4b (Piece D): this judge is the ``source_citation.claim_coverage``
+        member of the first-party ``source_citation`` policy (design 11.4), the
+        staged semantic layer above the deterministic gate. It stays default-OFF
+        (its flag is unchanged and NOT in the full profile), so the deterministic
+        gate covers the motivating failure without a critic-model call.
         """
         import os  # noqa: PLC0415
 

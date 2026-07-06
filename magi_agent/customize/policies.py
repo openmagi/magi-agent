@@ -174,6 +174,56 @@ class Policy(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# First-party (builtin) policies
+# ---------------------------------------------------------------------------
+#
+# A builtin policy gives a runtime-native behavior a policy-visible identity so
+# it appears in the Rules/Policies surface, is mode-scopable via
+# ``scoped_policy_ids`` (``policy:<id>``), and its verdicts land in Audit (the
+# ``lifecycle_audit`` precedent). Builtins are read-only (``upsert_policy``
+# rejects ``origin == "builtin"``); a user clones to a new id to customize.
+
+# The source-citation policy: the Wave 1-4 citation feature expressed as one
+# first-party policy composed of four member rules (design Section 10). Capture
+# and render are deterministic runtime code paths given policy-visible member
+# ids; the gate is this wave's deterministic repair-then-audit path; the
+# claim_coverage member is the default-OFF MAGI_VERIFY_CLAIM_CITATION judge
+# rehomed as a staged advisory member (design 11.4). The PolicyBinding gives
+# ``source_citation.capture`` (which emits ``SourceInspection`` producer_control
+# records) a producer identity, so a future user policy can require citation
+# evidence via the existing identity-join without new machinery.
+_SOURCE_CITATION_POLICY = Policy(
+    id="source_citation",
+    displayName="Source Citation",
+    intent=(
+        "Capture every external read as a citable source, render inline "
+        "citations, and gate high-risk claims (figures, dates, quotes, named "
+        "superlatives) so they are attributed to a registered source. "
+        "Repair-then-fail-open; never blocks the turn permanently."
+    ),
+    ruleIds=(
+        "source_citation.capture",
+        "source_citation.render",
+        "source_citation.gate",
+        "source_citation.claim_coverage",
+    ),
+    binding=PolicyBinding(
+        producerRuleId="source_citation.capture",
+        gateRuleId="source_citation.gate",
+        evidenceType="SourceInspection",
+    ),
+    origin="builtin",
+)
+
+BUILTIN_POLICIES: tuple[Policy, ...] = (_SOURCE_CITATION_POLICY,)
+
+
+def builtin_policies() -> tuple[Policy, ...]:
+    """The first-party read-only policies always present in the surface."""
+    return BUILTIN_POLICIES
+
+
+# ---------------------------------------------------------------------------
 # Store access
 # ---------------------------------------------------------------------------
 
@@ -190,9 +240,15 @@ def _custom_rules_raw(path: Path | None) -> list:
 
 
 def list_policies(path: Path | None = None) -> tuple[Policy, ...]:
-    """All valid stored policies, sorted by id. Malformed entries are skipped;
-    a stored dict key must match its payload id (hand-edit guard)."""
+    """All valid policies (first-party builtins + stored), sorted by id.
+
+    Builtins are always present so the Rules/Policies surface tells the truth
+    about the runtime-native policies that run (e.g. ``source_citation``). A
+    stored policy that reuses a builtin id shadows it (a user clone wins). Stored
+    malformed entries are skipped; a stored dict key must match its payload id
+    (hand-edit guard)."""
     out: list[Policy] = []
+    seen_ids: set[str] = set()
     for key, raw in _policies_raw(path).items():
         if not isinstance(raw, dict):
             continue
@@ -203,6 +259,10 @@ def list_policies(path: Path | None = None) -> tuple[Policy, ...]:
         if policy.policy_id != key:
             continue
         out.append(policy)
+        seen_ids.add(policy.policy_id)
+    for builtin in BUILTIN_POLICIES:
+        if builtin.policy_id not in seen_ids:
+            out.append(builtin)
     return tuple(sorted(out, key=lambda p: p.policy_id))
 
 
@@ -215,6 +275,9 @@ def get_policy(policy_id: str, path: Path | None = None) -> Policy | None:
                 return policy
         except ValidationError:
             pass
+    for builtin in BUILTIN_POLICIES:
+        if builtin.policy_id == policy_id:
+            return builtin
     return None
 
 

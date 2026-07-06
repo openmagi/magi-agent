@@ -488,10 +488,21 @@ def test_scoped_prefinal_force_includes_via_policy_ref(
 def test_scoped_policies_ruleids_reads_store(customize_env: None) -> None:
     from magi_agent.customize.scoped_policy import scoped_policies_ruleids
 
-    assert scoped_policies_ruleids() == {}
+    # The first-party source_citation builtin is always present so its policy
+    # ref is mode-scopable; stored policies are added on top.
+    baseline = scoped_policies_ruleids()
+    assert baseline["source_citation"] == (
+        "source_citation.capture",
+        "source_citation.render",
+        "source_citation.gate",
+        "source_citation.claim_coverage",
+    )
+    assert "p" not in baseline
     upsert_policy(
         Policy.model_validate(
             {"id": "p", "displayName": "P", "ruleIds": ["cr_a", "cr_b"]}
         )
     )
-    assert scoped_policies_ruleids() == {"p": ("cr_a", "cr_b")}
+    updated = scoped_policies_ruleids()
+    assert updated["p"] == ("cr_a", "cr_b")
+    assert "source_citation" in updated
