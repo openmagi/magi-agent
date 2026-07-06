@@ -687,6 +687,21 @@ def _selected_stream_event_key(payload: Mapping[str, object]) -> str | None:
     return json.dumps(dict(payload), sort_keys=True, default=str)
 
 
+# Strong references to detached hosted turns (pod-side #1326 analogue). When the
+# SSE generator tears down (browser refresh / disconnect / proxy timeout) mid
+# turn, the turn is DETACHED here instead of cancelled so it runs to completion
+# and its terminal + durable state (transcript, observability, and the PR-3 ADK
+# session) are recorded even though the browser socket is gone. asyncio keeps no
+# strong ref to a bare create_task, so we hold one here and drop it on done.
+_DETACHED_HOSTED_STREAM_TASKS: set[asyncio.Task] = set()
+
+
+def _detach_hosted_stream_turn(response_task: asyncio.Task) -> None:
+    """Let ``response_task`` run to completion detached from the SSE socket."""
+    _DETACHED_HOSTED_STREAM_TASKS.add(response_task)
+    response_task.add_done_callback(_DETACHED_HOSTED_STREAM_TASKS.discard)
+
+
 async def _drive_selected_gate5b_stream(
     runtime: object,
     body: object,
@@ -797,12 +812,14 @@ async def _drive_selected_gate5b_stream(
             yield chunk
         return
     finally:
+        # Pod-side detach (#1326 analogue, hosted gate5b branch only): the SSE
+        # generator tearing down means the BROWSER went away, not that the turn
+        # should die. Detach the in-flight turn so it runs to completion (bounded
+        # by the runner timeout) and durably records its terminal, instead of
+        # cancelling it on disconnect. The explicit interrupt route stops a turn
+        # through its own ACTIVE_TURNS cancel handle, not this teardown.
         if not response_task.done():
-            response_task.cancel()
-            try:
-                await response_task
-            except (asyncio.CancelledError, Exception):
-                pass
+            _detach_hosted_stream_turn(response_task)
 
     if response.status_code == 200 and payload.get("status") == "python_ready":
         public_events = payload.get("publicEvents")
