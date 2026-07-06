@@ -43,8 +43,15 @@ def _source_projection_result() -> ToolResult:
 
 
 def test_source_projection_flag_off_not_projected(monkeypatch) -> None:
-    """Item 4: OFF ⇒ source-ledger projection does NOT enter _records."""
+    """Item 4: BOTH gates OFF => source-ledger projection does NOT enter _records.
+
+    The projection fires when EITHER MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED OR
+    the citation master switch MAGI_SOURCE_CITATION_ENABLED (profile-aware
+    default-ON) is on (design 14, Wave 1 deferral), so the true flag-off
+    (byte-identical-to-main) path disables both.
+    """
     monkeypatch.delenv("MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_SOURCE_CITATION_ENABLED", "0")
     collector = LocalToolEvidenceCollector()
     collector.record_tool_result(
         session_id="session:proj",
