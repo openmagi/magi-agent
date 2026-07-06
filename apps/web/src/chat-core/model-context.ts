@@ -1,7 +1,10 @@
 import { compareChatMessages } from "./message-order";
 import type { ChatMessage } from "./types";
 
-const DEFAULT_MAX_MODEL_CONTEXT_MESSAGES = 32;
+// Generous client history cap (design budget: 31 -> 64). The wider window
+// hardens multi-turn continuity when a stream tail drops, matching the pod-side
+// sanitized-history bump.
+const DEFAULT_MAX_MODEL_CONTEXT_MESSAGES = 64;
 const DUPLICATE_WINDOW_MS = 5 * 60_000;
 
 /** Client-side session reset dividers carry this id prefix (see chat-store resetSession). */
