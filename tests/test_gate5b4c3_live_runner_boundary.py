@@ -2312,3 +2312,87 @@ def test_live_boundary_runs_finalizer_after_empty_no_tool_turn() -> None:
     ]
 
 
+
+
+# ── continuity observability (PR-1): session_reused / event_count / seeded ──
+
+
+def _capture_turn_start_events() -> list[dict[str, object]]:
+    """Register a transcript sink capturing only ``turn_start`` records."""
+    from magi_agent.observability.transcript import set_active_transcript_sink
+
+    captured: list[dict[str, object]] = []
+
+    def _sink(event: dict[str, object], _session_id: str, _turn_id: str) -> None:
+        if event.get("type") == "turn_start":
+            captured.append(event)
+
+    set_active_transcript_sink(_sink)
+    return captured
+
+
+def test_continuity_turn_start_records_reuse_fields_on_miss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from magi_agent.observability.transcript import set_active_transcript_sink
+
+    monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "1")
+    registry = SessionServiceRegistry(max_entries=4, ttl_seconds=60.0)
+    boundary = _session_reuse_boundary(registry)
+    captured = _capture_turn_start_events()
+    try:
+        result, _service, _text = _invoke_session_reuse_turn(boundary)
+    finally:
+        set_active_transcript_sink(None)
+
+    assert result.status == "completed"
+    # A registry miss is not a reuse; it seeds the two sanitized history turns.
+    assert result.session_reused is False
+    assert result.seeded_message_count == 2
+    assert result.session_event_count == 0
+    assert len(captured) == 1
+    record = captured[0]
+    assert record["session_reused"] is False
+    assert record["seeded_message_count"] == 2
+    assert record["session_event_count"] == 0
+
+
+def test_continuity_turn_start_records_reuse_fields_on_hit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from magi_agent.observability.transcript import set_active_transcript_sink
+
+    monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "1")
+    registry = SessionServiceRegistry(max_entries=4, ttl_seconds=60.0)
+    boundary = _session_reuse_boundary(registry)
+    # Turn 1 registers the session; turn 2 is the reuse hit under inspection.
+    _invoke_session_reuse_turn(boundary)
+    captured = _capture_turn_start_events()
+    try:
+        result, _service, _text = _invoke_session_reuse_turn(boundary)
+    finally:
+        set_active_transcript_sink(None)
+
+    assert result.status == "completed"
+    # Registry hit: reuse recorded, and no sanitized history re-seeded.
+    assert result.session_reused is True
+    assert result.seeded_message_count == 0
+    assert len(captured) == 1
+    record = captured[0]
+    assert record["session_reused"] is True
+    assert record["seeded_message_count"] == 0
+
+
+def test_continuity_result_defaults_are_present_and_serialized() -> None:
+    result = Gate5B4C3LiveRunnerBoundary(_fake_primitives).invoke(
+        _request(),
+        config=_enabled_config(),
+    )
+    assert result.status == "completed"
+    assert result.session_reused is False
+    assert result.session_event_count == 0
+    assert result.seeded_message_count == 0
+    dumped = result.model_dump(by_alias=True)
+    assert dumped["sessionReused"] is False
+    assert dumped["sessionEventCount"] == 0
+    assert dumped["seededMessageCount"] == 0
