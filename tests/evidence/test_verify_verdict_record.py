@@ -360,8 +360,8 @@ def test_verdict_record_shape_and_d4r(monkeypatch) -> None:
     expected_sha256 = hashlib.sha256(revision.encode("utf-8")).hexdigest()
     assert fields["deliveredTextSha256"] == expected_sha256
 
-    # findings is a list (may be empty if revision resolved the finding).
-    assert isinstance(fields["findings"], list)
+    # findings is a sequence (list or frozen tuple after Pydantic model_validate).
+    assert isinstance(fields["findings"], (list, tuple))
 
 
 # ---------------------------------------------------------------------------
@@ -431,6 +431,11 @@ def test_resolution_recomputed_on_delivered_text(monkeypatch) -> None:
         generations=[
             [{"type": "text_delta", "delta": "All 93 tests pass."}],
             [
+                # response_clear resets emitted_text so the nudge-round SHIP_AS_IS
+                # check at the loop top sees only "SHIP_AS_IS" (not the concatenated
+                # primary + marker). Without the clear, emitted_text would be
+                # "All 93 tests pass.SHIP_AS_IS" and the strip-equality check fails.
+                {"type": "response_clear"},
                 # SHIP_AS_IS restores the original and sets ship_marker_used.
                 {"type": "text_delta", "delta": "SHIP_AS_IS"},
             ],
@@ -479,7 +484,8 @@ def test_clean_turn_emits_compact_clean_record(monkeypatch) -> None:
     assert len(verdicts) == 1, f"Expected 1 verdict record, got {len(verdicts)}"
     fields = verdicts[0].fields
     assert isinstance(fields, Mapping)
-    assert fields.get("findings") == []
+    # findings may be a list or a Pydantic-frozen tuple; both compare empty via len.
+    assert len(fields.get("findings", ())) == 0
     assert isinstance(fields.get("passes"), int)
     assert fields["passes"] >= 1
     assert fields.get("verdict") == "verified_clean"
@@ -504,10 +510,17 @@ def test_fail_open_branch_runs_record_only_audit(monkeypatch) -> None:
     collector = _CitationVerifyCollector(registry=reg)
     sink = _SinkCapture()
     # Primary and repair generation: still uncited (budget exhausted -> fail-open).
+    # The repair generation must include response_clear so the citation repair loop
+    # resets emitted_text before appending the repair text. Without the clear,
+    # emitted_text at the A3 insert point would be "primary + repair" concatenated
+    # (the driver appends text_delta deltas onto whatever emitted_text already holds).
     runner = _ScriptedRunner(
         generations=[
             [{"type": "text_delta", "delta": _UNCITED}],
-            [{"type": "text_delta", "delta": _UNCITED}],
+            [
+                {"type": "response_clear"},
+                {"type": "text_delta", "delta": _UNCITED},
+            ],
         ],
         collector=collector,
     )

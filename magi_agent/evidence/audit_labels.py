@@ -51,6 +51,17 @@ SOURCES_CITED = "SOURCES CITED"
 PARTIALLY_CITED = "PARTIALLY CITED"
 UNCITED_CLAIMS = "UNCITED CLAIMS"
 
+# Verify-before-replying turn-level verdict labels (PR-V4, design Section 12.5).
+# The verify_before_replying.audit producer emits a custom:VerifyReplyVerdict
+# evidence record tagged source_type="verify"; its raw verdict string projects
+# to these four canonical labels. The mapping follows the _CITATION_VERDICT_TO_LABEL
+# pattern so the Audit tab renders consistent governance vocabulary across both
+# citation and verify surfaces.
+VERIFIED_CLEAN = "VERIFIED CLEAN"
+REVISED = "REVISED"
+SHIPPED_ACKNOWLEDGED = "SHIPPED ACKNOWLEDGED"
+NUDGE_IGNORED = "NUDGE IGNORED"
+
 # Statuses that count as a "pass" for the reviewer special-case below. A reviewer
 # event with any NON-pass status projects to REJECTED BY REVIEWER.
 _PASS_STATUSES: frozenset[str] = frozenset({"pass", "passed", "ok"})
@@ -63,6 +74,21 @@ _CITATION_VERDICT_TO_LABEL: dict[str, str] = {
     "cited": SOURCES_CITED,
     "partial": PARTIALLY_CITED,
     "uncited": UNCITED_CLAIMS,
+}
+
+# Raw verify turn-verdict value (source_type == "verify") -> canonical label. The
+# four verdicts map the final per-turn disposition of all findings. The verdict is
+# computed inside _emit_verify_reply_verdict (driver.py) from the resolution
+# taxonomy (design Section 12.3): verified_clean (zero high findings) / revised
+# (all high findings resolved by model revision) / shipped_acknowledged
+# (findings present, ship marker used) / nudge_ignored (findings present, no
+# marker -- the key metric). An unrecognized verdict falls back to the generic
+# status map via verdict_to_display_label's final return.
+_VERIFY_VERDICT_TO_LABEL: dict[str, str] = {
+    "verified_clean": VERIFIED_CLEAN,
+    "revised": REVISED,
+    "shipped_acknowledged": SHIPPED_ACKNOWLEDGED,
+    "nudge_ignored": NUDGE_IGNORED,
 }
 
 # Normalized (lowercased) status string -> canonical display label.
@@ -118,6 +144,13 @@ _SEVERITY_BY_LABEL: dict[str, str] = {
     SOURCES_CITED: "pass",
     PARTIALLY_CITED: "review",
     UNCITED_CLAIMS: "review",
+    # Verify-before-replying turn-level verdicts (PR-V4). Clean/revised pass;
+    # shipped-acknowledged is review-worthy; nudge_ignored is a deny-level signal
+    # (the key operational metric for ignore-rate tracking).
+    VERIFIED_CLEAN: "pass",
+    REVISED: "pass",
+    SHIPPED_ACKNOWLEDGED: "review",
+    NUDGE_IGNORED: "deny",
 }
 
 # ---------------------------------------------------------------------------
@@ -181,6 +214,14 @@ def verdict_to_display_label(status: str, *, source_type: str | None = None) -> 
         citation_label = _CITATION_VERDICT_TO_LABEL.get(normalized)
         if citation_label is not None:
             return citation_label
+    if source == "verify":
+        # ``normalized`` is the raw verify turn-verdict (verified_clean / revised
+        # / shipped_acknowledged / nudge_ignored). An unrecognized value falls
+        # back to UNKNOWN below (the verify surface never emits generic statuses).
+        verify_label = _VERIFY_VERDICT_TO_LABEL.get(normalized)
+        if verify_label is not None:
+            return verify_label
+        return UNKNOWN
     return _STATUS_TO_LABEL.get(normalized, UNKNOWN)
 
 
@@ -200,6 +241,10 @@ def is_enforced_kind(kind: str) -> bool:
 
 __all__ = [
     "ENFORCEMENT_EVENT_KINDS",
+    "NUDGE_IGNORED",
+    "REVISED",
+    "SHIPPED_ACKNOWLEDGED",
+    "VERIFIED_CLEAN",
     "classify_verdict_severity",
     "is_enforced_kind",
     "verdict_to_display_label",
