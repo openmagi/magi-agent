@@ -237,6 +237,36 @@ def _turn_is_substantive(
     return new_evidence_records >= 1
 
 
+def _extract_objective_text(runner_input: object) -> str:
+    """The original user text of a turn, read from the first ``runner_input``.
+
+    Design section 5.1 / assumption A-1: the ambient GoalLoopPolicy objective is
+    the ORIGINAL user message of the turn, captured ONCE at the top of ``_drive``
+    from the FIRST ``runner_input`` before any re-invocation (recovery / nudge /
+    continuation) replaces it. The first ``runner_input`` is built with the same
+    ``RunnerTurnInput(newMessage=Content(role="user", parts=[Part(text=...)]))``
+    shape as every re-invoke constructor, so the attribute path
+    ``runner_input.newMessage.parts[i].text`` is stable. Non-text parts (image
+    blocks built via ``Part.from_bytes``) carry no ``.text`` and are skipped;
+    the remaining non-empty text parts are joined with newlines.
+
+    Pure and fully defensive: any missing attribute / malformed part yields an
+    empty string, which the ambient factory treats as "no objective -> behave
+    exactly as today" (the ledger-first SEAM 2 path still covers the ledger
+    case).
+    """
+    new_message = getattr(runner_input, "newMessage", None)
+    parts = getattr(new_message, "parts", None)
+    if not parts:
+        return ""
+    texts: list[str] = []
+    for part in parts:
+        text = getattr(part, "text", None)
+        if isinstance(text, str) and text.strip():
+            texts.append(text)
+    return "\n".join(texts)
+
+
 # A sane default cap so a runaway stream can't yield forever; headless can
 # tolerate a generous bound on ADK events consumed per turn.
 _DEFAULT_MAX_EVENT_COUNT = 4096
@@ -610,6 +640,15 @@ class MagiEngineDriver:
         # configured provider keys; tests inject a fake judge for hermetic
         # behavior.
         goal_loop_judge_factory: Callable[..., object] | None = None,
+        # U5 ambient goal-loop synthesis (design 5.1, KD-1). Builds an ambient
+        # ``GoalLoopPolicy`` from the captured turn objective at the clean break
+        # when NO per-turn policy ContextVar was published (toggle off). ``None``
+        # (default) keeps the driver byte-identical to pre-U5: no synthesis, so
+        # the toggle-off / child / safe-profile paths are unchanged. Constructed
+        # ONCE at the wiring site (env-pure ctor convention, mirroring
+        # ``goal_loop_judge_factory``) and passed ``None`` for contained /
+        # flag-off configurations so synthesis is structurally impossible there.
+        ambient_goal_policy_factory: Callable[[str], object | None] | None = None,
         # WS3 PR3b evidence-first goal completion (default-OFF DI; all three
         # values resolve to their byte-identical OFF state when the flag is
         # unset). ``evidence_first`` is the master gate for ALL THREE seams in
@@ -663,6 +702,15 @@ class MagiEngineDriver:
         # ``GoalLoopPolicy`` is active for the turn but no factory is wired.
         self._goal_loop_judge_factory: Callable[..., object] | None = (
             goal_loop_judge_factory
+        )
+        # U5 ambient goal-loop synthesis factory (design 5.1). ``None`` (default)
+        # -> the clean-break synthesis is inert and ``_drive`` is byte-identical
+        # to pre-U5. Non-None only for parent turns under a profile-ON
+        # MAGI_GOAL_LOOP_ENABLED (the wiring passes ``None`` otherwise), and
+        # synthesis is additionally gated on ``self._auto_continue_enabled`` at
+        # the call site so a factory can never fire when auto-continue is off.
+        self._ambient_goal_policy_factory: Callable[[str], object | None] | None = (
+            ambient_goal_policy_factory
         )
         # WS3 PR3b: evidence-first goal completion. ``self._evidence_first``
         # False (default) -> all three seams in ``_drive`` are inert and the
@@ -1769,6 +1817,7 @@ class MagiEngineDriver:
             output_continuation=self._output_continuation,
             empty_response_recovery=self._empty_response_recovery,
             goal_loop_judge_factory=self._goal_loop_judge_factory,
+            ambient_goal_policy_factory=self._ambient_goal_policy_factory,
             evidence_first=self._evidence_first,
             plan_ledger_reader=self._plan_ledger_reader,
             required_evidence=self._required_evidence,
@@ -1840,6 +1889,7 @@ class MagiEngineDriver:
         output_continuation: "OutputContinuationConfig | None" = None,
         empty_response_recovery: "EmptyResponseRecoveryConfig | None" = None,
         goal_loop_judge_factory: Callable[..., object] | None = None,
+        ambient_goal_policy_factory: Callable[[str], object | None] | None = None,
         evidence_first: bool = False,
         plan_ledger_reader: Callable[[str], Sequence[object]] | None = None,
         required_evidence: tuple[str, ...] = (),
@@ -2023,6 +2073,12 @@ class MagiEngineDriver:
             # A plain dict without the key leaves this None — identical to today.
             harnessState=effective_harness_state,
         )
+        # U5 (design 5.1 / A-1): capture the ORIGINAL user text of this turn ONCE,
+        # from the FIRST runner_input, BEFORE any re-invocation (recovery / nudge /
+        # continuation) replaces ``runner_input``. Used solely as the objective for
+        # driver-side ambient GoalLoopPolicy synthesis at the clean break. An empty
+        # capture -> the ambient factory returns ``None`` -> the turn is unchanged.
+        objective_text = _extract_objective_text(runner_input)
 
         # Tracks tool_use ids we emitted (tool_start) but have not yet seen a
         # matching tool_end for. Used to synthesize orphan tool_results on cancel.
@@ -2596,6 +2652,53 @@ class MagiEngineDriver:
                     )
 
                     goal_loop_policy = current_per_turn_goal_loop_policy()
+                    # U5 ambient synthesis (design 5.1 / 5.2, KD-1). A ContextVar-
+                    # published policy (explicit mission) ALWAYS wins; synthesis
+                    # only fills the ``None`` case. When no policy was published,
+                    # auto-continue is enabled (which already encodes
+                    # is_goal_loop_enabled() AND auto_continue_allowed, so children
+                    # / depth>0 / safe profiles never reach here), a factory is
+                    # wired, and a real objective was captured, the driver
+                    # synthesizes an AMBIENT GoalLoopPolicy so finish-the-job is the
+                    # baseline. Mission intensity (the explicit toggle, or this
+                    # driver's mission default) BYPASSES the substance gate (OD-6);
+                    # otherwise the S1/S2/S3 substance gate (design 4.2) filters out
+                    # conversational turns so a bare "hi" costs zero extra calls.
+                    if (
+                        goal_loop_policy is None
+                        and self._auto_continue_enabled
+                        and self._ambient_goal_policy_factory is not None
+                        and objective_text
+                    ):
+                        from magi_agent.runtime.per_turn_goal_intensity import (  # noqa: PLC0415
+                            current_per_turn_goal_mission,
+                        )
+
+                        ambient_mission = (
+                            current_per_turn_goal_mission()
+                            or self._auto_continue_mission
+                        )
+                        if ambient_mission:
+                            ambient_substantive = True
+                        else:
+                            ambient_open_todos = (
+                                self._open_todo_count(
+                                    tuple(plan_ledger_reader(session_id))
+                                )
+                                if plan_ledger_reader is not None
+                                else None
+                            )
+                            ambient_substantive = _turn_is_substantive(
+                                tool_ends_total=turn_tool_ends_total,
+                                open_todos=ambient_open_todos,
+                                new_evidence_records=len(
+                                    self._collect_evidence(turn_id)
+                                ),
+                            )
+                        if ambient_substantive:
+                            goal_loop_policy = self._ambient_goal_policy_factory(
+                                objective_text
+                            )
                     if goal_loop_policy is not None:
                         # SEAM 1 (WS3 PR3b, lab loop ON): evidence-first pre-judge
                         # short-circuit. Runs BEFORE the LLM judge; ``done`` /
