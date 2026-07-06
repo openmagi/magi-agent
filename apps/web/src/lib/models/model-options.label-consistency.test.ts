@@ -34,6 +34,10 @@ describe("BASE_MODEL_OPTIONS label fidelity", () => {
     expect(source).toMatch(/value: "haiku",\s*label: "Claude Haiku 4\.5"/);
   });
 
+  it("offers Claude Fable 5 (slug routes to anthropic/claude-fable-5)", () => {
+    expect(source).toMatch(/value: "fable_5",\s*label: "Claude Fable 5"/);
+  });
+
   it("offers Gemini 3.5 Flash (slug routes to google/gemini-3.5-flash)", () => {
     // Gemini Flash default bumped 3.1 → 3.5; the chat picker must surface it
     // or users can only reach 3.5 by typing the env knob.

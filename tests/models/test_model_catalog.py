@@ -73,6 +73,7 @@ def test_all_records_includes_flagships() -> None:
     models = {r.model for r in catalog.all_records()}
     # Anthropic frontier (PR12 user-visible bug fix: 4-8 NOT 4-6).
     assert "claude-opus-4-8" in models
+    assert "claude-fable-5" in models
     assert "claude-sonnet-5" in models
     assert "claude-sonnet-4-6" in models
     # Other provider flagships referenced across cli/providers + registry.
@@ -82,6 +83,21 @@ def test_all_records_includes_flagships() -> None:
     assert "kimi-k2p6" in models
     assert "kimi-k2p7-code" in models
     assert "glm-5p2" in models
+
+
+def test_fable_5_record_keeps_default_stable_and_uses_adaptive_thinking() -> None:
+    """claude-fable-5 ships as a built-in OPTION, not the default (pricing is
+    above Opus tier). It must use adaptive reasoning kwargs — the model 400s
+    on the budget-enabled thinking shape."""
+    catalog = ModelCatalog.builtin()
+    assert catalog.default_model_for("anthropic").model == "claude-sonnet-5"
+    fable = catalog.record("anthropic", "claude-fable-5")
+    assert fable is not None
+    assert fable.tier == "sota"
+    assert fable.reasoning_style == "adaptive"
+    assert catalog.reasoning_default("anthropic", "claude-fable-5") == {
+        "thinking": {"type": "adaptive"}
+    }
 
 
 def test_new_fireworks_records_keep_provider_defaults_stable() -> None:
