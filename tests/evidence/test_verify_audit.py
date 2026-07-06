@@ -157,10 +157,10 @@ _FINGERPRINT_CANON_ROWS: list[tuple[str, str, bool, str]] = [
     ("released on 2023-01-15", "2023-01-15 is the release date", True, "same ISO date EN"),
     # Date (EN): same quarter-year tokens -> same canonical
     ("Q1 2026 results", "results for Q1 2026", True, "same quarter-year tokens EN"),
-    # Quoted string: same quote content -> same canonical
-    ("he said 'good luck'", "message was 'good luck'", True, "same quoted string EN"),
-    # Quoted string: different quote content -> different canonical
-    ("he said 'good luck'", "he said 'bad luck'", False, "different quoted strings EN"),
+    # Quoted string (curly quotes matched by _QUOTE_SPAN_RE): same content -> same canonical
+    ("he said ‘good luck’", "message was ‘good luck’", True, "same curly-quoted string EN"),
+    # Quoted string (curly quotes): different content -> different canonical
+    ("he said ‘good luck’", "he said ‘bad luck’", False, "different curly-quoted strings EN"),
     # Numeric (KR): same figure -> same canonical as EN equivalent
     ("매출이 40% 증가했습니다", "40% 매출 증가가 있었습니다", True, "same percent KR"),
     # Cross-language: same numeric value -> same canonical
@@ -481,9 +481,13 @@ def test_evidence_consistency_contradiction_table(
     high = [f for f in findings if f.confidence == "high"]
     if expect_any_high:
         assert high, f"{desc}: expected at least one HIGH finding, got none"
-        # Contradiction findings must carry non-empty evidence_refs (indicting record).
-        for f in high:
-            assert f.evidence_refs, f"{desc}: HIGH finding must carry evidence_refs"
+        # Contradiction findings (turn_recs or session_recs present) must carry
+        # non-empty evidence_refs pointing to the indicting record.
+        # Absence findings (no records) have evidence_refs=() by design: there is
+        # no contradicting record to point to, only a missing one.
+        if turn_recs or session_recs:
+            for f in high:
+                assert f.evidence_refs, f"{desc}: contradiction HIGH finding must carry evidence_refs"
     else:
         assert not high, f"{desc}: expected NO HIGH finding, got: {[f.detail for f in high]}"
 
