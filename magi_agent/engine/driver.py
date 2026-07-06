@@ -75,7 +75,7 @@ import logging
 import re
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from magi_agent.engine.contracts import ControlRequest, EngineResult, Terminal
 from magi_agent.engine.engine_routing import (
@@ -320,6 +320,31 @@ _AUTO_CONTINUE_WRAP_UP_PROMPT = (
     "attempting further steps. In your final message, report concisely what is "
     "done, what is not done, and what is blocking the remaining work."
 )
+
+
+@dataclass(frozen=True)
+class _AutoContinueExecResult:
+    """Outcome of the SEAM 2 deterministic auto-continue executor.
+
+    Carries the loop-control action back to ``_drive`` plus the three
+    continuation counters the caller must fold back into its turn state. The
+    executor itself is pure w.r.t. the loop (it never runs ``continue`` /
+    ``break``); the caller applies ``action`` and the updated counters.
+    """
+
+    #: ``"continue"`` -> the caller sets ``runner_input`` and re-invokes the
+    #: runner; ``"break"`` -> the caller falls through to the bare clean break.
+    action: Literal["continue", "break"]
+    #: The re-invocation input when ``action == "continue"`` (else ``None``).
+    runner_input: object | None
+    #: ``auto_continue_used`` after this decision (incremented on continue /
+    #: wrap_up; unchanged otherwise).
+    used: int
+    #: ``auto_continue_no_progress_streak`` after folding in this attempt.
+    no_progress_streak: int
+    #: ``auto_continue_wrap_up_spent`` after this decision (set once a wrap-up
+    #: invocation is spent).
+    wrap_up_spent: bool
 
 
 def _is_turn_end_event(event: Mapping[str, object]) -> bool:
@@ -2830,135 +2855,55 @@ class MagiEngineDriver:
                             seam2_outcome == "continue"
                             and self._auto_continue_enabled
                         ):
-                            from magi_agent.runtime.goal_loop_auto_continue import (  # noqa: PLC0415
-                                AttemptProgress,
-                                budgets_for_intensity,
-                                decide_auto_continue,
-                                ledger_changed,
-                            )
-                            from magi_agent.runtime.per_turn_goal_intensity import (  # noqa: PLC0415
-                                current_per_turn_goal_mission,
-                            )
-
-                            # Mission intensity: the composer Goal-mission toggle
-                            # (per-turn context) raises the budget ceiling; the
-                            # constructor default is the ambient fallback.
-                            auto_continue_mission = (
-                                current_per_turn_goal_mission()
-                                or self._auto_continue_mission
-                            )
-                            evidence_now = self._collect_evidence(turn_id)
-                            progress = AttemptProgress(
+                            # Shared deterministic executor (design 5.3): the
+                            # AttemptProgress assembly, the decide_auto_continue
+                            # gate, the four outcome arms and the re-invoke
+                            # construction live in one private helper so the U4
+                            # policy-present ``continue`` arm and this legacy SEAM
+                            # 2 arm run literally the same code. The helper is
+                            # pure w.r.t. the loop (no ``continue`` / ``break``);
+                            # it returns the events to yield plus the loop-control
+                            # action and the updated continuation counters.
+                            (
+                                ac_events,
+                                ac_result,
+                            ) = self._run_deterministic_auto_continue(
+                                turn_id=turn_id,
+                                session_id=session_id,
+                                seam2_snapshot=seam2_snapshot,
                                 ok_tool_ends=auto_continue_ok_tool_ends,
-                                blocked_tool_ends=auto_continue_blocked_tool_ends,
-                                ledger_changed=ledger_changed(
-                                    auto_continue_prev_ledger, seam2_snapshot
+                                blocked_tool_ends=(
+                                    auto_continue_blocked_tool_ends
                                 ),
-                                new_evidence_records=max(
-                                    0,
-                                    len(evidence_now)
-                                    - auto_continue_prev_evidence_count,
+                                prev_ledger=auto_continue_prev_ledger,
+                                prev_evidence_count=(
+                                    auto_continue_prev_evidence_count
                                 ),
-                            )
-                            decision = decide_auto_continue(
-                                ledger_wants_continue=True,
-                                progress=progress,
                                 continuations_used=auto_continue_used,
-                                prior_no_progress_streak=(
+                                no_progress_streak=(
                                     auto_continue_no_progress_streak
                                 ),
-                                elapsed_seconds=(
-                                    _auto_continue_time.monotonic()
-                                    - auto_continue_turn_start
-                                ),
-                                budgets=budgets_for_intensity(
-                                    mission=auto_continue_mission
-                                ),
-                                wrap_up_already_spent=auto_continue_wrap_up_spent,
+                                wrap_up_spent=auto_continue_wrap_up_spent,
+                                turn_start=auto_continue_turn_start,
+                                effective_harness_state=effective_harness_state,
+                                runner_turn_input_cls=runner_turn_input_cls,
+                                types_mod=types,
                             )
+                            for _ac_event in ac_events:
+                                yield _ac_event
+                            auto_continue_used = ac_result.used
                             auto_continue_no_progress_streak = (
-                                decision.no_progress_streak
+                                ac_result.no_progress_streak
                             )
-                            open_todos_now = self._open_todo_count(seam2_snapshot)
-                            if decision.outcome == "stop_budget":
-                                yield RuntimeEvent(
-                                    type="status",
-                                    payload={
-                                        "type": "goal_loop_exhausted",
-                                        "reason": decision.reason,
-                                        "continuations": auto_continue_used,
-                                    },
-                                    turn_id=turn_id,
-                                )
-                                yield self._goal_paused_event(
-                                    turn_id=turn_id,
-                                    reason="budget_exhausted",
-                                    objective=None,
-                                    open_todos=open_todos_now,
-                                )
-                                break
-                            if (
-                                decision.outcome
-                                == "paused_waiting_on_approvals"
-                            ):
-                                yield self._goal_paused_event(
-                                    turn_id=turn_id,
-                                    reason="waiting_on_approvals",
-                                    objective=None,
-                                    open_todos=open_todos_now,
-                                )
-                                break
-                            if decision.outcome == "paused_no_progress":
-                                yield self._goal_paused_event(
-                                    turn_id=turn_id,
-                                    reason="no_progress",
-                                    objective=None,
-                                    open_todos=open_todos_now,
-                                )
-                                break
-                            if decision.outcome in {"continue", "wrap_up"}:
-                                is_wrap_up = decision.outcome == "wrap_up"
-                                if is_wrap_up:
-                                    auto_continue_wrap_up_spent = True
-                                auto_continue_used += 1
-                                yield RuntimeEvent(
-                                    type="status",
-                                    payload={
-                                        "type": (
-                                            "goal_loop_wrap_up"
-                                            if is_wrap_up
-                                            else "goal_loop_continuation"
-                                        ),
-                                        "reason": decision.reason,
-                                        "continuation": auto_continue_used,
-                                        "openTodos": open_todos_now,
-                                        "source": "auto_continue",
-                                    },
-                                    turn_id=turn_id,
-                                )
-                                runner_input = runner_turn_input_cls(
-                                    userId=self._user_id,
-                                    sessionId=session_id,
-                                    turnId=turn_id,
-                                    invocationId=turn_id,
-                                    newMessage=types.Content(  # type: ignore[attr-defined]
-                                        role="user",
-                                        parts=[
-                                            types.Part(  # type: ignore[attr-defined]
-                                                text=(
-                                                    _AUTO_CONTINUE_WRAP_UP_PROMPT
-                                                    if is_wrap_up
-                                                    else _AUTO_CONTINUE_PROMPT
-                                                )
-                                            )
-                                        ],
-                                    ),
-                                    harnessState=effective_harness_state,
-                                )
+                            auto_continue_wrap_up_spent = (
+                                ac_result.wrap_up_spent
+                            )
+                            if ac_result.action == "continue":
+                                runner_input = ac_result.runner_input
                                 continue  # re-invoke run_async (genuine model call)
-                            # decision.outcome == "stop" (ledger_wants_continue was
-                            # True here so this is unreachable in practice) -> fall
-                            # through to the bare break.
+                            # action == "break" (terminal outcome or the
+                            # unreachable ledger "stop") -> fall through to the
+                            # bare break below.
                         # "defer_to_judge" / auto-continue disabled -> bare break.
                     break
 
@@ -3786,6 +3731,196 @@ class MagiEngineDriver:
                 "openTodos": open_todos,
             },
             turn_id=turn_id,
+        )
+
+    def _run_deterministic_auto_continue(
+        self,
+        *,
+        turn_id: str,
+        session_id: str,
+        seam2_snapshot: tuple[object, ...],
+        ok_tool_ends: int,
+        blocked_tool_ends: int,
+        prev_ledger: tuple[object, ...],
+        prev_evidence_count: int,
+        continuations_used: int,
+        no_progress_streak: int,
+        wrap_up_spent: bool,
+        turn_start: float,
+        effective_harness_state: object,
+        runner_turn_input_cls: Callable[..., object],
+        types_mod: object,
+    ) -> tuple[list[RuntimeEvent], _AutoContinueExecResult]:
+        """SEAM 2 deterministic auto-continue executor (extracted, byte-identical).
+
+        Behaviour-preserving extraction of the clean-break ``seam2_outcome ==
+        "continue" and self._auto_continue_enabled`` arm (design 5.3). Assembles
+        the :class:`AttemptProgress` from the caller's per-attempt counters plus
+        the ledger / evidence deltas, runs the pure
+        ``decide_auto_continue`` measurable-progress gate, and returns the events
+        to yield plus the loop-control action and the updated continuation
+        counters. This runs the SAME code the ambient path will call in U4. No
+        model call, no ``await`` (all inputs are precomputed by the caller), so
+        collecting the burst of events into a list and yielding them in order is
+        byte-identical to the previous inline ``yield`` sequence.
+        """
+        from magi_agent.runtime.goal_loop_auto_continue import (  # noqa: PLC0415
+            AttemptProgress,
+            budgets_for_intensity,
+            decide_auto_continue,
+            ledger_changed,
+        )
+        from magi_agent.runtime.per_turn_goal_intensity import (  # noqa: PLC0415
+            current_per_turn_goal_mission,
+        )
+        import time as _auto_continue_time  # noqa: PLC0415
+
+        events: list[RuntimeEvent] = []
+
+        # Mission intensity: the composer Goal-mission toggle (per-turn context)
+        # raises the budget ceiling; the constructor default is the ambient
+        # fallback.
+        auto_continue_mission = (
+            current_per_turn_goal_mission() or self._auto_continue_mission
+        )
+        evidence_now = self._collect_evidence(turn_id)
+        progress = AttemptProgress(
+            ok_tool_ends=ok_tool_ends,
+            blocked_tool_ends=blocked_tool_ends,
+            ledger_changed=ledger_changed(prev_ledger, seam2_snapshot),
+            new_evidence_records=max(
+                0,
+                len(evidence_now) - prev_evidence_count,
+            ),
+        )
+        decision = decide_auto_continue(
+            ledger_wants_continue=True,
+            progress=progress,
+            continuations_used=continuations_used,
+            prior_no_progress_streak=no_progress_streak,
+            elapsed_seconds=(
+                _auto_continue_time.monotonic() - turn_start
+            ),
+            budgets=budgets_for_intensity(mission=auto_continue_mission),
+            wrap_up_already_spent=wrap_up_spent,
+        )
+        no_progress_streak = decision.no_progress_streak
+        open_todos_now = self._open_todo_count(seam2_snapshot)
+        if decision.outcome == "stop_budget":
+            events.append(
+                RuntimeEvent(
+                    type="status",
+                    payload={
+                        "type": "goal_loop_exhausted",
+                        "reason": decision.reason,
+                        "continuations": continuations_used,
+                    },
+                    turn_id=turn_id,
+                )
+            )
+            events.append(
+                self._goal_paused_event(
+                    turn_id=turn_id,
+                    reason="budget_exhausted",
+                    objective=None,
+                    open_todos=open_todos_now,
+                )
+            )
+            return events, _AutoContinueExecResult(
+                action="break",
+                runner_input=None,
+                used=continuations_used,
+                no_progress_streak=no_progress_streak,
+                wrap_up_spent=wrap_up_spent,
+            )
+        if decision.outcome == "paused_waiting_on_approvals":
+            events.append(
+                self._goal_paused_event(
+                    turn_id=turn_id,
+                    reason="waiting_on_approvals",
+                    objective=None,
+                    open_todos=open_todos_now,
+                )
+            )
+            return events, _AutoContinueExecResult(
+                action="break",
+                runner_input=None,
+                used=continuations_used,
+                no_progress_streak=no_progress_streak,
+                wrap_up_spent=wrap_up_spent,
+            )
+        if decision.outcome == "paused_no_progress":
+            events.append(
+                self._goal_paused_event(
+                    turn_id=turn_id,
+                    reason="no_progress",
+                    objective=None,
+                    open_todos=open_todos_now,
+                )
+            )
+            return events, _AutoContinueExecResult(
+                action="break",
+                runner_input=None,
+                used=continuations_used,
+                no_progress_streak=no_progress_streak,
+                wrap_up_spent=wrap_up_spent,
+            )
+        if decision.outcome in {"continue", "wrap_up"}:
+            is_wrap_up = decision.outcome == "wrap_up"
+            if is_wrap_up:
+                wrap_up_spent = True
+            continuations_used += 1
+            events.append(
+                RuntimeEvent(
+                    type="status",
+                    payload={
+                        "type": (
+                            "goal_loop_wrap_up"
+                            if is_wrap_up
+                            else "goal_loop_continuation"
+                        ),
+                        "reason": decision.reason,
+                        "continuation": continuations_used,
+                        "openTodos": open_todos_now,
+                        "source": "auto_continue",
+                    },
+                    turn_id=turn_id,
+                )
+            )
+            runner_input = runner_turn_input_cls(
+                userId=self._user_id,
+                sessionId=session_id,
+                turnId=turn_id,
+                invocationId=turn_id,
+                newMessage=types_mod.Content(  # type: ignore[attr-defined]
+                    role="user",
+                    parts=[
+                        types_mod.Part(  # type: ignore[attr-defined]
+                            text=(
+                                _AUTO_CONTINUE_WRAP_UP_PROMPT
+                                if is_wrap_up
+                                else _AUTO_CONTINUE_PROMPT
+                            )
+                        )
+                    ],
+                ),
+                harnessState=effective_harness_state,
+            )
+            return events, _AutoContinueExecResult(
+                action="continue",
+                runner_input=runner_input,
+                used=continuations_used,
+                no_progress_streak=no_progress_streak,
+                wrap_up_spent=wrap_up_spent,
+            )
+        # decision.outcome == "stop" (ledger_wants_continue was True here so this
+        # is unreachable in practice) -> fall through to the bare break.
+        return events, _AutoContinueExecResult(
+            action="break",
+            runner_input=None,
+            used=continuations_used,
+            no_progress_streak=no_progress_streak,
+            wrap_up_spent=wrap_up_spent,
         )
 
     def _collect_evidence(self, turn_id: str) -> tuple[object, ...]:
