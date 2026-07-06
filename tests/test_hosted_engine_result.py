@@ -508,3 +508,120 @@ async def test_runtime_event_text_aggregation() -> None:
         started_at_monotonic=time.monotonic(),
     )
     assert result.output_text_internal == "Hello world."
+
+
+# ---------------------------------------------------------------------------
+# Test 10 (B8): live public-event forwarding to the 1-arg SSE sink
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_collect_forwards_public_events_live_to_sink() -> None:
+    """B8: each engine event's public payload is forwarded to ``public_event_sink``
+    (1-arg) AS it is consumed, in order, while the buffered result is unchanged.
+
+    The projected public event reused here is the SAME payload dict the local
+    streaming path frames (``RuntimeEvent.payload`` for engine events; the dict
+    itself for the plain-dict test double), so the hosted SSE route's
+    ``_enqueue_public_event`` consumes them exactly like the legacy path.
+    """
+    from magi_agent.runtime.events import RuntimeEvent  # noqa: PLC0415
+
+    generation = _request()
+    diag = _diagnostic(generation)
+    events = [
+        RuntimeEvent(type="token", payload=_text_delta("Hel")),
+        RuntimeEvent(type="tool", payload=_tool_start("c1", "ReadFile")),
+        RuntimeEvent(type="token", payload=_text_delta("lo")),
+        RuntimeEvent(type="tool", payload=_tool_end("c1")),
+    ]
+    forwarded: list[object] = []
+    result = await collect_engine_to_boundary_result(
+        generation=generation,
+        config=_config(),
+        diagnostic=diag,
+        event_stream=_fake_gen(events, _ok_terminal()),
+        started_at_monotonic=time.monotonic(),
+        public_event_sink=forwarded.append,
+    )
+
+    # Each event was forwarded live, in order, as the raw public payload dict.
+    assert forwarded == [evt.payload for evt in events]
+    # The terminal in the stream is NOT forwarded (only RuntimeEvent items are).
+    assert all(item.get("type") != "runner_completed" for item in forwarded)
+    # Buffered result is byte-identical to the no-sink path.
+    assert result.output_text_internal == "Hello"
+    assert result.event_count == 4
+
+
+@pytest.mark.asyncio
+async def test_collect_forwards_plain_dict_events_live() -> None:
+    """The plain-dict test double (as used by the other collector tests) is
+    forwarded verbatim: the dict itself is the public event."""
+    generation = _request()
+    diag = _diagnostic(generation)
+    events = [_text_delta("a"), _tool_start("c2"), _text_delta("b")]
+    forwarded: list[object] = []
+    await collect_engine_to_boundary_result(
+        generation=generation,
+        config=_config(),
+        diagnostic=diag,
+        event_stream=_fake_gen(events, _ok_terminal()),
+        started_at_monotonic=time.monotonic(),
+        public_event_sink=forwarded.append,
+    )
+    assert forwarded == events
+
+
+@pytest.mark.asyncio
+async def test_collect_none_sink_byte_identical() -> None:
+    """``public_event_sink=None`` (and the absent-kwarg default) forwards nothing
+    and returns a result byte-identical to today's drain-only path."""
+    generation = _request()
+    diag = _diagnostic(generation)
+
+    events_a = [_text_delta("a"), _text_delta("b")]
+    r_none = await collect_engine_to_boundary_result(
+        generation=generation,
+        config=_config(),
+        diagnostic=diag,
+        event_stream=_fake_gen(events_a, _ok_terminal()),
+        started_at_monotonic=time.monotonic(),
+        public_event_sink=None,
+    )
+    events_b = [_text_delta("a"), _text_delta("b")]
+    r_absent = await collect_engine_to_boundary_result(
+        generation=generation,
+        config=_config(),
+        diagnostic=diag,
+        event_stream=_fake_gen(events_b, _ok_terminal()),
+        started_at_monotonic=time.monotonic(),
+    )
+
+    assert r_none.output_text_internal == r_absent.output_text_internal == "ab"
+    assert r_none.event_count == r_absent.event_count == 2
+    assert r_none.status == r_absent.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_collect_sink_fault_never_breaks_collection() -> None:
+    """A raising ``public_event_sink`` must never corrupt the buffered drain:
+    forwarding is additive and fail-open."""
+    generation = _request()
+    diag = _diagnostic(generation)
+
+    def _boom(_event: object) -> None:
+        raise RuntimeError("sink exploded")
+
+    events = [_text_delta("x"), _text_delta("y")]
+    result = await collect_engine_to_boundary_result(
+        generation=generation,
+        config=_config(),
+        diagnostic=diag,
+        event_stream=_fake_gen(events, _ok_terminal()),
+        started_at_monotonic=time.monotonic(),
+        public_event_sink=_boom,
+    )
+    assert result.output_text_internal == "xy"
+    assert result.event_count == 2
+    assert result.status == "completed"

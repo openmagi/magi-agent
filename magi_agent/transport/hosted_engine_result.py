@@ -53,7 +53,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable, Mapping
 from typing import TYPE_CHECKING
 
 from magi_agent.engine.contracts import EngineResult, RuntimeEvent, Terminal
@@ -122,6 +122,82 @@ def _translate_usage(raw: dict[str, object]) -> dict[str, int] | None:
 
 
 # ---------------------------------------------------------------------------
+# B8: live public-event tee (governed SSE parity)
+# ---------------------------------------------------------------------------
+
+
+def _public_event_for(item: object) -> dict[str, object] | None:
+    """Project one drained stream item to the public SSE event payload.
+
+    Reuses the SAME payload shape the local streaming path frames: the engine
+    yields ``RuntimeEvent`` whose ``payload`` is already the public event dict
+    (``{"type": "text_delta", "delta": ...}``, ``tool_start`` / ``tool_end``,
+    etc.), so the hosted route's 1-arg ``public_event_sink``
+    (``_enqueue_public_event`` -> ``_selected_stream_public_event_for_turn``)
+    consumes them exactly like the legacy boundary's live pushes. Plain-dict
+    test doubles are the public event verbatim. Anything else has no public
+    projection and is skipped (``None``).
+    """
+    if isinstance(item, RuntimeEvent):
+        return item.payload
+    if isinstance(item, dict):
+        return item
+    return None
+
+
+def _forward_public_event(
+    public_event_sink: "Callable[[Mapping[str, object]], None]",
+    item: object,
+) -> None:
+    """Forward one drained item's public payload to the 1-arg SSE sink, live.
+
+    Fail-open: forwarding is additive and must NEVER corrupt the buffered
+    drain, so any sink fault (or a non-projectable item) is swallowed.
+    """
+    try:
+        public_event = _public_event_for(item)
+        if public_event is not None:
+            public_event_sink(public_event)
+    except Exception:
+        pass
+
+
+async def _drain_and_forward(
+    event_stream: AsyncGenerator[object, None],  # type: ignore[type-arg]
+    public_event_sink: "Callable[[Mapping[str, object]], None]",
+) -> tuple[list[object], EngineResult]:
+    """Tee variant of ``headless.drain``: forward each public event live AND
+    collect it for the buffered result.
+
+    Byte-identical to ``drain`` in every respect except the additive live
+    forward -- same terminal-as-final-item convention, same ``gen.aclose()``
+    ``finally`` guard (so a hung/timed-out stream is closed exactly as
+    ``drain`` closes it, preserving the U7 ``asyncio.timeout`` semantics the
+    caller wraps this in), same synthetic error terminal when the generator
+    completes without one.
+    """
+    events: list[object] = []
+    terminal: EngineResult | None = None
+    try:
+        async for item in event_stream:
+            if isinstance(item, EngineResult):
+                terminal = item
+                break
+            events.append(item)
+            _forward_public_event(public_event_sink, item)
+    finally:
+        await event_stream.aclose()
+    if terminal is None:
+        terminal = EngineResult(
+            terminal=Terminal.error,
+            usage={},
+            cost_usd=0.0,
+            error="engine_driver_yielded_no_terminal_result",
+        )
+    return events, terminal
+
+
+# ---------------------------------------------------------------------------
 # Public collector
 # ---------------------------------------------------------------------------
 
@@ -137,6 +213,7 @@ async def collect_engine_to_boundary_result(
     session_reused: bool = False,
     session_event_count: int = 0,
     seeded_message_count: int = 0,
+    public_event_sink: "Callable[[Mapping[str, object]], None] | None" = None,
 ) -> Gate5B4C3LiveRunnerBoundaryResult:
     """Consume the engine event stream and return a boundary result.
 
@@ -166,6 +243,17 @@ async def collect_engine_to_boundary_result(
         to what the legacy boundary produces.  When zero or falsy, no timeout
         context is armed and behaviour is byte-identical to the un-timed path.
         Defaults to 0 (no timeout).
+    public_event_sink:
+        B8 live-parity forward. The route's 1-arg public/SSE sink
+        (``_enqueue_public_event`` via ``run_gate5b_user_visible_chat_response``,
+        wrapped by the governed serving branch as ``governance_event_sink``).
+        When provided, each drained public event (``RuntimeEvent.payload``) is
+        forwarded to it AS it is consumed, so the hosted SSE queue streams the
+        governed turn's text/tool events live -- exactly like the legacy
+        boundary pushes them mid-turn. When ``None`` (default; every existing
+        caller and unit test) nothing is forwarded and the drain is
+        byte-identical to today. Forwarding is fail-open: a sink fault never
+        breaks the buffered collection.
 
     Returns
     -------
@@ -195,11 +283,23 @@ async def collect_engine_to_boundary_result(
     # guard closes the event stream, so there is no generator leak.
     # When timeout_ms is falsy (0 or default), no timeout context is armed
     # and behaviour is byte-identical to the previous implementation.
+    #
+    # B8 (live SSE parity): when a 1-arg ``public_event_sink`` is threaded in
+    # (the governed serving branch passes the route's ``governance_event_sink``),
+    # tee each drained public event to it AS it is consumed so the hosted SSE
+    # queue streams frame-by-frame exactly like the legacy boundary. When the
+    # sink is ``None`` (every existing caller / unit test) we call ``drain``
+    # verbatim, so the buffered-result path stays byte-identical to today.
+    async def _consume() -> tuple[list[object], EngineResult]:
+        if public_event_sink is None:
+            return await drain(event_stream)  # type: ignore[arg-type]
+        return await _drain_and_forward(event_stream, public_event_sink)
+
     if timeout_ms:
         async with asyncio.timeout(timeout_ms / 1000):
-            events, terminal = await drain(event_stream)  # type: ignore[arg-type]
+            events, terminal = await _consume()
     else:
-        events, terminal = await drain(event_stream)  # type: ignore[arg-type]
+        events, terminal = await _consume()
 
     # Aggregate text from text_delta events only.
     # The engine yields RuntimeEvent objects (not plain dicts); extract the

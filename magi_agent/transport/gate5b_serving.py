@@ -796,6 +796,19 @@ async def _run_live_chat_runner(
                         session_reused=session_reused,
                         session_event_count=int(session_event_count or 0),
                         seeded_message_count=seeded_message_count,
+                        # B8: forward the governed turn's public content events
+                        # (text_delta / thinking_delta / tool_start / tool_end)
+                        # to the route's 1-arg SSE sink LIVE as they are drained,
+                        # so ``/v1/chat/stream`` streams the answer frame-by-frame
+                        # exactly like the legacy boundary. This is the SAME 1-arg
+                        # public/SSE sink the legacy path threads
+                        # (``public_event_sink`` -> ``governance_event_sink``); it
+                        # is DISTINCT from the driver's 3-arg observability
+                        # event_sink (``governed_transcript_event_sink``) wired
+                        # into ``build_hosted_runtime`` above. ``None`` on the
+                        # completions route (no sink) keeps the buffered-only path
+                        # byte-identical.
+                        public_event_sink=governance_event_sink,
                     )
                     # U8 (B4): emit the assembled ``message`` (when non-empty) and
                     # ``turn_end`` records after collection, mirroring the legacy
