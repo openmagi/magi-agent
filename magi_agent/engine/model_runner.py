@@ -179,6 +179,7 @@ def build_cli_model_runner(
     self_review_scheduler: Callable[[Coroutine[Any, Any, None]], None] | None = None,
     pinned_recipe_pack_ids: Sequence[str] = (),
     agent_event_emitter: Callable[..., object] | None = None,
+    session_service_factory: "Callable[[str], object] | None" = None,
 ) -> CliModelRunner:
     """Build a real, model-backed CLI runner from a resolved provider config.
 
@@ -265,7 +266,15 @@ def build_cli_model_runner(
         pinned_recipe_pack_ids=pinned_recipe_pack_ids,
     )
     _attach_first_party_policy_callback(agent, runner_policy_assembly)
-    session_service = WorkspaceSessionService(app_name=app_name)
+    # Local serve rebuilds the engine per turn; a caller-supplied factory lets
+    # consecutive turns reuse ONE session service (and thus one ADK Session with
+    # accumulated events) so turn N+1 sees turn N. Default None keeps the
+    # historical fresh-per-build behavior byte-identical for every other caller.
+    session_service = (
+        session_service_factory(app_name)
+        if session_service_factory is not None
+        else WorkspaceSessionService(app_name=app_name)
+    )
     # Build the control plane via the shared helper (same as local_runner) so
     # both runners cannot drift. The full runtime profile enables first-party
     # controls by default; safe/minimal profiles or explicit false env values

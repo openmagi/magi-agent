@@ -50,6 +50,9 @@ async def _local_adk_chat_sse(
         build_headless_runtime,
         local_runner_policy_routing_enabled_from_env,
     )
+    from magi_agent.transport.local_session_registry import (
+        acquire_local_session_service,
+    )
     from magi_agent.config.env import LOCAL_DEV_MODEL_SENTINEL
     from magi_agent.runtime.goal_loop_policy import (
         build_goal_loop_policy_from_request,
@@ -263,6 +266,16 @@ async def _local_adk_chat_sse(
         _effective_permission_mode = _capped_permission_mode(
             _active_permission_mode(), _LOCAL_SERVE_PERMISSION_MODE
         )
+        # Reuse ONE session service per channel across per-turn engine rebuilds so
+        # ADK session events accumulate and turn N+1 sees turn N. Shares the same
+        # process-level registry (and the same magi-cli/cli/session_id identity)
+        # as the /v1/chat/stream surface, so continuity holds across both local
+        # routes.
+        def _session_service_factory(app_name: str) -> object:
+            return acquire_local_session_service(
+                app_name=app_name, session_id=session_id
+            )
+
         headless = build_headless_runtime(
             cwd=workspace_root,
             # A-8: explicit, audited local-serve YOLO opt-in (see module constant),
@@ -277,6 +290,7 @@ async def _local_adk_chat_sse(
             learning_live_readiness=learning_live_readiness,
             pinned_recipe_pack_ids=pinned_recipe_pack_ids,
             agent_event_emitter=_push_agent_event,
+            session_service_factory=_session_service_factory,
         )
         # Route the top-level serve turn through the single ``run_governed_turn``
         # primitive (Phase 1). ``runtime=headless`` reuses the SAME runner/gate/

@@ -378,6 +378,7 @@ def build_headless_runtime(
     tools: list[object] | None = None,
     pinned_recipe_pack_ids: Sequence[str] = (),
     agent_event_emitter: Callable[..., object] | None = None,
+    session_service_factory: "Callable[[str], object] | None" = None,
     auto_continue_allowed: bool = True,
 ) -> HeadlessRuntime:
     """Construct the complete headless dependency set.
@@ -451,6 +452,7 @@ def build_headless_runtime(
             tools=tools,
             pinned_recipe_pack_ids=pinned_recipe_pack_ids,
             agent_event_emitter=agent_event_emitter,
+            session_service_factory=session_service_factory,
         )
     )
     composio_bundle, composio_attached = _build_composio_bundle_for_mode(
@@ -724,6 +726,7 @@ def _build_default_runner(
     tools: list[object] | None = None,
     pinned_recipe_pack_ids: Sequence[str] = (),
     agent_event_emitter: Callable[..., object] | None = None,
+    session_service_factory: "Callable[[str], object] | None" = None,
 ) -> object:
     """Build the CLI's default runner.
 
@@ -803,6 +806,7 @@ def _build_default_runner(
             plan_ledger_handler_set=plan_ledger_handler_set,
             pinned_recipe_pack_ids=pinned_recipe_pack_ids,
             agent_event_emitter=agent_event_emitter,
+            session_service_factory=session_service_factory,
         )
     except CliProviderDependencyError as exc:
         # Key configured but the provider dependency is missing: keep the CLI
