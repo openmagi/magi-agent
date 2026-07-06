@@ -135,13 +135,23 @@ class LocalToolEvidenceCollector:
 
         # UPDATE authored-paths set from coding mutation receipts (for file exclusion).
         # Must happen BEFORE citation capture so a FileRead in the same batch
-        # after an edit correctly excludes the edited file.
-        _update_authored_paths(
-            authored_paths=self._session_authored_paths.setdefault(session_id, set()),
-            tool_result=tool_result,
-            tool_name=tool_name,
-            arguments=arguments or {},
-        )
+        # after an edit correctly excludes the edited file. Wave 4b (Piece F):
+        # the authored-paths bookkeeping only matters for citation capture, so
+        # gate it on the citation master switch (byte-identical OFF path: no
+        # authored-paths mutation) and wrap it in its own fail-quiet try/except
+        # so a malformed receipt can never break a tool result.
+        if _source_citation_enabled():
+            try:
+                _update_authored_paths(
+                    authored_paths=self._session_authored_paths.setdefault(
+                        session_id, set()
+                    ),
+                    tool_result=tool_result,
+                    tool_name=tool_name,
+                    arguments=arguments or {},
+                )
+            except Exception:
+                pass
 
         # Citation capture (MAGI_SOURCE_CITATION_ENABLED, profile-aware default-ON).
         # Single-registration invariant (Wave 2): the wrap point may have already
@@ -993,9 +1003,13 @@ def _projected_source_inspection_records(
 ) -> list[object]:
     """Project a read-only tool's source-ledger report into EvidenceRecords.
 
-    Default-OFF behind ``MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED``; returns
-    ``[]`` (byte-identical to main) when the flag is off, when the result has no
-    ``sourceProjection``, or when nothing was inspected.
+    Active when EITHER the legacy research-recipe gate
+    ``MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED`` OR the citation master switch
+    ``MAGI_SOURCE_CITATION_ENABLED`` is on (design 14, Wave 1 deferral): the
+    citation capture path wants read-only-host SourceInspection sources projected
+    into the corpus the pre-final gate reads, without depending on the legacy
+    research flag. Returns ``[]`` (byte-identical to main) when BOTH are off, when
+    the result has no ``sourceProjection``, or when nothing was inspected.
 
     Reuses the EXISTING ``SourceLedgerRecord.to_evidence_record()`` (which
     returns ``EvidenceRecord(type="SourceInspection")``) — it reconstructs a
@@ -1003,7 +1017,7 @@ def _projected_source_inspection_records(
     Only ``inspected`` ``SourceInspection`` sources are surfaced. Fail-open: any
     error yields ``[]`` so a malformed projection can never wedge the turn.
     """
-    if not _source_ledger_evidence_gate_enabled():
+    if not (_source_ledger_evidence_gate_enabled() or _source_citation_enabled()):
         return []
     projection = metadata.get("sourceProjection")
     if not isinstance(projection, Mapping):

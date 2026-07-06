@@ -3763,15 +3763,58 @@ def parse_source_citation_gate_mode(env: Mapping[str, str]) -> str:
 
     Returns ``"off"`` / ``"audit"`` / ``"repair"``. ``off`` skips the gate.
     ``audit`` runs the gate observe-only: it emits a ``custom:CitationVerdict``
-    evidence record and NEVER alters the turn. ``repair`` is accepted as a value
-    but, in Wave 4a, behaves as ``audit`` (repair / induce-search land in Wave
-    4b). Unknown values fall back to the FlagSpec default (``audit``). The gate
-    only runs when :func:`parse_source_citation_enabled` is also on.
+    evidence record and NEVER alters the turn. ``repair`` (the Wave 4b default)
+    additionally drives the pre-final repair loop: attribution repair for
+    dangling / uncited-with-sources claims, induce-search repair for high-risk
+    claims on a zero-external-read turn, a bounded budget, then fail-open with a
+    hedge notice so the turn always completes. Unknown values fall back to the
+    FlagSpec default (``repair``). The gate only runs when
+    :func:`parse_source_citation_enabled` is also on.
     """
     raw = (env.get("MAGI_SOURCE_CITATION_GATE_MODE") or "").strip().lower()
     if raw in ("off", "audit", "repair"):
         return raw
-    return "audit"
+    return "repair"
+
+
+def parse_source_citation_repair_max_attempts(env: Mapping[str, str]) -> int:
+    """MAGI_SOURCE_CITATION_REPAIR_MAX_ATTEMPTS -- repair budget before fail-open.
+
+    Bounded number of pre-final repair re-generations (shared across attribution
+    and induce-search repair kinds) the citation gate may drive in one turn
+    before failing open. Honors the retry-exhaustion-fail-open precedent: after
+    the budget the answer is emitted with a one-line hedge notice and the
+    ``custom:CitationVerdict`` record carries ``failOpen: true``. Non-positive or
+    unparseable values clamp to the FlagSpec default (``2``); a hard ceiling of
+    5 guards against a pathological override.
+    """
+    raw = (env.get("MAGI_SOURCE_CITATION_REPAIR_MAX_ATTEMPTS") or "").strip()
+    if not raw:
+        return 2
+    try:
+        value = int(raw)
+    except ValueError:
+        return 2
+    if value < 1:
+        return 2
+    return min(value, 5)
+
+
+def parse_source_citation_induce_search_enabled(env: Mapping[str, str]) -> bool:
+    """MAGI_SOURCE_CITATION_INDUCE_SEARCH_ENABLED -- induce-search repair kind.
+
+    Whether the ``uncited_high_risk_zero_source`` violation (high-risk claims on
+    a turn that registered zero external-read sources: the Tesla case) may direct
+    the model to run a web/KB search before re-answering. Profile-aware
+    default-ON (full runtime profile); OFF under safe/eval. It is the one
+    deliberate latency-adder and fires only on that precise failure mode. When
+    OFF, or when no search tool is bound (keyless install), the violation
+    degrades to the advisory verdict ``uncited`` with no forced search (a gate
+    must never demand impossible actions).
+    """
+    from .flags import flag_profile_bool
+
+    return flag_profile_bool("MAGI_SOURCE_CITATION_INDUCE_SEARCH_ENABLED", env=env)
 
 
 def parse_taskboard_completion_verification_enabled(env: Mapping[str, str]) -> bool:

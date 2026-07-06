@@ -1693,17 +1693,44 @@ FLAGS: tuple[FlagSpec, ...] = (
     ),
     FlagSpec(
         name="MAGI_SOURCE_CITATION_GATE_MODE",
-        default="audit",
+        default="repair",
         scope="public",
         stage="stage1",
         summary=(
             "Deterministic pre-final source-citation gate mode. `off` skips the "
             "gate entirely; `audit` runs the gate observe-only (emits a "
-            "custom:CitationVerdict record, never alters the turn); `repair` is "
-            "accepted but behaves as `audit` until Wave 4b wires repair. Only "
-            "runs when MAGI_SOURCE_CITATION_ENABLED is on."
+            "custom:CitationVerdict record, never alters the turn); `repair` (the "
+            "default) additionally drives attribution / induce-search repair with "
+            "a bounded budget, then fails open with a hedge notice. Only runs when "
+            "MAGI_SOURCE_CITATION_ENABLED is on."
         ),
         kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_SOURCE_CITATION_REPAIR_MAX_ATTEMPTS",
+        default="2",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Bounded pre-final citation repair budget (shared across attribution "
+            "and induce-search repair kinds) before the gate fails open with a "
+            "hedge notice and a failOpen:true verdict. Clamps to [1, 5]; unset / "
+            "unparseable falls back to 2. Only meaningful when "
+            "MAGI_SOURCE_CITATION_GATE_MODE=repair."
+        ),
+        kind="int",
+    ),
+    _pb(
+        "MAGI_SOURCE_CITATION_INDUCE_SEARCH_ENABLED",
+        stage="stage1",
+        summary=(
+            "Whether the citation gate may direct a web/KB search before "
+            "re-answering when high-risk claims have zero external-read sources "
+            "(the Tesla case). Profile default-ON (full); OFF under safe/eval. "
+            "The one deliberate latency-adder; fires only on that failure mode "
+            "and auto-degrades to the advisory `uncited` verdict when OFF or when "
+            "no search tool is bound (keyless install)."
+        ),
     ),
     _b(
         "MAGI_GATE5B_GOVERNANCE_ENABLED",
