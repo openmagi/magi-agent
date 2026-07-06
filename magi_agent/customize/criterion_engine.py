@@ -323,3 +323,132 @@ def _render_criterion_prompt(
                 criterion=criterion, draft=draft_text, evidence=evidence
             )
     return _CRITERION_PROMPT.format(criterion=criterion, draft=draft_text)
+
+
+# ---------------------------------------------------------------------------
+# PR-V5: skeptic member (advisory, default-OFF)
+# ---------------------------------------------------------------------------
+
+# The fixed first-party criterion the skeptic judges against. Passed by the
+# driver to evaluate_criterion_findings as the ``criterion`` keyword argument.
+_SKEPTIC_CRITERION = (
+    "overconfidence, flattery toward the user, or unsupported certainty: "
+    "the draft makes confident assertions without evidence, praises the user "
+    "excessively, or expresses certainty beyond what the evidence supports. "
+    "For each finding, quote the EXACT verbatim span from the draft (do not "
+    "paraphrase or summarize). Spans must appear verbatim in the draft text."
+)
+
+# System instruction for the skeptic judge. Demands verbatim spans and
+# returns a findings list (not a pass/fail verdict).
+_SKEPTIC_SYSTEM_INSTRUCTION = (
+    "You are a skeptic reviewer auditing an agent draft for overconfidence, "
+    "flattery, and unsupported certainty. For each problematic span, quote "
+    "the EXACT verbatim text from the draft -- do not paraphrase. "
+    "Return an empty findings list when the draft is clean. "
+    'Reply with ONLY a JSON object: {"findings": [{"span": "...", '
+    '"concern": "...", "note": "..."}]}'
+)
+
+
+class CriterionFindingItem(BaseModel):
+    """One skeptic finding item inside the structured LLM response."""
+
+    model_config = ConfigDict(frozen=True)
+
+    span: str = ""
+    concern: str = ""
+    note: str = ""
+
+
+class CriterionFindings(BaseModel):
+    """E-V5 structured-output schema for the skeptic judge findings list."""
+
+    model_config = ConfigDict(frozen=True)
+
+    findings: list[CriterionFindingItem] = Field(default_factory=list)
+
+
+def parse_findings(text: str) -> tuple[dict, ...] | None:
+    """Parse a ``{"findings": [...]}`` response. Returns None when malformed."""
+    if not isinstance(text, str):
+        return None
+    cleaned = _FENCE_RE.sub("", text).strip()
+    start, end = cleaned.find("{"), cleaned.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        cleaned = cleaned[start : end + 1]
+    try:
+        parsed = json.loads(cleaned)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    findings = parsed.get("findings")
+    if not isinstance(findings, list):
+        return None
+    result: list[dict] = []
+    for f in findings:
+        if not isinstance(f, dict):
+            continue
+        result.append(
+            {
+                "span": str(f.get("span", "")),
+                "concern": str(f.get("concern", "")),
+                "note": str(f.get("note", "")),
+            }
+        )
+    return tuple(result)
+
+
+async def _default_invoke_findings(model: Any, prompt: str) -> str:
+    """Call ``_invoke_llm`` with the skeptic system instruction and
+    ``CriterionFindings`` as response_schema. Mirrors ``_default_invoke``
+    for the verdict path."""
+
+    from magi_agent.introspection.egress_gate import _invoke_llm
+
+    return await _invoke_llm(
+        model,
+        prompt,
+        system_instruction=_SKEPTIC_SYSTEM_INSTRUCTION,
+        response_schema=CriterionFindings,
+    )
+
+
+async def evaluate_criterion_findings(
+    *,
+    criterion: str,
+    draft_text: str,
+    model_factory: Callable[[], Any] | None,
+    invoke: InvokeFn | None = None,
+    evidence_context: EvidenceCriterionView | None = None,
+) -> tuple[dict, ...]:
+    """Judge ``draft_text`` for skeptic findings against ``criterion``.
+
+    Returns a tuple of raw dicts with keys ``span``, ``concern``, ``note``.
+    The caller is responsible for converting these to ``VerifyFinding`` objects
+    and running the A2 post-filter (``filter_skeptic_findings``).
+
+    Fail-open: returns ``()`` when ``model_factory`` is None, when the model
+    cannot be constructed, or on any error. This mirrors the ``(True, "...")``
+    fail-open contract of :func:`evaluate_criterion`.
+    """
+    if model_factory is None:
+        return ()
+    invoke_fn = invoke or _default_invoke_findings
+    try:
+        model = model_factory()
+        if model is None:
+            return ()
+        prompt = _render_criterion_prompt(
+            criterion=criterion,
+            draft_text=draft_text,
+            evidence_context=evidence_context,
+        )
+        raw = await invoke_fn(model, prompt)
+        findings = parse_findings(raw)
+        if findings is None:
+            return ()
+        return findings
+    except Exception:
+        return ()
