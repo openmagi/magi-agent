@@ -143,8 +143,7 @@ def build_verdicts(
     layer: str,
     task_ids: list[str],
     *,
-    tones: tuple[str, ...],
-    conditions: tuple[tuple[str, str], ...] = JUDGE_CONDITIONS,
+    specs: tuple[tuple[str, str], ...],  # flat list of (source, tone)
     run_judge: bool,
     judge_cmd: list[str] | None = None,
 ) -> list[TurnVerdict]:
@@ -155,7 +154,7 @@ def build_verdicts(
     if cache_path.exists():
         cache = json.loads(cache_path.read_text(encoding="utf-8"))
 
-    keys = [f"{clabel}:{tone}" for clabel, _ in conditions for tone in tones]
+    keys = [f"{source}:{tone}" for source, tone in specs]
 
     out: list[TurnVerdict] = []
     for tid in task_ids:
@@ -173,25 +172,24 @@ def build_verdicts(
         if run_judge and claims:
             tcache = cache.setdefault(tid, {})
             transcript = transcript_from_stream(corpus / layer / tid / "raw.ndjson")
-            for clabel, source in conditions:
+            for source, tone in specs:
+                key = f"{source}:{tone}"
+                if key in tcache:
+                    judge[key] = tcache[key]
+                    continue
                 text = transcript if source == "transcript" else turn.claims_text
-                for tone in tones:
-                    key = f"{clabel}:{tone}"
-                    if key in tcache:
-                        judge[key] = tcache[key]
-                        continue
-                    print(f"[judge:{key}] {tid} ...", flush=True)
-                    v = judge_claim(
-                        text,
-                        cwd=corpus / "_judge" / clabel / tone / tid,
-                        objective=objective_for(ctype),
-                        tone=tone,
-                        source=source,
-                        judge_cmd=judge_cmd,
-                    ).upper()
-                    judge[key] = v
-                    tcache[key] = v
-                    cache_path.write_text(json.dumps(cache, indent=2), encoding="utf-8")
+                print(f"[judge:{key}] {tid} ...", flush=True)
+                v = judge_claim(
+                    text,
+                    cwd=corpus / "_judge" / source / tone / tid,
+                    objective=objective_for(ctype),
+                    tone=tone,
+                    source=source,
+                    judge_cmd=judge_cmd,
+                ).upper()
+                judge[key] = v
+                tcache[key] = v
+                cache_path.write_text(json.dumps(cache, indent=2), encoding="utf-8")
         elif not claims:
             judge = {k: "SHIP" for k in keys}  # nothing to flag
 
@@ -216,14 +214,13 @@ def _pct(num: int, den: int) -> str:
 
 def render_markdown(
     verdicts: list[TurnVerdict],
-    tones: tuple[str, ...],
-    conditions: tuple[tuple[str, str], ...] = JUDGE_CONDITIONS,
+    specs: tuple[tuple[str, str], ...],
 ) -> str:
     unbacked = [v for v in verdicts if v.population == "unbacked"]
     backed = [v for v in verdicts if v.population == "backed"]
     receipt_only = [v for v in verdicts if v.population == "receipt_only"]
     no_claim = [v for v in verdicts if v.population == "no_claim"]
-    clabels = [c[0] for c in conditions]
+    spec_keys = [f"{s}:{t}" for s, t in specs]
 
     def recall(getter) -> tuple[int, int]:
         return sum(1 for v in unbacked if getter(v) == "FLAG"), len(unbacked)
@@ -262,22 +259,20 @@ def render_markdown(
     # Headline: advisory, each (condition × tone), evidence-bound.
     L.append("## Headline — catch the unbacked, don't block real work\n")
     L.append(
-        "The judge is **Claude Opus 4.8** (frontier), run fresh per turn, swept "
-        "across four tones and two access levels: **answer** = the final message "
-        "only (what a user skimming the chat sees); **transcript** = the full tool "
-        "trace too (what a reviewer with log access sees).\n"
+        "The judge is **Claude Opus 4.8** (frontier), run fresh per turn at two "
+        "access levels: **answer** = the final message only (what a user skimming "
+        "the chat sees); **transcript** = the full tool trace too (what a reviewer "
+        "with log access sees). Tones sweep trusting → skeptical.\n"
     )
     L.append("| layer | catches unbacked (recall ↑) | blocks receipt-backed work ↓ |")
     L.append("|---|---|---|")
     rn, rd = recall(lambda v: v.advisory)
     bn, bd = blocks(lambda v: v.advisory)
     L.append(f"| advisory (trust the words) — by definition | {_pct(rn, rd)} | {_pct(bn, bd)} |")
-    for clabel in clabels:
-        for tone in tones:
-            key = f"{clabel}:{tone}"
-            rn, rd = recall(lambda v, k=key: v.judge.get(k, "UNKNOWN"))
-            bn, bd = blocks(lambda v, k=key: v.judge.get(k, "UNKNOWN"))
-            L.append(f"| LLM-judge · {clabel} · {tone} | {_pct(rn, rd)} | {_pct(bn, bd)} |")
+    for key in spec_keys:
+        rn, rd = recall(lambda v, k=key: v.judge.get(k, "UNKNOWN"))
+        bn, bd = blocks(lambda v, k=key: v.judge.get(k, "UNKNOWN"))
+        L.append(f"| LLM-judge · {key} | {_pct(rn, rd)} | {_pct(bn, bd)} |")
     rn, rd = recall(lambda v: v.evidence_bound)
     bn, bd = blocks(lambda v: v.evidence_bound)
     L.append(
@@ -310,12 +305,11 @@ def render_markdown(
     L.append("")
 
     # Per-turn detail.
-    keys = [f"{c[0]}:{t}" for c in conditions for t in tones]
     L.append("## Per-turn detail\n")
-    L.append("| task | type | population | " + " | ".join(keys) + " | evidence |")
-    L.append("|" + "---|" * (4 + len(keys)))
+    L.append("| task | type | population | " + " | ".join(spec_keys) + " | evidence |")
+    L.append("|" + "---|" * (4 + len(spec_keys)))
     for v in verdicts:
-        jc = " | ".join(v.judge.get(k, "-") for k in keys)
+        jc = " | ".join(v.judge.get(k, "-") for k in spec_keys)
         L.append(f"| {v.task_id} | {v.claim_type} | {v.population} | {jc} | {v.evidence_bound} |")
     L.append("")
     return "\n".join(L)
@@ -327,10 +321,12 @@ def main() -> int:
     ap.add_argument("--layer", default="baseline")
     ap.add_argument("--tasks", nargs="*", default=None, help="task ids; default: all on disk")
     ap.add_argument("--judge", action="store_true", help="run the LLM-judge (LLM calls)")
-    ap.add_argument("--tones", nargs="*", default=list(DEFAULT_TONES))
     ap.add_argument(
-        "--sources", nargs="*", default=[c[0] for c in JUDGE_CONDITIONS],
-        help="judge access levels: answer | transcript",
+        "--specs", nargs="*",
+        default=["answer:trusting", "answer:balanced", "answer:neutral",
+                 "answer:skeptical", "transcript:balanced", "transcript:neutral"],
+        help="judge conditions as source:tone (source=answer|transcript). The "
+        "published run uses 4 answer tones + 2 transcript tones.",
     )
     ap.add_argument(
         "--judge-cmd", default=None,
@@ -350,14 +346,13 @@ def main() -> int:
 
     import shlex
 
-    tones = tuple(args.tones)
-    conditions = tuple((s, s) for s in args.sources)
+    specs = tuple(tuple(s.split(":", 1)) for s in args.specs)
     judge_cmd = shlex.split(args.judge_cmd) if args.judge_cmd else None
     verdicts = build_verdicts(
         args.corpus, args.layer, task_ids,
-        tones=tones, conditions=conditions, run_judge=args.judge, judge_cmd=judge_cmd,
+        specs=specs, run_judge=args.judge, judge_cmd=judge_cmd,
     )
-    md = render_markdown(verdicts, tones, conditions)
+    md = render_markdown(verdicts, specs)
     print(md)
     if args.out:
         args.out.write_text(md, encoding="utf-8")
