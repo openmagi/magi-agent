@@ -191,6 +191,9 @@ _PROFILE_BOOL_FLAGS_ENABLED = (
     # Orchestrator pattern: per-spawn tool ceiling + recipe-gate binding consumers.
     "MAGI_SPAWN_RECIPE_CAP_ENABLED",
     "MAGI_SPAWN_RECIPE_BIND_ENABLED",
+    # Verify-before-replying policy master switch: profile default-ON (full).
+    # Skeptic member stays _b (strict default-OFF, D3); backstop is str, not _pb.
+    "MAGI_VERIFY_BEFORE_REPLYING_ENABLED",
 )
 
 
