@@ -124,6 +124,7 @@ graph LR
     engine --> evidence
     engine --> harness
     engine --> hooks
+    engine --> knowledge
     engine --> models
     engine --> ops
     engine --> packs
@@ -132,6 +133,7 @@ graph LR
     engine --> runtime
     engine --> shadow
     engine --> shared
+    engine --> tools
     engine --> transport
     evidence --> coding
     evidence --> config
@@ -911,7 +913,7 @@ graph LR
 |---|---|---|---|
 | __init__.py | Runtime-neutral engine kernel extracted from ``cli/`` (deep-review N-08). | — | browser/autonomous/tool.py, cli/contracts.py, cli/engine.py, cli/engine_user_packs.py, cli/event_projection.py, cli/litellm_empty_observer.py, cli/providers.py, cli/real_runner.py, computer/autonomous/tool.py, transport/app_api.py, transport/web_dashboard.py |
 | contracts.py | Stable interface surface for the Magi headless CLI. | control, events | engine/driver.py, runtime/child_governed_collector.py, runtime/governed_turn.py, transport/chat_routes_local.py, transport/hosted_engine_result.py, transport/streaming_chat.py, transport/streaming_chat_route.py, transport/streaming_driver.py |
-| driver.py | Real ADK-backed engine driver for the Magi headless CLI (PR-A2). | active_turn_registry, child_runner_live, citation_audit, citation_gate, claim_grounding, context, contracts, criterion_engine, customize_tool_wiring, discipline_boundary, empty_response_recovery, engine_gates, engine_recovery, engine_routing, engine_user_packs, env, error_recovery, event_adapter, event_projection, events, final_output_gate, final_projection_gate, flags, gate5b4c3_image_parts, goal_loop_auto_continue, goal_loop_evidence, goal_loop_judge, goal_nudge, hook_wiring, kernel_recipe_packs, live_research_final_gate, output_continuation, per_turn_goal_intensity, per_turn_goal_loop_context, permissions, readonly_classifier, recipe_routing, recipes, research_final_gate, runner_adapter, runtime_gate, safety, scoped_policy, sse, store, task_completion, types, usage_metadata, validator_taxonomy, verification_policy, verifier_bus | engine/engine_gates.py, engine/engine_routing.py, engine/model_runner.py, runtime/hosted_runtime.py |
+| driver.py | Real ADK-backed engine driver for the Magi headless CLI (PR-A2). | active_turn_registry, child_runner_live, citation_audit, citation_gate, claim_grounding, context, contracts, criterion_engine, customize_tool_wiring, discipline_boundary, empty_response_recovery, engine_gates, engine_recovery, engine_routing, engine_user_packs, env, error_recovery, event_adapter, event_projection, events, final_output_gate, final_projection_gate, flags, gate5b4c3_image_parts, goal_loop_auto_continue, goal_loop_evidence, goal_loop_judge, goal_nudge, hook_wiring, kernel_recipe_packs, live_research_final_gate, output_continuation, per_turn_goal_intensity, per_turn_goal_loop_context, permissions, qmd_index, readonly_classifier, recipe_routing, recipes, research_final_gate, runner_adapter, runtime_gate, safety, scoped_policy, sse, store, task_completion, types, usage_metadata, validator_taxonomy, verification_policy, verifier_bus, web_search_tools | engine/engine_gates.py, engine/engine_routing.py, engine/model_runner.py, runtime/hosted_runtime.py |
 | engine_gates.py | Pre-final evidence-gate stack helpers, pure move out of engine/driver.py (PR-G3). | driver, engine_routing, env, flags, repair_loop, runtime_gate, shacl_verifier, store, verification_policy, verifier_bus | engine/driver.py |
 | engine_recovery.py | Live retry / continuation / empty-response recovery helpers, pure move out of | empty_response_recovery, env, error_recovery, event_projection, output_continuation | engine/driver.py |
 | engine_routing.py | Runner routing and policy-assembly helpers, pure move out of engine/driver.py (PR-G2). | driver, flags | engine/driver.py, engine/engine_gates.py |
@@ -1274,7 +1276,7 @@ graph LR
 | __init__.py | — | provider_boundary | — |
 | local_index.py | Read-only scan + keyword search over the workspace knowledge directory. | — | knowledge/qmd_index.py, plugins/native/knowledge.py |
 | provider_boundary.py | — | — | knowledge/__init__.py, knowledge/source_tools.py, plugins/native/knowledge.py |
-| qmd_index.py | Optional ``qmd``-accelerated search over the workspace knowledge base. | local_index, qmd | cli/knowledge_cli.py, plugins/native/knowledge.py |
+| qmd_index.py | Optional ``qmd``-accelerated search over the workspace knowledge base. | local_index, qmd | cli/knowledge_cli.py, engine/driver.py, plugins/native/knowledge.py |
 | source_tools.py | — | policy, provider_boundary, result, source_ledger | plugins/native/knowledge.py |
 
 ### knowledge/okf/
@@ -1943,7 +1945,7 @@ graph LR
 | truncation.py | Shared head+tail ("middle") truncation for tool outputs. | flags | plugins/native/web.py, tools/archive_tools.py, tools/document_tools.py, tools/web_search_tools.py |
 | user_tool_packs.py | Merge user-authored TOOL packs into the CLI tool runtime registry. | context, discovery, env, gate5b_full_toolhost, manifest, registries, registry, result | cli/tool_runtime.py |
 | video_tools.py | VideoFrames tool — extract frames from a video at timestamps and describe them. | context, flags, image_tools, media_egress, result, spreadsheet_tools | tools/audio_tools.py, tools/file_toolhost.py |
-| web_search_tools.py | Fast direct web tools — Brave Search (or opt-in SerpAPI) + Firecrawl fetch. | env, policy, truncation | cli/tool_runtime.py, plugins/native/web.py |
+| web_search_tools.py | Fast direct web tools — Brave Search (or opt-in SerpAPI) + Firecrawl fetch. | env, policy, truncation | cli/tool_runtime.py, engine/driver.py, plugins/native/web.py |
 
 ### tools/document_write/
 
