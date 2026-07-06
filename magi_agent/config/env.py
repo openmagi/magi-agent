@@ -344,10 +344,10 @@ def parse_mcp_resilience_env(env: Mapping[str, str]) -> "McpResiliencePolicy":
     raise ``RuntimeEnvError`` at parse so an operator fails loud at startup; a
     malformed numeric on an OFF runtime never raises.
     """
-    from .flags import flag_bool  # noqa: PLC0415
+    from .flags import flag_profile_bool  # noqa: PLC0415
     from ..plugins.mcp_resilience import McpResiliencePolicy  # noqa: PLC0415
 
-    enabled = flag_bool(MCP_RESILIENCE_ENABLED_ENV, env=env)
+    enabled = flag_profile_bool(MCP_RESILIENCE_ENABLED_ENV, env=env)
     if not enabled:
         return McpResiliencePolicy()
 
@@ -2024,9 +2024,14 @@ def parse_python_runtime_authority_env(env: Mapping[str, str]) -> PythonRuntimeA
         "CORE_AGENT_PYTHON_DB_WRITE",
         "CORE_AGENT_PYTHON_WORKSPACE_MUTATION",
         "CORE_AGENT_PYTHON_CHILD_EXECUTION",
-        "CORE_AGENT_PYTHON_MISSION_RUNTIME",
         "CORE_AGENT_PYTHON_EVIDENCE_BLOCK_MODE",
     )
+    # ``CORE_AGENT_PYTHON_MISSION_RUNTIME`` is intentionally NOT in the
+    # false-only set: it is a permitted hosted authority flag that gates
+    # the missions projector/reconciler and must be allowed truthy at
+    # boot. The ``mission_runtime_allowed`` config descriptor stays a
+    # ``Literal[False]`` seam (D3, deferred); no consumer hard-blocks the
+    # projector on it.
     for name in false_only_flags:
         if flag_bool(name, env=env):
             raise RuntimeEnvError(f"{name} is not approved")
@@ -3070,28 +3075,57 @@ def is_hosted_streaming_serve_enabled(env: Mapping[str, str] | None = None) -> b
 MAGI_HOSTED_SESSION_REUSE_ENV = "MAGI_HOSTED_SESSION_REUSE"
 MAGI_HOSTED_SESSION_REUSE_MAX_ENTRIES_ENV = "MAGI_HOSTED_SESSION_REUSE_MAX_ENTRIES"
 MAGI_HOSTED_SESSION_REUSE_TTL_SECONDS_ENV = "MAGI_HOSTED_SESSION_REUSE_TTL_SECONDS"
+MAGI_HOSTED_SESSION_DB_ENV = "MAGI_HOSTED_SESSION_DB"
 
 
 def is_hosted_session_reuse_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Single source of truth for hosted session-service reuse (08-PR5).
 
-    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the
-    live runner boundary builds a fresh ``InMemorySessionService`` per turn —
-    byte-identical to today, with no registry interaction at all. When ON the
-    boundary acquires the session service from a process-scope LRU+TTL registry
-    keyed by ``(bot_id_digest, session_id)`` so multiturn context survives
-    across turns and the re-sent sanitized history is only used to seed a
-    registry miss. Hosted is multitenant — session leakage equals cross-user
-    data exposure — so like ``is_hosted_streaming_serve_enabled`` this is an
-    additive, default-disabled serving mode and deliberately does NOT follow
-    the runtime-profile default-ON convention.
+    Profile-aware default-ON (full/lab; OFF under the safe-family). When OFF the
+    live runner boundary builds a fresh ``InMemorySessionService`` per turn,
+    byte-identical to the pre-reuse behavior, with no registry interaction. When
+    ON the boundary acquires the session service from the process-scope LRU+TTL
+    lease registry keyed by ``(bot_id_digest, session_id)`` so multiturn context
+    survives across turns; with ``MAGI_HOSTED_SESSION_DB`` the leased service is
+    the durable SqliteSessionService. Hosted is multitenant, so the registry key
+    is the full tuple and empty parts are rejected.
     """
     # Delegate to the canonical config.flags registry; imported lazily to
     # avoid a config<->flags import cycle.
-    from .flags import flag_bool
+    from .flags import flag_profile_bool
 
     source = os.environ if env is None else env
-    return flag_bool(MAGI_HOSTED_SESSION_REUSE_ENV, env=source)
+    return flag_profile_bool(MAGI_HOSTED_SESSION_REUSE_ENV, env=source)
+
+
+def is_hosted_session_db_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the durable hosted ADK session substrate.
+
+    Profile-aware default-ON (full/lab; OFF under the safe-family). When ON the
+    hosted reuse lease registry fronts a process-singleton
+    ``SqliteSessionService`` at ``<MAGI_STATE_DIR>/adk_sessions.db`` so sessions
+    and their EVENTS survive pod restart, image bump, registry eviction and TTL.
+    Gated behind ``MAGI_HOSTED_SESSION_REUSE`` (the lease manager). Fail-open:
+    any construction failure falls back to the in-memory registry.
+    """
+    from .flags import flag_profile_bool
+
+    source = os.environ if env is None else env
+    return flag_profile_bool(MAGI_HOSTED_SESSION_DB_ENV, env=source)
+
+
+def hosted_session_db_path(env: Mapping[str, str] | None = None) -> Path:
+    """Resolve the durable hosted ADK session DB path.
+
+    ``<MAGI_STATE_DIR>/adk_sessions.db``, defaulting ``MAGI_STATE_DIR`` to
+    ``/workspace/.magi`` (the PVC). Hosted pods run read-only-root with HOME=/,
+    so the DB must NOT live under HOME; the default is the writable PVC path, not
+    ``~/.magi``. Kept a separate file from the harness ``session_store`` DB.
+    """
+    source = os.environ if env is None else env
+    raw = (source.get("MAGI_STATE_DIR") or "").strip()
+    state_dir = Path(raw).expanduser() if raw else Path("/workspace/.magi")
+    return state_dir / "adk_sessions.db"
 
 
 def hosted_session_reuse_max_entries(env: Mapping[str, str] | None = None) -> int:
@@ -3363,9 +3397,9 @@ def parse_recipe_default_packs_expanded(env: Mapping[str, str]) -> bool:
     ``openmagi.evidence``) are default-selected.
     """
     # I-1: route through the typed flag registry.
-    from .flags import flag_bool  # noqa: PLC0415
+    from .flags import flag_profile_bool  # noqa: PLC0415
 
-    return flag_bool("MAGI_RECIPE_DEFAULT_PACKS_EXPANDED", env=env)
+    return flag_profile_bool("MAGI_RECIPE_DEFAULT_PACKS_EXPANDED", env=env)
 
 
 def parse_recipe_intent_binding_enabled(env: Mapping[str, str]) -> bool:
@@ -3502,21 +3536,22 @@ def plan_act_gate_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Return True when the plan_act runner-wiring gate is explicitly enabled.
 
     Single source of truth for ``MAGI_PLAN_ACT_GATE_ENABLED`` (cluster 06 PR4 /
-    inventory B9). This is a **strict default-OFF** gate: unlike the
-    profile-aware ``MAGI_*_ENABLED`` flags, it never defaults ON in the full
-    runtime profile. It only flips to ``True`` for an explicit truthy value
-    (``"1"``/``"true"``/``"yes"``/``"on"``), so the GA
-    ``plan_gate -> plan_act_switch -> delegation`` chain stays inert (and
-    byte-identical to ``main``) unless an operator opts in.
+    inventory B9). This is now a **profile-aware default-ON** gate: it defaults
+    ON under the full/lab (non-safe) runtime profile and OFF under the
+    safe-family (``safe``/``eval``/``minimal``/``conservative``/``off``) or an
+    explicit ``"0"``. Activating this seam wires the GA
+    ``plan_gate -> plan_act_switch -> delegation`` chain, but the downstream
+    delegation still enforces ``MAGI_GA_LIVE_ENABLED`` + a general role + an
+    approved/matching control, so turning this ON does not auto-delegate.
     """
     if env is None:
         import os as _os
 
         env = _os.environ
     # I-1: route through the typed flag registry.
-    from .flags import flag_bool  # noqa: PLC0415
+    from .flags import flag_profile_bool  # noqa: PLC0415
 
-    return flag_bool("MAGI_PLAN_ACT_GATE_ENABLED", env=env)
+    return flag_profile_bool("MAGI_PLAN_ACT_GATE_ENABLED", env=env)
 
 
 def parse_ga_deliverable_gate_enabled(env: Mapping[str, str]) -> bool:
@@ -3907,37 +3942,34 @@ def plan_mode_tools_enabled(env: Mapping[str, str] | None = None) -> bool:
     (:mod:`magi_agent.harness.general_automation.question_tool` /
     :mod:`~magi_agent.harness.general_automation.plan_act_switch`).
 
-    Like :func:`plan_act_gate_enabled` this is a **strict default-OFF** gate: it
-    never defaults ON in the full runtime profile and flips to ``True`` only for
-    an explicit truthy value (``"1"``/``"true"``/``"yes"``/``"on"``). When OFF
-    the three tools stay manifest-only (no handler bound, not advertised), so
-    exposure is byte-identical to ``main``.
+    This is now a **profile-aware default-ON** gate: it defaults ON under the
+    full/lab (non-safe) runtime profile and OFF under the safe-family or an
+    explicit ``"0"``. When OFF the three tools stay manifest-only (no handler
+    bound, not advertised).
     """
     if env is None:
         import os as _os
 
         env = _os.environ
     # I-1: route through the typed flag registry.
-    from .flags import flag_bool  # noqa: PLC0415
+    from .flags import flag_profile_bool  # noqa: PLC0415
 
-    return flag_bool("MAGI_PLAN_MODE_TOOLS_ENABLED", env=env)
+    return flag_profile_bool("MAGI_PLAN_MODE_TOOLS_ENABLED", env=env)
 
 
 def document_qa_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Return True when the question-conditioned DocumentQA sidecar tool is enabled.
 
-    Single source of truth for ``MAGI_DOCUMENT_QA_ENABLED``. Like
-    :func:`plan_mode_tools_enabled` this is a **strict default-OFF** gate: it
-    never defaults ON in any runtime profile (the outer
-    ``MAGI_FILE_TOOLS_ENABLED`` suite gate is profile-default-ON locally, so
-    riding only that gate would silently flip the new tool ON for local users)
-    and flips to ``True`` only for an explicit truthy value. When OFF the
-    ``DocumentQA`` manifest is not registered and no handler is bound, so
-    registry contents stay byte-identical to before.
+    Single source of truth for ``MAGI_DOCUMENT_QA_ENABLED``. Now a
+    **profile-aware default-ON** gate: it defaults ON under the full/lab
+    (non-safe) runtime profile and OFF under the safe-family or an explicit
+    ``"0"`` (it no longer merely rides the ``MAGI_FILE_TOOLS_ENABLED`` suite
+    gate; it resolves its own profile default directly). When OFF the
+    ``DocumentQA`` manifest is not registered and no handler is bound.
     """
-    from .flags import flag_bool
+    from .flags import flag_profile_bool
 
-    return flag_bool("MAGI_DOCUMENT_QA_ENABLED", env=env)
+    return flag_profile_bool("MAGI_DOCUMENT_QA_ENABLED", env=env)
 
 
 MAGI_MESSAGE_CACHE_ENABLED_ENV = "MAGI_MESSAGE_CACHE_ENABLED"

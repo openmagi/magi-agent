@@ -396,6 +396,98 @@ def build_work_queue_notify_watcher(
     )
 
 
+# ---------------------------------------------------------------------------
+# Mission action reconciler watcher — inbound UI actions -> work_queue (PR-M8)
+# ---------------------------------------------------------------------------
+
+# Poll interval for the hosted inbound action reconciler (design 7.4; legacy
+# ``MissionActionReconciler.ts`` default 15s).
+DEFAULT_MISSION_ACTION_RECONCILER_INTERVAL_SECONDS = 15.0
+
+
+def is_mission_action_reconciler_enabled() -> bool:
+    """Return True iff the hosted mission runtime config is present + killed-on.
+
+    Reuses the projector's config-presence gate (``CORE_AGENT_CHAT_PROXY_URL`` +
+    ``GATEWAY_TOKEN`` + ``CORE_AGENT_PYTHON_MISSION_RUNTIME`` kill-switch), so the
+    reconciler and projector activate together and stay inert on OSS local. No
+    new capability flag (no-default-OFF policy).
+    """
+    import os  # noqa: PLC0415
+
+    from magi_agent.missions.projector import projector_active  # noqa: PLC0415
+
+    return projector_active(os.environ)
+
+
+def _mission_action_reconciler_enabled() -> bool:
+    return is_mission_action_reconciler_enabled()
+
+
+def build_local_mission_action_reconciler() -> Any:
+    """Build the mission action reconciler used by ``magi gateway start``.
+
+    Composes M7's ``UrllibMissionTransport`` (the single mission HTTP client,
+    Bearer-authed with the bot ``GATEWAY_TOKEN``) with the env-configured
+    ``SqliteWorkQueueStore``. On OSS local the URL/token are absent so the
+    transport is never exercised — the ``is_enabled`` gate keeps the watcher off.
+    """
+    import os  # noqa: PLC0415
+
+    from magi_agent.missions.action_reconciler import (  # noqa: PLC0415
+        MissionActionReconciler,
+    )
+    from magi_agent.missions.projector import (  # noqa: PLC0415
+        CHAT_PROXY_URL_ENV,
+        GATEWAY_TOKEN_ENV,
+        UrllibMissionTransport,
+    )
+    from magi_agent.missions.work_queue.store import SqliteWorkQueueStore  # noqa: PLC0415
+
+    base_url = (os.environ.get(CHAT_PROXY_URL_ENV) or "").strip()
+    token = (os.environ.get(GATEWAY_TOKEN_ENV) or "").strip()
+    transport = UrllibMissionTransport(base_url, token)
+    store = SqliteWorkQueueStore(_work_queue_db_path_from_env())
+    return MissionActionReconciler(transport, store)
+
+
+def build_mission_action_reconciler_watcher(
+    *,
+    reconciler: Any,
+    interval_seconds: float,
+    is_enabled: Callable[[], bool],
+) -> GatewayWatcher:
+    """Wrap a ``MissionActionReconciler`` as a continuous poll-loop watcher.
+
+    The loop calls ``reconciler.poll_once`` via ``asyncio.to_thread`` (it is
+    synchronous — blocking HTTP + SQLite off the event loop). A single tick
+    raising (transport/HTTP error) is caught + logged so a reconciler outage
+    never stops the watcher or corrupts the queue (fail-open, design 7.4).
+
+    Gate: ``is_enabled`` is the injected config-presence gate; with the hosted
+    config absent (OSS local) the daemon does not start this watcher.
+    """
+
+    async def run(stop_event: asyncio.Event) -> None:
+        while not stop_event.is_set():
+            try:
+                await asyncio.to_thread(reconciler.poll_once)
+            except Exception:  # noqa: BLE001 — transient poll error must not stop loop
+                _log.warning("mission action reconciler tick failed", exc_info=True)
+            if stop_event.is_set():
+                break
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+            except asyncio.TimeoutError:
+                continue
+
+    return GatewayWatcher(
+        name="mission_action_reconciler",
+        run=run,
+        is_enabled=is_enabled,
+    )
+
+
 def build_default_watchers() -> tuple[GatewayWatcher, ...]:
     """First-party watcher set for ``magi gateway start`` (each self-gates).
 
@@ -465,6 +557,16 @@ def build_default_watchers() -> tuple[GatewayWatcher, ...]:
             notifier=build_local_work_queue_notifier(),
             interval_seconds=DEFAULT_WORK_QUEUE_TICK_INTERVAL_SECONDS,
             is_enabled=_work_queue_notify_enabled,
+        )
+    )
+
+    # Hosted inbound mission action reconciler (PR-M8; self-gated on config
+    # presence — inert on OSS local, pairs with the M7 outbound projector).
+    watchers.append(
+        build_mission_action_reconciler_watcher(
+            reconciler=build_local_mission_action_reconciler(),
+            interval_seconds=DEFAULT_MISSION_ACTION_RECONCILER_INTERVAL_SECONDS,
+            is_enabled=_mission_action_reconciler_enabled,
         )
     )
 
@@ -582,15 +684,19 @@ def build_channel_poll_watcher(
 
 __all__ = [
     "DEFAULT_CRON_TICK_INTERVAL_SECONDS",
+    "DEFAULT_MISSION_ACTION_RECONCILER_INTERVAL_SECONDS",
     "DEFAULT_WORK_QUEUE_TICK_INTERVAL_SECONDS",
     "build_channel_poll_watcher",
     "build_default_watchers",
+    "build_local_mission_action_reconciler",
     "build_local_scheduler_cron_driver",
     "build_local_work_queue_driver",
     "build_local_work_queue_notifier",
+    "build_mission_action_reconciler_watcher",
     "build_scheduler_cron_watcher",
     "build_work_queue_notify_watcher",
     "build_work_queue_watcher",
+    "is_mission_action_reconciler_enabled",
     "is_scheduler_executor_enabled",
     "is_work_queue_executor_enabled",
     "is_work_queue_notify_enabled",

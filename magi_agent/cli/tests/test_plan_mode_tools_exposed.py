@@ -18,8 +18,10 @@ def _tool_names(tools: list[object]) -> set[str]:
     return {getattr(tool, "name", None) for tool in tools}
 
 
-def test_plan_mode_tools_hidden_by_default(monkeypatch, tmp_path) -> None:
-    monkeypatch.delenv("MAGI_PLAN_MODE_TOOLS_ENABLED", raising=False)
+def test_plan_mode_tools_hidden_when_explicitly_off(monkeypatch, tmp_path) -> None:
+    # The gate is now profile-aware default-ON, so exercise the hidden path by
+    # disabling it explicitly.
+    monkeypatch.setenv("MAGI_PLAN_MODE_TOOLS_ENABLED", "0")
 
     tools = build_cli_adk_tools(workspace_root=str(tmp_path), mode="plan")
     names = _tool_names(tools)

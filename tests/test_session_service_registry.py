@@ -296,6 +296,54 @@ def test_registry_try_acquire_busy_key_returns_fresh_unregistered_fallback() -> 
     assert reacquired_reused is True
 
 
+def test_registry_busy_fallback_uses_distinct_fallback_factory_when_provided() -> None:
+    """PR-3: the durable-substrate path shares ONE process-singleton service via
+    the primary factory, but a busy-overlap must NEVER hand out that singleton
+    (concurrent mutation of one durable session). A distinct fallback_factory
+    supplies a fresh throwaway service for the overlap instead."""
+    registry, _clock = _registry()
+    singleton = _FakeSessionService()
+
+    def primary() -> _FakeSessionService:
+        return singleton
+
+    def fallback() -> _FakeSessionService:
+        return _FakeSessionService()
+
+    held, held_reused = registry.try_acquire(
+        (BOT_A, SESSION_1), primary, fallback_factory=fallback
+    )
+    assert held is singleton
+    assert held_reused is False
+
+    overlap, overlap_reused = registry.try_acquire(
+        (BOT_A, SESSION_1), primary, fallback_factory=fallback
+    )
+    # Busy overlap: fresh throwaway from fallback_factory, never the singleton.
+    assert overlap_reused is False
+    assert overlap is not singleton
+    assert len(registry) == 1
+
+    assert registry.release((BOT_A, SESSION_1), held) is True
+    reacquired, reacquired_reused = registry.try_acquire(
+        (BOT_A, SESSION_1), primary, fallback_factory=fallback
+    )
+    # After release the same singleton is reused (durable continuity).
+    assert reacquired is singleton
+    assert reacquired_reused is True
+
+
+def test_registry_fallback_factory_defaults_to_primary_factory() -> None:
+    """Back-compat: without fallback_factory the busy overlap uses the primary
+    factory, exactly like today."""
+    registry, _clock = _registry()
+    held, _ = registry.try_acquire((BOT_A, SESSION_1), _FakeSessionService)
+    overlap, overlap_reused = registry.try_acquire((BOT_A, SESSION_1), _FakeSessionService)
+    assert overlap_reused is False
+    assert overlap is not held
+    assert isinstance(overlap, _FakeSessionService)
+
+
 def test_registry_release_is_identity_checked_and_idempotent() -> None:
     registry, _clock = _registry()
 
@@ -421,17 +469,31 @@ def test_default_registry_reads_env_tunable_caps(monkeypatch: pytest.MonkeyPatch
 
 
 # ---------------------------------------------------------------------------
-# MAGI_HOSTED_SESSION_REUSE flag (default-OFF, strict truthy) + cap readers
+# MAGI_HOSTED_SESSION_REUSE flag (profile-aware default-ON) + cap readers
 # ---------------------------------------------------------------------------
-def test_hosted_session_reuse_flag_default_off(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_hosted_session_reuse_flag_default_on_full_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from magi_agent.config.env import is_hosted_session_reuse_enabled
 
     monkeypatch.delenv("MAGI_HOSTED_SESSION_REUSE", raising=False)
+    monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
+    # Profile-aware default-ON: unset flag in the full/unset profile resolves ON.
+    assert is_hosted_session_reuse_enabled() is True
+
+
+def test_hosted_session_reuse_flag_default_off_under_safe_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from magi_agent.config.env import is_hosted_session_reuse_enabled
+
+    monkeypatch.delenv("MAGI_HOSTED_SESSION_REUSE", raising=False)
+    monkeypatch.setenv("MAGI_RUNTIME_PROFILE", "safe")
     assert is_hosted_session_reuse_enabled() is False
 
 
 @pytest.mark.parametrize("value", ["1", "true", "yes", "on", "ON", "True"])
-def test_hosted_session_reuse_flag_truthy(
+def test_hosted_session_reuse_flag_explicit_truthy(
     value: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -441,8 +503,8 @@ def test_hosted_session_reuse_flag_truthy(
     assert is_hosted_session_reuse_enabled() is True
 
 
-@pytest.mark.parametrize("value", ["0", "false", "off", "", "  ", "banana"])
-def test_hosted_session_reuse_flag_falsy(
+@pytest.mark.parametrize("value", ["0", "false", "off", "no"])
+def test_hosted_session_reuse_flag_explicit_falsy(
     value: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -452,11 +514,19 @@ def test_hosted_session_reuse_flag_falsy(
     assert is_hosted_session_reuse_enabled() is False
 
 
-def test_hosted_session_reuse_flag_registered_default_off() -> None:
+def test_hosted_session_reuse_flag_registered_profile_default_on() -> None:
     from magi_agent.config.flags import get_flag
 
     spec = get_flag("MAGI_HOSTED_SESSION_REUSE")
-    assert spec.default is False
+    assert spec.kind == "profile_bool"
+    assert spec.scope == "hosted"
+
+
+def test_hosted_session_db_flag_registered_profile_default_on() -> None:
+    from magi_agent.config.flags import get_flag
+
+    spec = get_flag("MAGI_HOSTED_SESSION_DB")
+    assert spec.kind == "profile_bool"
     assert spec.scope == "hosted"
 
 
@@ -471,7 +541,8 @@ def test_hosted_session_reuse_cap_readers_have_safe_defaults_and_clamping(
     monkeypatch.delenv("MAGI_HOSTED_SESSION_REUSE_MAX_ENTRIES", raising=False)
     monkeypatch.delenv("MAGI_HOSTED_SESSION_REUSE_TTL_SECONDS", raising=False)
     assert hosted_session_reuse_max_entries() == 64
-    assert hosted_session_reuse_ttl_seconds() == 1800.0
+    # Generous 6h idle lease (PR-3 budget bump 1800 -> 21600).
+    assert hosted_session_reuse_ttl_seconds() == 21600.0
 
     monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE_MAX_ENTRIES", "16")
     monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE_TTL_SECONDS", "600")
@@ -483,7 +554,7 @@ def test_hosted_session_reuse_cap_readers_have_safe_defaults_and_clamping(
     monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE_MAX_ENTRIES", "banana")
     monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE_TTL_SECONDS", "banana")
     assert hosted_session_reuse_max_entries() == 64
-    assert hosted_session_reuse_ttl_seconds() == 1800.0
+    assert hosted_session_reuse_ttl_seconds() == 21600.0
 
     monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE_MAX_ENTRIES", "0")
     monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE_TTL_SECONDS", "-5")

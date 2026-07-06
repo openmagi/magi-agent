@@ -95,10 +95,14 @@ def _approve_plan_exit(store: ControlRequestStore):
 # ---------------------------------------------------------------------------
 
 
-def test_plan_act_gate_defaults_off() -> None:
-    assert plan_act_gate_enabled({}) is False
-    # Even in a non-safe runtime profile, the gate stays OFF unless explicit.
-    assert plan_act_gate_enabled({"MAGI_RUNTIME_PROFILE": "full"}) is False
+def test_plan_act_gate_is_profile_aware_default_on() -> None:
+    # Promoted to a profile-aware default-ON gate: ON under a non-safe/unset
+    # profile, OFF under the safe-family. (Activating the seam still leaves
+    # downstream delegation gated by MAGI_GA_LIVE_ENABLED + an approved control.)
+    assert plan_act_gate_enabled({}) is True
+    assert plan_act_gate_enabled({"MAGI_RUNTIME_PROFILE": "full"}) is True
+    assert plan_act_gate_enabled({"MAGI_RUNTIME_PROFILE": "safe"}) is False
+    assert plan_act_gate_enabled({"MAGI_RUNTIME_PROFILE": "eval"}) is False
 
 
 def test_plan_act_gate_explicit_on() -> None:

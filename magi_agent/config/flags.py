@@ -770,11 +770,12 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_FILE_DELIVERY_LIVE_ENABLED",
         summary="Enable the live file-delivery tool (vs receipt-only).",
     ),
-    _b(
+    _pb(
         "MAGI_DOCUMENT_QA_ENABLED",
         summary=(
             "Expose the question-conditioned DocumentQA file-QA sidecar tool "
-            "(requires MAGI_FILE_TOOLS_ENABLED); strict default-OFF in all profiles."
+            "(requires MAGI_FILE_TOOLS_ENABLED). Profile-aware default-ON "
+            "(full/lab; OFF under the safe-family)."
         ),
     ),
     FlagSpec(
@@ -888,7 +889,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "byte-identical to today)."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_KERNEL_RECIPE_PACKS_ENABLED",
         stage="stage2",
         summary=(
@@ -898,8 +899,9 @@ FLAGS: tuple[FlagSpec, ...] = (
             "recipe spec into a genuine RecipePackManifest; this flag makes the "
             "compiler consume them. First-party packs register first and win on a "
             "colliding pack_id (a kernel pack cannot shadow first-party); discovery "
-            "failures fail closed to the first-party-only registry. Strict "
-            "default-OFF (OFF is byte-identical to today)."
+            "failures fail closed to the first-party-only registry. Profile-aware "
+            "default-ON (full/lab; OFF under the safe-family, which is "
+            "byte-identical to today)."
         ),
     ),
     _b(
@@ -933,7 +935,7 @@ FLAGS: tuple[FlagSpec, ...] = (
             "authority. Strict default-OFF (OFF is byte-identical)."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_KERNEL_ROLE_PROVIDES_ENABLED",
         stage="stage2",
         summary=(
@@ -944,8 +946,8 @@ FLAGS: tuple[FlagSpec, ...] = (
             "first-party role or claim hard-safety, and the harness always keeps "
             "hard-safety in its effective packs. Contained: the engine/parallel/"
             "inference/evidence AgentRole literals are NOT widened, so an external "
-            "role is a scope label only. Strict default-OFF (OFF is byte-identical "
-            "to today)."
+            "role is a scope label only. Profile-aware default-ON (full/lab; OFF "
+            "under the safe-family, which is byte-identical to today)."
         ),
     ),
     _b(
@@ -2336,12 +2338,27 @@ FLAGS: tuple[FlagSpec, ...] = (
             "completions-equivalent gates (no local-engine fallthrough)."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_HOSTED_SESSION_REUSE",
         scope="hosted",
         summary=(
-            "Reuse the in-memory ADK session service across hosted turns keyed by "
-            "(bot digest, session id); OFF keeps the fresh-per-turn behavior."
+            "Reuse the ADK session service across hosted turns keyed by "
+            "(bot digest, session id) via the single-flight lease registry; "
+            "with MAGI_HOSTED_SESSION_DB it fronts the durable SQLite substrate. "
+            "Profile-aware default-ON (full/lab; OFF under the safe-family). "
+            "OFF keeps the fresh-per-turn behavior."
+        ),
+    ),
+    _pb(
+        "MAGI_HOSTED_SESSION_DB",
+        scope="hosted",
+        summary=(
+            "Back hosted ADK sessions with a durable SqliteSessionService on the "
+            "PVC (<MAGI_STATE_DIR>/adk_sessions.db) so sessions and EVENTS survive "
+            "pod restart, image bump, registry eviction and TTL. Fronted by the "
+            "reuse lease registry (single-flight). Profile-aware default-ON "
+            "(full/lab; OFF under the safe-family). Fail-open: any init failure "
+            "falls back to the in-memory registry (today's behavior)."
         ),
     ),
     FlagSpec(
@@ -2354,10 +2371,14 @@ FLAGS: tuple[FlagSpec, ...] = (
     ),
     FlagSpec(
         name="MAGI_HOSTED_SESSION_REUSE_TTL_SECONDS",
-        default=1800,
+        default=21600,
         scope="hosted",
         stage="stage1",
-        summary="Idle TTL in seconds before a reusable hosted session is evicted.",
+        summary=(
+            "Idle TTL in seconds before a reusable hosted session lease is "
+            "evicted (6h; with MAGI_HOSTED_SESSION_DB, TTL expiry is no longer "
+            "data loss because the durable session persists)."
+        ),
         kind="int",
     ),
     # --- Runtime profile (string) ------------------------------------------
@@ -3159,14 +3180,14 @@ FLAGS: tuple[FlagSpec, ...] = (
     # eval/benchmark or a bare ``MAGI_RUNTIME_PROFILE=full`` does not silently
     # enable it unless a profile/overlay dict explicitly sets ``=1``. Mirrors
     # the ``MAGI_TOOL_EXCEPTION_REFLECTION_ENABLED`` precedent above.
-    _b(
+    _pb(
         "MAGI_MCP_RESILIENCE_ENABLED",
         summary=(
             "Wrap MCP provider tool calls in a reusable resilience primitive: a "
             "per-attempt call timeout, bounded reconnect with exponential "
             "backoff, a per-server circuit breaker, and non-retryable auth "
             "handling that surfaces a model-visible reconnect signal. When OFF "
-            "the call boundary is byte-identical to today. Default-OFF."
+            "the call boundary is byte-identical to today. Profile-aware default-ON (full/lab; OFF under the safe-family)."
         ),
     ),
     # I-1: register the seven 1-liner ``parse_*_*`` flags so the typed
@@ -3199,27 +3220,31 @@ FLAGS: tuple[FlagSpec, ...] = (
             "``EVAL_RUNTIME_ENV_DEFAULTS``."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_RECIPE_DEFAULT_PACKS_EXPANDED",
         summary=(
             "When ON, expand the default-selected first-party pack set to "
-            "include additional ``openmagi.evidence`` etc. Default-OFF "
-            "preserves the minimal default selection."
+            "include additional ``openmagi.evidence`` etc. Profile-aware "
+            "default-ON (full/lab; OFF under the safe-family keeps the minimal "
+            "default selection)."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_PLAN_ACT_GATE_ENABLED",
         summary=(
             "Live ``plan_gate -> plan_act_switch -> delegation`` chain "
-            "activation. Default-OFF leaves the chain inert and "
-            "byte-identical to main."
+            "activation. Profile-aware default-ON (full/lab; OFF under the "
+            "safe-family). Downstream delegation still enforces "
+            "MAGI_GA_LIVE_ENABLED + an approved control, so activating the seam "
+            "does not auto-delegate."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_PLAN_MODE_TOOLS_ENABLED",
         summary=(
-            "Plan-mode read-only toolset activation. Default-OFF keeps the "
-            "full toolset on every turn regardless of declared mode."
+            "Plan-mode read-only toolset activation. Profile-aware default-ON "
+            "(full/lab; OFF under the safe-family); OFF keeps the full toolset "
+            "on every turn regardless of declared mode."
         ),
     ),
     _b(

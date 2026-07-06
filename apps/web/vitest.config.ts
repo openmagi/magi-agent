@@ -20,7 +20,10 @@ export default {
     // would only surface unrelated breakage on local runs.
     include: [
       "src/components/onboarding/**/*.test.{ts,tsx}",
+      "src/components/chat/missions-panel.test.tsx",
       "src/lib/local-auth.test.ts",
+      "src/lib/chat/local-kb-upload.test.ts",
+      "src/chat-core/stuck-liverun-watchdog.test.ts",
     ],
   },
 };

@@ -378,6 +378,7 @@ def build_headless_runtime(
     tools: list[object] | None = None,
     pinned_recipe_pack_ids: Sequence[str] = (),
     agent_event_emitter: Callable[..., object] | None = None,
+    auto_continue_allowed: bool = True,
 ) -> HeadlessRuntime:
     """Construct the complete headless dependency set.
 
@@ -410,9 +411,16 @@ def build_headless_runtime(
         Optional explicit tool list forwarded to ``build_cli_model_runner``
         when building the default runner (i.e. when ``runner`` is ``None``).
         When ``None`` (the default) the full first-party toolset is built as
-        normal — behavior is byte-identical to pre-patch callers.  Pass an
+        normal - behavior is byte-identical to pre-patch callers.  Pass an
         explicit list (including ``[]``) to restrict the toolset; the primary
         use-case is child-agent privilege containment.
+    auto_continue_allowed:
+        Whether ledger-first auto-continue (SEAM 2 re-invocation, #1329) may be
+        enabled for the engine built here. ``True`` (default) = top-level
+        (parent) turn: auto-continue follows ``MAGI_GOAL_LOOP_ENABLED``. ``False``
+        is set by the child-runner build path so a SpawnAgent child never
+        auto-continues / self-checks-goal regardless of the env flag; the child
+        must answer its delegated subtask once and return.
 
     Returns
     -------
@@ -495,7 +503,16 @@ def build_headless_runtime(
     # here so the engine ctor stays env-pure. When ON, SEAM 2's already-computed
     # "continue" verdict re-invokes (bounded by the measurable-progress gate)
     # instead of degrading to a bare break; OFF keeps the historic behaviour.
-    auto_continue_enabled = is_goal_loop_enabled()
+    #
+    # Child gate (#1329 regression fix): auto-continue is a TOP-LEVEL (parent)
+    # turn concern only. A SpawnAgent child is a bounded, single-objective
+    # delegated execution the parent orchestrates; it must answer its subtask
+    # once and return, NOT self-check-goal / re-invoke. ``auto_continue_allowed``
+    # (default True) is forced False by the child-runner build path
+    # (``child_runner_live`` governed collector; ``governed_turn._build_runtime``
+    # for depth>0), so the env flag ALONE can never re-enable auto-continue for a
+    # child. Parent builds keep the default True -> unchanged behaviour.
+    auto_continue_enabled = is_goal_loop_enabled() and auto_continue_allowed
     # plan_ledger_reader reads the durable todo snapshot off the runner-attribute
     # handler set surfaced by PR3a (section 5.1). ``None`` for stub /
     # caller-supplied-tools / child-containment runners and when the durable

@@ -136,6 +136,41 @@ LOCAL_FULL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     "MAGI_DURABLE_STARTUP_RECOVERY_ENABLED": "1",
     # The durable work-queue dispatcher tick loop that re-runs reclaimed tasks.
     "MAGI_WORK_QUEUE_EXECUTOR_ENABLED": "1",
+    # M4 (missions x work-queue unification): the work-queue IS the mission
+    # substrate, so a self-host install surfaces its background tasks by default.
+    # BOARD_API/NOTIFY are profile-aware default-ON (_pb) and would self-enable
+    # under MAGI_RUNTIME_PROFILE=full anyway; seed them explicitly here to match
+    # the EXECUTOR line above (belt-and-suspenders, setdefault semantics keep an
+    # explicit operator "0" winning).
+    #   * MAGI_WORK_QUEUE_BOARD_API_ENABLED - the read-only board HTTP API. Auth
+    #     is fail-closed Bearer against the gateway token (board_api.py:38-45), so
+    #     ON is safe.
+    #   * MAGI_WORK_QUEUE_NOTIFY_ENABLED - the terminal-event notifier so a
+    #     completed background task announces into the next reply.
+    "MAGI_WORK_QUEUE_BOARD_API_ENABLED": "1",
+    "MAGI_WORK_QUEUE_NOTIFY_ENABLED": "1",
+    # The agent-facing background-task tool. Both flags are required before
+    # run_in_background creates a real WorkTask (scheduled_work.py:145-181): the
+    # TOOL flag exposes the entrypoint live, ATTACHED tells the honest gate a real
+    # SqliteWorkQueueStore is wired. The store IS real and the executor is
+    # default-ON locally, so the honest-block precondition ("until a real job
+    # store is wired") is satisfied. MAGI_SCHEDULER_ATTACHED stays UNSET: cron
+    # scheduling is a separate unbuilt surface (scheduled_work.py:59,77,83).
+    "MAGI_BACKGROUND_TASK_TOOL_ENABLED": "1",
+    "MAGI_BACKGROUND_TASKS_ATTACHED": "1",
+    # M9 (missions x serve process-model): the gateway daemon supervises the
+    # watcher fleet (work_queue_executor + notify + mission_action_reconciler).
+    # M4 above flips the work-queue EXECUTOR gate ON, but nothing hosts the
+    # daemon on the serve path, so the executor never actually runs. M9 co-locates
+    # the daemon in the ``create_app`` serve lifespan; this flag turns it ON so a
+    # fresh ``magi serve`` runs the executor in the same process as uvicorn.
+    # Raw env read (NOT a registered flag; read via ``is_gateway_daemon_enabled``
+    # -> ``config._truthy.env_bool``), so the local overlay is the only thing that
+    # turns it on for a served install. setdefault semantics keep an explicit
+    # operator "0" winning; safe/eval/off never apply this overlay. Hosted
+    # enablement is C1's job (setting the env on the pod); M9 does not touch the
+    # hosted tpl.
+    "MAGI_GATEWAY_DAEMON_ENABLED": "1",
     # WS3 PR3c: durable cross-turn plan/todo ledger + evidence-first goal
     # completion, activated for the full local (self-host) profile.
     # MAGI_PLAN_LEDGER_DURABLE_ENABLED appends each TodoWrite full-snapshot to
@@ -408,7 +443,6 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     "MAGI_CUSTOMIZE_SEAM_SPEC_ENABLED",
     "MAGI_DASHBOARD_PACK_AUTHORING_ENABLED",
     "MAGI_DEEP_WEB_RESEARCH_ENABLED",
-    "MAGI_DOCUMENT_QA_ENABLED",
     "MAGI_EGRESS_GATE_ENABLED",
     # (MAGI_EMPTY_RESPONSE_ESCALATION_ENABLED / MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED
     # were promoted to profile-aware default-ON flags — they now default ON under
@@ -433,8 +467,6 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     # the ledger-first auto-continue authority is ambient for every turn in the
     # lab / full profile via the profile resolver, so it no longer belongs in
     # this strict-bool lab-opt-in list.)
-    "MAGI_KERNEL_RECIPE_PACKS_ENABLED",
-    "MAGI_KERNEL_ROLE_PROVIDES_ENABLED",
     "MAGI_LEARNING_ENABLED",
     "MAGI_LEARNING_INJECTION_ENABLED",
     "MAGI_LEARNING_LIVE_ENABLED",

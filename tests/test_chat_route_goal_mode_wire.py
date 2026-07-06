@@ -145,7 +145,7 @@ async def test_goal_mode_true_but_master_flag_off_does_not_publish(
     # Master kill-switch must override the per-send toggle. The operator
     # controls rollout; an enthusiastic client cannot enable goal-loop on a
     # deployment that has not flipped MAGI_GOAL_LOOP_ENABLED.
-    monkeypatch.delenv("MAGI_GOAL_LOOP_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_GOAL_LOOP_ENABLED", "0")
 
     import magi_agent.cli.wiring as wiring
     from magi_agent.transport import chat as chat_mod

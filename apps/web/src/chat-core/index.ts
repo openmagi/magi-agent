@@ -87,6 +87,7 @@ export {
   foldRuntimeEvents,
 } from "./stream-chat-reducer";
 export * from "./stream-state-to-channel-state";
+export * from "./stuck-liverun-watchdog";
 export * from "./user-history-persistence";
 export * from "./work-console";
 export * from "./work-state";

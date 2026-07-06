@@ -86,7 +86,7 @@ def test_known_roles_flag_off_is_exactly_first_party(monkeypatch: pytest.MonkeyP
 def test_flag_off_ignores_a_present_role_pack(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.delenv(FLAG, raising=False)
+    monkeypatch.setenv(FLAG, "0")
     _write_role_pack(tmp_path, role_id="ext.finance")
     _patch_bases(monkeypatch, [tmp_path])
     assert known_agent_role_ids() == frozenset(FIRST_PARTY_AGENT_ROLE_IDS)

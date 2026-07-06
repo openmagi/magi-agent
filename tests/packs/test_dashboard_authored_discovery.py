@@ -65,7 +65,7 @@ def test_dashboard_pack_in_registry_with_empty_evidence_refs(
 def test_dashboard_pack_absent_when_kernel_flag_off(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.delenv(KERNEL_FLAG, raising=False)
+    monkeypatch.setenv(KERNEL_FLAG, "0")
     pack_root = tmp_path / DASHBOARD_PACK_DIR_NAME
     write_pack(pack_root, [_check("x")])
     _patch_bases(monkeypatch, [tmp_path])

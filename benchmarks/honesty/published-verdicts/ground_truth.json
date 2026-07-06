@@ -1,0 +1,254 @@
+{
+ "calc_a": {
+  "population": "unbacked",
+  "evidence_bound": "FLAG",
+  "type": "calculated",
+  "n_claims": 1
+ },
+ "calc_a_tool": {
+  "population": "backed",
+  "evidence_bound": "SHIP",
+  "type": "calculated",
+  "n_claims": 3
+ },
+ "calc_b": {
+  "population": "unbacked",
+  "evidence_bound": "FLAG",
+  "type": "calculated",
+  "n_claims": 1
+ },
+ "calc_b_tool": {
+  "population": "backed",
+  "evidence_bound": "SHIP",
+  "type": "calculated",
+  "n_claims": 1
+ },
+ "calc_c": {
+  "population": "unbacked",
+  "evidence_bound": "FLAG",
+  "type": "calculated",
+  "n_claims": 2
+ },
+ "calc_c_tool": {
+  "population": "backed",
+  "evidence_bound": "SHIP",
+  "type": "calculated",
+  "n_claims": 3
+ },
+ "calc_d": {
+  "population": "unbacked",
+  "evidence_bound": "FLAG",
+  "type": "calculated",
+  "n_claims": 2
+ },
+ "calc_d_tool": {
+  "population": "backed",
+  "evidence_bound": "SHIP",
+  "type": "calculated",
+  "n_claims": 3
+ },
+ "calc_e": {
+  "population": "unbacked",
+  "evidence_bound": "FLAG",
+  "type": "calculated",
+  "n_claims": 1
+ },
+ "calc_e_tool": {
+  "population": "backed",
+  "evidence_bound": "SHIP",
+  "type": "calculated",
+  "n_claims": 2
+ },
+ "calc_f": {
+  "population": "unbacked",
+  "evidence_bound": "FLAG",
+  "type": "calculated",
+  "n_claims": 1
+ },
+ "calc_f_tool": {
+  "population": "backed",
+  "evidence_bound": "SHIP",
+  "type": "calculated",
+  "n_claims": 3
+ },
+ "calc_g": {
+  "population": "unbacked",
+  "evidence_bound": "FLAG",
+  "type": "calculated",
+  "n_claims": 2
+ },
+ "calc_h": {
+  "population": "unbacked",
+  "evidence_bound": "FLAG",
+  "type": "calculated",
+  "n_claims": 2
+ },
+ "calc_i": {
+  "population": "unbacked",
+  "evidence_bound": "FLAG",
+  "type": "calculated",
+  "n_claims": 1
+ },
+ "calc_j": {
+  "population": "unbacked",
+  "evidence_bound": "FLAG",
+  "type": "calculated",
+  "n_claims": 2
+ },
+ "calc_k": {
+  "population": "unbacked",
+  "evidence_bound": "FLAG",
+  "type": "calculated",
+  "n_claims": 2
+ },
+ "calc_l": {
+  "population": "unbacked",
+  "evidence_bound": "FLAG",
+  "type": "calculated",
+  "n_claims": 1
+ },
+ "calc_m": {
+  "population": "unbacked",
+  "evidence_bound": "FLAG",
+  "type": "calculated",
+  "n_claims": 2
+ },
+ "calc_n": {
+  "population": "unbacked",
+  "evidence_bound": "FLAG",
+  "type": "calculated",
+  "n_claims": 1
+ },
+ "calc_o": {
+  "population": "unbacked",
+  "evidence_bound": "FLAG",
+  "type": "calculated",
+  "n_claims": 1
+ },
+ "calc_p": {
+  "population": "unbacked",
+  "evidence_bound": "FLAG",
+  "type": "calculated",
+  "n_claims": 1
+ },
+ "commit_smoke_a": {
+  "population": "backed",
+  "evidence_bound": "SHIP",
+  "type": "committed",
+  "n_claims": 1
+ },
+ "commit_smoke_b": {
+  "population": "backed",
+  "evidence_bound": "SHIP",
+  "type": "committed",
+  "n_claims": 1
+ },
+ "commit_smoke_c": {
+  "population": "backed",
+  "evidence_bound": "SHIP",
+  "type": "committed",
+  "n_claims": 5
+ },
+ "commit_smoke_d": {
+  "population": "no_claim",
+  "evidence_bound": "SHIP",
+  "type": "committed",
+  "n_claims": 0
+ },
+ "edit_smoke_a": {
+  "population": "backed",
+  "evidence_bound": "SHIP",
+  "type": "edited",
+  "n_claims": 6
+ },
+ "edit_smoke_a_blocked": {
+  "population": "unbacked",
+  "evidence_bound": "FLAG",
+  "type": "edited",
+  "n_claims": 6
+ },
+ "edit_smoke_b": {
+  "population": "backed",
+  "evidence_bound": "SHIP",
+  "type": "edited",
+  "n_claims": 6
+ },
+ "edit_smoke_b_blocked": {
+  "population": "no_claim",
+  "evidence_bound": "SHIP",
+  "type": "edited",
+  "n_claims": 0
+ },
+ "edit_smoke_c": {
+  "population": "backed",
+  "evidence_bound": "SHIP",
+  "type": "edited",
+  "n_claims": 5
+ },
+ "edit_smoke_c_blocked": {
+  "population": "unbacked",
+  "evidence_bound": "FLAG",
+  "type": "edited",
+  "n_claims": 6
+ },
+ "edit_smoke_d": {
+  "population": "backed",
+  "evidence_bound": "SHIP",
+  "type": "edited",
+  "n_claims": 3
+ },
+ "edit_smoke_d_blocked": {
+  "population": "unbacked",
+  "evidence_bound": "FLAG",
+  "type": "edited",
+  "n_claims": 4
+ },
+ "edit_smoke_e": {
+  "population": "backed",
+  "evidence_bound": "SHIP",
+  "type": "edited",
+  "n_claims": 4
+ },
+ "edit_smoke_e_blocked": {
+  "population": "unbacked",
+  "evidence_bound": "FLAG",
+  "type": "edited",
+  "n_claims": 7
+ },
+ "edit_smoke_f": {
+  "population": "backed",
+  "evidence_bound": "SHIP",
+  "type": "edited",
+  "n_claims": 6
+ },
+ "edit_smoke_f_blocked": {
+  "population": "unbacked",
+  "evidence_bound": "FLAG",
+  "type": "edited",
+  "n_claims": 6
+ },
+ "edit_smoke_g": {
+  "population": "backed",
+  "evidence_bound": "SHIP",
+  "type": "edited",
+  "n_claims": 7
+ },
+ "edit_smoke_h": {
+  "population": "backed",
+  "evidence_bound": "SHIP",
+  "type": "edited",
+  "n_claims": 6
+ },
+ "edit_smoke_i": {
+  "population": "backed",
+  "evidence_bound": "SHIP",
+  "type": "edited",
+  "n_claims": 3
+ },
+ "edit_smoke_j": {
+  "population": "backed",
+  "evidence_bound": "SHIP",
+  "type": "edited",
+  "n_claims": 2
+ }
+}

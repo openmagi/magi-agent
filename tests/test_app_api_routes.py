@@ -719,6 +719,82 @@ def test_knowledge_index_empty_is_valid(tmp_path, monkeypatch) -> None:
     assert body["documents"] == []
 
 
+def test_knowledge_upload_writes_binary_and_lists_in_index(tmp_path, monkeypatch) -> None:
+    client = _client(tmp_path, monkeypatch)
+    payload = b"%PDF-1.4 binary\x00\x01\x02 body"
+    res = client.post(
+        "/v1/app/knowledge/upload",
+        content=payload,
+        headers={"x-filename": "report.pdf", "content-type": "application/pdf"},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["status"] == "ready"
+    assert body["filename"] == "report.pdf"
+    assert body["collection"] == "Downloads"
+    assert body["doc_id"] == "knowledge/Downloads/report.pdf"
+    # Bytes land on disk verbatim.
+    on_disk = tmp_path / "knowledge" / "Downloads" / "report.pdf"
+    assert on_disk.read_bytes() == payload
+    # And it shows up in the knowledge index the read panel consumes.
+    index = client.get("/v1/app/knowledge").json()
+    paths = {doc["path"] for doc in index["documents"]}
+    assert "knowledge/Downloads/report.pdf" in paths
+
+
+def test_knowledge_upload_sanitizes_traversal_filename(tmp_path, monkeypatch) -> None:
+    client = _client(tmp_path, monkeypatch)
+    res = client.post(
+        "/v1/app/knowledge/upload",
+        content=b"x",
+        headers={"x-filename": "../../etc/escape.txt", "content-type": "text/plain"},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    # No path escape: the stored file stays inside knowledge/Downloads.
+    assert body["doc_id"].startswith("knowledge/Downloads/")
+    assert ".." not in body["doc_id"]
+    assert not (tmp_path.parent / "etc" / "escape.txt").exists()
+
+
+def test_knowledge_upload_rejects_missing_filename(tmp_path, monkeypatch) -> None:
+    client = _client(tmp_path, monkeypatch)
+    res = client.post(
+        "/v1/app/knowledge/upload",
+        content=b"x",
+        headers={"content-type": "text/plain"},
+    )
+    assert res.status_code == 400
+
+
+def test_knowledge_upload_disambiguates_collision(tmp_path, monkeypatch) -> None:
+    client = _client(tmp_path, monkeypatch)
+    headers = {"x-filename": "notes.txt", "content-type": "text/plain"}
+    first = client.post("/v1/app/knowledge/upload", content=b"one", headers=headers)
+    second = client.post("/v1/app/knowledge/upload", content=b"two", headers=headers)
+    assert first.status_code == 200 and second.status_code == 200
+    d1 = first.json()["doc_id"]
+    d2 = second.json()["doc_id"]
+    assert d1 != d2
+    assert (tmp_path / "knowledge" / "Downloads" / "notes.txt").read_bytes() == b"one"
+    # Second write did not clobber the first.
+    assert (tmp_path / d2).read_bytes() == b"two"
+
+
+def test_knowledge_upload_requires_gateway_token(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))
+    for name in (*_WORKSPACE_ENV_VARS, *_PROVIDER_KEY_ENV_VARS):
+        monkeypatch.delenv(name, raising=False)
+    client = TestClient(create_app(_runtime()))  # no token header
+    res = client.post(
+        "/v1/app/knowledge/upload",
+        content=b"x",
+        headers={"x-filename": "a.txt"},
+    )
+    assert res.status_code == 401
+
+
 def test_requires_gateway_token(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))

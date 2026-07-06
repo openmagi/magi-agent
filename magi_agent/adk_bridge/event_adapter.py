@@ -273,6 +273,14 @@ class OpenMagiEventBridge:
         # ``_project_content_parts``.
         self._streamed_partial_text = False
         self._streamed_partial_public_text = ""
+        # PR-3 (reasoning-only promotion fallback): True once ANY `text_delta`
+        # has been emitted at any point in this turn (partial or final). The
+        # empty-text terminal promotion only fires when this stays False for the
+        # WHOLE turn: a turn that already streamed a real answer must never have
+        # chain-of-thought appended to it. The bridge is constructed once per
+        # drive (``engine/driver.py`` ``_drive``), so this instance flag is
+        # turn-scoped, mirroring ``_streamed_partial_text``.
+        self._turn_text_emitted = False
         # HOSTED call/response correlation — mirrors gate5b4c3's
         # ``live_tool_event_ids_by_adk_id`` / ``pending_live_tool_event_ids_by_name``.
         # Populated on tool_start (HOSTED path only); consumed on tool_end so the
@@ -358,14 +366,21 @@ class OpenMagiEventBridge:
             # run is void, so the next non-partial aggregate is not a duplicate.
             self._streamed_partial_text = False
             self._streamed_partial_public_text = ""
+            # PR-3: a response_clear voids the prior visible answer, so any text
+            # emitted before it no longer counts as "an answer was produced" for
+            # the promotion precondition. Reset the turn-scoped flag so a later
+            # reasoning-only terminal can still be promoted.
+            self._turn_text_emitted = False
         partial_run = [self._streamed_partial_text]
         partial_public_text = [self._streamed_partial_public_text]
+        turn_text_emitted = [self._turn_text_emitted]
         content_projection = _project_content_parts(
             event,
             turn_id=turn_id,
             live_compatible=self.live_compatible,
             partial_run=partial_run,
             partial_public_text=partial_public_text,
+            turn_text_emitted=turn_text_emitted,
             wire_profile=self._wire_profile,
             hosted_tool_ids_by_adk_id=(
                 self._hosted_tool_ids_by_adk_id if self._wire_profile is not None else None
@@ -380,6 +395,7 @@ class OpenMagiEventBridge:
         )
         self._streamed_partial_text = partial_run[0]
         self._streamed_partial_public_text = partial_public_text[0]
+        self._turn_text_emitted = turn_text_emitted[0]
         if (
             content_projection.agent_events
             or content_projection.legacy_deltas
@@ -619,6 +635,7 @@ def _project_content_parts(
     live_compatible: bool,
     partial_run: list[bool],
     partial_public_text: list[str],
+    turn_text_emitted: list[bool] | None = None,
     wire_profile: WireProfile | None = None,
     hosted_tool_ids_by_adk_id: dict[str, str] | None = None,
     pending_hosted_ids_by_name: dict[str, list[str]] | None = None,
@@ -632,6 +649,16 @@ def _project_content_parts(
     final_text_chunks: list[str] = []
     is_final_response = _event_is_final_response(event)
     saw_tool_part = False
+    # PR-3: turn-scoped "any real answer text emitted yet" cell. Optional so
+    # direct unit callers stay compatible; the bridge always threads it.
+    text_emitted = turn_text_emitted if turn_text_emitted is not None else [False]
+    # PR-3: unsigned thought text of THIS event, buffered for the empty-text
+    # terminal promotion fallback. ``saw_signed_thought`` records whether any
+    # thought part on this event carries a ``thought_signature`` (Anthropic and
+    # other genuine chain-of-thought providers): a signed final thought is real
+    # reasoning and is NEVER promoted.
+    promotable_thought_texts: list[str] = []
+    saw_signed_thought = False
 
     def flush_final_text(*, public_if_non_final: bool = False) -> None:
         if not final_text_chunks:
@@ -643,6 +670,7 @@ def _project_content_parts(
             token_text = _unstreamed_final_text(public_text, partial_public_text[0])
             if token_text:
                 agent_events.append({"type": "text_delta", "delta": token_text})
+                text_emitted[0] = True  # PR-3: a real answer was produced.
             # The final reply's aggregate has now been reconciled with any
             # partials streamed earlier in the turn; close the partial run.
             partial_run[0] = False
@@ -679,6 +707,7 @@ def _project_content_parts(
             partial_public_text[0] = ""
             return
         agent_events.append({"type": "text_delta", "delta": public_text})
+        text_emitted[0] = True  # PR-3: a real answer was produced.
         normalized_events.append(
             NormalizedEvent(
                 type="model.message.delta",
@@ -708,6 +737,18 @@ def _project_content_parts(
             # nothing for thought parts. When on, surface streaming thought as
             # thinking_delta; sse.py redacts/forwards it for the public path.
             thought_text = getattr(part, "text", None)
+            # PR-3: buffer unsigned reasoning text for the empty-text terminal
+            # promotion fallback, and flag signed reasoning (which is genuine
+            # chain-of-thought and must never be promoted). A ``thought_signature``
+            # marks Anthropic thinking blocks and other signed CoT
+            # (anthropic_llm.py:620-622 / lite_llm.py:431-433). This bookkeeping
+            # is independent of the MAGI_STREAM_THINKING display gate below and of
+            # ``event.partial``: promotion itself only fires on the final event,
+            # but the buffer must reflect that event's thought parts.
+            if getattr(part, "thought_signature", None) is not None:
+                saw_signed_thought = True
+            elif thought_text:
+                promotable_thought_texts.append(thought_text)
             # I-1: route through the typed flag registry (default-OFF
             # ``FlagSpec`` mirrors the ``_truthy_env`` missing/empty → False
             # semantics byte-identically).
@@ -723,6 +764,7 @@ def _project_content_parts(
             if event.partial:
                 public_text = _public_stream_text(text)
                 agent_events.append({"type": "text_delta", "delta": public_text})
+                text_emitted[0] = True  # PR-3: a real answer was produced.
                 partial_run[0] = True
                 partial_public_text[0] += public_text
                 normalized_events.append(
@@ -784,6 +826,70 @@ def _project_content_parts(
             agent_events.extend(tool_projection.agent_events)
             transcript_entries.extend(tool_projection.transcript_entries)
             normalized_events.extend(tool_projection.normalized_events)
+
+    # PR-3: guarded empty-text terminal promotion fallback. A reasoning model
+    # that DEGRADES into answering inside `reasoning_content` (unsigned
+    # thought parts) with no `content` produces a clean, committed turn whose
+    # only visible answer is empty. Promote that unsigned reasoning to a real
+    # final answer so the turn is not silently blank. Every guard below must
+    # hold so genuine chain-of-thought models are never surfaced as the answer:
+    #   1. this is the final (terminal) event;
+    #   2. there is NO non-thought text on this event (final_text_chunks empty)
+    #      and no tool call/response part on it (saw_tool_part False);
+    #   3. NO `text_delta` was emitted anywhere earlier in the WHOLE turn (a
+    #      turn that already produced an answer must not get CoT appended);
+    #   4. this event carries unsigned reasoning text AND no SIGNED thought part
+    #      (Anthropic and other genuine CoT are signed -> excluded).
+    # The promoted text is joined with "" (verbatim, never "\n") and flushed
+    # through the standard `flush_final_text` path so it emits a normal
+    # `text_delta` + `AssistantTextEntry` + `model.message.completed` (all
+    # already redacted via `_public_stream_text`), keeping #1330 interleave
+    # segments coherent. Every firing emits an observability marker.
+    if (
+        is_final_response
+        and not final_text_chunks
+        and not saw_tool_part
+        and not text_emitted[0]
+        and promotable_thought_texts
+        and not saw_signed_thought
+    ):
+        promoted_text = "".join(promotable_thought_texts)
+        if promoted_text:
+            # Warning-level operator-visible marker on the observability sink
+            # (agent-event channel), so every promotion is auditable. Uses the
+            # existing `runtime_trace` shape (survives sse sanitization); the
+            # detail carries no private text (only a static description).
+            agent_events.append(
+                {
+                    "type": "runtime_trace",
+                    "turnId": _public_ref(turn_id, prefix="turn"),
+                    "phase": "verifier_blocked",
+                    "severity": "warning",
+                    "title": "Reasoning promoted to final answer",
+                    "detail": (
+                        "Terminal turn produced only unsigned reasoning text and "
+                        "no answer; promoted the reasoning to the final answer."
+                    ),
+                    "reasonCode": "reasoning_promoted_to_final",
+                }
+            )
+            # Named normalized marker (content-digest only, no raw text) for the
+            # transcript/normalized-event audit trail.
+            normalized_events.append(
+                NormalizedEvent(
+                    type="model.reasoning_promoted_to_final",
+                    eventId=_normalized_event_id(
+                        event,
+                        suffix=f"reasoning-promoted-{len(normalized_events)}",
+                    ),
+                    ts=_event_ts(event),
+                    turnId=turn_id,
+                    source="adk",
+                    payload={},
+                    metadata={"contentDigest": metadata_digest(promoted_text)},
+                )
+            )
+            final_text_chunks.append(promoted_text)
 
     flush_final_text(public_if_non_final=saw_tool_part)
     if is_final_response and live_compatible:

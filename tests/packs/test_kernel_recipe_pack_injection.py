@@ -61,14 +61,14 @@ def _patch_bases(monkeypatch: pytest.MonkeyPatch, bases: list[Path]) -> None:
 # Flag OFF — byte-identical baseline
 # --------------------------------------------------------------------------- #
 def test_flag_off_is_byte_identical_to_first_party(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv(FLAG, raising=False)
+    monkeypatch.setenv(FLAG, "0")
     assert build_runtime_pack_registry().pack_ids == PackRegistry.with_first_party_packs().pack_ids
 
 
 def test_flag_off_ignores_a_present_user_pack(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.delenv(FLAG, raising=False)
+    monkeypatch.setenv(FLAG, "0")
     _write_recipe_pack(tmp_path, pack_id="ext.kerneltest")
     _patch_bases(monkeypatch, [tmp_path])
     assert build_runtime_pack_registry().pack_ids == PackRegistry.with_first_party_packs().pack_ids

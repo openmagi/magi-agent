@@ -37,7 +37,7 @@ from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import Any
 
-from magi_agent.config.flags import flag_bool
+from magi_agent.config.flags import flag_bool, flag_profile_bool
 from magi_agent.recipes.compiler import PackRegistry, RecipePackManifest
 
 logger = logging.getLogger(__name__)
@@ -339,7 +339,7 @@ def build_runtime_pack_registry(env: Mapping[str, str] | None = None) -> PackReg
     """
 
     registry = PackRegistry.with_first_party_packs()
-    if not flag_bool(MAGI_KERNEL_RECIPE_PACKS_ENABLED_ENV, env=env):
+    if not flag_profile_bool(MAGI_KERNEL_RECIPE_PACKS_ENABLED_ENV, env=env):
         return registry
 
     external_pack_ids: set[str] = set()

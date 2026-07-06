@@ -150,6 +150,23 @@ class StartupRecoverySweep:
         except Exception:  # noqa: BLE001 - fail-open: boot continues
             logger.debug("durable startup sweep: background reclaim failed", exc_info=True)
 
+        # ----- 1b. PR-M7 hosted projection: restart-recovery seam (7.2) -----
+        # Tell the hosted receiver to abandon/resume its running missions from
+        # before this boot. Fail-open and non-blocking; inert unless the hosted
+        # projector config is present (naturally a no-op on OSS local).
+        try:
+            import datetime as _dt  # noqa: PLC0415
+
+            from magi_agent.missions.projector import (  # noqa: PLC0415
+                notify_restart_recovery,
+            )
+
+            notify_restart_recovery(
+                started_at=_dt.datetime.now(tz=_dt.timezone.utc).isoformat()
+            )
+        except Exception:  # noqa: BLE001 - fail-open: boot continues
+            logger.debug("durable startup sweep: restart-recovery projection failed", exc_info=True)
+
         # ----- 2. OPTIONAL: WS1-local context-only foreground continuation --
         resumed: list[str] = []
         skipped: list[tuple[str, str]] = []

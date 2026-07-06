@@ -156,6 +156,8 @@ class SessionServiceRegistry:
         self,
         key: SessionServiceKey,
         factory: SessionServiceFactory,
+        *,
+        fallback_factory: SessionServiceFactory | None = None,
     ) -> tuple[object, bool]:
         """Single-flight ``get_or_create``: mark ``key`` busy for this turn.
 
@@ -164,10 +166,18 @@ class SessionServiceRegistry:
         * miss — build via ``factory``, register provisionally, mark busy,
           ``reused=False``;
         * hit (idle) — mark busy, ``reused=True``;
-        * hit (busy) — **busy-fallback**: return a FRESH service built via
-          ``factory`` that is never registered (``reused=False``). The
-          overlapping turn seeds history exactly like a miss, and its later
-          :meth:`release` is an identity-checked no-op.
+        * hit (busy): **busy-fallback** returns a FRESH service that is never
+          registered (``reused=False``). The overlapping turn seeds history
+          exactly like a miss, and its later :meth:`release` is an
+          identity-checked no-op.
+
+        ``fallback_factory`` (PR-3) builds the busy-fallback service. It
+        defaults to ``factory`` for backward compatibility, but the durable
+        SQLite substrate passes a DISTINCT fresh-``InMemorySessionService``
+        factory here: ``factory`` returns a process-singleton durable service
+        that must never be handed to two overlapping turns of one key (that
+        would mutate one durable session concurrently), so the overlap gets a
+        throwaway in-memory service instead.
 
         Callers must pair every ``try_acquire`` with a
         ``release(key, service, seeded=...)`` in a ``finally`` once the turn
@@ -175,6 +185,7 @@ class SessionServiceRegistry:
         ``seeded=True``; pre-seed failure paths release with ``seeded=False``
         and discard the exact provisional service so the next turn reseeds.
         """
+        overlap_factory = fallback_factory if fallback_factory is not None else factory
         validated_key = _validated_key(key)
         now = self._clock()
         with self._lock:
@@ -188,7 +199,7 @@ class SessionServiceRegistry:
                 entry.last_used_at = now
                 self._entries.move_to_end(validated_key)
                 if entry.in_use:
-                    return factory(), False
+                    return overlap_factory(), False
                 entry.in_use = True
                 return entry.service, True
             service = factory()

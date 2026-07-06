@@ -5,6 +5,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import cached_property
 import hashlib
+import inspect
 import json
 import logging
 import os
@@ -352,6 +353,15 @@ class Gate5B4C3LiveRunnerBoundaryResult(BaseModel):
         alias="modelCallViaAdkRunnerAttempted",
     )
     event_count: int = Field(default=0, ge=0, alias="eventCount")
+    # Continuity observability (PR-1): make the hosted session-reuse verdict and
+    # the seed decision permanently diagnosable from the durable turn record.
+    # ``session_reused`` is the registry verdict; ``session_event_count`` is the
+    # ADK session's event count probed at turn start (0 when unknown/miss);
+    # ``seeded_message_count`` is the number of sanitized history messages sent
+    # into the model prompt this turn (0 on a reuse hit that skips seeding).
+    session_reused: bool = Field(default=False, alias="sessionReused")
+    session_event_count: int = Field(default=0, ge=0, alias="sessionEventCount")
+    seeded_message_count: int = Field(default=0, ge=0, alias="seededMessageCount")
     latency_ms: int = Field(default=0, ge=0, alias="latencyMs")
     timeout_ms: int = Field(default=0, ge=0, alias="timeoutMs")
     selected_provider: str = Field(default="", alias="selectedProvider")
@@ -728,6 +738,40 @@ class Gate5B4C3LiveRunnerBoundary:
                 gate1a_egress_correlation_context=self._gate1a_egress_correlation_context,
                 gate1a_egress_proxy_url=self._gate1a_egress_proxy_url,
             )
+        # Continuity observability + seed-on-empty safety net.
+        # Probe the durable session's event count once (read-only, fail-open).
+        # ``None`` means undeterminable (bare fake / error) -> fall back to the
+        # registry verdict so flag-OFF and local paths stay byte-identical.
+        session_event_count = await _probe_session_event_count(
+            session_service,
+            app_name=runner_kwargs["app_name"],
+            user_id="gate5b4c3-shadow-user",
+            session_id=_shadow_session_id(request),
+        )
+        include_history = _resolve_include_history(
+            session_reused=session_reused,
+            session_event_count=session_event_count,
+        )
+        seeded_message_count = (
+            _seeded_history_message_count(runner_input) if include_history else 0
+        )
+        continuity_fields = {
+            "session_reused": session_reused,
+            "session_event_count": int(session_event_count or 0),
+            "seeded_message_count": seeded_message_count,
+        }
+        # Bound the durable-session history the runner loads (PR-3). None when
+        # the in-memory substrate is active -> ADK default (byte-identical).
+        from magi_agent.shadow.hosted_session_substrate import (
+            DEFAULT_NUM_RECENT_EVENTS,
+            durable_hosted_session_factory,
+        )
+
+        session_num_recent_events = (
+            DEFAULT_NUM_RECENT_EVENTS
+            if durable_hosted_session_factory() is not None
+            else None
+        )
         try:
             message = primitives.Content(
                 parts=_build_user_message_parts(
@@ -736,8 +780,8 @@ class Gate5B4C3LiveRunnerBoundary:
                     # On a session-registry hit the reused ADK session already
                     # holds the prior turns; re-ingesting the re-sent sanitized
                     # history would duplicate context. History stays a
-                    # seed-on-miss (and the flag-OFF path always seeds).
-                    include_history=not session_reused,
+                    # seed-on-empty-session (and the flag-OFF path always seeds).
+                    include_history=include_history,
                 ),
                 role="user",
             )
@@ -767,6 +811,7 @@ class Gate5B4C3LiveRunnerBoundary:
         run_config = _selected_full_toolhost_run_config(
             selected_full_toolhost,
             max_llm_calls=request.budgets.max_adk_llm_calls,
+            num_recent_events=session_num_recent_events,
         )
         if run_config is not None:
             run_kwargs["run_config"] = run_config
@@ -791,6 +836,9 @@ class Gate5B4C3LiveRunnerBoundary:
                 "prompt": getattr(runner_input, "sanitized_user_input", None),
                 "provider": getattr(runner_input, "provider_label", None),
                 "model": getattr(runner_input, "model_label", None),
+                "session_reused": session_reused,
+                "session_event_count": int(session_event_count or 0),
+                "seeded_message_count": seeded_message_count,
             },
             request=request,
         )
@@ -1059,6 +1107,7 @@ class Gate5B4C3LiveRunnerBoundary:
                 status="error",
                 reason="runner_timeout",
                 started=started,
+                **continuity_fields,
                 adk_invoked=True,
                 runner_attempted=True,
                 model_attempted=True,
@@ -1128,6 +1177,7 @@ class Gate5B4C3LiveRunnerBoundary:
                 status="error",
                 reason="runner_error",
                 started=started,
+                **continuity_fields,
                 adk_invoked=True,
                 runner_attempted=True,
                 model_attempted=model_attempted,
@@ -1185,6 +1235,7 @@ class Gate5B4C3LiveRunnerBoundary:
                 status="error",
                 reason="runner_output_missing",
                 started=started,
+                **continuity_fields,
                 adk_invoked=True,
                 runner_attempted=True,
                 model_attempted=True,
@@ -1217,6 +1268,7 @@ class Gate5B4C3LiveRunnerBoundary:
                 status="error",
                 reason="runner_incomplete",
                 started=started,
+                **continuity_fields,
                 adk_invoked=True,
                 runner_attempted=True,
                 model_attempted=True,
@@ -1247,6 +1299,7 @@ class Gate5B4C3LiveRunnerBoundary:
             status="completed",
             reason="runner_completed",
             started=started,
+            **continuity_fields,
             adk_invoked=True,
             runner_attempted=True,
             model_attempted=True,
@@ -1302,10 +1355,28 @@ class Gate5B4C3LiveRunnerBoundary:
         if registry is None:
             registry = default_session_service_registry()
         session_key = (request.selection.bot_id_digest, _shadow_session_id(request))
-        session_service, session_reused = registry.try_acquire(
-            session_key,
-            primitives.InMemorySessionService,
+        # Durable substrate (PR-3): when MAGI_HOSTED_SESSION_DB is ON and the
+        # SqliteSessionService is constructible, the lease registry fronts a
+        # process-singleton durable service so sessions/events survive restart,
+        # image bump, LRU eviction and TTL. A busy-overlap gets a DISTINCT fresh
+        # in-memory fallback so two turns never mutate one durable session
+        # concurrently. Fail-open: None keeps today's in-memory behavior.
+        from magi_agent.shadow.hosted_session_substrate import (
+            durable_hosted_session_factory,
         )
+
+        durable_factory = durable_hosted_session_factory()
+        if durable_factory is not None:
+            session_service, session_reused = registry.try_acquire(
+                session_key,
+                durable_factory,
+                fallback_factory=primitives.InMemorySessionService,
+            )
+        else:
+            session_service, session_reused = registry.try_acquire(
+                session_key,
+                primitives.InMemorySessionService,
+            )
         seed_completed = {"value": session_reused}
 
         def mark_session_seeded() -> None:
@@ -1485,6 +1556,85 @@ def _runner_message_text(runner_input: object, *, include_history: bool = True) 
         + "\n\nCurrent user message:\n"
         + current
     )
+
+
+def _resolve_include_history(
+    *,
+    session_reused: bool,
+    session_event_count: int | None,
+) -> bool:
+    """Decide whether to seed sanitized history into this turn's prompt.
+
+    Emptiness probe (PR-2): seed whenever the durable ADK session holds zero
+    events, regardless of the registry reuse verdict. This is the unconditional
+    safety net: a reused-but-empty session (eviction / restart / hollow hit /
+    busy-fallback) still seeds the client echo instead of going in blind, while
+    a genuinely populated reused session is not double-seeded.
+
+    When the event count is undeterminable (``None`` -> bare service or a probe
+    error), fall back to today's registry verdict so flag-OFF and local paths
+    stay byte-identical (a fresh service always probes 0 anyway -> seed).
+    """
+    if session_event_count is None:
+        return not session_reused
+    return session_event_count == 0
+
+
+def _seeded_history_message_count(runner_input: object) -> int:
+    """Count the sanitized history messages that ``_runner_message_text`` seeds.
+
+    Mirrors the exact filter in ``_runner_message_text`` (valid user/assistant
+    items with non-empty content) so the observability count matches what the
+    model actually received. Fully defensive: any odd shape counts as zero.
+    """
+    history = getattr(runner_input, "sanitized_recent_history", ()) or ()
+    count = 0
+    for item in history:
+        if not isinstance(item, Mapping):
+            continue
+        role = str(item.get("role") or "").strip()
+        content = str(item.get("content") or "").strip()
+        if role in {"user", "assistant"} and content:
+            count += 1
+    return count
+
+
+async def _probe_session_event_count(
+    session_service: object,
+    *,
+    app_name: str,
+    user_id: str,
+    session_id: str,
+) -> int | None:
+    """Return the ADK session's event count, or ``None`` when undeterminable.
+
+    Read-only probe used for continuity observability (PR-1) and the
+    seed-on-empty safety net (PR-2). Fully fail-open: a service without an
+    async ``get_session`` (e.g. a bare test fake) or any error returns
+    ``None`` so callers fall back to today's registry-verdict behavior.
+    """
+    get_session = getattr(session_service, "get_session", None)
+    if get_session is None:
+        return None
+    try:
+        session = get_session(
+            app_name=app_name,
+            user_id=user_id,
+            session_id=session_id,
+        )
+        if inspect.isawaitable(session):
+            session = await session
+    except Exception:
+        return None
+    if session is None:
+        return 0
+    events = getattr(session, "events", None)
+    if events is None:
+        return None
+    try:
+        return len(events)
+    except Exception:
+        return None
 
 
 def run_gate5b4c3_live_runner_boundary(
@@ -1890,6 +2040,9 @@ def _result(
     runner_attempted: bool = False,
     model_attempted: bool = False,
     event_count: int = 0,
+    session_reused: bool = False,
+    session_event_count: int = 0,
+    seeded_message_count: int = 0,
     agent_kwargs_keys: tuple[str, ...] = (),
     runner_kwargs_keys: tuple[str, ...] = (),
     run_async_kwargs_keys: tuple[str, ...] = (),
@@ -1907,6 +2060,9 @@ def _result(
         runnerAttempted=runner_attempted,
         modelCallViaAdkRunnerAttempted=model_attempted,
         eventCount=event_count,
+        sessionReused=session_reused,
+        sessionEventCount=session_event_count,
+        seededMessageCount=seeded_message_count,
         latencyMs=_elapsed_ms(started),
         timeoutMs=request.budgets.python_runner_timeout_ms,
         selectedProvider=request.model_routing.provider_label,
@@ -2859,17 +3015,22 @@ def _selected_full_toolhost_run_config(
     enabled: bool,
     *,
     max_llm_calls: int,
+    num_recent_events: int | None = None,
 ) -> object | None:
     if not enabled:
         return None
-    return _run_config(max_llm_calls=max_llm_calls)
+    return _run_config(max_llm_calls=max_llm_calls, num_recent_events=num_recent_events)
 
 
-def _no_tool_finalizer_run_config() -> object | None:
-    return _run_config(max_llm_calls=2)
+def _no_tool_finalizer_run_config(num_recent_events: int | None = None) -> object | None:
+    return _run_config(max_llm_calls=2, num_recent_events=num_recent_events)
 
 
-def _run_config(*, max_llm_calls: int) -> object | None:
+def _run_config(
+    *,
+    max_llm_calls: int,
+    num_recent_events: int | None = None,
+) -> object | None:
     try:
         from google.adk.agents import RunConfig
     except Exception:
@@ -2885,6 +3046,19 @@ def _run_config(*, max_llm_calls: int) -> object | None:
         kwargs: dict[str, object] = {"max_llm_calls": max_llm_calls}
         if StreamingMode is not None:
             kwargs["streaming_mode"] = StreamingMode.SSE
+        # Bound the durable-session history the runner loads into the prompt so
+        # an old long session cannot blow the context; the model call itself
+        # remains the hard bound. None (in-memory substrate) leaves ADK's
+        # default (all events), byte-identical to the pre-durable behavior.
+        if num_recent_events is not None:
+            try:
+                from google.adk.sessions.base_session_service import GetSessionConfig
+
+                kwargs["get_session_config"] = GetSessionConfig(
+                    num_recent_events=num_recent_events
+                )
+            except Exception:
+                pass
         return RunConfig(**kwargs)
     except Exception:
         return None

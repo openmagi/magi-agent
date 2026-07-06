@@ -921,6 +921,119 @@ class SqliteWorkQueueStore:
         assert task is not None
         return task
 
+    # ------------------------------------------------------------------
+    # Control-action transitions (PR-M3 local mission control routes).
+    #
+    # Each applies design doc table 5.2 with a fresh-read + CAS-guarded
+    # ``UPDATE ... WHERE status IN (...)`` so an illegal transition (or a
+    # concurrent transition that already moved the row) is rejected by
+    # returning ``None`` rather than clobbering state. The status change and
+    # the task-event append happen in the SAME transaction.
+    # ------------------------------------------------------------------
+
+    def request_cancel(self, task_id: str, *, actor: str = "user") -> WorkTask | None:
+        """Cancel a task: release any held claim and move it to ``archived``.
+
+        Legal source statuses (5.2, mirroring the hosted ``validateMissionAction``
+        cancel guard): every non-closed status
+        (``triage``/``todo``/``ready``/``running``/``blocked``). Returns ``None``
+        when the task is already closed (``completed``/``failed``/``archived``)
+        or the CAS loses to a concurrent transition.
+        """
+        now = int(time.time())
+        conn = self._get_conn()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            # Release the claim: close any open run row for this task.
+            conn.execute(
+                "UPDATE work_queue_task_runs SET status='released', outcome='cancelled', ended_at=? "
+                "WHERE task_id=? AND ended_at IS NULL",
+                (now, task_id),
+            )
+            cur = conn.execute(
+                "UPDATE work_queue_tasks "
+                "SET status='archived', claim_lock=NULL, claim_expires=NULL, worker_pid=NULL, "
+                "    current_run_id=NULL "
+                "WHERE id=? AND status IN ('triage','todo','ready','running','blocked')",
+                (task_id,),
+            )
+            if cur.rowcount != 1:
+                conn.rollback()
+                return None
+            self._append_event(conn, task_id, "cancel_requested", {"actor": actor})
+            conn.commit()
+            return self.get(task_id)
+        except Exception:
+            conn.rollback()
+            raise
+
+    def request_retry(self, task_id: str, *, actor: str = "user") -> WorkTask | None:
+        """Retry a task: reset failures and move it back to ``ready`` (5.2).
+
+        Legal source statuses: ``failed`` or ``blocked`` only. Returns ``None``
+        otherwise (e.g. retry on a ``running`` task) or on CAS loss.
+        """
+        conn = self._get_conn()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            cur = conn.execute(
+                "UPDATE work_queue_tasks "
+                "SET status='ready', consecutive_failures=0, last_failure_error=NULL, "
+                "    current_run_id=NULL "
+                "WHERE id=? AND status IN ('failed','blocked')",
+                (task_id,),
+            )
+            if cur.rowcount != 1:
+                conn.rollback()
+                return None
+            self._append_event(conn, task_id, "retry_requested", {"actor": actor})
+            conn.commit()
+            return self.get(task_id)
+        except Exception:
+            conn.rollback()
+            raise
+
+    def request_unblock(self, task_id: str, *, actor: str = "user") -> WorkTask | None:
+        """Unblock a task: move it from ``blocked`` back to ``ready`` (5.2).
+
+        Legal source status: ``blocked`` only. Returns ``None`` otherwise or on
+        CAS loss.
+        """
+        conn = self._get_conn()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            cur = conn.execute(
+                "UPDATE work_queue_tasks SET status='ready' "
+                "WHERE id=? AND status='blocked'",
+                (task_id,),
+            )
+            if cur.rowcount != 1:
+                conn.rollback()
+                return None
+            self._append_event(conn, task_id, "unblocked", {"actor": actor})
+            conn.commit()
+            return self.get(task_id)
+        except Exception:
+            conn.rollback()
+            raise
+
+    def append_comment(self, task_id: str, *, author: str, message: str) -> bool:
+        """Append a ``comment`` task event (ledger-only, design D5).
+
+        Returns ``False`` when the task does not exist (no event written);
+        otherwise appends the event and returns ``True``. Does not change task
+        status and never touches the inject buffer (D5: ledger-only in v1).
+        """
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT 1 FROM work_queue_tasks WHERE id=?", (task_id,)
+        ).fetchone()
+        if row is None:
+            return False
+        self._append_event(conn, task_id, "comment", {"author": author, "message": message})
+        conn.commit()
+        return True
+
     def ready_tasks(self, limit: int) -> list[WorkTask]:
         conn = self._get_conn()
         rows = conn.execute(
@@ -1029,6 +1142,130 @@ class SqliteWorkQueueStore:
             "VALUES (?,?,?,?,?)",
             (task_id, None, kind, json.dumps(payload) if payload else None, int(time.time())),
         )
+
+    # ------------------------------------------------------------------
+    # PR-M7 hosted-projection identity mapping (mission_projection table).
+    #
+    # These helpers are the ONLY writers/readers of the ``mission_projection``
+    # table (design section 5.4). The hosted ``MissionProjector`` uses
+    # ``get_mission_projection`` / ``upsert_mission_projection`` to keep the
+    # ``wq:<task_id>`` -> mission-id mapping durable so a lost mapping row is
+    # recovered idempotently on the next create. ``task_id_for_mission`` is the
+    # reverse resolution PR-M8's reconciler needs (mission-id -> task-id) and is
+    # supported here by the ``idx_mission_projection_mission`` index.
+    # ------------------------------------------------------------------
+
+    def get_mission_projection(self, task_id: str) -> dict | None:
+        """Return the mission-projection mapping row for *task_id*, or None.
+
+        Shape: ``{task_id, mission_id, last_projected_status, updated_at}``.
+        """
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT task_id, mission_id, last_projected_status, updated_at "
+            "FROM mission_projection WHERE task_id=?",
+            (task_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "task_id": row["task_id"],
+            "mission_id": row["mission_id"],
+            "last_projected_status": row["last_projected_status"],
+            "updated_at": row["updated_at"],
+        }
+
+    def upsert_mission_projection(
+        self,
+        task_id: str,
+        *,
+        mission_id: str | None,
+        last_projected_status: str | None,
+    ) -> None:
+        """Insert-or-update the mission-projection mapping for *task_id*.
+
+        Idempotent by ``task_id`` primary key: a repeated create with the same
+        ``wq:<task_id>`` idempotency key re-lands the same ``mission_id`` here
+        without duplicating rows.
+        """
+        conn = self._get_conn()
+        conn.execute(
+            "INSERT INTO mission_projection (task_id, mission_id, last_projected_status, updated_at) "
+            "VALUES (?,?,?,?) "
+            "ON CONFLICT(task_id) DO UPDATE SET "
+            "mission_id=excluded.mission_id, "
+            "last_projected_status=excluded.last_projected_status, "
+            "updated_at=excluded.updated_at",
+            (task_id, mission_id, last_projected_status, int(time.time())),
+        )
+        conn.commit()
+
+    def task_id_for_mission(self, mission_id: str) -> str | None:
+        """Return the ``task_id`` mapped to *mission_id*, or None (PR-M8 reverse)."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT task_id FROM mission_projection WHERE mission_id=? LIMIT 1",
+            (mission_id,),
+        ).fetchone()
+        return row["task_id"] if row else None
+
+    def delete_mission_projection(self, task_id: str) -> None:
+        """Delete the mapping row for *task_id* (test seam: simulate a lost row)."""
+        conn = self._get_conn()
+        conn.execute("DELETE FROM mission_projection WHERE task_id=?", (task_id,))
+        conn.commit()
+
+    # ------------------------------------------------------------------
+    # PR-M8 hosted MissionActionReconciler poll cursor (design section 7.4).
+    #
+    # A single durable row records where the inbound action poll left off so the
+    # reconciler resumes across restart (never reprocesses from zero) and dedupes
+    # the inclusive ``created_at >= since`` boundary the chat-proxy actions
+    # endpoint returns. ``get_mission_action_cursor`` / ``set_mission_action_cursor``
+    # are the only readers/writers of the ``mission_action_cursor`` table.
+    # ------------------------------------------------------------------
+
+    def get_mission_action_cursor(self) -> dict | None:
+        """Return the reconciler poll cursor, or None when never set.
+
+        Shape: ``{last_created_at: str | None, processed_ids: list[str]}``.
+        """
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT last_created_at, processed_ids FROM mission_action_cursor WHERE id=1"
+        ).fetchone()
+        if row is None:
+            return None
+        raw = row["processed_ids"]
+        try:
+            processed = json.loads(raw) if raw else []
+        except (ValueError, TypeError):
+            processed = []
+        if not isinstance(processed, list):
+            processed = []
+        return {
+            "last_created_at": row["last_created_at"],
+            "processed_ids": [str(x) for x in processed],
+        }
+
+    def set_mission_action_cursor(
+        self,
+        *,
+        last_created_at: str | None,
+        processed_ids: list[str],
+    ) -> None:
+        """Insert-or-update the single reconciler poll cursor row (idempotent)."""
+        conn = self._get_conn()
+        conn.execute(
+            "INSERT INTO mission_action_cursor (id, last_created_at, processed_ids, updated_at) "
+            "VALUES (1,?,?,?) "
+            "ON CONFLICT(id) DO UPDATE SET "
+            "last_created_at=excluded.last_created_at, "
+            "processed_ids=excluded.processed_ids, "
+            "updated_at=excluded.updated_at",
+            (last_created_at, json.dumps(list(processed_ids)), int(time.time())),
+        )
+        conn.commit()
 
 
 __all__ = [

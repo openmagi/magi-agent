@@ -100,7 +100,7 @@ def test_entry_points_inert_when_ep_flag_off(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_entry_points_inert_when_kernel_flag_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv(KERNEL_FLAG, raising=False)
+    monkeypatch.setenv(KERNEL_FLAG, "0")
     monkeypatch.setenv(EP_FLAG, "1")
     monkeypatch.setattr("magi_agent.packs.discovery.default_search_bases", list)
     _patch_entry_points(monkeypatch, [_FakeEntryPoint("acme", _valid_manifest_dict())])
