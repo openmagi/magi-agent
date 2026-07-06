@@ -430,7 +430,9 @@ def rule_check_event(
     detail: str | None = None,
     event_family: str = "rule_check",
 ) -> PublicEvent:
-    _require_event_family(event_family, {"rule_check", "citation_gate_alias"})
+    _require_event_family(
+        event_family, {"rule_check", "citation_gate_alias", "verify_audit_alias"}
+    )
     event: PublicEvent = {
         "type": "rule_check",
         "ruleId": _public_text(rule_id, limit=_ID_LIMIT),
