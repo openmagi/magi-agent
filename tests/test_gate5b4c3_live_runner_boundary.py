@@ -2396,3 +2396,125 @@ def test_continuity_result_defaults_are_present_and_serialized() -> None:
     assert dumped["sessionReused"] is False
     assert dumped["sessionEventCount"] == 0
     assert dumped["seededMessageCount"] == 0
+
+
+# ── seed-on-empty-session safety net (PR-2): emptiness probe drives seeding ──
+
+
+class _EventAppendingRunner(_FakeRunner):
+    """Runner over a real ADK session service that optionally appends an event.
+
+    Mirrors what the production ADK Runner does: it get-or-creates the session
+    and appends events, so a reused service accumulates real turn history that
+    the emptiness probe can read on the next turn.
+    """
+
+    append_event_on_run: bool = True
+
+    def __init__(self, **kwargs: object) -> None:
+        type(self).created_kwargs = kwargs
+
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        service = type(self).created_kwargs["session_service"]
+        app_name = type(self).created_kwargs["app_name"]
+        user_id = kwargs["user_id"]
+        session_id = kwargs["session_id"]
+        session = await service.get_session(
+            app_name=app_name, user_id=user_id, session_id=session_id
+        )
+        if session is None:
+            session = await service.create_session(
+                app_name=app_name, user_id=user_id, session_id=session_id
+            )
+        if type(self).append_event_on_run:
+            from google.adk.events import Event
+            from google.genai import types as _genai_types
+
+            await service.append_event(
+                session,
+                Event(
+                    author="user",
+                    content=_genai_types.Content(
+                        parts=[_genai_types.Part.from_text(text="prior turn")],
+                        role="user",
+                    ),
+                ),
+            )
+        yield _FakeEvent("final answer for the turn")
+
+
+def _real_session_primitives(*, append: bool) -> Gate5B4C3LiveAdkPrimitives:
+    from google.adk.sessions import InMemorySessionService
+
+    _EventAppendingRunner.created_kwargs = {}
+    _EventAppendingRunner.run_kwargs = {}
+    _EventAppendingRunner.append_event_on_run = append
+    _FakeAgent.created_kwargs = {}
+    _FakeGenerateContentConfig.created_kwargs = {}
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=_FakeAgent,
+        Runner=_EventAppendingRunner,
+        InMemorySessionService=InMemorySessionService,
+        Content=_FakeContent,
+        Part=_FakePart,
+        GenerateContentConfig=_FakeGenerateContentConfig,
+    )
+
+
+def test_seed_probe_reuse_carries_events_and_skips_seed_on_second_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "1")
+    registry = SessionServiceRegistry(max_entries=4, ttl_seconds=60.0)
+    boundary = Gate5B4C3LiveRunnerBoundary(
+        lambda: _real_session_primitives(append=True),
+        adk_tools=(_ManualCalculationTool,),
+        session_service_registry=registry,
+    )
+
+    r1 = boundary.invoke(_session_reuse_request(), config=_session_reuse_config())
+    r2 = boundary.invoke(_session_reuse_request(), config=_session_reuse_config())
+
+    assert r1.status == "completed"
+    assert r2.status == "completed"
+    # Turn 1 is a miss over an empty session -> seed the two sanitized turns.
+    assert r1.session_reused is False
+    assert r1.session_event_count == 0
+    assert r1.seeded_message_count == 2
+    # Turn 2 reuses the same service; the probe sees turn 1's appended event, so
+    # history is NOT re-seeded (the reused ADK session already holds it).
+    assert r2.session_reused is True
+    assert r2.session_event_count == 1
+    assert r2.seeded_message_count == 0
+    second_text = _EventAppendingRunner.run_kwargs["new_message"].parts[0].text
+    assert _HISTORY_MARKER not in second_text
+    assert second_text == _CURRENT_TURN_TEXT
+
+
+def test_seed_probe_reused_but_empty_session_still_seeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The unconditional safety net: a reuse HIT with a zero-event session
+    (eviction / restart / hollow hit) must STILL seed sanitized history."""
+    monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "1")
+    registry = SessionServiceRegistry(max_entries=4, ttl_seconds=60.0)
+    boundary = Gate5B4C3LiveRunnerBoundary(
+        lambda: _real_session_primitives(append=False),
+        adk_tools=(_ManualCalculationTool,),
+        session_service_registry=registry,
+    )
+
+    r1 = boundary.invoke(_session_reuse_request(), config=_session_reuse_config())
+    r2 = boundary.invoke(_session_reuse_request(), config=_session_reuse_config())
+
+    assert r1.status == "completed"
+    assert r2.status == "completed"
+    # Registry reports a reuse hit on turn 2...
+    assert r2.session_reused is True
+    # ...but the durable session has zero events, so the safety net seeds anyway.
+    assert r2.session_event_count == 0
+    assert r2.seeded_message_count == 2
+    second_text = _EventAppendingRunner.run_kwargs["new_message"].parts[0].text
+    assert _HISTORY_MARKER in second_text
+    assert "user: What did you find last turn?" in second_text

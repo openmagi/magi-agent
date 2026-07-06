@@ -1534,12 +1534,19 @@ def _resolve_include_history(
 ) -> bool:
     """Decide whether to seed sanitized history into this turn's prompt.
 
-    PR-1 keeps today's behavior exactly: seed on anything but a registry-reuse
-    hit. ``session_event_count`` is accepted (and recorded for observability)
-    but does not yet drive the decision; PR-2 flips this to the emptiness probe
-    so a reused-but-empty session still seeds.
+    Emptiness probe (PR-2): seed whenever the durable ADK session holds zero
+    events, regardless of the registry reuse verdict. This is the unconditional
+    safety net: a reused-but-empty session (eviction / restart / hollow hit /
+    busy-fallback) still seeds the client echo instead of going in blind, while
+    a genuinely populated reused session is not double-seeded.
+
+    When the event count is undeterminable (``None`` -> bare service or a probe
+    error), fall back to today's registry verdict so flag-OFF and local paths
+    stay byte-identical (a fresh service always probes 0 anyway -> seed).
     """
-    return not session_reused
+    if session_event_count is None:
+        return not session_reused
+    return session_event_count == 0
 
 
 def _seeded_history_message_count(runner_input: object) -> int:
