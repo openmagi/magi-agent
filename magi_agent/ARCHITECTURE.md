@@ -934,7 +934,7 @@ graph LR
 | child_runtime_envelope.py | — | authority, runtime_issuance, subagent, tool_preview, types | harness/general_automation/delegation.py, meta_orchestration/child_acceptance.py, recipes/opencode_child_lifecycle.py, research/child_roles.py, research/evidence_graph.py, runtime/child_event_projection.py, runtime/child_runner_boundary.py |
 | citation_audit.py | — | authority, reports, source_ledger, types | engine/driver.py, evidence/research_final_gate.py, research/event_projection.py |
 | citation_capture.py | Deterministic citation capture classifier. | source_ledger | evidence/local_tool_collector.py |
-| citation_gate.py | Deterministic pre-final citation gate: high-risk claim detector plus gate | grounded_answer_guard, research_final_gate | engine/driver.py |
+| citation_gate.py | Deterministic pre-final citation gate: high-risk claim detector plus gate | grounded_answer_guard, research_final_gate | engine/driver.py, evidence/verify_audit.py |
 | citation_injection.py | Deterministic re-injection of assigned citation ids into tool results. | — | evidence/local_tool_collector.py |
 | citation_registry.py | Session-scoped source registry for citation id allocation and dedup. | source_ledger | evidence/local_tool_collector.py |
 | citation_render.py | Pure render projection for source citations (Wave 3a, design Section 8). | research_final_gate, source_ledger | cli/headless.py, transport/streaming_driver.py |
@@ -974,6 +974,7 @@ graph LR
 | tool_boundary.py | — | safety, tool_preview | tools/event_projection.py, tools/kernel.py |
 | types.py | — | authority | adk_bridge/dashboard_producer_control.py, customize/after_tool_gate.py, customize/field_constraint_compiler.py, customize/shacl_compiler.py, engine/driver.py, evidence/__init__.py, evidence/builtin.py, evidence/child_runtime_envelope.py, evidence/citation_audit.py, evidence/coding_verification.py, evidence/contracts.py, evidence/document_coverage.py, evidence/event_projection.py, evidence/extraction.py, evidence/extractors.py, evidence/first_party_activity.py, evidence/ledger.py, evidence/local_tool_collector.py, evidence/reports.py, evidence/research_final_gate.py, evidence/rollout.py, evidence/shacl_ontology.py, evidence/shacl_verifier.py, evidence/source_ledger.py, evidence/subagent.py, harness/goal_judge.py, harness/goal_loop_control.py, harness/resolved.py, harness/scheduler_delivery.py, harness/scheduler_job_execution.py, harness/self_review.py, harness/self_review_pipeline.py, harness/skill_curator.py, harness/verifier_bus.py, packs/dashboard_authored.py, recipes/coding_evidence_gate.py, shadow/audit_reporter.py, tools/manifest.py, transport/customize.py |
 | validator_taxonomy.py | — | — | engine/driver.py |
+| verify_audit.py | Verify-before-replying: pure detector module (PR-V1). | citation_gate, grounded_answer_guard | — |
 
 ### firstparty/
 
@@ -1618,7 +1619,7 @@ graph LR
 | event_projection.py | — | citation_audit, public_events, runtime_issuance, source_proof | research/research_first_canary.py |
 | evidence_graph.py | — | acceptance_criteria, action_claims, child_runtime_envelope, claim_graph, source_proof | research/boundary_enforcement.py, research/final_projection_gate.py, research/repair.py |
 | final_projection_gate.py | — | action_claims, boundary_enforcement, evidence_graph | engine/driver.py |
-| grounded_answer_guard.py | General grounded-answer guard (anti-fabrication lever). | — | evidence/citation_gate.py, evidence/claim_grounding.py, transport/gate5b_governance.py |
+| grounded_answer_guard.py | General grounded-answer guard (anti-fabrication lever). | — | evidence/citation_gate.py, evidence/claim_grounding.py, evidence/verify_audit.py, transport/gate5b_governance.py |
 | live_audit.py | Live, observe-only research-governance audit (audit-first). | flags | cli/headless.py |
 | live_research_final_gate.py | Live-path construction of a research final-gate request (WS6 PR6a). | research_final_gate, source_ledger | engine/driver.py |
 | meta_adapter.py | — | child_acceptance, child_roles, task_plan | — |
