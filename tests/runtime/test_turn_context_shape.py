@@ -45,6 +45,7 @@ def test_turn_context_field_set_is_exactly_the_golden() -> None:
         "depth",
         "budget_ms",
         "initial_messages",
+        "image_blocks",
     )
 
 
