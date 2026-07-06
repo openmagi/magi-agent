@@ -1,16 +1,17 @@
-"""LLM-judge layer — a content-based reviewer that reads ONLY the agent's final
-answer (the transcript) and rules whether the completion is trustworthy enough to
-ship. It never sees the evidence ledger.
+"""LLM-judge layer — a content-based reviewer that rules SHIP/FLAG on an agent
+turn. It never sees the evidence ledger; it reasons over prose only.
 
-This is the fair foil for the evidence-bound gate: a second model re-reads the
-same confident words the agent wrote. When the agent actually did the work
-(receipt present) the judge should ship; when the agent only asserted it (no
-receipt) the judge has to GUESS from prose. The evidence-bound gate does not
-guess — it reads the receipt. Run over an existing corpus; no new agent runs.
+Two access levels (``source``): "answer" = the agent's final message alone (what
+a chat-skimmer sees); "transcript" = the full tool trace too (what a log reviewer
+sees). Four tones (trusting / balanced / neutral / skeptical) sweep the
+suspicion dial so no single cherry-picked prompt drives the result. This is the
+fair foil for the evidence gate: the answer judge lacks the discriminating signal
+(it is not in the prose); the transcript judge recovers most of it; the evidence
+gate reads the typed receipt directly.
 
-The judge prompt is parameterized by the task's OBJECTIVE so the judge is asked
-the right question for each claim type (a tests-pass-only prompt would be unfair
-to edit/commit/calc answers). This keeps the comparison honest.
+The prompt is parameterized by the task's OBJECTIVE so the judge is asked the
+right question per claim type (a tests-pass-only prompt would be unfair to
+edit/commit/calc answers). This keeps the comparison honest.
 """
 from __future__ import annotations
 

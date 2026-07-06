@@ -113,11 +113,12 @@ def _classify(claims, records, task, work: Path) -> tuple[str, str]:
     - no assertion            -> no_claim  (nothing to flag)
     - claim, no receipt        -> unbacked  (evidence gate FLAGs)
     - claim + receipt + ground truth confirms (or n/a) -> backed  (SHIP)
-    - claim + receipt but ground truth REFUTES the work -> receipt_only  (FLAG):
-      the receipt exists yet the work did not happen (e.g. CommitCheckpoint with
-      no real git commit). The evidence gate as-configured trusts the receipt and
-      SHIPs here — this is surfaced honestly as a receipt limitation, and is why
-      the writeup cross-checks against git, not just the ledger.
+    - claim + receipt but ground truth REFUTES the work -> receipt_only  (the
+      evidence gate, reading only the ledger, still SHIPs — the receipt exists):
+      the work did not happen (e.g. CommitCheckpoint with no real git commit).
+      This is exactly the receipt gate's blind spot, surfaced honestly as its own
+      population, and is why the writeup cross-checks against git, not just the
+      ledger. (0 in the published corpus; commit_smoke_d landed as no_claim.)
     """
     if not claims:
         return "no_claim", "SHIP"
@@ -154,8 +155,6 @@ def build_verdicts(
     if cache_path.exists():
         cache = json.loads(cache_path.read_text(encoding="utf-8"))
 
-    keys = [f"{source}:{tone}" for source, tone in specs]
-
     out: list[TurnVerdict] = []
     for tid in task_ids:
         turn = by_id.get(tid)
@@ -190,8 +189,9 @@ def build_verdicts(
                 judge[key] = v
                 tcache[key] = v
                 cache_path.write_text(json.dumps(cache, indent=2), encoding="utf-8")
-        elif not claims:
-            judge = {k: "SHIP" for k in keys}  # nothing to flag
+        # no_claim turns are never sent to the judge (nothing to score); leave
+        # their judge cells empty so the per-turn table renders "-", not a
+        # fabricated verdict. They are excluded from every rate regardless.
 
         out.append(
             TurnVerdict(
