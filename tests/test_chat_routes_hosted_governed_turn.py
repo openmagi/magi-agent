@@ -346,14 +346,25 @@ def test_governed_fork_fronts_durable_session_service_when_db_flag_on(
 ) -> None:
     """PR-3 parity: the governed fork must front the durable SqliteSessionService
     (not a fresh per-turn InMemory) so flipping the governed flag on does not
-    regress server-side continuity."""
+    regress server-side continuity.
+
+    U3: durable fronting now flows through the single-flight session lease. A
+    stable ``sessionId`` in the body yields a non-empty ``session_key_digest``
+    so the lease engages (an empty digest would bypass the registry entirely,
+    per the legacy boundary rule) and the miss returns the durable singleton.
+    """
     from magi_agent.shadow.hosted_session_substrate import (
         reset_durable_hosted_session_service,
     )
+    from magi_agent.shadow.session_service_registry import (
+        reset_default_session_service_registry,
+    )
 
     reset_durable_hosted_session_service()
+    reset_default_session_service_registry()
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
     monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "1")
+    monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "1")
     monkeypatch.setenv("MAGI_HOSTED_SESSION_DB", "1")
     monkeypatch.setenv("MAGI_STATE_DIR", str(tmp_path))
 
@@ -388,7 +399,7 @@ def test_governed_fork_fronts_durable_session_service_when_db_flag_on(
     response = TestClient(create_app(runtime)).post(
         "/v1/chat/completions",
         headers=_canary_headers("b" * 64),
-        json=_CANARY_BODY,
+        json={**_CANARY_BODY, "sessionId": "sess-durable-front"},
     )
     assert response.status_code == 200, response.json()
 
@@ -400,11 +411,27 @@ def test_governed_fork_fronts_durable_session_service_when_db_flag_on(
     assert captured["session_service"] is durable
     assert captured["session_service"] is not None
     reset_durable_hosted_session_service()
+    reset_default_session_service_registry()
 
 
-def test_governed_fork_leaves_session_service_none_when_db_flag_off(
+def test_governed_fork_builds_fresh_in_memory_service_when_db_flag_off(
     monkeypatch, tmp_path: Any
 ) -> None:
+    """DB flag OFF with no session key: no durable service is wired.
+
+    U3: the governed branch acquires through the session lease, but a request
+    with no ``sessionId`` has an empty ``session_key_digest`` so the lease
+    bypasses the registry (``None``) and the branch builds a fresh in-memory
+    service explicitly (mirroring the legacy boundary bypass), rather than
+    passing ``None`` down to ``build_hosted_runtime``. Either way the turn runs
+    against a fresh per-turn in-memory service with no durable continuity.
+    """
+    from magi_agent.shadow.session_service_registry import (
+        default_session_service_registry,
+        reset_default_session_service_registry,
+    )
+
+    reset_default_session_service_registry()
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
     monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "1")
     monkeypatch.setenv("MAGI_HOSTED_SESSION_DB", "0")
@@ -443,9 +470,12 @@ def test_governed_fork_leaves_session_service_none_when_db_flag_off(
         json=_CANARY_BODY,
     )
     assert response.status_code == 200, response.json()
-    # DB flag OFF: no durable service wired -> build_hosted_runtime falls back to
-    # a fresh InMemorySessionService per turn (today's behavior).
-    assert captured["session_service"] is None
+    # DB flag OFF + no session key: the lease bypasses the registry, so the
+    # branch builds a fresh in-memory service (a _FakeSessionService instance
+    # from the fake primitives) rather than passing None. It is NOT the durable
+    # substrate, and the registry was never touched.
+    assert isinstance(captured["session_service"], _FakeSessionService)
+    assert len(default_session_service_registry()) == 0
 
 
 # ---------------------------------------------------------------------------

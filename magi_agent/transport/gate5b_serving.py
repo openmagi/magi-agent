@@ -53,7 +53,8 @@ from magi_agent.runtime.per_turn_goal_loop_context import (
 )
 from magi_agent.runtime.public_events import tool_end_event, tool_progress_event, tool_start_event, turn_phase_event
 from magi_agent.runtime.session_identity import _memory_mode_from_header
-from magi_agent.shadow.gate5b4c3_live_runner_boundary import _gate1a_correlated_model_or_label, run_gate5b4c3_live_runner_boundary_async
+from magi_agent.runtime.session_ownership import acquire_hosted_session_lease
+from magi_agent.shadow.gate5b4c3_live_runner_boundary import _gate1a_correlated_model_or_label, _shadow_session_id, run_gate5b4c3_live_runner_boundary_async
 from magi_agent.shadow.gate5b4c3_runner_input_adapter import build_gate5b4c3_runner_input
 from magi_agent.shadow.gate5b4c3_shadow_generation_contract import build_gate5b4c3_shadow_generation_diagnostic
 from magi_agent.transport.active_turn import ACTIVE_TURNS, ActiveTurn, ActiveTurnClaim
@@ -638,57 +639,97 @@ async def _run_live_chat_runner(
                 generate_content_config = primitives.GenerateContentConfig(
                     maxOutputTokens=runner_input.max_output_tokens,
                 )
-                # 4. Assemble HostedRuntime (PR1).
-                # Durable session parity (PR-3): the governed fork historically
-                # built a fresh InMemorySessionService per turn (session_service
-                # unset), which would silently kill server-side continuity when
-                # MAGI_HOSTED_GOVERNED_TURN_ENABLED flips on. Front it with the
-                # same durable SqliteSessionService the legacy boundary uses so
-                # sessions/events persist across restart. None (flag OFF /
-                # unconstructible) keeps the fresh-per-turn behavior.
-                from magi_agent.shadow.hosted_session_substrate import (
-                    durable_hosted_session_factory,
+                # 4. Assemble HostedRuntime (PR1) over the single-flight session
+                # lease (B3/U3). The governed fork historically fronted the
+                # durable SqliteSessionService by calling the bare per-turn
+                # factory (no registry, no lease, no release), so two overlapping
+                # same-session turns could interleave reads/appends into ONE
+                # durable SQLite session. Acquire through the SAME ownership
+                # chokepoint the legacy boundary uses
+                # (magi_agent.runtime.session_ownership) so the governed path gets
+                # the per-key single-flight busy-fallback (an overlapping same-key
+                # turn gets a DISTINCT fresh in-memory service), the durable
+                # substrate fronting, and the seed-aware release. A ``None`` lease
+                # is the historical bypass (reuse flag OFF, or empty
+                # session_key_digest whose session id is per-request-unique):
+                # build a fresh in-memory service and never touch the registry,
+                # byte-identical to the legacy boundary bypass.
+                lease = acquire_hosted_session_lease(
+                    bot_id_digest=generation.selection.bot_id_digest,
+                    session_id=_shadow_session_id(generation),
+                    session_key_digest=generation.selection.session_key_digest,
+                    in_memory_factory=primitives.InMemorySessionService,
                 )
-
-                _durable_factory = durable_hosted_session_factory()
-                governed_session_service = (
-                    _durable_factory() if _durable_factory is not None else None
-                )
-                hosted_rt = build_hosted_runtime(
-                    adk_primitives_loader=route_config.adk_primitives_loader,
-                    adk_tools=adk_tools,
-                    model=model_for_agent,
-                    instruction=runner_input.system_instruction,
-                    generate_content_config=generate_content_config,
-                    control_plane_plugins=control_plane_plugins,
-                    public_event_sink=governance_event_sink,
-                    app_name=GATE5B_SHADOW_APP_NAME,
-                    user_id=GATE5B_SHADOW_USER_ID,
-                    session_service=governed_session_service,
-                )
-                # 5. Build TurnContext (PR2).
-                ctx = hosted_request_to_turn_context(generation)
-                # 6. Reuse the already-built diagnostic (built earlier in the function;
-                # same object the legacy boundary would compute). Variable name: diagnostic.
-                # 7. Drive the turn via run_governed_turn.
-                started_at_monotonic = time.monotonic()
-                # Cancel event: the active_turn_claim holds the registered turn;
-                # look it up to get the cooperative cancel handle (None is safe —
-                # task-level CancelledError still aborts the turn).
-                cancel_event: asyncio.Event | None = None
-                if active_turn_claim is not None and active_session_id:
-                    registered = ACTIVE_TURNS.get(active_session_id, active_turn_id)
-                    cancel_event = registered.cancel if registered is not None else None
-                event_stream = run_governed_turn(ctx, runtime=hosted_rt, cancel=cancel_event)
-                # 8. Collect result (PR3).
-                boundary_result = await collect_engine_to_boundary_result(
-                    generation=generation,
-                    config=generation_config,
-                    diagnostic=diagnostic,  # the already-built diagnostic (pre-try-block)
-                    event_stream=event_stream,
-                    started_at_monotonic=started_at_monotonic,
-                    timeout_ms=getattr(generation.budgets, "python_runner_timeout_ms", 0),
-                )
+                if lease is None:
+                    governed_session_service = primitives.InMemorySessionService()
+                else:
+                    governed_session_service = lease.service
+                # Capture the registry reuse verdict for later units: U4 feeds it
+                # into the seed-on-empty history probe and U8 into the continuity
+                # result fields (sessionReused). U3 stays scoped to lease acquire
+                # and release plumbing, so the local is intentionally not wired
+                # into the mapper or result yet.
+                session_reused = lease.reused if lease is not None else False  # noqa: F841
+                boundary_result = None
+                try:
+                    hosted_rt = build_hosted_runtime(
+                        adk_primitives_loader=route_config.adk_primitives_loader,
+                        adk_tools=adk_tools,
+                        model=model_for_agent,
+                        instruction=runner_input.system_instruction,
+                        generate_content_config=generate_content_config,
+                        control_plane_plugins=control_plane_plugins,
+                        public_event_sink=governance_event_sink,
+                        app_name=GATE5B_SHADOW_APP_NAME,
+                        user_id=GATE5B_SHADOW_USER_ID,
+                        session_service=governed_session_service,
+                    )
+                    # 5. Build TurnContext (PR2).
+                    ctx = hosted_request_to_turn_context(generation)
+                    # 6. Reuse the already-built diagnostic (built earlier in the
+                    # function; same object the legacy boundary would compute).
+                    # 7. Drive the turn via run_governed_turn.
+                    started_at_monotonic = time.monotonic()
+                    # Cancel event: the active_turn_claim holds the registered
+                    # turn; look it up to get the cooperative cancel handle (None
+                    # is safe: task-level CancelledError still aborts the turn).
+                    cancel_event: asyncio.Event | None = None
+                    if active_turn_claim is not None and active_session_id:
+                        registered = ACTIVE_TURNS.get(active_session_id, active_turn_id)
+                        cancel_event = (
+                            registered.cancel if registered is not None else None
+                        )
+                    event_stream = run_governed_turn(
+                        ctx, runtime=hosted_rt, cancel=cancel_event
+                    )
+                    # 8. Collect result (PR3).
+                    boundary_result = await collect_engine_to_boundary_result(
+                        generation=generation,
+                        config=generation_config,
+                        diagnostic=diagnostic,
+                        event_stream=event_stream,
+                        started_at_monotonic=started_at_monotonic,
+                        timeout_ms=getattr(
+                            generation.budgets, "python_runner_timeout_ms", 0
+                        ),
+                    )
+                finally:
+                    # Release the single-flight lease exactly once, with the seed
+                    # verdict the legacy boundary applies on its first runner
+                    # event (mark_session_seeded at gate5b4c3:1367). A turn that
+                    # produced any event or completed has seeded the ADK session,
+                    # so promote the provisional miss entry to reusable; a
+                    # pre-result failure (a raise before collect returns) leaves
+                    # ``boundary_result`` None, so release with seeded=False to
+                    # discard the unseeded provisional entry and make the next
+                    # same-key turn reseed. The bypass (lease is None) never
+                    # registered anything, so there is nothing to release.
+                    if lease is not None:
+                        _lease_seeded = boundary_result is not None and (
+                            boundary_result.event_count > 0
+                            or boundary_result.status == "completed"
+                        )
+                        lease.release(seeded=_lease_seeded)
         else:
             boundary_result = await run_gate5b4c3_live_runner_boundary_async(
                 generation,
