@@ -151,6 +151,7 @@ export function streamStateToChannelState(
     pendingGoalMissionTitle: null,
     inspectedSources: state.inspectedSources,
     citationGate: state.citationGate,
+    turnCitations: state.terminal?.citations ?? null,
     runtimeTraces: state.runtimeTraces,
     // Ordered interleaved segments. Tool segment ids reference `activeTools` by
     // the same reducer tool-card id, so the interleaved renderer can look each

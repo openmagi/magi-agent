@@ -12,17 +12,25 @@ import { AgentActivityTimeline } from "./agent-activity-timeline";
 import { ThinkingBlock } from "./thinking-block";
 import { EChartRenderer } from "./echart-renderer";
 import { CitationLinkChip } from "./citation-link-chip";
+import { CitationMarkerChip } from "./citation-marker-chip";
 import { SegmentedTranscript } from "./segmented-transcript";
 import { parseMarkers } from "@/chat-core";
 import { parseKbContextMarker } from "@/chat-core";
 import { buildMessageCopyText } from "@/chat-core/message-copy";
 import { segmentsMatchContent } from "@/chat-core";
+import {
+  buildCitationIndex,
+  hasCanonicalCitationRef,
+  splitCitationTokens,
+  type CitationIndex,
+} from "@/chat-core";
 import { getAttachmentUrl, getKnowledgeDocumentUrl, fetchAttachmentBlob } from "@/chat-core/attachments";
 import {
   stripAssistantMetadataPreamble,
   stripStreamingAssistantMetadataPreamble,
 } from "@/chat-core";
 import type {
+  CitationsPayload,
   InspectedSource,
   ReplyTo,
   ResearchEvidenceSnapshot,
@@ -61,6 +69,11 @@ interface MessageBubbleProps {
   taskBoard?: TaskBoardSnapshot;
   /** Durable source/citation evidence captured with the finalized assistant message. */
   researchEvidence?: ResearchEvidenceSnapshot;
+  /**
+   * Source-citation payload from the terminal frame (Wave 3a wire contract).
+   * When present, inline `[src_N]` tokens render as clickable `[n]` chips.
+   */
+  citations?: CitationsPayload | null;
   /** Token/cost totals for the completed assistant turn. */
   usage?: ResponseUsage;
   botId?: string;
@@ -426,6 +439,51 @@ function injectCitationsIntoChildren(
   return children;
 }
 
+// --- Wave 3b: inline [src_N] -> clickable [n] marker chips ------------------
+// Distinct from the legacy `[src_N]` label chip (`CitationBadge`) and the
+// markdown-link chip (`CitationLinkChip`): this path activates only when a
+// terminal `citations` payload is present (or, while streaming, when the text
+// already carries canonical `[src_N]` tokens and the legacy research-evidence
+// path is inactive). Canonical / tolerant tokens that resolve to a display
+// index become `[n]` chips; dangling / unresolved tokens de-chip to plain text.
+
+function renderMarkerChips(text: string, index: CitationIndex): ReactNode[] {
+  const parts = splitCitationTokens(text, index);
+  return parts.map((part, i) => {
+    if (part.kind === "marker") {
+      return (
+        <CitationMarkerChip
+          key={`m-${part.sourceId}-${i}`}
+          sourceId={part.sourceId}
+          index={part.index}
+        />
+      );
+    }
+    if (part.kind === "dangling") return part.raw;
+    return part.value;
+  });
+}
+
+function injectMarkerChipsIntoChildren(
+  children: ReactNode,
+  index: CitationIndex,
+): ReactNode {
+  if (typeof children === "string") {
+    if (!children.includes("src")) return children;
+    return <>{renderMarkerChips(children, index)}</>;
+  }
+  if (Array.isArray(children)) {
+    return children.map((child, i) => {
+      if (typeof child === "string") {
+        if (!child.includes("src")) return child;
+        return <span key={i}>{renderMarkerChips(child, index)}</span>;
+      }
+      return child;
+    });
+  }
+  return children;
+}
+
 function sourceKindDisplayName(kind: InspectedSource["kind"]): string {
   return kind.replace(/_/g, " ");
 }
@@ -703,7 +761,7 @@ function ContextMenu({ x, y, onAction, onClose }: {
   );
 }
 
-export function MessageBubble({ role, content, timestamp, isStreaming, inlineBeforeContent, inlineAfterContent, liveTranscriptItems, liveAssistantTurn, thinkingContent, thinkingDuration, activities, segments, taskBoard, researchEvidence, usage, botId, replyTo, injected, selectionMode, selected, onSelect, onContextAction }: MessageBubbleProps) {
+export function MessageBubble({ role, content, timestamp, isStreaming, inlineBeforeContent, inlineAfterContent, liveTranscriptItems, liveAssistantTurn, thinkingContent, thinkingDuration, activities, segments, taskBoard, researchEvidence, citations, usage, botId, replyTo, injected, selectionMode, selected, onSelect, onContextAction }: MessageBubbleProps) {
   const timeStr = useMemo(() => (timestamp ? formatTime(timestamp) : null), [timestamp]);
   const { download, downloadingId } = useAuthDownload();
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -754,6 +812,18 @@ export function MessageBubble({ role, content, timestamp, isStreaming, inlineBef
   const rawContent = isStreaming ? safeTextContent + "\u2588" : safeTextContent;
   const displayContent = rawContent;
   const evidenceSources = researchEvidence?.inspectedSources ?? [];
+  // Wave 3b marker chips activate when the terminal `citations` payload is
+  // present, OR (optimistic streaming) when the text already carries canonical
+  // `[src_N]` tokens AND the legacy research-evidence path is inactive. This
+  // keeps flag-OFF rendering byte-identical: no payload, no tokens, and no
+  // evidence sources -> the new path stays off and existing behavior is intact.
+  const useMarkerCitations =
+    !isUser &&
+    (!!citations ||
+      (evidenceSources.length === 0 && hasCanonicalCitationRef(safeTextContent)));
+  const citationIndex = useMarkerCitations
+    ? buildCitationIndex(citations ?? null, safeTextContent)
+    : null;
   const hasInlineLiveContent = !!inlineBeforeContent || !!inlineAfterContent;
   const hasLiveTranscriptItems = !isUser && !!liveTranscriptItems && liveTranscriptItems.length > 0;
   const displayContentWithoutCursor = isStreaming && displayContent.endsWith("\u2588")
@@ -866,7 +936,13 @@ export function MessageBubble({ role, content, timestamp, isStreaming, inlineBef
               </code>
             );
           },
-          ...(evidenceSources.length > 0 ? {
+          ...(citationIndex ? {
+            p: ({ children }) => <p>{injectMarkerChipsIntoChildren(children, citationIndex)}</p>,
+            li: ({ children, ...props }) => <li {...props}>{injectMarkerChipsIntoChildren(children, citationIndex)}</li>,
+            td: ({ children, ...props }) => <td {...props}>{injectMarkerChipsIntoChildren(children, citationIndex)}</td>,
+            th: ({ children, ...props }) => <th {...props}>{injectMarkerChipsIntoChildren(children, citationIndex)}</th>,
+            strong: ({ children }) => <strong>{injectMarkerChipsIntoChildren(children, citationIndex)}</strong>,
+          } : evidenceSources.length > 0 ? {
             p: ({ children }) => <p>{injectCitationsIntoChildren(children, evidenceSources)}</p>,
             li: ({ children, ...props }) => <li {...props}>{injectCitationsIntoChildren(children, evidenceSources)}</li>,
             td: ({ children, ...props }) => <td {...props}>{injectCitationsIntoChildren(children, evidenceSources)}</td>,
