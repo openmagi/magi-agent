@@ -56,6 +56,7 @@ NormalizedEventType = Literal[
     "runtime.trace",
     "model.message.delta",
     "model.message.completed",
+    "model.reasoning_promoted_to_final",
     "tool.call.started",
     "tool.call.progress",
     "tool.call.needs_approval",
