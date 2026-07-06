@@ -90,9 +90,14 @@ class TestRenderFlagsSection:
     def test_profile_bool_default_is_described_not_as_constant(self) -> None:
         """profile_bool flags must NOT be rendered with a flat true/false default."""
         section = gen.render_flags_section(FLAGS)
-        profile_flags = [f for f in FLAGS if f.kind == "profile_bool"]
+        # The section renders public-scope flags only (see
+        # test_excludes_non_public_scopes), so scope the profile_bool assertion
+        # to public flags; a hosted/internal profile_bool is intentionally absent.
+        profile_flags = [
+            f for f in FLAGS if f.kind == "profile_bool" and f.scope == "public"
+        ]
         if not profile_flags:
-            pytest.skip("no profile_bool flags registered")
+            pytest.skip("no public profile_bool flags registered")
         # Each profile_bool flag line should mention the profile-aware nature.
         for spec in profile_flags:
             assert spec.name in section

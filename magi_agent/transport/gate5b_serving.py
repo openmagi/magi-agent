@@ -578,6 +578,21 @@ async def _run_live_chat_runner(
                     maxOutputTokens=runner_input.max_output_tokens,
                 )
                 # 4. Assemble HostedRuntime (PR1).
+                # Durable session parity (PR-3): the governed fork historically
+                # built a fresh InMemorySessionService per turn (session_service
+                # unset), which would silently kill server-side continuity when
+                # MAGI_HOSTED_GOVERNED_TURN_ENABLED flips on. Front it with the
+                # same durable SqliteSessionService the legacy boundary uses so
+                # sessions/events persist across restart. None (flag OFF /
+                # unconstructible) keeps the fresh-per-turn behavior.
+                from magi_agent.shadow.hosted_session_substrate import (
+                    durable_hosted_session_factory,
+                )
+
+                _durable_factory = durable_hosted_session_factory()
+                governed_session_service = (
+                    _durable_factory() if _durable_factory is not None else None
+                )
                 hosted_rt = build_hosted_runtime(
                     adk_primitives_loader=route_config.adk_primitives_loader,
                     adk_tools=adk_tools,
@@ -587,6 +602,7 @@ async def _run_live_chat_runner(
                     control_plane_plugins=control_plane_plugins,
                     public_event_sink=governance_event_sink,
                     app_name="openmagi-hosted-governed-turn",
+                    session_service=governed_session_service,
                 )
                 # 5. Build TurnContext (PR2).
                 ctx = hosted_request_to_turn_context(generation)

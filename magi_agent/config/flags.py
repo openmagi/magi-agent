@@ -2287,12 +2287,27 @@ FLAGS: tuple[FlagSpec, ...] = (
             "completions-equivalent gates (no local-engine fallthrough)."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_HOSTED_SESSION_REUSE",
         scope="hosted",
         summary=(
-            "Reuse the in-memory ADK session service across hosted turns keyed by "
-            "(bot digest, session id); OFF keeps the fresh-per-turn behavior."
+            "Reuse the ADK session service across hosted turns keyed by "
+            "(bot digest, session id) via the single-flight lease registry; "
+            "with MAGI_HOSTED_SESSION_DB it fronts the durable SQLite substrate. "
+            "Profile-aware default-ON (full/lab; OFF under the safe-family). "
+            "OFF keeps the fresh-per-turn behavior."
+        ),
+    ),
+    _pb(
+        "MAGI_HOSTED_SESSION_DB",
+        scope="hosted",
+        summary=(
+            "Back hosted ADK sessions with a durable SqliteSessionService on the "
+            "PVC (<MAGI_STATE_DIR>/adk_sessions.db) so sessions and EVENTS survive "
+            "pod restart, image bump, registry eviction and TTL. Fronted by the "
+            "reuse lease registry (single-flight). Profile-aware default-ON "
+            "(full/lab; OFF under the safe-family). Fail-open: any init failure "
+            "falls back to the in-memory registry (today's behavior)."
         ),
     ),
     FlagSpec(
@@ -2305,10 +2320,14 @@ FLAGS: tuple[FlagSpec, ...] = (
     ),
     FlagSpec(
         name="MAGI_HOSTED_SESSION_REUSE_TTL_SECONDS",
-        default=1800,
+        default=21600,
         scope="hosted",
         stage="stage1",
-        summary="Idle TTL in seconds before a reusable hosted session is evicted.",
+        summary=(
+            "Idle TTL in seconds before a reusable hosted session lease is "
+            "evicted (6h; with MAGI_HOSTED_SESSION_DB, TTL expiry is no longer "
+            "data loss because the durable session persists)."
+        ),
         kind="int",
     ),
     # --- Runtime profile (string) ------------------------------------------

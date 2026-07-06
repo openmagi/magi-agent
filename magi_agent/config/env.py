@@ -3075,28 +3075,57 @@ def is_hosted_streaming_serve_enabled(env: Mapping[str, str] | None = None) -> b
 MAGI_HOSTED_SESSION_REUSE_ENV = "MAGI_HOSTED_SESSION_REUSE"
 MAGI_HOSTED_SESSION_REUSE_MAX_ENTRIES_ENV = "MAGI_HOSTED_SESSION_REUSE_MAX_ENTRIES"
 MAGI_HOSTED_SESSION_REUSE_TTL_SECONDS_ENV = "MAGI_HOSTED_SESSION_REUSE_TTL_SECONDS"
+MAGI_HOSTED_SESSION_DB_ENV = "MAGI_HOSTED_SESSION_DB"
 
 
 def is_hosted_session_reuse_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Single source of truth for hosted session-service reuse (08-PR5).
 
-    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the
-    live runner boundary builds a fresh ``InMemorySessionService`` per turn —
-    byte-identical to today, with no registry interaction at all. When ON the
-    boundary acquires the session service from a process-scope LRU+TTL registry
-    keyed by ``(bot_id_digest, session_id)`` so multiturn context survives
-    across turns and the re-sent sanitized history is only used to seed a
-    registry miss. Hosted is multitenant — session leakage equals cross-user
-    data exposure — so like ``is_hosted_streaming_serve_enabled`` this is an
-    additive, default-disabled serving mode and deliberately does NOT follow
-    the runtime-profile default-ON convention.
+    Profile-aware default-ON (full/lab; OFF under the safe-family). When OFF the
+    live runner boundary builds a fresh ``InMemorySessionService`` per turn,
+    byte-identical to the pre-reuse behavior, with no registry interaction. When
+    ON the boundary acquires the session service from the process-scope LRU+TTL
+    lease registry keyed by ``(bot_id_digest, session_id)`` so multiturn context
+    survives across turns; with ``MAGI_HOSTED_SESSION_DB`` the leased service is
+    the durable SqliteSessionService. Hosted is multitenant, so the registry key
+    is the full tuple and empty parts are rejected.
     """
     # Delegate to the canonical config.flags registry; imported lazily to
     # avoid a config<->flags import cycle.
-    from .flags import flag_bool
+    from .flags import flag_profile_bool
 
     source = os.environ if env is None else env
-    return flag_bool(MAGI_HOSTED_SESSION_REUSE_ENV, env=source)
+    return flag_profile_bool(MAGI_HOSTED_SESSION_REUSE_ENV, env=source)
+
+
+def is_hosted_session_db_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the durable hosted ADK session substrate.
+
+    Profile-aware default-ON (full/lab; OFF under the safe-family). When ON the
+    hosted reuse lease registry fronts a process-singleton
+    ``SqliteSessionService`` at ``<MAGI_STATE_DIR>/adk_sessions.db`` so sessions
+    and their EVENTS survive pod restart, image bump, registry eviction and TTL.
+    Gated behind ``MAGI_HOSTED_SESSION_REUSE`` (the lease manager). Fail-open:
+    any construction failure falls back to the in-memory registry.
+    """
+    from .flags import flag_profile_bool
+
+    source = os.environ if env is None else env
+    return flag_profile_bool(MAGI_HOSTED_SESSION_DB_ENV, env=source)
+
+
+def hosted_session_db_path(env: Mapping[str, str] | None = None) -> Path:
+    """Resolve the durable hosted ADK session DB path.
+
+    ``<MAGI_STATE_DIR>/adk_sessions.db``, defaulting ``MAGI_STATE_DIR`` to
+    ``/workspace/.magi`` (the PVC). Hosted pods run read-only-root with HOME=/,
+    so the DB must NOT live under HOME; the default is the writable PVC path, not
+    ``~/.magi``. Kept a separate file from the harness ``session_store`` DB.
+    """
+    source = os.environ if env is None else env
+    raw = (source.get("MAGI_STATE_DIR") or "").strip()
+    state_dir = Path(raw).expanduser() if raw else Path("/workspace/.magi")
+    return state_dir / "adk_sessions.db"
 
 
 def hosted_session_reuse_max_entries(env: Mapping[str, str] | None = None) -> int:
