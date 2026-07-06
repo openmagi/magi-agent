@@ -42,6 +42,7 @@ CitationGateViolationKind = Literal[
     "uncited_high_risk",
 ]
 CitationGateVerdict = Literal["cited", "partial", "uncited", "not_applicable"]
+CitationRepairKind = Literal["attribution", "induce_search"]
 
 __all__ = [
     "HighRiskClass",
@@ -50,9 +51,15 @@ __all__ = [
     "CitationGateViolation",
     "CitationGateVerdict",
     "CitationGateResult",
+    "CitationRepairKind",
+    "CitationRepairPlan",
     "detect_high_risk_claims",
     "evaluate_citation_gate",
     "corpus_texts_from_snapshot",
+    "plan_citation_repair",
+    "build_attribution_repair_message",
+    "build_induce_search_repair_message",
+    "build_citation_fail_open_notice",
 ]
 
 # --- detector regexes (built on the reused number machinery) -----------------
@@ -480,3 +487,195 @@ def evaluate_citation_gate(
         dangling_refs=dangling,
         zero_source_turn=zero_source_turn,
     )
+
+
+# --- Wave 4b: repair planning + repair-message builders ----------------------
+#
+# All pure and deterministic (no env reads, no I/O, no model call). The engine
+# driver reads the flags, resolves tool availability from the runtime, calls
+# ``plan_citation_repair`` to pick a repair kind (or degrade to advisory), and
+# builds the repair instruction / fail-open notice from these builders. The
+# builders emit stable bytes for a given input so within-turn retry paths do not
+# thrash the prompt cache.
+
+
+@dataclass(frozen=True)
+class CitationRepairPlan:
+    """What the pre-final citation gate should do about a violated turn.
+
+    * ``kind`` is the repair family to drive through the existing driver repair
+      loop: ``"attribution"`` (a marker is missing but a valid source exists, so
+      re-emit with the marker attached, no new tool call) or ``"induce_search"``
+      (high-risk claims on a zero-external-read turn, so search then re-answer).
+    * ``degrade_to_advisory`` is True when a repair is warranted in principle but
+      is impossible or disabled (induce-search off, or no web/KB tool bound on a
+      keyless install): the gate must never demand an impossible action, so the
+      turn completes with the advisory ``advisory_verdict`` and no forced work.
+      When ``degrade_to_advisory`` is True, ``kind`` is None.
+    """
+
+    kind: CitationRepairKind | None
+    degrade_to_advisory: bool = False
+    advisory_verdict: CitationGateVerdict = "uncited"
+    induced_search: bool = False
+
+
+def plan_citation_repair(
+    result: CitationGateResult,
+    *,
+    web_available: bool,
+    kb_available: bool,
+    induce_search_enabled: bool,
+) -> CitationRepairPlan | None:
+    """Pick the repair action for a gate result (design 11.3).
+
+    Returns None when nothing warrants repair (no violations). Otherwise:
+
+    * A ``uncited_high_risk_zero_source`` violation (the Tesla case) drives an
+      INDUCE-SEARCH repair, UNLESS induce-search is disabled OR no search tool is
+      bound (``web_available`` and ``kb_available`` both False), in which case it
+      DEGRADES to the advisory ``uncited`` verdict with no forced search. On a
+      zero-source turn there is no valid id to attribute to, so attribution is
+      never the remedy there.
+    * A ``dangling_ref`` or ``uncited_high_risk`` violation (sources exist)
+      drives an ATTRIBUTION repair: re-emit with the marker attached.
+
+    Determinism: pure function of the result plus the three runtime booleans.
+    """
+    kinds = {violation.kind for violation in result.violations}
+    if not kinds:
+        return None
+    if "uncited_high_risk_zero_source" in kinds:
+        can_search = induce_search_enabled and (web_available or kb_available)
+        if can_search:
+            return CitationRepairPlan(kind="induce_search", induced_search=True)
+        return CitationRepairPlan(
+            kind=None, degrade_to_advisory=True, advisory_verdict="uncited"
+        )
+    if "dangling_ref" in kinds or "uncited_high_risk" in kinds:
+        return CitationRepairPlan(kind="attribution")
+    return None
+
+
+def _valid_source_lines(
+    registry_snapshot: Sequence[object], *, limit: int = 20
+) -> list[str]:
+    """Deterministic ``[src_N] <title>`` id list for the attribution message."""
+    lines: list[str] = []
+    for record in registry_snapshot:
+        source_id = str(getattr(record, "source_id", "")).strip()
+        if not source_id:
+            continue
+        title = getattr(record, "title", None)
+        uri = getattr(record, "uri", None)
+        label = ""
+        if isinstance(title, str) and title.strip():
+            label = title.strip()
+        elif isinstance(uri, str) and uri.strip():
+            label = uri.strip()
+        lines.append(f"[{source_id}] {label}".rstrip())
+        if len(lines) >= limit:
+            break
+    return lines
+
+
+def _offending_sentences(result: CitationGateResult, *, limit: int = 12) -> list[str]:
+    """The uncited high-risk sentences (deterministic order, trimmed)."""
+    sentences: list[str] = []
+    for claim in result.high_risk_claims:
+        if claim.has_marker:
+            continue
+        text = " ".join(claim.text.split())
+        if text:
+            sentences.append(text)
+        if len(sentences) >= limit:
+            break
+    return sentences
+
+
+def build_attribution_repair_message(
+    result: CitationGateResult, registry_snapshot: Sequence[object]
+) -> str:
+    """ATTRIBUTION repair instruction: attach a marker, no new tool call.
+
+    Lists the offending sentences and the valid id list with titles, and asks
+    the model to re-emit the SAME answer with a ``[src_N]`` marker immediately
+    after each listed claim. Dangling ids (cited but not registered) are named so
+    the model drops or corrects them.
+    """
+    parts: list[str] = [
+        "Your previous answer has high-risk claims (figures, dates, quotes, or "
+        "named superlatives) that are not attributed to a registered source. "
+        "Re-emit the SAME answer, unchanged in substance, but place a [src_N] "
+        "marker immediately after each of these claims. Do NOT invent ids: use "
+        "only ids from the valid list below."
+    ]
+    offending = _offending_sentences(result)
+    if offending:
+        parts.append("Claims that need a source marker:")
+        parts.extend(f"  - {sentence}" for sentence in offending)
+    if result.dangling_refs:
+        parts.append(
+            "These cited ids are not registered and must be removed or replaced "
+            "with a valid id: " + ", ".join(result.dangling_refs)
+        )
+    valid = _valid_source_lines(registry_snapshot)
+    if valid:
+        parts.append("Valid source ids you may cite:")
+        parts.extend(f"  {line}" for line in valid)
+    else:
+        parts.append("No registered sources are available to cite.")
+    return "\n".join(parts)
+
+
+def build_induce_search_repair_message(result: CitationGateResult) -> str:
+    """INDUCE-SEARCH repair instruction: ground the claims before asserting.
+
+    Directs the model to call ``research_fact`` / ``web_search`` /
+    ``KnowledgeSearch`` to find a source for each unsupported figure FIRST, then
+    re-answer citing the ``[src_N]`` ids those tools return. Used only for the
+    zero-external-read high-risk case (the Tesla report).
+    """
+    parts: list[str] = [
+        "Your previous answer asserts specific figures, dates, or named facts "
+        "but this turn registered NO external sources, so none of them are "
+        "grounded. Before re-answering, call a research tool (research_fact, "
+        "web_search, or KnowledgeSearch) to find a source for each figure. Then "
+        "re-answer and place a [src_N] marker (an id returned by those tools) "
+        "immediately after each figure. Do not assert a specific figure you "
+        "could not source."
+    ]
+    offending = _offending_sentences(result)
+    if offending:
+        parts.append("Unsupported claims to ground first:")
+        parts.extend(f"  - {sentence}" for sentence in offending)
+    return "\n".join(parts)
+
+
+def build_citation_fail_open_notice(result: CitationGateResult) -> str:
+    """Deterministic one-line fail-open hedge appended after the answer.
+
+    Format: ``Contains unverified figures; no source was available for: ...``.
+    Follows the soft-hedge append precedent (a single trailing sentence, never a
+    mutation of already-streamed text). The list is a short deterministic
+    excerpt of the still-unsupported claims.
+    """
+    fragments: list[str] = []
+    for claim in result.high_risk_claims:
+        if claim.has_marker:
+            continue
+        text = " ".join(claim.text.split())
+        if not text:
+            continue
+        if len(text) > 80:
+            text = text[:77].rstrip() + "..."
+        fragments.append(text)
+        if len(fragments) >= 3:
+            break
+    if not fragments and result.dangling_refs:
+        fragments = [f"unresolved citation {ref}" for ref in result.dangling_refs[:3]]
+    if not fragments:
+        detail = "one or more claims"
+    else:
+        detail = "; ".join(fragments)
+    return f"Contains unverified figures; no source was available for: {detail}"

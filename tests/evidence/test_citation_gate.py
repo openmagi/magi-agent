@@ -13,9 +13,14 @@ import pytest
 from magi_agent.engine.driver import MagiEngineDriver
 from magi_agent.evidence.citation_gate import (
     CitationGateResult,
+    CitationRepairPlan,
+    build_attribution_repair_message,
+    build_citation_fail_open_notice,
+    build_induce_search_repair_message,
     corpus_texts_from_snapshot,
     detect_high_risk_claims,
     evaluate_citation_gate,
+    plan_citation_repair,
 )
 from magi_agent.evidence.citation_registry import SessionSourceRegistry
 from magi_agent.evidence.local_tool_collector import LocalToolEvidenceCollector
@@ -267,6 +272,12 @@ class _FakeDriver:
     local_tool_evidence_collector = MagiEngineDriver.local_tool_evidence_collector
     _maybe_citation_gate_audit = MagiEngineDriver._maybe_citation_gate_audit
     _emit_citation_verdict_record = MagiEngineDriver._emit_citation_verdict_record
+    _evaluate_citation_gate_for_turn = (
+        MagiEngineDriver._evaluate_citation_gate_for_turn
+    )
+    _citation_repair_active = MagiEngineDriver._citation_repair_active
+    _citation_induce_availability = MagiEngineDriver._citation_induce_availability
+    _citation_repair_overlay = MagiEngineDriver._citation_repair_overlay
 
     def __init__(self, collector: object) -> None:
         self._runner = SimpleNamespace(local_tool_evidence_collector=collector)
@@ -313,20 +324,148 @@ def test_audit_mode_emits_verdict_record(monkeypatch: pytest.MonkeyPatch) -> Non
     assert records[0].producing_rule_id == "source_citation.gate"
 
 
-def test_repair_mode_behaves_as_audit_in_wave_4a(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_repair_mode_audit_hook_emits_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Wave 4b: in repair mode the pre-loop audit hook is a no-op (the pre-final
+    # loop owns evaluation + emission), so no record here (avoids a double emit).
     monkeypatch.setenv("MAGI_SOURCE_CITATION_ENABLED", "1")
     monkeypatch.setenv("MAGI_SOURCE_CITATION_GATE_MODE", "repair")
     collector = LocalToolEvidenceCollector()
     _register_zero_source_turn(collector)
     driver = _FakeDriver(collector)
 
-    returned = driver._maybe_citation_gate_audit(
+    driver._maybe_citation_gate_audit(
         session_id="sess", turn_id="turn", prompt="", final_text=TESLA_REPORT
     )
-    # repair is accepted but does not block or repair in Wave 4a: a record is
-    # emitted and the turn is not altered.
-    assert returned is None
-    assert len(_citation_records(collector, "turn")) == 1
+    assert _citation_records(collector, "turn") == []
+
+
+def test_repair_overlay_induce_search_on_tesla(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_SOURCE_CITATION_ENABLED", "1")
+    monkeypatch.setenv("MAGI_SOURCE_CITATION_GATE_MODE", "repair")
+    monkeypatch.setenv("MAGI_SOURCE_CITATION_INDUCE_SEARCH_ENABLED", "1")
+    monkeypatch.setattr(
+        "magi_agent.tools.web_search_tools.direct_web_tools_available",
+        lambda env=None: True,
+    )
+    monkeypatch.setattr(
+        "magi_agent.knowledge.qmd_index.qmd_available", lambda: False
+    )
+    collector = LocalToolEvidenceCollector()
+    _register_zero_source_turn(collector)
+    driver = _FakeDriver(collector)
+
+    overlay = driver._citation_repair_overlay(
+        session_id="sess",
+        turn_id="turn",
+        prompt="",
+        final_text=TESLA_REPORT,
+        attempt_count=0,
+    )
+    assert overlay is not None
+    assert overlay["shouldBlock"] is True
+    assert overlay["kind"] == "induce_search"
+    assert overlay["inducedSearch"] is True
+    assert overlay["continueRepair"] is True
+    assert "research_fact" in str(overlay["message"])
+
+
+def test_repair_overlay_degrades_on_keyless_install(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_SOURCE_CITATION_ENABLED", "1")
+    monkeypatch.setenv("MAGI_SOURCE_CITATION_GATE_MODE", "repair")
+    monkeypatch.setenv("MAGI_SOURCE_CITATION_INDUCE_SEARCH_ENABLED", "1")
+    # No web, no KB: a gate must not demand an impossible search.
+    monkeypatch.setattr(
+        "magi_agent.tools.web_search_tools.direct_web_tools_available",
+        lambda env=None: False,
+    )
+    monkeypatch.setattr(
+        "magi_agent.knowledge.qmd_index.qmd_available", lambda: False
+    )
+    collector = LocalToolEvidenceCollector()
+    _register_zero_source_turn(collector)
+    driver = _FakeDriver(collector)
+
+    overlay = driver._citation_repair_overlay(
+        session_id="sess",
+        turn_id="turn",
+        prompt="",
+        final_text=TESLA_REPORT,
+        attempt_count=0,
+    )
+    assert overlay is not None
+    assert overlay["shouldBlock"] is False
+    assert overlay["degrade"] is True
+    assert overlay["advisoryVerdict"] == "uncited"
+
+
+def test_repair_overlay_exhausted_budget_stops_repair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_SOURCE_CITATION_ENABLED", "1")
+    monkeypatch.setenv("MAGI_SOURCE_CITATION_GATE_MODE", "repair")
+    monkeypatch.setenv("MAGI_SOURCE_CITATION_INDUCE_SEARCH_ENABLED", "1")
+    monkeypatch.setenv("MAGI_SOURCE_CITATION_REPAIR_MAX_ATTEMPTS", "2")
+    monkeypatch.setattr(
+        "magi_agent.tools.web_search_tools.direct_web_tools_available",
+        lambda env=None: True,
+    )
+    monkeypatch.setattr(
+        "magi_agent.knowledge.qmd_index.qmd_available", lambda: False
+    )
+    collector = LocalToolEvidenceCollector()
+    _register_zero_source_turn(collector)
+    driver = _FakeDriver(collector)
+
+    overlay = driver._citation_repair_overlay(
+        session_id="sess",
+        turn_id="turn",
+        prompt="",
+        final_text=TESLA_REPORT,
+        attempt_count=2,
+    )
+    assert overlay is not None
+    # attempts exhausted: still a block payload but continueRepair is False so
+    # the loop routes to fail-open rather than another re-generation.
+    assert overlay["continueRepair"] is False
+
+
+def test_repair_overlay_none_when_gate_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MAGI_SOURCE_CITATION_ENABLED", "1")
+    monkeypatch.setenv("MAGI_SOURCE_CITATION_GATE_MODE", "audit")
+    collector = LocalToolEvidenceCollector()
+    _register_zero_source_turn(collector)
+    driver = _FakeDriver(collector)
+    overlay = driver._citation_repair_overlay(
+        session_id="sess",
+        turn_id="turn",
+        prompt="",
+        final_text=TESLA_REPORT,
+        attempt_count=0,
+    )
+    assert overlay is None
+
+
+def test_emit_record_carries_repair_fields() -> None:
+    collector = LocalToolEvidenceCollector()
+    _register_zero_source_turn(collector)
+    driver = _FakeDriver(collector)
+    result = evaluate_citation_gate(TESLA_REPORT, registry_snapshot=())
+    driver._emit_citation_verdict_record(
+        session_id="sess",
+        turn_id="turn",
+        result=result,
+        repair_attempts=2,
+        induced_search=True,
+        fail_open=True,
+    )
+    fields = dict(_citation_records(collector, "turn")[0].fields)
+    assert fields["repairAttempts"] == 2
+    assert fields["inducedSearch"] is True
+    assert fields["failOpen"] is True
 
 
 def test_flag_off_emits_no_record(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -386,3 +525,123 @@ def test_result_type_shape() -> None:
     result = evaluate_citation_gate(TESLA_REPORT, registry_snapshot=())
     assert isinstance(result, CitationGateResult)
     assert result.verdict in {"cited", "partial", "uncited", "not_applicable"}
+
+
+# --- Wave 4b: repair planning -------------------------------------------------
+
+
+def _tesla_zero_source_result() -> CitationGateResult:
+    return evaluate_citation_gate(
+        TESLA_REPORT, registry_snapshot=(), per_turn_source_ids=()
+    )
+
+
+def test_plan_none_when_no_violations() -> None:
+    text = "Debt was $8.4B [src_9]."
+    result = evaluate_citation_gate(
+        text,
+        registry_snapshot=(_Rec("src_9", "https://sec.gov/a", "Tesla 10-Q"),),
+        per_turn_source_ids=("src_9",),
+    )
+    assert result.violations == ()
+    plan = plan_citation_repair(
+        result, web_available=True, kb_available=True, induce_search_enabled=True
+    )
+    assert plan is None
+
+
+def test_plan_induce_search_on_tesla_zero_source() -> None:
+    result = _tesla_zero_source_result()
+    plan = plan_citation_repair(
+        result, web_available=True, kb_available=False, induce_search_enabled=True
+    )
+    assert isinstance(plan, CitationRepairPlan)
+    assert plan.kind == "induce_search"
+    assert plan.induced_search is True
+    assert plan.degrade_to_advisory is False
+
+
+def test_plan_degrades_when_induce_disabled() -> None:
+    result = _tesla_zero_source_result()
+    plan = plan_citation_repair(
+        result, web_available=True, kb_available=True, induce_search_enabled=False
+    )
+    assert plan is not None
+    assert plan.kind is None
+    assert plan.degrade_to_advisory is True
+    assert plan.advisory_verdict == "uncited"
+
+
+def test_plan_degrades_on_keyless_install() -> None:
+    # induce enabled but NO web and NO kb tool bound: a gate must not demand
+    # an impossible action.
+    result = _tesla_zero_source_result()
+    plan = plan_citation_repair(
+        result, web_available=False, kb_available=False, induce_search_enabled=True
+    )
+    assert plan is not None
+    assert plan.degrade_to_advisory is True
+    assert plan.induced_search is False
+
+
+def test_plan_attribution_when_sources_exist() -> None:
+    registry = SessionSourceRegistry(session_id="sess")
+    registry.register(
+        "web_fetch", "https://sec.gov/a", turn_id="turn", tool_name="web_fetch", title="Tesla 10-Q"
+    )
+    text = "Debt was $8.4B [src_9]. Cash was $44.1B."
+    result = evaluate_citation_gate(
+        text,
+        registry_snapshot=registry.snapshot(),
+        per_turn_source_ids=("src_1",),
+    )
+    plan = plan_citation_repair(
+        result, web_available=True, kb_available=True, induce_search_enabled=True
+    )
+    assert plan is not None
+    assert plan.kind == "attribution"
+    assert plan.degrade_to_advisory is False
+
+
+def test_attribution_message_lists_valid_ids_and_offending_sentences() -> None:
+    registry = SessionSourceRegistry(session_id="sess")
+    registry.register(
+        "web_fetch", "https://sec.gov/a", turn_id="turn", tool_name="web_fetch", title="Tesla 10-Q"
+    )
+    text = "Cash was $44.1B."
+    result = evaluate_citation_gate(
+        text, registry_snapshot=registry.snapshot(), per_turn_source_ids=("src_1",)
+    )
+    message = build_attribution_repair_message(result, registry.snapshot())
+    assert "src_1" in message
+    assert "Tesla 10-Q" in message
+    assert "$44.1B" in message
+    # Deterministic bytes: same input -> same output.
+    assert message == build_attribution_repair_message(result, registry.snapshot())
+
+
+def test_induce_search_message_names_tools_and_claims() -> None:
+    result = _tesla_zero_source_result()
+    message = build_induce_search_repair_message(result)
+    assert "research_fact" in message
+    assert "web_search" in message
+    assert "$12.77B" in message
+    assert message == build_induce_search_repair_message(result)
+
+
+def test_fail_open_notice_is_one_line_and_deterministic() -> None:
+    result = _tesla_zero_source_result()
+    notice = build_citation_fail_open_notice(result)
+    assert notice.startswith("Contains unverified figures; no source was available for:")
+    assert "\n" not in notice
+    assert notice == build_citation_fail_open_notice(result)
+
+
+class _Rec:
+    """Minimal registry-record stand-in for gate evaluation."""
+
+    def __init__(self, source_id: str, uri: str, title: str) -> None:
+        self.source_id = source_id
+        self.uri = uri
+        self.title = title
+        self.snippets: tuple[str, ...] = ()

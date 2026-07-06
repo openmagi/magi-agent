@@ -1181,11 +1181,11 @@ class MagiEngineDriver:
         turn.
 
         Gated on ``MAGI_SOURCE_CITATION_ENABLED`` being on AND
-        ``MAGI_SOURCE_CITATION_GATE_MODE`` != ``off``. In Wave 4a ``repair`` is
-        accepted but treated as ``audit`` (repair / induce-search land in Wave
-        4b, whose repair-decision seam is the ``repairDecision`` handling in the
-        pre-final loop below). Flag-OFF or mode ``off`` => byte-identical: no
-        registry read, no record.
+        ``MAGI_SOURCE_CITATION_GATE_MODE == "audit"``. In ``repair`` mode the
+        pre-final loop below owns evaluation, repair, and record emission (the
+        ``repairDecision`` / ``repairPolicy`` seam), so this pre-loop hook is a
+        no-op there to avoid a double record. Flag-OFF, mode ``off``, or mode
+        ``repair`` => this method emits nothing here.
         """
         try:
             import os  # noqa: PLC0415
@@ -1197,18 +1197,40 @@ class MagiEngineDriver:
 
             if not parse_source_citation_enabled(os.environ):
                 return
-            if parse_source_citation_gate_mode(os.environ) == "off":
+            if parse_source_citation_gate_mode(os.environ) != "audit":
                 return
+            result = self._evaluate_citation_gate_for_turn(
+                session_id=session_id,
+                turn_id=turn_id,
+                prompt=prompt,
+                final_text=final_text,
+            )
+            if result is None:
+                return
+            self._emit_citation_verdict_record(
+                session_id=session_id, turn_id=turn_id, result=result
+            )
+        except Exception:
+            return
 
+    def _evaluate_citation_gate_for_turn(
+        self, *, session_id: str, turn_id: str, prompt: str, final_text: str
+    ) -> object | None:
+        """Read the session registry and evaluate the deterministic gate.
+
+        Shared by the audit hook and the repair path. Returns a
+        ``CitationGateResult`` or None (no registry / any error). Never raises.
+        """
+        try:
             collector = self.local_tool_evidence_collector
             if collector is None:
-                return
+                return None
             registry_getter = getattr(collector, "source_registry_for", None)
             if not callable(registry_getter):
-                return
+                return None
             registry = registry_getter(session_id)
             if registry is None:
-                return
+                return None
             snapshot = registry.snapshot()
 
             per_turn_ids: list[str] = []
@@ -1226,28 +1248,167 @@ class MagiEngineDriver:
                 evaluate_citation_gate,
             )
 
-            result = evaluate_citation_gate(
+            return evaluate_citation_gate(
                 final_text,
                 registry_snapshot=snapshot,
                 per_turn_source_ids=tuple(per_turn_ids),
                 user_input=prompt or "",
             )
-            self._emit_citation_verdict_record(
-                session_id=session_id, turn_id=turn_id, result=result
+        except Exception:
+            return None
+
+    def _citation_repair_active(self) -> bool:
+        """True when the citation gate is in ``repair`` mode with the master on."""
+        try:
+            import os  # noqa: PLC0415
+
+            from magi_agent.config.env import (  # noqa: PLC0415
+                parse_source_citation_enabled,
+                parse_source_citation_gate_mode,
+            )
+
+            return (
+                parse_source_citation_enabled(os.environ)
+                and parse_source_citation_gate_mode(os.environ) == "repair"
             )
         except Exception:
-            return
+            return False
+
+    def _citation_induce_availability(self) -> tuple[bool, bool]:
+        """(web_available, kb_available) resolved from the runtime, not assumed.
+
+        Web: a real search+fetch provider is configured
+        (``direct_web_tools_available``). KB: the local qmd knowledge backend is
+        resolvable. Both fail-quiet to False so a probe error degrades safely.
+        """
+        import os  # noqa: PLC0415
+
+        web = False
+        kb = False
+        try:
+            from magi_agent.tools.web_search_tools import (  # noqa: PLC0415
+                direct_web_tools_available,
+            )
+
+            web = bool(direct_web_tools_available(os.environ))
+        except Exception:
+            web = False
+        try:
+            from magi_agent.knowledge.qmd_index import qmd_available  # noqa: PLC0415
+
+            kb = bool(qmd_available())
+        except Exception:
+            kb = False
+        return web, kb
+
+    def _citation_repair_overlay(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        prompt: str,
+        final_text: str,
+        attempt_count: int,
+    ) -> dict[str, object] | None:
+        """Compute the citation repair overlay for the pre-final loop.
+
+        Pure with respect to the turn text: reads the registry + flags, evaluates
+        the gate, plans a repair, and returns a dict the driver loop consumes.
+        Returns None when repair mode is off or nothing warrants a repair (a
+        clean / advisory-only turn: the finalization hook emits the record). When
+        a repair IS warranted it returns ``shouldBlock=True`` with a prebuilt
+        repair ``message`` + ``kind`` + ``inducedSearch``; when the repair must
+        DEGRADE (induce-search unavailable) it returns ``degrade=True`` and the
+        loop does not block. Never raises."""
+        try:
+            if not self._citation_repair_active():
+                return None
+            result = self._evaluate_citation_gate_for_turn(
+                session_id=session_id,
+                turn_id=turn_id,
+                prompt=prompt,
+                final_text=final_text,
+            )
+            if result is None:
+                return None
+
+            import os  # noqa: PLC0415
+
+            from magi_agent.config.env import (  # noqa: PLC0415
+                parse_source_citation_induce_search_enabled,
+                parse_source_citation_repair_max_attempts,
+            )
+            from magi_agent.evidence.citation_gate import (  # noqa: PLC0415
+                build_attribution_repair_message,
+                build_citation_fail_open_notice,
+                build_induce_search_repair_message,
+                plan_citation_repair,
+            )
+
+            web_available, kb_available = self._citation_induce_availability()
+            induce_enabled = parse_source_citation_induce_search_enabled(os.environ)
+            plan = plan_citation_repair(
+                result,
+                web_available=web_available,
+                kb_available=kb_available,
+                induce_search_enabled=induce_enabled,
+            )
+            max_attempts = parse_source_citation_repair_max_attempts(os.environ)
+            overlay: dict[str, object] = {
+                "result": result,
+                "maxAttempts": max_attempts,
+                "failOpenNotice": build_citation_fail_open_notice(result),
+            }
+            if plan is None:
+                overlay["shouldBlock"] = False
+                overlay["degrade"] = False
+                return overlay
+            if plan.degrade_to_advisory:
+                overlay["shouldBlock"] = False
+                overlay["degrade"] = True
+                overlay["advisoryVerdict"] = plan.advisory_verdict
+                return overlay
+            if plan.kind == "induce_search":
+                message = build_induce_search_repair_message(result)
+            else:
+                registry_getter = getattr(
+                    self.local_tool_evidence_collector, "source_registry_for", None
+                )
+                snapshot: tuple[object, ...] = ()
+                if callable(registry_getter):
+                    registry = registry_getter(session_id)
+                    if registry is not None:
+                        snapshot = registry.snapshot()
+                message = build_attribution_repair_message(result, snapshot)
+            overlay["shouldBlock"] = True
+            overlay["degrade"] = False
+            overlay["kind"] = plan.kind
+            overlay["inducedSearch"] = bool(plan.induced_search)
+            overlay["message"] = message
+            overlay["continueRepair"] = attempt_count < max_attempts
+            return overlay
+        except Exception:
+            return None
 
     def _emit_citation_verdict_record(
-        self, *, session_id: str, turn_id: str, result: object
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        result: object,
+        repair_attempts: int = 0,
+        induced_search: bool = False,
+        fail_open: bool = False,
+        verdict_override: str | None = None,
     ) -> None:
         """Emit the ``custom:CitationVerdict`` record (design Section 8).
 
-        In Wave 4a (audit) ``repairAttempts``/``inducedSearch``/``failOpen`` are
-        fixed 0/False; Wave 4b sets them. Durably persisted + gate-readable via
-        ``record_audit_evidence_for_turn``. The Audit tab currently projects the
-        terminal render verdict; switching it to read THIS backend verdict is the
-        Wave 4b/UI step (see apps/web audit-panel.tsx wave-4 note)."""
+        ``repair_attempts`` / ``induced_search`` / ``fail_open`` are set by the
+        Wave 4b repair path (0 / False / False on the audit path). A
+        ``verdict_override`` lets the repair path record a degraded advisory
+        verdict (e.g. ``uncited`` when induce-search is unavailable). Durably
+        persisted + gate-readable via ``record_audit_evidence_for_turn``; the
+        Audit tab reads THIS backend verdict (design 12.1)."""
         try:
             import time  # noqa: PLC0415
 
@@ -1259,6 +1420,7 @@ class MagiEngineDriver:
             collector = self.local_tool_evidence_collector
             if collector is None:
                 return
+            verdict = verdict_override or result.verdict
             record = EvidenceRecord.model_validate(
                 {
                     "type": "custom:CitationVerdict",
@@ -1266,13 +1428,13 @@ class MagiEngineDriver:
                     "observedAt": int(time.time() * 1000),
                     "source": {"kind": "custom_extractor"},
                     "fields": {
-                        "verdict": result.verdict,
+                        "verdict": verdict,
                         "highRiskClaims": len(result.high_risk_claims),
                         "citedClaims": result.cited_claims,
                         "danglingRefs": list(result.dangling_refs),
-                        "repairAttempts": 0,
-                        "inducedSearch": False,
-                        "failOpen": False,
+                        "repairAttempts": int(repair_attempts),
+                        "inducedSearch": bool(induced_search),
+                        "failOpen": bool(fail_open),
                     },
                     "metadata": {
                         "producingRuleId": "source_citation.gate",
@@ -2941,6 +3103,12 @@ class MagiEngineDriver:
         # buffered answer, so the suffix invariant fails. Track suppression and
         # skip the soft branch when it has happened.
         repair_output_suppressed = False
+        # Wave 4b source-citation repair tracking. These stay inert (0/False)
+        # unless the shared loop drives a citation repair, so the OFF path and
+        # the coding-repair path are byte-identical.
+        citation_repair_attempts = 0
+        citation_induced_search = False
+        citation_record_emitted = False
         while True:
             pre_final_gate = self._pre_final_gate_payload(
                 session_id=session_id,
@@ -2977,13 +3145,67 @@ class MagiEngineDriver:
 
             repair_decision = pre_final_gate.get("repairDecision")
             repair_policy = pre_final_gate.get("repairPolicy")
+            is_citation_repair = (
+                isinstance(repair_policy, Mapping)
+                and repair_policy.get("source") == "source-citation"
+            )
             should_repair = (
                 isinstance(repair_decision, Mapping)
                 and repair_decision.get("action") == "continue_repair"
                 and isinstance(repair_policy, Mapping)
-                and _coding_repair_loop_enabled()
+                and (_coding_repair_loop_enabled() or is_citation_repair)
             )
             if not should_repair:
+                # Wave 4b: citation repair budget exhausted -> FAIL-OPEN. The
+                # already-streamed answer stands; emit the CitationVerdict record
+                # with failOpen=true and append the deterministic one-line hedge
+                # notice (soft-append precedent). The turn always completes.
+                citation_repair = pre_final_gate.get("citationRepair")
+                if isinstance(citation_repair, Mapping) and citation_repair.get("kind"):
+                    final_result = self._evaluate_citation_gate_for_turn(
+                        session_id=session_id,
+                        turn_id=turn_id,
+                        prompt=prompt,
+                        final_text=emitted_text,
+                    )
+                    self._emit_citation_verdict_record(
+                        session_id=session_id,
+                        turn_id=turn_id,
+                        result=final_result,
+                        repair_attempts=citation_repair_attempts,
+                        induced_search=citation_induced_search,
+                        fail_open=True,
+                    )
+                    citation_record_emitted = True
+                    if not repair_output_suppressed:
+                        yield RuntimeEvent(
+                            type="status",
+                            payload={
+                                "type": "source_citation_fail_open",
+                                "turnId": turn_id,
+                                "repairAttempts": citation_repair_attempts,
+                                "inducedSearch": citation_induced_search,
+                            },
+                            turn_id=turn_id,
+                        )
+                        notice = str(citation_repair.get("failOpenNotice") or "")
+                        if notice:
+                            yield RuntimeEvent(
+                                type="token",
+                                payload={
+                                    "type": "text_delta",
+                                    "delta": "\n\n" + notice,
+                                },
+                                turn_id=turn_id,
+                            )
+                    yield EngineResult(  # type: ignore[misc]
+                        terminal=Terminal.completed,
+                        usage=usage,
+                        cost_usd=0.0,
+                        session_id=session_id,
+                        turn_id=turn_id,
+                    )
+                    return
                 # WS6 PR6a/PR6b: convert the hard pre-final refuse into a SOFT
                 # appended notice (research-governance notice OR evidence hedge,
                 # one seam two reason families) when an in-scope research/contract
@@ -3043,8 +3265,19 @@ class MagiEngineDriver:
                 for ref in pre_final_gate.get("missingValidators") or []
                 if isinstance(ref, str)
             ]
+            citation_repair = pre_final_gate.get("citationRepair")
+            citation_repair_message = (
+                str(citation_repair["message"])
+                if isinstance(citation_repair, Mapping)
+                and citation_repair.get("message")
+                else None
+            )
             retry_payload = {
-                "type": "coding_repair_retry_scheduled",
+                "type": (
+                    "source_citation_repair_scheduled"
+                    if citation_repair_message is not None
+                    else "coding_repair_retry_scheduled"
+                ),
                 "turnId": turn_id,
                 "attempt": next_repair_attempt,
                 "maxAttempts": max_repair_attempts,
@@ -3053,12 +3286,22 @@ class MagiEngineDriver:
             }
             yield RuntimeEvent(type="status", payload=retry_payload, turn_id=turn_id)
 
-            repair_message = _build_repair_continuation_message(
-                missing_evidence=missing_evidence,
-                missing_validators=missing_validators,
-                attempt=next_repair_attempt,
-                max_attempts=max_repair_attempts,
-            )
+            if citation_repair_message is not None:
+                # Wave 4b: attribution / induce-search repair instruction (the
+                # citationRepair message replaces the coding continuation text).
+                repair_message = citation_repair_message
+                citation_repair_attempts = next_repair_attempt
+                if isinstance(citation_repair, Mapping) and citation_repair.get(
+                    "inducedSearch"
+                ):
+                    citation_induced_search = True
+            else:
+                repair_message = _build_repair_continuation_message(
+                    missing_evidence=missing_evidence,
+                    missing_validators=missing_validators,
+                    attempt=next_repair_attempt,
+                    max_attempts=max_repair_attempts,
+                )
             runner_input = runner_turn_input_cls(
                 userId=self._user_id,
                 sessionId=session_id,
@@ -3252,6 +3495,28 @@ class MagiEngineDriver:
                 },
                 turn_id=turn_id,
             )
+
+        # Wave 4b: emit the single per-turn source-citation verdict record for a
+        # repair-mode turn that reached normal completion (clean/cited,
+        # advisory-degrade, or a successful repair). The fail-open branch already
+        # emitted its own record; audit mode emits before the loop. Re-evaluate
+        # on the FINAL emitted_text so a successful repair records `cited`.
+        if not citation_record_emitted and self._citation_repair_active():
+            final_citation_result = self._evaluate_citation_gate_for_turn(
+                session_id=session_id,
+                turn_id=turn_id,
+                prompt=prompt,
+                final_text=emitted_text,
+            )
+            if final_citation_result is not None:
+                self._emit_citation_verdict_record(
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    result=final_citation_result,
+                    repair_attempts=citation_repair_attempts,
+                    induced_search=citation_induced_search,
+                    fail_open=False,
+                )
 
         yield EngineResult(  # type: ignore[misc]
             terminal=Terminal.completed,
@@ -4088,6 +4353,74 @@ class MagiEngineDriver:
             turn_id=turn_id,
         )
 
+    def _citation_only_gate_payload(
+        self, overlay: dict[str, object] | None, turn_id: str
+    ) -> dict[str, object] | None:
+        """A citation-only pre-final block payload for turns with no coding gate.
+
+        Returns None unless the overlay actually warrants a block, so a plain
+        chat turn with no coding assembly and no citation violation stays a
+        byte-identical no-op (the loop breaks and finalization emits the record).
+        """
+        if not (isinstance(overlay, Mapping) and overlay.get("shouldBlock")):
+            return None
+        max_attempts = int(overlay.get("maxAttempts", 2) or 2)
+        continue_repair = bool(overlay.get("continueRepair"))
+        payload: dict[str, object] = {
+            "type": "pre_final_evidence_gate",
+            "turnId": turn_id,
+            "decision": "block",
+            "matchedRefs": [],
+            "missingEvidence": [],
+            "missingValidators": [],
+            "missingEvidenceAction": "repair_required",
+            "repairPolicy": {
+                "action": "repair_required",
+                "maxAttempts": max_attempts,
+                "source": "source-citation",
+            },
+            "attachmentFlags": {},
+            "citationRepair": {
+                "kind": overlay.get("kind"),
+                "message": overlay.get("message"),
+                "inducedSearch": bool(overlay.get("inducedSearch")),
+                "maxAttempts": max_attempts,
+                "failOpenNotice": overlay.get("failOpenNotice"),
+            },
+            "repairDecision": {
+                "action": "continue_repair" if continue_repair else "abstain",
+            },
+            "verifierBus": _build_pre_final_verifier_bus_payload(
+                decision="block", missing_evidence=[], missing_validators=[]
+            ),
+        }
+        return payload
+
+    def _overlay_citation_block(
+        self,
+        payload: dict[str, object],
+        overlay: dict[str, object] | None,
+        turn_id: str,
+    ) -> dict[str, object]:
+        """Overlay a citation block onto a coding gate payload that would PASS.
+
+        Coding precedence: when the coding gate already blocks, citation defers
+        (it re-evaluates on the next turn); it only overlays a citation repair
+        onto an otherwise-passing coding decision. Byte-identical when the
+        overlay does not warrant a block.
+        """
+        if not (isinstance(overlay, Mapping) and overlay.get("shouldBlock")):
+            return payload
+        if payload.get("decision") == "block":
+            return payload
+        citation_payload = self._citation_only_gate_payload(overlay, turn_id)
+        if citation_payload is None:
+            return payload
+        # Preserve any refs the coding pass already matched for observability.
+        citation_payload["matchedRefs"] = payload.get("matchedRefs", [])
+        citation_payload["attachmentFlags"] = payload.get("attachmentFlags", {})
+        return citation_payload
+
     def _pre_final_gate_payload(
         self,
         *,
@@ -4101,9 +4434,16 @@ class MagiEngineDriver:
         final_text: str = "",
         live_selected_pack_ids: tuple[str, ...] = (),
     ) -> dict[str, object] | None:
+        citation_overlay = self._citation_repair_overlay(
+            session_id=session_id,
+            turn_id=turn_id,
+            prompt=prompt,
+            final_text=final_text,
+            attempt_count=repair_attempt_count,
+        )
         assembly = self._runner_policy_assembly
         if assembly is None:
-            return None
+            return self._citation_only_gate_payload(citation_overlay, turn_id)
         if not _pre_final_gate_applies(
             assembly=assembly,
             prompt=prompt,
@@ -4111,7 +4451,7 @@ class MagiEngineDriver:
             coding_mutation_observed=coding_mutation_observed,
             live_selected_pack_ids=live_selected_pack_ids,
         ):
-            return None
+            return self._citation_only_gate_payload(citation_overlay, turn_id)
         # Union live-selected recipe obligations into the baseline gate requirements.
         # Fail-open: any error resolving the registry keeps extra_* as () so the
         # effective sets equal the baseline (byte-identical OFF-path behavior).
@@ -4386,6 +4726,9 @@ class MagiEngineDriver:
                 latest_test_evidence=latest_test_evidence,
                 is_coding_turn=is_coding_turn,
             )
+        # Overlay a citation repair only when the coding gate did NOT block
+        # (coding precedence); byte-identical when citation warrants no block.
+        payload = self._overlay_citation_block(payload, citation_overlay, turn_id)
         return payload
 
     def _ga_deliverable_missing_labels(
