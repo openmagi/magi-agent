@@ -54,7 +54,39 @@ const SOURCE_KINDS = new Set<InspectedSourceKind>([
   "external_repo",
   "external_doc",
   "subagent_result",
+  // "clock" is a Python SourceLedgerKind but the capture classifier
+  // (citation_capture.py) never registers a clock source into the citation
+  // registry, so it should never reach this payload. It is listed here
+  // defensively so an unexpected clock source renders with its own label
+  // instead of silently normalizing to "external_doc".
+  "clock",
 ]);
+
+/**
+ * Scheme allowlist for a source uri rendered as a clickable ``href``.
+ *
+ * Source uris are model/tool derived and can, when research runs over
+ * untrusted web content, carry a ``javascript:`` or ``data:`` scheme. Those
+ * must never become a clickable anchor (an XSS sink). Only these schemes are
+ * safe to expose as a real link; everything else is shown as inert text.
+ */
+const _SAFE_CITATION_HREF_SCHEMES = new Set<string>(["http:", "https:", "mailto:"]);
+
+/**
+ * Return ``uri`` when it is safe to use as an anchor ``href`` (http/https/mailto
+ * scheme), otherwise ``null``. Callers render the ``null`` case as plain text so
+ * a ``javascript:``/``data:`` uri never becomes a clickable link. Parsing is
+ * done with ``new URL`` in a try/catch: an unparseable uri is treated as unsafe.
+ */
+export function safeCitationHref(uri: string): string | null {
+  if (!uri || typeof uri !== "string") return null;
+  try {
+    const parsed = new URL(uri);
+    return _SAFE_CITATION_HREF_SCHEMES.has(parsed.protocol) ? uri : null;
+  } catch {
+    return null;
+  }
+}
 const VERDICTS = new Set<CitationVerdict>([
   "cited",
   "partial",
@@ -132,6 +164,16 @@ export function parseCitationsPayload(raw: unknown): CitationsPayload | null {
  * First-appearance ``src_N -> n`` map computed from raw text. Used for the
  * OPTIMISTIC streaming path before the terminal payload arrives. Only canonical
  * ``src_N`` refs participate (mirrors the Python marker extraction).
+ *
+ * INTENTIONAL TRANSIENT: this optimistic path numbers EVERY canonical ``src_N``
+ * by first appearance, including refs that will turn out to be dangling. The
+ * final payload (see ``buildCitationIndex`` with a payload) numbers ONLY the
+ * resolvable refs. So when a dangling ref appears BEFORE a resolvable one, the
+ * survivor's optimistic ``[n]`` is one higher than its finalized ``[n]`` and it
+ * shifts down when the terminal payload lands. This is a brief, self-healing
+ * streaming artifact (the dangling ref also de-chips on finalize), not a bug;
+ * the finalized numbering from the payload is always authoritative. Locked by
+ * the dangling-precedes-survivor test in citation-markers.test.ts.
  */
 export function computeOptimisticMarkers(text: string): Map<string, number> {
   const map = new Map<string, number>();

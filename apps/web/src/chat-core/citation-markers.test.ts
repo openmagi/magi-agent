@@ -13,6 +13,7 @@ import {
   computeOptimisticMarkers,
   hasCanonicalCitationRef,
   parseCitationsPayload,
+  safeCitationHref,
   splitCitationTokens,
 } from "./citation-markers";
 import type { CitationsPayload } from "./types";
@@ -82,6 +83,57 @@ describe("buildCitationIndex", () => {
     const finalized = buildCitationIndex(payload, text);
     expect(optimistic.displayIndexFor("src_3")).toBe(finalized.displayIndexFor("src_3"));
     expect(optimistic.displayIndexFor("src_7")).toBe(finalized.displayIndexFor("src_7"));
+  });
+
+  it("renumbers the survivor down when a dangling ref precedes it (intentional transient)", () => {
+    // Dangling src_9 appears BEFORE resolvable src_3. Optimistically both are
+    // numbered by first appearance (src_9 -> 1, src_3 -> 2), but the terminal
+    // payload numbers only the resolvable ref, so src_3 finalizes to [1]. This
+    // documents/locks the self-healing shift: the finalized index is [1], not
+    // the optimistic [2].
+    const text = "see [src_9] and also [src_3]";
+    const finalPayload: CitationsPayload = {
+      markers: [["src_3", 1]],
+      sources: [
+        {
+          n: 1,
+          sourceId: "src_3",
+          uri: "https://sec.gov/tesla",
+          title: "Tesla 10-Q",
+          kind: "web_fetch",
+          trustTier: "official",
+          inspected: true,
+        },
+      ],
+      danglingRefs: ["src_9"],
+      verdict: "partial",
+    };
+    const optimistic = buildCitationIndex(null, text);
+    expect(optimistic.displayIndexFor("src_9")).toBe(1);
+    expect(optimistic.displayIndexFor("src_3")).toBe(2);
+
+    const finalized = buildCitationIndex(finalPayload, text);
+    expect(finalized.displayIndexFor("src_3")).toBe(1);
+    expect(finalized.isDangling("src_9")).toBe(true);
+    expect(finalized.displayIndexFor("src_9")).toBeNull();
+  });
+});
+
+describe("safeCitationHref", () => {
+  it("returns the uri for http/https/mailto schemes", () => {
+    expect(safeCitationHref("https://sec.gov/tesla")).toBe("https://sec.gov/tesla");
+    expect(safeCitationHref("http://example.com/x")).toBe("http://example.com/x");
+    expect(safeCitationHref("mailto:analyst@example.com")).toBe(
+      "mailto:analyst@example.com",
+    );
+  });
+
+  it("rejects javascript:/data: and unparseable uris (XSS guard)", () => {
+    expect(safeCitationHref("javascript:alert(1)")).toBeNull();
+    expect(safeCitationHref("data:text/html,<script>alert(1)</script>")).toBeNull();
+    expect(safeCitationHref("file:///etc/passwd")).toBeNull();
+    expect(safeCitationHref("not a url")).toBeNull();
+    expect(safeCitationHref("")).toBeNull();
   });
 });
 

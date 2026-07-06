@@ -5,6 +5,7 @@ import {
   CITATION_FOCUS_EVENT,
   emitCitationFocus,
   readCitationFocusEvent,
+  safeCitationHref,
 } from "@/chat-core";
 import type { CitationSourceEntry, CitationsPayload } from "@/chat-core";
 
@@ -84,6 +85,10 @@ function SourceRow({
 }): React.ReactElement {
   const host = sourceHost(entry.uri);
   const tier = entry.trustTier;
+  // Only http/https/mailto uris become a clickable anchor. A model/tool derived
+  // uri carrying a javascript:/data: scheme (plausible when research runs over
+  // untrusted web content) is rendered as inert text, never a live href.
+  const safeHref = entry.uri ? safeCitationHref(entry.uri) : null;
   return (
     <li
       ref={(node) => registerRef(entry.sourceId, node)}
@@ -132,14 +137,23 @@ function SourceRow({
       </button>
       {entry.uri && (
         <div className="mt-1 pl-6">
-          <a
-            href={entry.uri}
-            target="_blank"
-            rel="noreferrer"
-            className="text-[10px] text-[var(--color-accent)] underline-offset-2 hover:underline"
-          >
-            Open source
-          </a>
+          {safeHref ? (
+            <a
+              href={safeHref}
+              target="_blank"
+              rel="noreferrer"
+              className="text-[10px] text-[var(--color-accent)] underline-offset-2 hover:underline"
+            >
+              Open source
+            </a>
+          ) : (
+            <span
+              className="block break-all text-[10px] text-secondary/50"
+              title={entry.uri}
+            >
+              {entry.uri}
+            </span>
+          )}
         </div>
       )}
     </li>

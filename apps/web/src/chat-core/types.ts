@@ -215,7 +215,11 @@ export type InspectedSourceKind =
   | "file"
   | "external_repo"
   | "external_doc"
-  | "subagent_result";
+  | "subagent_result"
+  // Defensive: the Python capture classifier never emits "clock" into a
+  // citations payload, but the shared SourceLedgerKind includes it, so the
+  // display kind mirrors it to avoid a silent "external_doc" mislabel.
+  | "clock";
 
 export interface InspectedSource {
   sourceId: string;

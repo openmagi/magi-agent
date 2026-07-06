@@ -66,4 +66,52 @@ describe("SourcesPanel", () => {
     const html = renderToStaticMarkup(<SourcesPanel sessionCitations={groups} />);
     expect(html).toContain("No sources cited yet.");
   });
+
+  it("renders an https source uri as a clickable anchor", () => {
+    const groups: SessionCitationGroup[] = [
+      {
+        messageId: "m1",
+        citations: payload([
+          {
+            n: 1,
+            sourceId: "src_1",
+            uri: "https://sec.gov/tesla",
+            title: "Tesla 10-Q",
+            kind: "web_fetch",
+            trustTier: "official",
+            inspected: true,
+          },
+        ]),
+      },
+    ];
+    const html = renderToStaticMarkup(<SourcesPanel sessionCitations={groups} />);
+    expect(html).toContain('href="https://sec.gov/tesla"');
+    expect(html).toContain("Open source");
+  });
+
+  it("renders a javascript: source uri as inert text, never an anchor (XSS guard)", () => {
+    const groups: SessionCitationGroup[] = [
+      {
+        messageId: "m1",
+        citations: payload([
+          {
+            n: 1,
+            sourceId: "src_1",
+            // eslint-disable-next-line no-script-url
+            uri: "javascript:alert(1)",
+            title: "poisoned source",
+            kind: "web_fetch",
+            trustTier: "secondary",
+            inspected: true,
+          },
+        ]),
+      },
+    ];
+    const html = renderToStaticMarkup(<SourcesPanel sessionCitations={groups} />);
+    // No anchor and no javascript: href is emitted for the unsafe uri.
+    expect(html).not.toContain('href="javascript:alert(1)"');
+    expect(html).not.toContain("Open source");
+    // The uri is shown as plain text so it stays visible but inert.
+    expect(html).toContain("javascript:alert(1)");
+  });
 });

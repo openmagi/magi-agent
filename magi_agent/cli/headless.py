@@ -1552,8 +1552,18 @@ def _headless_citations(
         from magi_agent.evidence.citation_render import (  # noqa: PLC0415
             citations_payload_for,
         )
+        # Route the headless payload through the SAME secret-marker scrub the SSE
+        # terminal frame uses (streaming_chat._scrub_citations), so a private-text
+        # marker in a uri/title is redacted on the headless NDJSON result frame
+        # AND the text-mode Sources footer (which is built from this payload).
+        from magi_agent.transport.streaming_chat import (  # noqa: PLC0415
+            _scrub_citations,
+        )
 
-        return citations_payload_for(assistant_text, registry)
+        payload = citations_payload_for(assistant_text, registry)
+        if payload is None:
+            return None
+        return _scrub_citations(payload)
     except Exception:
         return None
 
