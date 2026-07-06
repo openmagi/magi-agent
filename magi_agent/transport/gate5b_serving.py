@@ -37,7 +37,11 @@ from magi_agent.recipes.materializer import RecipeMaterializer
 from magi_agent.research.research_first_canary import build_research_first_selected_response, research_first_selected_canary_active
 from magi_agent.runtime.goal_loop_policy import build_goal_loop_policy_from_request
 from magi_agent.runtime.governed_turn import run_governed_turn
-from magi_agent.runtime.hosted_runtime import build_hosted_runtime
+from magi_agent.runtime.hosted_runtime import (
+    GATE5B_SHADOW_APP_NAME,
+    GATE5B_SHADOW_USER_ID,
+    build_hosted_runtime,
+)
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 from magi_agent.runtime.per_turn_goal_intensity import (
     reset_per_turn_goal_mission,
@@ -658,7 +662,8 @@ async def _run_live_chat_runner(
                     generate_content_config=generate_content_config,
                     control_plane_plugins=control_plane_plugins,
                     public_event_sink=governance_event_sink,
-                    app_name="openmagi-hosted-governed-turn",
+                    app_name=GATE5B_SHADOW_APP_NAME,
+                    user_id=GATE5B_SHADOW_USER_ID,
                     session_service=governed_session_service,
                 )
                 # 5. Build TurnContext (PR2).

@@ -26,6 +26,19 @@ from magi_agent.engine.driver import MagiEngineDriver
 
 
 # ---------------------------------------------------------------------------
+# Legacy gate5b4c3 session-identity constants
+#
+# The durable ADK session service keys rows by (app_name, user_id, session_id).
+# To preserve history across flag flips (governed-turn ON/OFF), the governed
+# path must adopt the same app_name and user_id as the legacy boundary.
+# The session_id is already shared via _shadow_session_id and is NOT changed.
+# ---------------------------------------------------------------------------
+
+GATE5B_SHADOW_APP_NAME: str = "openmagi-gate5b4c3-shadow-generation"
+GATE5B_SHADOW_USER_ID: str = "gate5b4c3-shadow-user"
+
+
+# ---------------------------------------------------------------------------
 # No-op gate (hosted enforcement is at the pod / egress level)
 # ---------------------------------------------------------------------------
 
@@ -86,6 +99,7 @@ def build_hosted_runtime(
     public_event_sink: object | None = None,
     app_name: str = "openmagi-hosted-governed-turn",
     session_service: object | None = None,
+    user_id: str = "cli",
 ) -> HostedRuntime:
     """Assemble a ``HostedRuntime`` from caller-provided ADK primitives.
 
@@ -117,10 +131,17 @@ def build_hosted_runtime(
         Optional event sink forwarded to ``MagiEngineDriver(event_sink=…)``.
     app_name:
         ADK runner app name (default: ``"openmagi-hosted-governed-turn"``).
+        Pass ``GATE5B_SHADOW_APP_NAME`` to adopt the legacy identity so the
+        governed path reads/writes the same session rows as the gate5b4c3
+        boundary (zero-migration flip-forward / flip-back parity, B6).
     session_service:
         Optional pre-built session service.  When ``None`` (default),
         ``primitives.InMemorySessionService()`` is used (PR1 inline;
         per-bot session-reuse pool from gate5b4c3 is out of scope until PR2).
+    user_id:
+        ADK user_id stamped on the engine driver and forwarded to
+        ``runner.run_async(user_id=...)`` (default: ``"cli"``).
+        Pass ``GATE5B_SHADOW_USER_ID`` to adopt the legacy identity (B6).
 
     Returns
     -------
@@ -157,10 +178,13 @@ def build_hosted_runtime(
 
     # Build engine with HOSTED_PROFILE so the bridge emits the gate5b4c3
     # wire shape (tu_<hash> tool ids, public_events field shapes).
+    # user_id is forwarded so runner.run_async receives the correct ADK
+    # identity (B6: governed path must match the legacy boundary identity).
     engine = MagiEngineDriver(
         runner=runner,
         event_sink=public_event_sink,
         wire_profile=HOSTED_PROFILE,
+        user_id=user_id,
     )
 
     return HostedRuntime(engine=engine, gate=_HOSTED_NOOP_GATE)
