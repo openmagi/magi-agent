@@ -687,6 +687,26 @@ def _selected_stream_event_key(payload: Mapping[str, object]) -> str | None:
     return json.dumps(dict(payload), sort_keys=True, default=str)
 
 
+# PR-4: strong references to hosted turns that outlived their SSE socket. The
+# event loop only holds a weak reference to a bare task, so a detached turn with
+# no other referent could be garbage-collected mid-flight ("Task was destroyed
+# but it is pending"). Keep it alive until it finishes, then drop the reference.
+_DETACHED_SELECTED_TURN_TASKS: set[asyncio.Task[object]] = set()
+
+
+def _detach_selected_turn_task(task: asyncio.Task[object]) -> None:
+    """Let an in-flight hosted turn run to completion after its reader is gone.
+
+    Hosted analogue of the local detach (#1326): the SSE generator's lifetime is
+    tied to the browser socket, so a refresh / disconnect closes the generator
+    and would otherwise cancel the turn mid-completion, losing its durable ADK
+    session events and terminal record. Detaching keeps the turn running (bounded
+    by the runner timeout); only the explicit interrupt route cancels a turn.
+    """
+    _DETACHED_SELECTED_TURN_TASKS.add(task)
+    task.add_done_callback(_DETACHED_SELECTED_TURN_TASKS.discard)
+
+
 async def _drive_selected_gate5b_stream(
     runtime: object,
     body: object,
@@ -797,12 +817,16 @@ async def _drive_selected_gate5b_stream(
             yield chunk
         return
     finally:
+        # PR-4 pod-side detach: if the SSE generator is torn down (browser
+        # refresh / disconnect closes it, or an upstream error path returned)
+        # while the turn is still running, DO NOT cancel it. Cancelling here
+        # would kill the hosted turn mid-completion and lose its durable ADK
+        # session events + turn_end, which is one leg of the multi-turn memory
+        # loss. Detach instead so the turn finalizes durable state even with no
+        # reader; the explicit interrupt route (/v1/chat/cancel -> ACTIVE_TURNS
+        # cooperative cancel) remains the only path that stops a turn early.
         if not response_task.done():
-            response_task.cancel()
-            try:
-                await response_task
-            except (asyncio.CancelledError, Exception):
-                pass
+            _detach_selected_turn_task(response_task)
 
     if response.status_code == 200 and payload.get("status") == "python_ready":
         public_events = payload.get("publicEvents")

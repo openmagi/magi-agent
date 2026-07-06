@@ -568,6 +568,74 @@ def test_selected_full_toolhost_same_content_without_turn_identity_both_respond(
     assert "counter_duplicate_replay" not in second.text
 
 
+def test_selected_gate5b_stream_detaches_turn_when_socket_closes_midturn(
+    monkeypatch,
+) -> None:
+    """PR-4 (hosted analogue of #1326): closing the SSE generator mid-turn (a
+    browser refresh / disconnect) must NOT cancel the in-flight hosted turn. The
+    turn runs to completion in the background so its durable ADK session events
+    and turn_end are finalized even though no reader remains."""
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    release_response = asyncio.Event()
+    completed = asyncio.Event()
+    cancelled = {"value": False}
+
+    async def fake_selected_chat_response(
+        runtime: object,
+        body: object,
+        *,
+        request: object,
+        public_event_sink=None,
+    ) -> JSONResponse:
+        assert public_event_sink is not None
+        public_event_sink({"type": "text_delta", "delta": "early live chunk"})
+        try:
+            await release_response.wait()
+        except asyncio.CancelledError:
+            cancelled["value"] = True
+            raise
+        completed.set()
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "python_ready",
+                "choices": [
+                    {"message": {"role": "assistant", "content": "final answer"}}
+                ],
+            },
+        )
+
+    monkeypatch.setattr(
+        streaming_chat_route_module,
+        "run_gate5b_user_visible_chat_response",
+        fake_selected_chat_response,
+    )
+
+    async def _run() -> None:
+        frames = _drive_selected_gate5b_stream(
+            SimpleNamespace(),
+            {"messages": [{"role": "user", "content": "stream selected"}]},
+            SimpleNamespace(),
+            session_id="s-detach",
+            turn_id="t-detach",
+        )
+        # Consume the first live frame so the response task is running and parked
+        # on ``release_response`` (mid-turn), then close the generator to simulate
+        # a browser disconnect while the turn is still in flight.
+        first_frame = await asyncio.wait_for(anext(frames), timeout=1)
+        assert _data_lines(first_frame.decode("utf-8"))[0]["type"] == "text_delta"
+        await frames.aclose()
+        # Detach contract: the turn is NOT cancelled by the socket teardown.
+        # Release it and assert it runs to completion in the background.
+        release_response.set()
+        await asyncio.wait_for(completed.wait(), timeout=1)
+
+    asyncio.run(_run())
+
+    assert completed.is_set() is True
+    assert cancelled["value"] is False
+
+
 def test_selected_gate5b_stream_emits_live_sink_events_before_completion(
     monkeypatch,
 ) -> None:
@@ -1288,11 +1356,17 @@ def test_selected_gate5b_stream_skips_posthoc_text_after_live_text(
     assert payloads[-1]["terminal"] == "completed"
 
 
-def test_selected_gate5b_stream_cancels_response_task_when_client_closes(
+def test_selected_gate5b_stream_tracks_detached_turn_when_client_closes(
     monkeypatch,
 ) -> None:
+    """PR-4 replacement for the old cancel-on-close test: when the client closes
+    the SSE generator mid-turn, the in-flight response task is DETACHED (tracked
+    in the keeper set so it is not garbage-collected) and NOT cancelled, so it
+    runs to completion and finalizes durable state."""
     monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
-    cancelled = asyncio.Event()
+    release = asyncio.Event()
+    cancelled = {"value": False}
+    finished = asyncio.Event()
 
     async def fake_selected_chat_response(
         runtime: object,
@@ -1304,10 +1378,12 @@ def test_selected_gate5b_stream_cancels_response_task_when_client_closes(
         assert public_event_sink is not None
         public_event_sink({"type": "text_delta", "delta": "first chunk"})
         try:
-            await asyncio.Event().wait()
+            await release.wait()
         except asyncio.CancelledError:
-            cancelled.set()
+            cancelled["value"] = True
             raise
+        finished.set()
+        return JSONResponse(status_code=200, content={"status": "python_ready"})
 
     monkeypatch.setattr(
         streaming_chat_route_module,
@@ -1315,7 +1391,7 @@ def test_selected_gate5b_stream_cancels_response_task_when_client_closes(
         fake_selected_chat_response,
     )
 
-    async def _run() -> bool:
+    async def _run() -> None:
         frames = _drive_selected_gate5b_stream(
             SimpleNamespace(),
             {"messages": [{"role": "user", "content": "stream selected"}]},
@@ -1324,13 +1400,21 @@ def test_selected_gate5b_stream_cancels_response_task_when_client_closes(
             turn_id="t-selected-close",
         )
         first_frame = await asyncio.wait_for(anext(frames), timeout=1)
-        first_payloads = _data_lines(first_frame.decode("utf-8"))
-        assert first_payloads[0]["delta"] == "first chunk"
+        assert _data_lines(first_frame.decode("utf-8"))[0]["delta"] == "first chunk"
         await frames.aclose()
-        await asyncio.wait_for(cancelled.wait(), timeout=1)
-        return cancelled.is_set()
+        # Detached: the still-running turn is tracked (strong ref) so the loop
+        # cannot GC it mid-flight, and it has NOT been cancelled.
+        assert len(streaming_chat_route_module._DETACHED_SELECTED_TURN_TASKS) == 1
+        release.set()
+        await asyncio.wait_for(finished.wait(), timeout=1)
+        # Done-callback drops the reference once the turn finalizes.
+        await asyncio.sleep(0)
+        assert len(streaming_chat_route_module._DETACHED_SELECTED_TURN_TASKS) == 0
 
-    assert asyncio.run(_run()) is True
+    asyncio.run(_run())
+
+    assert cancelled["value"] is False
+    assert finished.is_set() is True
 
 
 def test_selected_stream_failure_does_not_fall_back_to_headless_success(
