@@ -32,6 +32,13 @@ from dataclasses import dataclass
 #: per deployment via ``MAGI_GOAL_LOOP_MAX_TURNS``.
 DEFAULT_GOAL_LOOP_MAX_TURNS = 20
 
+#: Default upper bound on clean-break re-invocations for the AMBIENT (toggle-off)
+#: goal loop, applied to the no-ledger objective-aware judge path only. Kept
+#: small and distinct from the mission ceiling because ambient continuation is
+#: the finish-the-job baseline, not an explicit "keep going" mission. Tunable per
+#: deployment via ``MAGI_GOAL_LOOP_AMBIENT_MAX_TURNS``.
+DEFAULT_AMBIENT_GOAL_LOOP_MAX_TURNS = 3
+
 #: Default number of judge JSON-parse failures tolerated before the engine
 #: terminates the goal mission (fail-CLOSED — we do not loop forever on a
 #: broken judge model). Mirrors Hermes' bounded fallback.
@@ -49,6 +56,7 @@ DEFAULT_CONTINUATION_TEMPLATE = (
 )
 
 _GOAL_LOOP_MAX_TURNS_ENV = "MAGI_GOAL_LOOP_MAX_TURNS"
+_AMBIENT_GOAL_LOOP_MAX_TURNS_ENV = "MAGI_GOAL_LOOP_AMBIENT_MAX_TURNS"
 _GOAL_LOOP_JUDGE_PROVIDER_ENV = "MAGI_GOAL_LOOP_JUDGE_PROVIDER"
 _GOAL_LOOP_JUDGE_MODEL_ENV = "MAGI_GOAL_LOOP_JUDGE_MODEL"
 _GOAL_LOOP_JUDGE_PARSE_FAILURES_BUDGET_ENV = (
@@ -100,6 +108,22 @@ def _parse_max_turns(raw: object) -> int:
         return DEFAULT_GOAL_LOOP_MAX_TURNS
     if parsed <= 0:
         return DEFAULT_GOAL_LOOP_MAX_TURNS
+    return parsed
+
+
+def _parse_ambient_max_turns(raw: object) -> int:
+    # Byte-for-byte the same validation/clamp as ``_parse_max_turns`` (empty /
+    # non-str / non-int / <= 0 all fall back), the ONLY difference being the
+    # ambient default ceiling. Kept as a sibling helper rather than a shared
+    # parametrized parser so the mission builder stays untouched by this unit.
+    if not isinstance(raw, str) or not raw.strip():
+        return DEFAULT_AMBIENT_GOAL_LOOP_MAX_TURNS
+    try:
+        parsed = int(raw.strip(), 10)
+    except (TypeError, ValueError):
+        return DEFAULT_AMBIENT_GOAL_LOOP_MAX_TURNS
+    if parsed <= 0:
+        return DEFAULT_AMBIENT_GOAL_LOOP_MAX_TURNS
     return parsed
 
 
@@ -171,10 +195,65 @@ def build_goal_loop_policy_from_request(
     )
 
 
+def build_ambient_goal_loop_policy(
+    *,
+    objective: str,
+    env: Mapping[str, str],
+) -> GoalLoopPolicy | None:
+    """Construct the AMBIENT ``GoalLoopPolicy`` for a turn, or ``None`` if off.
+
+    This is the toggle-independent finish-the-job baseline: unlike
+    :func:`build_goal_loop_policy_from_request`, there is NO
+    ``goal_mode_requested`` gate — ambient is the toggle-OFF path by definition,
+    so the composer intensity toggle is never consulted here. Existence is
+    governed solely by the profile-aware master flag and the presence of a real
+    objective. Returns ``None`` (which the engine treats as "no ambient policy,
+    behave exactly as today") when:
+
+    * ``MAGI_GOAL_LOOP_ENABLED`` resolves OFF for *env* (the same profile-aware
+      master gate the mission builder uses: ON under the full/lab profile, OFF
+      under the safe-family or an explicit ``"0"``).
+    * ``objective`` is empty after trimming (a turn with no capturable user text
+      behaves exactly as today — the ledger-first SEAM 2 path still covers the
+      ledger case).
+
+    Otherwise returns a policy identical in shape to the mission policy, with the
+    SOLE difference that ``max_turns`` is the AMBIENT ceiling
+    (``MAGI_GOAL_LOOP_AMBIENT_MAX_TURNS``, default
+    ``DEFAULT_AMBIENT_GOAL_LOOP_MAX_TURNS``) rather than the mission ceiling. The
+    judge provider/model, parse-failure budget, and continuation template are
+    resolved identically to the mission builder so the two policies stay in
+    lockstep for every field except the ceiling source.
+
+    Inert until wired by a later unit (driver-side ambient synthesis); nothing
+    calls this yet.
+    """
+    from magi_agent.config.env import is_goal_loop_enabled  # noqa: PLC0415
+
+    if not is_goal_loop_enabled(env):
+        return None
+    cleaned_objective = (objective or "").strip()
+    if not cleaned_objective:
+        return None
+    return GoalLoopPolicy(
+        enabled=True,
+        objective=cleaned_objective,
+        max_turns=_parse_ambient_max_turns(env.get(_AMBIENT_GOAL_LOOP_MAX_TURNS_ENV)),
+        judge_provider=_clean_optional_str(env.get(_GOAL_LOOP_JUDGE_PROVIDER_ENV)),
+        judge_model=_clean_optional_str(env.get(_GOAL_LOOP_JUDGE_MODEL_ENV)),
+        judge_parse_failures_budget=_parse_parse_failures_budget(
+            env.get(_GOAL_LOOP_JUDGE_PARSE_FAILURES_BUDGET_ENV)
+        ),
+        continuation_template=DEFAULT_CONTINUATION_TEMPLATE,
+    )
+
+
 __all__ = [
     "DEFAULT_GOAL_LOOP_MAX_TURNS",
+    "DEFAULT_AMBIENT_GOAL_LOOP_MAX_TURNS",
     "DEFAULT_GOAL_LOOP_JUDGE_PARSE_FAILURES_BUDGET",
     "DEFAULT_CONTINUATION_TEMPLATE",
     "GoalLoopPolicy",
     "build_goal_loop_policy_from_request",
+    "build_ambient_goal_loop_policy",
 ]

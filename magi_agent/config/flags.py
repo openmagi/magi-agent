@@ -273,6 +273,23 @@ FLAGS: tuple[FlagSpec, ...] = (
             "profiles or an explicit MAGI_GOAL_LOOP_ENABLED=0."
         ),
     ),
+    FlagSpec(
+        name="MAGI_GOAL_LOOP_AMBIENT_MAX_TURNS",
+        default=3,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Ambient (toggle-off) goal-loop judge ceiling: the upper bound on "
+            "clean-break re-invocations for the finish-the-job baseline path "
+            "when no durable ledger is available. Distinct from the mission "
+            "ceiling MAGI_GOAL_LOOP_MAX_TURNS (default 20); kept small because "
+            "ambient continuation is the baseline, not an explicit mission. A "
+            "typed tunable, not a capability gate: it never adds default-OFF "
+            "semantics. Non-positive / non-integer values fall back to the "
+            "default 3."
+        ),
+        kind="int",
+    ),
     _pb(
         "MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED",
         summary=(
