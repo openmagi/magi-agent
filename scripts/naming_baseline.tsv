@@ -249,7 +249,7 @@ openmagi	magi_agent/transport/control_requests.py	3
 openmagi	magi_agent/transport/credentials.py	2
 openmagi	magi_agent/transport/customize.py	2
 openmagi	magi_agent/transport/gate2_sandbox_canary.py	13
-openmagi	magi_agent/transport/gate5b_serving.py	43
+openmagi	magi_agent/transport/gate5b_serving.py	44
 openmagi	magi_agent/transport/generation_request.py	7
 openmagi	magi_agent/transport/health.py	6
 openmagi	magi_agent/transport/integrations.py	2
