@@ -6,6 +6,7 @@ import { SHACL_EXAMPLE_TEMPLATE } from "./shacl-example-template";
 import { CustomChecksSection } from "./custom-checks-section";
 import { Modal } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
+import { Switch } from "@/components/ui/_ds";
 import type {
   ConversationTurn,
   CustomizeCatalog,
@@ -91,38 +92,6 @@ const STATIC_EVIDENCE_FIELDS = [
   "CommitCheckpoint: checkpointDigest, pathRef",
 ] as const;
 
-function Toggle({
-  checked,
-  disabled,
-  onChange,
-  label,
-}: {
-  checked: boolean;
-  disabled: boolean;
-  onChange: (next: boolean) => void;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40 ${
-        checked ? "bg-primary" : "bg-black/15"
-      }`}
-    >
-      <span
-        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-200 ${
-          checked ? "translate-x-6" : "translate-x-1"
-        }`}
-      />
-    </button>
-  );
-}
-
 function Pill({ text, tone }: { text: string; tone: "neutral" | "live" | "lock" | "preview" }) {
   const cls = {
     neutral: "bg-black/[0.05] text-secondary",
@@ -183,11 +152,12 @@ export function PresetRow({
         ) : null}
       </div>
       {togglable ? (
-        <Toggle
+        <Switch
           checked={checked}
           disabled={pending}
-          onChange={(next) => onToggle(preset.id, next)}
-          label={`Toggle preset ${preset.title}`}
+          onToggle={async (next) => onToggle(preset.id, next)}
+          labelOn={`Disable preset ${preset.title}`}
+          labelOff={`Enable preset ${preset.title}`}
         />
       ) : null}
     </div>
@@ -469,11 +439,12 @@ export function CustomRulesSection({
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <Toggle
+                <Switch
                   checked={rule.enabled}
                   disabled={busy}
-                  onChange={(next) => onToggle(rule, next)}
-                  label={`Toggle custom rule ${rule.id}`}
+                  onToggle={async (next) => onToggle(rule, next)}
+                  labelOn={`Disable custom rule ${rule.id}`}
+                  labelOff={`Enable custom rule ${rule.id}`}
                 />
                 <button
                   type="button"
