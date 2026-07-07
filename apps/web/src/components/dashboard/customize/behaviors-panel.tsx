@@ -46,7 +46,7 @@ export function BehaviorsPanel({
             return (
               <div
                 key={b.id}
-                className="flex items-start justify-between gap-4 rounded-xl border border-black/[0.06] bg-[var(--glass-regular-bg)] backdrop-blur-xl px-4 py-3"
+                className="flex items-start justify-between gap-4 rounded-xl border border-black/[0.06] bg-[var(--color-surface-raised)] px-4 py-3"
               >
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">

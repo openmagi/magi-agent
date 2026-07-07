@@ -209,7 +209,7 @@ export function SeamBuilderPanel({
             {seamSpecs.map((doc) => (
               <li
                 key={doc.id ?? Math.random().toString(36)}
-                className="rounded-xl border border-black/[0.06] bg-[var(--glass-regular-bg)] backdrop-blur-xl px-4 py-3"
+                className="rounded-xl border border-black/[0.06] bg-[var(--color-surface-raised)] px-4 py-3"
               >
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
@@ -295,7 +295,7 @@ function CompileResultView({
   const humanSummary = describeSpecActions(spec);
 
   return (
-    <section className="space-y-3 rounded-xl border border-black/[0.08] bg-[var(--glass-regular-bg)] backdrop-blur-xl px-4 py-3">
+    <section className="space-y-3 rounded-xl border border-black/[0.08] bg-[var(--color-surface-raised)] px-4 py-3">
       <div>
         <p className="text-sm font-semibold text-foreground">This spec will:</p>
         <ul className="mt-1 list-disc space-y-1 pl-5 text-xs leading-relaxed text-foreground">

@@ -206,7 +206,7 @@ export function CustomChecksSection({
           {checks.map((check) => (
             <div
               key={check.id}
-              className="flex items-center justify-between gap-3 rounded-xl border border-black/[0.06] bg-[var(--glass-regular-bg)] backdrop-blur-xl px-4 py-2.5"
+              className="flex items-center justify-between gap-3 rounded-xl border border-black/[0.06] bg-[var(--color-surface-raised)] px-4 py-2.5"
             >
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
