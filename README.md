@@ -11,6 +11,7 @@
 
 ![ci](https://github.com/openmagi/magi-agent/actions/workflows/ci.yml/badge.svg)
 ![release](https://img.shields.io/github/v/release/openmagi/magi-agent)
+![install](https://img.shields.io/badge/install-Homebrew-2563eb)
 ![license](https://img.shields.io/badge/license-Apache--2.0-111827)
 
 </div>
@@ -25,8 +26,8 @@ with any provider you bring, and is Apache-2.0.
 ## Install & quickstart
 
 ```bash
-# 1. Install (Homebrew)
-brew install openmagi/tap/magi-agent
+# 1. Install (Homebrew, prebuilt bottle)
+brew install --force-bottle openmagi/tap/magi-agent
 
 # 2. Set whichever provider key you have (auto-detected, one is enough)
 export ANTHROPIC_API_KEY=...     # or OPENAI_API_KEY / GEMINI_API_KEY (GOOGLE_API_KEY)
@@ -44,9 +45,12 @@ instead of the environment. Local runs default to `bypassPermissions`; pass
 read-only planning.
 
 Two binaries: **`magi`** is the headless / TUI CLI, **`magi-agent`** runs the
-server and local dashboard. Full setup, config resolution, flags, and runtime
-profiles: [Getting started](docs/getting-started.md) ·
-[CLI reference](docs/cli/magi.md).
+server and local dashboard. The **Local web dashboard** runs at
+http://localhost:8080/dashboard; run `magi-agent serve --help` for serve
+options. If Homebrew tries to build from source instead of using the prebuilt
+bottle, reinstall it: `brew reinstall openmagi/tap/magi-agent --force-bottle`.
+Full setup, config resolution, flags, and runtime profiles:
+[Getting started](docs/getting-started.md) · [CLI reference](docs/cli/magi.md).
 
 ## What you get today
 

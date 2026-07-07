@@ -14,7 +14,7 @@ def test_readme_uses_public_open_magi_agent_naming() -> None:
     text = _readme()
 
     assert text.startswith("<div align=\"center\">\n\n# Open Magi Agent\n")
-    assert "**The programmable AI agent that gets real work done under your rules.**" in text
+    assert "**A programmable AI agent that does real work under rules you author.**" in text
     assert "Local-first agent runtime and CLI" not in text
     assert "OpenMagi Python ADK runtime" not in text
     assert ("Cla" + "wy") not in text
