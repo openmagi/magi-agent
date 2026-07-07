@@ -3598,9 +3598,29 @@ class MagiEngineDriver:
                                 ),
                                 harnessState=effective_harness_state,
                             )
+                            # Same re-answer boundary as the auto-continue helper:
+                            # blank the prior attempt so the judge continuation
+                            # does not concatenate onto it, and reset
+                            # _turn_text_emitted (via response_clear at
+                            # event_adapter :373) so pre-answer thinking is not
+                            # over-suppressed on the continuation.
+                            yield RuntimeEvent(
+                                type=_map_event_kind("response_clear"),
+                                payload={
+                                    "type": "response_clear",
+                                    "turnId": turn_id,
+                                    "reason": "goal_loop_continuation",
+                                },
+                                turn_id=turn_id,
+                            )
+                            emitted_text = ""
                             continue  # re-invoke run_async (genuine model call)
                         # Historic (auto-continue disabled) raw continuation:
-                        # byte-identical to pre-U4.
+                        # byte-identical to pre-U4. This legacy path (auto-continue
+                        # off) is knowingly left without the response_clear boundary
+                        # to preserve the pre-U4 invariant; it is not exercised by
+                        # local ``magi serve`` (which runs auto-continue enabled via
+                        # the SEAM 2 helper above).
                         goal_loop_continuations += 1
                         yield RuntimeEvent(
                             type="status",

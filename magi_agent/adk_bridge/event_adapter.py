@@ -762,6 +762,13 @@ def _project_content_parts(
             # Only the DISPLAY emission is gated; the promotion bookkeeping above
             # (``promotable_thought_texts`` / ``saw_signed_thought``) still runs
             # for the empty-text terminal promotion fallback.
+            # Stream thinking only BEFORE the first answer text of the turn
+            # (``not text_emitted[0]``): once the answer begins, later thought
+            # parts are the interleaving artifact and must not ladder the answer
+            # with Thought blocks. Per-continuation correctness depends on
+            # ``_turn_text_emitted`` being reset on the ``response_clear`` boundary
+            # the goal-loop continuation emits (driver.py) plus the reset at :373;
+            # without it a continuation's pre-answer thinking is over-suppressed.
             if (
                 thought_text
                 and event.partial
