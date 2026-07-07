@@ -123,6 +123,13 @@ def build_hosted_runtime(
     # the durable session substrate is active, mirroring the legacy condition at
     # gate5b4c3:770-774. CLI and non-durable paths leave this as ``None``.
     num_recent_events: int | None = None,
+    # U9 (P1-1): truncated-output auto-continue config. ``None`` (default) leaves
+    # the driver's continuation path OFF, byte-identical to pre-U9. The serving
+    # call site resolves the config from env, gated on ``selected_full_toolhost``,
+    # to mirror the legacy boundary (gate5b4c3:834-836). Env is read at the call
+    # site (see ``_resolve_output_continuation_config``); this ctor stays
+    # env-pure and simply forwards the resolved object to the driver.
+    output_continuation: "object | None" = None,
 ) -> HostedRuntime:
     """Assemble a ``HostedRuntime`` from caller-provided ADK primitives.
 
@@ -209,6 +216,7 @@ def build_hosted_runtime(
         wire_profile=HOSTED_PROFILE,
         user_id=user_id,
         num_recent_events=num_recent_events,
+        output_continuation=output_continuation,
     )
 
     return HostedRuntime(engine=engine, gate=_HOSTED_NOOP_GATE)
