@@ -1723,21 +1723,23 @@ FLAGS: tuple[FlagSpec, ...] = (
     ),
     FlagSpec(
         name="MAGI_SOURCE_CITATION_GATE_MODE",
-        # Initial fleet default is `audit` (observe-only): capture + re-injection
-        # + inline citations + Sources panel + verdict recording all stay on, but
-        # the turn-intervening repair/induce-search is off by default. Flipping
-        # this default to `repair` is a documented follow-up once audit-mode
-        # telemetry validates the gate on the fleet.
-        default="audit",
+        # Fleet default is `repair` (active enforcement): capture + re-injection
+        # + inline citations + Sources panel + verdict recording plus the
+        # turn-intervening attribution / induce-search repair are all on by
+        # default. The default was flipped from the initial observe-only `audit`
+        # once the pre-merge P0 (repair dropping the cited answer) was fixed,
+        # skipping the canary-observe stage. `audit` and `off` are opt-down modes.
+        default="repair",
         scope="public",
         stage="stage1",
         summary=(
-            "Deterministic pre-final source-citation gate mode. `off` skips the "
-            "gate entirely; `audit` (the initial fleet default) runs the gate "
-            "observe-only (emits a custom:CitationVerdict record, never alters "
-            "the turn); `repair` additionally drives attribution / induce-search "
-            "repair with a bounded budget, then fails open with a hedge notice. "
-            "Only runs when MAGI_SOURCE_CITATION_ENABLED is on."
+            "Deterministic pre-final source-citation gate mode. Default `repair` "
+            "(active enforcement) drives attribution / induce-search repair with "
+            "a bounded budget, then fails open with a hedge notice. `audit` and "
+            "`off` are the opt-down modes: `audit` runs the gate observe-only "
+            "(emits a custom:CitationVerdict record, never alters the turn) and "
+            "`off` skips the gate entirely. Only runs when "
+            "MAGI_SOURCE_CITATION_ENABLED is on."
         ),
         kind="str",
     ),
