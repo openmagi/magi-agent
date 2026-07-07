@@ -37,6 +37,8 @@ if TYPE_CHECKING:
 
 def hosted_request_to_turn_context(
     generation: "Gate5B4C3ShadowGenerationRequest",
+    *,
+    include_history: bool = True,
 ) -> TurnContext:
     """Map a validated Gate5B4C3ShadowGenerationRequest to a TurnContext.
 
@@ -47,17 +49,29 @@ def hosted_request_to_turn_context(
     - provider        ← generation.model_routing.provider_label
     - model           ← generation.model_routing.model_label
     - initial_messages← generation.turn.sanitized_recent_history converted to
-                        tuple of {"role": ..., "content": ...} dicts
+                        tuple of {"role": ..., "content": ...} dicts, OR ``()``
+                        when ``include_history`` is False (seed-on-empty, U4)
     - recipe          ← None  (see module docstring)
     - memory_mode     ← "normal"  (header parsing is a PR4 chat_routes concern)
     - permission_mode ← "default"  (no-op gate from PR1 short-circuits anyway)
     - permission_cap  ← None  (hosted enforcement is via gate1a tools allowlist)
     - depth           ← 0  (top-level serve turn)
     - budget_ms       ← 0  (gate5b4c3 budgets stay in chat_routes middleware)
+
+    ``include_history`` (U4 / B2 seed-on-empty): when False the sanitized recent
+    history is NOT mapped into ``initial_messages`` (left ``()``), so the driver
+    renders no resume prefix. The hosted serving seam sets this to False once the
+    durable ADK session already holds the prior turns, preventing the #1364
+    double-seed (history via persisted session events AND via an inline resume
+    prefix). The default is True so any other caller/test stays byte-identical.
     """
-    initial_messages: tuple[dict[str, str], ...] = tuple(
-        {"role": msg.role, "content": msg.sanitized_text}
-        for msg in generation.turn.sanitized_recent_history
+    initial_messages: tuple[dict[str, str], ...] = (
+        tuple(
+            {"role": msg.role, "content": msg.sanitized_text}
+            for msg in generation.turn.sanitized_recent_history
+        )
+        if include_history
+        else ()
     )
     return TurnContext(
         prompt=generation.turn.sanitized_current_turn_text,
