@@ -472,5 +472,62 @@ class TestAutoContinueOffByteIdentical:
         assert _all_status_types(off_items) == _all_status_types(base_items)
 
 
+class TestAutoContinueResponseClearBoundary:
+    def test_response_clear_emitted_before_continuation_reinvocation(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Two run_async invocations: attempt 1 streams an answer and (open todo +
+        # progress) drives an auto-continue re-invocation; attempt 2 streams a
+        # fresh answer. WITHOUT a response_clear boundary the second answer's text
+        # concatenates onto the first in the client bubble (and in the engine's
+        # emitted_text), producing the duplicated-answer glue. The auto-continue
+        # arm must emit a response_clear BEFORE re-invoking, so the bubble resets
+        # and only the last continuation is visible.
+        runner = FakeRunner(
+            events_per_call=[
+                [_ok_tool_end(), _text("FIRST ANSWER.")],
+                [_text("SECOND ANSWER.")],
+            ]
+        )
+        _patch_lazy_deps(monkeypatch, runner)
+        reader = _LedgerReader(
+            [
+                _todos(("t1", "pending"), ("t2", "pending")),  # pre-attempt-1
+                _todos(("t1", "completed"), ("t2", "pending")),  # attempt-1 SEAM 2
+                _todos(("t1", "completed"), ("t2", "completed")),  # pre-attempt-2
+                _todos(("t1", "completed"), ("t2", "completed")),  # attempt-2 SEAM 2
+            ]
+        )
+        driver = MagiEngineDriver(
+            runner=runner,
+            user_id="cli",
+            evidence_first=True,
+            plan_ledger_reader=reader,
+            required_evidence=(),
+            auto_continue_enabled=True,
+        )
+        items = _run_drive(driver)
+        assert len(runner.calls) == 2
+
+        # A response_clear boundary is emitted for the continuation.
+        assert "response_clear" in _all_status_types(items)
+
+        def _first_index(pred) -> int:
+            for i, it in enumerate(items):
+                payload = getattr(it, "payload", None)
+                if isinstance(payload, dict) and pred(payload):
+                    return i
+            return -1
+
+        first_text_idx = _first_index(lambda p: p.get("text") == "FIRST ANSWER.")
+        clear_idx = _first_index(lambda p: p.get("type") == "response_clear")
+        second_text_idx = _first_index(lambda p: p.get("text") == "SECOND ANSWER.")
+        assert first_text_idx != -1
+        assert second_text_idx != -1
+        # The clear falls strictly between the two invocations' answer text, so
+        # the continuation re-answers into a blanked bubble (no concatenation).
+        assert first_text_idx < clear_idx < second_text_idx
+
+
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-q"]))
