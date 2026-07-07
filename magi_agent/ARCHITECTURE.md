@@ -1923,7 +1923,7 @@ graph LR
 | document_tools.py | DocumentRead tool — extract text from documents in the workspace. | context, env, result, source_ledger, spreadsheet_tools, truncation | tools/document_write_tools.py, tools/file_markdown.py, tools/file_toolhost.py |
 | document_write_tools.py | DocumentWrite DOCX backend — render markdown source into a ``.docx`` file. | _common, context, document_coverage, document_tools, model, policy, result | tools/document_write/agentic.py, tools/document_write/canonical.py, tools/document_write/orchestrator.py, tools/document_write/pdf.py |
 | event_projection.py | — | kernel, public_events, tool_boundary, tool_preview | tools/kernel.py |
-| file_markdown.py | Unified file→markdown conversion entry point (delegation-only). | archive_tools, context, document_tools, result, spreadsheet_tools | tools/document_qa_tools.py, transport/kb_context.py |
+| file_markdown.py | Unified file->markdown conversion entry point (delegation-only). | archive_tools, context, document_tools, result, spreadsheet_tools | tools/document_qa_tools.py, transport/kb_context.py |
 | file_tool_manifests.py | Manifest declarations for the optional file & multimodal tool suite. | catalog, env, manifest, registry | cli/tool_runtime.py, cli/wiring.py |
 | file_toolhost.py | Handler bindings for the optional file & multimodal tool suite. | archive_tools, audio_tools, document_qa_tools, document_tools, env, image_tools, music_tools, registry, spreadsheet_tools, video_tools | cli/tool_runtime.py, cli/wiring.py |
 | health.py | Tool firing health checks (Principle 1 — "Built ≠ works"). | base, context, manifest, registry, result | — |

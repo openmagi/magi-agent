@@ -94,6 +94,7 @@ files = [
   "openpyxl>=3.1",
   "pypdf>=4.0",
   "python-pptx>=1.0",
+  "xlrd>=2.0.1",
 ]
 # Optional audio transcription provider (MAGI_ASR_PROVIDER=openai_whisper).
 # Install with: uv sync --extra audio

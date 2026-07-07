@@ -248,6 +248,26 @@ _FILE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
         opt_out=True,
     ),
     ToolManifest(
+        name="XLSRead",
+        description=(
+            "Read an XLS (legacy BIFF format) spreadsheet from the workspace, "
+            "returning structured rows. Use for .xls files; use XLSXRead for .xlsx files."
+        ),
+        kind="core",
+        source=CORE_TOOL_SOURCE,
+        permission="read",
+        inputSchema=_XLSX_READ_SCHEMA,
+        availableInModes=("plan", "act"),
+        tags=("workspace", "file", "spreadsheet", "read", "multimodal-file"),
+        parallelSafety="readonly",
+        mutatesWorkspace=False,
+        dangerous=False,
+        timeoutMs=30_000,
+        budget=Budget(max_calls_per_turn=5, max_parallel=1, outputChars=32_000),
+        enabled_by_default=False,
+        opt_out=True,
+    ),
+    ToolManifest(
         name="DocumentRead",
         description=(
             "Extract text from a document file in the workspace. "
