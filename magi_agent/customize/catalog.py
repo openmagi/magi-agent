@@ -217,6 +217,11 @@ def build_catalog(runtime: Any) -> dict[str, Any]:
         # maps to a single ``MAGI_*_ENABLED`` flag that the lab/dogfood profiles
         # seed ON, so without this surface the dashboard could not turn them off.
         "controlPlane": _control_plane_entries(),
+        # User-disableable first-party (builtin) policies (verify-before-replying).
+        # Each maps a builtin policy id to its master ``MAGI_*_ENABLED`` flag; a
+        # toggle here projects an opt-out. Floors (source_citation) are absent by
+        # design so they cannot be disabled through this surface.
+        "builtinPolicies": _builtin_policy_entries(),
     }
 
 
@@ -226,3 +231,11 @@ def _control_plane_entries() -> list[dict[str, str]]:
     )
 
     return control_plane_behavior_catalog()
+
+
+def _builtin_policy_entries() -> list[dict[str, object]]:
+    from magi_agent.customize.builtin_policy_overrides import (  # noqa: PLC0415
+        builtin_policy_toggle_catalog,
+    )
+
+    return builtin_policy_toggle_catalog()

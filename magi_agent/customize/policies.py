@@ -139,6 +139,15 @@ class Policy(BaseModel):
     binding: PolicyBinding | None = None
     origin: Literal["user", "builtin"] = "user"
     review: PolicyReview | None = None
+    # Whether a user may turn this policy OFF from Customize. User policies are
+    # always disableable. A first-party builtin is a strong DEFAULT, not an
+    # un-removable floor -- EXCEPT one whose gate can block (a safety floor),
+    # which sets this False. This is the truthful display SIGNAL a surface can
+    # read to render a floor as locked; it does NOT itself gate anything. The
+    # actual opt-out mechanism (env projection) is enforced by catalog
+    # membership in ``builtin_policy_overrides`` (a floor is simply absent from
+    # the catalog), so the two are consistent by construction.
+    user_disableable: bool = Field(default=True, alias="userDisableable")
 
     @field_validator("policy_id")
     @classmethod
@@ -213,6 +222,9 @@ _SOURCE_CITATION_POLICY = Policy(
         evidenceType="SourceInspection",
     ),
     origin="builtin",
+    # Floor: the gate can BLOCK (repair mode), so it is not user-disableable.
+    # Correspondingly absent from ``builtin_policy_overrides.BUILTIN_POLICY_TOGGLES``.
+    userDisableable=False,
 )
 
 
@@ -245,6 +257,9 @@ _VERIFY_BEFORE_REPLYING_POLICY = Policy(
         "verify_before_replying.skeptic_review",
     ),
     origin="builtin",
+    # Non-blocking nudge: safe to opt out of. Listed in
+    # ``builtin_policy_overrides.BUILTIN_POLICY_TOGGLES``.
+    userDisableable=True,
 )
 
 BUILTIN_POLICIES: tuple[Policy, ...] = (

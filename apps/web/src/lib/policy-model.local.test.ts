@@ -52,6 +52,7 @@ function buildCatalog(): Parameters<typeof unifyPolicies>[0]["catalog"] {
     },
     tools: [],
     controlPlane: [],
+    builtinPolicies: [],
   };
 }
 
@@ -90,6 +91,7 @@ function buildOverrides(): Parameters<typeof unifyPolicies>[0]["overrides"] {
     tools: {},
     user_rules: "",
     control_plane: {},
+    builtin_policies: {},
   };
 }
 
