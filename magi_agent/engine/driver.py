@@ -7110,11 +7110,18 @@ class MagiEngineDriver:
             ),
             harnessState=effective_harness_state,
         )
-        deny_attach = self._attach_deny_all_tools(runner=runner)
-        finalizer_iter: AsyncIterator[object] = adapter.run_turn(finalizer_input).__aiter__()  # type: ignore[union-attr]
+        # Attach + iterator creation live INSIDE the try so a synchronous raise
+        # there (a) never propagates out of this pass (fail-open: a finalizer
+        # error must not turn a completed-blank turn into an error) and (b) can
+        # never leak the deny-all overlay into the next turn on the same
+        # long-lived runner (the finally always restores it).
+        deny_attach: "_GateAttachment | None" = None
+        finalizer_iter: "AsyncIterator[object] | None" = None
         _fin_usage: dict[str, int] = {}
         _fin_events = 0
         try:
+            deny_attach = self._attach_deny_all_tools(runner=runner)
+            finalizer_iter = adapter.run_turn(finalizer_input).__aiter__()  # type: ignore[union-attr]
             while _fin_events < event_allowance:
                 if cancel.is_set():
                     break
@@ -7141,7 +7148,8 @@ class MagiEngineDriver:
         except Exception:  # noqa: BLE001 - fail-open: a finalizer error never breaks the turn
             logger.debug("no_tool_finalizer pass failed", exc_info=True)
         finally:
-            await self._aclose_iter(finalizer_iter)
+            if finalizer_iter is not None:
+                await self._aclose_iter(finalizer_iter)
             self._restore_gate_callback(deny_attach)
             _fold_usage(usage, _fin_usage)
 

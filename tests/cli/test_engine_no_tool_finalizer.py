@@ -164,3 +164,63 @@ def test_deny_all_overlay_shape_and_restore():
     assert result["error"] == "no_tool_finalizer_pass"
     driver._restore_gate_callback(attach)
     assert driver._runner.agent.before_tool_callback == "ORIGINAL"
+
+
+def test_overlay_restored_even_when_pass_raises():
+    # Medium-1 regression: a synchronous raise while starting the finalizer pass
+    # (after the deny overlay is attached) must NOT leak the deny-all overlay
+    # into the next turn, and must NOT propagate (fail-open). Drive the pass
+    # method directly with a booming adapter.
+    class _Agent:
+        before_tool_callback = "ORIGINAL"
+
+    class _Runner:
+        agent = _Agent()
+
+    class _Types:
+        class Content:
+            def __init__(self, **kw):
+                self.__dict__.update(kw)
+
+        class Part:
+            def __init__(self, **kw):
+                self.__dict__.update(kw)
+
+    class _BoomAdapter:
+        def run_turn(self, _runner_input):
+            raise RuntimeError("boom")
+
+    class _TurnInput:
+        def __new__(cls, **kw):
+            obj = object.__new__(cls)
+            obj.__dict__.update(kw)
+            return obj
+
+    driver = MagiEngineDriver(
+        runner=_Runner(), user_id="cli", no_tool_finalizer=NoToolFinalizerConfig()
+    )
+
+    async def _run():
+        return [
+            e
+            async for e in driver._run_no_tool_finalizer_pass(
+                adapter=_BoomAdapter(),
+                bridge=object(),
+                sanitize=lambda d: d,
+                runner=driver._runner,
+                types=_Types(),
+                runner_turn_input_cls=_TurnInput,
+                session_id="s",
+                turn_id="t",
+                effective_harness_state=None,
+                event_allowance=64,
+                usage={},
+                cancel=asyncio.Event(),
+            )
+        ]
+
+    # Fail-open: no exception propagates, no events streamed.
+    events = asyncio.run(_run())
+    assert events == []
+    # The overlay was restored despite the raise (no leak into the next turn).
+    assert driver._runner.agent.before_tool_callback == "ORIGINAL"

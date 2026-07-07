@@ -67,6 +67,11 @@ def should_run_no_tool_finalizer(
     """
     if config is None or not config.enabled:
         return False
+    # Blank is keyed on emitted_text only (NOT net_user_text_streamed, unlike the
+    # terminal escalated_blank guard). This deliberately re-finalizes a turn that
+    # streamed text and then blanked it via a legitimate response_clear: the
+    # client saw the clear, so the UI is genuinely blank and re-answering is
+    # correct. Do not "align" this with the net_user_text_streamed-aware guard.
     if emitted_text.strip():
         return False
     if recoveries_used > 0:
