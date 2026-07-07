@@ -2992,6 +2992,15 @@ def _elapsed_ms(started: float) -> int:
     return int((time.monotonic() - started) * 1000)
 
 
+# flip-pr4: public API surface for the correlated model/label builder. The
+# hosted governed-turn serving path (gate5b_serving) reaches this builder once
+# MAGI_HOSTED_GOVERNED_TURN_ENABLED resolves ON, so it is promoted from the
+# private ``_gate1a_correlated_model_or_label`` symbol to a stable public name.
+# The private name is retained as an alias for existing importers / test
+# monkeypatch targets that bind it by the underscore name.
+gate1a_correlated_model_or_label = _gate1a_correlated_model_or_label
+
+
 __all__ = [
     "AdkPrimitivesLoader",
     "Gate5B4C3LiveAdkPrimitives",
@@ -3000,6 +3009,7 @@ __all__ = [
     "Gate5B4C3LiveRunnerBoundaryResult",
     "Gate5B4C3LiveRunnerReason",
     "Gate5B4C3LiveRunnerStatus",
+    "gate1a_correlated_model_or_label",
     "load_gate5b4c3_live_adk_primitives",
     "run_gate5b4c3_live_runner_boundary",
     "run_gate5b4c3_live_runner_boundary_async",
