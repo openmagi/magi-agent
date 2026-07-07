@@ -1742,8 +1742,63 @@ class MagiEngineDriver:
                     final_text=final_text,
                 )
 
-            # 6. the skeptic member is PR-V5: this PR passes an empty skeptic set.
-            # 7. run all deterministic auditors, deduped against this turn.
+            # 6. Skeptic member (PR-V5): LLM judge, advisory, default-OFF (D3).
+            #    _build_critic_factory is NEVER imported or called when the flag
+            #    is OFF; the inner import guard enforces the D3 binding.
+            from magi_agent.config.env import (  # noqa: PLC0415
+                parse_verify_before_replying_skeptic_enabled,
+            )
+            skeptic_verify_findings: tuple[object, ...] = ()
+            if parse_verify_before_replying_skeptic_enabled(os.environ):
+                from magi_agent.adk_bridge.lifecycle_llm_call_control import (  # noqa: PLC0415
+                    _build_critic_factory,
+                )
+                from magi_agent.customize.criterion_engine import (  # noqa: PLC0415
+                    _SKEPTIC_CRITERION,
+                    evaluate_criterion_findings,
+                    project_evidence_for_criterion,
+                )
+                from magi_agent.evidence.verify_audit import (  # noqa: PLC0415
+                    VerifyFinding as _VerifyFinding,
+                    filter_skeptic_findings,
+                    fingerprint_finding,
+                )
+
+                critic_factory = _build_critic_factory()
+                if critic_factory is not None:
+                    evidence_view = project_evidence_for_criterion(turn_records, [])
+                    skeptic_raw = await evaluate_criterion_findings(
+                        criterion=_SKEPTIC_CRITERION,
+                        draft_text=final_text,
+                        model_factory=critic_factory,
+                        evidence_context=evidence_view,
+                    )
+                    raw_vf: tuple[_VerifyFinding, ...] = tuple(
+                        _VerifyFinding(
+                            finding_id=fingerprint_finding(
+                                "verify_before_replying.skeptic_review",
+                                "skeptic_overconfidence",
+                                canonical_value=r.get("span", ""),
+                            ),
+                            rule_id="verify_before_replying.skeptic_review",
+                            confidence="advisory",
+                            claim_class="skeptic_overconfidence",
+                            claim_text=r.get("span", ""),
+                            span=(0, len(r.get("span", ""))),
+                            evidence_refs=(),
+                            expected=None,
+                            observed=None,
+                            detail=r.get("concern", ""),
+                            suggested_action="consider",
+                        )
+                        for r in skeptic_raw
+                    )
+                    kept_vf, dropped = filter_skeptic_findings(raw_vf, final_text)
+                    skeptic_verify_findings = kept_vf
+                    verify_state.skeptic_ran = True
+                    verify_state.skeptic_dropped += dropped
+
+            # 7. Run all deterministic auditors, deduped against this turn.
             result = verify_audit.audit_candidate(
                 final_text=final_text,
                 prompt=prompt,
@@ -1752,7 +1807,7 @@ class MagiEngineDriver:
                 gate_result=gate_result,
                 collector_present=collector_present,
                 surfaced_fingerprints=verify_state.surfaced,
-                skeptic_findings=(),
+                skeptic_findings=skeptic_verify_findings,
                 skeptic_ran=verify_state.skeptic_ran,
                 skeptic_dropped=verify_state.skeptic_dropped,
             )
