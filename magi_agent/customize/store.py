@@ -64,6 +64,15 @@ DEFAULT_OVERRIDES: dict[str, Any] = {
     # activation is per member rule. Empty by default so OFF is byte-identical.
     # See clawy docs/plans/2026-07-03-policy-abstraction-and-organic-multi-rule-authoring-design.md.
     "policies": {},
+    # Per-BUILTIN-policy enable override (tri-state like ``control_plane``). A
+    # first-party policy id (``verify_before_replying``) present with True/False
+    # projects onto its master ``MAGI_*_ENABLED`` flag as an overwrite (user
+    # toggle beats the profile seed; re-enable works cleanly); an absent id
+    # leaves the env flag untouched. Only ids in the curated
+    # ``builtin_policy_overrides.BUILTIN_POLICY_TOGGLES`` catalog project — a
+    # floor policy (``source_citation``) is never in the catalog, so it cannot
+    # be disabled through this seam. Empty by default so OFF is byte-identical.
+    "builtin_policies": {},
 }
 
 _USER_RULES_MAX = 20_000
@@ -148,6 +157,17 @@ def _normalize(data: dict[str, Any]) -> dict[str, Any]:
             for key, value in policies_raw.items()
             if isinstance(key, str) and isinstance(value, dict)
         }
+    # Builtin-policy opt-out overrides: tri-state bool filter, mirroring the
+    # ``control_plane`` branch above. Only explicit booleans survive; the
+    # projection step (builtin_policy_overrides) additionally ignores any id
+    # outside the curated catalog.
+    builtin_policies_raw = data.get("builtin_policies")
+    if isinstance(builtin_policies_raw, dict):
+        merged["builtin_policies"] = {
+            key: value
+            for key, value in builtin_policies_raw.items()
+            if isinstance(key, str) and isinstance(value, bool)
+        }
     return merged
 
 
@@ -226,6 +246,23 @@ def set_control_plane_override(
     target = path or customize_path()
     overrides = load_overrides(target)
     overrides.setdefault("control_plane", {})[behavior_id] = bool(enabled)
+    save_overrides(overrides, target)
+    return overrides
+
+
+def set_builtin_policy_override(
+    policy_id: str, enabled: bool, path: Path | None = None
+) -> dict[str, Any]:
+    """Set one builtin-policy enable override, save, return the new overrides.
+
+    The bool is RETAINED on disable (tri-state) so an opt-out of a default-ON
+    first-party policy persists across restarts. Validation that ``policy_id`` is
+    a real catalog entry is the API layer's job; the store records what it is
+    given (the projection step ignores ids outside the curated catalog anyway).
+    """
+    target = path or customize_path()
+    overrides = load_overrides(target)
+    overrides.setdefault("builtin_policies", {})[policy_id] = bool(enabled)
     save_overrides(overrides, target)
     return overrides
 

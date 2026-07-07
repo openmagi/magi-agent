@@ -334,7 +334,12 @@ def test_customize_returns_catalog_and_overrides(tmp_path, monkeypatch) -> None:
     assert res.status_code == 200
     body = res.json()
     assert set(body.keys()) == {"catalog", "overrides"}
-    assert set(body["catalog"].keys()) == {"verification", "tools", "controlPlane"}
+    assert set(body["catalog"].keys()) == {
+        "verification",
+        "tools",
+        "controlPlane",
+        "builtinPolicies",
+    }
     assert set(body["catalog"]["verification"].keys()) == {
         "recipes",
         "harnessPresets",
@@ -388,5 +393,53 @@ def test_patch_control_plane_requires_auth(tmp_path, monkeypatch) -> None:
     client = _client(tmp_path)  # no token
     resp = client.patch(
         "/v1/app/customize/control-plane/facts-replan", json={"enabled": False}
+    )
+    assert resp.status_code == 401
+
+
+def test_patch_builtin_policy_persists_and_projects_to_env(tmp_path, monkeypatch) -> None:
+    cfile = tmp_path / "customize.json"
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
+    # verify is default-ON with the flag UNSET; disabling must project "0".
+    monkeypatch.delenv("MAGI_VERIFY_BEFORE_REPLYING_ENABLED", raising=False)
+    client = TestClient(create_app(_build_runtime(tmp_path)))
+    client.headers.update({"x-gateway-token": _TOKEN})
+
+    resp = client.patch(
+        "/v1/app/customize/builtin-policies/verify_before_replying",
+        json={"enabled": False},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["overrides"]["builtin_policies"]["verify_before_replying"] is False
+    import json
+
+    assert (
+        json.loads(cfile.read_text())["builtin_policies"]["verify_before_replying"]
+        is False
+    )
+    assert os.environ["MAGI_VERIFY_BEFORE_REPLYING_ENABLED"] == "0"
+
+
+def test_patch_builtin_policy_floor_source_citation_404(tmp_path, monkeypatch) -> None:
+    # source_citation is a floor: not user-disableable, so the endpoint 404s and
+    # never touches its master flag.
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
+    monkeypatch.setenv("MAGI_SOURCE_CITATION_ENABLED", "1")
+    client = TestClient(create_app(_build_runtime(tmp_path)))
+    client.headers.update({"x-gateway-token": _TOKEN})
+    resp = client.patch(
+        "/v1/app/customize/builtin-policies/source_citation",
+        json={"enabled": False},
+    )
+    assert resp.status_code == 404
+    assert os.environ["MAGI_SOURCE_CITATION_ENABLED"] == "1"
+
+
+def test_patch_builtin_policy_requires_auth(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
+    client = _client(tmp_path)  # no token
+    resp = client.patch(
+        "/v1/app/customize/builtin-policies/verify_before_replying",
+        json={"enabled": False},
     )
     assert resp.status_code == 401

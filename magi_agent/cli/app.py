@@ -316,6 +316,21 @@ def agent(
     except Exception:  # noqa: BLE001 - never let a customize read break startup
         pass
 
+    # User-facing opt-out of first-party (builtin) policies. Same overwrite
+    # discipline as the control-plane toggles above: a persisted disable projects
+    # onto the policy's master ``MAGI_*_ENABLED`` flag so the runtime gate reads
+    # it off. Floors (source_citation) are never in the catalog, so they cannot
+    # be walked back here.
+    try:
+        from magi_agent.customize.builtin_policy_overrides import (  # noqa: PLC0415
+            apply_builtin_policy_overrides_to_env,
+        )
+        from magi_agent.customize.store import load_overrides  # noqa: PLC0415
+
+        apply_builtin_policy_overrides_to_env(os.environ, load_overrides())
+    except Exception:  # noqa: BLE001 - never let a customize read break startup
+        pass
+
     # WS1 PR1d - durable boot recovery sweep. Runs once, synchronously, before
     # the first turn dispatches (after the profile + customize env is settled).
     # Strict no-op + byte-identical when MAGI_DURABLE_STARTUP_RECOVERY_ENABLED is

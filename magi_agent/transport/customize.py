@@ -25,6 +25,7 @@ from magi_agent.customize.shacl_compiler import (
 from magi_agent.customize.store import (
     delete_custom_rule,
     load_overrides,
+    set_builtin_policy_override,
     set_control_plane_override,
     set_custom_rule,
     set_tool_override,
@@ -1041,6 +1042,42 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         # ``dict(os.environ)`` per call). Overwrite beats the profile seed.
         apply_control_plane_overrides_to_env(
             os.environ, {"control_plane": {behavior_id: enabled}}
+        )
+        return JSONResponse(content={"overrides": overrides})
+
+    @app.patch("/v1/app/customize/builtin-policies/{policy_id}")
+    async def patch_builtin_policy(policy_id: str, request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        if not isinstance(body, dict) or not isinstance(body.get("enabled"), bool):
+            return JSONResponse(status_code=400, content={"error": "enabled_bool_required"})
+        from magi_agent.customize.builtin_policy_overrides import (  # noqa: PLC0415
+            BUILTIN_POLICY_TOGGLES,
+            apply_builtin_policy_overrides_to_env,
+        )
+
+        # Only curated, user-disableable builtins are accepted. A floor policy
+        # (source_citation) or an unknown id 404s -- it can never be disabled here.
+        if policy_id not in {t.id for t in BUILTIN_POLICY_TOGGLES}:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "error": "not_found",
+                    "message": f'built-in policy "{policy_id}" is not user-disableable',
+                },
+            )
+        enabled = body["enabled"]
+        overrides = set_builtin_policy_override(policy_id, enabled)
+        # Project onto the live process env so the next turn's gate reads the
+        # toggle without a restart (the driver reads ``os.environ`` per turn).
+        # Overwrite beats the profile seed and re-enables cleanly.
+        apply_builtin_policy_overrides_to_env(
+            os.environ, {"builtin_policies": {policy_id: enabled}}
         )
         return JSONResponse(content={"overrides": overrides})
 

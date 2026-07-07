@@ -102,6 +102,22 @@ export interface ControlPlaneBehaviorItem {
   enabled: boolean;
 }
 
+/**
+ * A user-disableable first-party (builtin) *policy* toggle
+ * (verify-before-replying, …). Each maps a builtin policy id to its master
+ * `MAGI_*_ENABLED` flag; a toggle here projects an opt-out. Floor policies
+ * (e.g. source_citation, whose gate can BLOCK) are deliberately NOT in this
+ * list, so they cannot be disabled through this surface.
+ */
+export interface BuiltinPolicyToggleItem {
+  id: string;
+  env_var: string;
+  label: string;
+  description: string;
+  /** Current effective (profile-aware) state — reports ON even when the flag is unset-but-default-ON. */
+  enabled: boolean;
+}
+
 export interface CustomizeCatalog {
   verification: {
     recipes: RecipeItem[];
@@ -136,6 +152,8 @@ export interface CustomizeCatalog {
   };
   tools: ToolItem[];
   controlPlane: ControlPlaneBehaviorItem[];
+  /** User-disableable first-party policies (verify-before-replying). Floors excluded. */
+  builtinPolicies: BuiltinPolicyToggleItem[];
 }
 
 /** A structured custom verification rule (spec §9.1). P1 builds deterministic_ref.
@@ -178,6 +196,12 @@ export interface CustomizeOverrides {
    * value wins over the lab/dogfood env seed.
    */
   control_plane: Record<string, boolean>;
+  /**
+   * Explicit per-builtin-policy enable state (tri-state: present true/false, or
+   * absent → default). An explicit `false` opts out of a default-ON first-party
+   * policy; only ids in the curated catalog project onto their master flag.
+   */
+  builtin_policies: Record<string, boolean>;
 }
 
 /**
@@ -268,6 +292,33 @@ export async function patchControlPlaneOverride(
     },
   );
   if (!res.ok) throw new Error(`Failed to update behavior (${res.status})`);
+  const data = (await res.json()) as { overrides: CustomizeOverrides };
+  return data.overrides;
+}
+
+/**
+ * Persists a first-party (builtin) policy opt-out via
+ * `PATCH /v1/app/customize/builtin-policies/{policyId}`.
+ *
+ * Records an explicit tri-state in `builtin_policies` (so the opt-out of a
+ * default-ON policy persists) and projects it onto the live process env so the
+ * next turn's gate honors it. A floor policy (not user-disableable) 404s.
+ * Returns the updated overrides; throws on non-2xx so the caller can revert.
+ */
+export async function patchBuiltinPolicyOverride(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  policyId: string,
+  enabled: boolean,
+): Promise<CustomizeOverrides> {
+  const res = await fetch(
+    `/v1/app/customize/builtin-policies/${encodeURIComponent(policyId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    },
+  );
+  if (!res.ok) throw new Error(`Failed to update built-in policy (${res.status})`);
   const data = (await res.json()) as { overrides: CustomizeOverrides };
   return data.overrides;
 }

@@ -33,6 +33,7 @@ import {
   patchVerificationOverride,
   patchRecipeOverride,
   patchControlPlaneOverride,
+  patchBuiltinPolicyOverride,
   putRules,
   putCustomRule,
   deleteCustomRule,
@@ -352,6 +353,51 @@ export function CustomizeHub({
     [agentFetch],
   );
 
+  // --- Built-in (first-party) policy opt-out toggles -----------------------
+  // Mirrors the control-plane behavior toggles above, but for first-party
+  // POLICIES (verify-before-replying). Only user-disableable builtins appear in
+  // ``catalog.builtinPolicies``; floors (source_citation) are excluded server-
+  // side so they can never be turned off here.
+  const [builtinPolicyOverrides, setBuiltinPolicyOverrides] = useState<
+    Record<string, boolean>
+  >({});
+  const [builtinPolicyPending, setBuiltinPolicyPending] = useState<Set<string>>(
+    new Set(),
+  );
+  const [builtinPolicyError, setBuiltinPolicyError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setBuiltinPolicyOverrides(data?.overrides.builtin_policies ?? {});
+  }, [data]);
+
+  const handleToggleBuiltinPolicy = useCallback(
+    (id: string, enabled: boolean) => {
+      setBuiltinPolicyOverrides((prev) => ({ ...prev, [id]: enabled }));
+      setBuiltinPolicyError(null);
+      setBuiltinPolicyPending((prev) => new Set(prev).add(id));
+      patchBuiltinPolicyOverride(agentFetch, id, enabled)
+        .then((overrides) => {
+          setBuiltinPolicyOverrides(overrides.builtin_policies);
+        })
+        .catch((err: unknown) => {
+          setBuiltinPolicyOverrides((prev) => ({ ...prev, [id]: !enabled }));
+          setBuiltinPolicyError(
+            err instanceof Error
+              ? err.message
+              : `Failed to update built-in policy "${id}"`,
+          );
+        })
+        .finally(() => {
+          setBuiltinPolicyPending((prev) => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+        });
+    },
+    [agentFetch],
+  );
+
   // --- Recipes allowlist (F-UX10) ------------------------------------------
   // ``verification.recipes[]`` is allowlist-shaped: empty = no opt-out
   // (legacy default, every recipe behaves as enabled); non-empty filters out
@@ -624,6 +670,27 @@ export function CustomizeHub({
                 error={behaviorError}
               />
             </section>
+            {(data.catalog.builtinPolicies ?? []).length > 0 ? (
+              <section className="space-y-3">
+                <div>
+                  <h3 className="text-sm font-bold text-foreground">
+                    First-party policies
+                  </h3>
+                  <p className="mt-0.5 text-xs leading-relaxed text-secondary">
+                    Runtime-native policies that ship on by default. Turn one off
+                    to opt out — the change persists and applies from the next
+                    turn. Safety floors that can block a turn are not listed here.
+                  </p>
+                </div>
+                <BehaviorsPanel
+                  behaviors={data.catalog.builtinPolicies ?? []}
+                  overrides={builtinPolicyOverrides}
+                  onToggle={handleToggleBuiltinPolicy}
+                  pendingIds={builtinPolicyPending}
+                  error={builtinPolicyError}
+                />
+              </section>
+            ) : null}
           </div>
         ) : null}
 
