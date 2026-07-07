@@ -558,6 +558,30 @@ def parse_output_continuation_env(env: Mapping[str, str]) -> OutputContinuationE
     )
 
 
+# No-tool finalizer wiring (B9 backstop). One bounded tool-less pass forces a
+# final answer when a tool-loop turn stops with no text. Profile-aware
+# default-ON (like output continuation): ON in the full profile, OFF under
+# MAGI_RUNTIME_PROFILE safe/eval/minimal/conservative/off; set
+# MAGI_NO_TOOL_FINALIZER_ENABLED=0 to kill it. The event allowance bounds the
+# single pass.
+NO_TOOL_FINALIZER_ENABLED_ENV = "MAGI_NO_TOOL_FINALIZER_ENABLED"
+NO_TOOL_FINALIZER_EVENT_ALLOWANCE_ENV = "MAGI_NO_TOOL_FINALIZER_EVENT_ALLOWANCE"
+
+
+@dataclass(frozen=True)
+class NoToolFinalizerEnv:
+    enabled: bool = False
+    event_allowance: int = 64
+
+
+def parse_no_tool_finalizer_env(env: Mapping[str, str]) -> NoToolFinalizerEnv:
+    enabled = _runtime_feature_enabled(env, NO_TOOL_FINALIZER_ENABLED_ENV)
+    event_allowance = _int_env(env, NO_TOOL_FINALIZER_EVENT_ALLOWANCE_ENV, 64)
+    if event_allowance < 1:
+        raise RuntimeEnvError(f"{NO_TOOL_FINALIZER_EVENT_ALLOWANCE_ENV} must be >= 1")
+    return NoToolFinalizerEnv(enabled=enabled, event_allowance=event_allowance)
+
+
 # Empty-response recovery wiring (R2, hermes mechanism 3). One flag covers two
 # behaviors that together mean "never end a turn with nothing": (a) a bounded
 # corrective re-invocation when tools ran but the model returned no text, and
