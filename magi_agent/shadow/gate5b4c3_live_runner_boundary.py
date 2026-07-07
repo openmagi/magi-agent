@@ -5,7 +5,6 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import cached_property
 import hashlib
-import inspect
 import json
 import logging
 import os
@@ -51,7 +50,12 @@ from magi_agent.shadow.gate5b4c3_runner_input_adapter import (
 from magi_agent.shadow.gate5b4c3_image_parts import image_blocks_to_parts
 from magi_agent.shadow.session_service_registry import (
     SessionServiceRegistry,
-    default_session_service_registry,
+)
+from magi_agent.runtime.session_ownership import (
+    acquire_hosted_session_lease,
+    probe_session_event_count as _probe_session_event_count,
+    resolve_include_history as _resolve_include_history,
+    seeded_history_message_count as _seeded_history_message_count,
 )
 
 
@@ -1343,54 +1347,30 @@ class Gate5B4C3LiveRunnerBoundary:
         could never be reused — each one would only churn the LRU and evict
         this bot's live sessions.
         """
-        # Lazy import: shadow -> config is a function-level dependency by
-        # convention in this package (avoids import cycles).
-        from magi_agent.config.env import is_hosted_session_reuse_enabled
-
-        if not is_hosted_session_reuse_enabled():
-            return primitives.InMemorySessionService(), False, _noop
-        if not request.selection.session_key_digest:
-            return primitives.InMemorySessionService(), False, _noop
-        registry = self._session_service_registry
-        if registry is None:
-            registry = default_session_service_registry()
-        session_key = (request.selection.bot_id_digest, _shadow_session_id(request))
-        # Durable substrate (PR-3): when MAGI_HOSTED_SESSION_DB is ON and the
-        # SqliteSessionService is constructible, the lease registry fronts a
-        # process-singleton durable service so sessions/events survive restart,
-        # image bump, LRU eviction and TTL. A busy-overlap gets a DISTINCT fresh
-        # in-memory fallback so two turns never mutate one durable session
-        # concurrently. Fail-open: None keeps today's in-memory behavior.
-        from magi_agent.shadow.hosted_session_substrate import (
-            durable_hosted_session_factory,
+        # Ownership chokepoint moved to magi_agent.runtime.session_ownership
+        # (WS-A/U1). The helper owns the reuse-flag check, the empty-digest
+        # bypass, the durable-vs-in-memory factory selection, the single-flight
+        # ``try_acquire`` lease and the identity-checked release. ``None`` means
+        # "no registry participation": build a fresh in-memory service here,
+        # byte-identical to the historical fresh-instance-per-turn behavior.
+        lease = acquire_hosted_session_lease(
+            bot_id_digest=request.selection.bot_id_digest,
+            session_id=_shadow_session_id(request),
+            session_key_digest=request.selection.session_key_digest,
+            in_memory_factory=primitives.InMemorySessionService,
+            registry=self._session_service_registry,
         )
-
-        durable_factory = durable_hosted_session_factory()
-        if durable_factory is not None:
-            session_service, session_reused = registry.try_acquire(
-                session_key,
-                durable_factory,
-                fallback_factory=primitives.InMemorySessionService,
-            )
-        else:
-            session_service, session_reused = registry.try_acquire(
-                session_key,
-                primitives.InMemorySessionService,
-            )
-        seed_completed = {"value": session_reused}
+        if lease is None:
+            return primitives.InMemorySessionService(), False, _noop
+        seed_completed = {"value": lease.reused}
 
         def mark_session_seeded() -> None:
             seed_completed["value"] = True
 
-        bound_registry = registry
         session_lease_releases.append(
-            lambda: bound_registry.release(
-                session_key,
-                session_service,
-                seeded=seed_completed["value"],
-            )
+            lambda: lease.release(seeded=seed_completed["value"])
         )
-        return session_service, session_reused, mark_session_seeded
+        return lease.service, lease.reused, mark_session_seeded
 
     def _emit_public_event(self, payload: Mapping[str, object]) -> None:
         if self._public_event_sink is None:
@@ -1556,85 +1536,6 @@ def _runner_message_text(runner_input: object, *, include_history: bool = True) 
         + "\n\nCurrent user message:\n"
         + current
     )
-
-
-def _resolve_include_history(
-    *,
-    session_reused: bool,
-    session_event_count: int | None,
-) -> bool:
-    """Decide whether to seed sanitized history into this turn's prompt.
-
-    Emptiness probe (PR-2): seed whenever the durable ADK session holds zero
-    events, regardless of the registry reuse verdict. This is the unconditional
-    safety net: a reused-but-empty session (eviction / restart / hollow hit /
-    busy-fallback) still seeds the client echo instead of going in blind, while
-    a genuinely populated reused session is not double-seeded.
-
-    When the event count is undeterminable (``None`` -> bare service or a probe
-    error), fall back to today's registry verdict so flag-OFF and local paths
-    stay byte-identical (a fresh service always probes 0 anyway -> seed).
-    """
-    if session_event_count is None:
-        return not session_reused
-    return session_event_count == 0
-
-
-def _seeded_history_message_count(runner_input: object) -> int:
-    """Count the sanitized history messages that ``_runner_message_text`` seeds.
-
-    Mirrors the exact filter in ``_runner_message_text`` (valid user/assistant
-    items with non-empty content) so the observability count matches what the
-    model actually received. Fully defensive: any odd shape counts as zero.
-    """
-    history = getattr(runner_input, "sanitized_recent_history", ()) or ()
-    count = 0
-    for item in history:
-        if not isinstance(item, Mapping):
-            continue
-        role = str(item.get("role") or "").strip()
-        content = str(item.get("content") or "").strip()
-        if role in {"user", "assistant"} and content:
-            count += 1
-    return count
-
-
-async def _probe_session_event_count(
-    session_service: object,
-    *,
-    app_name: str,
-    user_id: str,
-    session_id: str,
-) -> int | None:
-    """Return the ADK session's event count, or ``None`` when undeterminable.
-
-    Read-only probe used for continuity observability (PR-1) and the
-    seed-on-empty safety net (PR-2). Fully fail-open: a service without an
-    async ``get_session`` (e.g. a bare test fake) or any error returns
-    ``None`` so callers fall back to today's registry-verdict behavior.
-    """
-    get_session = getattr(session_service, "get_session", None)
-    if get_session is None:
-        return None
-    try:
-        session = get_session(
-            app_name=app_name,
-            user_id=user_id,
-            session_id=session_id,
-        )
-        if inspect.isawaitable(session):
-            session = await session
-    except Exception:
-        return None
-    if session is None:
-        return 0
-    events = getattr(session, "events", None)
-    if events is None:
-        return None
-    try:
-        return len(events)
-    except Exception:
-        return None
 
 
 def run_gate5b4c3_live_runner_boundary(
