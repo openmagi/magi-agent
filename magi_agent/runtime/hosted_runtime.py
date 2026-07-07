@@ -117,6 +117,12 @@ def build_hosted_runtime(
     app_name: str = "openmagi-hosted-governed-turn",
     session_service: object | None = None,
     user_id: str = "cli",
+    # B5: durable-session event-fetch bound (driver-owned, anti-side-channel safe).
+    # ``None`` (default) -> byte-identical to pre-B5 (no GetSessionConfig on
+    # RunConfig). ``gate5b_serving`` passes ``DEFAULT_NUM_RECENT_EVENTS`` when
+    # the durable session substrate is active, mirroring the legacy condition at
+    # gate5b4c3:770-774. CLI and non-durable paths leave this as ``None``.
+    num_recent_events: int | None = None,
 ) -> HostedRuntime:
     """Assemble a ``HostedRuntime`` from caller-provided ADK primitives.
 
@@ -202,6 +208,7 @@ def build_hosted_runtime(
         event_sink=public_event_sink,
         wire_profile=HOSTED_PROFILE,
         user_id=user_id,
+        num_recent_events=num_recent_events,
     )
 
     return HostedRuntime(engine=engine, gate=_HOSTED_NOOP_GATE)

@@ -28,6 +28,13 @@ class TurnContext:
     # Emitted by ``to_turn_input`` ONLY when non-empty so a normal turn's input
     # dict stays byte-identical to the pre-extraction ``{"prompt", ...}`` shape.
     initial_messages: tuple[dict[str, str], ...] = field(default_factory=tuple)
+    # Optional image blocks in converter-dict shape (U5 / B1).
+    # Each element: ``{"type": "image", "source": {"type": "base64",
+    # "media_type": <str>, "data": <base64 str>}}``.
+    # Emitted by ``to_turn_input`` ONLY when non-empty (shape-neutrality
+    # invariant: a fresh-session turn dict stays byte-identical to the
+    # pre-U5 shape when no images are present).
+    image_blocks: tuple[dict[str, object], ...] = field(default_factory=tuple)
 
     def to_turn_input(self) -> dict[str, object]:
         turn_input: dict[str, object] = {
@@ -38,4 +45,6 @@ class TurnContext:
         }
         if self.initial_messages:
             turn_input["initial_messages"] = list(self.initial_messages)
+        if self.image_blocks:
+            turn_input["image_blocks"] = list(self.image_blocks)
         return turn_input

@@ -57,7 +57,7 @@ class _CapturedRunnerInput:
 class _TextEmittingAdapter:
     """Adapter that yields the configured final-answer text as a text_delta."""
 
-    def __init__(self, *, runner: object) -> None:
+    def __init__(self, *, runner: object, num_recent_events: int | None = None) -> None:
         self.runner = runner
 
     async def run_turn(self, runner_input: object) -> AsyncIterator[object]:

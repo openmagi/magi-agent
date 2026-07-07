@@ -51,6 +51,7 @@ Design notes
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
@@ -153,9 +154,15 @@ async def collect_engine_to_boundary_result(
         ``time.monotonic()`` snapshot taken by the caller before the turn was
         initiated.  Used to compute ``latency_ms``.
     timeout_ms:
-        Informational timeout budget passed into the result (does not enforce
-        a timeout here — PR4/middleware is responsible).  Defaults to 0 when
-        not supplied.
+        Wall-clock timeout budget in milliseconds.  When positive, the entire
+        ``drain`` call is wrapped in ``asyncio.timeout(timeout_ms / 1000)``.
+        On expiry ``asyncio.timeout`` raises ``TimeoutError`` after closing the
+        event stream via ``drain``'s existing ``finally: gen.aclose()`` guard;
+        the caller's ``except TimeoutError`` handler (in ``gate5b_serving.py``)
+        converts this to the ``runner_timeout`` diagnostic result -- identical
+        to what the legacy boundary produces.  When zero or falsy, no timeout
+        context is armed and behaviour is byte-identical to the un-timed path.
+        Defaults to 0 (no timeout).
 
     Returns
     -------
@@ -167,6 +174,10 @@ async def collect_engine_to_boundary_result(
     ------
     asyncio.CancelledError
         Re-raised as-is so PR4's chat_routes handler can abort the response.
+    TimeoutError
+        Raised when ``timeout_ms > 0`` and the drain exceeds the budget.
+        The caller's ``except TimeoutError`` block (``gate5b_serving.py``)
+        converts this to a ``runner_timeout`` diagnostic result.
         All other exceptions from the engine are captured into the terminal
         ``EngineResult`` by the engine itself; ``drain`` synthesises an error
         terminal when the generator completes without one.
@@ -174,7 +185,18 @@ async def collect_engine_to_boundary_result(
     # ``drain`` is the canonical consumer from headless.py: collects
     # RuntimeEvent items, captures the terminal EngineResult as the final
     # yielded item, and closes the generator.
-    events, terminal = await drain(event_stream)  # type: ignore[arg-type]
+    #
+    # When timeout_ms is positive, wrap the drain in asyncio.timeout so that
+    # a hung model call does not block indefinitely.  asyncio.timeout raises
+    # TimeoutError after the deadline; drain's own ``finally: gen.aclose()``
+    # guard closes the event stream, so there is no generator leak.
+    # When timeout_ms is falsy (0 or default), no timeout context is armed
+    # and behaviour is byte-identical to the previous implementation.
+    if timeout_ms:
+        async with asyncio.timeout(timeout_ms / 1000):
+            events, terminal = await drain(event_stream)  # type: ignore[arg-type]
+    else:
+        events, terminal = await drain(event_stream)  # type: ignore[arg-type]
 
     # Aggregate text from text_delta events only.
     # The engine yields RuntimeEvent objects (not plain dicts); extract the

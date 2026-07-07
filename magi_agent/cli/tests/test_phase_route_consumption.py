@@ -55,8 +55,9 @@ class _CapturedRunnerInput:
 
 
 class _FakeAdapter:
-    def __init__(self, *, runner: object) -> None:
+    def __init__(self, *, runner: object, num_recent_events: int | None = None) -> None:
         self.runner = runner
+        self._num_recent_events = num_recent_events
 
     async def run_turn(self, runner_input: object) -> AsyncIterator[object]:
         del runner_input

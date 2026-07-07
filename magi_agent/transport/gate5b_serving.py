@@ -57,6 +57,7 @@ from magi_agent.runtime.session_ownership import acquire_hosted_session_lease, p
 from magi_agent.shadow.gate5b4c3_live_runner_boundary import _gate1a_correlated_model_or_label, _shadow_session_id, run_gate5b4c3_live_runner_boundary_async
 from magi_agent.shadow.gate5b4c3_runner_input_adapter import build_gate5b4c3_runner_input
 from magi_agent.shadow.gate5b4c3_shadow_generation_contract import build_gate5b4c3_shadow_generation_diagnostic
+from magi_agent.shadow.hosted_session_substrate import DEFAULT_NUM_RECENT_EVENTS, durable_hosted_session_factory
 from magi_agent.transport.active_turn import ACTIVE_TURNS, ActiveTurn, ActiveTurnClaim
 from magi_agent.transport.chat_authority import _boundary_runner_error_diagnostic, _canary_gate_error, _chat_runner_error_diagnostic, _finish_counter_error, _gate8_selected_authority_metadata, _python_ready_response, _runner_incomplete_output_reason
 from magi_agent.transport.chat_routes_local import _NoopChatSink
@@ -697,6 +698,16 @@ async def _run_live_chat_runner(
                 )
                 boundary_result = None
                 try:
+                    # B5: mirror the legacy gate5b4c3 fetch-bound activation
+                    # condition (gate5b4c3:770-774). When the durable session
+                    # substrate is active the adapter injects GetSessionConfig so
+                    # long sessions do not load unbounded events every turn.
+                    # ``None`` keeps the non-durable and flag-OFF paths unchanged.
+                    _num_recent_events: int | None = (
+                        DEFAULT_NUM_RECENT_EVENTS
+                        if durable_hosted_session_factory() is not None
+                        else None
+                    )
                     hosted_rt = build_hosted_runtime(
                         adk_primitives_loader=route_config.adk_primitives_loader,
                         adk_tools=adk_tools,
@@ -708,6 +719,7 @@ async def _run_live_chat_runner(
                         app_name=GATE5B_SHADOW_APP_NAME,
                         user_id=GATE5B_SHADOW_USER_ID,
                         session_service=governed_session_service,
+                        num_recent_events=_num_recent_events,
                     )
                     # 5. Build TurnContext (PR2). Suppress inline history when the
                     # durable session already holds it (U4 seed-on-empty verdict).
