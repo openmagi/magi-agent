@@ -1272,6 +1272,10 @@ class RealLocalChildRunner:
             # replied "Yes." / "The goal has been fully met.", and the collector
             # took that last block as the child summary -> parent got "Yes."
             auto_continue_allowed=False,
+            # A child's deliverable is its structured tool-only / last-block
+            # return (child_governed_collector); forcing chat text would corrupt
+            # it (same containment reason as auto_continue_allowed, see #1329).
+            no_tool_finalizer_allowed=False,
         )
 
         # --- Drive the governed turn + collect summary + evidence_refs -------
