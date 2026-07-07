@@ -50,7 +50,7 @@ def test_empty_store_has_only_builtin_policies(tmp_path: Path) -> None:
     # policies (list_policies always includes the read-only builtins so the
     # Rules surface tells the truth about runtime-native policies).
     policies = list_policies(p)
-    assert [pol.policy_id for pol in policies] == ["source_citation"]
+    assert [pol.policy_id for pol in policies] == ["source_citation", "verify_before_replying"]
     assert all(pol.origin == "builtin" for pol in policies)
     assert get_policy("verify-source", p) is None
 
@@ -75,8 +75,8 @@ def test_list_sorted_and_skips_malformed(tmp_path: Path) -> None:
     overrides["policies"]["mismatch"] = {"id": "other", "displayName": "X"}
     save_overrides(overrides, p)
     ids = [pol.policy_id for pol in list_policies(p)]
-    # sorted, always-present builtin included, malformed + mismatch skipped
-    assert ids == ["alpha", "source_citation", "zeta"]
+    # sorted, always-present builtins included, malformed + mismatch skipped
+    assert ids == ["alpha", "source_citation", "verify_before_replying", "zeta"]
 
 
 def test_delete(tmp_path: Path) -> None:
@@ -93,8 +93,12 @@ def test_upsert_updates_in_place(tmp_path: Path) -> None:
     upsert_policy(_policy(ruleIds=["cr_a", "cr_b"]), p)
     got = get_policy("verify-source", p)
     assert got is not None and got.rule_ids == ("cr_a", "cr_b")
-    # In-place: one user policy (no duplicate) plus the always-present builtin.
-    assert [pol.policy_id for pol in list_policies(p)] == ["source_citation", "verify-source"]
+    # In-place: one user policy (no duplicate) plus the always-present builtins.
+    assert [pol.policy_id for pol in list_policies(p)] == [
+        "source_citation",
+        "verify-source",
+        "verify_before_replying",
+    ]
 
 
 # --- validation ---
@@ -183,8 +187,8 @@ def test_old_store_without_policies_key_normalizes(tmp_path: Path) -> None:
     )
     overrides = load_overrides(p)
     assert overrides["policies"] == {}  # default filled in, not dropped
-    # No stored user policies; the surface still shows the first-party builtin.
-    assert [pol.policy_id for pol in list_policies(p)] == ["source_citation"]
+    # No stored user policies; the surface still shows the first-party builtins.
+    assert [pol.policy_id for pol in list_policies(p)] == ["source_citation", "verify_before_replying"]
 
 
 def test_normalizer_drops_non_dict_policy_entries(tmp_path: Path) -> None:
@@ -276,8 +280,8 @@ def test_migrate_groups_is_idempotent(tmp_path: Path) -> None:
         p,
     )
     # 'grp' is a single group -> exactly one policy; re-running creates nothing.
-    # The surface = the one migrated policy + the always-present builtin.
+    # The surface = the one migrated policy + the always-present builtins.
     assert migrate_groups_to_policies(p) == 1
-    assert len(list_policies(p)) == 2
+    assert len(list_policies(p)) == 3
     assert migrate_groups_to_policies(p) == 0
-    assert len(list_policies(p)) == 2
+    assert len(list_policies(p)) == 3
