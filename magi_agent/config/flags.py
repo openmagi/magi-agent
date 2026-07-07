@@ -1767,6 +1767,47 @@ FLAGS: tuple[FlagSpec, ...] = (
             "no search tool is bound (keyless install)."
         ),
     ),
+    _pb(
+        "MAGI_VERIFY_BEFORE_REPLYING_ENABLED",
+        stage="stage1",
+        summary=(
+            "Master switch for the verify-before-replying first-party policy: "
+            "evidence-bound auditor, sycophancy heuristics, nudge injection, "
+            "and verdict/observability emission. Profile default-ON (full); "
+            "OFF under safe/eval so scored benchmarks run uncontaminated. "
+            "Naming note: distinct from the legacy MAGI_VERIFY_* single-preset "
+            "LLM-judge family (MAGI_VERIFY_CLAIM_CITATION etc.); do not add to "
+            "customize/preset_map.py."
+        ),
+    ),
+    _b(
+        "MAGI_VERIFY_BEFORE_REPLYING_SKEPTIC_ENABLED",
+        stage="stage1",
+        summary=(
+            "Enable the LLM skeptic member of the verify-before-replying policy "
+            "(one critic-model call per audited final answer, advisory findings). "
+            "Strict default-OFF including the full profile (D3): adds a per-turn "
+            "model call and is the weakest leg (advisory-only). Enable "
+            "deliberately; measure via skeptic_findings_dropped and advisory "
+            "ignore-rate before trusting. Graduation path: promote to _pb once "
+            "FPR is bounded empirically."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_VERIFY_BEFORE_REPLYING_BACKSTOP_MODE",
+        default="off",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Reserved backstop seam for the verify-before-replying policy "
+            "(Section 13 of the design). Sole shipped value is 'off' (no-op). "
+            "Reserved values 'block_high' and 'repair_high' are registered but "
+            "not implemented: any non-off value logs a warning and behaves as "
+            "'off'. Only crisp high-confidence findings may ever route to a "
+            "backstop; advisory findings are structurally excluded."
+        ),
+        kind="str",
+    ),
     _b(
         "MAGI_GATE5B_GOVERNANCE_ENABLED",
         stage="stage2",
