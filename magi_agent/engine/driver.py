@@ -3319,6 +3319,12 @@ class MagiEngineDriver:
                                 )
                                 if ac_result.action == "continue":
                                     runner_input = ac_result.runner_input
+                                    # The response_clear boundary is emitted by the
+                                    # auto-continue helper (in ac_events, yielded
+                                    # just above); blank emitted_text here so the
+                                    # continuation's answer does not concatenate
+                                    # onto the prior attempt (the duplicated glue).
+                                    emitted_text = ""
                                     continue  # re-invoke (genuine model call)
                                 break  # terminal deterministic outcome
                             # "continue" (auto-continue disabled) /
@@ -3609,9 +3615,29 @@ class MagiEngineDriver:
                                 ),
                                 harnessState=effective_harness_state,
                             )
+                            # Same re-answer boundary as the auto-continue helper:
+                            # blank the prior attempt so the judge continuation
+                            # does not concatenate onto it, and reset
+                            # _turn_text_emitted (via response_clear at
+                            # event_adapter :373) so pre-answer thinking is not
+                            # over-suppressed on the continuation.
+                            yield RuntimeEvent(
+                                type=_map_event_kind("response_clear"),
+                                payload={
+                                    "type": "response_clear",
+                                    "turnId": turn_id,
+                                    "reason": "goal_loop_continuation",
+                                },
+                                turn_id=turn_id,
+                            )
+                            emitted_text = ""
                             continue  # re-invoke run_async (genuine model call)
                         # Historic (auto-continue disabled) raw continuation:
-                        # byte-identical to pre-U4.
+                        # byte-identical to pre-U4. This legacy path (auto-continue
+                        # off) is knowingly left without the response_clear boundary
+                        # to preserve the pre-U4 invariant; it is not exercised by
+                        # local ``magi serve`` (which runs auto-continue enabled via
+                        # the SEAM 2 helper above).
                         goal_loop_continuations += 1
                         yield RuntimeEvent(
                             type="status",
@@ -3742,6 +3768,11 @@ class MagiEngineDriver:
                             )
                             if ac_result.action == "continue":
                                 runner_input = ac_result.runner_input
+                                # The response_clear boundary is emitted by the
+                                # auto-continue helper (in ac_events, yielded just
+                                # above); blank emitted_text so the continuation
+                                # does not concatenate onto the prior attempt.
+                                emitted_text = ""
                                 continue  # re-invoke run_async (genuine model call)
                             # action == "break" (terminal outcome or the
                             # unreachable ledger "stop") -> fall through to the
@@ -4847,6 +4878,22 @@ class MagiEngineDriver:
                         "continuation": continuations_used,
                         "openTodos": open_todos_now,
                         "source": "auto_continue",
+                    },
+                    turn_id=turn_id,
+                )
+            )
+            # Boundary before the auto-continue re-invoke: blank the prior
+            # attempt so the continuation's fresh answer does not concatenate
+            # onto it (the duplicated-answer glue, bounded by max_turns). Both
+            # consumers of this "continue" result yield these events and blank
+            # their own ``emitted_text``. Mirrors the repair / final-gate rounds.
+            events.append(
+                RuntimeEvent(
+                    type=_map_event_kind("response_clear"),
+                    payload={
+                        "type": "response_clear",
+                        "turnId": turn_id,
+                        "reason": "goal_loop_continuation",
                     },
                     turn_id=turn_id,
                 )

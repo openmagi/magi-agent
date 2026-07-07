@@ -754,7 +754,27 @@ def _project_content_parts(
             # semantics byte-identically).
             from magi_agent.config.flags import flag_profile_bool  #  # noqa: PLC0415
 
-            if thought_text and event.partial and flag_profile_bool("MAGI_STREAM_THINKING"):
+            # Reasoning-model interleaving guard: once the ANSWER text has begun
+            # for this turn (``text_emitted[0]``), further thought parts are the
+            # per-token interleaving artifact and must NOT be surfaced on the
+            # thinking channel (they belong before the answer). Streaming them
+            # would ladder the answer into fragments with Thought blocks between.
+            # Only the DISPLAY emission is gated; the promotion bookkeeping above
+            # (``promotable_thought_texts`` / ``saw_signed_thought``) still runs
+            # for the empty-text terminal promotion fallback.
+            # Stream thinking only BEFORE the first answer text of the turn
+            # (``not text_emitted[0]``): once the answer begins, later thought
+            # parts are the interleaving artifact and must not ladder the answer
+            # with Thought blocks. Per-continuation correctness depends on
+            # ``_turn_text_emitted`` being reset on the ``response_clear`` boundary
+            # the goal-loop continuation emits (driver.py) plus the reset at :373;
+            # without it a continuation's pre-answer thinking is over-suppressed.
+            if (
+                thought_text
+                and event.partial
+                and flag_profile_bool("MAGI_STREAM_THINKING")
+                and not text_emitted[0]
+            ):
                 agent_events.append(
                     {"type": "thinking_delta", "delta": _public_stream_text(thought_text)}
                 )

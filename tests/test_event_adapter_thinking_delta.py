@@ -72,3 +72,59 @@ def test_mixed_thought_and_text_parts_split_channels(monkeypatch) -> None:
     kinds = [(e.get("type"), e.get("delta")) for e in projection.agent_events]
     assert ("thinking_delta", "internal reasoning") in kinds
     assert ("text_delta", "visible answer") in kinds
+
+
+def test_thought_after_text_in_same_event_is_suppressed(monkeypatch) -> None:
+    # Reasoning-model interleaving artifact: once the ANSWER text has begun, a
+    # later thought part in the same partial event belongs BEFORE the answer and
+    # must not be surfaced as a thinking_delta (it would ladder the answer into
+    # per-token fragments with Thought blocks between). Parts arrive as
+    # [text, thought]: the text sets the turn answer latch, so the trailing
+    # thought yields NO thinking_delta.
+    monkeypatch.setenv("MAGI_STREAM_THINKING", "1")
+    bridge = OpenMagiEventBridge(live_compatible=True)
+    event = _model_event(
+        parts=[
+            types.Part(text="visible answer"),
+            types.Part(text="interleaved reasoning", thought=True),
+        ],
+        partial=True,
+    )
+    projection = bridge.project_adk_event(event, turn_id="turn-think")
+    kinds = [e.get("type") for e in projection.agent_events]
+    assert "text_delta" in kinds
+    assert "thinking_delta" not in kinds
+
+
+def test_thought_after_text_across_events_in_turn_is_suppressed(monkeypatch) -> None:
+    # The answer latch is TURN-scoped: an answer text_delta in an earlier partial
+    # event suppresses thinking_delta for a thought part in a LATER partial event
+    # of the same turn.
+    monkeypatch.setenv("MAGI_STREAM_THINKING", "1")
+    bridge = OpenMagiEventBridge(live_compatible=True)
+    text_event = _model_event(parts=[types.Part(text="the answer")], partial=True, idx=0)
+    text_projection = bridge.project_adk_event(text_event, turn_id="turn-think")
+    assert any(e.get("type") == "text_delta" for e in text_projection.agent_events)
+
+    thought_event = _model_event(
+        parts=[types.Part(text="post-answer reasoning", thought=True)],
+        partial=True,
+        idx=1,
+    )
+    thought_projection = bridge.project_adk_event(thought_event, turn_id="turn-think")
+    assert not any(
+        e.get("type") == "thinking_delta" for e in thought_projection.agent_events
+    )
+
+
+def test_thought_before_any_text_still_projects_thinking_delta(monkeypatch) -> None:
+    # Pre-answer thinking is preserved: a thought part that arrives before any
+    # answer text_delta in the turn still surfaces on the thinking channel.
+    monkeypatch.setenv("MAGI_STREAM_THINKING", "1")
+    bridge = OpenMagiEventBridge(live_compatible=True)
+    event = _model_event(
+        parts=[types.Part(text="reasoning before the answer", thought=True)],
+        partial=True,
+    )
+    projection = bridge.project_adk_event(event, turn_id="turn-think")
+    assert any(e.get("type") == "thinking_delta" for e in projection.agent_events)
