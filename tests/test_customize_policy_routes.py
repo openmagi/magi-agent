@@ -53,7 +53,7 @@ def test_list_only_builtins(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     assert resp.status_code == 200
     # An empty store still surfaces the first-party builtin(s).
     body = resp.json()
-    assert [p["id"] for p in body["policies"]] == ["source_citation"]
+    assert [p["id"] for p in body["policies"]] == ["source_citation", "verify_before_replying"]
     assert body["policies"][0]["origin"] == "builtin"
 
 
@@ -65,10 +65,18 @@ def test_upsert_and_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     assert body["policy"]["id"] == "verify-source"
     assert body["policy"]["ruleIds"] == ["cr_gate"]
     # The list is builtins + stored, sorted by id.
-    assert [p["id"] for p in body["policies"]] == ["source_citation", "verify-source"]
+    assert [p["id"] for p in body["policies"]] == [
+        "source_citation",
+        "verify-source",
+        "verify_before_replying",
+    ]
     # Follow-up GET agrees.
     listing = client.get("/v1/app/policies").json()
-    assert [p["id"] for p in listing["policies"]] == ["source_citation", "verify-source"]
+    assert [p["id"] for p in listing["policies"]] == [
+        "source_citation",
+        "verify-source",
+        "verify_before_replying",
+    ]
 
 
 def test_path_id_is_authoritative(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -114,14 +122,14 @@ def test_delete(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     client.put("/v1/app/policies/verify-source", json=_POLICY)
     resp = client.request("DELETE", "/v1/app/policies/verify-source")
     assert resp.status_code == 200
-    # Deleting the user policy leaves the first-party builtin intact.
-    assert [p["id"] for p in resp.json()["policies"]] == ["source_citation"]
+    # Deleting the user policy leaves the first-party builtins intact.
+    assert [p["id"] for p in resp.json()["policies"]] == ["source_citation", "verify_before_replying"]
     # Idempotent second delete.
     assert client.request("DELETE", "/v1/app/policies/verify-source").status_code == 200
-    # Deleting a builtin id is a no-op: the first-party policy stays present.
+    # Deleting a builtin id is a no-op: the first-party policies stay present.
     resp2 = client.request("DELETE", "/v1/app/policies/source_citation")
     assert resp2.status_code == 200
-    assert [p["id"] for p in resp2.json()["policies"]] == ["source_citation"]
+    assert [p["id"] for p in resp2.json()["policies"]] == ["source_citation", "verify_before_replying"]
 
 
 def test_migrate_groups(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -144,5 +152,9 @@ def test_migrate_groups(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     resp = client.post("/v1/app/policies/migrate")
     assert resp.status_code == 200
     assert resp.json()["created"] == 1
-    # The migrated policy plus the always-present first-party builtin.
-    assert sorted(p["id"] for p in resp.json()["policies"]) == ["my-group", "source_citation"]
+    # The migrated policy plus the always-present first-party builtins.
+    assert sorted(p["id"] for p in resp.json()["policies"]) == [
+        "my-group",
+        "source_citation",
+        "verify_before_replying",
+    ]
