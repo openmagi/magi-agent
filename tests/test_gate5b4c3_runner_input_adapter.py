@@ -266,7 +266,19 @@ def test_runner_input_adapter_full_toolhost_instructs_direct_answers_before_tool
     assert "For brief replies, do not call tools" in instruction
     assert "Every turn must end with a normal text answer" in instruction
     assert "non-text runner events alone are not a valid completion" in instruction
-    assert "Do not finish by promising future or background work" in instruction
+    # Self-scoping: the completion-discipline clauses apply to task turns, not
+    # conversational ones, and the model is told never to append a goal audit on
+    # a no-task turn (kills the "Goal met / nothing outstanding" greeting blurb).
+    assert (
+        "For greetings, thanks, acknowledgements, or small talk" in instruction
+    )
+    assert "for a turn that contained no task" in instruction
+    assert "When the user gives you an actual task" in instruction
+    assert "do not finish by promising future or background work" in instruction
+    assert "never append" in instruction
+    assert "meta-commentary about goals being met" in instruction
+    # The old unconditional phrasing must be gone.
+    assert "Do not finish by promising future or background work" not in instruction
     assert "SpawnAgent" in instruction
     assert "delegated subtask" in normalized_instruction
     assert "selected full toolhost" in normalized_instruction
