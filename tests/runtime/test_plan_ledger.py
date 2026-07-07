@@ -191,17 +191,35 @@ def _registry_with_todo() -> ToolRegistry:
 # ---------------------------------------------------------------------------
 
 
-def test_unsafe_session_id_degrades_no_crash(tmp_path: Path) -> None:
+def test_unsafe_session_id_sanitized_no_traversal(tmp_path: Path) -> None:
     store = PlanLedgerStore(
         str(tmp_path), durable_store=_FakeDurableStore(), policy_digest=_VALID_DIGEST
     )
-    # Must not raise and must not create a traversal path.
+    # A "/" must never create a traversal path: it is replaced, not preserved.
     store.append(session_id="a/b", turn_id=None, todos=[_todo("A")])
     ledger_dir = tmp_path / ".magi" / "durable" / "plan_ledger"
-    assert (ledger_dir / "local.jsonl").exists()
     assert not (ledger_dir / "a").exists()
-    # Index upsert is skipped for an unsafe session id.
-    assert store._durable_store.puts == []  # type: ignore[union-attr]
+    assert not (ledger_dir / "local.jsonl").exists()  # no collapse to local
+    files = list(ledger_dir.glob("*.jsonl"))
+    assert len(files) == 1 and files[0].name.startswith("a_b.")
+    # Sanitized keys ARE persistable to the durable index now.
+    assert store._durable_store.puts != []  # type: ignore[union-attr]
+
+
+def test_hosted_channel_keys_are_isolated_not_collapsed(tmp_path: Path) -> None:
+    # The real hosted key shape: colons previously collapsed every channel onto
+    # one shared local.jsonl. They must now get distinct per-channel ledgers,
+    # and the same key must round-trip (writer and reader derive the same file).
+    store = PlanLedgerStore(str(tmp_path), durable_store=None, policy_digest=_VALID_DIGEST)
+    a = "agent:main:app:chan-A"
+    b = "agent:main:app:chan-B"
+    store.append(session_id=a, turn_id=None, todos=[_todo("A-only")])
+    store.append(session_id=b, turn_id=None, todos=[_todo("B-only")])
+    ledger_dir = tmp_path / ".magi" / "durable" / "plan_ledger"
+    assert not (ledger_dir / "local.jsonl").exists()
+    assert len(list(ledger_dir.glob("*.jsonl"))) == 2  # not cross-mixed
+    assert store.restore(a) == (TodoItem(content="A-only", status="pending"),)
+    assert store.restore(b) == (TodoItem(content="B-only", status="pending"),)
 
 
 # ---------------------------------------------------------------------------
