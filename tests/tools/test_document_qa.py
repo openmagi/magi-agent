@@ -25,6 +25,7 @@ from magi_agent.tools.context import ToolContext
 _EXISTING_FILE_TOOL_NAMES = frozenset(
     {
         "XLSXRead",
+        "XLSRead",
         "XLSXInfo",
         "DocumentRead",
         "DocumentSearch",
@@ -325,9 +326,9 @@ class TestDocumentQaGating:
         assert set(bound) == _EXISTING_FILE_TOOL_NAMES
         assert registry.resolve_registration("DocumentQA") is None
 
-        # Stable public accessor still returns exactly the 9 existing manifests.
+        # Stable public accessor still returns exactly the 10 existing manifests.
         manifests = file_tool_manifests()
-        assert len(manifests) == 9
+        assert len(manifests) == 10
         assert {m.name for m in manifests} == _EXISTING_FILE_TOOL_NAMES
 
         # Explicit "0" forces OFF; a safe profile also keeps it OFF; the non-safe
