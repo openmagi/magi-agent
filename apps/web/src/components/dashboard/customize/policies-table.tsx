@@ -26,6 +26,7 @@ import React, { useMemo, useState } from "react";
 import type { CustomRule } from "@/lib/customize-api";
 import type { DashboardCheck } from "@/lib/packs-dashboard-api";
 import type { Policy, PolicyOrigin, PolicySource } from "@/lib/policy-model";
+import { Switch } from "@/components/ui/_ds";
 
 
 export interface PoliciesTableProps {
@@ -491,11 +492,12 @@ function PolicyRowView({
       <div className="flex shrink-0 items-center gap-3">
         <StatePill state={policy.state} />
         {policy.togglable ? (
-          <ToggleSwitch
+          <Switch
             checked={checked}
             disabled={pending || busy}
-            onChange={handleToggle}
-            label={`Toggle ${policy.name}`}
+            onToggle={async (next) => handleToggle(next)}
+            labelOn={`Disable ${policy.name}`}
+            labelOff={`Enable ${policy.name}`}
           />
         ) : null}
         {policy.editable && onEdit ? (
@@ -547,34 +549,3 @@ function StatePill({ state }: { state: Policy["state"] }): React.ReactElement {
 }
 
 
-function ToggleSwitch({
-  checked,
-  disabled,
-  onChange,
-  label,
-}: {
-  checked: boolean;
-  disabled: boolean;
-  onChange: (next: boolean) => void;
-  label: string;
-}): React.ReactElement {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
-        checked ? "bg-primary" : "bg-black/[0.15]"
-      }`}
-    >
-      <span
-        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-          checked ? "translate-x-4" : "translate-x-0.5"
-        }`}
-      />
-    </button>
-  );
-}

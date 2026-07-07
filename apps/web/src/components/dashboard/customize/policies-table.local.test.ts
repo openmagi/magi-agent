@@ -33,8 +33,10 @@ describe("PoliciesTable — unified policy surface (PR-E1)", () => {
   });
 
   it("uses a true switch role for togglable rows (accessibility)", () => {
-    expect(src).toContain('role="switch"');
-    expect(src).toContain("aria-checked={checked}");
+    // Togglable rows render the shared _ds/Switch primitive (which carries
+    // role="switch" + aria-checked).
+    expect(src).toContain('import { Switch } from "@/components/ui/_ds"');
+    expect(src).toMatch(/<Switch[\s\S]*?onToggle=/);
   });
 
   it("hides delete button for built-in / non-deletable rows", () => {

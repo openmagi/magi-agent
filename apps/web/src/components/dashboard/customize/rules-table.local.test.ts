@@ -25,8 +25,11 @@ describe("RulesTable — unified Customize rules surface (Phase 1)", () => {
   });
 
   it("uses a true switch role for togglable rows", () => {
-    expect(src).toContain('role="switch"');
-    expect(src).toContain("aria-checked={checked}");
+    // Togglable rows render the shared _ds/Switch primitive (which carries
+    // role="switch" + aria-checked); this catches a regression to a
+    // read-only row.
+    expect(src).toContain('import { Switch } from "@/components/ui/_ds"');
+    expect(src).toMatch(/<Switch[\s\S]*?onToggle=/);
   });
 
   it("never offers a delete button for built-in rows", () => {
