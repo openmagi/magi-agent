@@ -102,6 +102,20 @@ The full model, per-run flow, and control trace are in
 [Architecture](docs/architecture.md) and
 [Why the harness, not just hooks](docs/why-the-harness.md).
 
+## Example: Verify Source Before Claim
+
+The flagship governance example is a research task that answers only from
+inspected sources, each claim linked to a source span. The full walkthrough and
+the three-tier guarantee ceiling live in
+[Source-verified research](docs/source-verified-research.md).
+
+> **Status:** this is the evidence-governance *model*, not a fresh-install hard
+> block. The research final-projection gate is **audit-only** (default-off): it
+> records claims but **does not block the final answer**. The gate that *does*
+> block today is the coding-domain **pre-final** completion / evidence gate
+> (default-ON for coding turns). Treat the research rungs as the governance
+> model, not as out-of-the-box research blocking.
+
 ## Extend it
 
 Everything is authored as a disk pack in one format, loaded through the same path
