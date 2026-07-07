@@ -1849,6 +1849,256 @@ class MagiEngineDriver:
         except Exception:
             return
 
+    def _emit_verify_reply_verdict(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        verify_state: "_VerifyTurnState",
+        delivered_text: str,
+        context: str | None = None,
+    ) -> None:
+        """Emit the ``custom:VerifyReplyVerdict`` evidence record (PR-V4, design Section 12).
+
+        Mirrors ``_emit_citation_verdict_record``: builds an EvidenceRecord via
+        record_audit_evidence_for_turn, fully fail-soft. Called at two sites: (a)
+        the A3 citation fail-open branch (via ``_verify_fail_open_record_only``),
+        with ``context='citation_fail_open'``; (b) the normal-completion path
+        (guarded on master flag AND non-empty delivered_text).
+
+        D4-R fields: deliveredText is truncated at 20000 chars with
+        ``deliveredTextTruncated: true`` when cut; deliveredTextSha256 is the
+        sha256 of the FULL untruncated text. These allow offline resolution-class
+        recomputation.
+
+        The verdict record is producer_control-stamped (the record_audit_evidence_for_turn
+        write path sets this). Design Section 11 note 3: no policy should ever bind
+        ``custom:VerifyReplyVerdict`` as a required evidence type (has_unlock_evidence
+        invariant)."""
+        try:
+            import hashlib  # noqa: PLC0415
+            import os  # noqa: PLC0415
+            import time  # noqa: PLC0415
+
+            from magi_agent.config.env import (  # noqa: PLC0415
+                parse_verify_before_replying_enabled,
+            )
+            from magi_agent.evidence import verify_audit  # noqa: PLC0415
+            from magi_agent.evidence.types import EvidenceRecord  # noqa: PLC0415
+
+            if not parse_verify_before_replying_enabled(os.environ):
+                return
+            if not delivered_text.strip():
+                return
+            collector = self.local_tool_evidence_collector
+            if collector is None:
+                return
+            record_audit = getattr(collector, "record_audit_evidence_for_turn", None)
+            if not callable(record_audit):
+                return
+
+            # Build the evidence corpus for resolution computation.
+            turn_records: tuple[object, ...] = ()
+            session_records: tuple[object, ...] = ()
+            collect_turn = getattr(collector, "collect_for_turn", None)
+            collect_session = getattr(collector, "collect_for_session", None)
+            if callable(collect_turn):
+                turn_records = tuple(collect_turn(turn_id))
+            if callable(collect_session):
+                session_records = tuple(collect_session(session_id))
+
+            # Citation member: skip when in repair mode (design Section 7 decision 3:
+            # in repair mode the gate owns citation violations; the budget-exhausted
+            # residue is covered record-only by A3 in _verify_fail_open_record_only).
+            gate_result = None
+            if not self._citation_repair_active():
+                gate_result = self._evaluate_citation_gate_for_turn(
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    prompt="",
+                    final_text=delivered_text,
+                )
+
+            # Resolution: re-run detectors on the delivered text (design 12.3).
+            resolutions = verify_audit.resolve_findings(
+                verify_state.history,
+                delivered_text,
+                turn_records=turn_records,
+                session_records=session_records,
+                gate_result=gate_result,
+                collector_present=True,
+                ship_marker_used=bool(verify_state.ship_marker_used),
+            )
+
+            # Compute ignore-rate stats and turn-level verdict.
+            stats = verify_audit.ignore_rate_summary(resolutions)
+            high_total = int(stats["highTotal"])
+            high_resolved = int(stats["highResolved"])
+            high_acked = int(stats["highAcknowledged"])
+            high_ignored = int(stats["highIgnored"])
+            if high_total == 0:
+                verdict = "verified_clean"
+            elif high_ignored > 0:
+                verdict = "nudge_ignored"
+            elif bool(verify_state.ship_marker_used):
+                verdict = "shipped_acknowledged"
+            elif high_resolved > 0:
+                verdict = "revised"
+            else:
+                verdict = "verified_clean"
+
+            # D4-R: store truncated delivered text + full-text sha256.
+            max_chars = 20000
+            truncated = len(delivered_text) > max_chars
+            stored_text = delivered_text[:max_chars] if truncated else delivered_text
+            sha256_hex = hashlib.sha256(delivered_text.encode("utf-8")).hexdigest()
+
+            findings_list = [
+                {
+                    "findingId": str(getattr(finding, "finding_id", "")),
+                    "ruleId": str(getattr(finding, "rule_id", "")),
+                    "confidence": str(getattr(finding, "confidence", "")),
+                    "resolution": resolution,
+                }
+                for finding, resolution in resolutions
+            ]
+
+            fields: dict[str, object] = {
+                "verdict": verdict,
+                "turnId": turn_id,
+                "passes": int(verify_state.passes),
+                "findings": findings_list,
+                "highTotal": high_total,
+                "highResolved": high_resolved,
+                "highAcknowledged": high_acked,
+                "highIgnored": high_ignored,
+                "shipMarkerUsed": bool(verify_state.ship_marker_used),
+                "loopBackToolCalls": int(verify_state.loopback_tool_calls),
+                "deliveredText": stored_text,
+                "deliveredTextSha256": sha256_hex,
+            }
+            if truncated:
+                fields["deliveredTextTruncated"] = True
+            if context is not None:
+                fields["context"] = context
+
+            record = EvidenceRecord.model_validate(
+                {
+                    "type": "custom:VerifyReplyVerdict",
+                    "status": "ok",
+                    "observedAt": int(time.time() * 1000),
+                    "source": {"kind": "custom_extractor"},
+                    "fields": fields,
+                    "metadata": {
+                        "producingRuleId": "verify_before_replying.audit",
+                    },
+                }
+            )
+            record_audit(
+                session_id=session_id,
+                turn_id=turn_id,
+                tool_name="verify_before_replying.audit",
+                record=record,
+                tool_call_id=f"verify-before-replying:{turn_id}",
+                producing_rule_id="verify_before_replying.audit",
+            )
+        except Exception:
+            return
+
+    async def _verify_fail_open_record_only(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        prompt: str,
+        emitted_text: str,
+        verify_state: "_VerifyTurnState",
+    ) -> None:
+        """Run a record-only verify audit inside the citation fail-open branch (A3, PR-V4).
+
+        Hedge-suffix exclusion invariant: emitted_text here is the primary answer
+        text BEFORE the fail-open notice suffix is yielded. The notice, the
+        soft-consequence suffix, and the hard-blocked notice are all yielded as
+        token deltas WITHOUT mutating emitted_text, so emitted_text is by
+        construction the suffix-free delivered answer at this call site. Any
+        future mutation of emitted_text after this call would silently corrupt
+        resolution stats (the PR-V1 test_hedge_notice_never_trips_detectors
+        fixture is the tripwire for the claim detector side; the D4-R sha256 in
+        the verdict record is the tripwire for the storage side).
+
+        Runs audit_candidate (no dedup consumption beyond marking, no nudge, no
+        continuation), increments verify_state.passes, emits one per-pass
+        observability row via _emit_verify_pass_observability, then emits the
+        verdict record via _emit_verify_reply_verdict with context='citation_fail_open'.
+        Fully fail-soft."""
+        try:
+            import os  # noqa: PLC0415
+
+            from magi_agent.config.env import (  # noqa: PLC0415
+                parse_verify_before_replying_enabled,
+            )
+            from magi_agent.evidence import verify_audit  # noqa: PLC0415
+
+            if not parse_verify_before_replying_enabled(os.environ):
+                return
+            if not emitted_text.strip():
+                return
+
+            collector = self.local_tool_evidence_collector
+            collector_present = collector is not None
+
+            turn_records: tuple[object, ...] = ()
+            session_records: tuple[object, ...] = ()
+            if collector is not None:
+                collect_turn = getattr(collector, "collect_for_turn", None)
+                collect_session = getattr(collector, "collect_for_session", None)
+                if callable(collect_turn):
+                    turn_records = tuple(collect_turn(turn_id))
+                if callable(collect_session):
+                    session_records = tuple(collect_session(session_id))
+
+            # Citation member: always None in the fail-open branch (design Section 7
+            # decision 3: citation repair mode is active here, so the gate owns the
+            # citation violations; the verify layer observes without citation context).
+            result = verify_audit.audit_candidate(
+                final_text=emitted_text,
+                prompt=prompt,
+                turn_records=turn_records,
+                session_records=session_records,
+                gate_result=None,
+                collector_present=collector_present,
+                surfaced_fingerprints=verify_state.surfaced,
+                skeptic_findings=(),
+                skeptic_ran=verify_state.skeptic_ran,
+                skeptic_dropped=verify_state.skeptic_dropped,
+            )
+
+            # Mark fingerprints surfaced and extend history (no nudge, no dedup
+            # consumption beyond fingerprint marking).
+            for finding in result.new_findings:
+                verify_state.surfaced.add(finding.finding_id)
+            verify_state.history.extend(result.new_findings)
+            verify_state.passes += 1
+
+            # One per-pass observability row (design 7.2).
+            self._emit_verify_pass_observability(
+                session_id=session_id,
+                turn_id=turn_id,
+                result=result,
+                pass_index=verify_state.passes,
+            )
+
+            # Verdict record with context marker.
+            self._emit_verify_reply_verdict(
+                session_id=session_id,
+                turn_id=turn_id,
+                verify_state=verify_state,
+                delivered_text=emitted_text,
+                context="citation_fail_open",
+            )
+        except Exception:
+            return
+
     @property
     def runner_policy_assembly(self) -> RunnerPolicyAssembly | None:
         return self._runner_policy_assembly
@@ -3854,6 +4104,23 @@ class MagiEngineDriver:
                             fail_open=True,
                         )
                         citation_record_emitted = True
+                        # PR-V4 A3: run verify audit record-only inside the citation
+                        # fail-open branch. emitted_text at this call site is the
+                        # primary answer text BEFORE the hedge notice is yielded below
+                        # -- the hedge-suffix exclusion invariant is preserved because
+                        # all notice yields are token deltas that do NOT mutate
+                        # emitted_text. Any accidental mutation of emitted_text after
+                        # this call would silently corrupt resolution stats; the PR-V1
+                        # test_hedge_notice_never_trips_detectors fixture is the
+                        # detector-side tripwire and the D4-R sha256 is the storage
+                        # tripwire.
+                        await self._verify_fail_open_record_only(
+                            session_id=session_id,
+                            turn_id=turn_id,
+                            prompt=prompt,
+                            emitted_text=emitted_text,
+                            verify_state=verify_state,
+                        )
                         # Fail-open keeps a coherent answer. A prior repair round's
                         # LIVE response_clear may have blanked the UI while that
                         # round's tokens were suppressed on the re-block; flush the
@@ -4245,6 +4512,20 @@ class MagiEngineDriver:
                     induced_search=citation_induced_search,
                     fail_open=False,
                 )
+
+        # PR-V4: emit the per-turn verify reply verdict at normal completion.
+        # Guarded inside _emit_verify_reply_verdict on master flag AND non-empty
+        # delivered_text. Hedge-suffix exclusion: emitted_text here is the
+        # suffix-free delivered answer (the fail-open hedge, soft-consequence
+        # suffix, and hard-blocked notice are all yielded as token deltas that do
+        # NOT mutate emitted_text). Terminal.error and aborted paths exit before
+        # this point, so only Terminal.completed turns reach this emit.
+        self._emit_verify_reply_verdict(
+            session_id=session_id,
+            turn_id=turn_id,
+            verify_state=verify_state,
+            delivered_text=emitted_text,
+        )
 
         yield EngineResult(  # type: ignore[misc]
             terminal=Terminal.completed,
