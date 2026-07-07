@@ -83,7 +83,7 @@ class _CapturedRunnerInput:
 
 
 class _TextEmittingAdapter:
-    def __init__(self, *, runner: object) -> None:
+    def __init__(self, *, runner: object, num_recent_events: int | None = None) -> None:
         self.runner = runner
 
     async def run_turn(self, runner_input: object) -> AsyncIterator[object]:

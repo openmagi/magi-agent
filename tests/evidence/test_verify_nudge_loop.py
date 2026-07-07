@@ -68,7 +68,7 @@ class _ScriptedAdapter:
     index scripts multi-turn model behavior on the real loop.
     """
 
-    def __init__(self, *, runner: "_ScriptedRunner") -> None:
+    def __init__(self, *, runner: "_ScriptedRunner", num_recent_events: int | None = None) -> None:
         self.runner = runner
 
     async def run_turn(self, runner_input: object) -> AsyncIterator[object]:

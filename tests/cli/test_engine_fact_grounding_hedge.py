@@ -68,7 +68,7 @@ class _CapturedRunnerInput:
 
 
 class _TextEmittingAdapter:
-    def __init__(self, *, runner: object) -> None:
+    def __init__(self, *, runner: object, num_recent_events: int | None = None) -> None:
         self.runner = runner
 
     async def run_turn(self, runner_input: object) -> AsyncIterator[object]:
@@ -82,7 +82,7 @@ class _StatefulRepairAdapter:
     """First run_turn = initial turn (an edit tool_start + the answer text);
     every subsequent run_turn = a repair attempt that streams one token."""
 
-    def __init__(self, *, runner: object) -> None:
+    def __init__(self, *, runner: object, num_recent_events: int | None = None) -> None:
         self.runner = runner
         self._calls = 0
 
