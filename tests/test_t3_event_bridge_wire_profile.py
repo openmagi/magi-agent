@@ -398,8 +398,8 @@ def test_t3_hosted_response_tool_end_has_digest_refs_duration() -> None:
 
 def test_t3_cli_none_no_tool_progress_and_tool_end_byte_identical() -> None:
     """None/CLI bridge: project call+response → NO tool_progress; tool_end
-    shape is byte-identical to current CLI output (durationMs=0, no transcriptRefs,
-    output_preview from _public_preview)."""
+    shape matches the current CLI output (no transcriptRefs, output_preview from
+    _public_preview, and a non-negative real ``durationMs``)."""
     bridge = OpenMagiEventBridge()  # None path
 
     adk_tool_id = "fc-cli-t3-001"
@@ -426,12 +426,21 @@ def test_t3_cli_none_no_tool_progress_and_tool_end_byte_identical() -> None:
         f"CLI path must NOT emit tool_progress, got: {call_types}"
     )
 
-    # tool_end shape: no transcriptRefs, durationMs=0
+    # tool_end shape: no transcriptRefs, non-negative real durationMs
     tool_end = resp_proj.agent_events[0]
     assert tool_end["type"] == "tool_end"
     assert "transcriptRefs" not in tool_end, (
         f"CLI tool_end must NOT have transcriptRefs, got: {tool_end}"
     )
-    assert tool_end.get("durationMs") == 0, (
-        f"CLI tool_end must have durationMs=0, got: {tool_end.get('durationMs')!r}"
+    # Post-#1328 (tool-latency-duration-passthrough): the CLI path threads a REAL
+    # wall-clock duration from the correlated tool_start (call seen first) instead
+    # of the old hardcoded ``durationMs: 0``. Its value is only 0 when <1ms passes
+    # between the two projections, so asserting == 0 was flaky under CI load.
+    # Mirrors test_t4a_correlation_fix::test_cli_path_unaffected_by_correlation_store.
+    duration = tool_end.get("durationMs")
+    assert isinstance(duration, int), (
+        f"CLI tool_end durationMs must be an int, got: {duration!r}"
+    )
+    assert duration >= 0, (
+        f"CLI tool_end durationMs must be a non-negative real elapsed value, got: {duration!r}"
     )
