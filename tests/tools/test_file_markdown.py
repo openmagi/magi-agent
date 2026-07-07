@@ -159,6 +159,7 @@ class TestRoutingPolicy:
                 ".md",
                 ".rst",
                 ".xlsx",
+                ".xls",
                 ".zip",
             }
         )

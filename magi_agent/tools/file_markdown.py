@@ -1,12 +1,13 @@
-"""Unified file→markdown conversion entry point (delegation-only).
+"""Unified file->markdown conversion entry point (delegation-only).
 
-One function — :func:`convert_file_to_markdown` — routes a workspace file to
+One function -- :func:`convert_file_to_markdown` -- routes a workspace file to
 the *existing* format handlers by extension and normalizes their
 ``ToolResult``s into a single :class:`MarkdownConversion`:
 
-- ``.pdf/.docx/.pptx/.xml/.csv/.txt/.md/.rst`` → :func:`~magi_agent.tools.document_tools.document_read`
-- ``.xlsx`` → :func:`~magi_agent.tools.spreadsheet_tools.xlsx_read` rendered as a markdown table
-- ``.zip``  → :func:`~magi_agent.tools.archive_tools.archive_extract` entry listing (never inner content)
+- ``.pdf/.docx/.pptx/.xml/.csv/.txt/.md/.rst`` -> :func:`~magi_agent.tools.document_tools.document_read`
+- ``.xlsx`` -> :func:`~magi_agent.tools.spreadsheet_tools.xlsx_read` rendered as a markdown table
+- ``.xls``  -> :func:`~magi_agent.tools.spreadsheet_tools.xls_read` rendered as a markdown table
+- ``.zip``  -> :func:`~magi_agent.tools.archive_tools.archive_extract` entry listing (never inner content)
 
 No new parsers are introduced.  All existing workspace-path policy
 (``_resolve_workspace_path``), byte gates, sanitization (``_sanitize_text``),
@@ -14,7 +15,7 @@ and dependency-missing ``blocked`` results are inherited from the delegates.
 
 Also hosts :func:`truncate_head_tail`, a local head+tail truncation helper
 (keep the first ~60% and last ~40% of the budget with a middle marker), so
-document tails — totals rows, appendices, conclusions — survive capping.
+document tails -- totals rows, appendices, conclusions -- survive capping.
 """
 
 from __future__ import annotations
@@ -38,6 +39,7 @@ QA_SUPPORTED_EXTENSIONS: frozenset[str] = frozenset(
         ".md",
         ".rst",
         ".xlsx",
+        ".xls",
         ".zip",
     }
 )
@@ -120,6 +122,8 @@ def convert_file_to_markdown(
         return _convert_via_document_read(path, context, max_chars)
     if suffix == ".xlsx":
         return _convert_via_xlsx_read(path, context, max_chars)
+    if suffix == ".xls":
+        return _convert_via_xls_read(path, context, max_chars)
     if suffix == ".zip":
         return _convert_via_archive_extract(path, context, max_chars)
 
@@ -190,6 +194,40 @@ def _convert_via_xlsx_read(
         markdown=markdown,
         truncated=bool(output.get("truncated")) or locally_truncated,
         source_tool="xlsx_read",
+        content_digest=_digest_from(output),
+        error_code=None,
+    )
+
+
+def _convert_via_xls_read(
+    path: str, context: ToolContext, max_chars: int
+) -> MarkdownConversion:
+    from .spreadsheet_tools import _markdown_table, xls_read  # noqa: PLC0415
+
+    result = xls_read(
+        {"path": path, "maxRows": _XLSX_MAX_ROWS, "maxCols": _XLSX_MAX_COLS},
+        context,
+    )
+    failure = _failure_from(result, "xls_read")
+    if failure is not None:
+        return failure
+
+    output = _output_mapping(result)
+    rows_raw = output.get("rows")
+    rows: list[list[str]] = []
+    if isinstance(rows_raw, list):
+        for row in rows_raw:
+            if isinstance(row, (list, tuple)):
+                rows.append([str(cell) for cell in row])
+
+    heading = f"# {Path(path).name}"
+    markdown = f"{heading}\n\n{_markdown_table(rows)}" if rows else heading
+    markdown, locally_truncated = truncate_head_tail(markdown, max_chars)
+    return MarkdownConversion(
+        status="ok",
+        markdown=markdown,
+        truncated=bool(output.get("truncated")) or locally_truncated,
+        source_tool="xls_read",
         content_digest=_digest_from(output),
         error_code=None,
     )
