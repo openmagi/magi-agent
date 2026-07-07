@@ -50,6 +50,30 @@ _LOCAL_KEY = "local"
 # legacy systems). The session_id is used directly as a JSONL filename AND as a
 # durable ref suffix, so it must pass this shape before either is constructed.
 _SAFE_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.@+-]{0,119}$")
+_UNSAFE_SESSION_CHAR_RE = re.compile(r"[^A-Za-z0-9_.@+-]")
+
+
+def _sanitize_session_id(session_id: str) -> str:
+    """Map an unsafe session id to a stable filesystem-safe + ref-safe key.
+
+    The real hosted session key is ``agent:main:app:<channel>[:<n>]``. The
+    colons fail ``_SAFE_SESSION_ID_RE`` (a filename cannot contain ":" on some
+    systems, and the durable ref suffix charset excludes it), so historically
+    EVERY channel collapsed to the single shared ``local`` key, cross-mixing
+    per-channel plan ledgers. Instead of collapsing, sanitize: replace every
+    disallowed char with "_", guarantee an alphanumeric first char, cap the
+    readable head, and append a short digest of the ORIGINAL id so two distinct
+    originals that sanitize to the same string stay distinct. The result passes
+    ``_SAFE_SESSION_ID_RE`` (a subset of the durable ref charset), so it is safe
+    as both a JSONL filename and a durable index ref. Deterministic, so the
+    writer and reader derive the same key (no split-brain).
+    """
+    cleaned = _UNSAFE_SESSION_CHAR_RE.sub("_", session_id)
+    if not cleaned or not cleaned[0].isalnum():
+        cleaned = f"s_{cleaned}"
+    digest = canonical_digest(session_id)[:12]
+    head = cleaned[:100]
+    return f"{head}.{digest}"
 
 
 class TodoItem(BaseModel):
@@ -137,21 +161,23 @@ class PlanLedgerStore:
         return self._ledger_dir() / f"{safe_session_id}.jsonl"
 
     def _safe_session_id(self, session_id: str | None) -> tuple[str, bool]:
-        """Return ``(key, is_original_safe)``.
+        """Return ``(key, is_persistable)``.
 
-        Degrades an unsafe session id to the ``local`` key (parity with
-        ``todo_toolhost`` ``session_id or "local"``) so a stray ``/`` can never
-        traverse the path. The bool reports whether the ORIGINAL id was safe,
-        which gates the durable index upsert (an unsafe id skips the index).
+        A ``None``/empty id uses the ``local`` key. An already-safe id is used
+        verbatim (backward compatible: gate5b4c3-shadow ids, local-serve ids).
+        An id with unsafe chars (the hosted ``agent:main:app:<channel>`` key,
+        whose colons previously collapsed every channel onto one shared
+        ``local`` ledger) is SANITIZED into a stable per-channel key that passes
+        the safe charset, rather than degraded. The bool reports whether the key
+        is safe to persist to the durable index (always True now, since both the
+        verbatim and sanitized keys pass the ref charset; a stray "/" or ":" can
+        no longer traverse a path because it is replaced, not preserved).
         """
-        if session_id is None:
+        if not session_id:
             return _LOCAL_KEY, True
         if _SAFE_SESSION_ID_RE.fullmatch(session_id):
             return session_id, True
-        _LOGGER.warning(
-            "plan_ledger: unsafe session_id rejected; degrading to local key"
-        )
-        return _LOCAL_KEY, False
+        return _sanitize_session_id(session_id), True
 
     # -- writes ------------------------------------------------------------
 
