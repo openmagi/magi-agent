@@ -834,34 +834,53 @@ def test_output_continuation_verdict_forwarded_on_serving_path(monkeypatch, tmp_
 # ===========================================================================
 
 
-@pytest.mark.xfail(
-    reason="B9: governed path lacks the legacy no-tool finalizer; tracked follow-up before default-ON",
-    strict=True,
-)
-def test_b9_governed_tool_only_turn_should_finalize_like_legacy() -> None:
-    """LOCKED GAP. A governed selected_full_toolhost turn whose model calls a
-    tool and then emits NO final text must, at parity with the legacy no-tool
-    finalizer, still complete with a non-empty answer. Today the governed path
-    surfaces runner_output_missing (empty), so this XFAILs. When B9 lands it will
-    XPASS and the strict marker will fail the build, alerting us to remove it."""
+def test_b9_governed_tool_only_turn_finalizes_like_legacy() -> None:
+    """B9 UNLOCKED. A governed selected_full_toolhost turn whose model calls a
+    tool and then emits NO final text still completes with a non-empty answer,
+    at parity with the legacy no-tool finalizer. The first runner pass is tool
+    only (no text); the driver runs one tool-less finalizer pass (second run)
+    that produces the answer. Before the finalizer (U1-U4) this surfaced
+    runner_output_missing; the strict xfail that locked the gap is now removed."""
+    from magi_agent.runtime.no_tool_finalizer import NoToolFinalizerConfig
+
     request = _request_full_toolhost()
     config = _config_full_toolhost()
 
-    # Tool call + tool response in-stream, then NO final text event.
-    engine_runner = MockRunner([
-        call_event("Calculation", {"expression": "1 + 1"}, "calculation-call-001"),
-        response_event(
-            "Calculation",
-            {"status": "ok", "reason": "tool_completed", "outputPreview": {"value": 2}},
-            "calculation-call-001",
-        ),
-    ])
+    # Per-call script: call 1 is tool-only (no text); call 2 (the finalizer
+    # pass) yields the final answer.
+    class _SequenceRunner:
+        def __init__(self) -> None:
+            self._script = [
+                [
+                    call_event("Calculation", {"expression": "1 + 1"}, "calculation-call-001"),
+                    response_event(
+                        "Calculation",
+                        {"status": "ok", "reason": "tool_completed", "outputPreview": {"value": 2}},
+                        "calculation-call-001",
+                    ),
+                ],
+                [text_event("The result is 2.", partial=True)],
+            ]
+            self._i = 0
+            self.agent = None
+
+        async def run_async(self, **_kwargs: object):
+            events = self._script[min(self._i, len(self._script) - 1)]
+            self._i += 1
+            for event in events:
+                yield event
+
     _events, result = asyncio.run(
         _drive_governed_turn_path(
-            request, config, engine_runner=engine_runner, adk_tools=(_ManualCalculationTool,)
+            request,
+            config,
+            engine_runner=_SequenceRunner(),
+            adk_tools=(_ManualCalculationTool,),
+            no_tool_finalizer=NoToolFinalizerConfig(),
         )
     )
 
     # Parity target (legacy no-tool finalizer): a completed turn with an answer.
     assert result.status == "completed"
     assert result.output_text_internal
+    assert "2" in result.output_text_internal

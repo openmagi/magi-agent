@@ -744,6 +744,12 @@ async def _run_live_chat_runner(
                         output_continuation=_resolve_output_continuation_config(
                             generation
                         ),
+                        # B9 unlock: run one tool-less finalizer pass when a
+                        # selected_full_toolhost turn stops with no text, matching
+                        # the legacy boundary. None on other routes / OFF profile.
+                        no_tool_finalizer=_resolve_no_tool_finalizer_config(
+                            generation
+                        ),
                     )
                     # 5. Build TurnContext (PR2). Suppress inline history when the
                     # durable session already holds it (U4 seed-on-empty verdict).
@@ -1232,6 +1238,27 @@ def _resolve_output_continuation_config(generation: object) -> object | None:
     )
 
     return build_output_continuation_config()
+
+
+def _resolve_no_tool_finalizer_config(generation: object) -> object | None:
+    """Resolve the no-tool finalizer config for the governed path (B9 unlock).
+
+    Mirrors ``_resolve_output_continuation_config`` and the legacy boundary,
+    which runs the finalizer for ``selected_full_toolhost`` turns that end with
+    no text. Gate on ``selected_full_toolhost`` first, then reuse the shared
+    env-reader (profile-aware default-ON). Env is read here so
+    ``build_hosted_runtime`` / ``MagiEngineDriver`` stay env-pure.
+    """
+    tools_policy = getattr(
+        getattr(generation, "recipe_profile", None), "tools_policy", None
+    )
+    if tools_policy != "selected_full_toolhost":
+        return None
+    from magi_agent.engine.engine_recovery import (  # noqa: PLC0415
+        build_no_tool_finalizer_config,
+    )
+
+    return build_no_tool_finalizer_config()
 
 
 def _model_attempt_digest(

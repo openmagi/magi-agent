@@ -375,6 +375,7 @@ async def _drive_governed_turn_path(
     *,
     engine_runner: object,
     adk_tools: tuple = (),
+    no_tool_finalizer: object | None = None,
 ) -> tuple[list[dict[str, Any]], Gate5B4C3LiveRunnerBoundaryResult]:
     """Drive the governed-turn path and return (public_events, result).
 
@@ -439,6 +440,7 @@ async def _drive_governed_turn_path(
         control_plane_plugins=(),
         public_event_sink=None,  # event_sink is MagiEngineDriver observability sink (3-arg);
                                  # public events are captured from RuntimeEvent.payload below
+        no_tool_finalizer=no_tool_finalizer,
     )
 
     ctx = hosted_request_to_turn_context(request)
