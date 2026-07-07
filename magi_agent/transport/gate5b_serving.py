@@ -32,6 +32,7 @@ from magi_agent.evidence.observed_egress import ObservedEgressEvidence, get_obse
 from magi_agent.gates.gate1a_readonly_tools import Gate1AReadOnlyToolBundle, Gate1AReadOnlyToolConfig, build_gate1a_readonly_tool_bundle
 from magi_agent.gates.gate5b_full_toolhost import Gate5BFullToolBundle, Gate5BFullToolHostConfig, build_gate5b_full_toolhost_bundle
 from magi_agent.introspection.egress_gate import EgressVerifierStatus
+from magi_agent.observability.transcript import emit_transcript_record, governed_transcript_event_sink
 from magi_agent.recipes.compiler import AgentRecipeCompiler, ProfileResolutionRequest
 from magi_agent.recipes.materializer import RecipeMaterializer
 from magi_agent.research.research_first_canary import build_research_first_selected_response, research_first_selected_canary_active
@@ -692,8 +693,9 @@ async def _run_live_chat_runner(
                     session_event_count=session_event_count,
                 )
                 # Observability count for U8 (the number of history messages this
-                # turn actually seeds); U8 threads it into the boundary result.
-                _seeded_message_count = (  # noqa: F841
+                # turn actually seeds); threaded into the boundary result and the
+                # turn_start transcript record below.
+                seeded_message_count = (
                     seeded_history_message_count(runner_input) if include_history else 0
                 )
                 boundary_result = None
@@ -715,7 +717,19 @@ async def _run_live_chat_runner(
                         instruction=runner_input.system_instruction,
                         generate_content_config=generate_content_config,
                         control_plane_plugins=control_plane_plugins,
-                        public_event_sink=governance_event_sink,
+                        # U8 (B4): compose the process-global transcript sink into
+                        # the driver event_sink the way the CLI does
+                        # (cli/wiring combine_sinks + get_active_transcript_sink),
+                        # with a D4 translation shim that maps the engine-native
+                        # public tool events (tool_start/tool_end) onto the legacy
+                        # tool_call/tool_result transcript record TYPES. When no
+                        # transcript sink is registered this returns
+                        # ``governance_event_sink`` unchanged, so the driver
+                        # event_sink path is byte-identical to pre-U8; the hosted
+                        # public/SSE path is never altered by this unit.
+                        public_event_sink=governed_transcript_event_sink(
+                            governance_event_sink
+                        ),
                         app_name=GATE5B_SHADOW_APP_NAME,
                         user_id=GATE5B_SHADOW_USER_ID,
                         session_service=governed_session_service,
@@ -739,10 +753,37 @@ async def _run_live_chat_runner(
                         cancel_event = (
                             registered.cancel if registered is not None else None
                         )
+                    # U8 (B4): emit the ``turn_start`` transcript record BEFORE the
+                    # turn runs, mirroring the legacy boundary shape
+                    # (gate5b4c3:837-848) and carrying the three #1364 continuity
+                    # fields. session_id/turn_id match the identity the governed
+                    # driver stamps on its tool records (ctx.session_id /
+                    # ctx.turn_id below), so every record in this turn shares one
+                    # (session_id, turn_id). No-op when no transcript sink is
+                    # registered.
+                    _transcript_session_id = _shadow_session_id(generation)
+                    _transcript_turn_id = generation.turn.turn_id
+                    emit_transcript_record(
+                        {
+                            "type": "turn_start",
+                            "prompt": getattr(
+                                runner_input, "sanitized_user_input", None
+                            ),
+                            "provider": getattr(runner_input, "provider_label", None),
+                            "model": getattr(runner_input, "model_label", None),
+                            "session_reused": session_reused,
+                            "session_event_count": int(session_event_count or 0),
+                            "seeded_message_count": seeded_message_count,
+                        },
+                        _transcript_session_id,
+                        _transcript_turn_id,
+                    )
                     event_stream = run_governed_turn(
                         ctx, runtime=hosted_rt, cancel=cancel_event
                     )
-                    # 8. Collect result (PR3).
+                    # 8. Collect result (PR3). U8 threads the continuity verdicts
+                    # (B3 lease reuse, B2 probe / seed count) onto the result so
+                    # the hosted #1364 dashboard fields are populated.
                     boundary_result = await collect_engine_to_boundary_result(
                         generation=generation,
                         config=generation_config,
@@ -752,6 +793,49 @@ async def _run_live_chat_runner(
                         timeout_ms=getattr(
                             generation.budgets, "python_runner_timeout_ms", 0
                         ),
+                        session_reused=session_reused,
+                        session_event_count=int(session_event_count or 0),
+                        seeded_message_count=seeded_message_count,
+                        # B8: forward the governed turn's public content events
+                        # (text_delta / thinking_delta / tool_start / tool_end)
+                        # to the route's 1-arg SSE sink LIVE as they are drained,
+                        # so ``/v1/chat/stream`` streams the answer frame-by-frame
+                        # exactly like the legacy boundary. This is the SAME 1-arg
+                        # public/SSE sink the legacy path threads
+                        # (``public_event_sink`` -> ``governance_event_sink``); it
+                        # is DISTINCT from the driver's 3-arg observability
+                        # event_sink (``governed_transcript_event_sink``) wired
+                        # into ``build_hosted_runtime`` above. ``None`` on the
+                        # completions route (no sink) keeps the buffered-only path
+                        # byte-identical.
+                        public_event_sink=governance_event_sink,
+                    )
+                    # U8 (B4): emit the assembled ``message`` (when non-empty) and
+                    # ``turn_end`` records after collection, mirroring the legacy
+                    # boundary chokepoint (_emit_turn_completion, gate5b4c3:1449-1465).
+                    if boundary_result.output_text_internal:
+                        emit_transcript_record(
+                            {
+                                "type": "message",
+                                "role": "assistant",
+                                "content": boundary_result.output_text_internal,
+                            },
+                            _transcript_session_id,
+                            _transcript_turn_id,
+                        )
+                    emit_transcript_record(
+                        {
+                            "type": "turn_end",
+                            "terminal": boundary_result.status,
+                            "reason": boundary_result.reason,
+                            "usage": boundary_result.usage_internal,
+                            "provider": boundary_result.selected_provider,
+                            "model": boundary_result.selected_model,
+                            "event_count": boundary_result.event_count,
+                            "latency_ms": boundary_result.latency_ms,
+                        },
+                        _transcript_session_id,
+                        _transcript_turn_id,
                     )
                 finally:
                     # Release the single-flight lease exactly once, with the seed

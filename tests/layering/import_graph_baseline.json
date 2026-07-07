@@ -296,6 +296,7 @@
     "transport->introspection",
     "transport->learning",
     "transport->missions",
+    "transport->observability",
     "transport->ops",
     "transport->plugins",
     "transport->recipes",

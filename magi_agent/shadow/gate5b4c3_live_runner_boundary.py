@@ -1387,18 +1387,14 @@ class Gate5B4C3LiveRunnerBoundary:
         """Append one full-fidelity record to the process-global session
         transcript sink (separate from the SSE ``_emit_public_event`` seam). No-op
         and fully fail-open when no transcript sink is registered (flag OFF) — so
-        this never alters the boundary result or the SSE contract."""
-        try:
-            from magi_agent.observability.transcript import (
-                get_active_transcript_sink,
-            )
+        this never alters the boundary result or the SSE contract. Delegates to
+        the shared ``emit_transcript_record`` chokepoint so the legacy boundary
+        and the governed hosted path write byte-identical records (U8)."""
+        from magi_agent.observability.transcript import emit_transcript_record
 
-            sink = get_active_transcript_sink()
-            if sink is None:
-                return
-            sink(dict(event), _shadow_session_id(request), request.turn.turn_id)
-        except Exception:
-            logger.debug("gate5b transcript record failed", exc_info=True)
+        emit_transcript_record(
+            event, _shadow_session_id(request), request.turn.turn_id
+        )
 
     def _emit_evidence(
         self, record: dict, *, request: Gate5B4C3ShadowGenerationRequest
