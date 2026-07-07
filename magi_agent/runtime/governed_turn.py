@@ -1424,4 +1424,8 @@ def _build_runtime(ctx: TurnContext) -> object:
         # keeps the parent auto-continue authority (still bounded by
         # MAGI_GOAL_LOOP_ENABLED inside build_headless_runtime).
         auto_continue_allowed=(ctx.depth == 0),
+        # Depth>0 (child/subagent) turns are exempt from the finalizer for the
+        # same containment reason: a child's structured return must not be
+        # overwritten by forced chat text. Top-level turns get the backstop.
+        no_tool_finalizer_allowed=(ctx.depth == 0),
     )

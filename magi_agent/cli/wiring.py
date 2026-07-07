@@ -51,6 +51,7 @@ from magi_agent.cli.engine import (
     RunnerPolicyAssembly,
     build_empty_response_recovery_config,
     build_engine_recovery_policy,
+    build_no_tool_finalizer_config,
     build_output_continuation_config,
 )
 from magi_agent.cli.goal_nudge_wiring import build_goal_nudge_from_env
@@ -380,6 +381,7 @@ def build_headless_runtime(
     agent_event_emitter: Callable[..., object] | None = None,
     session_service_factory: "Callable[[str], object] | None" = None,
     auto_continue_allowed: bool = True,
+    no_tool_finalizer_allowed: bool = True,
 ) -> HeadlessRuntime:
     """Construct the complete headless dependency set.
 
@@ -564,6 +566,13 @@ def build_headless_runtime(
         # Default OFF (MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED, strict truthy
         # opt-in) → build returns None → engine control flow is byte-identical.
         empty_response_recovery=build_empty_response_recovery_config(),
+        # B9 backstop: one tool-less finalizer pass on a blank tool turn.
+        # Profile default-ON; forced OFF for SpawnAgent children / depth>0 turns
+        # (no_tool_finalizer_allowed=False) so a child's structured tool-only
+        # return is never overwritten by forced chat text.
+        no_tool_finalizer=(
+            build_no_tool_finalizer_config() if no_tool_finalizer_allowed else None
+        ),
         runner_policy_assembly=_build_runner_policy_assembly(
             runner=effective_runner,
             model=model,

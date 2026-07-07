@@ -133,6 +133,7 @@ from magi_agent.engine.engine_recovery import (
     _suppress_cleanup_errors,
     build_empty_response_recovery_config,
     build_engine_recovery_policy,
+    build_no_tool_finalizer_config,
     build_output_continuation_config,
     EngineRecoveryPolicy,
     should_reprompt_for_zero_edits,
@@ -158,6 +159,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
     from magi_agent.runtime.empty_response_recovery import (
         EmptyResponseRecoveryConfig,
     )
+    from magi_agent.runtime.no_tool_finalizer import NoToolFinalizerConfig
     from magi_agent.runtime.goal_nudge import GoalNudge
     from magi_agent.runtime.output_continuation import OutputContinuationConfig
     from magi_agent.evidence.verify_audit import VerifyFinding
@@ -658,6 +660,7 @@ class MagiEngineDriver:
         goal_nudge: "GoalNudge | None" = None,
         output_continuation: "OutputContinuationConfig | None" = None,
         empty_response_recovery: "EmptyResponseRecoveryConfig | None" = None,
+        no_tool_finalizer: "NoToolFinalizerConfig | None" = None,
         evidence_collector: Callable[[str], Sequence[object]] | None = None,
         user_hook_bus: object | None = None,
         criterion_model_factory: Callable[[], object] | None = None,
@@ -782,6 +785,9 @@ class MagiEngineDriver:
         self._empty_response_recovery: "EmptyResponseRecoveryConfig | None" = (
             empty_response_recovery
         )
+        # B9 backstop: one bounded tool-less finalizer pass when a tool-loop turn
+        # commits blank. None (default) keeps _drive byte-identical.
+        self._no_tool_finalizer: "NoToolFinalizerConfig | None" = no_tool_finalizer
         # Optional evidence-collector DI seam (PR4 follow-up). When set,
         # _collect_evidence delegates to this callable instead of returning ().
         # The engine driver does NOT own a ledger; the harness layer above wires
@@ -2334,6 +2340,7 @@ class MagiEngineDriver:
             goal_nudge=self._goal_nudge,
             output_continuation=self._output_continuation,
             empty_response_recovery=self._empty_response_recovery,
+            no_tool_finalizer=self._no_tool_finalizer,
             goal_loop_judge_factory=self._goal_loop_judge_factory,
             ambient_goal_policy_factory=self._ambient_goal_policy_factory,
             evidence_first=self._evidence_first,
@@ -2406,6 +2413,7 @@ class MagiEngineDriver:
         goal_nudge: "GoalNudge | None" = None,
         output_continuation: "OutputContinuationConfig | None" = None,
         empty_response_recovery: "EmptyResponseRecoveryConfig | None" = None,
+        no_tool_finalizer: "NoToolFinalizerConfig | None" = None,
         goal_loop_judge_factory: Callable[..., object] | None = None,
         ambient_goal_policy_factory: Callable[[str], object | None] | None = None,
         evidence_first: bool = False,
@@ -2559,6 +2567,9 @@ class MagiEngineDriver:
             select_recovery_message,
             should_grace,
             should_recover_empty,
+        )
+        from magi_agent.runtime.no_tool_finalizer import (  # noqa: PLC0415
+            should_run_no_tool_finalizer,
         )
 
         types = deps["types"]
@@ -3959,6 +3970,65 @@ class MagiEngineDriver:
 
             # If cancelled during the guard retry, fall through to the cancel
             # block below (cancelled flag is already set).
+
+        # B9 no-tool finalizer: run-until-done backstop, ported from the legacy
+        # gate5b boundary. ONE bounded tool-less pass when the turn is about to
+        # commit blank (no visible answer text this turn). Runs AFTER every
+        # ladder re-invocation (continuation / grace / recovery / nudge / goal
+        # loop / auto-continue) and the zero-edit guard, and BEFORE the citation
+        # audit + LLM criterion gates + pre-final gate, so those evaluate the
+        # finalizer's answer and the citation / verify verdict records stay
+        # truthful. Only clean-break Terminal.completed turns reach here (the
+        # cancelled and engine_error paths returned above). config=None or a
+        # non-blank turn is a byte-identical no-op.
+        if not cancelled and should_run_no_tool_finalizer(
+            no_tool_finalizer,
+            emitted_text=emitted_text,
+            recoveries_used=recoveries_used,
+        ):
+            yield RuntimeEvent(
+                type="status",
+                payload={
+                    "type": "no_tool_finalizer",
+                    "phase": "start",
+                    "turnId": turn_id,
+                    "toolEnds": turn_tool_ends_total,
+                },
+                turn_id=turn_id,
+            )
+            _finalizer_produced = False
+            async for _fin_event in self._run_no_tool_finalizer_pass(
+                adapter=adapter,
+                bridge=bridge,
+                sanitize=sanitize,
+                runner=runner,
+                types=types,
+                runner_turn_input_cls=runner_turn_input_cls,
+                session_id=session_id,
+                turn_id=turn_id,
+                effective_harness_state=effective_harness_state,
+                event_allowance=no_tool_finalizer.event_allowance,
+                usage=usage,
+                cancel=cancel,
+            ):
+                _fin_payload = _fin_event.payload
+                if isinstance(_fin_payload, dict) and _fin_payload.get("type") == "text_delta":
+                    _fin_delta = _fin_payload.get("delta")
+                    if isinstance(_fin_delta, str) and _fin_delta:
+                        emitted_text += _fin_delta
+                        net_user_text_streamed = True
+                        _finalizer_produced = True
+                yield _fin_event
+            yield RuntimeEvent(
+                type="status",
+                payload={
+                    "type": "no_tool_finalizer",
+                    "phase": "end",
+                    "turnId": turn_id,
+                    "producedText": _finalizer_produced,
+                },
+                turn_id=turn_id,
+            )
 
         # Model text produced DURING a bounded repair attempt is held here and
         # only delivered if that attempt actually un-blocks the gate. A failed
@@ -6960,6 +7030,128 @@ class MagiEngineDriver:
         if isinstance(value, list | tuple):
             for nested in value:
                 MagiEngineDriver._collect_public_refs(nested, refs)
+
+    # -- B9 no-tool finalizer -----------------------------------------------
+    def _attach_deny_all_tools(self, *, runner: object) -> "_GateAttachment | None":
+        """Prepend a deny-all ``before_tool_callback`` for the finalizer pass.
+
+        Every tool call is SKIPPED and returns a blocked dict result (verified
+        ADK contract: a dict return short-circuits the tool). This gives the
+        hosted finalizer's ``tools: ()`` guarantee without rebuilding the agent
+        (the driver owns a live runner, not agent kwargs). Prepended FIRST so it
+        wins over any pre-existing callback; restore via ``_restore_gate_callback``
+        in a finally. No-op (None) when the runner has no agent (agentless
+        ``MockRunner`` tests stay green: the finalizer prompt alone governs them).
+        """
+        agent = getattr(runner, "agent", None)
+        if agent is None:
+            return None
+        original = getattr(agent, "before_tool_callback", None)
+        if original is None:
+            original_as_list: list = []
+        elif isinstance(original, list):
+            original_as_list = list(original)
+        else:
+            original_as_list = [original]
+
+        async def _deny_all(*, tool, args=None, tool_context=None):
+            _ = (args, tool_context)
+            return {
+                "status": "blocked",
+                "error": "no_tool_finalizer_pass",
+                "tool": getattr(tool, "name", "tool"),
+                "feedback": (
+                    "This is a finalizer pass. Do not call tools; write the "
+                    "final answer as text using the evidence already gathered."
+                ),
+            }
+
+        agent.before_tool_callback = [_deny_all, *original_as_list]
+        return _GateAttachment(agent=agent, original=original)
+
+    async def _run_no_tool_finalizer_pass(
+        self,
+        *,
+        adapter: object,
+        bridge: object,
+        sanitize: Callable[[dict], "dict | None"],
+        runner: object,
+        types: object,
+        runner_turn_input_cls: object,
+        session_id: str,
+        turn_id: str,
+        effective_harness_state: object,
+        event_allowance: int,
+        usage: dict,
+        cancel: asyncio.Event,
+    ) -> AsyncIterator["RuntimeEvent"]:
+        """One bounded tool-less pass that forces a final answer (B9 backstop).
+
+        Re-invokes the SAME runner (same ADK session, so it sees the just-run
+        tool/function response events) with a finalizer user message, under a
+        deny-all tool overlay. Streams the finalizer text live via the same
+        projection pipeline as the main loop, so the UI renders it as a normal
+        answer. Fail-open: any exception yields whatever streamed and never turns
+        a completed-blank turn into an error. Exactly one pass (no back-edge);
+        bounded by ``event_allowance``.
+        """
+        from magi_agent.runtime.no_tool_finalizer import (  # noqa: PLC0415
+            build_no_tool_finalizer_message,
+        )
+
+        finalizer_input = runner_turn_input_cls(
+            userId=self._user_id,
+            sessionId=session_id,
+            turnId=turn_id,
+            invocationId=turn_id,
+            newMessage=types.Content(  # type: ignore[attr-defined]
+                role="user",
+                parts=[types.Part(text=build_no_tool_finalizer_message())],  # type: ignore[attr-defined]
+            ),
+            harnessState=effective_harness_state,
+        )
+        # Attach + iterator creation live INSIDE the try so a synchronous raise
+        # there (a) never propagates out of this pass (fail-open: a finalizer
+        # error must not turn a completed-blank turn into an error) and (b) can
+        # never leak the deny-all overlay into the next turn on the same
+        # long-lived runner (the finally always restores it).
+        deny_attach: "_GateAttachment | None" = None
+        finalizer_iter: "AsyncIterator[object] | None" = None
+        _fin_usage: dict[str, int] = {}
+        _fin_events = 0
+        try:
+            deny_attach = self._attach_deny_all_tools(runner=runner)
+            finalizer_iter = adapter.run_turn(finalizer_input).__aiter__()  # type: ignore[union-attr]
+            while _fin_events < event_allowance:
+                if cancel.is_set():
+                    break
+                _fstep = await self._next_adk_event(finalizer_iter, cancel)
+                if _fstep is _CANCELLED or _fstep is _EXHAUSTED:
+                    break
+                _fadk_event = _fstep
+                self._note_observed_invocation_id(_adk_invocation_id(_fadk_event))
+                _fin_reading = _adk_usage_metadata(_fadk_event)
+                if _fin_reading:
+                    _fin_usage.update(_fin_reading)
+                _fprojection = bridge.project_adk_event(_fadk_event, turn_id=turn_id)  # type: ignore[union-attr]
+                for _fraw in _fprojection.agent_events:  # type: ignore[union-attr]
+                    _fsafe = sanitize(dict(_fraw))  # type: ignore[operator]
+                    if _fsafe is None:
+                        continue
+                    _fin_events += 1
+                    self._observe_event(_fsafe, session_id, turn_id)
+                    yield RuntimeEvent(
+                        type=_map_event_kind(_fsafe.get("type")),
+                        payload=_fsafe,
+                        turn_id=turn_id,
+                    )
+        except Exception:  # noqa: BLE001 - fail-open: a finalizer error never breaks the turn
+            logger.debug("no_tool_finalizer pass failed", exc_info=True)
+        finally:
+            if finalizer_iter is not None:
+                await self._aclose_iter(finalizer_iter)
+            self._restore_gate_callback(deny_attach)
+            _fold_usage(usage, _fin_usage)
 
     # -- Permission gate wiring (Stream F) ----------------------------------
     def _attach_gate_callback(

@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from magi_agent.runtime.empty_response_recovery import EmptyResponseRecoveryConfig
     from magi_agent.runtime.error_recovery import RecoveryEngine
+    from magi_agent.runtime.no_tool_finalizer import NoToolFinalizerConfig
     from magi_agent.runtime.output_continuation import OutputContinuationConfig
 
 
@@ -97,6 +98,32 @@ def build_output_continuation_config(
     return OutputContinuationConfig(
         enabled=True,
         max_continuations=parsed.max_continuations,
+    )
+
+
+def build_no_tool_finalizer_config(
+    env: object = None,
+) -> "NoToolFinalizerConfig | None":
+    """Build the no-tool finalizer config from env, or ``None`` when OFF.
+
+    Reuses ``MAGI_NO_TOOL_FINALIZER_ENABLED`` (profile-aware default-ON) /
+    ``MAGI_NO_TOOL_FINALIZER_EVENT_ALLOWANCE`` (single source of truth in
+    ``config.env``). ``None`` leaves the driver's terminal handling
+    byte-for-byte identical to the pre-finalizer path.
+    """
+
+    import os
+
+    from magi_agent.config.env import parse_no_tool_finalizer_env
+    from magi_agent.runtime.no_tool_finalizer import NoToolFinalizerConfig
+
+    mapping = env if isinstance(env, dict) else os.environ
+    parsed = parse_no_tool_finalizer_env(mapping)
+    if not parsed.enabled:
+        return None
+    return NoToolFinalizerConfig(
+        enabled=True,
+        event_allowance=parsed.event_allowance,
     )
 
 

@@ -2066,6 +2066,13 @@ FLAGS: tuple[FlagSpec, ...] = (
         summary="Enable automatic continuation of truncated model output (default-ON full profile).",
     ),
     _pb(
+        "MAGI_NO_TOOL_FINALIZER_ENABLED",
+        summary=(
+            "Run one bounded tool-less finalizer pass when a tool-loop turn stops "
+            "with no answer text, forcing a final answer (default-ON full profile)."
+        ),
+    ),
+    _pb(
         "MAGI_CONTEXT_COMPACTION_ENABLED",
         summary="Compact the working context when the token threshold is hit (default-ON full profile).",
     ),

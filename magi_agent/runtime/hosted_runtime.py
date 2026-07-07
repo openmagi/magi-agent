@@ -130,6 +130,11 @@ def build_hosted_runtime(
     # site (see ``_resolve_output_continuation_config``); this ctor stays
     # env-pure and simply forwards the resolved object to the driver.
     output_continuation: "object | None" = None,
+    # B9 backstop: one tool-less finalizer pass on a blank tool turn. ``None``
+    # (default) is byte-identical. The serving call site resolves the config
+    # from env gated on ``selected_full_toolhost`` (legacy always-on parity);
+    # this ctor stays env-pure and forwards the resolved object to the driver.
+    no_tool_finalizer: "object | None" = None,
 ) -> HostedRuntime:
     """Assemble a ``HostedRuntime`` from caller-provided ADK primitives.
 
@@ -217,6 +222,7 @@ def build_hosted_runtime(
         user_id=user_id,
         num_recent_events=num_recent_events,
         output_continuation=output_continuation,
+        no_tool_finalizer=no_tool_finalizer,
     )
 
     return HostedRuntime(engine=engine, gate=_HOSTED_NOOP_GATE)

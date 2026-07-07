@@ -189,6 +189,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_MODEL_THINKING_TYPE` (no default) — Highest-precedence reasoning escape hatch. Set to ``adaptive`` to send ``thinking={'type': 'adaptive'}`` directly (Anthropic Opus 4.7/4.8 adaptive-only path). Empty = unused.
 - `MAGI_MODEL_TIMEOUT_S` (default `600`) — litellm ``timeout`` (seconds) bounding a single hung request to the model provider. Values < 1 fall back to the default.
 - `MAGI_MULTI_FILE_JOIN_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Append multi-file cross-reference guidance: enumerate archives, read structured files fully, and run joins/dedup programmatically.
+- `MAGI_NO_TOOL_FINALIZER_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Run one bounded tool-less finalizer pass when a tool-loop turn stops with no answer text, forcing a final answer (default-ON full profile).
 - `MAGI_OBSERVABILITY_ENABLED` (default off) — Enable the hook-tap observability module (bot-activity visibility).
 - `MAGI_OBS_CHANNEL_INTERVAL_S` (default `10`) — Seconds between observability channel snapshots.
 - `MAGI_OBS_HEALTH_INTERVAL_S` (default `5`) — Seconds between observability health snapshots.
