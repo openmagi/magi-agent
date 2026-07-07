@@ -74,7 +74,7 @@ import asyncio
 import logging
 import re
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 from magi_agent.engine.contracts import ControlRequest, EngineResult, Terminal
@@ -160,6 +160,37 @@ if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
     )
     from magi_agent.runtime.goal_nudge import GoalNudge
     from magi_agent.runtime.output_continuation import OutputContinuationConfig
+    from magi_agent.evidence.verify_audit import VerifyFinding
+
+
+@dataclass
+class _VerifyTurnState:
+    """Per-turn verify-before-replying state (PR-V3).
+
+    Small module-level dataclass threaded through one turn's pre-final loop.
+    ``surfaced`` holds fingerprints already shown to the model this turn (the
+    counterless-convergence dedup key, design 7.3 / A1); ``history`` accumulates
+    every new finding for the terminal verdict record (PR-V4). The nudge fields
+    drive the SHIP_AS_IS interception and the response_clear buffering. All
+    counters are observability-only and never gate anything.
+    """
+
+    surfaced: set[str] = field(default_factory=set)
+    history: list["VerifyFinding"] = field(default_factory=list)
+    nudge_pending: bool = False
+    nudge_round_active: bool = False
+    pre_nudge_text: str = ""
+    ship_marker_used: bool = False
+    passes: int = 0
+    nudge_rounds: int = 0
+    loopback_tool_calls: int = 0
+    skeptic_ran: bool = False
+    skeptic_dropped: int = 0
+    # Transient carry of the last audited pass's new-finding counts, read by the
+    # nudge-setup status yield in the driver loop (the exit-site computes the
+    # message string, these two feed the observability status event).
+    pending_new_count: int = 0
+    pending_high_count: int = 0
 
 
 def _adk_invocation_id(event: object) -> str | None:
@@ -1643,6 +1674,177 @@ class MagiEngineDriver:
             event["repairAttempts"] = int(repair_attempts)
             event["inducedSearch"] = bool(induced_search)
             event["failOpen"] = bool(fail_open)
+            self._observe_event(dict(event), session_id, turn_id)
+        except Exception:
+            return
+
+    async def _verify_nudge_check(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        prompt: str,
+        final_text: str,
+        verify_state: "_VerifyTurnState",
+    ) -> str | None:
+        """Compute the verify-before-replying nudge at a loop exit site (PR-V3).
+
+        Shaped like ``_citation_repair_overlay``: fail-soft (any error returns
+        None), flag-gated, reads the evidence collector + registry. Runs the
+        deterministic auditors over the candidate final text, emits one per-pass
+        rule_check observability row ALWAYS (design 7.2 allows exactly this one
+        store-side row, clean pass included), and returns a nudge continuation
+        message when NEW findings exist, else None. Never blocks, never yields a
+        terminal, never mutates repairDecision.
+        """
+        try:
+            import os  # noqa: PLC0415
+
+            from magi_agent.config.env import (  # noqa: PLC0415
+                parse_verify_before_replying_enabled,
+            )
+
+            # 1. master flag OFF -> byte-identical short-circuit.
+            if not parse_verify_before_replying_enabled(os.environ):
+                return None
+            # 2. empty candidate -> nothing to audit.
+            if not final_text.strip():
+                return None
+
+            from magi_agent.evidence import verify_audit  # noqa: PLC0415
+
+            # 3. collector presence (governed_turn.py:119 semantics).
+            collector = self.local_tool_evidence_collector
+            collector_present = collector is not None
+
+            # 4. turn / session corpus (empty when the collector lacks the read
+            #    path: a child agent or a test stub).
+            turn_records: tuple[object, ...] = ()
+            session_records: tuple[object, ...] = ()
+            if collector is not None:
+                collect_turn = getattr(collector, "collect_for_turn", None)
+                if callable(collect_turn):
+                    turn_records = tuple(collect_turn(turn_id))
+                collect_session = getattr(collector, "collect_for_session", None)
+                if callable(collect_session):
+                    session_records = tuple(collect_session(session_id))
+
+            # 5. citation member: only when the citation gate is NOT in repair
+            #    mode (composition rule, design Section 7 decision 3). In repair
+            #    mode the gate owns citation violations (blocks) and the
+            #    budget-exhausted residue is covered record-only by A3 in PR-V4.
+            gate_result = None
+            if not self._citation_repair_active():
+                gate_result = self._evaluate_citation_gate_for_turn(
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    prompt=prompt,
+                    final_text=final_text,
+                )
+
+            # 6. the skeptic member is PR-V5: this PR passes an empty skeptic set.
+            # 7. run all deterministic auditors, deduped against this turn.
+            result = verify_audit.audit_candidate(
+                final_text=final_text,
+                prompt=prompt,
+                turn_records=turn_records,
+                session_records=session_records,
+                gate_result=gate_result,
+                collector_present=collector_present,
+                surfaced_fingerprints=verify_state.surfaced,
+                skeptic_findings=(),
+                skeptic_ran=verify_state.skeptic_ran,
+                skeptic_dropped=verify_state.skeptic_dropped,
+            )
+
+            # 8. one per-pass observability row ALWAYS (clean pass included).
+            verify_state.passes += 1
+            self._emit_verify_pass_observability(
+                session_id=session_id,
+                turn_id=turn_id,
+                result=result,
+                pass_index=verify_state.passes,
+            )
+
+            # 9. no NEW findings -> deliver (silence about an old finding is a
+            #    ship decision, recorded in PR-V4; the loop terminates in at most
+            #    distinct-findings + 1 passes with no counter).
+            if not result.new_findings:
+                return None
+
+            # 10. mark fingerprints surfaced + extend the turn history.
+            for finding in result.new_findings:
+                verify_state.surfaced.add(finding.finding_id)
+            verify_state.history.extend(result.new_findings)
+            verify_state.pending_new_count = len(result.new_findings)
+            verify_state.pending_high_count = sum(
+                1 for finding in result.new_findings if finding.confidence == "high"
+            )
+
+            # 11. render the nudge continuation message.
+            return verify_audit.build_nudge_message(result.new_findings)
+        except Exception:
+            return None
+
+    def _emit_verify_pass_observability(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        result: object,
+        pass_index: int,
+    ) -> None:
+        """Surface one verify audit pass on the observability audit feed (PR-V3).
+
+        Mirrors ``_emit_citation_verdict_observability``: emits a rule_check
+        family event under the ``verify_audit_alias`` family with flat verify
+        fields the projector preserves. Verdict maps ``ok`` / ``violation`` /
+        ``pending`` (no findings / any high finding / advisory only). Store-side
+        only (never streamed), so the clean-turn stream stays byte-identical
+        (A4). Fully fail-soft."""
+        if getattr(self, "_event_sink", None) is None:
+            return
+        try:
+            from magi_agent.runtime.public_events import rule_check_event  # noqa: PLC0415
+
+            high_count = int(getattr(result, "high_count", 0))
+            advisory_count = int(getattr(result, "advisory_count", 0))
+            new_findings = tuple(getattr(result, "new_findings", ()))
+            if high_count > 0:
+                rule_verdict = "violation"
+            elif advisory_count > 0:
+                rule_verdict = "pending"
+            else:
+                rule_verdict = "ok"
+            detail = (
+                f"verify pass {pass_index}: "
+                f"high={high_count} advisory={advisory_count} "
+                f"new={len(new_findings)}"
+            )
+            event = rule_check_event(
+                rule_id="verify_before_replying.audit",
+                verdict=rule_verdict,  # type: ignore[arg-type]
+                detail=detail,
+                event_family="verify_audit_alias",
+            )
+            event["sourceType"] = "verify"
+            event["policyId"] = "verify_before_replying"
+            event["passIndex"] = int(pass_index)
+            event["newFindings"] = len(new_findings)
+            event["findings"] = [
+                {
+                    "findingId": str(getattr(finding, "finding_id", "")),
+                    "ruleId": str(getattr(finding, "rule_id", "")),
+                    "confidence": str(getattr(finding, "confidence", "")),
+                    "claimClass": str(getattr(finding, "claim_class", "")),
+                    "detail": str(getattr(finding, "detail", "")),
+                }
+                for finding in new_findings
+            ]
+            event["skepticRan"] = bool(getattr(result, "skeptic_ran", False))
+            event["skepticDropped"] = int(
+                getattr(result, "skeptic_findings_dropped", 0)
+            )
             self._observe_event(dict(event), session_id, turn_id)
         except Exception:
             return
@@ -3511,7 +3713,25 @@ class MagiEngineDriver:
         citation_repair_attempts = 0
         citation_induced_search = False
         citation_record_emitted = False
+        # PR-V3 verify-before-replying: per-turn nudge state. Inert (no flag) or
+        # finding-free turns leave every branch below byte-identical to before.
+        verify_state = _VerifyTurnState()
         while True:
+            # PR-V3: SHIP_AS_IS interception at the loop top, BEFORE re-evaluating
+            # the gates. A prior pass injected a verify nudge; this pass carries
+            # the model's response to it. SHIP_AS_IS means "the original stands":
+            # discard the buffered marker round and restore the pre-nudge text.
+            # Any other response falls through to re-evaluate the gates and
+            # re-audit the (possibly revised) candidate.
+            if verify_state.nudge_pending:
+                verify_state.nudge_pending = False
+                verify_state.nudge_round_active = False
+                if emitted_text.strip() == "SHIP_AS_IS":
+                    repair_token_buffer = []
+                    emitted_text = verify_state.pre_nudge_text
+                    verify_state.ship_marker_used = True
+                    break
+            verify_nudge_message: str | None = None
             pre_final_gate = self._pre_final_gate_payload(
                 session_id=session_id,
                 turn_id=turn_id,
@@ -3538,137 +3758,133 @@ class MagiEngineDriver:
                 for buffered in repair_token_buffer:
                     yield buffered
                 repair_token_buffer = []
-                break
-            yield RuntimeEvent(type="status", payload=pre_final_gate, turn_id=turn_id)
-            if pre_final_gate["decision"] != "block":
-                for buffered in repair_token_buffer:
-                    yield buffered
-                repair_token_buffer = []
-                break
-            if repair_token_buffer:
-                yield RuntimeEvent(
-                    type="status",
-                    payload={
-                        "type": "coding_repair_output_suppressed",
-                        "turnId": turn_id,
-                        "attempt": repair_attempts,
-                        "suppressedTokenEvents": len(repair_token_buffer),
-                    },
+                # PR-V3: on a gate-less turn the verify audit runs HERE (SITE-A),
+                # after the flush and before the break. A None nudge delivers as
+                # today; a nudge message skips the status yield and the not-block
+                # exit below and drops into the nudge setup (block-wrap else arm).
+                verify_nudge_message = await self._verify_nudge_check(
+                    session_id=session_id,
                     turn_id=turn_id,
+                    prompt=prompt,
+                    final_text=emitted_text,
+                    verify_state=verify_state,
                 )
-                # Retain the suppressed attempt so a subsequent citation
-                # fail-open can restore a coherent answer (never blank).
-                last_repair_buffer = list(repair_token_buffer)
-                repair_token_buffer = []
-                repair_output_suppressed = True
-
-            repair_decision = pre_final_gate.get("repairDecision")
-            repair_policy = pre_final_gate.get("repairPolicy")
-            is_citation_repair = (
-                isinstance(repair_policy, Mapping)
-                and repair_policy.get("source") == "source-citation"
-            )
-            should_repair = (
-                isinstance(repair_decision, Mapping)
-                and repair_decision.get("action") == "continue_repair"
-                and isinstance(repair_policy, Mapping)
-                and (_coding_repair_loop_enabled() or is_citation_repair)
-            )
-            if not should_repair:
-                # Wave 4b: citation repair budget exhausted -> FAIL-OPEN. The
-                # already-streamed answer stands; emit the CitationVerdict record
-                # with failOpen=true and append the deterministic one-line hedge
-                # notice (soft-append precedent). The turn always completes.
-                citation_repair = pre_final_gate.get("citationRepair")
-                if isinstance(citation_repair, Mapping) and citation_repair.get("kind"):
-                    # P2 follow-up: if ``_evaluate_citation_gate_for_turn``
-                    # returns None here (registry vanished mid-turn), the notice
-                    # still streams but ``_emit_citation_verdict_record`` writes
-                    # nothing (no CitationGateResult). A minimal synthetic
-                    # failOpen record would close that observability gap; left as
-                    # a follow-up to avoid widening this branch.
-                    final_result = self._evaluate_citation_gate_for_turn(
+                if verify_nudge_message is None:
+                    break
+            # PR-V3: the per-pass status yield and the not-block exit (SITE-B) run
+            # only when no SITE-A nudge fired. When verify_nudge_message is None
+            # here the payload is guaranteed non-None (today SITE-A always breaks
+            # on a None payload), so this guard keeps the None payload out of the
+            # status yield and is byte-identical on every path that reaches these
+            # lines today.
+            if verify_nudge_message is None:
+                yield RuntimeEvent(
+                    type="status", payload=pre_final_gate, turn_id=turn_id
+                )
+                if pre_final_gate["decision"] != "block":
+                    for buffered in repair_token_buffer:
+                        yield buffered
+                    repair_token_buffer = []
+                    # PR-V3: verify audit runs at SITE-B too (after the flush,
+                    # before the break) on a passing-gate turn.
+                    verify_nudge_message = await self._verify_nudge_check(
                         session_id=session_id,
                         turn_id=turn_id,
                         prompt=prompt,
                         final_text=emitted_text,
+                        verify_state=verify_state,
                     )
-                    self._emit_citation_verdict_record(
-                        session_id=session_id,
-                        turn_id=turn_id,
-                        result=final_result,
-                        repair_attempts=citation_repair_attempts,
-                        induced_search=citation_induced_search,
-                        fail_open=True,
-                    )
-                    citation_record_emitted = True
-                    # Fail-open keeps a coherent answer. A prior repair round's
-                    # LIVE response_clear may have blanked the UI while that
-                    # round's tokens were suppressed on the re-block; flush the
-                    # last attempt so the hedge notice follows a real answer
-                    # rather than leaving a blank turn (answer==verdict, no-blank
-                    # invariant). When no repair round ran (buffer never
-                    # suppressed) this is empty and the primary live answer
-                    # already stands, so the notice is a pure suffix as before.
-                    for buffered in last_repair_buffer:
-                        yield buffered
-                    last_repair_buffer = []
+                    if verify_nudge_message is None:
+                        break
+            if verify_nudge_message is None:
+                if repair_token_buffer:
                     yield RuntimeEvent(
                         type="status",
                         payload={
-                            "type": "source_citation_fail_open",
+                            "type": "coding_repair_output_suppressed",
                             "turnId": turn_id,
-                            "repairAttempts": citation_repair_attempts,
-                            "inducedSearch": citation_induced_search,
+                            "attempt": repair_attempts,
+                            "suppressedTokenEvents": len(repair_token_buffer),
                         },
                         turn_id=turn_id,
                     )
-                    notice = str(citation_repair.get("failOpenNotice") or "")
-                    if notice:
+                    # Retain the suppressed attempt so a subsequent citation
+                    # fail-open can restore a coherent answer (never blank).
+                    last_repair_buffer = list(repair_token_buffer)
+                    repair_token_buffer = []
+                    repair_output_suppressed = True
+
+                repair_decision = pre_final_gate.get("repairDecision")
+                repair_policy = pre_final_gate.get("repairPolicy")
+                is_citation_repair = (
+                    isinstance(repair_policy, Mapping)
+                    and repair_policy.get("source") == "source-citation"
+                )
+                should_repair = (
+                    isinstance(repair_decision, Mapping)
+                    and repair_decision.get("action") == "continue_repair"
+                    and isinstance(repair_policy, Mapping)
+                    and (_coding_repair_loop_enabled() or is_citation_repair)
+                )
+                if not should_repair:
+                    # Wave 4b: citation repair budget exhausted -> FAIL-OPEN. The
+                    # already-streamed answer stands; emit the CitationVerdict record
+                    # with failOpen=true and append the deterministic one-line hedge
+                    # notice (soft-append precedent). The turn always completes.
+                    citation_repair = pre_final_gate.get("citationRepair")
+                    if isinstance(citation_repair, Mapping) and citation_repair.get("kind"):
+                        # P2 follow-up: if ``_evaluate_citation_gate_for_turn``
+                        # returns None here (registry vanished mid-turn), the notice
+                        # still streams but ``_emit_citation_verdict_record`` writes
+                        # nothing (no CitationGateResult). A minimal synthetic
+                        # failOpen record would close that observability gap; left as
+                        # a follow-up to avoid widening this branch.
+                        final_result = self._evaluate_citation_gate_for_turn(
+                            session_id=session_id,
+                            turn_id=turn_id,
+                            prompt=prompt,
+                            final_text=emitted_text,
+                        )
+                        self._emit_citation_verdict_record(
+                            session_id=session_id,
+                            turn_id=turn_id,
+                            result=final_result,
+                            repair_attempts=citation_repair_attempts,
+                            induced_search=citation_induced_search,
+                            fail_open=True,
+                        )
+                        citation_record_emitted = True
+                        # Fail-open keeps a coherent answer. A prior repair round's
+                        # LIVE response_clear may have blanked the UI while that
+                        # round's tokens were suppressed on the re-block; flush the
+                        # last attempt so the hedge notice follows a real answer
+                        # rather than leaving a blank turn (answer==verdict, no-blank
+                        # invariant). When no repair round ran (buffer never
+                        # suppressed) this is empty and the primary live answer
+                        # already stands, so the notice is a pure suffix as before.
+                        for buffered in last_repair_buffer:
+                            yield buffered
+                        last_repair_buffer = []
                         yield RuntimeEvent(
-                            type="token",
+                            type="status",
                             payload={
-                                "type": "text_delta",
-                                "delta": "\n\n" + notice,
+                                "type": "source_citation_fail_open",
+                                "turnId": turn_id,
+                                "repairAttempts": citation_repair_attempts,
+                                "inducedSearch": citation_induced_search,
                             },
                             turn_id=turn_id,
                         )
-                    yield EngineResult(  # type: ignore[misc]
-                        terminal=Terminal.completed,
-                        usage=usage,
-                        cost_usd=0.0,
-                        session_id=session_id,
-                        turn_id=turn_id,
-                    )
-                    return
-                # WS6 PR6a/PR6b: convert the hard pre-final refuse into a SOFT
-                # appended notice (research-governance notice OR evidence hedge,
-                # one seam two reason families) when an in-scope research/contract
-                # recipe blocked under the relevant flag. The already-streamed
-                # answer is kept; only a trailing notice SUFFIX is appended.
-                # Skipped (existing hard refuse runs) when the flags are OFF, the
-                # recipe is out of scope, the missing set is empty, or a
-                # repair-suppressed turn discarded its answer (MINOR-2). Fail-open
-                # inside the seam.
-                if not repair_output_suppressed:
-                    soft_consequence = self._apply_soft_verification_consequence(
-                        turn_id=turn_id,
-                        session_id=session_id,
-                        final_text=emitted_text,
-                        pre_final_gate=pre_final_gate,
-                        live_selected_pack_ids=live_selected,
-                    )
-                    if soft_consequence is not None:
-                        notice_suffix_text, status_event = soft_consequence
-                        yield status_event
-                        yield RuntimeEvent(
-                            type="token",
-                            payload={
-                                "type": "text_delta",
-                                "delta": notice_suffix_text,
-                            },
-                            turn_id=turn_id,
-                        )
+                        notice = str(citation_repair.get("failOpenNotice") or "")
+                        if notice:
+                            yield RuntimeEvent(
+                                type="token",
+                                payload={
+                                    "type": "text_delta",
+                                    "delta": "\n\n" + notice,
+                                },
+                                turn_id=turn_id,
+                            )
                         yield EngineResult(  # type: ignore[misc]
                             terminal=Terminal.completed,
                             usage=usage,
@@ -3677,66 +3893,126 @@ class MagiEngineDriver:
                             turn_id=turn_id,
                         )
                         return
-                yield EngineResult(  # type: ignore[misc]
-                    terminal=Terminal.error,
-                    usage=usage,
-                    cost_usd=0.0,
-                    error="pre_final_evidence_gate_blocked",
-                    session_id=session_id,
+                    # WS6 PR6a/PR6b: convert the hard pre-final refuse into a SOFT
+                    # appended notice (research-governance notice OR evidence hedge,
+                    # one seam two reason families) when an in-scope research/contract
+                    # recipe blocked under the relevant flag. The already-streamed
+                    # answer is kept; only a trailing notice SUFFIX is appended.
+                    # Skipped (existing hard refuse runs) when the flags are OFF, the
+                    # recipe is out of scope, the missing set is empty, or a
+                    # repair-suppressed turn discarded its answer (MINOR-2). Fail-open
+                    # inside the seam.
+                    if not repair_output_suppressed:
+                        soft_consequence = self._apply_soft_verification_consequence(
+                            turn_id=turn_id,
+                            session_id=session_id,
+                            final_text=emitted_text,
+                            pre_final_gate=pre_final_gate,
+                            live_selected_pack_ids=live_selected,
+                        )
+                        if soft_consequence is not None:
+                            notice_suffix_text, status_event = soft_consequence
+                            yield status_event
+                            yield RuntimeEvent(
+                                type="token",
+                                payload={
+                                    "type": "text_delta",
+                                    "delta": notice_suffix_text,
+                                },
+                                turn_id=turn_id,
+                            )
+                            yield EngineResult(  # type: ignore[misc]
+                                terminal=Terminal.completed,
+                                usage=usage,
+                                cost_usd=0.0,
+                                session_id=session_id,
+                                turn_id=turn_id,
+                            )
+                            return
+                    yield EngineResult(  # type: ignore[misc]
+                        terminal=Terminal.error,
+                        usage=usage,
+                        cost_usd=0.0,
+                        error="pre_final_evidence_gate_blocked",
+                        session_id=session_id,
+                        turn_id=turn_id,
+                    )
+                    return
+
+                max_repair_attempts = _coding_repair_max_attempts(repair_policy)
+                next_repair_attempt = repair_attempts + 1
+                repair_attempts = next_repair_attempt
+                missing_evidence = [
+                    str(ref)
+                    for ref in pre_final_gate.get("missingEvidence") or []
+                    if isinstance(ref, str)
+                ]
+                missing_validators = [
+                    str(ref)
+                    for ref in pre_final_gate.get("missingValidators") or []
+                    if isinstance(ref, str)
+                ]
+                citation_repair = pre_final_gate.get("citationRepair")
+                citation_repair_message = (
+                    str(citation_repair["message"])
+                    if isinstance(citation_repair, Mapping)
+                    and citation_repair.get("message")
+                    else None
+                )
+                retry_payload = {
+                    "type": (
+                        "source_citation_repair_scheduled"
+                        if citation_repair_message is not None
+                        else "coding_repair_retry_scheduled"
+                    ),
+                    "turnId": turn_id,
+                    "attempt": next_repair_attempt,
+                    "maxAttempts": max_repair_attempts,
+                    "missingEvidence": missing_evidence,
+                    "missingValidators": missing_validators,
+                }
+                yield RuntimeEvent(type="status", payload=retry_payload, turn_id=turn_id)
+
+                if citation_repair_message is not None:
+                    # Wave 4b: attribution / induce-search repair instruction (the
+                    # citationRepair message replaces the coding continuation text).
+                    repair_message = citation_repair_message
+                    citation_repair_attempts = next_repair_attempt
+                    if isinstance(citation_repair, Mapping) and citation_repair.get(
+                        "inducedSearch"
+                    ):
+                        citation_induced_search = True
+                else:
+                    repair_message = _build_repair_continuation_message(
+                        missing_evidence=missing_evidence,
+                        missing_validators=missing_validators,
+                        attempt=next_repair_attempt,
+                        max_attempts=max_repair_attempts,
+                    )
+            else:
+                # PR-V3: a verify nudge fired at SITE-A or SITE-B. Skip the
+                # block-path repair machinery entirely (repair_attempts,
+                # citation_repair_attempts, repairDecision and the suppression
+                # handling are all inside the guarded arm above and stay
+                # there) and set up a nudge continuation that reuses the shared
+                # runner_input build below. Control falls into it exactly as a
+                # repair round does.
+                yield RuntimeEvent(
+                    type="status",
+                    payload={
+                        "type": "verify_nudge_scheduled",
+                        "turnId": turn_id,
+                        "newFindings": verify_state.pending_new_count,
+                        "highFindings": verify_state.pending_high_count,
+                        "nudgeRound": verify_state.nudge_rounds,
+                    },
                     turn_id=turn_id,
                 )
-                return
-
-            max_repair_attempts = _coding_repair_max_attempts(repair_policy)
-            next_repair_attempt = repair_attempts + 1
-            repair_attempts = next_repair_attempt
-            missing_evidence = [
-                str(ref)
-                for ref in pre_final_gate.get("missingEvidence") or []
-                if isinstance(ref, str)
-            ]
-            missing_validators = [
-                str(ref)
-                for ref in pre_final_gate.get("missingValidators") or []
-                if isinstance(ref, str)
-            ]
-            citation_repair = pre_final_gate.get("citationRepair")
-            citation_repair_message = (
-                str(citation_repair["message"])
-                if isinstance(citation_repair, Mapping)
-                and citation_repair.get("message")
-                else None
-            )
-            retry_payload = {
-                "type": (
-                    "source_citation_repair_scheduled"
-                    if citation_repair_message is not None
-                    else "coding_repair_retry_scheduled"
-                ),
-                "turnId": turn_id,
-                "attempt": next_repair_attempt,
-                "maxAttempts": max_repair_attempts,
-                "missingEvidence": missing_evidence,
-                "missingValidators": missing_validators,
-            }
-            yield RuntimeEvent(type="status", payload=retry_payload, turn_id=turn_id)
-
-            if citation_repair_message is not None:
-                # Wave 4b: attribution / induce-search repair instruction (the
-                # citationRepair message replaces the coding continuation text).
-                repair_message = citation_repair_message
-                citation_repair_attempts = next_repair_attempt
-                if isinstance(citation_repair, Mapping) and citation_repair.get(
-                    "inducedSearch"
-                ):
-                    citation_induced_search = True
-            else:
-                repair_message = _build_repair_continuation_message(
-                    missing_evidence=missing_evidence,
-                    missing_validators=missing_validators,
-                    attempt=next_repair_attempt,
-                    max_attempts=max_repair_attempts,
-                )
+                repair_message = verify_nudge_message
+                verify_state.nudge_pending = True
+                verify_state.nudge_round_active = True
+                verify_state.pre_nudge_text = emitted_text
+                verify_state.nudge_rounds += 1
             runner_input = runner_turn_input_cls(
                 userId=self._user_id,
                 sessionId=session_id,
@@ -3804,6 +4080,14 @@ class MagiEngineDriver:
                                 emitted_text += delta
                                 if delta:
                                     net_user_text_streamed = True
+                        # PR-V3: count tool loop-backs during a verify nudge round
+                        # (observability for the PR-V4 verdict record). Repair
+                        # rounds leave this inert (nudge_round_active is False).
+                        if (
+                            verify_state.nudge_round_active
+                            and safe.get("type") == "tool_start"
+                        ):
+                            verify_state.loopback_tool_calls += 1
                         yielded_events += 1
                         self._observe_event(safe, session_id, turn_id)
                         event_kind = _map_event_kind(safe.get("type"))
@@ -3812,10 +4096,19 @@ class MagiEngineDriver:
                             payload=safe,
                             turn_id=turn_id,
                         )
-                        if event_kind == "token":
+                        if event_kind == "token" or (
+                            verify_state.nudge_round_active
+                            and safe.get("type") == "response_clear"
+                        ):
                             # Held until the gate re-evaluates: delivered on
                             # pass, suppressed on another block (see the
                             # repair_token_buffer handling at the loop top).
+                            # PR-V3: during a verify nudge round the response_clear
+                            # is buffered too (it classifies as status and would
+                            # blank the UI live). SHIP_AS_IS discards the whole
+                            # buffer (UI never blanked); a revision flushes
+                            # clear-then-tokens in order. Repair rounds keep the
+                            # live-clear behavior byte-identically.
                             repair_token_buffer.append(runtime_event)
                         else:
                             yield runtime_event
