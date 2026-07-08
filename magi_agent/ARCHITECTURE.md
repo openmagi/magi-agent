@@ -4,6 +4,7 @@
 
 ```mermaid
 graph LR
+    solving
     adk_bridge --> cli
     adk_bridge --> config
     adk_bridge --> context
@@ -1865,6 +1866,14 @@ graph LR
 |---|---|---|---|
 | __init__.py | — | — | — |
 | test_usage_metadata.py | G2: shared duck-typed ADK usage-metadata extraction. | usage_metadata | — |
+
+### solving/
+
+| Module | Purpose | Depends On | Depended By |
+|---|---|---|---|
+| __init__.py | Deep-solve verification-and-refinement pipeline — orchestrator core. | deep_solve, templates | — |
+| deep_solve.py | Deep-solve orchestrator core (U1) — pure, no network. | templates | solving/__init__.py |
+| templates.py | Domain prompt templates for the deep-solve pipeline (U1.4). | — | solving/__init__.py, solving/deep_solve.py |
 
 ### storage/
 
