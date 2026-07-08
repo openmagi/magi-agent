@@ -114,15 +114,15 @@ describe("GuidedWizard shell — forwards the handoff prop", () => {
 
 
 describe("CustomizeHub — wires the handoff into the NL surface", () => {
-  it("extends AddState.nl with an optional nlPrefill seed", () => {
+  it("extends the Add-policy phase with an optional nlPrefill seed (PR-4 shape)", () => {
     expect(hubSrc).toMatch(
-      /phase: "nl"[\s\S]*?nlPrefill\?: string/,
+      /phase: "policy"; surface: "describe" \| "linked"; nlPrefill\?: string/,
     );
   });
 
-  it("flips to phase='nl' with the primer when the wizard calls onContinueInNl", () => {
+  it("flips to the describe surface with the primer when the wizard calls onContinueInNl", () => {
     expect(hubSrc).toMatch(
-      /onContinueInNl=\{[\s\S]*?setAddState\(\{ phase: "nl", nlPrefill: primer \}\)/,
+      /onContinueInNl=\{[\s\S]*?setAddState\(\{ phase: "policy", surface: "describe", nlPrefill: primer \}\)/,
     );
   });
 

@@ -56,7 +56,6 @@ import { useAgentFetch } from "@/lib/local-api";
 import { getModes } from "@/lib/agent-modes-api";
 import type { AgentMode } from "@/chat-core";
 import { AddRulePicker, type AddRuleChoice } from "./add-rule-modal";
-import { AddPolicyModePicker, type AddPolicyMode } from "./add-policy-mode-picker";
 import { GuidedWizard } from "./guided-wizard";
 import { NlRuleCompose } from "./nl-rule-compose";
 import { ConversationalPolicyCompose } from "./conversational-policy-compose";
@@ -753,9 +752,11 @@ export function CustomizeHub({
  *
  * The legacy flat :class:`PoliciesTable` + the reusable Evidence / Conditions
  * catalogs move under a collapsed "Advanced" disclosure below the card list
- * (design D3) — kept functional for debugging. The 3-mode Add Policy entry
- * (NL / Guided / Raw) and the legacy ``CustomRulesSection`` / AddRulePicker
- * still mount under the Raw authoring path.
+ * (design D3) — kept functional for debugging. Authoring is consolidated
+ * behind the single "+ Add policy" entry (PR-4, design D2): conversational NL
+ * is the default surface, "Producer + gate" is the multi-rule composer, and
+ * the Guided wizard + the legacy ``CustomRulesSection`` / AddRulePicker Raw
+ * forms mount unchanged behind the flow's "Advanced" entry.
  */
 function RulesSectionMount({
   data,
@@ -814,21 +815,22 @@ function RulesSectionMount({
   ) => Promise<ShaclCompileResponse>;
   ruleError: string | null;
 }): React.ReactElement {
-  // 5-phase Add state. picking_mode shows the NL/Guided/Raw cards; nl,
-  // raw_picking, and raw_authoring are the actual authoring surfaces.
-  // PR-F-HANDOFF — the ``nl`` phase carries an optional ``nlPrefill`` seed
-  // sourced from the guided wizard's "Continue in NL" handoff. The NL
-  // surface reads it via NlRuleCompose's ``initialNlText`` prop.
+  // Add-policy state machine (PR-4 authoring consolidation). "+ Add policy"
+  // is the SINGLE entry point: it opens the ``policy`` phase whose default
+  // ``describe`` surface is the conversational NL composer — a 1-rule save
+  // auto-promotes to a 1-rule Policy server-side (PR-1), the degenerate case
+  // of the original design intent. The ``linked`` surface is the multi-rule
+  // producer + gate composer. The Guided wizard and the Raw forms survive
+  // unchanged as an "Advanced" entry INSIDE the flow (guided / raw_picking /
+  // raw_authoring phases); the standalone add-rule button/picker is retired.
+  // PR-F-HANDOFF — ``nlPrefill`` seeds the NL surface from the guided
+  // wizard's "Continue in NL" handoff (NlRuleCompose ``initialNlText``).
   type AddState =
     | { phase: "idle" }
-    | { phase: "picking_mode" }
-    | { phase: "nl"; nlPrefill?: string }
+    | { phase: "policy"; surface: "describe" | "linked"; nlPrefill?: string }
     | { phase: "guided" }
     | { phase: "raw_picking" }
-    | { phase: "raw_authoring"; choice: AddRuleChoice }
-    // Multi-rule policy composer (producer + gate), reached via its own
-    // "Add policy" button rather than the single-rule mode picker.
-    | { phase: "policy" };
+    | { phase: "raw_authoring"; choice: AddRuleChoice };
   const [addState, setAddState] = useState<AddState>({ phase: "idle" });
 
   type SubTab = "policies" | "evidence" | "conditions";
@@ -941,69 +943,112 @@ function RulesSectionMount({
   );
   const seamSpecs = data.overrides.verification.seam_specs ?? [];
 
-  const handleModePick = (mode: AddPolicyMode) => {
-    if (mode === "nl") setAddState({ phase: "nl" });
-    else if (mode === "guided") setAddState({ phase: "guided" });
-    else if (mode === "raw") setAddState({ phase: "raw_picking" });
-  };
+  const composeSurface = (surface: "describe" | "linked") =>
+    setAddState({ phase: "policy", surface });
 
   return (
     <div className="space-y-5">
-      {/* Policies header + Add buttons. Both "Add rule" and "Add policy" are
-          kept for this PR (authoring consolidation lands in PR-4); a single-rule
-          save auto-promotes to a 1-rule Policy server-side (PR-1). */}
+      {/* Policies header. "+ Add policy" is the SINGLE authoring entry point
+          (PR-4): every path — conversational NL (default), producer + gate,
+          Guided, Raw — yields a Policy (1-rule saves auto-promote via PR-1). */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="text-sm font-semibold text-foreground">
           Policies{" "}
           <span className="font-normal text-secondary">({policyCardCount})</span>
         </h3>
         {addState.phase === "idle" ? (
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setAddState({ phase: "picking_mode" })}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-primary/90"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Add rule
-            </button>
-            <button
-              type="button"
-              onClick={() => setAddState({ phase: "policy" })}
-              title="Author a multi-step policy: a producer that records evidence + a gate that blocks a tool until that evidence exists this session."
-              className="inline-flex items-center gap-1.5 rounded-lg border border-primary/40 bg-white px-3 py-1.5 text-xs font-semibold text-primary shadow-sm hover:bg-primary/[0.06]"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Add policy
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => composeSurface("describe")}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-primary/90"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Add policy
+          </button>
         ) : null}
       </div>
 
-      {addState.phase === "picking_mode" ? (
-        <AddPolicyModePicker
-          onCancel={() => setAddState({ phase: "idle" })}
-          onPick={handleModePick}
-        />
-      ) : null}
-
-      {addState.phase === "nl" ? (
+      {addState.phase === "policy" ? (
         <section className="space-y-2">
           <AuthoringHeader
-            label="Describe it"
-            onPickDifferent={() => setAddState({ phase: "picking_mode" })}
+            label={
+              addState.surface === "linked"
+                ? "Add policy: link two rules (producer + gate)"
+                : "Add policy"
+            }
             onClose={() => setAddState({ phase: "idle" })}
           />
-          <NlRuleCompose
-            onActivated={() => {
-              reload();
-              reloadDashboardChecks();
-              setAddState({ phase: "idle" });
-            }}
-            onBrowseEvidence={() => setSubTab("evidence")}
-            onAuthorManually={() => setAddState({ phase: "guided" })}
-            initialNlText={addState.nlPrefill}
-          />
+          {/* Surface switcher + the demoted Advanced editors. Conversational
+              is the default; Guided/Raw survive unchanged behind "Advanced". */}
+          <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+            <div className="flex items-center gap-1.5" role="group" aria-label="Authoring surface">
+              <button
+                type="button"
+                aria-pressed={addState.surface === "describe"}
+                onClick={() => composeSurface("describe")}
+                className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                  addState.surface === "describe"
+                    ? "bg-primary text-white"
+                    : "border border-black/[0.08] bg-white text-secondary hover:text-foreground"
+                }`}
+              >
+                Describe it
+              </button>
+              <button
+                type="button"
+                aria-pressed={addState.surface === "linked"}
+                onClick={() => composeSurface("linked")}
+                title="Author a multi-step policy: a producer that records evidence + a gate that blocks a tool until that evidence exists this session."
+                className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                  addState.surface === "linked"
+                    ? "bg-primary text-white"
+                    : "border border-black/[0.08] bg-white text-secondary hover:text-foreground"
+                }`}
+              >
+                Producer + gate
+              </button>
+            </div>
+            <div className="flex items-center gap-1.5 text-[11px] text-secondary/80">
+              <span className="font-medium">Advanced:</span>
+              <button
+                type="button"
+                onClick={() => setAddState({ phase: "guided" })}
+                title="Answer a few questions, step by step. No jargon, no blank form."
+                className="rounded-full border border-black/[0.08] bg-white px-2.5 py-1 font-medium text-secondary hover:text-foreground"
+              >
+                Guided steps
+              </button>
+              <button
+                type="button"
+                onClick={() => setAddState({ phase: "raw_picking" })}
+                title="Fill the form by hand — for when you already know the exact rule shape you want."
+                className="rounded-full border border-black/[0.08] bg-white px-2.5 py-1 font-medium text-secondary hover:text-foreground"
+              >
+                Raw form
+              </button>
+            </div>
+          </div>
+          {addState.surface === "describe" ? (
+            <NlRuleCompose
+              onActivated={() => {
+                reload();
+                reloadDashboardChecks();
+                setAddState({ phase: "idle" });
+              }}
+              onBrowseEvidence={() => setSubTab("evidence")}
+              onAuthorManually={() => setAddState({ phase: "guided" })}
+              initialNlText={addState.nlPrefill}
+            />
+          ) : (
+            <ConversationalPolicyCompose
+              agentFetch={agentFetch}
+              onSaved={() => {
+                reload();
+                reloadDashboardChecks();
+                setAddState({ phase: "idle" });
+              }}
+            />
+          )}
         </section>
       ) : null}
 
@@ -1016,14 +1061,14 @@ function RulesSectionMount({
             reloadDashboardChecks();
             setAddState({ phase: "idle" });
           }}
-          onPickDifferent={() => setAddState({ phase: "picking_mode" })}
+          onPickDifferent={() => composeSurface("describe")}
           onCancel={() => setAddState({ phase: "idle" })}
           // PR-F-HANDOFF — operator clicked "Continue in NL" mid-wizard.
           // Flip to the NL surface and seed the textarea with the
           // serialized draft primer so the chat resumes where the
           // wizard left off.
           onContinueInNl={(primer) =>
-            setAddState({ phase: "nl", nlPrefill: primer })
+            setAddState({ phase: "policy", surface: "describe", nlPrefill: primer })
           }
         />
       ) : null}
@@ -1032,11 +1077,11 @@ function RulesSectionMount({
         <section className="space-y-2">
           <AuthoringHeader
             label="Advanced: pick a rule kind"
-            onPickDifferent={() => setAddState({ phase: "picking_mode" })}
+            onPickDifferent={() => composeSurface("describe")}
             onClose={() => setAddState({ phase: "idle" })}
           />
           <AddRulePicker
-            onCancel={() => setAddState({ phase: "picking_mode" })}
+            onCancel={() => composeSurface("describe")}
             onPick={(choice) =>
               setAddState({ phase: "raw_authoring", choice })
             }
@@ -1072,23 +1117,6 @@ function RulesSectionMount({
           {addState.choice === "rewire-builtin" ? (
             <SeamBuilderPanel seamSpecs={seamSpecs} onChange={reload} />
           ) : null}
-        </section>
-      ) : null}
-
-      {addState.phase === "policy" ? (
-        <section className="space-y-2">
-          <AuthoringHeader
-            label="Link a policy (producer + gate)"
-            onClose={() => setAddState({ phase: "idle" })}
-          />
-          <ConversationalPolicyCompose
-            agentFetch={agentFetch}
-            onSaved={() => {
-              reload();
-              reloadDashboardChecks();
-              setAddState({ phase: "idle" });
-            }}
-          />
         </section>
       ) : null}
 
@@ -1236,7 +1264,7 @@ function RulesSectionMount({
         </>
       ) : (
         <div className="rounded-xl border border-dashed border-black/[0.08] bg-gray-50/60 px-4 py-3 text-xs text-secondary">
-          List hidden while adding a rule. Cancel above to return.
+          List hidden while adding a policy. Close above to return.
         </div>
       )}
     </div>
@@ -1250,9 +1278,9 @@ function AuthoringHeader({
   onClose,
 }: {
   label: string;
-  /** Optional; omit when the authoring surface has no sibling mode to
-   *  switch to (e.g. the policy composer, reached via its own button
-   *  rather than the NL/Guided/Raw mode picker). */
+  /** Optional; omit when the surface has its own switcher (the Add-policy
+   *  phase renders the Describe/Producer+gate pills + Advanced entries
+   *  itself). Guided/Raw wire this back to the Add-policy surface. */
   onPickDifferent?: () => void;
   onClose: () => void;
 }): React.ReactElement {

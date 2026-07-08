@@ -205,11 +205,13 @@ describe("Customize-hub wiring for the policy composer", () => {
     expect(HUB).toContain("<ConversationalPolicyCompose");
   });
 
-  it('adds a dedicated "Add policy" entry + a "policy" add phase', () => {
-    expect(HUB).toContain('{ phase: "policy" }');
+  it('mounts inside the single "Add policy" flow as the "linked" surface (PR-4)', () => {
+    expect(HUB).toContain('phase: "policy"');
     expect(HUB).toContain("Add policy");
-    // The button sits next to the existing "Add rule" button.
-    expect(HUB).toContain("Add rule");
+    // PR-4 consolidation: the composer is the producer+gate surface of the
+    // ONE Add-policy flow; the standalone add-rule button is retired.
+    expect(HUB).toContain('composeSurface("linked")');
+    expect(HUB).not.toMatch(/>\s*Add rule\b/);
   });
 
   it("reloads catalog + dashboard checks on a successful save", () => {

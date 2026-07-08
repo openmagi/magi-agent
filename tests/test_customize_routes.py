@@ -305,6 +305,53 @@ def test_put_custom_rule_auto_promotes_to_policy(tmp_path, monkeypatch):
     assert any(rid in p.rule_ids for p in user_policies)
 
 
+def test_put_custom_rule_threads_display_name_and_intent_to_policy(tmp_path, monkeypatch):
+    """PR-4: the NL client passes displayName + the user's original sentence
+    (intent) in the PUT body; the auto-promoted 1-rule policy carries both and
+    the persisted RULE shape stays clean (no policy-envelope keys)."""
+    from magi_agent.customize.policies import list_policies
+
+    cfile = tmp_path / "customize.json"
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
+    client = _client(tmp_path)
+    client.headers.update({"x-gateway-token": _TOKEN})
+    body = {
+        **_valid_custom_rule(),
+        "displayName": "Tests must run before answering",
+        "intent": "block answers when tests have not run on coding turns",
+    }
+    resp = client.put("/v1/app/customize/custom-rules", json=body)
+    assert resp.status_code == 200
+    rid = resp.json()["id"]
+    policy = next(
+        p for p in list_policies(cfile) if p.origin == "user" and rid in p.rule_ids
+    )
+    assert policy.display_name == "Tests must run before answering"
+    assert policy.intent == "block answers when tests have not run on coding turns"
+    # The stored rule must NOT carry the policy-envelope keys.
+    rules = resp.json()["overrides"]["verification"]["custom_rules"]
+    saved = next(r for r in rules if r["id"] == rid)
+    assert "displayName" not in saved
+    assert "intent" not in saved
+
+
+def test_put_custom_rule_grouped_save_skips_auto_promote(tmp_path, monkeypatch):
+    """PR-4: a rule carrying a groupId (hybrid NL proposal member) is NOT
+    individually promoted — the group composes ONE policy (client upsert or
+    read-time group migration), never N singles plus the group."""
+    from magi_agent.customize.policies import list_policies
+
+    cfile = tmp_path / "customize.json"
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
+    client = _client(tmp_path)
+    client.headers.update({"x-gateway-token": _TOKEN})
+    body = {**_valid_custom_rule(), "groupId": "grp_hybrid1"}
+    resp = client.put("/v1/app/customize/custom-rules", json=body)
+    assert resp.status_code == 200
+    rid = resp.json()["id"]
+    assert not any(rid in p.rule_ids for p in list_policies(cfile))
+
+
 def test_put_custom_rule_update_does_not_double_promote(tmp_path, monkeypatch):
     """U1: re-saving (updating) the SAME rule id must not create a 2nd policy."""
     from magi_agent.customize.policies import list_policies
