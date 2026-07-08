@@ -7,9 +7,12 @@ const src = readFileSync(
 );
 
 describe("PoliciesTable — unified policy surface (PR-E1)", () => {
-  it("imports the unified Policy type from policy-model", () => {
+  it("imports the unified RuleRow type from policy-model (renamed from Policy in PR-2)", () => {
     expect(src).toContain('from "@/lib/policy-model"');
-    expect(src).toContain("type { Policy");
+    expect(src).toContain("type { RuleRow");
+    // The word "Policy" as a row TYPE is gone — it now belongs to the real
+    // Policy entity + PolicyCardList surface.
+    expect(src).not.toContain("type { Policy,");
   });
 
   it("ships filter chips for Custom and Built-in origins", () => {
