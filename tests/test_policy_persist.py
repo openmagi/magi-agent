@@ -91,6 +91,25 @@ def test_persist_writes_all_three_stores(tmp_path: Path) -> None:
     assert policy.review is not None and policy.review.verdict == "unreviewed"
 
 
+def test_plan_persisted_gate_is_not_double_promoted(tmp_path: Path) -> None:
+    """PR-1 U1/U2: the gate rule persisted by ``persist_policy_plan`` is already
+    referenced by the plan's Policy, so neither ``promote_rule_to_policy`` nor the
+    read-time backfill may mint a second 1-rule policy for it."""
+    from magi_agent.customize.policies import (
+        ensure_policies_for_unreferenced_rules,
+        list_policies,
+        promote_rule_to_policy,
+    )
+
+    persist_policy_plan(_plan())
+    before = {p.policy_id for p in list_policies()}
+    # An explicit promote of the already-bound gate is a no-op.
+    assert promote_rule_to_policy(_gate()) is None
+    # And the read-time backfill leaves it alone.
+    assert ensure_policies_for_unreferenced_rules() == 0
+    assert {p.policy_id for p in list_policies()} == before
+
+
 def test_persist_is_idempotent(tmp_path: Path) -> None:
     persist_policy_plan(_plan())
     persist_policy_plan(_plan())  # re-save same ids

@@ -332,6 +332,20 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         unauthorized = _unauthorized_response(request, runtime)
         if unauthorized is not None:
             return unauthorized
+        # U2 (policies-first surface unification): one-shot, idempotent backfill
+        # of 1-rule policies for any pre-existing unreferenced rule the moment
+        # the Customize surface is opened, so the Policies list is complete
+        # without a separate migration step. Write-on-first-read only — a
+        # fully-migrated store re-runs to a no-op with no write. Fail-soft: a
+        # backfill error must never break the read.
+        try:
+            from magi_agent.customize.policies import (  # noqa: PLC0415
+                ensure_policies_for_unreferenced_rules,
+            )
+
+            ensure_policies_for_unreferenced_rules()
+        except Exception:  # noqa: BLE001
+            pass
         return JSONResponse(
             content={
                 "catalog": build_catalog(runtime),
@@ -486,17 +500,73 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             content={"policies": [p.to_payload() for p in list_policies()]}
         )
 
+    @app.patch("/v1/app/policies/{policy_id}")
+    async def patch_policy_enabled(policy_id: str, request: Request) -> JSONResponse:
+        """Policy-level enabled toggle with member-rule cascade (PR-1 U4).
+
+        Body ``{"enabled": bool}``: atomically sets ``enabled`` on every member
+        custom rule of a USER policy. 404 for an unknown policy id; 409 for a
+        first-party (builtin) policy — those keep their own preset /
+        control-plane / builtin-policies PATCH routes and are never toggled
+        through this cascade. Returns the refreshed policy list."""
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        if not isinstance(body, dict) or not isinstance(body.get("enabled"), bool):
+            return JSONResponse(status_code=400, content={"error": "enabled_bool_required"})
+
+        from magi_agent.customize.policies import (  # noqa: PLC0415
+            list_policies,
+            set_policy_enabled,
+        )
+
+        try:
+            set_policy_enabled(policy_id, body["enabled"])
+        except KeyError:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "error": "not_found",
+                    "message": f'policy "{policy_id}" not found',
+                },
+            )
+        except ValueError:
+            # First-party (builtin) policy — not togglable via this route.
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": "builtin_policy",
+                    "message": (
+                        f'built-in policy "{policy_id}" is toggled via its own '
+                        "route, not the policy cascade"
+                    ),
+                },
+            )
+        # Re-project the runtime verification overrides so the cascade takes
+        # effect without a restart (mirrors the custom-rule routes).
+        apply_verification_overrides(runtime, load_overrides())
+        return JSONResponse(
+            content={"policies": [p.to_payload() for p in list_policies()]}
+        )
+
     @app.post("/v1/app/policies/migrate")
     async def migrate_policies_route(request: Request) -> JSONResponse:
         unauthorized = _unauthorized_response(request, runtime)
         if unauthorized is not None:
             return unauthorized
         from magi_agent.customize.policies import (
+            ensure_policies_for_unreferenced_rules,
             list_policies,
-            migrate_groups_to_policies,
         )
 
-        created = migrate_groups_to_policies()
+        # U2: migrate groups AND synthesize 1-rule policies for every remaining
+        # unreferenced rule (idempotent). ``ensure_...`` runs the group migration
+        # itself first, then backfills the singles.
+        created = ensure_policies_for_unreferenced_rules()
         return JSONResponse(
             content={
                 "created": created,
@@ -1136,9 +1206,46 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
                 status_code=400, content={"error": "invalid_custom_rule", "details": errors}
             )
         rule = dict(body)
-        if not isinstance(rule.get("id"), str) or not rule["id"]:
+        supplied_id = isinstance(rule.get("id"), str) and bool(rule["id"])
+        if not supplied_id:
             rule["id"] = f"cr_{uuid.uuid4().hex}"
+        # U1 (policies-first surface unification): a genuinely NEW custom rule is
+        # auto-promoted to a 1-rule Policy so it is never an orphan rule in the
+        # Policies surface. Detect create-vs-update BEFORE the save: a
+        # client-supplied id that already exists in the store is an UPDATE (skip
+        # promotion); a backfilled id, or a supplied id not yet present, is a
+        # CREATE. ``promote_rule_to_policy`` is itself idempotent (it no-ops when
+        # the rule id is already referenced by a policy — e.g. a plan-persisted
+        # rule), so this is a belt-and-suspenders guard, not the only one.
+        existing_ids = {
+            r.get("id")
+            for r in load_overrides().get("verification", {}).get("custom_rules", [])
+            if isinstance(r, dict)
+        }
+        is_create = rule["id"] not in existing_ids
         overrides = set_custom_rule(rule)
+        if is_create:
+            from magi_agent.customize.policies import (  # noqa: PLC0415
+                promote_rule_to_policy,
+            )
+
+            # ``intent`` plumbing: the PUT body carries no original NL text today
+            # (the conversational compile flow returns a draft, then the client
+            # PUTs the rule shape without the sentence). Accept an optional
+            # ``displayName`` / ``intent`` from the body so a future client can
+            # pass them; otherwise fall back to the rule id (custom rules carry
+            # no name field). TODO(policies-surface): thread the compile-flow NL
+            # text through so the policy card shows the user's own sentence.
+            display_name = (
+                body.get("displayName")
+                if isinstance(body.get("displayName"), str)
+                else None
+            )
+            intent = body.get("intent") if isinstance(body.get("intent"), str) else None
+            try:
+                promote_rule_to_policy(rule, display_name=display_name, intent=intent)
+            except Exception:  # noqa: BLE001 - promotion must never fail the save
+                pass
         apply_verification_overrides(runtime, overrides)
         return JSONResponse(content={"overrides": overrides, "id": rule["id"]})
 

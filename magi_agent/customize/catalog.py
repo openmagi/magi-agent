@@ -222,7 +222,67 @@ def build_catalog(runtime: Any) -> dict[str, Any]:
         # toggle here projects an opt-out. Floors (source_citation) are absent by
         # design so they cannot be disabled through this surface.
         "builtinPolicies": _builtin_policy_entries(),
+        # Unified Policies surface (PR-1): the full list of policies (user +
+        # first-party builtin) with membership, origin, review-verdict summary,
+        # binding presence, and derived on/off/mixed enabled state. The web
+        # Policies tab reads this so it needs no second fetch.
+        "policies": _policy_entries(),
     }
+
+
+def _policy_entries() -> list[dict[str, Any]]:
+    """Serialize every policy for the unified Policies surface (PR-1 U3).
+
+    Each entry is a summary with camelCase keys mirroring the rest of the
+    catalog payload. ``enabledState`` is derived from the member custom rules'
+    ``enabled`` flags: ``on`` / ``off`` / ``mixed`` when at least one member is
+    a stored custom rule, and ``managed`` when NONE are (a builtin whose
+    members are runtime-native, or a policy whose members all live outside the
+    custom-rules store). ``managed`` tells the UI there is nothing on the
+    per-rule ``enabled`` axis to toggle here - rendering it as a green "on"
+    toggle the user cannot move would be dishonest (review finding, PR-1)."""
+    from magi_agent.customize.policies import list_policies  # noqa: PLC0415
+    from magi_agent.customize.store import load_overrides  # noqa: PLC0415
+
+    overrides = load_overrides()
+    rules = overrides.get("verification", {}).get("custom_rules", [])
+    enabled_by_id: dict[str, bool] = {}
+    if isinstance(rules, list):
+        for rule in rules:
+            if isinstance(rule, dict) and isinstance(rule.get("id"), str):
+                enabled_by_id[rule["id"]] = bool(rule.get("enabled", True))
+
+    entries: list[dict[str, Any]] = []
+    for policy in list_policies():
+        # Derive on/off/mixed from the member custom rules that are actually
+        # stored. Members that are not stored custom rules (builtin member refs,
+        # dashboard-check producers) do not participate in the enabled axis.
+        member_states = [
+            enabled_by_id[rid] for rid in policy.rule_ids if rid in enabled_by_id
+        ]
+        if not member_states:
+            enabled_state = "managed"
+        elif all(member_states):
+            enabled_state = "on"
+        elif not any(member_states):
+            enabled_state = "off"
+        else:
+            enabled_state = "mixed"
+        review_verdict = policy.review.verdict if policy.review is not None else "unreviewed"
+        entries.append(
+            {
+                "id": policy.policy_id,
+                "displayName": policy.display_name,
+                "intent": policy.intent,
+                "ruleIds": list(policy.rule_ids),
+                "origin": policy.origin,
+                "userDisableable": policy.user_disableable,
+                "reviewVerdict": review_verdict,
+                "hasBinding": policy.binding is not None,
+                "enabledState": enabled_state,
+            }
+        )
+    return entries
 
 
 def _control_plane_entries() -> list[dict[str, str]]:

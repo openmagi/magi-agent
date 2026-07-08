@@ -288,6 +288,39 @@ def test_put_custom_rule_valid_persists_and_assigns_id(tmp_path, monkeypatch):
     assert len(rules) == 1 and rules[0]["id"] == body["id"]
 
 
+def test_put_custom_rule_auto_promotes_to_policy(tmp_path, monkeypatch):
+    """U1: a freshly-saved custom rule is auto-promoted to a 1-rule policy so
+    it is never an orphan in the Policies surface."""
+    from magi_agent.customize.policies import list_policies
+
+    cfile = tmp_path / "customize.json"
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
+    client = _client(tmp_path)
+    client.headers.update({"x-gateway-token": _TOKEN})
+    resp = client.put("/v1/app/customize/custom-rules", json=_valid_custom_rule())
+    assert resp.status_code == 200
+    rid = resp.json()["id"]
+    # A user policy now references the new rule id.
+    user_policies = [p for p in list_policies(cfile) if p.origin == "user"]
+    assert any(rid in p.rule_ids for p in user_policies)
+
+
+def test_put_custom_rule_update_does_not_double_promote(tmp_path, monkeypatch):
+    """U1: re-saving (updating) the SAME rule id must not create a 2nd policy."""
+    from magi_agent.customize.policies import list_policies
+
+    cfile = tmp_path / "customize.json"
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
+    client = _client(tmp_path)
+    client.headers.update({"x-gateway-token": _TOKEN})
+    rule = {**_valid_custom_rule(), "id": "cr_fixed"}
+    client.put("/v1/app/customize/custom-rules", json=rule)
+    before = {p.policy_id for p in list_policies(cfile)}
+    client.put("/v1/app/customize/custom-rules", json=rule)  # update, not create
+    after = {p.policy_id for p in list_policies(cfile)}
+    assert before == after
+
+
 def test_put_custom_rule_invalid_returns_400(tmp_path, monkeypatch):
     monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
     client = _client(tmp_path)
@@ -339,6 +372,7 @@ def test_customize_returns_catalog_and_overrides(tmp_path, monkeypatch) -> None:
         "tools",
         "controlPlane",
         "builtinPolicies",
+        "policies",
     }
     assert set(body["catalog"]["verification"].keys()) == {
         "recipes",
