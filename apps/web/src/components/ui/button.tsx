@@ -13,7 +13,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 const CTA_CLASS =
   "inline-flex items-center justify-center gap-2 font-semibold cursor-pointer min-h-[44px] " +
   "rounded-xl px-7 py-3.5 text-base transition duration-200 " +
-  "bg-[var(--color-accent)] text-[var(--color-text-on-accent)] hover:bg-[var(--color-accent-hover)] glow-cta " +
+  "bg-[var(--color-accent)] text-[var(--color-text-on-accent)] hover:bg-[var(--color-accent-hover)] " +
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/45 " +
   "focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-base)] " +
   "disabled:opacity-40 disabled:pointer-events-none";
