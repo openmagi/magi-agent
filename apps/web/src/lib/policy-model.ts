@@ -1,8 +1,15 @@
 /**
- * Unified Policy model — PR-E1.
+ * Unified rule-row model — PR-E1 (renamed PR-2 "policies-first surface").
+ *
+ * Historical note: this type was originally called ``Policy``, which collided
+ * with the real Policy entity (a named 1..N-rule user-intent unit persisted in
+ * ``customize.json > policies:{}``). The word "Policy" now belongs to that
+ * entity + its :class:`PolicyCardList` surface; the flat, per-store row this
+ * module unifies is a :class:`RuleRow` (the atomic implementation detail that
+ * lives inside a policy's drill-down).
  *
  * Kevin's 2026-06-22 architecture call: the user has one mental concept
- * ("Policy"), but the backend persists it in four disjoint shapes:
+ * (a "policy"), but the backend persists rules in four disjoint shapes:
  *
  *   1. ``HarnessPresetItem`` (built-in policy template) + per-id
  *      ``preset_overrides[id]`` toggle (built-in policy)
@@ -105,7 +112,11 @@ export interface PolicyCondition {
 }
 
 
-export interface Policy {
+/**
+ * A single unified rule row (formerly ``Policy``). One per backend store
+ * record; a policy's drill-down renders a subset of these keyed by rule id.
+ */
+export interface RuleRow {
   /** Stable key for React + de-dup. Format: ``<source>:<source-specific-id>``. */
   id: string;
   /** Human label. Built-in: HarnessPresetItem.title. User: rule id / label. */
@@ -140,10 +151,10 @@ export interface Policy {
 // ---------------------------------------------------------------------------
 
 
-function presetToPolicy(
+function presetToRow(
   preset: HarnessPresetItem,
   presetOverrides: Record<string, boolean>,
-): Policy {
+): RuleRow {
   const enabledByOverride = presetOverrides[preset.id];
   const enabled =
     typeof enabledByOverride === "boolean" ? enabledByOverride : preset.defaultEnabled;
@@ -176,7 +187,7 @@ function presetToPolicy(
 }
 
 
-function customRuleToPolicy(rule: CustomRule): Policy {
+function customRuleToRow(rule: CustomRule): RuleRow {
   const kind = (rule.what?.kind ?? "evidence_ref") as PolicyConditionKind;
   const payload = (rule.what?.payload ?? {}) as Record<string, unknown>;
   const condition = customRuleCondition(kind, payload);
@@ -343,7 +354,7 @@ function customRuleCondition(
 }
 
 
-function dashboardCheckToPolicy(check: DashboardCheck): Policy {
+function dashboardCheckToRow(check: DashboardCheck): RuleRow {
   const pattern = check.trigger.match.pattern;
   const isRegex = check.trigger.match.isRegex;
   return {
@@ -368,16 +379,16 @@ function dashboardCheckToPolicy(check: DashboardCheck): Policy {
 }
 
 
-function seamSpecToPolicies(spec: SeamSpecDoc): Policy[] {
-  return spec.actions.map((action, idx) => seamActionToPolicy(spec, action, idx));
+function seamSpecToRows(spec: SeamSpecDoc): RuleRow[] {
+  return spec.actions.map((action, idx) => seamActionToRow(spec, action, idx));
 }
 
 
-function seamActionToPolicy(
+function seamActionToRow(
   spec: SeamSpecDoc,
   action: SeamSpecAction,
   idx: number,
-): Policy {
+): RuleRow {
   const ops = action.op === "add_seam" ? "Adds preset" : "Rewires preset";
   const wiringHint = action.wiring ? ` (${action.wiring})` : "";
   return {
@@ -413,24 +424,24 @@ function seamActionToPolicy(
 // ---------------------------------------------------------------------------
 
 
-export function unifyPolicies(args: {
+export function unifyRuleRows(args: {
   catalog: CustomizeCatalog;
   overrides: CustomizeOverrides;
   dashboardChecks: DashboardCheck[];
-}): Policy[] {
+}): RuleRow[] {
   const { catalog, overrides, dashboardChecks } = args;
-  const out: Policy[] = [];
+  const out: RuleRow[] = [];
   for (const preset of catalog.verification.harnessPresets) {
-    out.push(presetToPolicy(preset, overrides.verification.preset_overrides));
+    out.push(presetToRow(preset, overrides.verification.preset_overrides));
   }
   for (const rule of overrides.verification.custom_rules) {
-    out.push(customRuleToPolicy(rule));
+    out.push(customRuleToRow(rule));
   }
   for (const spec of overrides.verification.seam_specs ?? []) {
-    for (const p of seamSpecToPolicies(spec)) out.push(p);
+    for (const p of seamSpecToRows(spec)) out.push(p);
   }
   for (const check of dashboardChecks) {
-    out.push(dashboardCheckToPolicy(check));
+    out.push(dashboardCheckToRow(check));
   }
   return out;
 }
@@ -655,7 +666,7 @@ export function trustClassForPolicy(policy: PolicyTrustInput): TrustClass {
  * As Stage 5 adds a first-class ``emit_evidence`` action to Policy,
  * ``producedBy`` will fill in automatically; today it stays empty.
  */
-export function extractEvidenceTypes(policies: Policy[]): EvidenceTypeEntry[] {
+export function extractEvidenceTypes(policies: RuleRow[]): EvidenceTypeEntry[] {
   const byRef = new Map<string, EvidenceTypeEntry>();
   const upsert = (ref: string, origin: PolicyOrigin): EvidenceTypeEntry => {
     let entry = byRef.get(ref);
@@ -728,7 +739,7 @@ export function extractBuiltinJudgmentRefs(
  * specifically the user-defined SHACL shapes / LLM criteria / regex
  * patterns / tool-match patterns that are reusable across other policies.
  */
-export function extractNamedConditions(policies: Policy[]): NamedConditionEntry[] {
+export function extractNamedConditions(policies: RuleRow[]): NamedConditionEntry[] {
   const out: NamedConditionEntry[] = [];
   for (const policy of policies) {
     if (policy.origin !== "user") continue;

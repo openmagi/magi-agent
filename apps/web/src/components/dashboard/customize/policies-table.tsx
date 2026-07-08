@@ -4,7 +4,7 @@
  * PoliciesTable — unified single-list view over the four backend stores.
  *
  * Replaces ``RulesTable``'s origin-grouped surface with one flat list
- * driven by the :type:`Policy` adapter. Each row carries its own
+ * driven by the :type:`RuleRow` adapter. Each row carries its own
  * togglable/editable/deletable affordance derived from ``policy.source``
  * so the consumer does not need per-source branching.
  *
@@ -25,12 +25,12 @@ import React, { useMemo, useState } from "react";
 
 import type { CustomRule } from "@/lib/customize-api";
 import type { DashboardCheck } from "@/lib/packs-dashboard-api";
-import type { Policy, PolicyOrigin, PolicySource } from "@/lib/policy-model";
+import type { RuleRow, PolicyOrigin, PolicySource } from "@/lib/policy-model";
 import { Switch } from "@/components/ui/_ds";
 
 
 export interface PoliciesTableProps {
-  policies: Policy[];
+  policies: RuleRow[];
   pendingPresets: Set<string>;
   busy: boolean;
   onTogglePreset: (presetId: string, next: boolean) => void;
@@ -39,7 +39,7 @@ export interface PoliciesTableProps {
   onToggleDashboardCheck: (check: DashboardCheck, next: boolean) => void;
   onDeleteDashboardCheck: (id: string) => void;
   onDeleteSeamSpec: (specId: string) => void;
-  onEdit?: (policy: Policy) => void;
+  onEdit?: (policy: RuleRow) => void;
   /** PR-U4a reverse cross-link: policy id maps to the display names of the modes
    * that scope it. Rows whose id is present show a "scoped in N modes" badge so the
    * operator can see, from the Rules tab, which stances force a rule on (the
@@ -125,7 +125,7 @@ export function PoliciesTable({
   // enforcement is not wired yet (state "preview") are pulled OUT of the live
   // groups into a collapsed "Dormant" section so the main list only shows rules
   // that actually gate a turn.
-  const isDormant = (p: Policy) => p.state === "preview";
+  const isDormant = (p: RuleRow) => p.state === "preview";
   const userPolicies = visible.filter((p) => p.origin === "user" && !isDormant(p));
   const builtinPolicies = visible.filter((p) => p.origin === "builtin" && !isDormant(p));
   const dormantPolicies = visible.filter(isDormant);
@@ -327,7 +327,7 @@ function FilterChip({
 
 interface GroupProps extends Omit<PoliciesTableProps, "policies"> {
   title: string;
-  rows: Policy[];
+  rows: RuleRow[];
   defaultOpen: boolean;
 }
 
@@ -411,7 +411,7 @@ function PolicyRowView({
   onEdit,
   scopedModes,
 }: {
-  policy: Policy;
+  policy: RuleRow;
   pending: boolean;
   busy: boolean;
   onTogglePreset: (id: string, next: boolean) => void;
@@ -420,7 +420,7 @@ function PolicyRowView({
   onToggleDashboardCheck: (check: DashboardCheck, next: boolean) => void;
   onDeleteDashboardCheck: (id: string) => void;
   onDeleteSeamSpec: (specId: string) => void;
-  onEdit?: (policy: Policy) => void;
+  onEdit?: (policy: RuleRow) => void;
   scopedModes?: ReadonlyArray<string>;
 }): React.ReactElement {
   const checked = policy.state === "enabled" || policy.state === "always-on";
@@ -526,14 +526,14 @@ function PolicyRowView({
 }
 
 
-function StatePill({ state }: { state: Policy["state"] }): React.ReactElement {
-  const cls: Record<Policy["state"], string> = {
+function StatePill({ state }: { state: RuleRow["state"] }): React.ReactElement {
+  const cls: Record<RuleRow["state"], string> = {
     enabled: "bg-emerald-500/15 text-emerald-700",
     disabled: "bg-black/[0.06] text-secondary",
     "always-on": "bg-emerald-700/15 text-emerald-800",
     preview: "bg-amber-500/10 text-amber-700",
   };
-  const label: Record<Policy["state"], string> = {
+  const label: Record<RuleRow["state"], string> = {
     enabled: "on",
     disabled: "off",
     "always-on": "always-on",

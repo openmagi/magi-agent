@@ -19,22 +19,45 @@ describe("CustomizeHub — Policy unification (PR-E1)", () => {
     expect(src).toContain("BehaviorsPanel");
   });
 
-  it("labels the enforcement section 'Rules' and the pack section 'Packs' (region terminology)", () => {
-    expect(src).toContain('label: "Rules"');
+  it("PR-2: labels the enforcement section 'Policies' (was 'Rules') and pack section 'Packs'", () => {
+    expect(src).toContain('label: "Policies"');
     expect(src).toContain('label: "Packs"');
     // the section ids stay stable so deep-links / routes are unaffected
     expect(src).toContain('id: "rules"');
     expect(src).toContain('id: "recipes"');
   });
 
-  it("mounts the unified PoliciesTable, Reusable Evidence + Conditions sub-tabs", () => {
+  it("PR-2: PolicyCardList is the primary surface; the flat PoliciesTable + Evidence/Conditions move under Advanced", () => {
+    expect(src).toContain("PolicyCardList");
+    // The flat table + reusable catalogs survive under the Advanced disclosure.
     expect(src).toContain("PoliciesTable");
     expect(src).toContain("ReusableEvidenceTab");
     expect(src).toContain("ReusableConditionsTab");
+    expect(src).toContain('data-testid="policies-advanced"');
   });
 
-  it("uses the policy-model unifier + extractors", () => {
-    expect(src).toContain("unifyPolicies");
+  it("PR-2: the card list is fed native catalog policies + the flat rule rows", () => {
+    expect(src).toContain("catalogPolicies={catalogPolicies}");
+    expect(src).toContain("data.catalog.policies");
+    expect(src).toContain("ruleRows={ruleRows}");
+  });
+
+  it("PR-2: the policy count chip counts policies (cards), not rules", () => {
+    expect(src).toContain("policyCardCount");
+    expect(src).toContain("Policies{\" \"}");
+  });
+
+  it("PR-2: wires native policy toggle (cascade) + delete (member cascade) handlers", () => {
+    expect(src).toContain("patchPolicyEnabled");
+    expect(src).toContain("deletePolicy");
+    expect(src).toContain("handleTogglePolicy");
+    expect(src).toContain("handleDeletePolicy");
+    expect(src).toContain("onTogglePolicy={handleTogglePolicy}");
+    expect(src).toContain("onDeletePolicy={handleDeletePolicy}");
+  });
+
+  it("uses the policy-model unifier (renamed unifyRuleRows) + extractors", () => {
+    expect(src).toContain("unifyRuleRows");
     expect(src).toContain("extractEvidenceTypes");
     expect(src).toContain("extractNamedConditions");
   });
@@ -120,7 +143,7 @@ describe("CustomizeHub — PR-F-UX5 counters + built-in judgment merge", () => {
     expect(src).toContain(
       "data.catalog.verification.evidenceMenu.length",
     );
-    expect(src).toContain("+ evidenceTypes.length");
+    expect(src).toContain("evidenceTypes.length");
   });
 
   it("Conditions sub-tab counter sums builtinJudgments + user-authored conditions", () => {

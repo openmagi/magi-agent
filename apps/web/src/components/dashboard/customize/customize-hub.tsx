@@ -38,6 +38,8 @@ import {
   putCustomRule,
   deleteCustomRule,
   compileCustomRule,
+  patchPolicyEnabled,
+  deletePolicy,
   getBudgets,
   putBudgets,
 } from "@/lib/customize-api";
@@ -46,6 +48,7 @@ import type {
   ConversationTurn,
   CustomRule,
   CustomizeOverrides,
+  PolicyCatalogEntry,
   ShaclCompileResponse,
   VerificationBudgets,
 } from "@/lib/customize-api";
@@ -69,6 +72,7 @@ import { ModesPanel } from "./modes-panel";
 import { PacksPanel } from "./packs-panel";
 import { PageHint } from "./page-hint";
 import { PoliciesTable } from "./policies-table";
+import { PolicyCardList } from "./policy-card-list";
 import { PrebuiltComponentsPanel } from "./prebuilt-components-panel";
 import { ReusableEvidenceTab } from "./reusable-evidence-tab";
 import { ReusableConditionsTab } from "./reusable-conditions-tab";
@@ -77,7 +81,7 @@ import {
   extractBuiltinJudgmentRefs,
   extractEvidenceTypes,
   extractNamedConditions,
-  unifyPolicies,
+  unifyRuleRows,
 } from "@/lib/policy-model";
 import {
   deleteDashboardCheck,
@@ -106,10 +110,10 @@ const SECTIONS: ReadonlyArray<{
 }> = [
   {
     id: "rules",
-    label: "Rules",
+    label: "Policies",
     icon: <ShieldCheck className="h-4 w-4" />,
     description:
-      "Enforcement: rules that gate the agent (block / audit / require). Built-in + your own, same shape, same controls. Toggles here set the GLOBAL default for every turn; to apply a rule only in a specific stance, scope it in Modes.",
+      "Your policies: named units of intent that gate or guide the agent (block / ask / audit / nudge). Built-in + first-party + your own, one card each. Toggles here set the GLOBAL default for every turn; to apply a policy only in a specific stance, scope it in Modes. Individual rules live inside each policy's drill-down.",
   },
   {
     id: "modes",
@@ -229,6 +233,51 @@ export function CustomizeHub({
   const handleDeleteCustomRule = useCallback(
     (id: string) => runCustomRuleOp(() => deleteCustomRule(agentFetch, id)),
     [agentFetch, runCustomRuleOp],
+  );
+
+  // ---- Native (catalog) policy handlers (PR-2) ----
+  // A native policy toggle cascades member custom-rule `enabled` server-side
+  // (PATCH /v1/app/policies/{id}); we reload to pick up the projected states.
+  const handleTogglePolicy = useCallback(
+    (policyId: string, enabled: boolean) => {
+      setCustomRuleBusy(true);
+      setRuleError(null);
+      patchPolicyEnabled(agentFetch, policyId, enabled)
+        .then(() => reload())
+        .catch((err: unknown) =>
+          setRuleError(err instanceof Error ? err.message : "Failed to toggle policy"),
+        )
+        .finally(() => setCustomRuleBusy(false));
+    },
+    [agentFetch, reload],
+  );
+
+  // Delete: the backend DELETE /v1/app/policies/{id} removes only the policy
+  // record. Per the magi-cp cascade precedent, we then delete the member
+  // custom rules client-side so they do not re-orphan onto the surface.
+  const handleDeletePolicy = useCallback(
+    (policy: PolicyCatalogEntry) => {
+      setCustomRuleBusy(true);
+      setRuleError(null);
+      (async () => {
+        await deletePolicy(agentFetch, policy.id);
+        for (const rid of policy.ruleIds) {
+          try {
+            await deleteCustomRule(agentFetch, rid);
+          } catch {
+            // A member that is not a stored custom rule (builtin-native /
+            // dashboard-check producer) 404s here — ignore, the policy record
+            // is already gone.
+          }
+        }
+      })()
+        .then(() => reload())
+        .catch((err: unknown) =>
+          setRuleError(err instanceof Error ? err.message : "Failed to delete policy"),
+        )
+        .finally(() => setCustomRuleBusy(false));
+    },
+    [agentFetch, reload],
   );
 
   const handleTogglePreset = useCallback(
@@ -632,6 +681,8 @@ export function CustomizeHub({
             onAddCustomRule={handleAddCustomRule}
             onToggleCustomRule={handleToggleCustomRule}
             onDeleteCustomRule={handleDeleteCustomRule}
+            onTogglePolicy={handleTogglePolicy}
+            onDeletePolicy={handleDeletePolicy}
             onCompileShacl={handleCompileShacl}
             ruleError={ruleError}
           />
@@ -746,14 +797,18 @@ export function CustomizeHub({
 
 
 /**
- * Policies section mount — single-list view over the four backend stores
- * unified via :func:`unifyPolicies`. Provides a 3-sub-tab surface
- * (Policies / Evidence types / Conditions) and a 3-mode Add Policy entry
- * (NL / Guided[placeholder] / Raw).
+ * Policies section mount (PR-2 "policies-first surface").
  *
- * The legacy ``RulesTable`` + 4-card AddRulePicker still mount under
- * the Raw mode so power-users keep their direct-form path while we land
- * the Guided wizard in PR-E2.
+ * PRIMARY surface: the :class:`PolicyCardList` — one card per policy from the
+ * catalog `policies` list (Your / First-party / Built-in), with the flat rule
+ * rows (unified via :func:`unifyRuleRows`) supplying each card's member
+ * drill-down.
+ *
+ * The legacy flat :class:`PoliciesTable` + the reusable Evidence / Conditions
+ * catalogs move under a collapsed "Advanced" disclosure below the card list
+ * (design D3) — kept functional for debugging. The 3-mode Add Policy entry
+ * (NL / Guided / Raw) and the legacy ``CustomRulesSection`` / AddRulePicker
+ * still mount under the Raw authoring path.
  */
 function RulesSectionMount({
   data,
@@ -766,6 +821,8 @@ function RulesSectionMount({
   onAddCustomRule,
   onToggleCustomRule,
   onDeleteCustomRule,
+  onTogglePolicy,
+  onDeletePolicy,
   onCompileShacl,
   ruleError,
 }: {
@@ -779,6 +836,8 @@ function RulesSectionMount({
   onAddCustomRule: (rule: CustomRule) => void;
   onToggleCustomRule: (rule: CustomRule, enabled: boolean) => void;
   onDeleteCustomRule: (id: string) => void;
+  onTogglePolicy: (policyId: string, next: boolean) => void;
+  onDeletePolicy: (policy: PolicyCatalogEntry) => void;
   onCompileShacl: (
     nlText: string,
     sampleRecords?: unknown[],
@@ -861,9 +920,9 @@ function RulesSectionMount({
     [agentFetch, reload],
   );
 
-  const policies = useMemo(
+  const ruleRows = useMemo(
     () =>
-      unifyPolicies({
+      unifyRuleRows({
         catalog: data.catalog,
         overrides: { ...data.overrides, verification: { ...data.overrides.verification, custom_rules: customRules, preset_overrides: presetOverrides } },
         dashboardChecks,
@@ -882,8 +941,28 @@ function RulesSectionMount({
     }
     return map;
   }, [modes]);
-  const evidenceTypes = useMemo(() => extractEvidenceTypes(policies), [policies]);
-  const conditions = useMemo(() => extractNamedConditions(policies), [policies]);
+  const evidenceTypes = useMemo(() => extractEvidenceTypes(ruleRows), [ruleRows]);
+  const conditions = useMemo(() => extractNamedConditions(ruleRows), [ruleRows]);
+  // PR-2: native policy summaries from the catalog (user + first-party
+  // builtin). The Policies card list renders from these; the flat rule rows
+  // supply the member drill-down. An absent key (pre-U3 backend) = empty list.
+  const catalogPolicies = data.catalog.policies ?? [];
+  // Policy CARD count for the tab chip (design D: count = policies, not rules):
+  // native policies + every rule row NOT referenced by a native policy (each of
+  // those renders as its own 1-rule adapter card).
+  const policyCardCount = useMemo(() => {
+    const referenced = new Set<string>();
+    for (const p of catalogPolicies) for (const rid of p.ruleIds) referenced.add(rid);
+    const adapters = ruleRows.filter(
+      (r) =>
+        !(
+          r.rawSource.kind === "custom_rule" &&
+          r.rawSource.rule.id &&
+          referenced.has(r.rawSource.rule.id)
+        ),
+    ).length;
+    return catalogPolicies.length + adapters;
+  }, [catalogPolicies, ruleRows]);
   // PR-F-UX5 — built-in verdict primitives sourced from catalog.judgmentMenu.
   // The Conditions tab merges this with user-authored conditions; the
   // counter sums both halves so it matches what the tab body renders.
@@ -901,55 +980,15 @@ function RulesSectionMount({
 
   return (
     <div className="space-y-5">
-      {/* sub-tab nav + Add button */}
-      <div className="flex items-center justify-between gap-3">
-        <nav
-          aria-label="Rules sub-tabs"
-          className="flex rounded-xl border border-black/[0.06] bg-white p-1 text-xs"
-        >
-          {(
-            [
-              { id: "policies", label: `Rules (${policies.length})` },
-              // PR-F-UX5 — Evidence counter = built-in evidence menu (raw
-              // producer records the runtime knows about) + the user-consumed
-              // refs the policies-derived index has surfaced. Both halves
-              // appear in the Evidence tab body, so the counter mirrors the
-              // visible row count.
-              {
-                id: "evidence",
-                label: `Evidence (${
-                  data.catalog.verification.evidenceMenu.length
-                  + evidenceTypes.length
-                })`,
-              },
-              // PR-F-UX5 — Conditions counter = built-in verdict primitives
-              // (judgmentMenu) + user-authored named conditions. The tab body
-              // merges them under origin badges so the counter equals the row
-              // count there too.
-              {
-                id: "conditions",
-                label: `Conditions (${
-                  builtinJudgments.length + conditions.length
-                })`,
-              },
-            ] as ReadonlyArray<{ id: SubTab; label: string }>
-          ).map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setSubTab(t.id)}
-              aria-current={subTab === t.id ? "page" : undefined}
-              className={`rounded-lg px-3 py-1.5 font-medium transition-colors ${
-                subTab === t.id
-                  ? "bg-primary text-white"
-                  : "text-secondary hover:bg-black/[0.04] hover:text-foreground"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </nav>
-        {addState.phase === "idle" && subTab === "policies" ? (
+      {/* Policies header + Add buttons. Both "Add rule" and "Add policy" are
+          kept for this PR (authoring consolidation lands in PR-4); a single-rule
+          save auto-promotes to a 1-rule Policy server-side (PR-1). */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold text-foreground">
+          Policies{" "}
+          <span className="font-normal text-secondary">({policyCardCount})</span>
+        </h3>
+        {addState.phase === "idle" ? (
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -1092,33 +1131,107 @@ function RulesSectionMount({
 
       {addState.phase === "idle" ? (
         <>
-          {subTab === "policies" ? (
-            <PoliciesTable
-              policies={policies}
-              pendingPresets={pendingPresets}
-              busy={customRuleBusy || dashboardBusy}
-              onTogglePreset={onTogglePreset}
-              onToggleCustomRule={onToggleCustomRule}
-              onDeleteCustomRule={onDeleteCustomRule}
-              onToggleDashboardCheck={handleToggleDashboardCheck}
-              onDeleteDashboardCheck={handleDeleteDashboardCheck}
-              onDeleteSeamSpec={handleDeleteSeamSpec}
-              scopedInModes={scopedInModes}
-            />
-          ) : null}
-          {subTab === "policies" ? <PrebuiltComponentsPanel /> : null}
-          {subTab === "evidence" ? (
-            <ReusableEvidenceTab
-              entries={evidenceTypes}
-              knownRefs={data.catalog.verification.evidenceMenu}
-            />
-          ) : null}
-          {subTab === "conditions" ? (
-            <ReusableConditionsTab
-              entries={conditions}
-              builtinEntries={builtinJudgments}
-            />
-          ) : null}
+          {/* PRIMARY: the policies-first card list (PR-2). */}
+          <PolicyCardList
+            catalogPolicies={catalogPolicies}
+            ruleRows={ruleRows}
+            pendingPresets={pendingPresets}
+            busy={customRuleBusy || dashboardBusy}
+            scopedInModes={scopedInModes}
+            onTogglePolicy={onTogglePolicy}
+            onDeletePolicy={onDeletePolicy}
+            onTogglePreset={onTogglePreset}
+            onToggleCustomRule={onToggleCustomRule}
+            onDeleteCustomRule={onDeleteCustomRule}
+            onToggleDashboardCheck={handleToggleDashboardCheck}
+            onDeleteDashboardCheck={handleDeleteDashboardCheck}
+            onDeleteSeamSpec={handleDeleteSeamSpec}
+          />
+
+          <PrebuiltComponentsPanel />
+
+          {/* ADVANCED (D3): the legacy flat rule table + reusable Evidence /
+              Conditions catalogs, kept for debugging under a collapsed
+              disclosure below the card list. */}
+          <details
+            className="group rounded-xl border border-black/[0.06] bg-white"
+            data-testid="policies-advanced"
+          >
+            <summary className="flex cursor-pointer items-center justify-between gap-2 rounded-xl px-4 py-3 text-xs font-semibold text-secondary hover:bg-black/[0.02]">
+              <span>Advanced · flat rule list, evidence &amp; conditions</span>
+              <span
+                aria-hidden
+                className="inline-block transition-transform duration-150 group-open:rotate-180"
+              >
+                ▾
+              </span>
+            </summary>
+            <div className="space-y-4 px-4 pb-4 pt-1">
+              <nav
+                aria-label="Advanced sub-tabs"
+                className="flex rounded-xl border border-black/[0.06] bg-white p-1 text-xs"
+              >
+                {(
+                  [
+                    { id: "policies", label: `Rules (${ruleRows.length})` },
+                    {
+                      id: "evidence",
+                      label: `Evidence (${
+                        data.catalog.verification.evidenceMenu.length +
+                        evidenceTypes.length
+                      })`,
+                    },
+                    {
+                      id: "conditions",
+                      label: `Conditions (${
+                        builtinJudgments.length + conditions.length
+                      })`,
+                    },
+                  ] as ReadonlyArray<{ id: SubTab; label: string }>
+                ).map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setSubTab(t.id)}
+                    aria-current={subTab === t.id ? "page" : undefined}
+                    className={`rounded-lg px-3 py-1.5 font-medium transition-colors ${
+                      subTab === t.id
+                        ? "bg-primary text-white"
+                        : "text-secondary hover:bg-black/[0.04] hover:text-foreground"
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </nav>
+              {subTab === "policies" ? (
+                <PoliciesTable
+                  policies={ruleRows}
+                  pendingPresets={pendingPresets}
+                  busy={customRuleBusy || dashboardBusy}
+                  onTogglePreset={onTogglePreset}
+                  onToggleCustomRule={onToggleCustomRule}
+                  onDeleteCustomRule={onDeleteCustomRule}
+                  onToggleDashboardCheck={handleToggleDashboardCheck}
+                  onDeleteDashboardCheck={handleDeleteDashboardCheck}
+                  onDeleteSeamSpec={handleDeleteSeamSpec}
+                  scopedInModes={scopedInModes}
+                />
+              ) : null}
+              {subTab === "evidence" ? (
+                <ReusableEvidenceTab
+                  entries={evidenceTypes}
+                  knownRefs={data.catalog.verification.evidenceMenu}
+                />
+              ) : null}
+              {subTab === "conditions" ? (
+                <ReusableConditionsTab
+                  entries={conditions}
+                  builtinEntries={builtinJudgments}
+                />
+              ) : null}
+            </div>
+          </details>
         </>
       ) : (
         <div className="rounded-xl border border-dashed border-black/[0.08] bg-gray-50/60 px-4 py-3 text-xs text-secondary">
