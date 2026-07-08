@@ -1,6 +1,7 @@
 "use client";
 
 import { Modal } from "@/components/ui/modal";
+import { Switch } from "@/components/ui/_ds";
 import type { ToolItem } from "@/lib/customize-api";
 
 interface CustomToolModalProps {
@@ -20,38 +21,6 @@ const SOURCE_BADGE: Record<string, string> = {
   skill: "bg-primary/10 text-primary",
   external: "bg-cta/10 text-cta",
 };
-
-function Toggle({
-  checked,
-  onChange,
-  label,
-  disabled,
-}: {
-  checked: boolean;
-  onChange: (next: boolean) => void;
-  label: string;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
-        checked ? "bg-primary" : "bg-black/15"
-      }`}
-    >
-      <span
-        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-200 ${
-          checked ? "translate-x-6" : "translate-x-1"
-        }`}
-      />
-    </button>
-  );
-}
 
 export type CustomToolPanelProps = Omit<CustomToolModalProps, "open" | "onClose">;
 
@@ -105,10 +74,11 @@ export function CustomToolPanel({
                     <p className="mt-1 text-xs leading-relaxed text-secondary">{tool.description}</p>
                   ) : null}
                 </div>
-                <Toggle
+                <Switch
                   checked={enabled}
-                  onChange={(next) => onToggle(tool.name, next)}
-                  label={`Toggle ${tool.name}`}
+                  onToggle={async (next) => onToggle(tool.name, next)}
+                  labelOn={`Disable ${tool.name}`}
+                  labelOff={`Enable ${tool.name}`}
                   disabled={isPending}
                 />
               </div>
