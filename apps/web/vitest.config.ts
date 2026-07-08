@@ -38,6 +38,10 @@ export default {
       "src/components/chat/citation-hedge-callout.test.tsx",
       "src/components/chat/message-bubble.citation-hedge.test.tsx",
       "src/components/chat/chat-messages.citation-status.test.tsx",
+      // Skills page source-string assertions (skill detail view). These are
+      // readFileSync string checks that pass under the node environment.
+      "app/dashboard/[botId]/skills/skills-catalog.test.ts",
+      "app/dashboard/[botId]/skills/skills-catalog.local.test.ts",
     ],
   },
 };

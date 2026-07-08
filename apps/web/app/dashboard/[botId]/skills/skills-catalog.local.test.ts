@@ -14,4 +14,11 @@ describe("local OSS skills page", () => {
     expect(source).not.toContain("/api/bots/${botId}/skills/refresh");
     expect(source).not.toContain("@/lib/skills-catalog");
   });
+
+  it("wires the local SKILL.md detail endpoint into the skills view", () => {
+    const source = readFileSync(new URL("./skills-catalog.tsx", import.meta.url), "utf8");
+
+    expect(source).toContain("/v1/app/skills/file?dir=");
+    expect(source).toContain("SkillDetailModal");
+  });
 });

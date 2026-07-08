@@ -23,4 +23,23 @@ describe("SkillsCatalog responsive layout", () => {
     expect(source).toContain("Issue detail");
     expect(source).not.toContain("/api/bots/${botId}");
   });
+
+  it("opens a SKILL.md detail modal from a clickable skill card", () => {
+    const source = readFileSync(new URL("./skills-catalog.tsx", import.meta.url), "utf8");
+
+    // Detail endpoint is fetched with an encoded dir query param.
+    expect(source).toContain("/v1/app/skills/file?dir=");
+    expect(source).toContain("encodeURIComponent(skill.dir)");
+    // Cards are keyboard-operable and open the detail modal.
+    expect(source).toContain('role="button"');
+    expect(source).toContain("openSkillDetail");
+    expect(source).toContain("SkillDetailModal");
+
+    const modalSource = readFileSync(
+      new URL("./skill-detail-modal.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(modalSource).toContain("ReactMarkdown");
+    expect(modalSource).toContain("overflow-y-auto");
+  });
 });

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshCw, Search } from "lucide-react";
 import { GlassCard } from "@/components/ui/glass-card";
 import { useAgentFetch } from "@/lib/local-api";
+import { SkillDetailModal } from "./skill-detail-modal";
 
 type JsonRecord = Record<string, unknown>;
 type SkillDirectoryFilter = "all" | "prompt" | "script" | "hooks" | "issues";
@@ -17,9 +18,12 @@ interface SkillIssueDetail {
   lookupKeys: string[];
 }
 
-interface SkillDirectoryItem {
+export interface SkillDirectoryItem {
   name: string;
+  dir: string;
   path: string;
+  source: string;
+  description: string;
   tags: string[];
   promptOnly: boolean;
   scriptBacked: boolean;
@@ -92,7 +96,10 @@ function normalizeSkillDirectoryItems(loaded: JsonRecord[], issues: JsonRecord[]
     );
     return {
       name,
+      dir,
       path,
+      source: asString(skill.source),
+      description: asString(skill.description),
       tags: asStringArray(skill.tags),
       promptOnly: skill.promptOnly === true,
       scriptBacked: skill.scriptBacked === true,
@@ -106,6 +113,7 @@ function skillSearchText(skill: SkillDirectoryItem): string {
   return [
     skill.name,
     skill.path,
+    skill.description,
     ...skill.tags,
     ...skill.issues.flatMap((issue) => [issue.title, issue.reason, issue.detail, issue.path]),
   ].join(" ").toLowerCase();
@@ -119,13 +127,13 @@ function filterSkillDirectoryItem(skill: SkillDirectoryItem, filter: SkillDirect
   return true;
 }
 
-function skillTypeLabel(skill: SkillDirectoryItem): string {
+export function skillTypeLabel(skill: SkillDirectoryItem): string {
   if (skill.scriptBacked) return "Script skill";
   if (skill.promptOnly) return "Prompt skill";
   return "Skill";
 }
 
-function SkillBadge({
+export function SkillBadge({
   children,
   tone = "neutral",
 }: {
@@ -239,12 +247,42 @@ export default function SkillsCatalog(_props: SkillsCatalogProps): React.JSX.Ele
       const res = await agentFetch("/v1/app/skills/reload", { method: "POST" });
       if (!res.ok) throw new Error("Failed to reload local skills");
       await applySnapshot(res);
+      // Invalidate the per-dir SKILL.md cache so the modal refetches fresh
+      // content after an operator edits a skill file and clicks Reload.
+      setDetailCache({});
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to reload local skills");
     } finally {
       setRefreshing(false);
     }
   }, [agentFetch, applySnapshot]);
+
+  const [activeSkill, setActiveSkill] = useState<SkillDirectoryItem | null>(null);
+  const [detailCache, setDetailCache] = useState<Record<string, string>>({});
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+
+  const openSkillDetail = useCallback(
+    async (skill: SkillDirectoryItem) => {
+      setActiveSkill(skill);
+      setDetailError(null);
+      if (!skill.dir || detailCache[skill.dir] !== undefined) return;
+      setDetailLoading(true);
+      try {
+        const res = await agentFetch(
+          `/v1/app/skills/file?dir=${encodeURIComponent(skill.dir)}`,
+        );
+        if (!res.ok) throw new Error(`Failed to load SKILL.md (${res.status})`);
+        const data = (await res.json()) as JsonRecord;
+        setDetailCache((prev) => ({ ...prev, [skill.dir]: asString(data.content) }));
+      } catch (err) {
+        setDetailError(err instanceof Error ? err.message : "Failed to load SKILL.md");
+      } finally {
+        setDetailLoading(false);
+      }
+    },
+    [agentFetch, detailCache],
+  );
 
   const skillItems = useMemo(
     () => normalizeSkillDirectoryItems(snapshot.loaded, snapshot.issues),
@@ -369,7 +407,17 @@ export default function SkillsCatalog(_props: SkillsCatalogProps): React.JSX.Ele
             {filteredSkills.map((skill) => (
               <article
                 key={`${skill.name}-${skill.path}`}
-                className="flex min-h-[190px] flex-col rounded-2xl border border-black/[0.06] bg-[var(--glass-regular-bg)] backdrop-blur-xl px-4 py-4 transition-all duration-200 hover:border-primary/20 hover:bg-primary/[0.025]"
+                role="button"
+                tabIndex={0}
+                onClick={() => void openSkillDetail(skill)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    void openSkillDetail(skill);
+                  }
+                }}
+                aria-label={`View ${skill.name} details`}
+                className="flex min-h-[190px] cursor-pointer flex-col rounded-2xl border border-black/[0.06] bg-[var(--glass-regular-bg)] backdrop-blur-xl px-4 py-4 transition-all duration-200 hover:border-primary/30 hover:bg-primary/[0.035] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -399,12 +447,14 @@ export default function SkillsCatalog(_props: SkillsCatalogProps): React.JSX.Ele
                 <div className="mt-auto pt-4">
                   <div className="rounded-xl border border-black/[0.05] bg-black/[0.025] px-3 py-2">
                     <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-secondary/60">
-                      Runtime role
+                      {skill.description ? "Description" : "Runtime role"}
                     </div>
-                    <p className="mt-1 text-sm leading-5 text-secondary">
-                      {skill.scriptBacked
-                        ? "Executable capability with an input schema and local entrypoint."
-                        : "Prompt capability that can be invoked by the local operator."}
+                    <p className="mt-1 line-clamp-2 text-sm leading-5 text-secondary">
+                      {skill.description
+                        ? skill.description
+                        : skill.scriptBacked
+                          ? "Executable capability with an input schema and local entrypoint."
+                          : "Prompt capability that can be invoked by the local operator."}
                     </p>
                   </div>
                 </div>
@@ -471,6 +521,15 @@ export default function SkillsCatalog(_props: SkillsCatalogProps): React.JSX.Ele
           )}
         </GlassCard>
       </div>
+
+      <SkillDetailModal
+        open={activeSkill !== null}
+        onClose={() => setActiveSkill(null)}
+        skill={activeSkill}
+        content={activeSkill ? detailCache[activeSkill.dir] ?? null : null}
+        loading={detailLoading}
+        error={detailError}
+      />
     </div>
   );
 }
