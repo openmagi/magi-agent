@@ -1900,6 +1900,7 @@ class MagiEngineDriver:
                 event_family="verify_audit_alias",
             )
             event["sourceType"] = "verify"
+            event["verifyKind"] = "pass"  # B3: row-species scalar for _project_verdict (GAP-2 fix)
             event["policyId"] = "verify_before_replying"
             event["passIndex"] = int(pass_index)
             event["newFindings"] = len(new_findings)

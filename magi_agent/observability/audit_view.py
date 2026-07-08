@@ -17,6 +17,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from magi_agent.evidence.audit_labels import (
+    AUDIT_PASS,
     ENFORCEMENT_EVENT_KINDS,
     classify_verdict_severity,
     is_enforced_kind,
@@ -126,7 +127,30 @@ def _project_verdict(event: Mapping[str, Any]) -> dict[str, Any]:
         citation_status = _first_str(payload.get("citationVerdict"))
         if citation_status is not None:
             status = citation_status
-    display_label = verdict_to_display_label(status, source_type=source_type)
+    # verify_before_replying per-pass rows (B4, GAP-2 fix): per-pass rows carry
+    # ``sourceType="verify"`` and a ``verifyKind`` scalar that identifies the
+    # row species. Pass rows (verifyKind="pass") and legacy rows emitted by
+    # pre-fix images (no verifyKind) must render as AUDIT PASS / info rather
+    # than falling through to verdict_to_display_label's verify branch, which
+    # only handles turn-level verdicts and returns UNKNOWN for pass verdicts.
+    #
+    # Branch is structured as an if/elif ladder so that turn and finding species
+    # (verifyKind="turn" / "finding", added by the full rich-panel work) can be
+    # wired here without restructuring.
+    display_label: str
+    if source_type == "verify":
+        verify_kind = _first_str(payload.get("verifyKind"))
+        if verify_kind == "pass" or verify_kind is None:
+            # Pass row or legacy row (no verifyKind from pre-fix image).
+            display_label = AUDIT_PASS
+        else:
+            # Future: "turn" / "finding" arms land here. Until those are wired,
+            # fall through to the existing label function (may return UNKNOWN for
+            # unrecognized species, which is acceptable for rows that do not yet
+            # exist in the store).
+            display_label = verdict_to_display_label(status, source_type=source_type)
+    else:
+        display_label = verdict_to_display_label(status, source_type=source_type)
 
     subject_raw = _first_str(
         payload.get("ruleId"),
