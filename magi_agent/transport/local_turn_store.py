@@ -675,9 +675,12 @@ class LocalTurnStore:
             return
         with self._lock:
             self._live[session_id] = _LiveEntry(reducer=reducer)
-            # A fresh turn supersedes any stale completed record for this key
-            # (e.g. a second turn in the same channel before TTL expiry).
-            self._completed.pop(session_id, None)
+            # Do NOT drop the prior completed record here. A new turn starting
+            # must not destroy the previous turn's committed answer before the
+            # client has rehydrated it: the sub-3s send race (follow-up sent
+            # right after a truncated turn) otherwise wiped the only server copy
+            # and the answer vanished. ``finish()`` overwrites the record when
+            # THIS turn completes; TTL eviction handles genuine staleness.
 
     def finish(self, session_id: str, reducer: LocalSnapshotReducer) -> None:
         """Move a finished turn from live to a completed record (or detached)."""
@@ -725,8 +728,12 @@ class LocalTurnStore:
         """Return committed assistant message(s) for a just-finished turn.
 
         Shaped like the hosted ``channel-messages`` server payload: a list of
-        ``{role, content, createdAt, turnId}`` entries. Errored/aborted turns
-        deliver no content (mirrors the hosted persistence rule).
+        ``{role, content, createdAt, turnId}`` entries. A turn that errored or
+        aborted mid-stream but still produced visible text is delivered too,
+        flagged ``incomplete``: dropping it made a truncated answer VANISH on
+        the next turn (the client's error-recovery path never re-committed it,
+        so the server copy was the only survivor). Only genuinely empty turns
+        deliver nothing.
         """
         if not session_id:
             return []
@@ -735,18 +742,18 @@ class LocalTurnStore:
             record = self._completed.get(session_id)
             if record is None:
                 return []
-            if record.terminal in ("error", "aborted"):
-                return []
             if not record.content:
                 return []
-            return [
-                {
-                    "role": record.role,
-                    "content": record.content,
-                    "createdAt": record.created_at_ms,
-                    "turnId": record.turn_id,
-                }
-            ]
+            message: dict[str, Any] = {
+                "role": record.role,
+                "content": record.content,
+                "createdAt": record.created_at_ms,
+                "turnId": record.turn_id,
+            }
+            if record.terminal in ("error", "aborted"):
+                message["incomplete"] = True
+                message["terminal"] = record.terminal
+            return [message]
 
     def live_reducer(self, session_id: str) -> LocalSnapshotReducer | None:
         with self._lock:

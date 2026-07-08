@@ -241,14 +241,52 @@ def test_store_live_snapshot_then_completed_messages() -> None:
     assert msgs[0]["turnId"] == "t1"
 
 
-def test_store_errored_turn_delivers_no_completed_message() -> None:
+def test_store_errored_turn_delivers_partial_with_incomplete_marker() -> None:
+    # A turn that errored mid-stream but produced visible text must still be
+    # delivered (flagged incomplete) so a refresh/follow-up does not make the
+    # partial answer vanish.
     store = LocalTurnStore()
     sk = "agent:main:app:general"
     reducer = LocalSnapshotReducer(session_id=sk, turn_id="t1")
     store.begin(sk, reducer)
     _feed_completed(reducer, "half answer", terminal="error")
     store.finish(sk, reducer)
+    msgs = store.completed_messages(sk)
+    assert len(msgs) == 1
+    assert msgs[0]["content"] == "half answer"
+    assert msgs[0]["incomplete"] is True
+    assert msgs[0]["terminal"] == "error"
+
+
+def test_store_errored_turn_with_no_text_delivers_nothing() -> None:
+    # Genuinely empty errored turn still delivers nothing (no phantom bubble).
+    store = LocalTurnStore()
+    sk = "agent:main:app:general"
+    reducer = LocalSnapshotReducer(session_id=sk, turn_id="t1")
+    store.begin(sk, reducer)
+    reducer.ingest(_agent_frame({"type": "turn_result", "terminal": "error", "turn_id": "t1"}))
+    store.finish(sk, reducer)
     assert store.completed_messages(sk) == []
+
+
+def test_store_begin_preserves_prior_completed_until_finish() -> None:
+    # A new turn on the same key must NOT destroy the prior committed answer
+    # before it is superseded by THIS turn's own finish (sub-3s send race).
+    store = LocalTurnStore()
+    sk = "agent:main:app:general"
+    r1 = LocalSnapshotReducer(session_id=sk, turn_id="t1")
+    store.begin(sk, r1)
+    _feed_completed(r1, "first answer")
+    store.finish(sk, r1)
+    assert store.completed_messages(sk)[0]["content"] == "first answer"
+
+    r2 = LocalSnapshotReducer(session_id=sk, turn_id="t2")
+    store.begin(sk, r2)  # follow-up turn starts; prior answer must survive
+    assert store.completed_messages(sk)[0]["content"] == "first answer"
+
+    _feed_completed(r2, "second answer")
+    store.finish(sk, r2)
+    assert store.completed_messages(sk)[0]["content"] == "second answer"
 
 
 def test_store_reset_key_scopes_fresh_entry() -> None:

@@ -1009,6 +1009,16 @@ export function ChatViewClient({
 
       const activeReply = explicitReply;
 
+      // If the PRIOR turn left visible streamed text that was never committed
+      // to messages[] (e.g. it settled Idle from an error/recovery path without
+      // finalizing), commit it BEFORE this new turn clears streamingText below.
+      // Otherwise the follow-up send wipes the partial answer and it vanishes.
+      // finalizeStream is a no-op when there is nothing visible to commit.
+      const priorState = useChatStore.getState().channelStates[channel];
+      if (priorState?.hasTextContent && (priorState.streamingText ?? "").trim().length > 0) {
+        store.finalizeStream(channel, undefined, { botId });
+      }
+
       const userMsg: ChatMessage = {
         id: `user-${Date.now()}`,
         role: "user",
@@ -1389,7 +1399,17 @@ export function ChatViewClient({
                     } else {
                       // Snapshot gone = turn finished server-side
                       const msgs = await chatApi.fetchChannelMessages(botId, channel);
-                      if (msgs?.length) mergeFetchedServerMessages(botId, channel, msgs);
+                      if (msgs?.length) {
+                        mergeFetchedServerMessages(botId, channel, msgs);
+                      } else {
+                        // The server had no committed record of this turn (an
+                        // older serve, a TTL-expired record, or an error
+                        // terminal that dropped content). Commit the partial
+                        // streamingText locally so the clear below cannot make
+                        // it vanish. Mirrors the non-retryable / unrecovered
+                        // branches, which finalize before clearing.
+                        store.finalizeStream(channel, undefined, { botId });
+                      }
                       store.setChannelState(channel, {
                         streaming: false,
                         streamingText: "",

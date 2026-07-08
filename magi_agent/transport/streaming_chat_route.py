@@ -1412,7 +1412,9 @@ def register_streaming_chat_routes(
     # message(s) for a session whose turn finished while the browser was away
     # (the completed-turn record held under a generous TTL). Absorbs the
     # chat-proxy ``channel-messages`` role for the LOCAL streaming branch.
-    # Errored/aborted turns deliver no content. Always returns
+    # A turn that errored/aborted mid-stream but produced text is returned too,
+    # flagged ``incomplete`` (only genuinely empty turns deliver nothing), so a
+    # truncated answer does not vanish on refresh/follow-up. Always returns
     # ``{"messages": [...]}`` (possibly empty); never a hard error.
     # ------------------------------------------------------------------
     @app.get("/v1/chat/channel-messages", response_model=None)
