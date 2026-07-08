@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
 from magi_agent.cli.contracts import EngineResult, Terminal
@@ -64,6 +65,21 @@ FIRST_PARTY_RECIPE_PACK_IDS = (
     "openmagi.document-review",
     "openmagi.lightweight-scripting",
 )
+
+
+@pytest.fixture(autouse=True)
+def _legacy_selected_chat_route_path(monkeypatch):
+    """Pin the pre-governed selected-canary chat route for this module.
+
+    These contract tests exercise the legacy (non-governed) gate5b chat route
+    with fake runners. Under ``MAGI_HOSTED_GOVERNED_TURN_ENABLED`` default-ON the
+    requests route through ``run_governed_turn`` -> ``MagiEngineDriver`` (verified
+    working end-to-end on a live bot), whose layer these fakes do not wire,
+    surfacing ``runner_error`` / a 502. The governed path has its own suite in
+    ``tests/test_chat_routes_hosted_governed_turn.py``; hold the legacy path here.
+    """
+
+    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "0")
 
 
 def _sha256(value: str) -> str:
