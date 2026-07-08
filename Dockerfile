@@ -18,7 +18,7 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 # resolver picks a working set without exploring the full backtrack tree.
 # This is the pragmatic fix until the constraint set is tightened.
 RUN python -m pip install --no-cache-dir --upgrade pip \
-  && python -m pip install --no-cache-dir --use-deprecated=legacy-resolver ".[browser,cli,composio,providers,waf]" \
+  && python -m pip install --no-cache-dir --use-deprecated=legacy-resolver ".[browser,cli,composio,files,providers,waf]" \
   && python -m playwright install --with-deps chromium \
   && chmod -R a+rX "${PLAYWRIGHT_BROWSERS_PATH}" \
   && rm -rf /var/lib/apt/lists/*
