@@ -503,41 +503,7 @@ describe("MessageBubble", () => {
     expect(html).toContain("The answer is 42.");
   });
 
-  it("renders the source-citation fail-open hedge as a distinguished callout", () => {
-    const html = renderToStaticMarkup(
-      <MessageBubble
-        role="assistant"
-        botId="bot-1"
-        content={[
-          "Revenue grew 40% year over year.",
-          "",
-          "> [!citation-hedge]",
-          "> Contains unverified figures; no source was available for: Revenue grew 40%",
-        ].join("\n")}
-        timestamp={1_800_000_000_000}
-      />,
-    );
-
-    // The hedge is styled as the muted callout, not plain answer prose.
-    expect(html).toContain("citation-hedge-callout");
-    expect(html).toContain("bg-amber-500");
-    expect(html).toContain("Contains unverified figures");
-    // The sentinel itself is stripped from the visible text.
-    expect(html).not.toContain("[!citation-hedge]");
-  });
-
-  it("does NOT restyle a normal blockquote as a citation callout", () => {
-    const html = renderToStaticMarkup(
-      <MessageBubble
-        role="assistant"
-        botId="bot-1"
-        content={"> A normal quote from a source document."}
-        timestamp={1_800_000_000_000}
-      />,
-    );
-
-    expect(html).not.toContain("citation-hedge-callout");
-    expect(html).toContain("A normal quote from a source document.");
-    expect(html).toContain("<blockquote>");
-  });
+  // Source-citation hedge cases (GAP #5) live in the standalone, included suite
+  // message-bubble.citation-hedge.test.tsx so they run in the standard vitest
+  // run (this file is out of the include due to pre-existing dormant failures).
 });

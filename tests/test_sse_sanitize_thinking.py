@@ -116,7 +116,6 @@ def test_citation_turn_phase_survives_wire_with_status(monkeypatch):
             "turnId": "turn_x",
             "phase": "verifying",
             "status": "citation_attribution",
-            "label": "Verifying citations",
             "eventId": "citation-repair-turn_x-1",
         }
     )

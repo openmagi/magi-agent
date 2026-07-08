@@ -4437,25 +4437,29 @@ class MagiEngineDriver:
                         if citation_induced_search
                         else "citation_attribution"
                     )
-                    _citation_phase_label = (
-                        "Searching to ground claims"
-                        if citation_induced_search
-                        else "Verifying citations"
-                    )
-                    yield RuntimeEvent(
+                    # No "label" on this frame on purpose: the frontend owns the
+                    # localized (KO + EN) copy for the citation repair state,
+                    # derived from `status` (see citationRepairLabel in
+                    # chat-messages.tsx). A backend English-only label would be
+                    # dead data here and would lose the Korean copy if consumed.
+                    _citation_phase_event = RuntimeEvent(
                         type="status",
                         payload={
                             "type": "turn_phase",
                             "turnId": turn_id,
                             "phase": "verifying",
                             "status": _citation_phase_status,
-                            "label": _citation_phase_label,
                             "eventId": (
                                 f"citation-repair-{turn_id}-{next_repair_attempt}"
                             ),
                         },
                         turn_id=turn_id,
                     )
+                    # Fail-soft: a telemetry/UX frame must never break the turn.
+                    try:
+                        yield _citation_phase_event
+                    except Exception:  # noqa: BLE001
+                        pass
                 else:
                     repair_message = _build_repair_continuation_message(
                         missing_evidence=missing_evidence,
