@@ -28,10 +28,12 @@ import {
   compileRule,
   putCustomRule,
   putSeamSpec,
+  upsertPolicy,
   type ArchitectPrimitive,
   type ArchitectProposal,
   type ConversationTurn,
   type CustomRule,
+  type CustomRulePolicyEnvelope,
   type InterviewQuestion,
   type MissingFieldEntry,
   type RoutedKind,
@@ -121,6 +123,34 @@ function newGroupId(): string {
 }
 
 
+/** Mint a client-side custom-rule id for a hybrid member whose compiler
+ *  payload arrived without one, so the explicit Policy upsert (PR-4) can
+ *  reference every member. Same shape as the server backfill (``cr_`` +
+ *  token matching the rule-id regex). */
+function newRuleId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `cr_${crypto.randomUUID()}`;
+  }
+  return `cr_${Math.random().toString(36).slice(2, 12)}`;
+}
+
+
+/**
+ * Derive a policy displayName from the operator's NL sentence (PR-4).
+ * Collapses whitespace and trims to a word boundary near 60 chars — long
+ * sentences stay readable as a card headline while the FULL sentence is
+ * preserved separately as ``Policy.intent``.
+ */
+export function derivePolicyDisplayName(text: string): string {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  if (collapsed.length <= 60) return collapsed;
+  const cut = collapsed.slice(0, 60);
+  const lastSpace = cut.lastIndexOf(" ");
+  const atWord = lastSpace > 20 ? cut.slice(0, lastSpace) : cut;
+  return `${atWord}...`;
+}
+
+
 /**
  * Lift an architect primitive into the persistence-shape needed by the
  * matching PUT route. Primitives whose backing storage is a CustomRule
@@ -136,22 +166,32 @@ function stampGroupId<T>(payload: T, groupId: string | null): T {
 }
 
 
+/** Architect primitive kinds whose backing storage is a CustomRule (the
+ *  putCustomRule route — the only route with the PR-4 policy-envelope seam). */
+const CUSTOM_RULE_KINDS: ReadonlySet<RoutedKind> = new Set<RoutedKind>([
+  "deterministic_ref",
+  "tool_perm",
+  "llm_criterion",
+  "shacl_constraint",
+  "field_constraint",
+  "capability_scope",
+]);
+
+
 async function activatePrimitive(
   agentFetch: (path: string, init?: RequestInit) => Promise<Response>,
   primitive: ArchitectPrimitive,
   groupId: string | null,
+  policyEnvelope?: CustomRulePolicyEnvelope,
 ): Promise<void> {
   const kind = primitive.kind;
-  if (
-    kind === "deterministic_ref"
-      || kind === "tool_perm"
-      || kind === "llm_criterion"
-      || kind === "shacl_constraint"
-      || kind === "field_constraint"
-      || kind === "capability_scope"
-  ) {
+  if (CUSTOM_RULE_KINDS.has(kind)) {
     const rule = stampGroupId(primitive.payload as CustomRule, groupId);
-    await putCustomRule(agentFetch, rule);
+    // ``policyEnvelope`` (PR-4) threads displayName + the operator's original
+    // NL sentence onto the server's auto-promoted 1-rule Policy. Only the
+    // CustomRule route supports it; seam_spec / custom_check saves have no
+    // envelope seam (their policies fall back to id-derived names — honest).
+    await putCustomRule(agentFetch, rule, policyEnvelope);
     return;
   }
   if (kind === "seam_spec") {
@@ -209,12 +249,25 @@ export function NlRuleCompose({
         agentFetch={agentFetch}
         initialUserMessage={initialNlText}
         onPickDifferent={() => setConversational(false)}
-        onSave={async (draft) => {
+        onSave={async (draft, meta) => {
           // The conversational compiler only sets ready_to_save once
           // ``validate_custom_rule`` accepts the draft, so the PUT
           // should round-trip without surfacing a 4xx.
           try {
-            await putCustomRule(agentFetch, draft as unknown as CustomRule);
+            // PR-4: thread the operator's first chat turn (the original NL
+            // sentence) onto the auto-promoted 1-rule Policy as ``intent``,
+            // with a derived headline as ``displayName``.
+            const intentText = meta.intentText.trim();
+            await putCustomRule(
+              agentFetch,
+              draft as unknown as CustomRule,
+              intentText
+                ? {
+                    displayName: derivePolicyDisplayName(intentText),
+                    intent: intentText,
+                  }
+                : undefined,
+            );
             onActivated();
           } catch (err: unknown) {
             // Toast / banner handling lives in ``onActivated``'s
@@ -375,9 +428,58 @@ export function NlRuleCompose({
     setActivateBusy(true);
     setActivateError(null);
     try {
-      const groupId = proposal.mode === "hybrid" ? newGroupId() : null;
-      for (const primitive of proposal.primitives) {
-        await activatePrimitive(agentFetch, primitive, groupId);
+      // PR-4: the operator's original sentence + the architect's summary
+      // become the promoted Policy's intent / displayName.
+      const intentText = nlText.trim();
+      const envelope: CustomRulePolicyEnvelope | undefined = intentText
+        ? {
+            displayName: derivePolicyDisplayName(
+              proposal.summary.trim() || intentText,
+            ),
+            intent: intentText,
+          }
+        : undefined;
+      if (proposal.mode === "hybrid") {
+        // Hybrid: N primitives compose ONE logical policy. Per-rule
+        // auto-promotion is skipped server-side for grouped saves; instead
+        // the client upserts a single Policy (id = groupId, which the
+        // read-time group migration treats as already-migrated) referencing
+        // every member — so the composition renders as one card, carrying
+        // the operator's own sentence.
+        const groupId = newGroupId();
+        const memberIds: string[] = [];
+        for (const primitive of proposal.primitives) {
+          let toSave = primitive;
+          const payload = primitive.payload as Record<string, unknown> | null;
+          const payloadId =
+            payload && typeof payload.id === "string" && payload.id
+              ? payload.id
+              : null;
+          if (CUSTOM_RULE_KINDS.has(primitive.kind) && !payloadId) {
+            const minted = newRuleId();
+            toSave = {
+              ...primitive,
+              payload: { ...(payload ?? {}), id: minted },
+            };
+            memberIds.push(minted);
+          } else if (payloadId) {
+            memberIds.push(payloadId);
+          }
+          await activatePrimitive(agentFetch, toSave, groupId);
+        }
+        if (memberIds.length > 0) {
+          await upsertPolicy(agentFetch, groupId, {
+            displayName:
+              envelope?.displayName
+              ?? derivePolicyDisplayName(proposal.summary.trim() || groupId),
+            intent: intentText,
+            ruleIds: memberIds,
+          });
+        }
+      } else {
+        for (const primitive of proposal.primitives) {
+          await activatePrimitive(agentFetch, primitive, null, envelope);
+        }
       }
       resetSurface();
       setNlText("");
@@ -389,7 +491,7 @@ export function NlRuleCompose({
     } finally {
       setActivateBusy(false);
     }
-  }, [agentFetch, architectState, onActivated, resetSurface]);
+  }, [agentFetch, architectState, nlText, onActivated, resetSurface]);
 
   const handleAuthorManually = useCallback(() => {
     // Drop to the wizard with whatever intent state was inferred. The
@@ -438,7 +540,19 @@ export function NlRuleCompose({
         // as shacl_constraint (the backend compiles the structured IR to
         // a SHACL shape at save time; the on-disk kind alias is preserved
         // via `authoredAs` per the F3 design doc).
-        await putCustomRule(agentFetch, result.draft as CustomRule);
+        // PR-4: the textarea sentence is the operator's original intent —
+        // thread it onto the auto-promoted 1-rule Policy.
+        const intentText = nlText.trim();
+        await putCustomRule(
+          agentFetch,
+          result.draft as CustomRule,
+          intentText
+            ? {
+                displayName: derivePolicyDisplayName(intentText),
+                intent: intentText,
+              }
+            : undefined,
+        );
       } else if (result.routedKind === "seam_spec") {
         await putSeamSpec(agentFetch, result.draft as SeamSpecDoc);
       } else if (result.routedKind === "custom_check") {
@@ -452,7 +566,7 @@ export function NlRuleCompose({
     } finally {
       setActivateBusy(false);
     }
-  }, [agentFetch, onActivated, result]);
+  }, [agentFetch, nlText, onActivated, result]);
 
   const canActivate = Boolean(
     result?.ok

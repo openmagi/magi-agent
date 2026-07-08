@@ -455,17 +455,40 @@ export async function putRules(
 }
 
 /**
+ * Policy-envelope fields threaded through a custom-rule save (PR-4 authoring
+ * consolidation). When a rule is authored from a natural-language flow, the
+ * client passes the user's ORIGINAL sentence as `intent` plus a
+ * compiler-suggested (or derived) `displayName`; the server's auto-promoted
+ * 1-rule Policy carries both, so the policy card shows the user's own words.
+ * These are Policy fields, not rule fields — the server strips them from the
+ * persisted rule shape.
+ */
+export interface CustomRulePolicyEnvelope {
+  displayName?: string;
+  intent?: string;
+}
+
+/**
  * Creates/updates a structured custom rule via `PUT /v1/app/customize/custom-rules`.
  * The server validates (400 on bad shape) and assigns an id. Returns overrides.
+ *
+ * `policyEnvelope` (optional) threads displayName/intent for the
+ * auto-promoted 1-rule Policy; omit it on flows with no NL sentence
+ * (Guided/Raw), where the server falls back to the rule id — honest, not
+ * fabricated.
  */
 export async function putCustomRule(
   fetch: (path: string, init?: RequestInit) => Promise<Response>,
   rule: CustomRule,
+  policyEnvelope?: CustomRulePolicyEnvelope,
 ): Promise<CustomizeOverrides> {
+  const body: Record<string, unknown> = { ...rule };
+  if (policyEnvelope?.displayName) body.displayName = policyEnvelope.displayName;
+  if (policyEnvelope?.intent) body.intent = policyEnvelope.intent;
   const res = await fetch(`/v1/app/customize/custom-rules`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(rule),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}));
@@ -887,6 +910,35 @@ export async function patchPolicyEnabled(
     if (res.status === 404) throw new Error("Policy not found.");
     throw new Error(`Failed to update policy (${res.status})`);
   }
+}
+
+/** Body for {@link upsertPolicy} — the user-facing Policy envelope. */
+export interface UpsertPolicyInput {
+  displayName: string;
+  intent?: string;
+  ruleIds: string[];
+}
+
+/**
+ * Creates/updates a Policy record via `PUT /v1/app/policies/{id}` (PR-4).
+ *
+ * Used by the NL hybrid-proposal activate path: after saving the N member
+ * rules under one groupId (whose per-rule auto-promotion the server skips),
+ * the client upserts ONE Policy carrying the operator's original sentence as
+ * `intent` — so a hybrid composition renders as a single policy card instead
+ * of shattering into member rows.
+ */
+export async function upsertPolicy(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  policyId: string,
+  input: UpsertPolicyInput,
+): Promise<void> {
+  const res = await fetch(`/v1/app/policies/${encodeURIComponent(policyId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(`Failed to save policy (${res.status})`);
 }
 
 /**

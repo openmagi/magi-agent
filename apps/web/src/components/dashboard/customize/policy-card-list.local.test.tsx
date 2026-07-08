@@ -403,3 +403,71 @@ describe("PolicyCardList — PR-3 structure", () => {
     expect(src).toContain("actionHint");
   });
 });
+
+describe("runtime-native member honesty (0-rules bug fix)", () => {
+  it("counts runtime-native members instead of lying 0 rules", () => {
+    const entry: PolicyCatalogEntry = {
+      id: "verify_before_replying",
+      displayName: "Verify Before Replying",
+      intent: "audit the candidate reply",
+      ruleIds: [
+        "verify_before_replying.claim_citation",
+        "verify_before_replying.evidence_consistency",
+      ],
+      origin: "builtin",
+      userDisableable: true,
+      reviewVerdict: "unreviewed",
+      hasBinding: false,
+      enabledState: "on",
+      source: "builtinPolicy",
+    };
+    const html = renderToStaticMarkup(
+      <PolicyCardList {...baseProps({ catalogPolicies: [entry], ruleRows: [] })} />,
+    );
+    expect(html).toContain("2 rules");
+    expect(html).not.toContain("0 rules");
+    expect(html).toContain("runtime-managed");
+  });
+
+  it("renders runtime-native members read-only in the drill-down", () => {
+    const entry: PolicyCatalogEntry = {
+      id: "source_citation",
+      displayName: "Source Citation",
+      intent: "",
+      ruleIds: ["source_citation.capture", "source_citation.gate"],
+      origin: "builtin",
+      userDisableable: false,
+      reviewVerdict: "unreviewed",
+      hasBinding: false,
+      enabledState: "managed",
+      source: "builtinPolicy",
+    };
+    const html = renderToStaticMarkup(
+      <PolicyCardList {...baseProps({ catalogPolicies: [entry], ruleRows: [] })} />,
+    );
+    // Member names humanized from the id tail.
+    expect(html).toContain("capture");
+    expect(html).toContain("gate");
+  });
+
+  it("omits the drill-down entirely for zero-member nudge cards", () => {
+    const entry: PolicyCatalogEntry = {
+      id: "goal-loop",
+      displayName: "Goal nudge",
+      intent: "keeps long turns on-goal",
+      ruleIds: [],
+      origin: "builtin",
+      userDisableable: true,
+      reviewVerdict: "unreviewed",
+      hasBinding: false,
+      enabledState: "on",
+      source: "controlPlane",
+      actionHint: "nudge",
+    };
+    const html = renderToStaticMarkup(
+      <PolicyCardList {...baseProps({ catalogPolicies: [entry], ruleRows: [] })} />,
+    );
+    expect(html).not.toContain("0 rules");
+    expect(html).not.toContain(`policy-drilldown-native:goal-loop`);
+  });
+});

@@ -86,18 +86,24 @@ describe("CustomizeHub — Policy unification (PR-E1)", () => {
     expect(src).toContain("extractNamedConditions");
   });
 
-  it("Add policy entry shows the 3-mode AddPolicyModePicker (NL / Guided / Raw)", () => {
-    expect(src).toContain("AddPolicyModePicker");
-    expect(src).toContain('phase: "picking_mode"');
-    expect(src).toContain('phase: "nl"');
+  it("PR-4: single Add-policy flow — conversational default + Advanced Guided/Raw phases", () => {
+    // The standalone 3-mode picker is absorbed: no picker component, no
+    // picking_mode phase. The flow opens directly on the conversational
+    // "describe" surface; Guided/Raw survive as phases behind "Advanced".
+    expect(src).not.toContain("AddPolicyModePicker");
+    expect(src).not.toContain("picking_mode");
+    expect(src).toContain('phase: "policy"; surface: "describe" | "linked"');
     expect(src).toContain('phase: "guided"');
     expect(src).toContain('phase: "raw_picking"');
     expect(src).toContain('phase: "raw_authoring"');
   });
 
-  it("routes the Guided choice to the GuidedWizard (PR-E2)", () => {
+  it("PR-4: the Advanced entry routes to the Guided wizard and the Raw kind picker", () => {
     expect(src).toContain("GuidedWizard");
-    expect(src).toContain('mode === "guided"');
+    expect(src).toContain("Advanced:");
+    expect(src).toMatch(
+      /Advanced:[\s\S]*?setAddState\(\{ phase: "guided" \}\)[\s\S]*?setAddState\(\{ phase: "raw_picking" \}\)/,
+    );
   });
 
   it("loads DashboardChecks at hub level so they appear in the unified table", () => {
@@ -110,8 +116,22 @@ describe("CustomizeHub — Policy unification (PR-E1)", () => {
     expect(src).toContain("deleteSeamSpecApi");
   });
 
-  it("PR-U3.1: names the Rules-tab add button 'Add rule' (region-aligned)", () => {
-    expect(src).toContain("Add rule");
+  it("PR-4: '+ Add policy' is the SOLE primary CTA (no 'Add rule' button)", () => {
+    expect(src).toContain("Add policy");
+    // The literal button label "Add rule" is retired; the only surviving
+    // "AddRule" token is the Raw kind picker component (AddRulePicker).
+    expect(src).not.toMatch(/>\s*Add rule\b/);
+    expect(src).not.toContain('"Add rule"');
+  });
+
+  it("PR-4: both conversational composers mount inside the single flow", () => {
+    // Default surface: single-rule NL composer (the 1-rule degenerate case,
+    // auto-promoted to a Policy server-side). Linked surface: producer+gate.
+    expect(src).toMatch(
+      /surface === "describe" \?[\s\S]*?<NlRuleCompose[\s\S]*?<ConversationalPolicyCompose/,
+    );
+    expect(src).toContain('composeSurface("describe")');
+    expect(src).toContain('composeSurface("linked")');
   });
 
   it("keeps the legacy CustomRulesSection / CustomChecksSection / SeamBuilderPanel reachable under raw_authoring", () => {
@@ -121,7 +141,7 @@ describe("CustomizeHub — Policy unification (PR-E1)", () => {
   });
 
   it("hides the unified list while authoring so the page is focused", () => {
-    expect(src).toContain("List hidden while adding a rule");
+    expect(src).toContain("List hidden while adding a policy");
   });
 
   it("registers the PR-F7 Budgets sub-tab (id, label, icon, panel mount)", () => {

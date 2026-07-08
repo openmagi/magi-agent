@@ -45,12 +45,24 @@ import {
 } from "@/lib/customize-api";
 
 
+/** Save-time metadata threaded alongside the draft (PR-4 authoring
+ *  consolidation). ``intentText`` is the operator's FIRST user turn — the
+ *  original natural-language sentence — so the parent can stamp it onto the
+ *  auto-promoted 1-rule Policy as ``intent``. Empty when no user turn was
+ *  sent (defensive; Save is unreachable before the first turn). */
+export interface ConversationalSaveMeta {
+  intentText: string;
+}
+
 export interface ConversationalComposeProps {
   /** Authenticated fetch threaded from the parent. */
   agentFetch: (path: string, init?: RequestInit) => Promise<Response>;
   /** Called when the operator clicks Save on a validator-clean draft.
    *  The parent persists via ``putCustomRule`` and toasts on success. */
-  onSave: (draft: Record<string, unknown>) => Promise<void> | void;
+  onSave: (
+    draft: Record<string, unknown>,
+    meta: ConversationalSaveMeta,
+  ) => Promise<void> | void;
   /** Called when the operator clicks "Use textarea instead" to drop
    *  back to the F-UX6 single-shot textarea. The parent's mode-picker
    *  AuthoringHeader handles back-out to a different authoring mode. */
@@ -276,11 +288,14 @@ export function ConversationalCompose({
     if (!draft || !readyToSave || saving) return;
     setSaving(true);
     try {
-      await onSave(draft);
+      // The first user turn is the operator's original NL sentence — it
+      // becomes the auto-promoted 1-rule Policy's ``intent`` (PR-4).
+      const firstUserTurn = history.find((t) => t.role === "user");
+      await onSave(draft, { intentText: firstUserTurn?.content ?? "" });
     } finally {
       if (mountedRef.current) setSaving(false);
     }
-  }, [draft, onSave, readyToSave, saving]);
+  }, [draft, history, onSave, readyToSave, saving]);
 
   return (
     <div

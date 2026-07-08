@@ -302,3 +302,18 @@ def test_get_customize_survives_corrupt_store(
     cfile.write_text("{ not valid json !!", encoding="utf-8")
     resp = client.get("/v1/app/customize")
     assert resp.status_code == 200
+
+
+def test_upsert_builtin_id_reserved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PR-4 hardening: a user record must not shadow a first-party policy's
+    display card. Reserved ids are rejected outright."""
+    client = _authed(tmp_path, monkeypatch)
+    for reserved in ("source_citation", "verify_before_replying"):
+        resp = client.put(
+            f"/v1/app/policies/{reserved}",
+            json={"displayName": "impostor", "ruleIds": []},
+        )
+        assert resp.status_code == 409, (reserved, resp.status_code)
+        assert resp.json()["error"] == "builtin_id_reserved"

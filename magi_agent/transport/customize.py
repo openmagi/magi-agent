@@ -464,7 +464,23 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             return JSONResponse(status_code=400, content={"error": "object_required"})
         from pydantic import ValidationError
 
-        from magi_agent.customize.policies import Policy, list_policies, upsert_policy
+        from magi_agent.customize.policies import (
+            BUILTIN_POLICIES,
+            Policy,
+            list_policies,
+            upsert_policy,
+        )
+
+        # PR-4 hardening (review): first-party policy ids are reserved. A user
+        # record with a builtin id would shadow the builtin's DISPLAY card
+        # (list_policies lets the stored clone win) - display spoofing only
+        # (the runtime floor keys on env/catalog, not this record), but there
+        # is no legitimate reason to allow it.
+        if policy_id in {b.policy_id for b in BUILTIN_POLICIES}:
+            return JSONResponse(
+                status_code=409,
+                content={"error": "builtin_id_reserved", "policyId": policy_id},
+            )
 
         # The path id is authoritative: drop any body-supplied id / policy_id so
         # neither can conflict, then set the path id.
@@ -1205,7 +1221,18 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             return JSONResponse(
                 status_code=400, content={"error": "invalid_custom_rule", "details": errors}
             )
-        rule = dict(body)
+        # Policy-envelope fields (PR-4 authoring consolidation): the NL
+        # authoring client threads the user's ORIGINAL sentence (``intent``)
+        # plus a compiler-suggested/derived ``displayName`` through the save so
+        # the auto-promoted 1-rule Policy carries them. They are Policy fields,
+        # NOT rule fields — strip them from the persisted rule shape.
+        display_name = (
+            body.get("displayName")
+            if isinstance(body.get("displayName"), str)
+            else None
+        )
+        intent = body.get("intent") if isinstance(body.get("intent"), str) else None
+        rule = {k: v for k, v in body.items() if k not in ("displayName", "intent")}
         supplied_id = isinstance(rule.get("id"), str) and bool(rule["id"])
         if not supplied_id:
             rule["id"] = f"cr_{uuid.uuid4().hex}"
@@ -1224,24 +1251,23 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         }
         is_create = rule["id"] not in existing_ids
         overrides = set_custom_rule(rule)
-        if is_create:
+        # Grouped rules (a hybrid NL proposal saving N rules under one
+        # ``groupId``) compose ONE logical policy: the client upserts that
+        # Policy itself via PUT /v1/app/policies/{groupId}, and the read-time
+        # group migration backfills legacy grouped saves. Per-rule promotion
+        # here would shatter the group into N singles PLUS the group policy
+        # (double-representation), so it is skipped for grouped saves.
+        grouped = isinstance(rule.get("groupId"), str) and bool(rule["groupId"].strip())
+        if is_create and not grouped:
             from magi_agent.customize.policies import (  # noqa: PLC0415
                 promote_rule_to_policy,
             )
 
-            # ``intent`` plumbing: the PUT body carries no original NL text today
-            # (the conversational compile flow returns a draft, then the client
-            # PUTs the rule shape without the sentence). Accept an optional
-            # ``displayName`` / ``intent`` from the body so a future client can
-            # pass them; otherwise fall back to the rule id (custom rules carry
-            # no name field). TODO(policies-surface): thread the compile-flow NL
-            # text through so the policy card shows the user's own sentence.
-            display_name = (
-                body.get("displayName")
-                if isinstance(body.get("displayName"), str)
-                else None
-            )
-            intent = body.get("intent") if isinstance(body.get("intent"), str) else None
+            # ``display_name`` / ``intent`` arrive from the NL authoring client
+            # (the compile flow threads the operator's own sentence through the
+            # save). Both optional: absent → displayName falls back to the rule
+            # id inside ``promote_rule_to_policy`` and intent stays empty (the
+            # Guided/Raw editors have no NL sentence — honest, not fabricated).
             try:
                 promote_rule_to_policy(rule, display_name=display_name, intent=intent)
             except Exception:  # noqa: BLE001 - promotion must never fail the save

@@ -79,6 +79,13 @@ interface PolicyCardVM {
   origin: PolicyOrigin;
   originLabel: string;
   members: RuleRow[];
+  /**
+   * Member rule ids that did NOT resolve to a dashboard rule row (runtime-
+   * native members of first-party policies, e.g.
+   * `verify_before_replying.claim_citation`). They are real rules — the card
+   * must count them and list them read-only instead of lying "0 rules".
+   */
+  unresolvedMemberIds: string[];
   hasBinding: boolean;
   reviewVerdict: string;
   /** Names of modes that force this policy on (union of policy: + member refs). */
@@ -177,6 +184,11 @@ export function PolicyCardList(props: PolicyCardListProps): React.ReactElement {
       const members = p.ruleIds
         .map((rid) => rowByRuleId.get(rid))
         .filter((r): r is RuleRow => r !== undefined);
+      // Runtime-native members (builtin policies) have no dashboard row;
+      // they still count and list read-only in the drill-down.
+      const unresolvedMemberIds = p.ruleIds.filter(
+        (rid) => !rowByRuleId.has(rid),
+      );
       // Mode-scope: the policy: ref plus any legacy member-row ref.
       const scopedSet = new Set<string>(scopedFor(`policy:${p.id}`));
       for (const m of members) for (const name of scopedFor(m.id)) scopedSet.add(name);
@@ -216,6 +228,7 @@ export function PolicyCardList(props: PolicyCardListProps): React.ReactElement {
         origin: p.origin,
         originLabel: ORIGIN_LABEL[p.origin] ?? p.origin,
         members,
+        unresolvedMemberIds,
         hasBinding: p.hasBinding,
         reviewVerdict: p.reviewVerdict,
         scopedModes: [...scopedSet],
@@ -323,6 +336,16 @@ function titleCase(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+/**
+ * Human-readable name for a runtime-native member id. Builtin member ids use
+ * the `<policy>.<member>` namespace (e.g. `verify_before_replying.evidence_audit`);
+ * show the member part with word separators expanded.
+ */
+function formatRuntimeMemberName(rid: string): string {
+  const member = rid.includes(".") ? rid.slice(rid.indexOf(".") + 1) : rid;
+  return member.replace(/[_-]+/g, " ");
+}
+
 /** Adapter: build a 1-rule policy card view model from a flat rule row. */
 function adapterCardFor(row: RuleRow, scopedModes: string[]): PolicyCardVM {
   const isFloor = row.state === "always-on";
@@ -334,6 +357,7 @@ function adapterCardFor(row: RuleRow, scopedModes: string[]): PolicyCardVM {
     origin: row.origin,
     originLabel: row.origin === "builtin" ? "Built-in" : "Custom",
     members: [row],
+    unresolvedMemberIds: [],
     hasBinding: false,
     reviewVerdict: "unreviewed",
     scopedModes,
@@ -489,9 +513,15 @@ function PolicyCard({
             <p className="mt-1 text-xs italic text-secondary/80">“{vm.intent}”</p>
           ) : null}
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px]">
-            <span className="text-secondary/70">
-              {vm.members.length} rule{vm.members.length === 1 ? "" : "s"}
-            </span>
+            {vm.members.length + vm.unresolvedMemberIds.length > 0 ? (
+              <span className="text-secondary/70">
+                {vm.members.length + vm.unresolvedMemberIds.length} rule
+                {vm.members.length + vm.unresolvedMemberIds.length === 1
+                  ? ""
+                  : "s"}
+                {vm.members.length === 0 ? " · runtime-managed" : ""}
+              </span>
+            ) : null}
             {action ? (
               <span
                 className={`rounded-full px-2 py-0.5 font-medium uppercase tracking-wide ${ACTION_TONE[action] ?? "bg-black/[0.05] text-secondary"}`}
@@ -655,8 +685,12 @@ function ReviewBadge({ verdict }: { verdict: string }): React.ReactElement | nul
  * binding, the first member reads as the producer and the second as the gate
  * (chips make the relationship legible).
  */
-function MemberDrillDown({ vm }: { vm: PolicyCardVM }): React.ReactElement {
-  const n = vm.members.length;
+function MemberDrillDown({ vm }: { vm: PolicyCardVM }): React.ReactElement | null {
+  const n = vm.members.length + vm.unresolvedMemberIds.length;
+  // A card with genuinely zero member rules (control-plane nudges: a single
+  // behavior, not a composition) gets no drill-down at all - "0 RULES" was
+  // noise pretending to be information.
+  if (n === 0) return null;
   return (
     <details
       className="group mt-3 rounded-lg border border-black/[0.05] bg-gray-50/40"
@@ -700,11 +734,22 @@ function MemberDrillDown({ vm }: { vm: PolicyCardVM }): React.ReactElement {
             <StatePill state={m.state} />
           </li>
         ))}
-        {n === 0 ? (
-          <li className="text-[11px] text-secondary/60">
-            (member rules are runtime-managed)
+        {vm.unresolvedMemberIds.map((rid) => (
+          <li
+            key={rid}
+            className="flex flex-wrap items-center gap-2 text-[12px]"
+          >
+            <span className="font-medium text-foreground">
+              {formatRuntimeMemberName(rid)}
+            </span>
+            <span
+              title="This rule is part of the runtime itself; it has no dashboard editor."
+              className="rounded bg-black/[0.05] px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-secondary/70"
+            >
+              runtime-managed
+            </span>
           </li>
-        ) : null}
+        ))}
       </ul>
     </details>
   );
