@@ -93,7 +93,7 @@ function LiveCatalogRow({
   const authorable = isAuthorableNow(entry);
 
   return (
-    <li className="rounded-xl border border-black/[0.06] bg-[var(--glass-regular-bg)] backdrop-blur-xl">
+    <li className="rounded-xl border border-black/[0.06] bg-[var(--color-surface-raised)]">
       <button
         type="button"
         onClick={onToggle}
@@ -255,7 +255,7 @@ function PolicyDerivedRefs({
           {entries.map((entry) => (
             <li
               key={entry.ref}
-              className="rounded-xl border border-black/[0.06] bg-[var(--glass-regular-bg)] backdrop-blur-xl px-4 py-3"
+              className="rounded-xl border border-black/[0.06] bg-[var(--color-surface-raised)] px-4 py-3"
             >
               <div className="flex items-start gap-3">
                 <div className="min-w-0 flex-1">
@@ -370,7 +370,7 @@ export function ReusableEvidenceTab({
             {knownRefs.map((item) => (
               <li
                 key={item.ref}
-                className="rounded-xl border border-black/[0.06] bg-[var(--glass-regular-bg)] backdrop-blur-xl px-4 py-3"
+                className="rounded-xl border border-black/[0.06] bg-[var(--color-surface-raised)] px-4 py-3"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">

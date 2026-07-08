@@ -103,7 +103,7 @@ export function ReusableConditionsTab({
           {merged.map((entry) => (
             <li
               key={entry.key}
-              className="rounded-xl border border-black/[0.06] bg-[var(--glass-regular-bg)] backdrop-blur-xl px-4 py-3"
+              className="rounded-xl border border-black/[0.06] bg-[var(--color-surface-raised)] px-4 py-3"
             >
               <div className="flex items-start gap-3">
                 <div className="min-w-0 flex-1">

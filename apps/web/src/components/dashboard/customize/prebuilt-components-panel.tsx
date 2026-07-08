@@ -32,7 +32,7 @@ export function PrebuiltComponentsPanel(): React.ReactElement | null {
   if (!loaded || components.length === 0) return null;
 
   return (
-    <details className="mt-4 rounded-xl border border-black/[0.06] bg-[var(--glass-regular-bg)] backdrop-blur-xl">
+    <details className="mt-4 rounded-xl border border-black/[0.06] bg-[var(--color-surface-raised)]">
       <summary className="flex cursor-pointer items-center gap-2 px-4 py-3">
         <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-600" />
         <span className="text-sm font-semibold text-foreground">
