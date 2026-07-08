@@ -62,6 +62,14 @@ REVISED = "REVISED"
 SHIPPED_ACKNOWLEDGED = "SHIPPED ACKNOWLEDGED"
 NUDGE_IGNORED = "NUDGE IGNORED"
 
+# Per-pass verify observability row label (B3+B4, GAP-2 fix). Per-pass rows
+# carry ``sourceType="verify"`` and ``verifyKind="pass"`` (or no verifyKind on
+# rows emitted by pre-fix images). The label is purely descriptive -- it marks
+# the row species as an audit-pass record, not a turn-level verdict. Severity
+# is info because these rows are process-trace noise for most users; the turn
+# label carries the actionable verdict.
+AUDIT_PASS = "AUDIT PASS"
+
 # Statuses that count as a "pass" for the reviewer special-case below. A reviewer
 # event with any NON-pass status projects to REJECTED BY REVIEWER.
 _PASS_STATUSES: frozenset[str] = frozenset({"pass", "passed", "ok"})
@@ -151,6 +159,9 @@ _SEVERITY_BY_LABEL: dict[str, str] = {
     REVISED: "pass",
     SHIPPED_ACKNOWLEDGED: "review",
     NUDGE_IGNORED: "deny",
+    # Per-pass audit trace row (B4, GAP-2 fix). Info: these are process-trace
+    # rows, not actionable verdicts; the turn label carries the real signal.
+    AUDIT_PASS: "info",
 }
 
 # ---------------------------------------------------------------------------
@@ -240,6 +251,7 @@ def is_enforced_kind(kind: str) -> bool:
 
 
 __all__ = [
+    "AUDIT_PASS",
     "ENFORCEMENT_EVENT_KINDS",
     "NUDGE_IGNORED",
     "REVISED",
