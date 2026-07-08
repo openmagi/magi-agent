@@ -140,6 +140,99 @@ def span_meets_minimum(span_text: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# display_span: redaction-safe claim span transform (PR-2, design 3.4)
+# ---------------------------------------------------------------------------
+
+# Local regex mirrors of reports.py private patterns. The public function
+# public_projection_safe_text is the postcondition source of truth (step 9);
+# these local regexes are used for targeted substring replacement so we never
+# fork the redaction grammar. Mirror, not import, to avoid coupling to private
+# reports.py internals.
+_DS_URL_RE = re.compile(
+    r"(?:https?|s3|gs|file|ssh|git)://([A-Za-z0-9._-]+)(?:[/?#][^\s\"'{}\]\)]*)?",
+    re.IGNORECASE,
+)
+_DS_GIT_SSH_RE = re.compile(
+    r"git@([A-Za-z0-9._-]+):[^\s\"'{}\]\)]+",
+    re.IGNORECASE,
+)
+_DS_REF_TOKEN_RE = re.compile(
+    r"(?<![A-Za-z0-9])(?:search|source|ref):[^\s\"'{}\]\)]+",
+    re.IGNORECASE,
+)
+_DS_PVC_RE = re.compile(
+    r"pvc-[A-Za-z0-9-]+",
+    re.IGNORECASE,
+)
+_DS_PATH_RE = re.compile(
+    r"(?:"
+    r"~[\\/][^,\s\"'{}\]\)]*|"
+    r"[A-Za-z]:[\\/][^,\s\"'{}\]\)]+|"
+    r"\\\\[^,\s\"'{}\]\)]+|"
+    r"(?<![A-Za-z0-9:/])/(?:[^/,\s\"'{}\]\)]+)(?:/[^/,\s\"'{}\]\)]+)*"
+    r")",
+)
+
+
+def _ds_basename(m: re.Match) -> str:  # type: ignore[type-arg]
+    """Extract basename from a path-match for use as replacement."""
+    raw = m.group(0)
+    # Normalize separators and split
+    for sep in ("\\", "/"):
+        parts = raw.replace("\\", "/").rstrip("/").split("/")
+        if len(parts) >= 1 and parts[-1]:
+            return parts[-1]
+    return raw
+
+
+def display_span(text: str, *, limit: int = 240) -> str:
+    """Collapse redaction-triggering substrings so a verbatim claim span
+    survives public_projection_safe_text whole-string redaction (design 3.4).
+
+    Pure and deterministic. Returns "" when the input is empty or when the
+    sanitized result would STILL be redacted (the caller/FE falls back to
+    claimClass + member-rule copy).
+    """
+    if not text:
+        return ""
+
+    # Step 1: Unicode NFC normalize.
+    s = unicodedata.normalize("NFC", text)
+
+    # Step 2: URLs -> host only.
+    s = _DS_URL_RE.sub(lambda m: m.group(1), s)
+
+    # Step 3: git@host:path -> host.
+    s = _DS_GIT_SSH_RE.sub(lambda m: m.group(1), s)
+
+    # Step 4: ref:/source:/search: tokens -> [ref].
+    s = _DS_REF_TOKEN_RE.sub("[ref]", s)
+
+    # Step 5: pvc-... -> [volume].
+    s = _DS_PVC_RE.sub("[volume]", s)
+
+    # Step 6: filesystem paths -> basename.
+    s = _DS_PATH_RE.sub(_ds_basename, s)
+
+    # Step 7: collapse whitespace runs, strip.
+    s = " ".join(s.split())
+
+    # Step 8: truncate to limit chars (budget-inclusive ellipsis).
+    if len(s) > limit:
+        s = s[: limit - 3] + "..."
+
+    # Step 9: postcondition backstop.
+    from magi_agent.evidence.reports import (  # noqa: PLC0415
+        public_projection_safe_text,
+    )
+
+    if public_projection_safe_text(s) == "[redacted]":
+        return ""
+
+    return s
+
+
+# ---------------------------------------------------------------------------
 # Internal record-access helpers (duck-typed; no pydantic validation here)
 # ---------------------------------------------------------------------------
 
