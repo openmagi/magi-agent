@@ -92,7 +92,13 @@ class TestFullTextSinkNone:
 
         runner = RealLocalChildRunner(full_text_sink=None)
 
-        with patch.object(runner, "_drive_one_turn", side_effect=_fake_drive):
+        # Patch _resolve_provider_config so the test is hermetic and does not
+        # depend on an ambient provider key (which varies across CI shards);
+        # a truthy config lets run_child reach _drive_one_turn (patched below).
+        with (
+            patch.object(runner, "_resolve_provider_config", return_value=object()),
+            patch.object(runner, "_drive_one_turn", side_effect=_fake_drive),
+        ):
             # Build a minimal fake request
             request = MagicMock()
             request.task_id = "test-task-id"
@@ -137,7 +143,10 @@ class TestFullTextSinkCallable:
 
         runner = RealLocalChildRunner(full_text_sink=sink)
 
-        with patch.object(runner, "_drive_one_turn", side_effect=_fake_drive):
+        with (
+            patch.object(runner, "_resolve_provider_config", return_value=object()),
+            patch.object(runner, "_drive_one_turn", side_effect=_fake_drive),
+        ):
             request = MagicMock()
             request.task_id = "test-task-id"
             request.parentExecutionId = "test-parent"
@@ -174,7 +183,10 @@ class TestFullTextSinkCallable:
 
         runner = RealLocalChildRunner(full_text_sink=sink)
 
-        with patch.object(runner, "_drive_one_turn", side_effect=_fake_drive):
+        with (
+            patch.object(runner, "_resolve_provider_config", return_value=object()),
+            patch.object(runner, "_drive_one_turn", side_effect=_fake_drive),
+        ):
             request = MagicMock()
             request.task_id = "test-task-id"
             request.parentExecutionId = "test-parent"
