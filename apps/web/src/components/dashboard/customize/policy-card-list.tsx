@@ -83,9 +83,17 @@ interface PolicyCardVM {
   reviewVerdict: string;
   /** Names of modes that force this policy on (union of policy: + member refs). */
   scopedModes: string[];
+  /** Optional explicit action chip when there are no member rules (nudges). */
+  actionHint?: string;
   /** How the policy-level toggle behaves. */
   toggle:
     | { kind: "native"; policyId: string; enabledState: PolicyCatalogEntry["enabledState"] }
+    // PR-3 — first-party policy opt-out (verify_before_replying): a real single
+    // Switch routed to PATCH /v1/app/customize/builtin-policies/{id}.
+    | { kind: "builtin-policy"; policyId: string; enabled: boolean }
+    // PR-3 — control-plane behavior nudge: a real single Switch routed to
+    // PATCH /v1/app/customize/control-plane/{id}.
+    | { kind: "control-plane"; behaviorId: string; enabled: boolean }
     | { kind: "adapter-row"; row: RuleRow }
     | { kind: "floor" }; // always-on, no toggle
   /** Delete affordance: native policies cascade member rules; adapters can't delete. */
@@ -109,6 +117,15 @@ export interface PolicyCardListProps {
   onTogglePolicy: (policyId: string, next: boolean) => void;
   /** Native USER policy delete (cascades member rules client-side). */
   onDeletePolicy: (policy: PolicyCatalogEntry) => void;
+  // PR-3 — first-party policy opt-out + control-plane behavior toggle routing.
+  /** Toggle a first-party builtin policy (verify_before_replying) opt-out. */
+  onToggleBuiltinPolicy: (policyId: string, next: boolean) => void;
+  /** Toggle an in-context control-plane behavior nudge. */
+  onToggleControlPlane: (behaviorId: string, next: boolean) => void;
+  /** Ids of builtin policies whose PATCH is in flight. */
+  pendingBuiltinPolicies?: Set<string>;
+  /** Ids of control-plane behaviors whose PATCH is in flight. */
+  pendingControlPlane?: Set<string>;
   // Adapter-row routing (built-in presets + orphan user rows).
   onTogglePreset: (presetId: string, next: boolean) => void;
   onToggleCustomRule: (rule: CustomRule, next: boolean) => void;
@@ -164,6 +181,33 @@ export function PolicyCardList(props: PolicyCardListProps): React.ReactElement {
       const scopedSet = new Set<string>(scopedFor(`policy:${p.id}`));
       for (const m of members) for (const name of scopedFor(m.id)) scopedSet.add(name);
       const isFloor = p.origin === "builtin" && !p.userDisableable;
+      const source = p.source ?? "policy";
+      // Route the policy-level toggle by the backend `source` discriminator
+      // (PR-3). A floor always wins (no toggle); otherwise builtinPolicy /
+      // controlPlane get their own real single Switch, and store-backed user
+      // policies keep the member-cascade native toggle.
+      let toggle: PolicyCardVM["toggle"];
+      if (isFloor) {
+        toggle = { kind: "floor" as const };
+      } else if (source === "builtinPolicy") {
+        toggle = {
+          kind: "builtin-policy" as const,
+          policyId: p.id,
+          enabled: p.enabledState === "on",
+        };
+      } else if (source === "controlPlane") {
+        toggle = {
+          kind: "control-plane" as const,
+          behaviorId: p.id,
+          enabled: p.enabledState === "on",
+        };
+      } else {
+        toggle = {
+          kind: "native" as const,
+          policyId: p.id,
+          enabledState: p.enabledState,
+        };
+      }
       return {
         key: `native:${p.id}`,
         kind: "native" as const,
@@ -175,9 +219,8 @@ export function PolicyCardList(props: PolicyCardListProps): React.ReactElement {
         hasBinding: p.hasBinding,
         reviewVerdict: p.reviewVerdict,
         scopedModes: [...scopedSet],
-        toggle: isFloor
-          ? { kind: "floor" as const }
-          : { kind: "native" as const, policyId: p.id, enabledState: p.enabledState },
+        actionHint: p.actionHint,
+        toggle,
         deletable: p.origin === "user",
       };
     });
@@ -354,9 +397,16 @@ function PolicyCard({
   onToggleDashboardCheck,
   onDeleteDashboardCheck,
   onDeleteSeamSpec,
+  onToggleBuiltinPolicy,
+  onToggleControlPlane,
+  pendingBuiltinPolicies,
+  pendingControlPlane,
   catalogPolicies,
 }: { vm: PolicyCardVM } & PolicyCardListProps): React.ReactElement {
-  const action = strongestAction(vm.members);
+  // Strongest member action wins; when there are no members (control-plane
+  // nudge adapters) fall back to the explicit actionHint so the chip still
+  // renders (e.g. NUDGE) — design D4.
+  const action = strongestAction(vm.members) ?? vm.actionHint?.toLowerCase() ?? null;
   const firesAt = [...new Set(vm.members.map((m) => m.when.firesAt).filter(Boolean))];
   // "N of M rules on" note for mixed native policies.
   const memberOnCount = vm.members.filter(
@@ -372,6 +422,8 @@ function PolicyCard({
   const globallyOff =
     (vm.toggle.kind === "native" &&
       (vm.toggle.enabledState === "off" || vm.toggle.enabledState === "mixed")) ||
+    (vm.toggle.kind === "builtin-policy" && !vm.toggle.enabled) ||
+    (vm.toggle.kind === "control-plane" && !vm.toggle.enabled) ||
     (vm.toggle.kind === "adapter-row" &&
       !(vm.toggle.row.state === "enabled" || vm.toggle.row.state === "always-on"));
   const forcedOn = globallyOff && vm.scopedModes.length > 0;
@@ -499,6 +551,44 @@ function PolicyCard({
                 labelOff={`Enable ${vm.displayName}`}
               />
             </div>
+          ) : vm.toggle.kind === "builtin-policy" ? (
+            <Switch
+              checked={vm.toggle.enabled}
+              disabled={
+                busy ||
+                (pendingBuiltinPolicies?.has(
+                  vm.toggle.kind === "builtin-policy" ? vm.toggle.policyId : "",
+                ) ??
+                  false)
+              }
+              onToggle={async (next) =>
+                onToggleBuiltinPolicy(
+                  vm.toggle.kind === "builtin-policy" ? vm.toggle.policyId : "",
+                  next,
+                )
+              }
+              labelOn={`Disable ${vm.displayName}`}
+              labelOff={`Enable ${vm.displayName}`}
+            />
+          ) : vm.toggle.kind === "control-plane" ? (
+            <Switch
+              checked={vm.toggle.enabled}
+              disabled={
+                busy ||
+                (pendingControlPlane?.has(
+                  vm.toggle.kind === "control-plane" ? vm.toggle.behaviorId : "",
+                ) ??
+                  false)
+              }
+              onToggle={async (next) =>
+                onToggleControlPlane(
+                  vm.toggle.kind === "control-plane" ? vm.toggle.behaviorId : "",
+                  next,
+                )
+              }
+              labelOn={`Disable ${vm.displayName}`}
+              labelOff={`Enable ${vm.displayName}`}
+            />
           ) : vm.toggle.kind === "adapter-row" ? (
             <Switch
               checked={

@@ -148,6 +148,25 @@ export interface PolicyCatalogEntry {
   /** True when the policy binds a producer → gate pair (render the relationship). */
   hasBinding: boolean;
   enabledState: "on" | "off" | "mixed" | "managed";
+  /**
+   * PR-3 — routing discriminator for the policy-level toggle:
+   *   - `"policy"`        — store-backed user policy; cascade onto member custom
+   *     rules (`PATCH /v1/app/policies/{id}`).
+   *   - `"builtinPolicy"` — first-party policy (verify_before_replying,
+   *     source_citation); opt-out routes to `PATCH .../builtin-policies/{id}`.
+   *   - `"controlPlane"`  — one of the 4 in-context control-plane *behaviors*
+   *     (facts-replan, goal-loop, tool-synthesis-nudge, empty-response-recovery)
+   *     adapted read-time into a 1-rule nudge card; toggle routes to
+   *     `PATCH .../control-plane/{id}`.
+   * Optional so a pre-PR-3 backend still type-checks (absent → `"policy"`).
+   */
+  source?: "policy" | "builtinPolicy" | "controlPlane";
+  /**
+   * PR-3 — lightweight action label for adapter entries that have no member
+   * rules to derive a strongest-action chip from (the control-plane nudges).
+   * `"nudge"` lets the card render a NUDGE chip without member rules.
+   */
+  actionHint?: string;
 }
 
 export interface CustomizeCatalog {

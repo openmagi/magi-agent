@@ -231,16 +231,44 @@ def build_catalog(runtime: Any) -> dict[str, Any]:
 
 
 def _policy_entries() -> list[dict[str, Any]]:
-    """Serialize every policy for the unified Policies surface (PR-1 U3).
+    """Serialize every policy for the unified Policies surface (PR-1 U3 + PR-3).
 
     Each entry is a summary with camelCase keys mirroring the rest of the
-    catalog payload. ``enabledState`` is derived from the member custom rules'
-    ``enabled`` flags: ``on`` / ``off`` / ``mixed`` when at least one member is
-    a stored custom rule, and ``managed`` when NONE are (a builtin whose
-    members are runtime-native, or a policy whose members all live outside the
-    custom-rules store). ``managed`` tells the UI there is nothing on the
-    per-rule ``enabled`` axis to toggle here - rendering it as a green "on"
-    toggle the user cannot move would be dishonest (review finding, PR-1)."""
+    catalog payload, plus a ``source`` discriminator the web uses to route the
+    policy-level toggle to the right PATCH endpoint:
+
+      - ``"policy"``       — a store-backed user policy; the toggle cascades
+        onto its member custom rules (``PATCH /v1/app/policies/{id}``).
+      - ``"builtinPolicy"``— a first-party policy (``verify_before_replying``,
+        ``source_citation``) whose runtime gate is env-flag gated; the opt-out
+        routes to ``PATCH /v1/app/customize/builtin-policies/{id}`` (#1403).
+      - ``"controlPlane"`` — one of the 4 in-context control-plane *behaviors*
+        (facts-replan, goal-loop, tool-synthesis-nudge, empty-response-recovery)
+        adapted read-time into a 1-rule ``action=nudge`` policy card; the toggle
+        routes to ``PATCH /v1/app/customize/control-plane/{id}``.
+
+    ``enabledState`` is derived per source:
+
+      - user ``"policy"``: ``on`` / ``off`` / ``mixed`` from the member custom
+        rules' ``enabled`` flags, or ``managed`` when NONE of its members are
+        stored custom rules (nothing on the per-rule axis to cascade — a green
+        toggle the user cannot move would be dishonest, PR-1 review finding).
+      - ``"builtinPolicy"`` / ``"controlPlane"``: ``on`` / ``off`` from the real
+        single env-flag toggle (profile-aware for builtins). These have a real
+        toggle, so they are NEVER ``managed`` — that was the PR-2 dishonesty this
+        PR fixes: verify_before_replying rendered a static ``managed`` pill even
+        though it is user-disableable via the builtin-policies route.
+
+    Floors (``userDisableable=false``, e.g. ``source_citation``) still render
+    always-on regardless of ``source``.
+    """
+    from magi_agent.customize.builtin_policy_overrides import (  # noqa: PLC0415
+        builtin_policy_toggle_catalog,
+    )
+    from magi_agent.customize.control_plane_overrides import (  # noqa: PLC0415
+        CONTROL_PLANE_BEHAVIORS,
+        control_plane_behavior_catalog,
+    )
     from magi_agent.customize.policies import list_policies  # noqa: PLC0415
     from magi_agent.customize.store import load_overrides  # noqa: PLC0415
 
@@ -252,23 +280,45 @@ def _policy_entries() -> list[dict[str, Any]]:
             if isinstance(rule, dict) and isinstance(rule.get("id"), str):
                 enabled_by_id[rule["id"]] = bool(rule.get("enabled", True))
 
+    # First-party (builtin) policies expose their real on/off state through the
+    # builtin-policies opt-out catalog (profile-aware ``enabled``). A builtin id
+    # ABSENT from this map is a floor (source_citation) — no toggle.
+    builtin_state_by_id: dict[str, bool] = {
+        item["id"]: bool(item["enabled"])
+        for item in builtin_policy_toggle_catalog()
+        if isinstance(item.get("id"), str)
+    }
+
     entries: list[dict[str, Any]] = []
     for policy in list_policies():
-        # Derive on/off/mixed from the member custom rules that are actually
-        # stored. Members that are not stored custom rules (builtin member refs,
-        # dashboard-check producers) do not participate in the enabled axis.
-        member_states = [
-            enabled_by_id[rid] for rid in policy.rule_ids if rid in enabled_by_id
-        ]
-        if not member_states:
-            enabled_state = "managed"
-        elif all(member_states):
-            enabled_state = "on"
-        elif not any(member_states):
-            enabled_state = "off"
+        review_verdict = (
+            policy.review.verdict if policy.review is not None else "unreviewed"
+        )
+        if policy.origin == "builtin":
+            source = "builtinPolicy"
+            # A user-disableable builtin has a real single toggle → on/off from
+            # its env flag. A floor has no toggle; ``managed`` is a harmless
+            # sentinel (the web renders it always-on via userDisableable=false).
+            if policy.policy_id in builtin_state_by_id:
+                enabled_state = "on" if builtin_state_by_id[policy.policy_id] else "off"
+            else:
+                enabled_state = "managed"
         else:
-            enabled_state = "mixed"
-        review_verdict = policy.review.verdict if policy.review is not None else "unreviewed"
+            source = "policy"
+            # Derive on/off/mixed from the member custom rules that are actually
+            # stored. Members that are not stored custom rules (builtin member
+            # refs, dashboard-check producers) do not participate.
+            member_states = [
+                enabled_by_id[rid] for rid in policy.rule_ids if rid in enabled_by_id
+            ]
+            if not member_states:
+                enabled_state = "managed"
+            elif all(member_states):
+                enabled_state = "on"
+            elif not any(member_states):
+                enabled_state = "off"
+            else:
+                enabled_state = "mixed"
         entries.append(
             {
                 "id": policy.policy_id,
@@ -280,8 +330,40 @@ def _policy_entries() -> list[dict[str, Any]]:
                 "reviewVerdict": review_verdict,
                 "hasBinding": policy.binding is not None,
                 "enabledState": enabled_state,
+                "source": source,
             }
         )
+
+    # Behavior→policy adapter (PR-3 / design D4): the 4 in-context control-plane
+    # behaviors become first-party 1-rule ``action=nudge`` policy cards so the
+    # retired Behaviors tab folds into the Policies surface. Read-time only — the
+    # control_plane override store is untouched; the toggle keeps its own PATCH
+    # route (``source="controlPlane"``). No member rules (runtime-managed
+    # nudges), so ``ruleIds=[]``, ``hasBinding=False``; ``actionHint="nudge"``
+    # lets the card chip render NUDGE without a member-rule action.
+    cp_enabled_by_id: dict[str, bool] = {
+        item["id"]: bool(item["enabled"])
+        for item in control_plane_behavior_catalog()
+        if isinstance(item.get("id"), str)
+    }
+    for behavior in CONTROL_PLANE_BEHAVIORS:
+        enabled = cp_enabled_by_id.get(behavior.id, False)
+        entries.append(
+            {
+                "id": behavior.id,
+                "displayName": behavior.label,
+                "intent": behavior.description,
+                "ruleIds": [],
+                "origin": "builtin",
+                "userDisableable": True,
+                "reviewVerdict": "unreviewed",
+                "hasBinding": False,
+                "enabledState": "on" if enabled else "off",
+                "source": "controlPlane",
+                "actionHint": "nudge",
+            }
+        )
+
     return entries
 
 
