@@ -46,8 +46,11 @@ _TEXT_LIKE_EXTENSIONS = frozenset(
 )
 
 # Extract via the shared document converter (PDF/Office/archive).
+# ``convert_file_to_markdown`` supports legacy ``.xls`` (via xls_read) as well as
+# ``.xlsx`` — keep both here so an attached legacy Excel workbook is inlined
+# instead of falling through to the unsupported-format note.
 _CONVERTIBLE_EXTENSIONS = frozenset(
-    {".pdf", ".docx", ".pptx", ".xlsx", ".zip"}
+    {".pdf", ".docx", ".pptx", ".xlsx", ".xls", ".zip"}
 )
 
 
