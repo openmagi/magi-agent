@@ -1,5 +1,5 @@
 :HL["/_next/static/chunks/3ksk7sm54l1s0.css","style"]
-:HL["/_next/static/chunks/0b3363e579pm5.css","style"]
+:HL["/_next/static/chunks/1_267n09z_-0g.css","style"]
 :HL["/_next/static/media/797e433ab948586e-s.p.0r6juujl39pe6.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
 :HL["/_next/static/media/f06bf9da926bae75-s.p.2874ccu1_u7jf.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
 :HL["https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@500,700,800&display=swap","style"]
