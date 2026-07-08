@@ -389,7 +389,17 @@ def test_claim_span_with_path_survives_redaction(monkeypatch) -> None:
     def patched_audit_candidate(**kwargs):
         result = original_audit_candidate(**kwargs)
         all_findings = list(result.findings) + [injected_finding]
-        new_findings = [f for f in [injected_finding] if f not in list(result.findings)]
+        # Honor the surfaced-fingerprint contract the real audit_candidate
+        # enforces: a finding already surfaced this turn is never "new" again.
+        # Without this the driver's counterless-convergence loop never
+        # terminates on a single-generation script (the injected finding would
+        # re-nudge every pass forever).
+        surfaced = kwargs.get("surfaced_fingerprints") or set()
+        new_findings = [
+            f
+            for f in [injected_finding]
+            if f not in list(result.findings) and f.finding_id not in surfaced
+        ]
         return VerifyAuditResult(
             findings=tuple(all_findings),
             new_findings=tuple(new_findings),
