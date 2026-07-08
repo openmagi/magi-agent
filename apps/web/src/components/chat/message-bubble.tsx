@@ -13,6 +13,8 @@ import { ThinkingBlock } from "./thinking-block";
 import { EChartRenderer } from "./echart-renderer";
 import { CitationLinkChip } from "./citation-link-chip";
 import { CitationMarkerChip } from "./citation-marker-chip";
+import { CitationHedgeCallout } from "./citation-hedge-callout";
+import { matchCitationHedge } from "@/chat-core/citation-hedge";
 import { SegmentedTranscript } from "./segmented-transcript";
 import { parseMarkers } from "@/chat-core";
 import { parseKbContextMarker } from "@/chat-core";
@@ -484,6 +486,18 @@ function injectMarkerChipsIntoChildren(
   return children;
 }
 
+/** Recursively collect string leaves from a rendered ReactNode subtree. Used to
+ *  inspect a blockquote's plain text for the citation-hedge sentinel (GAP #5). */
+function reactNodeToText(node: ReactNode): string {
+  if (typeof node === "string") return node;
+  if (typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(reactNodeToText).join("");
+  if (isValidElement<{ children?: ReactNode }>(node)) {
+    return reactNodeToText(node.props.children);
+  }
+  return "";
+}
+
 function sourceKindDisplayName(kind: InspectedSource["kind"]): string {
   return kind.replace(/_/g, " ");
 }
@@ -935,6 +949,17 @@ export function MessageBubble({ role, content, timestamp, isStreaming, inlineBef
                 {children}
               </code>
             );
+          },
+          blockquote: ({ children }) => {
+            // GAP #5: the source-citation fail-open hedge arrives as a
+            // sentinel-tagged blockquote. Detect it deterministically and render
+            // a distinguished (muted) callout; any other blockquote renders
+            // normally so we never restyle ordinary quoted text.
+            const match = matchCitationHedge(reactNodeToText(children));
+            if (match.isHedge) {
+              return <CitationHedgeCallout>{match.body}</CitationHedgeCallout>;
+            }
+            return <blockquote>{children}</blockquote>;
           },
           ...(citationIndex ? {
             p: ({ children }) => <p>{injectMarkerChipsIntoChildren(children, citationIndex)}</p>,

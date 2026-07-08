@@ -1504,7 +1504,7 @@ class MagiEngineDriver:
             )
             from magi_agent.evidence.citation_gate import (  # noqa: PLC0415
                 build_attribution_repair_message,
-                build_citation_fail_open_notice,
+                build_citation_fail_open_notice_block,
                 build_induce_search_repair_message,
                 plan_citation_repair,
             )
@@ -1521,7 +1521,10 @@ class MagiEngineDriver:
             overlay: dict[str, object] = {
                 "result": result,
                 "maxAttempts": max_attempts,
-                "failOpenNotice": build_citation_fail_open_notice(result),
+                # GAP #5: the hedge is emitted as a sentinel-tagged blockquote so
+                # the frontend renders it as a distinguished (muted) callout
+                # rather than plain answer prose. Pure trailing suffix.
+                "failOpenNotice": build_citation_fail_open_notice_block(result),
             }
             if plan is None:
                 overlay["shouldBlock"] = False
@@ -4423,6 +4426,41 @@ class MagiEngineDriver:
                         "inducedSearch"
                     ):
                         citation_induced_search = True
+                    # GAP #4 in-flight UX signal. The status frames above
+                    # (source_citation_repair_scheduled) are dropped at the public
+                    # SSE allowlist, so emit a turn_phase "verifying" frame the
+                    # client keys on to label the mid-turn intervention. The
+                    # citation-specific status distinguishes it from other
+                    # verifications (coding gate, verify-audit). eventId is
+                    # required for the allowlist to preserve the status field.
+                    _citation_phase_status = (
+                        "citation_induce_search"
+                        if citation_induced_search
+                        else "citation_attribution"
+                    )
+                    # No "label" on this frame on purpose: the frontend owns the
+                    # localized (KO + EN) copy for the citation repair state,
+                    # derived from `status` (see citationRepairLabel in
+                    # chat-messages.tsx). A backend English-only label would be
+                    # dead data here and would lose the Korean copy if consumed.
+                    _citation_phase_event = RuntimeEvent(
+                        type="status",
+                        payload={
+                            "type": "turn_phase",
+                            "turnId": turn_id,
+                            "phase": "verifying",
+                            "status": _citation_phase_status,
+                            "eventId": (
+                                f"citation-repair-{turn_id}-{next_repair_attempt}"
+                            ),
+                        },
+                        turn_id=turn_id,
+                    )
+                    # Fail-soft: a telemetry/UX frame must never break the turn.
+                    try:
+                        yield _citation_phase_event
+                    except Exception:  # noqa: BLE001
+                        pass
                 else:
                     repair_message = _build_repair_continuation_message(
                         missing_evidence=missing_evidence,

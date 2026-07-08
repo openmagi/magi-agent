@@ -6,6 +6,7 @@
 // the live assistant bubble + thinking block (center, via ChatMessages) and the
 // Work tab tool feed (right, via KbSidePanel) both read from `ChannelState`.
 
+import { deriveCitationRepairStatus } from "./citation-repair-status";
 import type {
   StreamChatState,
   ToolCardState,
@@ -151,6 +152,12 @@ export function streamStateToChannelState(
     pendingGoalMissionTitle: null,
     inspectedSources: state.inspectedSources,
     citationGate: state.citationGate,
+    citationRepair: deriveCitationRepairStatus({
+      streaming: state.streaming,
+      hasAssistantText: state.assistantText.length > 0,
+      phase: state.phase?.phase,
+      status: state.phase?.status,
+    }),
     turnCitations: state.terminal?.citations ?? null,
     runtimeTraces: state.runtimeTraces,
     // Ordered interleaved segments. Tool segment ids reference `activeTools` by

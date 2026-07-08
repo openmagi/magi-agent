@@ -2247,4 +2247,9 @@ describe("ChatMessages", () => {
     expect(html).not.toContain("META: intent=질문답변");
     expect(html).toContain("그럼 그 스킬로 다시 CRDO");
   });
+
+  // Source-citation repair affordance cases (GAP #4) live in the standalone,
+  // included suite chat-messages.citation-status.test.tsx so they run in the
+  // standard vitest run (this file is out of the include due to pre-existing
+  // dormant failures).
 });

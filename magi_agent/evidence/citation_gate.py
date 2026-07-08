@@ -60,6 +60,8 @@ __all__ = [
     "build_attribution_repair_message",
     "build_induce_search_repair_message",
     "build_citation_fail_open_notice",
+    "build_citation_fail_open_notice_block",
+    "CITATION_HEDGE_SENTINEL",
 ]
 
 # --- detector regexes (built on the reused number machinery) -----------------
@@ -679,3 +681,23 @@ def build_citation_fail_open_notice(result: CitationGateResult) -> str:
     else:
         detail = "; ".join(fragments)
     return f"Contains unverified figures; no source was available for: {detail}"
+
+
+#: Deterministic sentinel that tags the fail-open hedge so the frontend can
+#: render it as a distinguished (muted / non-alarming) callout instead of plain
+#: answer prose. GitHub-alert admonition syntax the answer body never emits on
+#: its own, so the frontend match cannot false-positive on normal text.
+CITATION_HEDGE_SENTINEL = "[!citation-hedge]"
+
+
+def build_citation_fail_open_notice_block(result: CitationGateResult) -> str:
+    """Fail-open hedge wrapped as a sentinel-tagged markdown blockquote.
+
+    Same one-line hedge as ``build_citation_fail_open_notice``, but emitted as a
+    blockquote whose first line carries ``CITATION_HEDGE_SENTINEL`` so the
+    renderer detects it deterministically (design GAP #5). Still a pure trailing
+    SUFFIX (never a mutation of already-streamed text), and the underlying text
+    is preserved verbatim so a non-callout renderer degrades to a readable
+    blockquote rather than losing the hedge."""
+    notice = build_citation_fail_open_notice(result)
+    return f"> {CITATION_HEDGE_SENTINEL}\n> {notice}"

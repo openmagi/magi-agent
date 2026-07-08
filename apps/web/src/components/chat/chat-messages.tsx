@@ -73,6 +73,20 @@ function writingAnswerLabel(language?: ChatResponseLanguage): string {
   return language === "ko" ? "답변 작성 중..." : "Writing answer...";
 }
 
+function citationRepairLabel(
+  kind: NonNullable<ChannelState["citationRepair"]>,
+  language?: ChatResponseLanguage,
+): string {
+  if (kind === "induce_search") {
+    return language === "ko"
+      ? "주장 근거를 찾는 중..."
+      : "Searching to ground claims...";
+  }
+  return language === "ko"
+    ? "출처와 함께 답변을 다시 작성하는 중..."
+    : "Revising answer with sources...";
+}
+
 function isKorean(language?: ChatResponseLanguage): boolean {
   return language === "ko";
 }
@@ -945,16 +959,34 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
             <>
               {renderFinalizedMessages(mainMessages)}
 
-              {/* Loading indicator between thinking completion and first text delta */}
-              {channelState.streaming &&
+              {/* GAP #4: in-flight source-citation gate intervention. The gate is
+                  repairing / grounding the answer mid-turn (an otherwise silent
+                  answer swap), so surface a labeled state. Clears once the
+                  repaired answer streams (citationRepair derives to null). Takes
+                  precedence over the generic "Writing answer" indicator. */}
+              {channelState.streaming && channelState.citationRepair ? (
+                <div className="chat-msg-in flex justify-start mb-4">
+                  <div
+                    className="w-full max-w-full py-1 text-sm text-secondary/50 animate-pulse"
+                    role="status"
+                    aria-live="polite"
+                    data-testid="citation-repair-indicator"
+                  >
+                    {citationRepairLabel(channelState.citationRepair, language)}
+                  </div>
+                </div>
+              ) : (
+                /* Loading indicator between thinking completion and first text delta */
+                channelState.streaming &&
                 !channelState.streamingText &&
                 channelState.thinkingStartedAt !== null &&
                 channelState.thinkingText !== "" && (
-                <div className="chat-msg-in flex justify-start mb-4">
-                  <div className="w-full max-w-full py-1 text-sm text-secondary/50 animate-pulse">
-                    {writingAnswerLabel(language)}
+                  <div className="chat-msg-in flex justify-start mb-4">
+                    <div className="w-full max-w-full py-1 text-sm text-secondary/50 animate-pulse">
+                      {writingAnswerLabel(language)}
+                    </div>
                   </div>
-                </div>
+                )
               )}
 
               {shouldRenderLiveAssistant &&

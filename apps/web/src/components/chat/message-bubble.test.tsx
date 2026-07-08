@@ -502,4 +502,8 @@ describe("MessageBubble", () => {
     expect(html).toContain("Thought");
     expect(html).toContain("The answer is 42.");
   });
+
+  // Source-citation hedge cases (GAP #5) live in the standalone, included suite
+  // message-bubble.citation-hedge.test.tsx so they run in the standard vitest
+  // run (this file is out of the include due to pre-existing dormant failures).
 });
