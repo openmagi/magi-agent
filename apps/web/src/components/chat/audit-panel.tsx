@@ -8,6 +8,7 @@ import {
   type AuditSeverity,
   type AuditSource,
   type AuditVerdict,
+  type AuditVerdictVerify,
 } from "@/hooks/use-audit-events";
 
 interface AuditPanelProps {
@@ -178,7 +179,314 @@ function VerdictRow({ verdict }: { verdict: AuditVerdict }): React.ReactElement 
   );
 }
 
+// ---- Verify-before-replying section ----------------------------------------
+
+const VERIFY_SUBJECT = "verify_before_replying.audit";
+const VERIFY_PREFIX = "verify_before_replying.";
+
+/**
+ * Strip the "verify_before_replying." prefix from a subject string to get the
+ * member-rule short name (e.g. "verify_before_replying.evidence_consistency"
+ * -> "evidence_consistency").
+ */
+function memberRuleShortName(subject: string | null): string {
+  if (!subject) return "";
+  return subject.startsWith(VERIFY_PREFIX)
+    ? subject.slice(VERIFY_PREFIX.length)
+    : subject;
+}
+
+/**
+ * Compose the trajectory line from turn scalars.
+ * Format: "{N} audit pass(es) . {decision verb} . {N} tool call(s) during recheck"
+ * Singular-safe for passes and loopBackToolCalls.
+ */
+function trajectoryLine(vfy: AuditVerdictVerify): string {
+  const parts: string[] = [];
+
+  const passes = vfy.passes ?? 1;
+  parts.push(passes === 1 ? "1 audit pass" : `${passes} audit passes`);
+
+  if (vfy.verdict === "revised") {
+    parts.push("model revised");
+  } else if (vfy.verdict === "shipped_acknowledged") {
+    parts.push("model shipped as-is, acknowledged the findings");
+  } else if (vfy.verdict === "nudge_ignored") {
+    parts.push("finding not addressed, reply shipped unchanged");
+  }
+  // "verified_clean" gets no decision verb in the trajectory line (clean turn
+  // has its own calm sub-line and no trajectory section)
+
+  if (vfy.loopBackToolCalls && vfy.loopBackToolCalls > 0) {
+    const n = vfy.loopBackToolCalls;
+    parts.push(n === 1 ? "1 tool call during recheck" : `${n} tool calls during recheck`);
+  }
+
+  return parts.join(" . ");
+}
+
+/**
+ * Single finding row inside the verify section. Renders as a nested variant
+ * of VerdictRow: resolution badge, member-rule + claimClass chip, quoted claim
+ * (or fallback), expected/observed, evidenceRefs.
+ */
+function FindingRow({ verdict }: { verdict: AuditVerdict }): React.ReactElement {
+  const vfy = verdict.verify as AuditVerdictVerify;
+  const shortName = memberRuleShortName(verdict.subject);
+  const isRedacted =
+    !vfy.claimText || vfy.claimText === "[redacted]";
+
+  return (
+    <li
+      className="rounded-lg border border-black/[0.06] bg-white/85 px-2.5 py-2 shadow-[0_1px_3px_rgba(15,23,42,0.04)]"
+      data-audit-verdict-row="true"
+    >
+      <div className="flex min-w-0 items-start gap-2">
+        <Badge variant={severityVariant(verdict.severity)} className="shrink-0">
+          {verdict.displayLabel}
+        </Badge>
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            {shortName && (
+              <span className="text-[11px] font-medium text-foreground/80">
+                {shortName}
+              </span>
+            )}
+            {vfy.claimClass && (
+              <span className="rounded bg-black/[0.04] px-1.5 py-0.5 text-[10px] font-medium text-secondary/60">
+                {vfy.claimClass}
+              </span>
+            )}
+          </div>
+          {isRedacted ? (
+            <div className="mt-0.5 text-[11px] text-secondary/45">
+              {shortName && (
+                <span>{shortName}</span>
+              )}
+              {vfy.claimClass && shortName && (
+                <span> ({vfy.claimClass})</span>
+              )}
+            </div>
+          ) : (
+            <blockquote className="mt-0.5 border-l-2 border-black/[0.10] pl-1.5 text-[11px] italic text-secondary/65">
+              {vfy.claimText}
+            </blockquote>
+          )}
+          {!isRedacted && vfy.expected && vfy.observed && (
+            <div className="mt-0.5 text-[10px] text-secondary/50">
+              expected {vfy.expected} . observed {vfy.observed}
+            </div>
+          )}
+          {verdict.evidenceRefs.length > 0 && (
+            <div className="mt-0.5">
+              <div className="text-[9px] font-semibold uppercase tracking-wide text-secondary/45">
+                Evidence
+              </div>
+              <ul className="mt-0.5 space-y-0.5">
+                {verdict.evidenceRefs.map((ref) => (
+                  <li
+                    key={ref}
+                    className="truncate font-mono text-[10px] text-secondary/55"
+                    title={ref}
+                  >
+                    {ref}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      </div>
+    </li>
+  );
+}
+
+/**
+ * "Verify before replying" process section rendered inside RunGroup when a
+ * kind:"turn" verify row is present.
+ *
+ * Clean turn: one calm row with a corpus-count sub-line.
+ * Process view (any turn with findings): trajectory line, standing framing
+ *   sub-line, findings grouped HIGH then ADVISORY.
+ */
+function VerifySection({
+  turnRow,
+  findingRows,
+}: {
+  turnRow: AuditVerdict;
+  findingRows: AuditVerdict[];
+}): React.ReactElement {
+  const vfy = turnRow.verify as AuditVerdictVerify;
+  const isClean =
+    vfy.verdict === "verified_clean" && findingRows.length === 0;
+
+  const friendlyTitle =
+    turnRow.subject === VERIFY_SUBJECT
+      ? "Verify before replying"
+      : (turnRow.subject ?? "Verify before replying");
+
+  const hasFindings = findingRows.length > 0;
+
+  const highFindings = findingRows.filter(
+    (v) => v.verify?.confidence === "high",
+  );
+  const advisoryFindings = findingRows.filter(
+    (v) => v.verify?.confidence === "advisory",
+  );
+
+  const corpusCount = vfy.corpusRecordCount ?? 0;
+  const corpusLine =
+    corpusCount === 1
+      ? `Audited against 1 evidence record. No issues found.`
+      : `Audited against ${corpusCount} evidence records. No issues found.`;
+
+  return (
+    <li
+      className="rounded-lg border border-black/[0.06] bg-white/85 px-2.5 py-2 shadow-[0_1px_3px_rgba(15,23,42,0.04)]"
+      data-audit-verdict-row="true"
+    >
+      <div className="flex min-w-0 items-start gap-2">
+        <Badge variant={severityVariant(turnRow.severity)} className="shrink-0">
+          {turnRow.displayLabel}
+        </Badge>
+        <div className="min-w-0 flex-1">
+          <div
+            className="truncate text-[12px] font-medium text-foreground/85"
+            title={turnRow.subject ?? undefined}
+          >
+            {friendlyTitle}
+          </div>
+
+          {isClean ? (
+            <p className="mt-0.5 text-[11px] leading-snug text-secondary/65">
+              {corpusLine}
+            </p>
+          ) : (
+            <>
+              {/* Trajectory line */}
+              <p className="mt-0.5 text-[11px] leading-snug text-secondary/65">
+                {trajectoryLine(vfy)}
+              </p>
+
+              {/* Standing framing sub-line (always present when there are findings) */}
+              {hasFindings && (
+                <p className="mt-0.5 text-[11px] leading-snug text-secondary/55">
+                  Findings were advisory: nothing was blocked, the model chose how to respond.
+                </p>
+              )}
+
+              {/* HIGH findings group */}
+              {highFindings.length > 0 && (
+                <div className="mt-2">
+                  <div className="mb-1 text-[10px] font-semibold text-secondary/60">
+                    Evidence-backed findings (high confidence)
+                  </div>
+                  <ul className="space-y-1.5">
+                    {highFindings.map((fv) => (
+                      <FindingRow
+                        key={fv.id ?? fv.verify?.findingId ?? fv.subject}
+                        verdict={fv}
+                      />
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* ADVISORY findings group (header only when advisory findings exist) */}
+              {advisoryFindings.length > 0 && (
+                <div className="mt-2">
+                  <div className="mb-1 text-[10px] font-semibold text-secondary/40">
+                    Heuristic observations (may be wrong)
+                  </div>
+                  <ul className="space-y-1.5">
+                    {advisoryFindings.map((fv) => (
+                      <FindingRow
+                        key={fv.id ?? fv.verify?.findingId ?? fv.subject}
+                        verdict={fv}
+                      />
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Overflow indicator */}
+              {(vfy.findingsOmitted ?? 0) > 0 && (
+                <p className="mt-1.5 text-[10px] text-secondary/40">
+                  +{vfy.findingsOmitted} more findings recorded
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </li>
+  );
+}
+
+// ---- RunGroup with verify partitioning -------------------------------------
+
 function RunGroup({ group }: { group: AuditRunGroup }): React.ReactElement {
+  // Partition verify rows out of the generic list.
+  const verifyRows = group.verdicts.filter((v) => v.verify !== undefined);
+  const nonVerifyRows = group.verdicts.filter((v) => v.verify === undefined);
+
+  const turnRow = verifyRows.find((v) => v.verify?.kind === "turn");
+  const findingRows = verifyRows.filter((v) => v.verify?.kind === "finding");
+  // kind:"pass" rows are consumed for nothing visible (pass count comes from turn row).
+
+  // When a turn row exists, anchor the VerifySection at the position of the
+  // FIRST verify row in the original list (temporal placement).
+  const firstVerifyIndex =
+    turnRow !== undefined
+      ? group.verdicts.findIndex((v) => v.verify !== undefined)
+      : -1;
+
+  // Build the rendered list interleaving VerifySection at the right position.
+  const renderedItems: React.ReactElement[] = [];
+  let verifyInserted = false;
+  let nonVerifyIdx = 0;
+
+  for (let i = 0; i < group.verdicts.length; i++) {
+    const v = group.verdicts[i];
+    if (v.verify !== undefined) {
+      // First verify slot: insert VerifySection (if turn row exists) or
+      // fall back to plain rows for finding/pass rows only.
+      if (!verifyInserted) {
+        verifyInserted = true;
+        if (turnRow !== undefined) {
+          renderedItems.push(
+            <VerifySection
+              key={`verify:${group.runId ?? "run"}`}
+              turnRow={turnRow}
+              findingRows={findingRows}
+            />,
+          );
+        } else {
+          // No turn row: render finding/pass rows as plain VerdictRows.
+          for (const fv of verifyRows) {
+            renderedItems.push(
+              <VerdictRow
+                key={fv.id ?? `${group.runId ?? "run"}:verify:${fv.verify?.findingId ?? ""}`}
+                verdict={fv}
+              />,
+            );
+          }
+        }
+      }
+      // All subsequent verify row slots are consumed (already rendered above).
+      void firstVerifyIndex; // suppress unused warning
+    } else {
+      // Non-verify row: render in original order.
+      renderedItems.push(
+        <VerdictRow
+          key={v.id ?? `${group.runId ?? "run"}:${nonVerifyIdx}`}
+          verdict={v}
+        />,
+      );
+      nonVerifyIdx++;
+    }
+  }
+
   return (
     <section
       className="rounded-lg border border-black/[0.06] bg-white/75 px-2 py-2"
@@ -194,11 +502,7 @@ function RunGroup({ group }: { group: AuditRunGroup }): React.ReactElement {
           No verdicts recorded for this run.
         </div>
       ) : (
-        <ul className="space-y-1.5">
-          {group.verdicts.map((verdict, index) => (
-            <VerdictRow key={verdict.id ?? `${group.runId ?? "run"}:${index}`} verdict={verdict} />
-          ))}
-        </ul>
+        <ul className="space-y-1.5">{renderedItems}</ul>
       )}
     </section>
   );
