@@ -1,0 +1,21 @@
+# Bundled first-party deep-solve pack. Loaded by the SAME loader/format a user
+# pack uses (D1/D3). First-party holds NO privilege: this manifest is
+# discovered, overridable, and removable (config.toml [packs] disable /
+# dashboard remove) exactly like ~/.magi/packs/* manifests. Schema =
+# magi_agent/packs/manifest.py (top-level packId/displayName, NOT a [pack]
+# table).
+#
+# The tool entry carries catalog METADATA only — the runtime handler lives in
+# magi_agent/plugins/native/deep_solve.py, registered via native_catalog
+# (design D2/B2, same shape as SpawnAgent). Removing this pack blocks dispatch
+# via the handler's _deep_solve_pack_enabled gate.
+
+packId = "openmagi.deep-solve"
+displayName = "Deep Solve"
+version = "1.0.0"
+description = "Verification-and-refinement pipeline (arXiv 2507.15855) for olympiad math, competitive programming, and complex analysis problems, bundled as a removable pack (no privilege)."
+
+[[provides]]
+type = "tool"
+ref = "DeepSolve"
+impl = "magi_agent.firstparty.packs.deep_solve.impl:provide_deep_solve"

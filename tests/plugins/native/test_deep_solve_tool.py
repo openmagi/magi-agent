@@ -207,6 +207,97 @@ class TestLiveChildRunnerOff:
 
 
 # ---------------------------------------------------------------------------
+# Gate: pack removed / uninstalled (U4 dispatch gate)
+# ---------------------------------------------------------------------------
+
+class TestPackUninstallGate:
+    @pytest.mark.asyncio
+    async def test_pack_removed_returns_blocked(self) -> None:
+        """With the openmagi.deep-solve pack removed, dispatch is blocked."""
+        from magi_agent.plugins.native.deep_solve import deep_solve
+
+        context = _make_context()
+        args = _make_args()
+
+        with (
+            patch("magi_agent.config.env.is_deep_solve_enabled", return_value=True),
+            patch(
+                "magi_agent.plugins.native.deep_solve._deep_solve_pack_enabled",
+                return_value=False,
+            ),
+        ):
+            result = await deep_solve(args, context)
+
+        assert result.status == "blocked"
+        assert result.error_code == "deep_solve_pack_removed"
+        output = result.output or {}
+        assert output.get("reason") == "deep_solve_pack_removed"
+
+    @pytest.mark.asyncio
+    async def test_pack_removed_via_config_disable(
+        self, tmp_path: Any, monkeypatch: Any
+    ) -> None:
+        """The gate resolves installed state through the SAME loader seam a
+        config.toml ``[packs] disable`` removal uses (mirror of
+        test_direct_manifest_registration_respects_pack_disable for
+        PersistentPython)."""
+        from magi_agent.plugins.native.deep_solve import deep_solve
+
+        cfg = tmp_path / "config.toml"
+        cfg.write_text(
+            '[packs]\ndisable = ["open' 'magi.deep-solve"]\n',
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("MAGI_CONFIG", str(cfg))
+
+        context = _make_context()
+        args = _make_args()
+
+        with patch(
+            "magi_agent.config.env.is_deep_solve_enabled", return_value=True
+        ):
+            result = await deep_solve(args, context)
+
+        assert result.status == "blocked"
+        assert result.error_code == "deep_solve_pack_removed"
+
+    @pytest.mark.asyncio
+    async def test_pack_present_passes_through_to_next_gate(self) -> None:
+        """Pack installed → gate passes through to the child-runner gate."""
+        from magi_agent.plugins.native.deep_solve import deep_solve
+
+        context = _make_context()
+        args = _make_args()
+
+        with (
+            patch("magi_agent.config.env.is_deep_solve_enabled", return_value=True),
+            patch(
+                "magi_agent.plugins.native.deep_solve._deep_solve_pack_enabled",
+                return_value=True,
+            ),
+            patch(
+                "magi_agent.runtime.child_runner_live.is_live_child_runner_enabled",
+                return_value=False,
+            ),
+        ):
+            result = await deep_solve(args, context)
+
+        # Reached the NEXT gate (child runner), not the pack gate.
+        assert result.status == "blocked"
+        assert result.error_code == "live_child_runner_disabled"
+
+    def test_pack_enabled_helper_fail_open(self) -> None:
+        """Loader failure → helper returns True (never blocks on infra errors)."""
+        import magi_agent.plugins.native.deep_solve as mod
+
+        with patch(
+            "magi_agent.packs.discovery.load_packs_config",
+            side_effect=RuntimeError("loader exploded"),
+        ):
+            assert mod._deep_solve_pack_enabled() is True
+
+
+# ---------------------------------------------------------------------------
 # Never-raise contract
 # ---------------------------------------------------------------------------
 

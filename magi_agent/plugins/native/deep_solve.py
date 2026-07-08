@@ -7,6 +7,7 @@ conventions:
 - ALL heavy imports are lazy inside the handler function (never at module level).
 - Never-raise contract: any exception → blocked ``ToolResult``.
 - Gate order: (a) ``is_deep_solve_enabled()`` → honest disabled result;
+  (a2) ``_deep_solve_pack_enabled()`` → honest pack-removed result (U4);
   (b) ``is_live_child_runner_enabled()`` → not_attached result;
   (c) run.
 
@@ -148,6 +149,32 @@ def _deep_solve_result(
 
 
 # ---------------------------------------------------------------------------
+# Pack-installed dispatch gate (U4)
+# ---------------------------------------------------------------------------
+
+_DEEP_SOLVE_PACK_ID = "openmagi.deep-solve"
+
+
+def _deep_solve_pack_enabled() -> bool:
+    """Return whether config.toml/packs-state.json leave the bundled pack installed.
+
+    Mirrors ``tools/persistent_python_toolhost.py::_persistent_python_pack_enabled``:
+    the manifest loader already applies ``[packs] disable`` (merged with the
+    dashboard install/remove sidecar ``packs-state.json``), but the native tool
+    handler is registered via ``native_catalog`` independently of pack
+    discovery, so dispatch must consult the SAME removal contract to keep the
+    pack an honest install axis (design D2). Fail-open on loader errors —
+    an infra failure must never block dispatch.
+    """
+    try:
+        from magi_agent.packs.discovery import load_packs_config  # noqa: PLC0415
+
+        return _DEEP_SOLVE_PACK_ID not in set(load_packs_config().disable)
+    except Exception:  # noqa: BLE001
+        return True
+
+
+# ---------------------------------------------------------------------------
 # Main handler
 # ---------------------------------------------------------------------------
 
@@ -156,8 +183,10 @@ async def deep_solve(arguments: dict[str, object], context: ToolContext) -> Tool
 
     Gate order:
     1. ``is_deep_solve_enabled()`` OFF → honest disabled blocked result.
-    2. ``is_live_child_runner_enabled()`` OFF → honest not_attached blocked result.
-    3. Run pipeline.
+    2. ``_deep_solve_pack_enabled()`` FALSE (pack removed/uninstalled) →
+       honest "deep_solve_pack_removed" blocked result (U4).
+    3. ``is_live_child_runner_enabled()`` OFF → honest not_attached blocked result.
+    4. Run pipeline.
     """
     # ------------------------------------------------------------------
     # Gate phase — also never-raise (F4): a failing lazy import or flag
@@ -170,6 +199,7 @@ async def deep_solve(arguments: dict[str, object], context: ToolContext) -> Tool
         )
 
         deep_solve_on = is_deep_solve_enabled()
+        pack_installed = _deep_solve_pack_enabled()
         child_runner_on = is_live_child_runner_enabled()
     except Exception:  # noqa: BLE001 — NEVER raise out of deep_solve
         return _deep_solve_result(
@@ -190,6 +220,22 @@ async def deep_solve(arguments: dict[str, object], context: ToolContext) -> Tool
             ),
         }
         return _deep_solve_result("blocked", output, error_code="deep_solve_disabled")
+
+    # Gate (a2): pack installed — removing/uninstalling the openmagi.deep-solve
+    # pack blocks dispatch honestly (U4; install axis stays real).
+    if not pack_installed:
+        output = {
+            "status": "blocked",
+            "reason": "deep_solve_pack_removed",
+            "hint": (
+                "The openmagi.deep-solve pack is removed. Reinstall it "
+                "(remove it from config.toml [packs] disable or reinstall via "
+                "the dashboard) to enable the DeepSolve tool."
+            ),
+        }
+        return _deep_solve_result(
+            "blocked", output, error_code="deep_solve_pack_removed"
+        )
 
     # Gate (b): live child runner attached
     if not child_runner_on:
