@@ -4554,6 +4554,44 @@ def native_receipts_honest(env: Mapping[str, str] | None = None) -> bool:
     return _env_bool_default_true(env.get(NATIVE_RECEIPTS_HONEST_ENV))
 
 
+# ---------------------------------------------------------------------------
+# Deep-solve pipeline (U2)
+# ---------------------------------------------------------------------------
+
+_DEEP_SOLVE_KILL_SWITCH_ENV = "MAGI_DEEP_SOLVE_KILL_SWITCH"
+
+# Raw truthy allowlist — mirrors the pattern from
+# ``magi_agent.runtime.child_runner_live._TRUTHY`` so fleet operators can
+# disable deep-solve with the same ``1``/``true``/``yes``/``on`` values.
+_DEEP_SOLVE_KILL_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def is_deep_solve_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Return True iff the deep-solve pipeline is enabled and not kill-switched.
+
+    Profile-aware default-ON: delegates to ``flag_profile_bool`` for
+    ``MAGI_DEEP_SOLVE_ENABLED``, which resolves ON under the full/unset
+    runtime profile and OFF under safe/eval/minimal/conservative/off.
+
+    The kill-switch ``MAGI_DEEP_SOLVE_KILL_SWITCH`` is a raw allowlist read
+    (not a registry flag — mirrors the ``MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH``
+    pattern in ``magi_agent.runtime.child_runner_live``). Any truthy value
+    (``1``/``true``/``yes``/``on``, case-insensitive after strip) in the
+    kill-switch env var overrides ``enabled`` and returns ``False``.
+
+    Args:
+        env: Optional environment mapping. Defaults to ``os.environ`` so the
+            flag can be evaluated against the live process environment.
+    """
+    from .flags import flag_profile_bool
+
+    source: Mapping[str, str] = env if env is not None else os.environ
+    enabled = flag_profile_bool("MAGI_DEEP_SOLVE_ENABLED", env=source)
+    kill_raw = source.get(_DEEP_SOLVE_KILL_SWITCH_ENV, "")
+    killed = str(kill_raw).strip().lower() in _DEEP_SOLVE_KILL_TRUTHY
+    return enabled and not killed
+
+
 def _trimmed(value: str | None) -> str | None:
     if value is None:
         return None

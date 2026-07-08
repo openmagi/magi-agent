@@ -4517,6 +4517,20 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
+    # --- Deep-solve pipeline ------------------------------------------------
+    _pb(
+        "MAGI_DEEP_SOLVE_ENABLED",
+        stage="stage1",
+        summary=(
+            "Master switch for the deep-solve iterative reasoning pipeline: "
+            "multi-stage solver/verifier/adjudicator/refiner loop with "
+            "fingerprint-dedup convergence and optional test execution. "
+            "Profile default-ON (full/unset); OFF under safe/eval/minimal/"
+            "conservative/off so benchmark hosts are unaffected. "
+            "The MAGI_DEEP_SOLVE_KILL_SWITCH env var (raw allowlist, not "
+            "registered) overrides this flag to OFF fleet-wide when set."
+        ),
+    ),
 )
 
 
