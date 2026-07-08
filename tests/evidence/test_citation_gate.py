@@ -692,6 +692,25 @@ def test_fail_open_notice_is_one_line_and_deterministic() -> None:
     assert notice == build_citation_fail_open_notice(result)
 
 
+def test_fail_open_notice_block_is_sentinel_tagged_blockquote() -> None:
+    """GAP #5: the block form wraps the hedge in a sentinel-tagged markdown
+    blockquote (deterministic frontend detection) while preserving the hedge
+    text verbatim so a plain renderer still shows it."""
+    from magi_agent.evidence.citation_gate import (
+        CITATION_HEDGE_SENTINEL,
+        build_citation_fail_open_notice_block,
+    )
+
+    result = _tesla_zero_source_result()
+    block = build_citation_fail_open_notice_block(result)
+    lines = block.split("\n")
+    assert lines[0] == f"> {CITATION_HEDGE_SENTINEL}"
+    # Every line is a blockquote line and the plain hedge is preserved verbatim.
+    assert all(line.startswith("> ") for line in lines)
+    assert build_citation_fail_open_notice(result) in block
+    assert block == build_citation_fail_open_notice_block(result)
+
+
 class _Rec:
     """Minimal registry-record stand-in for gate evaluation."""
 

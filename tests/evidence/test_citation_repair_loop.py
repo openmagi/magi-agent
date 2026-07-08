@@ -231,6 +231,23 @@ def _citation_records(collector: _CaptureCollector) -> list[object]:
     ]
 
 
+def _citation_phase_events(items: list[object]) -> list[Mapping[str, object]]:
+    """turn_phase frames tagged with a citation-repair status (GAP #4 signal)."""
+    out: list[Mapping[str, object]] = []
+    for item in items:
+        if not isinstance(item, RuntimeEvent) or not isinstance(item.payload, Mapping):
+            continue
+        payload = item.payload
+        status = payload.get("status")
+        if (
+            payload.get("type") == "turn_phase"
+            and isinstance(status, str)
+            and status.startswith("citation_")
+        ):
+            out.append(payload)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # P0: successful citation repair on an assembly=None turn keeps the cited answer
 # ---------------------------------------------------------------------------
@@ -395,3 +412,77 @@ def test_shared_budget_bounds_repair_generations(monkeypatch) -> None:
     assert runner.call_count == 3
     assert collector.records
     assert _citation_records(collector)[0].fields["failOpen"] is True
+
+
+# ---------------------------------------------------------------------------
+# GAP #4: in-flight turn_phase signal (attribution repair + induce-search)
+# ---------------------------------------------------------------------------
+
+
+def test_attribution_repair_emits_citation_verifying_phase(monkeypatch) -> None:
+    """An attribution repair round emits a public turn_phase verifying frame.
+
+    The frame carries phase=verifying + a citation status the frontend keys on
+    (status startswith citation_) + an eventId (so status survives the SSE
+    allowlist) so the chat client can label the mid-turn intervention
+    ("Verifying citations") rather than leaving a silent answer swap.
+    """
+    _repair_env(monkeypatch, max_attempts="2")
+    collector = _CaptureCollector(registry=_registry((_source_record(),)))
+    runner = _ScriptedRunner(
+        generations=[
+            [{"type": "text_delta", "delta": _UNCITED}],
+            [
+                {"type": "response_clear"},
+                {"type": "text_delta", "delta": _CITED},
+            ],
+        ],
+        collector=collector,
+    )
+    driver = MagiEngineDriver(runner=runner, runner_policy_assembly=None)
+
+    items = _drive(driver, prompt="When was Tesla founded")
+
+    phase_events = _citation_phase_events(items)
+    assert phase_events, "expected a citation-tagged turn_phase frame"
+    frame = phase_events[0]
+    assert frame.get("phase") == "verifying"
+    assert frame.get("status") == "citation_attribution"
+    # eventId is required for the SSE allowlist to keep the status field.
+    assert isinstance(frame.get("eventId"), str) and frame["eventId"]
+
+
+def test_clean_turn_emits_no_citation_phase(monkeypatch) -> None:
+    """A turn whose primary answer is already cited never blocks, so NO citation
+    turn_phase affordance is emitted (no ghost UI on normal turns)."""
+    _repair_env(monkeypatch, max_attempts="2")
+    collector = _CaptureCollector(registry=_registry((_source_record(),)))
+    runner = _ScriptedRunner(
+        generations=[[{"type": "text_delta", "delta": _CITED}]],
+        collector=collector,
+    )
+    driver = MagiEngineDriver(runner=runner, runner_policy_assembly=None)
+
+    items = _drive(driver, prompt="When was Tesla founded")
+
+    assert _citation_phase_events(items) == []
+    # And the model was never re-invoked (no repair round).
+    assert runner.call_count == 1
+
+
+def test_citation_gate_audit_mode_emits_no_citation_phase(monkeypatch) -> None:
+    """With the gate mode NOT repair (audit), the citation repair overlay is
+    inert, so an uncited answer produces NO citation turn_phase affordance even
+    though an audit record may still be written."""
+    _repair_env(monkeypatch, max_attempts="2")
+    monkeypatch.setenv("MAGI_SOURCE_CITATION_GATE_MODE", "audit")
+    collector = _CaptureCollector(registry=_registry((_source_record(),)))
+    runner = _ScriptedRunner(
+        generations=[[{"type": "text_delta", "delta": _UNCITED}]],
+        collector=collector,
+    )
+    driver = MagiEngineDriver(runner=runner, runner_policy_assembly=None)
+
+    items = _drive(driver, prompt="When was Tesla founded")
+
+    assert _citation_phase_events(items) == []

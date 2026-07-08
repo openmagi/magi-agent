@@ -2247,4 +2247,60 @@ describe("ChatMessages", () => {
     expect(html).not.toContain("META: intent=질문답변");
     expect(html).toContain("그럼 그 스킬로 다시 CRDO");
   });
+
+  it("shows the citation-repair affordance during an attribution repair", () => {
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={[] satisfies ChatMessage[]}
+        serverMessages={[] satisfies ChatMessage[]}
+        channelState={baseChannelState({
+          streaming: true,
+          turnPhase: "verifying",
+          citationRepair: "attribution",
+        })}
+      />,
+    );
+
+    expect(html).toContain("citation-repair-indicator");
+    expect(html).toContain("Revising answer with sources...");
+  });
+
+  it("shows the grounding affordance during an induce-search repair", () => {
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={[] satisfies ChatMessage[]}
+        serverMessages={[] satisfies ChatMessage[]}
+        channelState={baseChannelState({
+          streaming: true,
+          turnPhase: "verifying",
+          citationRepair: "induce_search",
+        })}
+      />,
+    );
+
+    expect(html).toContain("citation-repair-indicator");
+    expect(html).toContain("Searching to ground claims...");
+  });
+
+  it("shows NO citation affordance on a normal streaming turn", () => {
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={[] satisfies ChatMessage[]}
+        serverMessages={[] satisfies ChatMessage[]}
+        channelState={baseChannelState({
+          streaming: true,
+          streamingText: "A normal answer.",
+          hasTextContent: true,
+          turnPhase: "executing",
+          citationRepair: null,
+        })}
+      />,
+    );
+
+    expect(html).not.toContain("citation-repair-indicator");
+    expect(html).toContain("A normal answer.");
+  });
 });

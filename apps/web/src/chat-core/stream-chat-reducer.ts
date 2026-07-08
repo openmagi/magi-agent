@@ -52,6 +52,13 @@ export interface TurnPhaseState {
   phase: string;
   label: string | null;
   detail: string | null;
+  /**
+   * Optional runtime sub-status (e.g. a citation-repair tag such as
+   * `citation_attribution` / `citation_induce_search`) carried on `turn_phase`
+   * frames. Lets the UI label a specific mid-turn intervention rather than a
+   * generic phase. Null on frames that carry no status.
+   */
+  status: string | null;
 }
 
 export interface TerminalState {
@@ -141,6 +148,7 @@ export function beginStreamChatTurn(state: StreamChatState): StreamChatState {
     phase: "preparing",
     label: "Preparing",
     detail: null,
+    status: null,
   };
   next.heartbeatElapsedMs = 0;
   next.terminal = null;
@@ -839,6 +847,7 @@ export function foldRuntimeEvent(
         phase,
         label: str(p.label),
         detail: str(p.detail),
+        status: str(p.status),
       };
       next.streaming = true;
       return next;

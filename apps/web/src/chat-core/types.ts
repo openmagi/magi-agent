@@ -244,6 +244,14 @@ export interface CitationGateStatus {
 }
 
 /**
+ * Kind of in-flight source-citation gate intervention (GAP #4). Mirrors the
+ * driver's `turn_phase` citation status: `attribution` re-generates the answer
+ * with `[src_N]` markers, `induce_search` forces a grounding search before
+ * answering. Drives the labeled in-flight affordance.
+ */
+export type CitationRepairKind = "attribution" | "induce_search";
+
+/**
  * Source-citation wire contract (Wave 3a).
  *
  * The terminal ``turn_result`` SSE frame (and the headless NDJSON ``result``
@@ -543,6 +551,13 @@ export interface ChannelState {
   inspectedSources?: InspectedSource[];
   /** Latest claim-citation gate status for the current research turn. */
   citationGate?: CitationGateStatus | null;
+  /**
+   * Active source-citation gate in-flight intervention for the current live
+   * turn (GAP #4). Set while the gate is mid-turn repairing the answer and
+   * cleared once the repaired answer streams or the turn ends. Null on turns
+   * with no citation intervention, or when the gate is in audit/off mode.
+   */
+  citationRepair?: CitationRepairKind | null;
   /** Public runtime verifier/contract trace for the current live turn. */
   runtimeTraces?: RuntimeTrace[];
   /** Sanitized deterministic runtime projection state for the current live turn. */

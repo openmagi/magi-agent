@@ -103,3 +103,40 @@ def test_thinking_non_string_delta_returns_type_only(monkeypatch):
     assert out is not None
     assert out["type"] == "thinking_delta"
     assert "delta" not in out
+
+
+def test_citation_turn_phase_survives_wire_with_status(monkeypatch):
+    """GAP #4 wire contract: the driver's citation repair turn_phase frame
+    (phase=verifying + citation status + eventId) survives the public SSE
+    allowlist with its status field intact so the client can label the
+    mid-turn intervention."""
+    out = sse._sanitize_agent_event(
+        {
+            "type": "turn_phase",
+            "turnId": "turn_x",
+            "phase": "verifying",
+            "status": "citation_attribution",
+            "label": "Verifying citations",
+            "eventId": "citation-repair-turn_x-1",
+        }
+    )
+    assert out is not None
+    assert out["type"] == "turn_phase"
+    assert out["phase"] == "verifying"
+    assert out["status"] == "citation_attribution"
+    assert out["eventId"] == "citation-repair-turn_x-1"
+
+
+def test_turn_phase_status_dropped_without_event_id(monkeypatch):
+    """Without an eventId the status field is dropped (allowlist invariant), so
+    the citation frame MUST carry an eventId to be usable downstream."""
+    out = sse._sanitize_agent_event(
+        {
+            "type": "turn_phase",
+            "turnId": "turn_x",
+            "phase": "verifying",
+            "status": "citation_attribution",
+        }
+    )
+    assert out is not None
+    assert "status" not in out
