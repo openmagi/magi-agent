@@ -318,17 +318,20 @@ class TestVerdictAppendedOnce:
         from magi_agent.plugins.native.deep_solve import deep_solve
         from magi_agent.solving.deep_solve import DeepSolveOutcome, DeepSolveVerdictData
 
-        verdicts: list[Any] = []
+        append_calls: list[Any] = []
 
-        # Fake a minimal run_deep_solve that calls append_verdict once
-        async def _fake_run(config: Any, deps: Any) -> DeepSolveOutcome:
+        # Fake run_deep_solve: calls the HANDLER'S real deps.append_verdict
+        # once and returns a VALID DeepSolveOutcome (frozen/extra=forbid —
+        # invalid fields here would silently exercise the never-raise
+        # fallback and turn this test into a tautology; review F3).
+        async def _fake_run(config: Any, deps: Any) -> Any:
             from magi_agent.solving.deep_solve import (
                 DeepSolveOutcome,
                 DeepSolveVerdictData,
             )
 
             verdict = DeepSolveVerdictData(
-                problem_digest="sha256:abc",
+                problem_digest="abc123",
                 problem_class="executable",
                 cycles=1,
                 refolds=0,
@@ -337,14 +340,14 @@ class TestVerdictAppendedOnce:
                 per_stage_child_refs=(),
             )
             deps.append_verdict(verdict)
+            append_calls.append(verdict)
             return DeepSolveOutcome(
                 acceptance_basis="tests_passed",
-                final_artifact="solution code here",
-                verdict=verdict,
+                cycles=1,
+                refolds=0,
+                final_findings_open=(),
+                best_candidate="solution code here",
             )
-
-        # Patch append_verdict to capture calls
-        original_append = None
 
         context = _make_context()
         args = _make_args()
@@ -357,12 +360,154 @@ class TestVerdictAppendedOnce:
             ),
             patch("magi_agent.solving.deep_solve.run_deep_solve", side_effect=_fake_run),
         ):
-            # Also need to patch the boundary creation since no real runner is attached
-            try:
-                result = await deep_solve(args, context)
-            except Exception:
-                # The handler must never raise — if it does, test should fail
-                pytest.fail("deep_solve raised an exception (violates never-raise contract)")
+            result = await deep_solve(args, context)
 
-        # Result should not be a hard error
-        assert result is not None
+        # The verdict path itself is verified end-to-end: appended exactly
+        # once, and promoted onto the ToolResult output payload.
+        assert len(append_calls) == 1
+        assert result.status == "ok"
+        assert result.output["acceptanceBasis"] == "tests_passed"
+        verdict_payload = result.output["deepSolveVerdict"]
+        assert verdict_payload["acceptance_basis"] == "tests_passed"
+        assert verdict_payload["cycles"] == 1
+
+
+class TestExecuteTestsGovernedPath:
+    """Review F1: ground-truth execution must route through the governed
+    parent Bash toolhost (standalone_core_tool_handler), never a raw
+    subprocess, and the artifact must live under the workspace root."""
+
+    @pytest.mark.asyncio
+    async def test_execute_tests_routes_through_governed_bash(
+        self, tmp_path: Any
+    ) -> None:
+        from magi_agent.plugins.native.deep_solve import deep_solve
+        from magi_agent.tools.result import ToolResult
+
+        captured_cmds: list[str] = []
+        handler_requests: list[str] = []
+
+        def _fake_handler_factory(tool_name: str, **kwargs: Any) -> Any:
+            handler_requests.append(tool_name)
+
+            async def _fake_bash(arguments: dict[str, object], context: Any) -> ToolResult:
+                captured_cmds.append(str(arguments["command"]))
+                return ToolResult(
+                    status="ok",
+                    output={"exitCode": 0, "stdout": "1 passed"},
+                )
+
+            return _fake_bash
+
+        async def _fake_run(config: Any, deps: Any) -> Any:
+            from magi_agent.solving.deep_solve import DeepSolveOutcome
+
+            report = await deps.execute_tests(
+                artifact="print('hello')",
+                test_command="pytest -q tests/",
+            )
+            assert report.passed == 1
+            assert report.failed_cases == ()
+            return DeepSolveOutcome(
+                acceptance_basis="tests_passed",
+                cycles=1,
+                refolds=0,
+                final_findings_open=(),
+                best_candidate="print('hello')",
+            )
+
+        context = _make_context(workspaceRoot=str(tmp_path))
+        args = _make_args(test_command="pytest -q tests/")
+
+        with (
+            patch("magi_agent.config.env.is_deep_solve_enabled", return_value=True),
+            patch(
+                "magi_agent.runtime.child_runner_live.is_live_child_runner_enabled",
+                return_value=True,
+            ),
+            patch(
+                "magi_agent.solving.deep_solve.run_deep_solve",
+                side_effect=_fake_run,
+            ),
+            patch(
+                "magi_agent.tools.core_toolhost.standalone_core_tool_handler",
+                side_effect=_fake_handler_factory,
+            ),
+        ):
+            result = await deep_solve(args, context)
+
+        assert result.status == "ok"
+        # The governed Bash handler was requested (not a raw subprocess).
+        assert handler_requests == ["Bash"]
+        # The dispatched command carries the artifact env prefix + user command.
+        assert len(captured_cmds) == 1
+        assert captured_cmds[0].startswith("DEEP_SOLVE_ARTIFACT=")
+        assert "pytest -q tests/" in captured_cmds[0]
+        # Artifact directory is run-scoped under the workspace root and
+        # cleaned up after execution.
+        assert not list((tmp_path / ".deep-solve").glob("*")) or not (
+            tmp_path / ".deep-solve"
+        ).exists()
+
+    @pytest.mark.asyncio
+    async def test_execute_tests_blocked_result_reports_honestly(
+        self, tmp_path: Any
+    ) -> None:
+        """A gate-blocked Bash dispatch (memory-mode, policy) surfaces as an
+        honest failing ExecutionReport — never a bypass to raw subprocess."""
+        from magi_agent.plugins.native.deep_solve import deep_solve
+        from magi_agent.tools.result import ToolResult
+
+        def _fake_handler_factory(tool_name: str, **kwargs: Any) -> Any:
+            async def _fake_bash(arguments: dict[str, object], context: Any) -> ToolResult:
+                return ToolResult(
+                    status="blocked",
+                    errorCode="memory_mode_blocked",
+                    errorMessage="blocked by memory mode",
+                    output={},
+                )
+
+            return _fake_bash
+
+        reports: list[Any] = []
+
+        async def _fake_run(config: Any, deps: Any) -> Any:
+            from magi_agent.solving.deep_solve import DeepSolveOutcome
+
+            report = await deps.execute_tests(
+                artifact="print('x')", test_command="pytest -q"
+            )
+            reports.append(report)
+            return DeepSolveOutcome(
+                acceptance_basis="rejected",
+                cycles=1,
+                refolds=0,
+                final_findings_open=(),
+                best_candidate="print('x')",
+                reject_reason="tests blocked",
+            )
+
+        context = _make_context(workspaceRoot=str(tmp_path))
+        args = _make_args(test_command="pytest -q")
+
+        with (
+            patch("magi_agent.config.env.is_deep_solve_enabled", return_value=True),
+            patch(
+                "magi_agent.runtime.child_runner_live.is_live_child_runner_enabled",
+                return_value=True,
+            ),
+            patch(
+                "magi_agent.solving.deep_solve.run_deep_solve",
+                side_effect=_fake_run,
+            ),
+            patch(
+                "magi_agent.tools.core_toolhost.standalone_core_tool_handler",
+                side_effect=_fake_handler_factory,
+            ),
+        ):
+            await deep_solve(args, context)
+
+        assert len(reports) == 1
+        assert reports[0].passed == 0
+        assert reports[0].failed_cases == ("test_command_blocked",)
+        assert "memory_mode_blocked" in reports[0].raw_output

@@ -160,11 +160,26 @@ async def deep_solve(arguments: dict[str, object], context: ToolContext) -> Tool
     3. Run pipeline.
     """
     # ------------------------------------------------------------------
-    # Gate (a): deep_solve feature flag
+    # Gate phase — also never-raise (F4): a failing lazy import or flag
+    # evaluation degrades to a blocked result, not an exception.
     # ------------------------------------------------------------------
-    from magi_agent.config.env import is_deep_solve_enabled  # noqa: PLC0415
+    try:
+        from magi_agent.config.env import is_deep_solve_enabled  # noqa: PLC0415
+        from magi_agent.runtime.child_runner_live import (  # noqa: PLC0415
+            is_live_child_runner_enabled,
+        )
 
-    if not is_deep_solve_enabled():
+        deep_solve_on = is_deep_solve_enabled()
+        child_runner_on = is_live_child_runner_enabled()
+    except Exception:  # noqa: BLE001 — NEVER raise out of deep_solve
+        return _deep_solve_result(
+            "blocked",
+            {"status": "blocked", "reason": "deep_solve_gate_error"},
+            error_code="deep_solve_gate_error",
+        )
+
+    # Gate (a): deep_solve feature flag
+    if not deep_solve_on:
         output = {
             "status": "blocked",
             "reason": "deep_solve_disabled",
@@ -176,14 +191,8 @@ async def deep_solve(arguments: dict[str, object], context: ToolContext) -> Tool
         }
         return _deep_solve_result("blocked", output, error_code="deep_solve_disabled")
 
-    # ------------------------------------------------------------------
     # Gate (b): live child runner attached
-    # ------------------------------------------------------------------
-    from magi_agent.runtime.child_runner_live import (  # noqa: PLC0415
-        is_live_child_runner_enabled,
-    )
-
-    if not is_live_child_runner_enabled():
+    if not child_runner_on:
         output = {
             "status": "not_attached",
             "reason": "live_child_runner_disabled",
@@ -323,15 +332,6 @@ async def _run_deep_solve_live(
         _emit_agent_event,
     )
 
-    # For deep-solve the child workspace is based on what solver stages need.
-    # Solver/improve/refine use "readonly"; verifier/adjudicator use "none".
-    # We resolve workspace for the maximal toolset request (readonly) since
-    # that is what solver stages ask for.
-    _solver_toolset = clamp_stage_toolset(operator_gate, "readonly")
-    child_workspace, workspace_error = _child_workspace_for_toolset(
-        _solver_toolset, context
-    )
-
     # Receipt ref for the run as a whole (lifecycle events).
     run_receipt_ref = _child_event_receipt_ref(
         parent_execution_id=parent_exec_id,
@@ -387,9 +387,22 @@ async def _run_deep_solve_live(
         )
 
         # Stage workspace: resolve for this stage's clamped toolset.
-        stage_workspace, _ws_err = _child_workspace_for_toolset(
+        stage_workspace, ws_err = _child_workspace_for_toolset(
             toolset_profile, context
         )
+        if ws_err and toolset_profile != "none":
+            # A readonly/full stage running without its workspace is a silent
+            # degrade operators should be able to see (review F5).
+            try:
+                from magi_agent.runtime.child_runner_live import (  # noqa: PLC0415
+                    _emit_trace,
+                )
+
+                _emit_trace(
+                    f"deep_solve stage={stage!r} workspace degraded: {ws_err!r}"
+                )
+            except Exception:  # noqa: BLE001
+                pass
 
         # Emit stage-start event.
         await _emit_agent_event(
@@ -479,51 +492,74 @@ async def _run_deep_solve_live(
         artifact: str,
         test_command: str,
     ) -> ExecutionReport:
-        """Execute test_command against artifact in a sandboxed subprocess.
+        """Execute test_command through the GOVERNED parent Bash toolhost.
 
-        Uses parent toolhost Bash surface when available (via context); falls
-        back to subprocess.run for hermetic execution. Capture stdout/stderr
-        per-case and build ExecutionReport.
+        The command runs on the same surface the model's own Bash tool calls
+        take (memory-mode guard + Gate5B toolhost caps/redaction/timeout) —
+        never a raw subprocess (design D5/§6: parent toolhost under the
+        existing gates). The artifact is written to a run-scoped dir under the
+        writable workspace root and cleaned up afterwards.
 
-        Never-raise: execution failure → ExecutionReport with raw_output carrying
-        the error string.
+        Never-raise: execution failure → ExecutionReport with raw_output
+        carrying the error string.
         """
         import hashlib  # noqa: PLC0415
-        import subprocess  # noqa: PLC0415
-        import tempfile  # noqa: PLC0415
+        import shlex  # noqa: PLC0415
+        import shutil  # noqa: PLC0415
+        from pathlib import Path  # noqa: PLC0415
+
+        from magi_agent.tools.core_toolhost import (  # noqa: PLC0415
+            standalone_core_tool_handler,
+        )
 
         cmd_digest = "sha256:" + hashlib.sha256(test_command.encode()).hexdigest()
+        run_dir: Path | None = None
 
         try:
-            # Write artifact to a temp file so test_command can reference it.
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                suffix=".py",
-                delete=False,
-                prefix="deep_solve_artifact_",
-            ) as f:
-                f.write(artifact)
-                artifact_path = f.name
-
-            # Run with a 60s timeout per-batch.
-            proc = subprocess.run(  # noqa: S603
-                test_command,
-                shell=True,  # noqa: S602
-                capture_output=True,
-                text=True,
-                timeout=60,
-                env={"DEEP_SOLVE_ARTIFACT": artifact_path},
+            # Run-scoped artifact under the writable workspace root (F2).
+            workspace_base = (
+                context.spawn_workspace or context.workspace_root or "."
             )
-            raw_output = proc.stdout + proc.stderr
-            # Simple pass/fail heuristic from exit code.
-            passed = proc.returncode == 0
+            run_dir = Path(workspace_base).expanduser() / ".deep-solve" / run_id
+            run_dir.mkdir(parents=True, exist_ok=True)
+            artifact_path = run_dir / "artifact.py"
+            artifact_path.write_text(artifact, encoding="utf-8")
+
+            # Governed Bash dispatch — same gates as a model Bash call.
+            bash_handler = standalone_core_tool_handler(
+                "Bash", command_timeout_ms=120_000
+            )
+            command = (
+                f"DEEP_SOLVE_ARTIFACT={shlex.quote(str(artifact_path))} "
+                f"{test_command}"
+            )
+            result = await bash_handler({"command": command}, context)
+
+            output = result.output if isinstance(result.output, Mapping) else {}
+            exit_code = output.get("exitCode")
+            stdout = str(output.get("stdout") or "")
+            if result.status != "ok":
+                # Blocked/error at the gate (memory-mode, toolhost policy…):
+                # honest failure report, never a bypass.
+                return ExecutionReport(
+                    command_digest=cmd_digest,
+                    total=1,
+                    passed=0,
+                    failed_cases=("test_command_blocked",),
+                    score=None,
+                    raw_output=(
+                        f"[{result.status}:{result.error_code or 'unknown'}] "
+                        f"{result.error_message or ''} {stdout}"
+                    )[:4000],
+                )
+            passed = exit_code == 0
             return ExecutionReport(
                 command_digest=cmd_digest,
                 total=1,
                 passed=1 if passed else 0,
                 failed_cases=() if passed else ("test_command_failed",),
                 score=1.0 if passed else 0.0,
-                raw_output=raw_output[:4000],
+                raw_output=stdout[:4000],
             )
         except Exception as exc:  # noqa: BLE001 — never raise
             return ExecutionReport(
@@ -534,6 +570,13 @@ async def _run_deep_solve_live(
                 score=None,
                 raw_output=str(exc)[:2000],
             )
+        finally:
+            if run_dir is not None:
+                shutil.rmtree(run_dir, ignore_errors=True)
+
+    # Strong refs for fire-and-forget progress emits (F6): without these the
+    # event loop may GC a pending task before it runs.
+    _pending_emits: set[object] = set()
 
     def _emit_progress(event: Mapping[str, object]) -> None:
         """Emit a progress event to the parent context (fire-and-forget)."""
@@ -548,10 +591,13 @@ async def _run_deep_solve_live(
             result = emitter(payload)
             if inspect.isawaitable(result):
                 # We're called from a sync context inside the orchestrator.
-                # Best-effort: schedule on the running loop.
+                # Best-effort: schedule on the running loop, retaining a
+                # strong reference so the task is not GC'd mid-flight (F6).
                 try:
                     loop = asyncio.get_running_loop()
-                    loop.create_task(result)
+                    task = loop.create_task(result)
+                    _pending_emits.add(task)
+                    task.add_done_callback(_pending_emits.discard)
                 except RuntimeError:
                     pass
         except Exception:  # noqa: BLE001
