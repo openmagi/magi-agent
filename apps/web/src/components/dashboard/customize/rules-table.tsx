@@ -461,7 +461,7 @@ function OriginGroup({
 }): React.ReactElement {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <section className="rounded-xl border border-black/[0.06] bg-[var(--glass-regular-bg)] backdrop-blur-xl">
+    <section className="rounded-xl border border-black/[0.06] bg-[var(--color-surface-raised)]">
       <button
         type="button"
         onClick={() => setOpen((p) => !p)}
