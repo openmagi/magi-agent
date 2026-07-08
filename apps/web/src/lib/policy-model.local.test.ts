@@ -5,13 +5,13 @@ import {
   extractEvidenceTypes,
   extractNamedConditions,
   trustClassForPolicy,
-  unifyPolicies,
-  type Policy,
+  unifyRuleRows,
+  type RuleRow,
   type PolicyConditionKind,
 } from "./policy-model";
 
 
-function buildCatalog(): Parameters<typeof unifyPolicies>[0]["catalog"] {
+function buildCatalog(): Parameters<typeof unifyRuleRows>[0]["catalog"] {
   return {
     verification: {
       recipes: [],
@@ -57,7 +57,7 @@ function buildCatalog(): Parameters<typeof unifyPolicies>[0]["catalog"] {
 }
 
 
-function buildOverrides(): Parameters<typeof unifyPolicies>[0]["overrides"] {
+function buildOverrides(): Parameters<typeof unifyRuleRows>[0]["overrides"] {
   return {
     verification: {
       recipes: [],
@@ -96,9 +96,9 @@ function buildOverrides(): Parameters<typeof unifyPolicies>[0]["overrides"] {
 }
 
 
-describe("unifyPolicies — merges all four backend stores into a single Policy[]", () => {
+describe("unifyRuleRows — merges all four backend stores into a single RuleRow[]", () => {
   it("includes one entry per built-in preset, one per custom rule, one per dashboard check, one per SeamSpec action", () => {
-    const policies = unifyPolicies({
+    const policies = unifyRuleRows({
       catalog: buildCatalog(),
       overrides: buildOverrides(),
       dashboardChecks: [
@@ -122,7 +122,7 @@ describe("unifyPolicies — merges all four backend stores into a single Policy[
   });
 
   it("respects preset_overrides — coding-verification toggled OFF surfaces as disabled", () => {
-    const policies = unifyPolicies({
+    const policies = unifyRuleRows({
       catalog: buildCatalog(),
       overrides: buildOverrides(),
       dashboardChecks: [],
@@ -134,7 +134,7 @@ describe("unifyPolicies — merges all four backend stores into a single Policy[
   });
 
   it("renders security presets with state=always-on and togglable=false", () => {
-    const policies = unifyPolicies({
+    const policies = unifyRuleRows({
       catalog: buildCatalog(),
       overrides: buildOverrides(),
       dashboardChecks: [],
@@ -146,7 +146,7 @@ describe("unifyPolicies — merges all four backend stores into a single Policy[
   });
 
   it("marks user policies as togglable + deletable", () => {
-    const policies = unifyPolicies({
+    const policies = unifyRuleRows({
       catalog: buildCatalog(),
       overrides: buildOverrides(),
       dashboardChecks: [],
@@ -157,7 +157,7 @@ describe("unifyPolicies — merges all four backend stores into a single Policy[
   });
 
   it("renders SeamSpec actions as one row per action with togglable=false", () => {
-    const policies = unifyPolicies({
+    const policies = unifyRuleRows({
       catalog: buildCatalog(),
       overrides: buildOverrides(),
       dashboardChecks: [],
@@ -171,7 +171,7 @@ describe("unifyPolicies — merges all four backend stores into a single Policy[
 
 describe("extractEvidenceTypes — auto-derived from policy list", () => {
   it("collects evidence refs from custom_rule deterministic_ref payloads", () => {
-    const policies: Policy[] = [
+    const policies: RuleRow[] = [
       {
         id: "custom_rule:r1",
         name: "r1",
@@ -224,7 +224,7 @@ describe("extractEvidenceTypes — auto-derived from policy list", () => {
     // PRODUCED-BY-0 on every row. The real catalog of emit-able types
     // comes from /v1/app/customize/evidence/live-catalog (F2); this
     // function is now the per-ref consumer index only.
-    const policies: Policy[] = [
+    const policies: RuleRow[] = [
       {
         id: "preset_seam:answer-quality",
         name: "Answer Quality",
@@ -247,7 +247,7 @@ describe("extractEvidenceTypes — auto-derived from policy list", () => {
             category: "delivery",
             enabled: false,
             mode: "block",
-          } as unknown as Policy["rawSource"]["preset"],
+          } as unknown as RuleRow["rawSource"]["preset"],
         },
       },
     ];
@@ -260,7 +260,7 @@ describe("extractEvidenceTypes — auto-derived from policy list", () => {
 
 describe("extractNamedConditions — user-defined reusable condition payloads", () => {
   it("captures shacl_constraint / llm_criterion / regex / tool_perm conditions", () => {
-    const policies = unifyPolicies({
+    const policies = unifyRuleRows({
       catalog: buildCatalog(),
       overrides: buildOverrides(),
       dashboardChecks: [
@@ -281,7 +281,7 @@ describe("extractNamedConditions — user-defined reusable condition payloads", 
   });
 
   it("skips built-in policies (they have implicit conditions)", () => {
-    const policies = unifyPolicies({
+    const policies = unifyRuleRows({
       catalog: buildCatalog(),
       overrides: buildOverrides(),
       dashboardChecks: [],
@@ -306,9 +306,9 @@ describe("extractNamedConditions — user-defined reusable condition payloads", 
 function buildPolicy(args: {
   kind: PolicyConditionKind;
   action?: string;
-  state?: Policy["state"];
-  source?: Policy["source"];
-}): Policy {
+  state?: RuleRow["state"];
+  source?: RuleRow["source"];
+}): RuleRow {
   const source = args.source ?? "custom_rule";
   return {
     id: `${source}:fixture`,

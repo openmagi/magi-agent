@@ -30,7 +30,7 @@ import {
 } from "@/lib/agent-modes-api";
 import { useCustomize, type ToolItem } from "@/lib/customize-api";
 import { getDashboardChecks, type DashboardCheck } from "@/lib/packs-dashboard-api";
-import { unifyPolicies } from "@/lib/policy-model";
+import { unifyRuleRows } from "@/lib/policy-model";
 import type { AgentMode } from "@/chat-core";
 import { PageHint } from "./page-hint";
 import { parseList, selectedScopedIds, slugifyModeId, toggleListItem, toggleScopedId } from "./modes-panel.helpers";
@@ -119,7 +119,7 @@ export function ModesPanel({ botId }: { botId: string }): React.JSX.Element {
   const policiesLoading = customizeLoading || checksLoading;
   const policyOptions = useMemo<ScopablePolicyOption[]>(() => {
     if (!customizeData) return [];
-    return unifyPolicies({
+    return unifyRuleRows({
       catalog: customizeData.catalog,
       overrides: customizeData.overrides,
       dashboardChecks,

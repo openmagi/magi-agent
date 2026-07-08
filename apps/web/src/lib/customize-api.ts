@@ -118,6 +118,38 @@ export interface BuiltinPolicyToggleItem {
   enabled: boolean;
 }
 
+/**
+ * A unified Policy summary from the `GET /v1/app/customize` catalog (PR-1 U3).
+ *
+ * A *policy* is the user's unit of intent — a named 1..N-rule bundle. The
+ * Policies surface renders one card per entry; member rules live in the
+ * drill-down (looked up by id from the flat rule-row list).
+ *
+ * `enabledState` is derived from member custom rules' `enabled` flags:
+ *   - `"on"`  — every stored member is enabled
+ *   - `"off"` — every stored member is disabled
+ *   - `"mixed"` — some on, some off (render an indeterminate toggle + note)
+ *   - `"managed"` — NO members are stored custom rules (builtin-native or
+ *     dashboard-check producers): there is nothing on the per-rule `enabled`
+ *     axis to cascade, so the card renders a static pill, NOT a Switch.
+ */
+export interface PolicyCatalogEntry {
+  id: string;
+  displayName: string;
+  /** The user's own natural-language sentence; may be empty. */
+  intent: string;
+  /** Member rule ids (join into the flat rule-row list for the drill-down). */
+  ruleIds: string[];
+  origin: "user" | "builtin";
+  /** False for floor policies (source_citation) — render always-on, no toggle. */
+  userDisableable: boolean;
+  /** Advisory review verdict; `"unreviewed"` when never reviewed. */
+  reviewVerdict: string;
+  /** True when the policy binds a producer → gate pair (render the relationship). */
+  hasBinding: boolean;
+  enabledState: "on" | "off" | "mixed" | "managed";
+}
+
 export interface CustomizeCatalog {
   verification: {
     recipes: RecipeItem[];
@@ -154,6 +186,16 @@ export interface CustomizeCatalog {
   controlPlane: ControlPlaneBehaviorItem[];
   /** User-disableable first-party policies (verify-before-replying). Floors excluded. */
   builtinPolicies: BuiltinPolicyToggleItem[];
+  /**
+   * Unified Policies surface (PR-1 U3): the full list of policies (user +
+   * first-party builtin) with membership, origin, review verdict, binding
+   * flag, and derived `enabledState`. The Policies card list renders from
+   * this; drill-down member rows come from the flat rule-row list.
+   *
+   * Optional at the type level so a pre-U3 backend (no `policies` key) still
+   * type-checks; the UI treats an absent value as an empty list.
+   */
+  policies?: PolicyCatalogEntry[];
 }
 
 /** A structured custom verification rule (spec §9.1). P1 builds deterministic_ref.
@@ -795,6 +837,56 @@ export async function reviewPolicyPlan(
     const message = err instanceof Error ? err.message : "Network error";
     return { ok: false, error: message };
   }
+}
+
+
+/**
+ * Toggles a USER policy on/off via `PATCH /v1/app/policies/{id}` `{enabled}`
+ * (PR-1 U4). The server atomically cascades `enabled` to every member custom
+ * rule and re-projects the verification overrides so the change takes effect
+ * next turn. Throws on non-2xx so the caller can surface the error and revert:
+ *   - 404 unknown policy id
+ *   - 409 first-party (builtin) policy — those toggle via their own route
+ *
+ * The response carries the refreshed policy list; the caller should still
+ * `reload()` the catalog to pick up the cascaded member-rule states.
+ */
+export async function patchPolicyEnabled(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  policyId: string,
+  enabled: boolean,
+): Promise<void> {
+  const res = await fetch(`/v1/app/policies/${encodeURIComponent(policyId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!res.ok) {
+    if (res.status === 409) {
+      throw new Error("This built-in policy is toggled from its own control.");
+    }
+    if (res.status === 404) throw new Error("Policy not found.");
+    throw new Error(`Failed to update policy (${res.status})`);
+  }
+}
+
+/**
+ * Deletes a policy record via `DELETE /v1/app/policies/{id}`.
+ *
+ * NOTE: the backend route deletes ONLY the policy record — it does NOT cascade
+ * to member custom rules. Per the magi-cp precedent (cascade delete), the
+ * caller is responsible for deleting the member rules client-side (sequential
+ * {@link deleteCustomRule} calls) so a delete does not orphan the members back
+ * onto the surface as loose rows.
+ */
+export async function deletePolicy(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  policyId: string,
+): Promise<void> {
+  const res = await fetch(`/v1/app/policies/${encodeURIComponent(policyId)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(`Failed to delete policy (${res.status})`);
 }
 
 
