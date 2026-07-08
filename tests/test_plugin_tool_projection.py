@@ -75,6 +75,7 @@ def test_native_state_projection_returns_expected_native_tool_names_in_resolved_
         "RepositoryMap",
         "RepoTaskState",
         "SafeCommand",
+        "DeepSolve",
         "DocumentWrite",
         "SpreadsheetWrite",
         "FileDeliver",

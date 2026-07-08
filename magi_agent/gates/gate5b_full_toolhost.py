@@ -287,6 +287,7 @@ _GATE5B_FIRST_PARTY_REGISTRY_TOOL_NAMES = (
     "ExternalSourceCache",
     "ExternalSourceRead",
     "ExternalToolLoader",
+    "DeepSolve",
     "GitDiff",
     "KnowledgeSearch",
     "KnowledgeWrite",
@@ -2594,6 +2595,58 @@ def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
             return await _dispatch_adk_tool(host, "Bash", {"command": command}, tool_context)
 
         return function_tool(invoke_bash)
+
+    if name == "DeepSolve":
+
+        async def invoke_deep_solve(
+            problem: str = "",
+            domain: str = "",
+            test_command: str = "",
+            tests: str = "",
+            consecutive_clean_passes: int = 3,
+            language: str = "python3",
+            provider: str = "",
+            model: str = "",
+            tool_context: object | None = None,
+        ) -> dict[str, object]:
+            """Run the deep-solve verification-refinement pipeline for a problem.
+
+            Args:
+                problem: The full problem statement (required).
+                domain: Optional domain hint: competitive_programming / math_proof / general_analysis.
+                test_command: Shell command to run acceptance tests against the candidate solution.
+                tests: Alias for test_command.
+                consecutive_clean_passes: Number of consecutive clean verification rounds needed to accept a proof (default 3).
+                language: Target implementation language (default python3).
+                provider: Optional explicit child provider route for stage agents.
+                model: Optional explicit child model route for stage agents.
+            """
+            arguments = _registry_adk_arguments(
+                problem=problem,
+                provider=provider,
+                model=model,
+            )
+            if domain:
+                arguments["domain"] = domain
+            if test_command:
+                arguments["test_command"] = test_command
+            elif tests:
+                arguments["tests"] = tests
+            if consecutive_clean_passes != 3:
+                arguments["consecutive_clean_passes"] = consecutive_clean_passes
+            if language and language != "python3":
+                arguments["language"] = language
+            return await _dispatch_adk_tool(host, "DeepSolve", arguments, tool_context)
+
+        return function_tool(
+            invoke_deep_solve,
+            description=(
+                "Run the deep-solve verification-refinement pipeline on a math or "
+                "competitive programming problem. Iterates solve/verify/refine cycles "
+                "using live child agents until tests pass or N consecutive clean "
+                "verification rounds occur."
+            ),
+        )
 
     if name == "SpawnAgent":
 

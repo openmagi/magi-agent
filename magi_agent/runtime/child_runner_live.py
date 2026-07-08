@@ -856,6 +856,7 @@ class RealLocalChildRunner:
         evidence_collector: object | None = None,
         workspace_root: str | None = None,
         progress_sink: Callable[[Mapping[str, object]], object] | None = None,
+        full_text_sink: Callable[[str], None] | None = None,
         env: Mapping[str, str] | None = None,
         spawn_cap: tuple[str, ...] | None = None,
     ) -> None:
@@ -884,6 +885,14 @@ class RealLocalChildRunner:
         self._evidence_collector = evidence_collector
         self._workspace_root = workspace_root
         self._progress_sink = progress_sink
+        #: B1 full-text seam (U3, deep-solve pipeline): optional sink that
+        #: receives the UNTRIMMED final_text BEFORE the ``_MAX_SUMMARY_CHARS``
+        #: pre-trim.  Default ``None`` → byte-identical to pre-seam behavior
+        #: (the envelope/summary path is untouched regardless).
+        #: The sink is documented parent-runtime-internal; it MUST NOT be
+        #: propagated to any public event or SSE channel.  A raising sink is
+        #: swallowed (never-raise contract preserved).
+        self._full_text_sink: Callable[[str], None] | None = full_text_sink
         self._env: Mapping[str, str] = os.environ if env is None else env
         #: Orchestrator-imposed tool-name ceiling (Seam 2b). Stored for a future
         #: task (Seam 4) that will intersect the child's toolset against it.
@@ -976,6 +985,15 @@ class RealLocalChildRunner:
                 child_execution_id,
                 reason=_DEGRADE_TURN_ERROR,
             )
+
+        # B1 full-text seam: invoke sink with the UNTRIMMED text BEFORE the
+        # _MAX_SUMMARY_CHARS pre-trim.  Default None → byte-identical behavior.
+        # A raising sink is swallowed so the never-raise contract is preserved.
+        if self._full_text_sink is not None:
+            try:
+                self._full_text_sink((final_text or "").strip())
+            except Exception:  # noqa: BLE001 — sink failure must never abort run_child
+                pass
 
         summary = (final_text or "").strip()[:_MAX_SUMMARY_CHARS]
         return {

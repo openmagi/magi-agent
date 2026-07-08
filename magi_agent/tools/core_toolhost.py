@@ -200,6 +200,28 @@ def bind_core_toolhost_handlers(registry: ToolRegistry) -> tuple[str, ...]:
     return CoreToolhostHandlerSet.from_env().bind(registry)
 
 
+def standalone_core_tool_handler(
+    tool_name: str,
+    *,
+    command_timeout_ms: int | None = None,
+):
+    """Governed standalone handler for ONE core tool, outside a registry bind.
+
+    First-party orchestrators (e.g. DeepSolve ground-truth test execution) use
+    this to run a command through the SAME governed surface the model's own
+    tool calls take — memory-mode guard + Gate5B toolhost caps/redaction —
+    instead of a raw subprocess. ``command_timeout_ms`` optionally overrides
+    the env-derived per-command timeout (clamped to the toolhost's own
+    250ms–600s bounds).
+    """
+    handler_set = CoreToolhostHandlerSet.from_env()
+    if command_timeout_ms is not None:
+        handler_set._config["commandTimeoutMs"] = max(
+            250, min(int(command_timeout_ms), 600000)
+        )
+    return handler_set._handler_for(tool_name)
+
+
 def _memory_mode_block(
     tool_name: str,
     arguments: dict[str, object],

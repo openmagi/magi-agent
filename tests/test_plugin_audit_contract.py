@@ -22,6 +22,7 @@ EXPECTED_NATIVE_PLUGIN_IDS = (
     "openmagi.artifacts",
     "openmagi.browser",
     "openmagi.coding",
+    "openmagi.deep-solve",
     "openmagi.documents",
     "openmagi.knowledge",
     "openmagi.knowledge-okf",
