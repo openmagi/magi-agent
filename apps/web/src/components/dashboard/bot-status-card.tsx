@@ -604,7 +604,7 @@ export function BotStatusCard({ bot, subscriptionPlan }: BotStatusCardProps) {
       <div className="flex items-start justify-between mb-6">
         <div className="flex items-center gap-3">
           {isActive && !restarting && !isDegraded && (
-            <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 pulse-glow" />
+            <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
           )}
           {isActive && !restarting && isDegraded && (
             <div className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />

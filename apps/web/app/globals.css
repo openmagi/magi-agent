@@ -61,33 +61,15 @@ body {
   -webkit-backdrop-filter: blur(12px);
 }
 
-/* Neon glow */
-.glow {
-  box-shadow: 0 0 20px rgba(23, 99, 90, 0.08), 0 0 40px rgba(23, 99, 90, 0.04);
-}
-
+/* Small glow — used by GlassCard glow prop (landing/status accents). */
 .glow-sm {
   box-shadow: 0 0 8px rgba(23, 99, 90, 0.04);
-}
-
-.glow-cta {
-  box-shadow: 0 0 16px rgba(23, 99, 90, 0.3), 0 0 32px rgba(23, 99, 90, 0.1);
 }
 
 /* Shimmer for loading */
 @keyframes shimmer {
   0% { background-position: -200% center; }
   100% { background-position: 200% center; }
-}
-
-/* Pulse glow for active indicators */
-@keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 6px rgba(23, 99, 90, 0.4); }
-  50% { box-shadow: 0 0 16px rgba(23, 99, 90, 0.7), 0 0 24px rgba(23, 99, 90, 0.2); }
-}
-
-.pulse-glow {
-  animation: pulse-glow 2s ease-in-out infinite;
 }
 
 /* Scrollbar */
