@@ -46,6 +46,7 @@ EXPECTED_NATIVE_TOOL_NAMES = {
     "CodingBenchmark",
     "CommitCheckpoint",
     "DateRange",
+    "DeepSolve",
     "SocialBrowser",
     "DocumentWrite",
     "SpreadsheetWrite",
