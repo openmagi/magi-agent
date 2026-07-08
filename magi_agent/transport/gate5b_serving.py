@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from magi_agent.config.env import is_egress_gate_enabled
-from magi_agent.config.flags import flag_bool, flag_str
+from magi_agent.config.flags import flag_profile_bool, flag_str
 from magi_agent.evidence.gate1a_egress_correlation import GATE1A_EGRESS_CORRELATION_MODE, GATE1A_EGRESS_TELEMETRY_SOURCE, Gate1AEgressCorrelationContext
 from magi_agent.evidence.observed_egress import ObservedEgressEvidence, get_observed_egress_evidence_provider
 from magi_agent.gates.gate1a_readonly_tools import Gate1AReadOnlyToolBundle, Gate1AReadOnlyToolConfig, build_gate1a_readonly_tool_bundle
@@ -124,9 +124,10 @@ async def run_gate5b_user_visible_chat_response(
     ``/v1/chat/completions`` route reach the driver through this function, so a
     single set/reset here keeps the ContextVars live for the governed turn in
     both. ``goalMode`` absent leaves both ContextVars at their defaults, so
-    behavior is byte-identical to pre-U6. Inert on hosted until
-    ``MAGI_HOSTED_GOVERNED_TURN_ENABLED`` flips (only then does the hosted turn
-    reach ``MagiEngineDriver._drive``); active immediately for the local-engine
+    behavior is byte-identical to pre-U6. On hosted the governed turn reaches
+    ``MagiEngineDriver._drive`` whenever ``MAGI_HOSTED_GOVERNED_TURN_ENABLED``
+    resolves ON (profile-aware default-ON: the full/lab profile; OFF under the
+    safe-family or an explicit "0"); active immediately for the local-engine
     branch of the streaming route. Mirrors ``chat_routes_local`` set/reset.
     """
     _goal_mode_requested = (
@@ -601,14 +602,15 @@ async def _run_live_chat_runner(
         except Exception:  # noqa: BLE001 — registration must never break a turn
             active_turn_claim = None
     try:
-        # MAGI_HOSTED_GOVERNED_TURN_ENABLED (default-OFF, hosted scope):
-        # When ON, route through run_governed_turn → MagiEngineDriver (Phase 2
-        # flip) instead of gate5b4c3._invoke_async_turn. The result shim
+        # MAGI_HOSTED_GOVERNED_TURN_ENABLED (profile-aware default-ON, hosted
+        # scope): when ON (the default under the full/lab runtime profile),
+        # route through run_governed_turn → MagiEngineDriver (Phase 2 flip)
+        # instead of gate5b4c3._invoke_async_turn. The result shim
         # (collect_engine_to_boundary_result) produces a wire-compatible
         # Gate5B4C3LiveRunnerBoundaryResult so all downstream code is unchanged.
-        # Flag-OFF (default) = byte-identical to today: the legacy boundary call
-        # is taken without any additional overhead.
-        if flag_bool("MAGI_HOSTED_GOVERNED_TURN_ENABLED"):
+        # OFF (safe-family profile or an explicit "0") = byte-identical to the
+        # legacy boundary call, taken without any additional overhead.
+        if flag_profile_bool("MAGI_HOSTED_GOVERNED_TURN_ENABLED"):
             # 1. Build the runner input (input adapter + policy checks).
             runner_input_result = build_gate5b4c3_runner_input(generation)
             if runner_input_result.status != "accepted" or runner_input_result.runner_input is None:

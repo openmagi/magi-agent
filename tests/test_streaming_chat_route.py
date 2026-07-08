@@ -61,6 +61,24 @@ from magi_agent.transport.streaming_sink import build_streaming_prompt_sink
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _legacy_selected_stream_path(monkeypatch):
+    """Pin the pre-governed selected-canary streaming path for this module.
+
+    These tests exercise the legacy (non-governed) gate5b selected-canary /
+    full-toolhost streaming route with fake runners. When
+    ``MAGI_HOSTED_GOVERNED_TURN_ENABLED`` flips to profile-aware default-ON,
+    the requests would instead route through ``run_governed_turn`` ->
+    ``MagiEngineDriver`` (verified working end-to-end on a live bot), whose
+    layer these fakes deliberately do not wire, surfacing ``runner_error``.
+    The governed streaming path has its own suite in
+    ``tests/test_chat_routes_hosted_governed_turn.py``; here we hold the legacy
+    path explicitly so each test keeps asserting the behavior it was written for.
+    """
+
+    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "0")
+
+
 def _make_runtime(
     *,
     gateway_token: str = "test-token",

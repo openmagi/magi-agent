@@ -56,6 +56,21 @@ _ENV = "MAGI_GATE5B_GOVERNANCE_ENABLED"
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _legacy_selected_gate5b_path(monkeypatch):
+    """Pin the pre-governed selected-canary gate5b path for this module.
+
+    These tests exercise the legacy (non-governed) gate5b chat route with fake
+    runners; under MAGI_HOSTED_GOVERNED_TURN_ENABLED default-ON the requests
+    route through run_governed_turn -> MagiEngineDriver (verified working on a
+    live bot) whose layer these fakes do not wire, surfacing runner_error / 502.
+    Governed streaming has its own suite in
+    tests/test_chat_routes_hosted_governed_turn.py; hold the legacy path here.
+    """
+
+    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "0")
+
+
 def test_flag_off_by_default(monkeypatch) -> None:
     monkeypatch.delenv(_ENV, raising=False)
     assert gate5b_governance_enabled() is False

@@ -2403,14 +2403,16 @@ FLAGS: tuple[FlagSpec, ...] = (
             "OFF under the safe-family)."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_HOSTED_GOVERNED_TURN_ENABLED",
         scope="hosted",
         summary=(
             "Route hosted serving turns through run_governed_turn → "
-            "MagiEngineDriver instead of gate5b4c3._invoke_async_turn (Phase 2 "
-            "flip; default-OFF; CLI/local path unchanged). When OFF the hosted "
-            "path is byte-identical to today."
+            "MagiEngineDriver instead of gate5b4c3._invoke_async_turn "
+            "(Phase 2 flip; CLI/local path unchanged). Profile-aware "
+            "default-ON (full/lab; OFF under the safe-family or an explicit "
+            "\"0\"). When OFF the hosted path is byte-identical to the legacy "
+            "gate5b4c3._invoke_async_turn boundary."
         ),
     ),
     _b(
