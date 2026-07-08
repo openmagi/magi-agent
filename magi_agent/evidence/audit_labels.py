@@ -70,6 +70,15 @@ NUDGE_IGNORED = "NUDGE IGNORED"
 # label carries the actionable verdict.
 AUDIT_PASS = "AUDIT PASS"
 
+# Per-finding verify labels (PR-2, B4 finding arm, design Section 5). Advisory
+# findings never escalate above ADVISORY/info regardless of resolution; the
+# resolution still rides the verify wire object so the FE can render the
+# muted "ignored" state.
+RESOLVED = "RESOLVED"
+ACKNOWLEDGED = "ACKNOWLEDGED"
+IGNORED = "IGNORED"
+ADVISORY = "ADVISORY"
+
 # Statuses that count as a "pass" for the reviewer special-case below. A reviewer
 # event with any NON-pass status projects to REJECTED BY REVIEWER.
 _PASS_STATUSES: frozenset[str] = frozenset({"pass", "passed", "ok"})
@@ -162,6 +171,11 @@ _SEVERITY_BY_LABEL: dict[str, str] = {
     # Per-pass audit trace row (B4, GAP-2 fix). Info: these are process-trace
     # rows, not actionable verdicts; the turn label carries the real signal.
     AUDIT_PASS: "info",
+    # Per-finding labels (PR-2, design Section 5).
+    RESOLVED: "pass",
+    ACKNOWLEDGED: "review",
+    IGNORED: "deny",
+    ADVISORY: "info",
 }
 
 # ---------------------------------------------------------------------------
@@ -245,19 +259,44 @@ def classify_verdict_severity(label: str) -> str:
     return _SEVERITY_BY_LABEL.get(label, "info")
 
 
+def verify_finding_display_label(confidence: str, resolution: str) -> str:
+    """Project a verify finding (confidence x resolution) onto a display label.
+
+    Advisory findings never escalate above ADVISORY/info regardless of
+    resolution (the confidence label does the triage; design Section 5).
+    """
+    conf = (confidence or "").strip().lower()
+    res = (resolution or "").strip().lower()
+    if conf == "advisory":
+        return ADVISORY
+    if conf == "high":
+        return {
+            "resolved": RESOLVED,
+            "acknowledged_shipped": ACKNOWLEDGED,
+            "ignored": IGNORED,
+        }.get(res, UNKNOWN)
+    return UNKNOWN
+
+
 def is_enforced_kind(kind: str) -> bool:
     """Return True iff ``kind`` is a persisted policy-enforcement event kind."""
     return kind in ENFORCEMENT_EVENT_KINDS
 
 
 __all__ = [
+    "ACKNOWLEDGED",
+    "ADVISORY",
     "AUDIT_PASS",
     "ENFORCEMENT_EVENT_KINDS",
+    "IGNORED",
     "NUDGE_IGNORED",
+    "RESOLVED",
     "REVISED",
     "SHIPPED_ACKNOWLEDGED",
+    "UNKNOWN",
     "VERIFIED_CLEAN",
     "classify_verdict_severity",
     "is_enforced_kind",
+    "verify_finding_display_label",
     "verdict_to_display_label",
 ]

@@ -22,6 +22,7 @@ from magi_agent.evidence.audit_labels import (
     classify_verdict_severity,
     is_enforced_kind,
     verdict_to_display_label,
+    verify_finding_display_label,
 )
 from magi_agent.evidence.reports import (
     public_evidence_metadata_report,
@@ -152,9 +153,16 @@ def _project_verdict(event: Mapping[str, Any]) -> dict[str, Any]:
         elif verify_kind == "pass" or verify_kind is None:
             # Pass row or legacy row (no verifyKind from pre-fix image).
             display_label = AUDIT_PASS
+        elif verify_kind == "finding":
+            # Per-finding row (PR-2, design B4 finding arm). Use the finding-specific
+            # label function keyed on (confidence, resolution); bypass the generic
+            # verdict_to_display_label which only handles turn-level verdicts.
+            confidence = _first_str(payload.get("confidence")) or ""
+            resolution = _first_str(payload.get("resolution")) or ""
+            status = resolution or status
+            display_label = verify_finding_display_label(confidence, resolution)
         else:
-            # "finding" arm and any future species land here. Fall through to the
-            # existing label function until that arm is wired in PR-2.
+            # Future species: fall through to the generic label function.
             display_label = verdict_to_display_label(status, source_type=source_type)
     else:
         display_label = verdict_to_display_label(status, source_type=source_type)
@@ -250,7 +258,39 @@ def _verify_wire_fields(payload: Mapping[str, Any]) -> dict[str, Any] | None:
         if context is not None:
             obj["context"] = context
         return obj
-    # "finding" arm and any future species: no wire object yet (PR-2 adds finding arm).
+    if verify_kind == "finding":
+        # Per-finding wire object (PR-2, design B4 finding arm). Free text fields
+        # (claimText, expected, observed) run through public_projection_safe_text
+        # as a backstop -- the emitter already applied display_span, but the
+        # projection layer is the final redaction frontier (mirrors how summary
+        # is handled at :193).
+        fobj: dict[str, Any] = {"kind": "finding"}
+        finding_id = _first_str(payload.get("findingId"))
+        if finding_id is not None:
+            fobj["findingId"] = finding_id
+        confidence = _first_str(payload.get("confidence"))
+        if confidence is not None:
+            fobj["confidence"] = confidence
+        claim_class = _first_str(payload.get("claimClass"))
+        if claim_class is not None:
+            fobj["claimClass"] = claim_class
+        resolution = _first_str(payload.get("resolution"))
+        if resolution is not None:
+            fobj["resolution"] = resolution
+        claim_text_raw = _first_str(payload.get("claimText"))
+        if claim_text_raw is not None:
+            fobj["claimText"] = public_projection_safe_text(claim_text_raw)
+        expected_raw = _first_str(payload.get("expectedValue"))
+        if expected_raw is not None:
+            fobj["expected"] = public_projection_safe_text(expected_raw)
+        observed_raw = _first_str(payload.get("observedValue"))
+        if observed_raw is not None:
+            fobj["observed"] = public_projection_safe_text(observed_raw)
+        suggested_action = _first_str(payload.get("suggestedAction"))
+        if suggested_action is not None:
+            fobj["suggestedAction"] = suggested_action
+        return fobj
+    # Future species: no wire object.
     return None
 
 

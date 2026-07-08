@@ -376,6 +376,10 @@ _VERIFY_TURN_VERDICT_TO_RULE_VERDICT: dict[str, str] = {
     "nudge_ignored": "violation",
 }
 
+# Maximum number of per-finding rows emitted per turn (B2, design 3.2).
+# Excess findings are counted in the turn row's findingsOmitted field.
+_VERIFY_FINDING_ROW_CAP = 12
+
 #: Auto-continue re-invocation prompt fed back to the SAME session when the
 #: durable ledger still has open todos. Deliberately short + generic so the model
 #: does not anchor on the wording and re-describe its plan; the original system
@@ -1947,6 +1951,7 @@ class MagiEngineDriver:
         stats: "Mapping[str, int]",
         corpus_record_count: int,
         context: str | None = None,
+        findings_omitted: int = 0,
     ) -> None:
         """Surface the per-turn verify verdict on the observability audit feed (PR-1, design B1).
 
@@ -1989,9 +1994,67 @@ class MagiEngineDriver:
             event["loopBackToolCalls"] = int(verify_state.loopback_tool_calls)
             event["skepticRan"] = bool(verify_state.skeptic_ran)
             event["corpusRecordCount"] = int(corpus_record_count)
+            event["findingsOmitted"] = int(findings_omitted)
             if context is not None:
                 event["context"] = context
             self._observe_event(dict(event), session_id, turn_id)
+        except Exception:
+            return
+
+    def _emit_verify_finding_observability(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        resolutions: "Sequence[tuple[object, str]]",
+    ) -> None:
+        """One capped rule_check row per finding with its FINAL resolution (B2).
+
+        Terminal-only: a persistent finding appears exactly once. Fail-soft.
+        """
+        if getattr(self, "_event_sink", None) is None:
+            return
+        try:
+            from magi_agent.evidence.verify_audit import display_span  # noqa: PLC0415
+            from magi_agent.runtime.public_events import rule_check_event  # noqa: PLC0415
+
+            for finding, resolution in list(resolutions)[:_VERIFY_FINDING_ROW_CAP]:
+                confidence = str(getattr(finding, "confidence", ""))
+                if confidence == "high" and resolution == "ignored":
+                    rule_verdict = "violation"
+                elif resolution == "resolved":
+                    rule_verdict = "ok"
+                else:
+                    rule_verdict = "pending"
+                detail_raw = str(getattr(finding, "detail", ""))
+                event = rule_check_event(
+                    rule_id=str(getattr(finding, "rule_id", "")),
+                    verdict=rule_verdict,  # type: ignore[arg-type]
+                    detail=display_span(detail_raw),
+                    event_family="verify_audit_alias",
+                )
+                event["sourceType"] = "verify"
+                event["policyId"] = "verify_before_replying"
+                event["verifyKind"] = "finding"
+                event["findingId"] = str(getattr(finding, "finding_id", ""))
+                event["confidence"] = confidence
+                event["claimClass"] = str(getattr(finding, "claim_class", ""))
+                event["resolution"] = str(resolution)
+                claim_text = str(getattr(finding, "claim_text", ""))
+                claim = display_span(claim_text)
+                if claim:
+                    event["claimText"] = claim
+                expected = getattr(finding, "expected", None)
+                if expected is not None:
+                    event["expectedValue"] = display_span(str(expected))
+                observed = getattr(finding, "observed", None)
+                if observed is not None:
+                    event["observedValue"] = display_span(str(observed))
+                event["suggestedAction"] = str(getattr(finding, "suggested_action", ""))
+                evidence_refs = getattr(finding, "evidence_refs", ())
+                if evidence_refs:
+                    event["evidenceRef"] = str(evidence_refs[0])
+                self._observe_event(dict(event), session_id, turn_id)
         except Exception:
             return
 
@@ -2148,6 +2211,7 @@ class MagiEngineDriver:
                 tool_call_id=f"verify-before-replying:{turn_id}",
                 producing_rule_id="verify_before_replying.audit",
             )
+            findings_omitted = max(0, len(resolutions) - _VERIFY_FINDING_ROW_CAP)
             self._emit_verify_verdict_observability(
                 session_id=session_id,
                 turn_id=turn_id,
@@ -2156,6 +2220,12 @@ class MagiEngineDriver:
                 stats=stats,
                 corpus_record_count=len(turn_records) + len(session_records),
                 context=context,
+                findings_omitted=findings_omitted,
+            )
+            self._emit_verify_finding_observability(
+                session_id=session_id,
+                turn_id=turn_id,
+                resolutions=resolutions,
             )
         except Exception:
             return

@@ -619,3 +619,170 @@ def test_project_verdict_legacy_verify_row_has_no_verify_object(tmp_path):
     assert row["severity"] == "info"
     # Legacy row must NOT have a verify wire object.
     assert row.get("verify") is None
+
+
+# ---------------------------------------------------------------------------
+# Tests 19-21: PR-2 finding arm (verifyKind=="finding")
+# ---------------------------------------------------------------------------
+
+
+def test_project_verdict_verify_finding_row_golden(tmp_path):
+    """Test 19: golden projection for a per-finding row.
+
+    high+ignored variant -> displayLabel==IGNORED, severity==deny, status==ignored.
+    advisory variant -> displayLabel==ADVISORY, severity==info.
+    subject is ruleId; verify object carries finding fields; evidenceRefs lifted.
+    """
+    store = _store(tmp_path)
+    store.record_event(
+        ActivityEvent(
+            kind="rule_check",
+            session_id="s1",
+            run_id="r",
+            ts=1.0,
+            payload={
+                "verdict": "violation",
+                "sourceType": "verify",
+                "verifyKind": "finding",
+                "ruleId": "verify_before_replying.claim_citation",
+                "findingId": "a1b2",
+                "confidence": "high",
+                "claimClass": "numeric",
+                "resolution": "ignored",
+                "claimText": "revenue grew 40% in Q1",
+                "suggestedAction": "cite",
+                "evidenceRef": "evidence:sha256:ab...",
+            },
+        )
+    )
+    row = build_session_audit("s1", store=store)["runs"][0]["verdicts"][0]
+
+    # Label / severity / status
+    assert row["displayLabel"] == "IGNORED", f"got {row['displayLabel']!r}"
+    assert row["severity"] == "deny", f"got {row['severity']!r}"
+    assert row["status"] == "ignored", f"got {row['status']!r}"
+
+    # Subject is the ruleId
+    assert row["subject"] == "verify_before_replying.claim_citation"
+
+    # evidenceRefs lifted from scalar evidenceRef field
+    assert row["evidenceRefs"] == ["evidence:sha256:ab..."]
+
+    # verify wire object
+    verify = row.get("verify")
+    assert verify is not None, "Expected verify wire object on finding row"
+    assert verify["kind"] == "finding"
+    assert verify["findingId"] == "a1b2"
+    assert verify["confidence"] == "high"
+    assert verify["claimClass"] == "numeric"
+    assert verify["resolution"] == "ignored"
+    assert verify["claimText"] == "revenue grew 40% in Q1"
+    assert verify["suggestedAction"] == "cite"
+
+    # Advisory variant: displayLabel==ADVISORY, severity==info regardless of resolution.
+    store2 = _store(tmp_path / "adv")
+    store2.record_event(
+        ActivityEvent(
+            kind="rule_check",
+            session_id="s2",
+            run_id="r2",
+            ts=2.0,
+            payload={
+                "verdict": "pending",
+                "sourceType": "verify",
+                "verifyKind": "finding",
+                "ruleId": "verify_before_replying.claim_citation",
+                "findingId": "c3d4",
+                "confidence": "advisory",
+                "claimClass": "existence",
+                "resolution": "ignored",
+                "claimText": "the study found significant results",
+                "suggestedAction": "recheck",
+                "evidenceRef": "evidence:sha256:xy...",
+            },
+        )
+    )
+    row2 = build_session_audit("s2", store=store2)["runs"][0]["verdicts"][0]
+    assert row2["displayLabel"] == "ADVISORY", f"got {row2['displayLabel']!r}"
+    assert row2["severity"] == "info", f"got {row2['severity']!r}"
+    verify2 = row2.get("verify")
+    assert verify2 is not None
+    assert verify2["resolution"] == "ignored"
+
+
+def test_project_verdict_finding_claim_text_redaction_backstop(tmp_path):
+    """Test 20: claimText with a raw path is redacted by the audit_view backstop.
+
+    Even if the emitter hypothetically bypassed display_span, the audit_view
+    projection layer (public_projection_safe_text) remains the final backstop.
+    The path /home/kevin/secret.txt triggers redaction to [redacted].
+    FE must treat [redacted]/empty as a fallback display.
+    """
+    store = _store(tmp_path)
+    store.record_event(
+        ActivityEvent(
+            kind="rule_check",
+            session_id="s1",
+            run_id="r",
+            ts=1.0,
+            payload={
+                "verdict": "violation",
+                "sourceType": "verify",
+                "verifyKind": "finding",
+                "ruleId": "verify_before_replying.evidence_consistency",
+                "findingId": "path-test",
+                "confidence": "high",
+                "claimClass": "existence",
+                "resolution": "ignored",
+                "claimText": "see /home/kevin/secret.txt",
+                "suggestedAction": "recheck",
+            },
+        )
+    )
+    row = build_session_audit("s1", store=store)["runs"][0]["verdicts"][0]
+    verify = row.get("verify")
+    assert verify is not None, "Expected verify wire object"
+    claim_text = verify.get("claimText")
+    # The backstop redacts paths; value should be [redacted].
+    assert claim_text == "[redacted]", (
+        f"Expected claimText to be redacted to '[redacted]', got {claim_text!r}"
+    )
+
+
+def test_project_verdict_finding_expected_observed(tmp_path):
+    """Test 21: expectedValue / observedValue project to verify.expected / verify.observed.
+
+    Wire names per design 3.5. Both fields run through public_projection_safe_text.
+    """
+    store = _store(tmp_path)
+    store.record_event(
+        ActivityEvent(
+            kind="rule_check",
+            session_id="s1",
+            run_id="r",
+            ts=1.0,
+            payload={
+                "verdict": "violation",
+                "sourceType": "verify",
+                "verifyKind": "finding",
+                "ruleId": "verify_before_replying.numeric_accuracy",
+                "findingId": "exp-obs-test",
+                "confidence": "high",
+                "claimClass": "numeric",
+                "resolution": "ignored",
+                "claimText": "the value was 42",
+                "expectedValue": "42",
+                "observedValue": "38",
+                "suggestedAction": "recheck",
+            },
+        )
+    )
+    row = build_session_audit("s1", store=store)["runs"][0]["verdicts"][0]
+    verify = row.get("verify")
+    assert verify is not None, "Expected verify wire object"
+    assert verify.get("expected") == "42", (
+        f"expectedValue should project to verify.expected, got {verify.get('expected')!r}"
+    )
+    assert verify.get("observed") == "38", (
+        f"observedValue should project to verify.observed, got {verify.get('observed')!r}"
+    )
