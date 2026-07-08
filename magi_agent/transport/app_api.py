@@ -331,6 +331,68 @@ def _read_text(path: Path, *, limit: int | None = None) -> str | None:
     return data if limit is None else data[:limit]
 
 
+# Per-preview extraction budget. The converter clamps to its own 200 000-char
+# ceiling; the dashboard preview pane never needs more than the head of a doc.
+_KB_PREVIEW_MAX_CHARS = 200_000
+
+# Honest, specific messages for the KB preview when text extraction fails. The
+# frontend renders ``error`` verbatim, so these replace the misleading
+# ``not_found`` a binary document used to yield.
+_KB_PREVIEW_ERROR_MESSAGES = {
+    "document_dependency_not_installed": (
+        "preview unavailable — document extraction libraries are not installed"
+    ),
+    "document_extension_not_supported": (
+        "preview unavailable — this file type can't be previewed as text"
+    ),
+    "document_input_too_large": (
+        "preview unavailable — this file is too large to preview"
+    ),
+}
+_KB_PREVIEW_DEFAULT_ERROR = (
+    "preview unavailable — could not extract text from this file"
+)
+
+
+def _extraction_root_for(target: Path) -> Path | None:
+    """Return the workspace root that owns *target*, or ``None``."""
+    for root in _workspace_roots():
+        try:
+            target.relative_to(root)
+        except ValueError:
+            continue
+        return root
+    return None
+
+
+def _extract_document_markdown(
+    target: Path, *, bot_id: str, max_chars: int = _KB_PREVIEW_MAX_CHARS
+) -> object | None:
+    """Extract *target* to markdown via the first-party document converter.
+
+    Returns the ``MarkdownConversion`` (any ``status``) so the caller can surface
+    a specific, honest error, or ``None`` when no workspace root owns the file or
+    the converter raises. Never raises — a preview must not crash the dashboard.
+    """
+    root = _extraction_root_for(target)
+    if root is None:
+        return None
+    try:
+        rel = target.relative_to(root).as_posix()
+    except ValueError:
+        return None
+    try:
+        from magi_agent.tools.context import ToolContext  # noqa: PLC0415
+        from magi_agent.tools.file_markdown import (  # noqa: PLC0415
+            convert_file_to_markdown,
+        )
+
+        context = ToolContext(botId=bot_id, workspaceRoot=str(root))
+        return convert_file_to_markdown(rel, context, max_chars=max_chars)
+    except Exception:  # noqa: BLE001 — extraction must never crash a preview
+        return None
+
+
 # --------------------------------------------------------------------------- #
 # Runtime status
 # --------------------------------------------------------------------------- #
@@ -1178,10 +1240,36 @@ def register_app_api_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         target = _resolve_in_workspace(path)
         if target is None or _is_protected(target):
             return JSONResponse(status_code=403, content={"error": "forbidden_path"})
-        content = _read_text(target)
-        if content is None:
+        if not _path_exists(target):
             return JSONResponse(status_code=404, content={"error": "not_found"})
-        return JSONResponse(content={"content": content, "path": path})
+        # Text-like files: fast UTF-8 read. Binary documents (PDF, Office, legacy
+        # Excel) fail that decode — extract them to markdown with the first-party
+        # document converter so the preview shows real text instead of the
+        # misleading "not_found" a binary used to yield.
+        content = _read_text(target)
+        if content is not None:
+            return JSONResponse(content={"content": content, "path": path})
+        conversion = _extract_document_markdown(target, bot_id=runtime.config.bot_id)
+        if conversion is not None and getattr(conversion, "status", None) == "ok":
+            return JSONResponse(
+                content={
+                    "content": getattr(conversion, "markdown", "") or "",
+                    "path": path,
+                    "extracted": True,
+                    "truncated": bool(getattr(conversion, "truncated", False)),
+                    "sourceTool": getattr(conversion, "source_tool", "") or "",
+                }
+            )
+        error_code = (
+            getattr(conversion, "error_code", None) if conversion is not None else None
+        )
+        message = _KB_PREVIEW_ERROR_MESSAGES.get(
+            error_code or "", _KB_PREVIEW_DEFAULT_ERROR
+        )
+        return JSONResponse(
+            status_code=415,
+            content={"error": message, "errorCode": error_code},
+        )
 
     @app.put("/v1/app/knowledge/file")
     async def app_knowledge_write(request: Request) -> JSONResponse:

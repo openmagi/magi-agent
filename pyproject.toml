@@ -21,6 +21,19 @@ dependencies = [
   # without ever seeing the secret. Lazily imported in
   # credentials_admin/local_proxy.py, so a stripped env that drops it still runs.
   "mitmproxy>=10",
+  # Document-extraction libraries for the KB file preview and DocumentRead.
+  # These are first-party *local reading* surfaces — the dashboard preview
+  # (/v1/app/knowledge/file) and DocumentRead extract text from uploaded
+  # PDFs/spreadsheets/decks — symmetric to DocumentWrite authoring
+  # (python-docx, below), which is already core for the same reason. Promoted
+  # from the `[files]` extra so `pip install magi-agent` previews binary docs
+  # out-of-the-box instead of failing with a UTF-8 decode error. All four are
+  # pure-Python wheels; each importer still imports lazily, so a stripped env
+  # that drops one degrades that one format gracefully.
+  "openpyxl>=3.1",
+  "pypdf>=4.0",
+  "python-pptx>=1.0",
+  "xlrd>=2.0.1",
   "pydantic==2.13.4",
   "python-docx>=1.1",
   "pyshacl>=0.25.0",
@@ -86,16 +99,13 @@ anthropic = [
 # Compatibility extra. Provider-capable installs are now the default because
 # the runtime uses ADK LiteLlm as the common model path.
 providers = []
-# Optional file & multimodal attachment tools (MAGI_FILE_TOOLS_ENABLED=true).
-# DOCX/HWPX authoring dependencies are base runtime dependencies because
-# DocumentWrite is a first-party local authoring surface.
-# Install with: uv sync --extra files
-files = [
-  "openpyxl>=3.1",
-  "pypdf>=4.0",
-  "python-pptx>=1.0",
-  "xlrd>=2.0.1",
-]
+# Back-compat no-op extra. The document-extraction libraries it used to carry
+# (openpyxl, pypdf, python-pptx, xlrd) are now BASE dependencies — see the note
+# beside them in `dependencies` above — because the KB preview and DocumentRead
+# are first-party local reading surfaces that must work out-of-the-box. Kept as
+# an empty extra so existing `pip install magi-agent[files]` / `uv sync --extra
+# files` invocations keep resolving.
+files = []
 # Optional audio transcription provider (MAGI_ASR_PROVIDER=openai_whisper).
 # Install with: uv sync --extra audio
 audio = [
