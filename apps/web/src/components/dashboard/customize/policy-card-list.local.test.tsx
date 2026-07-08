@@ -106,6 +106,10 @@ function baseProps(over: Partial<PolicyCardListProps>): PolicyCardListProps {
     onToggleDashboardCheck: NOOP,
     onDeleteDashboardCheck: NOOP,
     onDeleteSeamSpec: NOOP,
+    onToggleBuiltinPolicy: NOOP,
+    onToggleControlPlane: NOOP,
+    pendingBuiltinPolicies: new Set(),
+    pendingControlPlane: new Set(),
     ...over,
   };
 }
@@ -300,5 +304,102 @@ describe("delete confirmation (review fold)", () => {
   it("asks for confirmation with an honest member-cascade note", () => {
     expect(src).toContain("window.confirm");
     expect(src).toContain("member rule");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PR-3 — first-party opt-out + control-plane nudge cards fold into Policies
+// ---------------------------------------------------------------------------
+
+describe("PolicyCardList — PR-3 first-party + control-plane cards", () => {
+  it("verify_before_replying (source=builtinPolicy) renders a REAL Switch, not a managed pill", () => {
+    const html = render({
+      catalogPolicies: [
+        nativePolicy({
+          id: "verify_before_replying",
+          origin: "builtin",
+          userDisableable: true,
+          ruleIds: [],
+          enabledState: "on",
+          source: "builtinPolicy",
+        }),
+      ],
+    });
+    const card = html.slice(html.indexOf("policy-card-native:verify_before_replying"));
+    // Real toggle — NOT the dishonest static "managed" pill PR-2 rendered.
+    expect(card).toContain('role="switch"');
+    expect(card).not.toContain(">managed<");
+    // Lands in the First-party section.
+    expect(html).toContain("First-party");
+  });
+
+  it("source_citation floor stays an always-on pill (no toggle)", () => {
+    const html = render({
+      catalogPolicies: [
+        nativePolicy({
+          id: "source_citation",
+          origin: "builtin",
+          userDisableable: false,
+          ruleIds: [],
+          enabledState: "managed",
+          source: "builtinPolicy",
+        }),
+      ],
+    });
+    const card = html.slice(html.indexOf("policy-card-native:source_citation"));
+    expect(card).toContain("always-on");
+    expect(card).not.toContain('role="switch"');
+  });
+
+  it("a control-plane behavior renders as a NUDGE card with a real Switch in First-party", () => {
+    const html = render({
+      catalogPolicies: [
+        nativePolicy({
+          id: "goal-loop",
+          displayName: "Goal nudge",
+          intent: "re-inject the active goal",
+          origin: "builtin",
+          userDisableable: true,
+          ruleIds: [],
+          enabledState: "on",
+          source: "controlPlane",
+          actionHint: "nudge",
+        }),
+      ],
+    });
+    const card = html.slice(html.indexOf("policy-card-native:goal-loop"));
+    // NUDGE chip derived from actionHint even with zero member rules.
+    expect(card.toLowerCase()).toContain("nudge");
+    expect(card).toContain('role="switch"');
+    expect(html).toContain("First-party");
+  });
+
+  it("a control-plane behavior OFF globally reads as off (real toggle, no managed pill)", () => {
+    const html = render({
+      catalogPolicies: [
+        nativePolicy({
+          id: "facts-replan",
+          origin: "builtin",
+          userDisableable: true,
+          ruleIds: [],
+          enabledState: "off",
+          source: "controlPlane",
+          actionHint: "nudge",
+        }),
+      ],
+    });
+    const card = html.slice(html.indexOf("policy-card-native:facts-replan"));
+    expect(card).toContain('role="switch"');
+    expect(card).not.toContain(">managed<");
+  });
+});
+
+describe("PolicyCardList — PR-3 structure", () => {
+  it("declares builtin-policy + control-plane toggle routing + actionHint chip", () => {
+    expect(src).toContain("onToggleBuiltinPolicy");
+    expect(src).toContain("onToggleControlPlane");
+    expect(src).toContain('kind: "builtin-policy"');
+    expect(src).toContain('kind: "control-plane"');
+    expect(src).toContain("actionHint");
   });
 });

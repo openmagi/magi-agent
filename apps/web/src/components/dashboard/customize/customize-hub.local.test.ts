@@ -7,16 +7,40 @@ const src = readFileSync(
 );
 
 describe("CustomizeHub — Policy unification (PR-E1)", () => {
-  it("keeps the rules / modes / tools / behaviors / recipes / hooks sub-nav (deep-link compat)", () => {
+  it("keeps the rules / modes / tools / recipes / hooks sub-nav", () => {
     expect(src).toContain('"rules"');
     expect(src).toContain('"tools"');
     expect(src).toContain('"recipes"');
     expect(src).toContain('"hooks"');
-    // Guidance merged into the capability "behaviors" tab (PR-U2); it renders
-    // GuidancePanel + BehaviorsPanel under one section.
-    expect(src).toContain('"behaviors"');
+  });
+
+  it("PR-3: retires the Behaviors tab (no SECTIONS entry, no BehaviorsPanel)", () => {
+    // The Behaviors tab is gone from the sub-nav — its cards fold into Policies.
+    expect(src).not.toContain('id: "behaviors"');
+    expect(src).not.toContain('label: "Behaviors"');
+    expect(src).not.toContain("BehaviorsPanel");
+    // No render branch for the retired section (the only surviving reference to
+    // the literal is inside normalizeSection's redirect, asserted separately).
+    expect(src).not.toMatch(/\{section === "behaviors" \?/);
+  });
+
+  it("PR-3: an old ?section=behaviors deep link redirects to Policies (rules)", () => {
+    // normalizeSection maps the retired literal to the Policies tab so the URL
+    // lands there rather than a blank/404 panel.
+    expect(src).toContain("normalizeSection");
+    expect(src).toMatch(/section === "behaviors"[\s\S]*?return "rules"/);
+  });
+
+  it("PR-3: 'Your guidance' (GuidancePanel) relocates into the Policies surface", () => {
     expect(src).toContain("GuidancePanel");
-    expect(src).toContain("BehaviorsPanel");
+    expect(src).toContain('data-testid="guidance-section"');
+  });
+
+  it("PR-3: wires first-party policy + control-plane behavior toggles into the card list", () => {
+    expect(src).toContain("onToggleBuiltinPolicy={handleToggleBuiltinPolicy}");
+    expect(src).toContain("onToggleControlPlane={handleToggleBehavior}");
+    expect(src).toContain("patchBuiltinPolicyOverride");
+    expect(src).toContain("patchControlPlaneOverride");
   });
 
   it("PR-2: labels the enforcement section 'Policies' (was 'Rules') and pack section 'Packs'", () => {

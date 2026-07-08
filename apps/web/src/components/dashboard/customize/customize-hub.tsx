@@ -26,7 +26,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Switch } from "@/components/ui/_ds";
-import { ShieldCheck, Wrench, Layers, Webhook, Plus, SlidersHorizontal, Gauge, Drama } from "lucide-react";
+import { ShieldCheck, Wrench, Layers, Webhook, Plus, Gauge, Drama } from "lucide-react";
 import {
   useCustomize,
   patchToolOverride,
@@ -65,7 +65,6 @@ import {
 } from "./verification-rule-modal";
 import { CustomChecksSection } from "./custom-checks-section";
 import { CustomToolPanel } from "./custom-tool-modal";
-import { BehaviorsPanel } from "./behaviors-panel";
 import { BudgetsTab } from "./budgets-tab";
 import { GuidancePanel } from "./guidance-panel";
 import { ModesPanel } from "./modes-panel";
@@ -97,6 +96,10 @@ export type CustomizeSection =
   | "rules"
   | "modes"
   | "tools"
+  // PR-3 (design D4): the "behaviors" section is retired — its cards fold into
+  // the Policies surface. The literal is kept in the union so an old deep link
+  // (?section=behaviors) still type-checks; ``normalizeSection`` redirects it to
+  // ``"rules"`` so the tab is never rendered and the URL lands on Policies.
   | "behaviors"
   | "budgets"
   | "recipes"
@@ -129,13 +132,6 @@ const SECTIONS: ReadonlyArray<{
     description: "Enable or disable individual tools.",
   },
   {
-    id: "behaviors",
-    label: "Behaviors",
-    icon: <SlidersHorizontal className="h-4 w-4" />,
-    description:
-      "Capability (soft): things that nudge or help the agent but never block. Your freeform guidance plus the built-in in-context behaviors (facts survey, goal nudge, tool-synthesis nudge, empty-response recovery).",
-  },
-  {
     id: "budgets",
     label: "Budgets",
     icon: <Gauge className="h-4 w-4" />,
@@ -160,6 +156,17 @@ const SECTIONS: ReadonlyArray<{
 
 const DEFAULT_SECTION: CustomizeSection = "rules";
 
+/**
+ * Deep-link safety (PR-3): the retired "behaviors" section redirects to the
+ * Policies tab ("rules") so an old bookmark / query string lands on Policies
+ * instead of a blank/404 panel. Any section id not backed by a live SECTIONS
+ * entry also falls back to the default.
+ */
+function normalizeSection(section: CustomizeSection): CustomizeSection {
+  if (section === "behaviors") return "rules";
+  return SECTIONS.some((s) => s.id === section) ? section : DEFAULT_SECTION;
+}
+
 
 interface CustomizeHubProps {
   botId: string;
@@ -179,15 +186,18 @@ export function CustomizeHub({
   const { data, loading, error, reload } = useCustomize();
   const agentFetch = useAgentFetch();
 
-  const [section, setSection] = useState<CustomizeSection>(initialSection);
+  const [section, setSection] = useState<CustomizeSection>(
+    normalizeSection(initialSection),
+  );
   useEffect(() => {
-    setSection(initialSection);
+    setSection(normalizeSection(initialSection));
   }, [initialSection]);
 
   const handleSection = useCallback(
     (next: CustomizeSection) => {
-      setSection(next);
-      onSectionChange?.(next);
+      const resolved = normalizeSection(next);
+      setSection(resolved);
+      onSectionChange?.(resolved);
     },
     [onSectionChange],
   );
@@ -368,25 +378,21 @@ export function CustomizeHub({
   );
 
   // --- Control-plane behavior toggles (facts-survey replan, goal nudge, …) ---
-  const [behaviorOverrides, setBehaviorOverrides] = useState<Record<string, boolean>>({});
+  // PR-3: these now render as NUDGE cards inside the Policies surface. Their
+  // enabled state is read from the catalog (`policies` list, derived server-side
+  // from the control_plane env projection), so a successful PATCH calls
+  // ``reload()`` to re-derive the card state rather than mirroring into a local
+  // override map the card no longer reads.
   const [behaviorPending, setBehaviorPending] = useState<Set<string>>(new Set());
   const [behaviorError, setBehaviorError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setBehaviorOverrides(data?.overrides.control_plane ?? {});
-  }, [data]);
-
   const handleToggleBehavior = useCallback(
     (id: string, enabled: boolean) => {
-      setBehaviorOverrides((prev) => ({ ...prev, [id]: enabled }));
       setBehaviorError(null);
       setBehaviorPending((prev) => new Set(prev).add(id));
       patchControlPlaneOverride(agentFetch, id, enabled)
-        .then((overrides) => {
-          setBehaviorOverrides(overrides.control_plane);
-        })
+        .then(() => reload())
         .catch((err: unknown) => {
-          setBehaviorOverrides((prev) => ({ ...prev, [id]: !enabled }));
           setBehaviorError(
             err instanceof Error ? err.message : `Failed to update behavior "${id}"`,
           );
@@ -399,7 +405,7 @@ export function CustomizeHub({
           });
         });
     },
-    [agentFetch],
+    [agentFetch, reload],
   );
 
   // --- Built-in (first-party) policy opt-out toggles -----------------------
@@ -407,29 +413,18 @@ export function CustomizeHub({
   // POLICIES (verify-before-replying). Only user-disableable builtins appear in
   // ``catalog.builtinPolicies``; floors (source_citation) are excluded server-
   // side so they can never be turned off here.
-  const [builtinPolicyOverrides, setBuiltinPolicyOverrides] = useState<
-    Record<string, boolean>
-  >({});
   const [builtinPolicyPending, setBuiltinPolicyPending] = useState<Set<string>>(
     new Set(),
   );
   const [builtinPolicyError, setBuiltinPolicyError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setBuiltinPolicyOverrides(data?.overrides.builtin_policies ?? {});
-  }, [data]);
-
   const handleToggleBuiltinPolicy = useCallback(
     (id: string, enabled: boolean) => {
-      setBuiltinPolicyOverrides((prev) => ({ ...prev, [id]: enabled }));
       setBuiltinPolicyError(null);
       setBuiltinPolicyPending((prev) => new Set(prev).add(id));
       patchBuiltinPolicyOverride(agentFetch, id, enabled)
-        .then((overrides) => {
-          setBuiltinPolicyOverrides(overrides.builtin_policies);
-        })
+        .then(() => reload())
         .catch((err: unknown) => {
-          setBuiltinPolicyOverrides((prev) => ({ ...prev, [id]: !enabled }));
           setBuiltinPolicyError(
             err instanceof Error
               ? err.message
@@ -444,7 +439,7 @@ export function CustomizeHub({
           });
         });
     },
-    [agentFetch],
+    [agentFetch, reload],
   );
 
   // --- Recipes allowlist (F-UX10) ------------------------------------------
@@ -683,66 +678,18 @@ export function CustomizeHub({
             onDeleteCustomRule={handleDeleteCustomRule}
             onTogglePolicy={handleTogglePolicy}
             onDeletePolicy={handleDeletePolicy}
+            onToggleBuiltinPolicy={handleToggleBuiltinPolicy}
+            onToggleControlPlane={handleToggleBehavior}
+            pendingBuiltinPolicies={builtinPolicyPending}
+            pendingControlPlane={behaviorPending}
+            behaviorError={behaviorError}
+            builtinPolicyError={builtinPolicyError}
+            userRules={userRules}
+            rulesSaving={rulesSaving}
+            onSaveRules={handleSaveRules}
             onCompileShacl={handleCompileShacl}
             ruleError={ruleError}
           />
-        ) : null}
-
-        {section === "behaviors" ? (
-          <div className="space-y-8">
-            <section className="space-y-3">
-              <div>
-                <h3 className="text-sm font-bold text-foreground">Your guidance</h3>
-                <p className="mt-0.5 text-xs leading-relaxed text-secondary">
-                  Soft prompt instructions injected into the system prompt every
-                  turn. The model is asked to follow them but is never forced to.
-                </p>
-              </div>
-              <GuidancePanel
-                userRules={userRules}
-                rulesSaving={rulesSaving}
-                onSaveRules={handleSaveRules}
-              />
-            </section>
-            <section className="space-y-3">
-              <div>
-                <h3 className="text-sm font-bold text-foreground">Built-in behaviors</h3>
-                <p className="mt-0.5 text-xs leading-relaxed text-secondary">
-                  In-context nudges and recovery (facts survey, goal nudge,
-                  tool-synthesis nudge, empty-response recovery). Seeded ON by the
-                  lab/dogfood profile; a toggle here overrides that. Never blocks.
-                </p>
-              </div>
-              <BehaviorsPanel
-                behaviors={data.catalog.controlPlane ?? []}
-                overrides={behaviorOverrides}
-                onToggle={handleToggleBehavior}
-                pendingIds={behaviorPending}
-                error={behaviorError}
-              />
-            </section>
-            {(data.catalog.builtinPolicies ?? []).length > 0 ? (
-              <section className="space-y-3">
-                <div>
-                  <h3 className="text-sm font-bold text-foreground">
-                    First-party policies
-                  </h3>
-                  <p className="mt-0.5 text-xs leading-relaxed text-secondary">
-                    Runtime-native policies that ship on by default. Turn one off
-                    to opt out — the change persists and applies from the next
-                    turn. Safety floors that can block a turn are not listed here.
-                  </p>
-                </div>
-                <BehaviorsPanel
-                  behaviors={data.catalog.builtinPolicies ?? []}
-                  overrides={builtinPolicyOverrides}
-                  onToggle={handleToggleBuiltinPolicy}
-                  pendingIds={builtinPolicyPending}
-                  error={builtinPolicyError}
-                />
-              </section>
-            ) : null}
-          </div>
         ) : null}
 
         {section === "modes" ? <ModesPanel botId={botId} /> : null}
@@ -823,6 +770,15 @@ function RulesSectionMount({
   onDeleteCustomRule,
   onTogglePolicy,
   onDeletePolicy,
+  onToggleBuiltinPolicy,
+  onToggleControlPlane,
+  pendingBuiltinPolicies,
+  pendingControlPlane,
+  behaviorError,
+  builtinPolicyError,
+  userRules,
+  rulesSaving,
+  onSaveRules,
   onCompileShacl,
   ruleError,
 }: {
@@ -838,6 +794,19 @@ function RulesSectionMount({
   onDeleteCustomRule: (id: string) => void;
   onTogglePolicy: (policyId: string, next: boolean) => void;
   onDeletePolicy: (policy: PolicyCatalogEntry) => void;
+  // PR-3 — first-party policy opt-out + control-plane behavior nudge routing,
+  // folded into the Policies surface (Behaviors tab retired).
+  onToggleBuiltinPolicy: (policyId: string, next: boolean) => void;
+  onToggleControlPlane: (behaviorId: string, next: boolean) => void;
+  pendingBuiltinPolicies: Set<string>;
+  pendingControlPlane: Set<string>;
+  behaviorError: string | null;
+  builtinPolicyError: string | null;
+  // "Your guidance" freeform system-prompt text, relocated from the retired
+  // Behaviors tab into the Policies surface.
+  userRules: string;
+  rulesSaving: boolean;
+  onSaveRules: (text: string) => void;
   onCompileShacl: (
     nlText: string,
     sampleRecords?: unknown[],
@@ -1131,7 +1100,18 @@ function RulesSectionMount({
 
       {addState.phase === "idle" ? (
         <>
-          {/* PRIMARY: the policies-first card list (PR-2). */}
+          {/* Behavior / first-party toggle errors surface here now that those
+              cards live in the Policies surface (Behaviors tab retired). */}
+          {behaviorError || builtinPolicyError ? (
+            <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.08] px-3 py-2 text-xs text-amber-800">
+              {behaviorError ?? builtinPolicyError}
+            </div>
+          ) : null}
+
+          {/* PRIMARY: the policies-first card list (PR-2 + PR-3). First-party
+              policies (verify_before_replying) get a real Switch routed to the
+              builtin-policies PATCH; the 4 control-plane behaviors render as
+              NUDGE cards routed to the control-plane PATCH. */}
           <PolicyCardList
             catalogPolicies={catalogPolicies}
             ruleRows={ruleRows}
@@ -1146,7 +1126,28 @@ function RulesSectionMount({
             onToggleDashboardCheck={handleToggleDashboardCheck}
             onDeleteDashboardCheck={handleDeleteDashboardCheck}
             onDeleteSeamSpec={handleDeleteSeamSpec}
+            onToggleBuiltinPolicy={onToggleBuiltinPolicy}
+            onToggleControlPlane={onToggleControlPlane}
+            pendingBuiltinPolicies={pendingBuiltinPolicies}
+            pendingControlPlane={pendingControlPlane}
           />
+
+          {/* "Your guidance": freeform soft system-prompt text, relocated from
+              the retired Behaviors tab. Soft-only — never blocks. */}
+          <section className="space-y-2" data-testid="guidance-section">
+            <div>
+              <h4 className="text-sm font-semibold text-foreground">Your guidance</h4>
+              <p className="mt-0.5 text-xs leading-relaxed text-secondary">
+                Soft prompt instructions injected into the system prompt every
+                turn. The model is asked to follow them but is never forced to.
+              </p>
+            </div>
+            <GuidancePanel
+              userRules={userRules}
+              rulesSaving={rulesSaving}
+              onSaveRules={onSaveRules}
+            />
+          </section>
 
           <PrebuiltComponentsPanel />
 
