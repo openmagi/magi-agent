@@ -167,6 +167,9 @@ class DeepSolveRunState(BaseModel):
     cycles: int = 0
     #: plateau_streak: 0 = fresh, 1 = one no-progress cycle, 2 = two → reject.
     plateau_streak: int = 0
+    #: Set by _emit_verdict — guards the exception-path best-effort emit
+    #: in run_deep_solve against double emission.
+    verdict_emitted: bool = False
     #: Open findings from the last cycle.
     current_findings: list[Finding] = Field(default_factory=list)
     #: Collected child refs (for verdict record).
@@ -217,6 +220,20 @@ _PROOF_BLOCKING_CATEGORIES: set[FindingCategory] = {
     "critical_logic",
     "complexity_exceeded",
 }
+
+
+def _is_blocking_finding(finding: Finding) -> bool:
+    """A finding that blocks acceptance and participates in convergence.
+
+    Minor findings are reported (final_findings_open) but neither reset the
+    consecutive-clean counter nor feed the fingerprint/no-progress ladder —
+    a recurring minor nit must not refold or reject an otherwise-clean run
+    (D6: minor gaps "do not reset but are reported").
+    """
+    return (
+        finding.severity in _CRITICAL_MAJOR_SEVERITIES
+        or finding.category in _PROOF_BLOCKING_CATEGORIES
+    )
 
 
 def _compute_fingerprint(finding: Finding, problem_class: ProblemClass) -> str:
@@ -458,6 +475,7 @@ def _emit_verdict(
     acceptance_basis: Literal["tests_passed", "n_consecutive_clean", "rejected"],
 ) -> None:
     """Emit the verdict record exactly once (T10)."""
+    state.verdict_emitted = True
     open_descriptions = tuple(f.description for f in state.current_findings)
     child_refs = tuple(
         r for r in state.child_refs if r is not None
@@ -507,11 +525,31 @@ async def run_deep_solve(
     S0 intake → S1 solve → S2 improve → LOOP{S3 verify → S4 adjudicate →
     S5 refine → S5.5 execute (executable)} → S7 verdict.
 
-    append_verdict is called EXACTLY ONCE on every code path (T10).
+    append_verdict is called EXACTLY ONCE on every returning path (T10).
+    On an unexpected exception a ``rejected`` verdict is emitted best-effort
+    (guarded against double emission) and the exception propagates to the
+    never-raise tool boundary (U3).
     """
     problem_class, domain = _resolve_intake(config)
     state = DeepSolveRunState(config=config)
+    try:
+        return await _run_pipeline(config, deps, state, problem_class, domain)
+    except Exception:
+        if not state.verdict_emitted:
+            try:
+                _emit_verdict(deps, state, problem_class, "rejected")
+            except Exception:  # noqa: BLE001 — verdict emit is best-effort here
+                pass
+        raise
 
+
+async def _run_pipeline(
+    config: DeepSolveConfig,
+    deps: DeepSolveDeps,
+    state: DeepSolveRunState,
+    problem_class: ProblemClass,
+    domain: DomainTemplate,
+) -> DeepSolveOutcome:
     # S0 intake: emit first progress event with cost estimate (O2)
     deps.emit_progress({
         "event": "deep_solve_start",
@@ -666,8 +704,11 @@ async def run_deep_solve(
         # -----------------------------------------------------------------------
         # Fingerprint dedup and no-progress detection (D7 / B4)
         # -----------------------------------------------------------------------
+        # Only blocking findings participate in convergence — a recurring
+        # minor nit must not drive refold/reject (_is_blocking_finding).
+        blocking_findings = [f for f in confirmed_findings if _is_blocking_finding(f)]
         cycle_fingerprints: set[str] = set()
-        for finding in confirmed_findings:
+        for finding in blocking_findings:
             fp = _compute_fingerprint(finding, problem_class)
             cycle_fingerprints.add(fp)
 
@@ -689,9 +730,11 @@ async def run_deep_solve(
                 reject_reason=f"fingerprint budget exceeded ({len(state.fingerprints)} > {config.fingerprint_budget})",
             )
 
-        # S5 refine (always run, then check acceptance)
-        refiner_template = get_template(domain, "solver")
+        # S5 refine (always run, then check acceptance). The refiner is a
+        # solver-family child (D5) and carries the same rigor header.
+        rigor_header = RIGOR_HEADERS.get(domain, RIGOR_HEADERS["general_analysis"])
         refine_objective = (
+            f"{rigor_header.strip()}\n\n"
             f"아래의 지적된 문제를 수정하여 개선된 풀이를 제출하십시오.\n\n"
             f"[원래 풀이]\n{best_candidate}\n\n"
             f"[확정된 문제]\n{json.dumps([f.model_dump() for f in confirmed_findings], ensure_ascii=False)}\n\n"
@@ -728,9 +771,11 @@ async def run_deep_solve(
 
         # S5.5 execute (executable class only — D5, D6)
         prev_score: float | None = None
+        prev_failed: tuple[str, ...] | None = None
         if problem_class == "executable" and config.test_command:
             if state.execution_results is not None:
                 prev_score = state.execution_results.score
+                prev_failed = state.execution_results.failed_cases
             exec_report = await deps.execute_tests(
                 artifact=best_candidate,
                 test_command=config.test_command,
@@ -761,17 +806,14 @@ async def run_deep_solve(
         # -----------------------------------------------------------------------
         if problem_class != "executable":
             # Check for critical/major findings that reset the counter
-            has_blocking = any(
-                f.severity in _CRITICAL_MAJOR_SEVERITIES
-                or f.category in _PROOF_BLOCKING_CATEGORIES
-                for f in confirmed_findings
-            )
+            has_blocking = any(_is_blocking_finding(f) for f in confirmed_findings)
             if has_blocking:
                 state.consecutive_clean = 0
-            elif not confirmed_findings:
+            else:
+                # Zero critical/major confirmed findings = a clean pass. Minor
+                # gaps do not block acceptance (D6: "do not reset but are
+                # reported") — they surface in final_findings_open.
                 state.consecutive_clean += 1
-            # Minor findings don't reset counter but don't increment (per spec: "minor gaps
-            # do not reset but are reported")
 
             if state.consecutive_clean >= config.consecutive_clean_passes:
                 _emit_verdict(deps, state, problem_class, "n_consecutive_clean")
@@ -791,18 +833,21 @@ async def run_deep_solve(
         # - Executable: no test-score improvement AND tests not all passing
         is_no_progress = False
 
-        if confirmed_findings and all_seen:
-            # All confirmed findings are already-seen fingerprints
+        if blocking_findings and all_seen:
+            # All blocking confirmed findings are already-seen fingerprints
             is_no_progress = True
         elif problem_class == "executable" and state.execution_results is not None:
-            # Score didn't improve
-            curr_score = state.execution_results.score
-            if prev_score is not None and curr_score is not None and curr_score <= prev_score:
-                if state.execution_results.failed_cases:
+            curr = state.execution_results
+            if curr.failed_cases:
+                if prev_score is not None and curr.score is not None:
+                    # Score signal available: no improvement = no progress
+                    if curr.score <= prev_score:
+                        is_no_progress = True
+                elif prev_failed is not None and set(prev_failed) <= set(curr.failed_cases):
+                    # No score signal (pass/fail grader): the failing set did not
+                    # shrink cycle-over-cycle — refold must engage here, or a
+                    # persistently-failing run would only end at the agents cap.
                     is_no_progress = True
-            elif prev_score is None and curr_score is None and state.execution_results.failed_cases:
-                # No score tracking, but still failing
-                pass  # Not no-progress by score criterion alone
 
         if is_no_progress:
             state.plateau_streak += 1
@@ -843,8 +888,8 @@ async def run_deep_solve(
                 state.consecutive_clean = 0
                 # plateau_streak keeps its value (now =1); next no-progress → reject
             else:
-                # Already refold-ed, and another no-progress → reject
-                state.plateau_streak += 1
+                # Only one refold is permitted (O1): any later no-progress
+                # cycle rejects unconditionally.
                 _emit_verdict(deps, state, problem_class, "rejected")
                 return DeepSolveOutcome(
                     acceptance_basis="rejected",

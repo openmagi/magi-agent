@@ -331,6 +331,13 @@ def test_rephrase_livelock_triggers_refold() -> None:
     outcome = run(run_deep_solve(config, deps))
     # A refold was triggered; outcome may accept or reject depending on post-refold
     assert outcome.refolds >= 1
+    # Pin the mechanism itself: the reworded description maps to the SAME
+    # fingerprint (rephrase-invariance), not merely "a refold occurred".
+    from magi_agent.solving.deep_solve import _compute_fingerprint
+
+    fp_a = _compute_fingerprint(Finding(**finding1), "proof")
+    fp_b = _compute_fingerprint(Finding(**finding1_rephrased), "proof")
+    assert fp_a == fp_b
 
 
 # ---------------------------------------------------------------------------
@@ -791,3 +798,108 @@ def test_first_progress_event_has_cost_estimate() -> None:
     assert len(deps.progress_events) > 0
     first_event = deps.progress_events[0]
     assert "estimated_child_turns" in first_event
+
+
+# ---------------------------------------------------------------------------
+# Review fixes (2026-07-08 code-review of U1)
+# ---------------------------------------------------------------------------
+
+def test_executable_score_none_persistent_failures_refolds_then_rejects() -> None:
+    """Fix 1 (High): pass/fail grader (score=None) with a non-shrinking failing
+    set must engage the refold ladder, not grind to the 1000-agent cap."""
+    # Clean findings every cycle; identical failing case forever.
+    exec_results = [_exec_report(total=5, failed=("case-49",), score=None) for _ in range(10)]
+    deps = _FakeDeps(stage_outputs=[], exec_results=exec_results)
+    config = DeepSolveConfig(
+        problem="sort numbers",
+        test_command="pytest",
+        consecutive_clean_passes=3,
+        fingerprint_budget=64,
+    )
+    outcome = run(run_deep_solve(config, deps))
+    assert outcome.acceptance_basis == "rejected"
+    assert outcome.refolds == 1
+    # The ladder terminates in a handful of cycles — NOT the agents-cap grind.
+    assert outcome.cycles <= 4
+    assert deps.agents_spent_log[-1] < 100
+    assert len(deps.verdicts) == 1
+
+
+def test_proof_minor_only_findings_accept() -> None:
+    """Fix 2 (Medium): recurring minor-only findings count as clean passes and
+    never drive refold/reject; the run accepts and reports the minor gap."""
+    minor = _finding(
+        category="justification_gap_minor",
+        severity="minor",
+        description="could cite the lemma explicitly",
+    )
+    stage_outputs = [
+        ("solve", []),
+        ("improve", []),
+    ]
+    # Three cycles, each verify+adjudicate confirming the same minor finding.
+    for i in range(3):
+        stage_outputs.append((f"verify {i}", [minor]))
+        stage_outputs.append((f"adjudicate {i}", [minor]))
+        stage_outputs.append((f"refine {i}", []))
+    deps = _FakeDeps(stage_outputs=stage_outputs)
+    config = DeepSolveConfig(
+        problem="prove theorem",
+        consecutive_clean_passes=3,
+        fingerprint_budget=64,
+    )
+    outcome = run(run_deep_solve(config, deps))
+    assert outcome.acceptance_basis == "n_consecutive_clean"
+    assert outcome.refolds == 0
+    assert any("lemma" in d for d in outcome.final_findings_open)
+    assert len(deps.verdicts) == 1
+
+
+def test_exception_mid_loop_emits_rejected_verdict_and_raises() -> None:
+    """Fix 3 (Medium): an exception from deps mid-run emits a best-effort
+    rejected verdict exactly once, then propagates (never-raise lives in U3)."""
+
+    class _ExplodingDeps(_FakeDeps):
+        async def run_stage(self, **kwargs: Any) -> StageResult:
+            if self._stage_call_idx >= 2:
+                raise RuntimeError("provider blew up")
+            return await super().run_stage(**kwargs)
+
+    deps = _ExplodingDeps(stage_outputs=[("solve", []), ("improve", [])])
+    config = DeepSolveConfig(problem="prove theorem", consecutive_clean_passes=3)
+    with pytest.raises(RuntimeError, match="provider blew up"):
+        run(run_deep_solve(config, deps))
+    assert len(deps.verdicts) == 1
+    assert deps.verdicts[0].acceptance_basis == "rejected"
+
+
+def test_refine_objective_carries_rigor_header() -> None:
+    """Fix 4 (Medium): the refine stage is a solver-family child and must carry
+    the domain rigor header, not a bare instruction."""
+    captured: list[tuple[str, str]] = []
+
+    class _CapturingDeps(_FakeDeps):
+        async def run_stage(self, **kwargs: Any) -> StageResult:
+            captured.append((kwargs["stage"], kwargs["objective"]))
+            return await super().run_stage(**kwargs)
+
+    finding = _finding(category="critical_error", severity="critical")
+    stage_outputs = [
+        ("solve", []),
+        ("improve", []),
+        ("verify", [finding]),
+        ("adjudicate", [finding]),
+        ("refine", []),
+    ]
+    deps = _CapturingDeps(stage_outputs=stage_outputs)
+    config = DeepSolveConfig(problem="prove theorem", consecutive_clean_passes=1)
+    run(run_deep_solve(config, deps))
+    refine_objectives = [obj for stage, obj in captured if stage == "refine"]
+    assert refine_objectives, "refine stage never ran"
+    # The domain rigor header itself is embedded in the refine objective.
+    from magi_agent.solving.deep_solve import _resolve_intake
+    from magi_agent.solving.templates import RIGOR_HEADERS
+
+    _, domain = _resolve_intake(config)
+    rigor_header = RIGOR_HEADERS.get(domain, RIGOR_HEADERS["general_analysis"])
+    assert rigor_header.strip() in refine_objectives[0]
