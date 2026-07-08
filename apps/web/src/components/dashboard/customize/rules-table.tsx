@@ -39,6 +39,7 @@ import type {
 } from "@/lib/customize-api";
 
 import { TrustBadge, trustClassForPolicy, type TrustClass } from "./trust-badge";
+import { Switch } from "@/components/ui/_ds";
 
 
 // ---------------------------------------------------------------------------
@@ -534,10 +535,11 @@ function RuleRowView({ row }: { row: RuleRow }): React.ReactElement {
           />
           <StatePill state={row.state} />
           {row.onToggle ? (
-            <ToggleSwitch
+            <Switch
               checked={row.state === "enabled"}
-              onChange={row.onToggle}
-              label={`Toggle ${row.title}`}
+              onToggle={async (next) => row.onToggle?.(next)}
+              labelOn={`Disable ${row.title}`}
+              labelOff={`Enable ${row.title}`}
             />
           ) : null}
           {row.onDelete ? (
@@ -587,31 +589,3 @@ function StatePill({ state }: { state: RuleRow["state"] }): React.ReactElement {
 }
 
 
-function ToggleSwitch({
-  checked,
-  onChange,
-  label,
-}: {
-  checked: boolean;
-  onChange: (next: boolean) => void;
-  label: string;
-}): React.ReactElement {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
-        checked ? "bg-primary" : "bg-black/[0.15]"
-      }`}
-    >
-      <span
-        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-          checked ? "translate-x-4" : "translate-x-0.5"
-        }`}
-      />
-    </button>
-  );
-}
