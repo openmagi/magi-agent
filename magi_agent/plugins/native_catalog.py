@@ -785,6 +785,45 @@ _NATIVE_PLUGIN_DATA: tuple[Mapping[str, object], ...] = (
         ),
     },
     {
+        "id": "openmagi.deep-solve",
+        "name": "OpenMagi Deep-Solve",
+        "kind": "native",
+        "version": "0.1.0-deep-solve-u3",
+        "description": (
+            "Verification-and-refinement pipeline for competitive programming "
+            "and mathematical proof problems (arXiv 2507.15855). Runs iterative "
+            "solve/verify/refine cycles with live child agents; accepts when "
+            "tests pass or N consecutive clean verification rounds occur."
+        ),
+        "publisher": "openmagi",
+        "defaultInstalled": True,
+        "defaultEnabled": True,
+        "optOutAllowed": True,
+        "securityCritical": False,
+        "audit_required": True,
+        "runtime": {
+            "minCoreVersion": "0.1.0-deep-solve-u3",
+            "adkCompatibility": "ADK FunctionTool-compatible deep-solve pipeline surface.",
+        },
+        "permissions": ("execute",),
+        "services": (),
+        "tools": (
+            {
+                "name": "DeepSolve",
+                "entrypoint": "magi_agent.plugins.native.deep_solve:deep_solve",
+            },
+        ),
+        "harnessRules": ("subagent_delegation_policy",),
+        "configSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {},
+        },
+        "capabilities": (
+            {"type": "tool", "name": "DeepSolve"},
+        ),
+    },
+    {
         "id": "openmagi.taskboard",
         "name": "OpenMagi Taskboard",
         "kind": "native",
