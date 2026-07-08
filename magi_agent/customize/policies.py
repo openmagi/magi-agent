@@ -439,3 +439,210 @@ def migrate_groups_to_policies(path: Path | None = None) -> int:
         upsert_policy(policy, path)
         created += 1
     return created
+
+
+# ---------------------------------------------------------------------------
+# Auto-promotion: no orphan rules (policies-first surface unification, PR-1)
+# ---------------------------------------------------------------------------
+#
+# The user's unit of intent is a *policy*; a bare rule is an implementation
+# detail. Every rule must therefore be reachable through some Policy so the
+# management surface never shatters a policy back into loose rules. Two seams
+# keep this invariant: promote-on-create (U1, called from the custom-rule save
+# path for a genuinely NEW rule) and a read-time backfill (U2, for rules that
+# predate this feature). Both derive a 1-rule Policy the same way.
+
+
+def _referenced_rule_ids(path: Path | None) -> set[str]:
+    """Every rule id referenced by any persisted user policy (its ``ruleIds``).
+
+    Builtins are excluded on purpose: their member ids live in the
+    ``<policy>.<member>`` namespace and never collide with user custom-rule ids,
+    and a stored user policy is what determines whether a rule is already
+    surfaced. Reads the raw store so a malformed entry cannot mask a reference.
+    """
+    referenced: set[str] = set()
+    for raw in _policies_raw(path).values():
+        if not isinstance(raw, dict):
+            continue
+        rule_ids = raw.get("ruleIds")
+        if isinstance(rule_ids, list):
+            for rid in rule_ids:
+                if isinstance(rid, str):
+                    referenced.add(rid)
+    return referenced
+
+
+def _derive_policy_id_for_rule(rule_id: str, taken: set[str]) -> str:
+    """A collision-free bare-slug policy id derived from a rule id.
+
+    Slugifies the rule id (the natural, stable name) and, on collision with an
+    already-taken policy id, appends ``-2``, ``-3``, … until free. The suffix is
+    bounded so the result always satisfies ``_POLICY_ID_RE``.
+    """
+    base = _slugify(rule_id)
+    if base not in taken:
+        return base
+    for suffix in range(2, 10_000):
+        candidate = f"{base[:56]}-{suffix}"
+        if candidate not in taken:
+            return candidate
+    # Astronomically unlikely; fall back to a hash-ish tail.
+    return f"{base[:48]}-{abs(hash(rule_id)) % 1_000_000}"
+
+
+def promote_rule_to_policy(
+    rule: dict,
+    *,
+    path: Path | None = None,
+    display_name: str | None = None,
+    intent: str | None = None,
+) -> str | None:
+    """Persist a 1-rule Policy for a freshly-created custom rule (U1).
+
+    Idempotent guard: returns ``None`` (creating nothing) when the rule has no
+    usable id OR the rule id is already referenced by some persisted policy — so
+    an UPDATE to an existing rule, or a save that ``persist_policy_plan`` already
+    tied into a Policy, never double-creates.
+
+    ``display_name`` defaults to the rule id (custom rules carry no name field;
+    matches the read-time ``implicit_policy_for_rule`` view). ``intent`` defaults
+    to empty. When the caller has the original natural-language text (the
+    conversational compile flow), it should pass it as ``intent`` so the policy
+    card shows the user's own sentence.
+
+    Returns the new policy id, or ``None`` when nothing was created.
+    """
+    rule_id = rule.get("id") if isinstance(rule, dict) else None
+    if not isinstance(rule_id, str) or _RULE_ID_RE.fullmatch(rule_id) is None:
+        return None
+    if rule_id in _referenced_rule_ids(path):
+        return None  # already surfaced through a policy; do not double-create
+    taken = {p.policy_id for p in list_policies(path)}
+    policy_id = _derive_policy_id_for_rule(rule_id, taken)
+    label = (display_name or "").strip() or rule_id
+    try:
+        policy = Policy(
+            id=policy_id,
+            displayName=label[:120],
+            intent=(intent or ""),
+            ruleIds=(rule_id,),
+            origin="user",
+        )
+    except ValidationError:
+        return None
+    upsert_policy(policy, path)
+    return policy_id
+
+
+def _unreferenced_seam_spec_ids(path: Path | None, referenced: set[str]) -> list[str]:
+    """Ids of stored seam specs not referenced by any policy."""
+    overrides = load_overrides(path)
+    specs = overrides.get("verification", {}).get("seam_specs", [])
+    out: list[str] = []
+    if isinstance(specs, list):
+        for spec in specs:
+            if not isinstance(spec, dict):
+                continue
+            sid = spec.get("id")
+            if (
+                isinstance(sid, str)
+                and _RULE_ID_RE.fullmatch(sid) is not None
+                and sid not in referenced
+            ):
+                out.append(sid)
+    return out
+
+
+def ensure_policies_for_unreferenced_rules(path: Path | None = None) -> int:
+    """Idempotently synthesize + persist 1-rule policies for every unreferenced
+    rule (U2). Returns the number of policies created.
+
+    Order matters: ``migrate_groups_to_policies`` runs FIRST so a set of grouped
+    rules lands in its single multi-rule policy (not N singles). Then, for each
+    custom rule / seam spec whose id is not referenced by any persisted policy, a
+    1-rule Policy is created (same derivation as ``promote_rule_to_policy``). A
+    rule already inside a policy (multi-rule or a prior single) is left
+    untouched. Persists only when something changed (a fully-migrated store
+    re-runs to a no-op with no write).
+
+    Dashboard-check producers are intentionally NOT backfilled here: their
+    sidecar lives at a single host-global writable pack root that is not scoped
+    to ``path``, and a producer authored through ``persist_policy_plan`` is
+    already bound into a Policy (so it is referenced anyway). Covering them would
+    require a path-scoped producer store that does not exist today."""
+    created = migrate_groups_to_policies(path)
+
+    referenced = _referenced_rule_ids(path)
+    taken = {p.policy_id for p in list_policies(path)}
+
+    candidate_ids: list[str] = []
+    for rule in _custom_rules_raw(path):
+        if not isinstance(rule, dict):
+            continue
+        rid = rule.get("id")
+        if (
+            isinstance(rid, str)
+            and _RULE_ID_RE.fullmatch(rid) is not None
+            and rid not in referenced
+        ):
+            candidate_ids.append(rid)
+    candidate_ids.extend(_unreferenced_seam_spec_ids(path, referenced))
+
+    seen: set[str] = set()
+    for rid in candidate_ids:
+        if rid in seen or rid in referenced:
+            continue
+        seen.add(rid)
+        policy_id = _derive_policy_id_for_rule(rid, taken)
+        try:
+            policy = Policy(
+                id=policy_id,
+                displayName=rid[:120],
+                intent="",
+                ruleIds=(rid,),
+                origin="user",
+            )
+        except ValidationError:
+            continue
+        upsert_policy(policy, path)
+        taken.add(policy_id)
+        referenced.add(rid)
+        created += 1
+    return created
+
+
+# ---------------------------------------------------------------------------
+# Policy-level enabled cascade (U4)
+# ---------------------------------------------------------------------------
+
+
+def set_policy_enabled(policy_id: str, enabled: bool, path: Path | None = None) -> int:
+    """Set ``enabled`` on every member custom rule of a USER policy (cascade).
+
+    Returns the number of member rules whose flag was written. Raises
+    :class:`KeyError` for an unknown policy id and :class:`ValueError` for a
+    builtin (first-party) policy — those keep their own preset / control-plane /
+    builtin-policy PATCH routes and must not be toggled through this seam.
+
+    A member id that is not a stored custom rule (e.g. a dashboard-check
+    producer or a builtin member ref) is skipped silently: the cascade only
+    owns the ``verification.custom_rules[]`` ``enabled`` axis.
+    """
+    policy = get_policy(policy_id, path)
+    if policy is None:
+        raise KeyError(policy_id)
+    if policy.origin != "user":
+        raise ValueError(
+            "built-in policies are toggled via their own routes, not the policy cascade"
+        )
+    member_ids = set(policy.rule_ids)
+    overrides = load_overrides(path)
+    rules = overrides["verification"]["custom_rules"]
+    changed = 0
+    for rule in rules:
+        if isinstance(rule, dict) and rule.get("id") in member_ids:
+            rule["enabled"] = bool(enabled)
+            changed += 1
+    save_overrides(overrides, path)
+    return changed
