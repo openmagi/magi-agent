@@ -141,7 +141,7 @@ export function PresetRow({
 }) {
   const togglable = preset.enforcement === "enforcing";
   return (
-    <div className="flex items-center justify-between gap-4 rounded-xl border border-black/[0.06] bg-[var(--glass-regular-bg)] backdrop-blur-xl px-4 py-3">
+    <div className="flex items-center justify-between gap-4 rounded-xl border border-black/[0.06] bg-[var(--color-surface-raised)] px-4 py-3">
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <p className="truncate text-sm font-semibold text-foreground">{preset.title}</p>
@@ -423,7 +423,7 @@ export function CustomRulesSection({
           {rules.map((rule) => (
             <div
               key={rule.id}
-              className="flex items-center justify-between gap-3 rounded-xl border border-black/[0.06] bg-[var(--glass-regular-bg)] backdrop-blur-xl px-4 py-2.5"
+              className="flex items-center justify-between gap-3 rounded-xl border border-black/[0.06] bg-[var(--color-surface-raised)] px-4 py-2.5"
             >
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
@@ -522,7 +522,7 @@ export function CustomRulesSection({
               {shaclMode === "nl" ? (
                 <>
                   {/* Sub-task 5.3c — Guide panel (default expanded, auto-collapse on input) */}
-                  <div className="rounded-lg border border-black/[0.07] bg-[var(--glass-regular-bg)] backdrop-blur-xl p-3">
+                  <div className="rounded-lg border border-black/[0.07] bg-[var(--color-surface-raised)] p-3">
                     <div className="flex items-center justify-between">
                       <span className="text-[11px] font-semibold text-foreground">
                         What kind of rules can I write?
