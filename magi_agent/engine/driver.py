@@ -302,7 +302,58 @@ def _extract_objective_text(runner_input: object) -> str:
 
 # A sane default cap so a runaway stream can't yield forever; headless can
 # tolerate a generous bound on ADK events consumed per turn.
-_DEFAULT_MAX_EVENT_COUNT = 4096
+#
+# The cap counts ADK events that represent real WORK (final model events and
+# tool calls), NOT fine-grained streaming text/thinking deltas: see
+# ``_adk_event_counts_toward_budget``. Before that gate a single long answer
+# could self-exhaust a 4096 cap purely on its own streamed deltas and get cut
+# off mid-sentence, so the default is also raised here (generous-budget policy)
+# and made env-tunable via ``MAGI_MAX_TURN_EVENT_COUNT``.
+_DEFAULT_MAX_EVENT_COUNT = 20000
+_MAX_TURN_EVENT_COUNT_ENV = "MAGI_MAX_TURN_EVENT_COUNT"
+
+
+def _resolve_max_event_count(default: int = _DEFAULT_MAX_EVENT_COUNT) -> int:
+    """Resolve the per-turn event budget, honoring ``MAGI_MAX_TURN_EVENT_COUNT``.
+
+    A positive integer override wins; anything else (unset, empty, non-numeric,
+    <= 0) falls back to ``default``. Never raises.
+    """
+    import os  # noqa: PLC0415 (module keeps os out of scope by convention)
+
+    raw = os.environ.get(_MAX_TURN_EVENT_COUNT_ENV)
+    if raw is None:
+        return default
+    try:
+        parsed = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
+def _adk_event_counts_toward_budget(event: object) -> bool:
+    """Whether an ADK event should consume the per-turn event budget.
+
+    Fine-grained STREAMING text/thinking deltas (``partial=True`` and NOT
+    ``turn_complete``) are excluded: they are the same logical model step
+    fragmented across many chunks, so counting each one let a long answer
+    exhaust the budget on its own streaming granularity and truncate
+    mid-sentence. Everything else counts: the final aggregated event
+    (``turn_complete=True`` even if ``partial``), non-partial events, and every
+    function_call / function_response (tool) event (``partial`` is falsy on
+    those). Duck-typed; never raises.
+    """
+    partial = getattr(event, "partial", None)
+    if isinstance(event, Mapping):
+        partial = event.get("partial", partial)
+    if partial is not True:
+        return True
+    turn_complete = getattr(event, "turn_complete", None)
+    if isinstance(event, Mapping):
+        turn_complete = event.get("turn_complete", turn_complete)
+    # A partial event that also marks turn completion is the final event: count
+    # it. Only a mid-stream partial (not turn_complete) is a pure delta.
+    return bool(turn_complete)
 
 
 def _goal_is_met(nudge: "GoalNudge", *, evidence_records: object) -> bool:
@@ -667,7 +718,7 @@ class MagiEngineDriver:
         self,
         *,
         runner: object | None = None,
-        max_event_count: int = _DEFAULT_MAX_EVENT_COUNT,
+        max_event_count: int | None = None,
         user_id: str = "cli",
         recovery: "EngineRecoveryPolicy | None" = None,
         runner_policy_assembly: RunnerPolicyAssembly | None = None,
@@ -742,7 +793,12 @@ class MagiEngineDriver:
         # constructed with ``wire_profile=self._wire_profile`` so projected events
         # carry the hosted wire shape (tu_<hash> ids, public_events field shapes).
         self._wire_profile = wire_profile
-        self._max_event_count = max(1, int(max_event_count))
+        # An explicit constructor value wins (tests pin small caps); otherwise
+        # resolve the env-tunable default (MAGI_MAX_TURN_EVENT_COUNT).
+        resolved_max_event_count = (
+            max_event_count if max_event_count is not None else _resolve_max_event_count()
+        )
+        self._max_event_count = max(1, int(resolved_max_event_count))
         self._user_id = user_id
         # Genuine error-recovery retry policy (PR12). ``None`` -> no retry
         # wrapper (the OFF path; byte-for-byte identical streaming). When set,
@@ -2974,7 +3030,12 @@ class MagiEngineDriver:
                             break
 
                         adk_event = step
-                        event_count += 1
+                        # Count real work (final model events + tool calls)
+                        # toward the budget, NOT mid-stream text/thinking deltas
+                        # (a long answer must not self-exhaust the cap on its own
+                        # streaming granularity and truncate mid-sentence).
+                        if _adk_event_counts_toward_budget(adk_event):
+                            event_count += 1
                         # Root-cause-1: note the ADK invocation id so the
                         # pre-final gate can reconcile it with the engine turn id.
                         self._note_observed_invocation_id(
@@ -4683,7 +4744,9 @@ class MagiEngineDriver:
                         break
 
                     adk_event = step
-                    event_count += 1
+                    # Same work-not-deltas budget accounting as the main loop.
+                    if _adk_event_counts_toward_budget(adk_event):
+                        event_count += 1
                     self._note_observed_invocation_id(
                         _adk_invocation_id(adk_event)
                     )
