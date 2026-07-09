@@ -110,12 +110,101 @@ class _SafeLocalCronTurnRunner:
         )
 
 
-def build_local_scheduler_cron_driver() -> _LoopDriverLike:
+class _LiveLocalCronTurnRunner:
+    """CronTurnRunner backed by the governed turn engine (run_governed_turn).
+
+    This is the live counterpart to ``_SafeLocalCronTurnRunner``.  It drives one
+    governed turn per cron plan, using the same engine primitives that the channel
+    watchers use (``run_governed_turn`` + ``collect_governed_child_turn``), so cron
+    turns enjoy the same memory/tool/permission pipeline without requiring an
+    ADK-level client to be constructed here.
+
+    The ``stream_factory`` parameter allows test injection of a fake async
+    generator; production code uses the real ``run_governed_turn`` default.
+    """
+
+    def __init__(self, *, stream_factory: Any = None) -> None:
+        # Default resolved lazily so importing this module never pulls the engine.
+        self._stream_factory = stream_factory
+
+    async def run_turn(self, plan: Any) -> Any:
+        import uuid  # noqa: PLC0415
+
+        from magi_agent.harness.scheduler_job_execution import CronTurnResult  # noqa: PLC0415
+
+        # Derive a stable synthetic session_id from the job_id (same contract as
+        # CronTurnRunnerAdapter._safe_session_suffix, but this runner uses the
+        # governed turn engine rather than the ADK runner adapter).
+        from magi_agent.harness.cron_turn_runner_adapter import _safe_session_suffix  # noqa: PLC0415
+
+        session_id = f"cron:{_safe_session_suffix(plan.job_id)}"
+        turn_id = uuid.uuid4().hex
+
+        if self._stream_factory is None:
+            from magi_agent.runtime.governed_turn import run_governed_turn  # noqa: PLC0415
+            stream_factory = run_governed_turn
+        else:
+            stream_factory = self._stream_factory
+
+        from magi_agent.runtime.turn_context import TurnContext  # noqa: PLC0415
+        from magi_agent.runtime.child_governed_collector import collect_governed_child_turn  # noqa: PLC0415
+
+        ctx = TurnContext(
+            prompt=plan.prompt,
+            session_id=session_id,
+            turn_id=turn_id,
+            memory_mode="normal",
+        )
+
+        try:
+            summary, _evidence_refs, _status = await collect_governed_child_turn(
+                stream_factory(ctx)
+            )
+        except Exception:  # noqa: BLE001 - any engine error is a failed cron turn
+            return CronTurnResult(
+                status="failed",
+                jobId=plan.job_id,
+                runnerInvoked=True,
+                output="",
+            )
+
+        return CronTurnResult(
+            status="completed",
+            jobId=plan.job_id,
+            runnerInvoked=True,
+            output=summary[:2000] if isinstance(summary, str) else "",
+        )
+
+
+def _build_local_cron_turn_runner(*, stream_factory: Any = None) -> Any:
+    """Select the cron turn runner based on ``MAGI_BACKGROUND_LIVE_RUNNER_ENABLED``.
+
+    Flag off (default): returns ``_SafeLocalCronTurnRunner`` -- always skips,
+    never invokes the engine.  Behavior is byte-identical to the previous default.
+
+    Flag on: returns ``_LiveLocalCronTurnRunner`` backed by the governed turn
+    engine (or an injected ``stream_factory`` for tests).  Each cron plan
+    triggers one governed turn through the same pipeline as channel messages.
+
+    The ``stream_factory`` parameter is only for test injection; production code
+    leaves it ``None`` and the live runner lazily imports ``run_governed_turn``.
+    """
+    if _background_live_runner_enabled():
+        return _LiveLocalCronTurnRunner(stream_factory=stream_factory)
+    return _SafeLocalCronTurnRunner()
+
+
+def build_local_scheduler_cron_driver(*, stream_factory: Any = None) -> _LoopDriverLike:
     """Build the local scheduler driver used by ``magi gateway start``.
 
     This composes the existing persistent job source and scheduler executor seam.
-    It deliberately uses a safe local runner: even if an operator requests live
-    mode, no ADK/client credentials or network authority are constructed here.
+    When ``MAGI_BACKGROUND_LIVE_RUNNER_ENABLED`` is off (default), the driver uses
+    ``_SafeLocalCronTurnRunner`` and behavior is byte-identical to the previous
+    implementation.  When the flag is on, a live engine-backed runner is selected
+    via ``_build_local_cron_turn_runner``.
+
+    The ``stream_factory`` parameter is only for test injection and is forwarded
+    to ``_build_local_cron_turn_runner`` when the live path is selected.
     """
     from typing import cast
 
@@ -124,7 +213,7 @@ def build_local_scheduler_cron_driver() -> _LoopDriverLike:
 
     return SchedulerLoopDriver(
         source=SqliteScheduledJobSource(_scheduler_db_path_from_env()),
-        runner=_SafeLocalCronTurnRunner(),
+        runner=_build_local_cron_turn_runner(stream_factory=stream_factory),
         owner_digest=_scheduler_owner_digest_from_env(),
         lock_dir=_scheduler_lock_dir_from_env(),
         readiness_execution_mode=cast(Any, _scheduler_readiness_mode_from_env()),
