@@ -524,3 +524,63 @@ def test_patch_builtin_policy_requires_auth(tmp_path, monkeypatch) -> None:
         json={"enabled": False},
     )
     assert resp.status_code == 401
+
+
+# --------------------------------------------------------------------------- #
+# source_citation gate-mode opt-down (repair/audit/off) route                   #
+# --------------------------------------------------------------------------- #
+def test_patch_citation_gate_mode_persists_and_projects(tmp_path, monkeypatch) -> None:
+    cfile = tmp_path / "customize.json"
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
+    # Capture is on; the selector must NEVER touch it.
+    monkeypatch.setenv("MAGI_SOURCE_CITATION_ENABLED", "1")
+    client = TestClient(create_app(_build_runtime(tmp_path)))
+    client.headers.update({"x-gateway-token": _TOKEN})
+    import json
+
+    for mode in ("repair", "audit", "off"):
+        resp = client.patch(
+            "/v1/app/customize/citation-gate-mode", json={"mode": mode}
+        )
+        assert resp.status_code == 200
+        assert resp.json()["overrides"]["citation_gate_mode"] == mode
+        assert json.loads(cfile.read_text())["citation_gate_mode"] == mode
+        assert os.environ["MAGI_SOURCE_CITATION_GATE_MODE"] == mode
+        # Capture / inline citations / Sources stay on in every mode.
+        assert os.environ["MAGI_SOURCE_CITATION_ENABLED"] == "1"
+
+
+def test_patch_citation_gate_mode_rejects_bad_value(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
+    client = TestClient(create_app(_build_runtime(tmp_path)))
+    client.headers.update({"x-gateway-token": _TOKEN})
+    resp = client.patch(
+        "/v1/app/customize/citation-gate-mode", json={"mode": "loud"}
+    )
+    assert resp.status_code == 400
+
+
+def test_patch_citation_gate_mode_requires_auth(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
+    client = _client(tmp_path)  # no token
+    resp = client.patch(
+        "/v1/app/customize/citation-gate-mode", json={"mode": "audit"}
+    )
+    assert resp.status_code == 401
+
+
+def test_source_citation_boolean_still_404_after_gate_mode_feature(
+    tmp_path, monkeypatch
+) -> None:
+    # The boolean disable floor is untouched by the mode selector: the builtin-
+    # policies endpoint still 404s source_citation.
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
+    monkeypatch.setenv("MAGI_SOURCE_CITATION_ENABLED", "1")
+    client = TestClient(create_app(_build_runtime(tmp_path)))
+    client.headers.update({"x-gateway-token": _TOKEN})
+    resp = client.patch(
+        "/v1/app/customize/builtin-policies/source_citation",
+        json={"enabled": False},
+    )
+    assert resp.status_code == 404
+    assert os.environ["MAGI_SOURCE_CITATION_ENABLED"] == "1"

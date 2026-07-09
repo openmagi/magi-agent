@@ -45,6 +45,9 @@ export default {
       // PR-3: verify-before-replying Audit panel section + citations mirror suite
       "src/components/chat/audit-panel.verify.test.tsx",
       "src/components/chat/audit-panel.citations.test.tsx",
+      // source-citation gate-mode selector on the floored policy card. Standalone
+      // react-dom/server snapshot suite (green under node).
+      "src/components/dashboard/customize/policy-card-list.gate-mode.test.tsx",
     ],
   },
 };

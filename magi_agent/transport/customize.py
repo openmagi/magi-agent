@@ -26,6 +26,7 @@ from magi_agent.customize.store import (
     delete_custom_rule,
     load_overrides,
     set_builtin_policy_override,
+    set_citation_gate_mode_override,
     set_control_plane_override,
     set_custom_rule,
     set_tool_override,
@@ -1164,6 +1165,46 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         # Overwrite beats the profile seed and re-enables cleanly.
         apply_builtin_policy_overrides_to_env(
             os.environ, {"builtin_policies": {policy_id: enabled}}
+        )
+        return JSONResponse(content={"overrides": overrides})
+
+    @app.patch("/v1/app/customize/citation-gate-mode")
+    async def patch_citation_gate_mode(request: Request) -> JSONResponse:
+        # source_citation opt-DOWN: a 3-way gate MODE step (repair/audit/off), not
+        # a boolean off switch. Boolean-disable of the citation policy stays
+        # floored (the builtin-policies endpoint 404s it). This never touches
+        # MAGI_SOURCE_CITATION_ENABLED, so capture / inline citations / Sources
+        # stay on in every mode.
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        from magi_agent.customize.builtin_policy_overrides import (  # noqa: PLC0415
+            CITATION_GATE_MODE_VALUES,
+            apply_citation_gate_mode_override_to_env,
+        )
+
+        mode = body.get("mode") if isinstance(body, dict) else None
+        if not isinstance(mode, str) or mode not in CITATION_GATE_MODE_VALUES:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "mode_required",
+                    "message": (
+                        "mode must be one of "
+                        f"{', '.join(CITATION_GATE_MODE_VALUES)}"
+                    ),
+                },
+            )
+        overrides = set_citation_gate_mode_override(mode)
+        # Project onto the live process env so the next turn's citation gate reads
+        # the mode without a restart. Overwrite beats the profile seed and steps
+        # back up cleanly.
+        apply_citation_gate_mode_override_to_env(
+            os.environ, {"citation_gate_mode": mode}
         )
         return JSONResponse(content={"overrides": overrides})
 

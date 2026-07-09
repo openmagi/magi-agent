@@ -28,10 +28,14 @@
 import { ChevronRight, Trash2 } from "lucide-react";
 import React, { useMemo, useState } from "react";
 
-import type { CustomRule, PolicyCatalogEntry } from "@/lib/customize-api";
+import type {
+  CitationGateModeDescriptor,
+  CustomRule,
+  PolicyCatalogEntry,
+} from "@/lib/customize-api";
 import type { DashboardCheck } from "@/lib/packs-dashboard-api";
 import type { PolicyOrigin, RuleRow } from "@/lib/policy-model";
-import { Switch } from "@/components/ui/_ds";
+import { Select, Switch, type SelectOption } from "@/components/ui/_ds";
 
 // ---------------------------------------------------------------------------
 // Action spectrum: strongest member wins (BLOCK > ASK > AUDIT > NUDGE).
@@ -103,6 +107,13 @@ interface PolicyCardVM {
     | { kind: "control-plane"; behaviorId: string; enabled: boolean }
     | { kind: "adapter-row"; row: RuleRow }
     | { kind: "floor" }; // always-on, no toggle
+  /**
+   * Present only on the floored `source_citation` policy: the 3-way gate-mode
+   * opt-DOWN descriptor (repair/audit/off). Its always-on floor card renders a
+   * selector under the badge to step enforcement STRICTNESS down. The boolean
+   * disable stays floored (no off switch).
+   */
+  gateMode?: CitationGateModeDescriptor;
   /** Delete affordance: native policies cascade member rules; adapters can't delete. */
   deletable: boolean;
 }
@@ -133,6 +144,17 @@ export interface PolicyCardListProps {
   pendingBuiltinPolicies?: Set<string>;
   /** Ids of control-plane behaviors whose PATCH is in flight. */
   pendingControlPlane?: Set<string>;
+  // source_citation gate-mode opt-DOWN (repair/audit/off). The floored citation
+  // card renders a 3-way selector under its always-on badge. The boolean disable
+  // stays floored; this only steps enforcement STRICTNESS down.
+  /** Current explicit gate-mode override, or `null` (fall back to the catalog value). */
+  citationGateMode?: string | null;
+  /** Persist a new gate mode. Absent = no selector rendered on the floor card. */
+  onCitationGateModeChange?: (mode: string) => void;
+  /** True while the gate-mode PATCH is in flight (disables the selector). */
+  citationGateModePending?: boolean;
+  /** Last gate-mode PATCH error, surfaced under the selector. */
+  citationGateModeError?: string | null;
   // Adapter-row routing (built-in presets + orphan user rows).
   onTogglePreset: (presetId: string, next: boolean) => void;
   onToggleCustomRule: (rule: CustomRule, next: boolean) => void;
@@ -234,6 +256,8 @@ export function PolicyCardList(props: PolicyCardListProps): React.ReactElement {
         scopedModes: [...scopedSet],
         actionHint: p.actionHint,
         toggle,
+        // Only the floored source_citation policy carries a gate-mode descriptor.
+        gateMode: p.gateMode,
         deletable: p.origin === "user",
       };
     });
@@ -425,6 +449,10 @@ function PolicyCard({
   onToggleControlPlane,
   pendingBuiltinPolicies,
   pendingControlPlane,
+  citationGateMode,
+  onCitationGateModeChange,
+  citationGateModePending,
+  citationGateModeError,
   catalogPolicies,
 }: { vm: PolicyCardVM } & PolicyCardListProps): React.ReactElement {
   // Strongest member action wins; when there are no members (control-plane
@@ -660,7 +688,70 @@ function PolicyCard({
         </div>
       </div>
 
+      {vm.toggle.kind === "floor" && vm.gateMode && onCitationGateModeChange ? (
+        <CitationGateModeSelector
+          descriptor={vm.gateMode}
+          value={citationGateMode ?? vm.gateMode.value}
+          pending={citationGateModePending ?? false}
+          error={citationGateModeError ?? null}
+          onChange={onCitationGateModeChange}
+        />
+      ) : null}
+
       <MemberDrillDown vm={vm} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Citation gate-mode selector (floored source_citation card only)
+// ---------------------------------------------------------------------------
+
+const GATE_MODE_LABELS: Record<string, string> = {
+  repair: "Repair (revise or search to ground claims)",
+  audit: "Audit (record findings, never alter the answer)",
+  off: "Off (skip the gate)",
+};
+
+/**
+ * The 3-way enforcement-strictness selector rendered under the always-on badge
+ * of the floored source_citation card. The policy itself is always on (it cannot
+ * be disabled); this selector only steps its gate STRICTNESS down. Inline
+ * citations and the Sources panel stay on in every mode.
+ */
+function CitationGateModeSelector({
+  descriptor,
+  value,
+  pending,
+  error,
+  onChange,
+}: {
+  descriptor: CitationGateModeDescriptor;
+  value: string;
+  pending: boolean;
+  error: string | null;
+  onChange: (mode: string) => void;
+}): React.ReactElement {
+  const options: SelectOption[] = descriptor.options.map((mode) => ({
+    value: mode,
+    label: GATE_MODE_LABELS[mode] ?? mode,
+  }));
+  return (
+    <div className="mt-3 rounded-lg border border-black/[0.05] bg-gray-50/40 px-3 py-2.5">
+      <Select
+        label="Enforcement strictness"
+        options={options}
+        value={value}
+        disabled={pending}
+        error={error ?? undefined}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <p className="mt-1.5 text-[10px] leading-relaxed text-secondary/70">
+        Always on and cannot be turned off. This only steps its enforcement down.
+        Repair can revise or search to ground claims, audit records but never
+        alters the answer, off skips the gate. Inline citations and the Sources
+        panel stay on in all modes.
+      </p>
     </div>
   );
 }

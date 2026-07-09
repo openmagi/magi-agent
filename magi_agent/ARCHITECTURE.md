@@ -389,7 +389,7 @@ graph LR
 | __main__.py | — | main | — |
 | app.py | — | active_sessions, app_api, board_api, bootstrap, chat, composio_broker, config, control_requests, credentials, customize, daemon, debug_trace, health, integrations, learning_dashboard, observability, openmagi_runtime, packs_dashboard, plugins, shadow_invocations, streaming_chat_route, tools, web_dashboard | (root)/main.py |
 | facades.py | High-level entry-point facades that compose existing modules. | bus, context, dispatcher, flags, lifecycle_audit, lifecycle_shell_command_control, manifest, output_rewrite, prompt_injection, replace_payloads, resolved, result, store, verification_policy | cli/customize_tool_wiring.py |
-| main.py | — | _truthy, app, chat, control_plane_overrides, env, flags, hosted_defaults, install_profile_bootstrap, local_defaults, local_proxy, local_vault, memory_bootstrap, models, observed_egress, openmagi_runtime, otel_noise, providers, serve_token, store, vault_local, vault_server | (root)/__main__.py, cli/tests/test_app.py |
+| main.py | — | _truthy, app, builtin_policy_overrides, chat, control_plane_overrides, env, flags, hosted_defaults, install_profile_bootstrap, local_defaults, local_proxy, local_vault, memory_bootstrap, models, observed_egress, openmagi_runtime, otel_noise, providers, serve_token, store, vault_local, vault_server | (root)/__main__.py, cli/tests/test_app.py |
 
 ### adk_bridge/
 
@@ -850,7 +850,7 @@ graph LR
 | after_tool_gate.py | Customize after-tool-use ingestion gate (P4). | control_plane, criterion_engine, flags, receipt_redaction, store, types, verification_policy | engine/model_runner.py |
 | apply.py | — | flags, verification_policy | customize/__init__.py, runtime/openmagi_runtime.py, transport/customize.py |
 | budgets_apply.py | F7 — Customize budgets applier. | flags, verification_policy | runtime/governed_turn.py, transport/customize.py |
-| builtin_policy_overrides.py | User-facing opt-out for first-party (builtin) *policies*. | env | cli/app.py, customize/catalog.py, transport/customize.py |
+| builtin_policy_overrides.py | User-facing opt-out for first-party (builtin) *policies*. | env | (root)/main.py, cli/app.py, customize/catalog.py, transport/customize.py |
 | capability_scope.py | Capability-scope custom rule (F4). | local_readonly, permissions | customize/custom_rules.py, runtime/child_runner_live.py |
 | catalog.py | — | app_api, builtin_policy_overrides, control_plane_overrides, policies, preset_map, presets, store, what_menu | engine/model_runner.py, transport/customize.py |
 | control_plane_overrides.py | User-facing toggles for in-context control-plane *behaviors*. | _truthy | (root)/main.py, cli/app.py, customize/catalog.py, transport/customize.py |

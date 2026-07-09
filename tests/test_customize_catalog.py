@@ -146,6 +146,44 @@ def test_catalog_has_curated_recipes_and_presets() -> None:
     assert catalog["verification"]["recipes"][0]["id"]
 
 
+def test_catalog_attaches_gate_mode_to_source_citation_policy() -> None:
+    # source_citation is disclosed as an always-on floor card by the unified
+    # ``policies`` array (userDisableable False, no boolean toggle). Its 3-way
+    # gate-mode step-down descriptor rides ON that entry so the floor card can
+    # render the selector WITH the row it governs (no separate floor array).
+    runtime = _FakeRuntime(tools=[])
+    catalog = build_catalog(runtime)
+    by_id = {p["id"]: p for p in catalog["policies"]}
+    assert "source_citation" in by_id
+    entry = by_id["source_citation"]
+    assert entry["origin"] == "builtin"
+    assert entry["userDisableable"] is False
+    assert entry["gateMode"]["value"] in ("repair", "audit", "off")
+    assert entry["gateMode"]["options"] == ["repair", "audit", "off"]
+
+
+def test_catalog_gate_mode_only_on_source_citation_not_verify() -> None:
+    runtime = _FakeRuntime(tools=[])
+    catalog = build_catalog(runtime)
+    by_id = {p["id"]: p for p in catalog["policies"]}
+    # verify_before_replying is a real user toggle, not a gate-mode floor.
+    assert "gateMode" not in by_id.get("verify_before_replying", {})
+    # It is a user-disableable boolean toggle in builtinPolicies.
+    toggle_ids = {t["id"] for t in catalog["builtinPolicies"]}
+    assert "verify_before_replying" in toggle_ids
+    # source_citation is a floor, never a boolean toggle.
+    assert "source_citation" not in toggle_ids
+    # Hard infra flags never leak into the boolean toggle catalog.
+    toggle_env = {t.get("env_var") for t in catalog["builtinPolicies"]}
+    for forbidden in (
+        "MAGI_EGRESS_GATE_ENABLED",
+        "MAGI_GATE5B_GOVERNANCE_ENABLED",
+        "MAGI_SERVE_EVIDENCE_ENABLED",
+        "MAGI_KERNEL_RECIPE_PACKS_ENABLED",
+    ):
+        assert forbidden not in toggle_env
+
+
 def test_presets_sourced_from_real_catalog_with_hyphen_ids() -> None:
     runtime = _FakeRuntime(tools=[])
     presets = build_catalog(runtime)["verification"]["harnessPresets"]

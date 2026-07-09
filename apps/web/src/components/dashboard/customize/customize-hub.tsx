@@ -34,6 +34,7 @@ import {
   patchRecipeOverride,
   patchControlPlaneOverride,
   patchBuiltinPolicyOverride,
+  patchCitationGateMode,
   putRules,
   putCustomRule,
   deleteCustomRule,
@@ -441,6 +442,44 @@ export function CustomizeHub({
     [agentFetch, reload],
   );
 
+  // --- source_citation gate-mode opt-down (repair/audit/off) ----------------
+  // The citation policy's BOOLEAN disable stays floored; this MODE step-down is
+  // the acceptable opt-DOWN lever. It projects onto MAGI_SOURCE_CITATION_GATE_MODE
+  // and never touches MAGI_SOURCE_CITATION_ENABLED, so capture / inline
+  // citations / Sources stay on in all three modes.
+  const [citationGateMode, setCitationGateMode] = useState<string | null>(null);
+  const [citationGateModePending, setCitationGateModePending] = useState(false);
+  const [citationGateModeError, setCitationGateModeError] = useState<string | null>(
+    null,
+  );
+
+  useEffect(() => {
+    setCitationGateMode(data?.overrides.citation_gate_mode ?? null);
+  }, [data]);
+
+  const handleCitationGateModeChange = useCallback(
+    (mode: string) => {
+      const previous = citationGateMode;
+      setCitationGateMode(mode);
+      setCitationGateModeError(null);
+      setCitationGateModePending(true);
+      patchCitationGateMode(agentFetch, mode)
+        .then((overrides) => {
+          setCitationGateMode(overrides.citation_gate_mode ?? mode);
+        })
+        .catch((err: unknown) => {
+          setCitationGateMode(previous);
+          setCitationGateModeError(
+            err instanceof Error ? err.message : "Failed to update citation gate mode",
+          );
+        })
+        .finally(() => {
+          setCitationGateModePending(false);
+        });
+    },
+    [agentFetch, citationGateMode],
+  );
+
   // --- Recipes allowlist (F-UX10) ------------------------------------------
   // ``verification.recipes[]`` is allowlist-shaped: empty = no opt-out
   // (legacy default, every recipe behaves as enabled); non-empty filters out
@@ -683,6 +722,10 @@ export function CustomizeHub({
             pendingControlPlane={behaviorPending}
             behaviorError={behaviorError}
             builtinPolicyError={builtinPolicyError}
+            citationGateMode={citationGateMode}
+            onCitationGateModeChange={handleCitationGateModeChange}
+            citationGateModePending={citationGateModePending}
+            citationGateModeError={citationGateModeError}
             userRules={userRules}
             rulesSaving={rulesSaving}
             onSaveRules={handleSaveRules}
@@ -777,6 +820,10 @@ function RulesSectionMount({
   pendingControlPlane,
   behaviorError,
   builtinPolicyError,
+  citationGateMode,
+  onCitationGateModeChange,
+  citationGateModePending,
+  citationGateModeError,
   userRules,
   rulesSaving,
   onSaveRules,
@@ -803,6 +850,13 @@ function RulesSectionMount({
   pendingControlPlane: Set<string>;
   behaviorError: string | null;
   builtinPolicyError: string | null;
+  // source_citation gate-mode opt-DOWN (repair/audit/off): the floored citation
+  // policy card renders a 3-way selector. `null` means no explicit override yet
+  // (the card falls back to the catalog entry's gateMode.value = fleet default).
+  citationGateMode: string | null;
+  onCitationGateModeChange: (mode: string) => void;
+  citationGateModePending: boolean;
+  citationGateModeError: string | null;
   // "Your guidance" freeform system-prompt text, relocated from the retired
   // Behaviors tab into the Policies surface.
   userRules: string;
@@ -1158,6 +1212,10 @@ function RulesSectionMount({
             onToggleControlPlane={onToggleControlPlane}
             pendingBuiltinPolicies={pendingBuiltinPolicies}
             pendingControlPlane={pendingControlPlane}
+            citationGateMode={citationGateMode}
+            onCitationGateModeChange={onCitationGateModeChange}
+            citationGateModePending={citationGateModePending}
+            citationGateModeError={citationGateModeError}
           />
 
           {/* "Your guidance": freeform soft system-prompt text, relocated from

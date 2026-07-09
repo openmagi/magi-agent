@@ -171,6 +171,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         # win over the profile seed just applied: project them onto os.environ
         # as an explicit overwrite. Fail-soft; a no-op when the section is empty.
         _apply_local_control_plane_overrides(os.environ)
+        # First-party (builtin) policy opt-outs + the source_citation gate-mode
+        # opt-DOWN persist in the same customize.json. Project them at startup too
+        # so a dashboard toggle survives a restart (the PATCH route projects onto
+        # the live process, but without this the persisted choice silently reverts
+        # on the next boot). Local-full seam only; see the hosted branch below.
+        _apply_persisted_customize_policy_overrides(os.environ)
         _maybe_start_local_vault_proxy(os.environ)
         _print_local_startup_notice(port)
     else:
@@ -179,6 +185,15 @@ def main(argv: Sequence[str] | None = None) -> None:
         # instead: no-op unless MAGI_DEPLOYMENT=hosted, and byte-identical to
         # today at the default stage (off). See runtime/hosted_defaults.py.
         apply_hosted_runtime_defaults(os.environ)
+        # Hosted bots also serve the Customize dashboard (its PATCH routes write to
+        # the PVC customize.json), so a bot owner can persist a verify opt-out or a
+        # citation gate-mode step-down. Honor that persisted choice at boot so it
+        # does not silently revert on the next restart / image bump. These are
+        # user opt-DOWN levers only: source_citation's ENABLED master flag is never
+        # touched and its boolean disable is a 404 floor, so this cannot lower a
+        # hosted safety floor. The control-plane behavior overlay stays local-only
+        # (it is a lab/dogfood seed, not a user surface).
+        _apply_persisted_customize_policy_overrides(os.environ)
     runtime = OpenMagiRuntime(config=config)
     runtime.gate5b4c3_shadow_generation_route_config = (
         parse_gate5b4c3_shadow_generation_route_env(os.environ)
@@ -268,6 +283,41 @@ def _apply_local_control_plane_overrides(environ) -> None:
         from .customize.store import load_overrides
 
         apply_control_plane_overrides_to_env(environ, load_overrides())
+    except Exception:  # noqa: BLE001 - never let a customize read break startup
+        return
+
+
+def _apply_persisted_customize_policy_overrides(environ) -> None:
+    """Project persisted first-party policy opt-outs onto the environment.
+
+    Mirrors the ``magi`` CLI dispatch (cli/app.py) on the serve path so a
+    dashboard toggle survives a restart. Applies two seams from a single
+    ``load_overrides()`` result:
+
+    * ``apply_builtin_policy_overrides_to_env`` -- a persisted disable of a
+      curated builtin policy (``verify_before_replying``) projects onto its
+      master ``MAGI_*_ENABLED`` flag as an overwrite. This also cures the
+      pre-existing #1403 restart-revert (setdefault-only projection could not
+      re-apply a boolean opt-out on boot).
+    * ``apply_citation_gate_mode_override_to_env`` -- a persisted source_citation
+      gate-mode step-down (repair/audit/off) projects onto
+      ``MAGI_SOURCE_CITATION_GATE_MODE``. It NEVER touches
+      ``MAGI_SOURCE_CITATION_ENABLED``: capture, inline citations, and Sources
+      stay on in every mode, and the boolean disable stays floored.
+
+    Tri-state / fail-soft: an absent override leaves the env byte-identical, and
+    any load/apply failure leaves the profile defaults in place.
+    """
+    try:
+        from .customize.builtin_policy_overrides import (
+            apply_builtin_policy_overrides_to_env,
+            apply_citation_gate_mode_override_to_env,
+        )
+        from .customize.store import load_overrides
+
+        overrides = load_overrides()
+        apply_builtin_policy_overrides_to_env(environ, overrides)
+        apply_citation_gate_mode_override_to_env(environ, overrides)
     except Exception:  # noqa: BLE001 - never let a customize read break startup
         return
 
