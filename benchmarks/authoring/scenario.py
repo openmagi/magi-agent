@@ -51,8 +51,14 @@ class Oracle:
     params: dict[str, Any] = field(default_factory=dict)
     plan: dict[str, Any] = field(default_factory=dict)
     persisted: dict[str, Any] = field(default_factory=dict)
+    # "default" = final-state alias of the per-turn I5 vocabulary check (the
+    # runner re-asserts no vocabulary leak on the FINAL assistant_message).
     forbidden_strings: str | None = None
     never_persists: bool = False
+    # NOTE: the loop check only fires when a turn supplied `answers` yet the
+    # working state did not change (attempted progress). On scenarios that
+    # never engage a question (e.g. out_of_scope), this knob is inert by
+    # design - honest non-engagement is not a flow bug.
     no_question_loop: bool = False
     draft_absent_keys: list[str] = field(default_factory=list)
 

@@ -9,6 +9,12 @@ failure carrying ``{invariant_id, turn_index, evidence}``.
 See design section 6.4. Where a magi-agent quirk weakens an invariant (flow B
 LLM questions carry an empty ``targets_field``), the invariant degrades
 honestly rather than being papered over.
+
+NOTE (review fold): I8 (no store write before the save step) is NOT a per-turn
+check in this module - it is the store-level oracle
+``oracles.persisted.assert_store_untouched``, because "the store did not
+change" is a property of bytes on disk across the whole pre-save window, not
+of a single TurnResult. This module therefore implements I1-I7 and I9.
 """
 from __future__ import annotations
 
@@ -140,7 +146,33 @@ def check_invariants(
             )
     else:  # linked_policy
         plan = result.plan
-        plan_clean = plan is not None and not validate_policy_plan(plan)
+        # Review fold (Wave A): also re-run the EMBEDDED validators, not only
+        # the composition check. validate_policy_plan delegates per-rule
+        # schema validity to the producer/gate validators; leaning on
+        # production's own "plan is not None implies embedded-clean" gating
+        # would let a future regression (non-None plan carrying an invalid
+        # embedded rule, ready still set) slip past. The harness must stay an
+        # INDEPENDENT oracle.
+        embedded_clean = False
+        if isinstance(plan, dict):
+            from magi_agent.packs.dashboard_authored import (
+                validate_dashboard_check,
+            )
+
+            producer = plan.get("producer")
+            gate = plan.get("gate")
+            try:
+                embedded_clean = (
+                    isinstance(producer, dict)
+                    and isinstance(gate, dict)
+                    and not validate_dashboard_check(producer)
+                    and not validate_custom_rule(gate)
+                )
+            except Exception as exc:  # noqa: BLE001
+                add("I2", f"embedded validator raised: {exc}")
+        plan_clean = (
+            plan is not None and embedded_clean and not validate_policy_plan(plan)
+        )
         expected_ready = plan_clean
         if result.ready_to_save != expected_ready:
             add(

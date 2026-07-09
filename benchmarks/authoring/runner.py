@@ -290,6 +290,20 @@ def _check_final_oracle(
     for key in oracle.draft_absent_keys:
         if _get_path(final.working, key) is not _MISSING:
             return _div(f"draft_absent[{key}]", "absent", "present")
+
+    # Review fold (Wave A): `forbidden_strings: default` was an unwired knob.
+    # It is now an explicit final-state alias of the per-turn I5 vocabulary
+    # check: the final assistant_message must not leak internal vocabulary.
+    # (Custom string lists are not supported; per-turn I5 already covers every
+    # turn, this only makes the scenario-level intent non-misleading.)
+    if oracle.forbidden_strings is not None:
+        from magi_agent.customize.nl_compiler_interactive import (
+            _to_plain_language,
+        )
+
+        msg = final.assistant_message or ""
+        if _to_plain_language(msg) != msg:
+            return _div("forbidden_strings", "no vocabulary leak", msg)
     return None
 
 
