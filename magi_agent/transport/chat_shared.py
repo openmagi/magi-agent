@@ -59,6 +59,45 @@ def bearer_auth_failed(request: Request, runtime: OpenMagiRuntime) -> bool:
     return not hmac.compare_digest(presented, expected)
 
 
+def _is_loopback_host(host: str | None) -> bool:
+    """True when ``host`` binds only the local machine.
+
+    ``localhost`` and any address in the ``127.0.0.0/8`` block or the IPv6
+    ``::1`` loopback are treated as loopback. Everything else (``0.0.0.0``,
+    ``::``, LAN IPs, hostnames) is non-loopback = network-reachable.
+    """
+    import ipaddress  # noqa: PLC0415
+
+    if not host:
+        return False
+    value = host.strip().strip("[]")
+    if value.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(value).is_loopback
+    except ValueError:
+        return False
+
+
+def local_serve_permission_mode(env: Mapping[str, str] | None = None) -> str:
+    """Baseline permission mode for the LOCAL ``magi serve`` owner.
+
+    Exposure<->authority coupling (P0): the local serve owner keeps the YOLO
+    ``bypassPermissions`` baseline only when the resolved bind host is loopback
+    (or the explicit ``MAGI_SERVE_REMOTE_YOLO`` opt-in is set). When the host is
+    non-loopback (LAN-reachable) and the opt-in is off, the baseline is
+    downgraded to the ask-capable ``"default"`` mode so a network peer cannot
+    drive a full-authority agent. Hard-safety denies are unaffected either way;
+    an active mode may still TIGHTEN this baseline via ``capped_permission_mode``.
+    """
+    from magi_agent.config.flags import flag_bool, flag_str  # noqa: PLC0415
+
+    host = flag_str("MAGI_SERVE_HOST", env=env) or "127.0.0.1"
+    if _is_loopback_host(host) or flag_bool("MAGI_SERVE_REMOTE_YOLO", env=env):
+        return "bypassPermissions"
+    return "default"
+
+
 _RUNNER_DIAGNOSTIC_PREVIEW_FORBIDDEN_RE = re.compile(
     r"(?:"
     r"Authorization:|Bearer\s+\S+|(?:Cookie|Set-Cookie):|"
