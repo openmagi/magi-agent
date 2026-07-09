@@ -81,11 +81,11 @@ function ProvisioningSection({
         <div className="flex items-center gap-3">
           <div className="h-4 w-4 rounded-full border-2 border-amber-400 border-t-transparent animate-spin shrink-0" />
           <div>
-            <p className="text-sm font-medium text-amber-300">
+            <p className="text-sm font-medium text-[var(--color-review-fg)]">
               {restarting ? t.botCard.telegramSetupUpdating : t.botCard.provisioning}
             </p>
             {!restarting && (
-              <p className="text-xs text-amber-300/70 mt-0.5">
+              <p className="text-xs text-[var(--color-review-fg)]/80 mt-0.5">
                 {t.botCard.provisioningDesc}
               </p>
             )}
@@ -99,7 +99,7 @@ function ProvisioningSection({
         </div>
         {provisionTimedOut && !isActive && (
           <div className="pt-1 space-y-2">
-            <p className="text-xs text-amber-300/70">
+            <p className="text-xs text-[var(--color-review-fg)]/80">
               {t.botCard.provisioningRetry}
             </p>
             {bot.telegram_bot_username && !bot.telegram_owner_id && (
@@ -111,7 +111,7 @@ function ProvisioningSection({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="w-full text-amber-300 border-amber-500/30"
+                  className="w-full text-[var(--color-review-fg)] border-amber-500/30"
                 >
                   {t.onboarding.sendStartButton}
                 </Button>
@@ -135,7 +135,7 @@ function ErrorSection({
     <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20">
       <div className="space-y-3">
         <div>
-          <p className="text-sm font-medium text-red-400">
+          <p className="text-sm font-medium text-[var(--color-deny-fg)]">
             {t.botCard.errorTitle}
           </p>
           <p className="text-xs text-secondary mt-1">
@@ -166,7 +166,7 @@ function DegradedSection({
     <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20">
       <div className="space-y-3">
         <div>
-          <p className="text-sm font-medium text-amber-300">
+          <p className="text-sm font-medium text-[var(--color-review-fg)]">
             {t.botCard.degradedTitle}
           </p>
           <p className="text-xs text-secondary mt-1">
@@ -174,7 +174,7 @@ function DegradedSection({
           </p>
         </div>
         {!isRecovering && (
-          <Button variant="ghost" size="sm" className="w-full text-amber-300 border-amber-500/30" onClick={onRetry} disabled={retrying}>
+          <Button variant="ghost" size="sm" className="w-full text-[var(--color-review-fg)] border-amber-500/30" onClick={onRetry} disabled={retrying}>
             {retrying ? t.botCard.provisioning : t.botCard.retryButton}
           </Button>
         )}
@@ -198,7 +198,7 @@ function StoppedSection({
     <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20">
       <div className="space-y-3">
         <div>
-          <p className="text-sm font-medium text-amber-300">
+          <p className="text-sm font-medium text-[var(--color-review-fg)]">
             {t.botCard.stoppedTitle}
           </p>
           <p className="text-xs text-secondary mt-1">
@@ -215,7 +215,7 @@ function StoppedSection({
           {subscribing ? t.botCard.subscribing : t.botCard.subscribeButton}
         </Button>
         {error && (
-          <p className="text-xs text-red-400">{error}</p>
+          <p className="text-xs text-[var(--color-deny-fg)]">{error}</p>
         )}
       </div>
     </div>
@@ -745,7 +745,7 @@ export function BotStatusCard({ bot, subscriptionPlan }: BotStatusCardProps) {
               <p className="font-medium text-foreground">@{bot.discord_bot_username}</p>
               <button
                 onClick={handleDiscordDisconnect}
-                className="text-[10px] text-red-400 hover:text-red-300 transition-colors cursor-pointer"
+                className="text-[10px] text-[var(--color-deny-fg)] hover:opacity-80 transition-colors cursor-pointer"
               >
                 {t.settingsPage.discordDisconnect}
               </button>
@@ -1029,7 +1029,7 @@ export function BotStatusCard({ bot, subscriptionPlan }: BotStatusCardProps) {
                         placeholder={t.onboarding.telegramTokenPlaceholder}
                         className="w-full bg-white border border-gray-300 rounded-xl px-4 py-3 text-sm text-foreground placeholder-gray-400 font-mono focus:outline-none focus:border-primary/50 mb-2"
                       />
-                      {telegramError && <p className="text-red-400 text-[13px] mb-2">{telegramError}</p>}
+                      {telegramError && <p className="text-[var(--color-deny-fg)] text-[13px] mb-2">{telegramError}</p>}
                       <button
                         onClick={handleValidateToken}
                         disabled={telegramValidating || !telegramToken.trim()}
@@ -1057,7 +1057,7 @@ export function BotStatusCard({ bot, subscriptionPlan }: BotStatusCardProps) {
                           <span className="text-[#2AABEE]">{"\u2197"}</span>
                         </a>
                       </div>
-                      {telegramError && <p className="text-red-400 text-[13px] mb-2">{telegramError}</p>}
+                      {telegramError && <p className="text-[var(--color-deny-fg)] text-[13px] mb-2">{telegramError}</p>}
                       <div className="flex gap-3 mt-3">
                         <button
                           onClick={() => { setTelegramPhase("token"); setTelegramError(null); }}
