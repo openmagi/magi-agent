@@ -133,9 +133,11 @@ def test_resolve_server_port_rejects_unknown_commands() -> None:
         resolve_server_port(["run"], environ={})
 
 
-def test_resolve_server_host_defaults_to_all_interfaces() -> None:
-    # Default must remain 0.0.0.0 so hosted/existing behaviour is unchanged.
-    assert resolve_server_host([], environ={}) == "0.0.0.0"
+def test_resolve_server_host_defaults_to_loopback() -> None:
+    # P0 security fix: default is now 127.0.0.1 (loopback only) so a stock
+    # ``magi serve`` is not LAN-reachable. Hosted infra sets MAGI_SERVE_HOST
+    # explicitly to 0.0.0.0.
+    assert resolve_server_host([], environ={}) == "127.0.0.1"
 
 
 def test_resolve_server_host_honours_core_agent_host_env() -> None:
@@ -262,7 +264,8 @@ def test_main_uses_local_full_runtime_defaults_when_env_is_absent(
     monkeypatch.setattr(main_module.uvicorn, "run", lambda app, **kwargs: captured.update(kwargs))
     main_module.main(["serve", "--port", "9093"])
 
-    assert captured["host"] == "0.0.0.0"
+    # P0: no MAGI_SERVE_HOST env -> loopback default (was 0.0.0.0).
+    assert captured["host"] == "127.0.0.1"
     assert captured["port"] == 9093
     for key, value in EXPECTED_LOCAL_FULL_RUNTIME_DEFAULTS.items():
         assert main_module.os.environ[key] == value
