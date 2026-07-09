@@ -1,0 +1,31 @@
+schema_version: 1
+id: rule_corrective_toolperm_en_001
+flow: single_rule
+archetype: corrective
+language: en
+turn_budget: 4
+# The corrective quirk: turn 1 sets action=ask_approval, turn 2 the operator
+# retargets it to block. Last valid answer must win; the stale value must be
+# gone. (Payload seeded per the HEAD-compat note in the happy-path scenario.)
+seed_draft:
+  what:
+    payload:
+      match: {tool: Bash}
+      decision: deny
+turns:
+  - say: "require approval before the Bash tool"
+    answers: {q_what.kind: tool_perm, q_action: ask_approval, q_scope: always}
+  - say: "actually just block it outright"
+    answers: {q_action: block}
+save: envelope
+oracle:
+  expect_ready: true
+  max_turns_to_ready: 2
+  draft:
+    what.kind: tool_perm
+    action: block
+    scope: always
+  persisted:
+    rule_valid_and_clean: true
+    no_orphan_rules: true
+  forbidden_strings: default

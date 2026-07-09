@@ -1,0 +1,27 @@
+schema_version: 1
+# DELIBERATELY BROKEN fixture. It is schema-valid (so it loads and lints), but
+# its oracle asserts the WRONG final draft on purpose: the converged rule has
+# scope=always, yet the oracle claims scope=coding. The runner MUST fail this
+# scenario with a populated first_divergence. Kept under _broken/ so the CI
+# glob never replays it as a real corpus entry; the selftest points at it
+# explicitly to pin the failure-report shape.
+id: deliberately_broken_oracle_001
+flow: single_rule
+archetype: happy_path
+language: en
+turn_budget: 4
+seed_draft:
+  what:
+    payload:
+      match: {tool: Bash}
+      decision: deny
+turns:
+  - say: "block the Bash tool"
+    answers: {q_what.kind: tool_perm}
+  - answers: {q_action: block, q_scope: always}
+save: none
+oracle:
+  expect_ready: true
+  max_turns_to_ready: 2
+  draft:
+    scope: coding          # WRONG on purpose: the real converged scope is always

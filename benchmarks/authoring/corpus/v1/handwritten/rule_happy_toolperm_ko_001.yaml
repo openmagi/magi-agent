@@ -1,0 +1,30 @@
+schema_version: 1
+id: rule_happy_toolperm_ko_001
+flow: single_rule
+archetype: happy_path
+language: ko
+turn_budget: 4
+seed_draft:
+  what:
+    payload:
+      match: {tool: shell_exec}
+      decision: deny
+turns:
+  - say: "shell_exec 툴을 못 쓰게 막아줘"
+    answers: {q_what.kind: tool_perm}
+  - answers: {q_action: block, q_scope: always}
+save: envelope
+oracle:
+  expect_ready: true
+  max_turns_to_ready: 2
+  draft:
+    what.kind: tool_perm
+    what.payload.match.tool: shell_exec
+    firesAt: before_tool_use
+    action: block
+    scope: always
+  persisted:
+    rule_valid_and_clean: true
+    policy_intent_is_first_utterance: true
+    no_orphan_rules: true
+  forbidden_strings: default

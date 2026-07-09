@@ -1,0 +1,15 @@
+schema_version: 1
+id: rule_outofscope_schedule_en_001
+flow: single_rule
+archetype: out_of_scope
+language: en
+turn_budget: 4
+turns:
+  - say: "run a database backup every night at 3am"
+  - say: "so a rule can't run a cron job on its own?"
+save: none
+oracle:
+  expect_ready: false
+  never_persists: true
+  no_question_loop: true
+  forbidden_strings: default

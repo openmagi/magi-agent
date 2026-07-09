@@ -1,0 +1,29 @@
+schema_version: 1
+id: rule_corrective_toolperm_ko_001
+flow: single_rule
+archetype: corrective
+language: ko
+turn_budget: 4
+seed_draft:
+  what:
+    payload:
+      match: {tool: shell_exec}
+      decision: deny
+turns:
+  - say: "shell_exec 쓰기 전에 승인 받게 해줘"
+    answers: {q_what.kind: tool_perm, q_action: ask_approval, q_scope: always}
+  - say: "아니 그냥 막아줘"
+    answers: {q_action: block}
+save: envelope
+oracle:
+  expect_ready: true
+  max_turns_to_ready: 2
+  draft:
+    what.kind: tool_perm
+    what.payload.match.tool: shell_exec
+    action: block
+    scope: always
+  persisted:
+    rule_valid_and_clean: true
+    no_orphan_rules: true
+  forbidden_strings: default
