@@ -1,10 +1,22 @@
-"""F-MUT1 — ``prompt_injection`` custom_rule kind.
+"""F-MUT1 -- ``prompt_injection`` custom_rule kind (module: authored_prompt_append).
+
+This module was renamed from ``customize/prompt_injection.py`` to
+``customize/authored_prompt_append.py`` (U8, security-policies track). The
+rename removes the naming collision between this USER-AUTHORED MUTATOR feature
+and the new ``injection_guard`` defense policy / ``security/injection_detection``
+module. A one-line re-export shim remains at the old path for one release.
+
+Stored ``custom_rule`` kind id: ``prompt_injection`` -- this is intentionally
+retained for backward compatibility with existing user customize.json files.
+A cosmetic rename of stored data carries bad risk/benefit; the id gain a
+display alias in a future v2. Do NOT change the kind id string in
+``custom_rules.py`` or the ``what.kind`` values in rule payloads.
 
 Adds the first mutator kind to the customize wizard's surface, exposing the
 HookBus ``replace`` action shape as a constrained author surface. Two
 lifecycle slots are honored today:
 
-* ``before_tool_use`` — append a value to a chosen ``arguments`` key of a
+* ``before_tool_use`` -- append a value to a chosen ``arguments`` key of a
   matched tool call BEFORE dispatch. Example: "append ``--dry-run`` to
   ``shell_exec.command``". Wired through :func:`apply_prompt_injection_to_tool_args`,
   which the live agent-level ADK bridge
@@ -12,16 +24,16 @@ lifecycle slots are honored today:
   before_tool_callback boundary (and which
   :func:`magi_agent.facades.execute_tool_with_hooks` also composes) after the
   ``before_result`` block branch (so a blocked call still fails closed).
-* ``on_user_prompt_submit`` — append a value as a new section to the assembled
+* ``on_user_prompt_submit`` -- append a value as a new section to the assembled
   system prompt. Example: "always append coding-standards context". Wired
   through :func:`apply_prompt_injection_to_prompt_sections` which is invoked
   alongside the existing :mod:`magi_agent.customize.lifecycle_audit` audit
   fan-out at the top of :func:`magi_agent.runtime.governed_turn.run_governed_turn`.
 
-Author contract (validator below):
+Author contract (validator below)::
 
     {
-      mode: "append"                                # v1 — only mode supported
+      mode: "append"                                # v1 -- only mode supported
       target_arg_key: str                           # before_tool_use only
       target: "system_prompt"                       # on_user_prompt_submit only
       value: str                                    # <= 4000 chars
@@ -33,7 +45,7 @@ flag) and caps ``value`` at 4000 characters to bound the prompt cost.
 
 Apply contract:
 
-* The two apply helpers are PURE — they take the inbound payload + a list of
+* The two apply helpers are PURE -- they take the inbound payload + a list of
   enabled rules and return the (possibly mutated) payload. Fail-safe-original
   on any rule-level error: a malformed rule never breaks the turn, it is
   silently dropped from the projection. Mirrors
