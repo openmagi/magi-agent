@@ -320,6 +320,12 @@ class ChildRunnerEnvelopeRef(BaseModel):
     parent_execution_id: str = Field(alias="parentExecutionId")
     status: Literal["completed", "blocked", "failed"]
     summary: str = ""
+    # Best-effort partial answer text on a non-completed turn (e.g. a child that
+    # produced a real answer before hitting an internal cap). Separate from
+    # ``summary`` (which carries the failure reason on the degraded path) so the
+    # parent can surface the child's actual work without colliding with the
+    # reason. Empty on the happy path.
+    partial_summary: str = Field(default="", alias="partialSummary")
     evidence_refs: tuple[str, ...] = Field(default=(), alias="evidenceRefs")
     artifact_refs: tuple[str, ...] = Field(default=(), alias="artifactRefs")
     audit_event_refs: tuple[str, ...] = Field(default=(), alias="auditEventRefs")
@@ -1152,6 +1158,9 @@ def _envelope_from_output(
         parentExecutionId=request.parent_execution_id,
         status=status,
         summary=_sanitize_public_text(str(data.get("summary") or ""), max_chars=512),
+        partialSummary=_sanitize_public_text(
+            str(data.get("partialSummary") or ""), max_chars=512
+        ),
         evidenceRefs=_runtime_issued_refs(
             request,
             child_execution_id,

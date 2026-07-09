@@ -237,9 +237,17 @@ def _spawn_agent_result(
     model = safe_output.get("model")
     if isinstance(model, str) and model.strip():
         llm_output["model"] = model
-    result_text = safe_output.get("summary")
-    if isinstance(result_text, str) and result_text.strip():
-        llm_output["result"] = result_text
+    # Prefer the child's best-effort partial answer (present only on a
+    # failed/blocked child that still produced text) so the parent reads the
+    # ACTUAL answer, not the reason token that ``summary`` carries on failure.
+    # On the happy path there is no partialSummary and ``summary`` is the answer.
+    partial_summary = safe_output.get("partialSummary")
+    if isinstance(partial_summary, str) and partial_summary.strip():
+        llm_output["result"] = partial_summary
+    else:
+        result_text = safe_output.get("summary")
+        if isinstance(result_text, str) and result_text.strip():
+            llm_output["result"] = result_text
     reason = error_code or (failure_reason if isinstance(failure_reason, str) else None)
     if isinstance(reason, str) and reason.strip():
         llm_output["reason"] = reason
@@ -592,6 +600,12 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
             # Sanitised summary from the envelope (already redacted by boundary).
             "summary": summary,
         }
+        # Best-effort partial answer on a failed/blocked child (e.g. a slow child
+        # that produced a real answer before a non-completed terminal). Carried
+        # separately from the reason so the parent still gets the child's work.
+        partial_summary = envelope.partial_summary if envelope is not None else ""
+        if isinstance(partial_summary, str) and partial_summary.strip():
+            output["partialSummary"] = partial_summary
         # Model attribution (provider:model the parent requested) so the caller
         # can tell which model produced which answer — essential for the
         # cross-validation / panel-of-models use case.
