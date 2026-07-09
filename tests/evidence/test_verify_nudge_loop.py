@@ -418,8 +418,14 @@ def test_flag_on_clean_turn_is_byte_identical_except_one_rule_check_row(
     assert not _verify_status(items)
     assert runner.call_count == 1
     rows = _verify_rows(sink)
-    assert len(rows) == 1
-    assert rows[0]["type"] == "rule_check"
+    # PR-1: a clean turn now emits 2 verify rows: 1 per-pass row (verifyKind=="pass")
+    # + 1 turn twin (verifyKind=="turn"). Both are store-side only (stream unchanged).
+    assert len(rows) == 2
+    assert all(r["type"] == "rule_check" for r in rows)
+    pass_rows = [r for r in rows if r.get("verifyKind") == "pass"]
+    turn_rows = [r for r in rows if r.get("verifyKind") == "turn"]
+    assert len(pass_rows) == 1
+    assert len(turn_rows) == 1
     assert _terminal(items).terminal == Terminal.completed
 
 
@@ -579,8 +585,12 @@ def test_tool_loopback_reaudits_and_resolves(monkeypatch) -> None:
     assert types_seq.count("verify_nudge_scheduled") == 1
     assert _client_answer(items) == revised
     assert _terminal(items).terminal == Terminal.completed
-    # Two audit passes, two store-side verify rows.
-    assert len(_verify_rows(sink)) == 2
+    # PR-1: two audit passes -> 2 per-pass rows + 1 turn twin = 3 verify rows total.
+    all_verify = _verify_rows(sink)
+    pass_rows = [r for r in all_verify if r.get("verifyKind") == "pass"]
+    turn_rows = [r for r in all_verify if r.get("verifyKind") == "turn"]
+    assert len(pass_rows) == 2
+    assert len(turn_rows) == 1
 
 
 # ---------------------------------------------------------------------------

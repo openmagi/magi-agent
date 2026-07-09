@@ -140,14 +140,21 @@ def _project_verdict(event: Mapping[str, Any]) -> dict[str, Any]:
     display_label: str
     if source_type == "verify":
         verify_kind = _first_str(payload.get("verifyKind"))
-        if verify_kind == "pass" or verify_kind is None:
+        if verify_kind == "turn":
+            # Per-turn verdict row (PR-1, design B4 turn arm). The verifyVerdict
+            # scalar carries the four turn-level verdict strings; override the
+            # event-level status with it so verdict_to_display_label routes to
+            # the correct turn-label arm in audit_labels.py.
+            turn_verdict = _first_str(payload.get("verifyVerdict"))
+            if turn_verdict is not None:
+                status = turn_verdict
+            display_label = verdict_to_display_label(status, source_type=source_type)
+        elif verify_kind == "pass" or verify_kind is None:
             # Pass row or legacy row (no verifyKind from pre-fix image).
             display_label = AUDIT_PASS
         else:
-            # Future: "turn" / "finding" arms land here. Until those are wired,
-            # fall through to the existing label function (may return UNKNOWN for
-            # unrecognized species, which is acceptable for rows that do not yet
-            # exist in the store).
+            # "finding" arm and any future species land here. Fall through to the
+            # existing label function until that arm is wired in PR-2.
             display_label = verdict_to_display_label(status, source_type=source_type)
     else:
         display_label = verdict_to_display_label(status, source_type=source_type)
@@ -185,7 +192,66 @@ def _project_verdict(event: Mapping[str, Any]) -> dict[str, Any]:
         "affordances": affordances,
         "summary": public_projection_safe_text(summary_raw) if summary_raw else "",
         "evidenceRefs": _evidence_refs(payload),
+        "verify": _verify_wire_fields(payload),
     }
+
+
+def _verify_wire_fields(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Build the optional verify wire object for the Audit panel (PR-1, design B4).
+
+    Returns None for non-verify rows and for legacy rows (no verifyKind). For
+    pass rows returns {kind: 'pass'}. For turn rows returns the full scalar
+    inventory (int/bool coerced, absent keys omitted). Free text never enters
+    this object; all fields are numbers, bools, or enum strings. findingsOmitted
+    and context are added only when present in the payload.
+    """
+    verify_kind = _first_str(payload.get("verifyKind"))
+    if verify_kind is None:
+        # Legacy row (no verifyKind): return None to preserve old behavior.
+        return None
+    if verify_kind == "pass":
+        return {"kind": "pass"}
+    if verify_kind == "turn":
+        obj: dict[str, Any] = {"kind": "turn"}
+        verify_verdict = _first_str(payload.get("verifyVerdict"))
+        if verify_verdict is not None:
+            obj["verdict"] = verify_verdict
+        for int_key in (
+            "passes",
+            "highTotal",
+            "highResolved",
+            "highAcknowledged",
+            "highIgnored",
+            "advisoryTotal",
+            "advisoryIgnored",
+            "loopBackToolCalls",
+            "corpusRecordCount",
+        ):
+            val = payload.get(int_key)
+            if val is not None:
+                try:
+                    obj[int_key] = int(val)
+                except (TypeError, ValueError):
+                    pass
+        ship = payload.get("shipMarkerUsed")
+        if ship is not None:
+            obj["shipMarkerUsed"] = bool(ship)
+        skeptic = payload.get("skepticRan")
+        if skeptic is not None:
+            obj["skepticRan"] = bool(skeptic)
+        # findingsOmitted and context are optional (PR-2 adds findingsOmitted).
+        findings_omitted = payload.get("findingsOmitted")
+        if findings_omitted is not None:
+            try:
+                obj["findingsOmitted"] = int(findings_omitted)
+            except (TypeError, ValueError):
+                pass
+        context = _first_str(payload.get("context"))
+        if context is not None:
+            obj["context"] = context
+        return obj
+    # "finding" arm and any future species: no wire object yet (PR-2 adds finding arm).
+    return None
 
 
 def _citation_affordance_codes(payload: Mapping[str, Any]) -> list[str]:

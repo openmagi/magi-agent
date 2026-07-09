@@ -364,6 +364,18 @@ _CITATION_VERDICT_TO_RULE_VERDICT: dict[str, str] = {
     "uncited": "violation",
 }
 
+#: verify turn-level verdict -> RuleVerdict for the observability rule_check
+#: twin event (PR-1, design B1). verified_clean and revised are ok (no block);
+#: shipped_acknowledged is pending (ship marker used, advisory); nudge_ignored
+#: is violation (high finding delivered without resolution). Unknown verdicts
+#: fall back to "pending" via dict.get default.
+_VERIFY_TURN_VERDICT_TO_RULE_VERDICT: dict[str, str] = {
+    "verified_clean": "ok",
+    "revised": "ok",
+    "shipped_acknowledged": "pending",
+    "nudge_ignored": "violation",
+}
+
 #: Auto-continue re-invocation prompt fed back to the SAME session when the
 #: durable ledger still has open todos. Deliberately short + generic so the model
 #: does not anchor on the wording and re-describe its plan; the original system
@@ -1925,6 +1937,64 @@ class MagiEngineDriver:
         except Exception:
             return
 
+    def _emit_verify_verdict_observability(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        verdict: str,
+        verify_state: "_VerifyTurnState",
+        stats: "Mapping[str, int]",
+        corpus_record_count: int,
+        context: str | None = None,
+    ) -> None:
+        """Surface the per-turn verify verdict on the observability audit feed (PR-1, design B1).
+
+        The durable custom:VerifyReplyVerdict record alone never reaches the
+        observability store (only the JSONL ledger / gate corpus), mirroring the
+        citation twin's reason for existing. Flat scalars only; deliveredText and
+        its sha256 stay OFF the wire (D4-R is an offline affordance). Fully
+        fail-soft. Called from the tail of _emit_verify_reply_verdict after the
+        durable record write so an exception here can never un-write the record.
+        """
+        if getattr(self, "_event_sink", None) is None:
+            return
+        try:
+            from magi_agent.runtime.public_events import rule_check_event  # noqa: PLC0415
+
+            rule_verdict = _VERIFY_TURN_VERDICT_TO_RULE_VERDICT.get(verdict, "pending")
+            detail = (
+                f"verify verdict={verdict}: passes={verify_state.passes} "
+                f"high={stats['highResolved']}/{stats['highTotal']} resolved, "
+                f"loopback_tools={verify_state.loopback_tool_calls}"
+            )
+            event = rule_check_event(
+                rule_id="verify_before_replying.audit",
+                verdict=rule_verdict,  # type: ignore[arg-type]
+                detail=detail,
+                event_family="verify_audit_alias",
+            )
+            event["sourceType"] = "verify"
+            event["policyId"] = "verify_before_replying"
+            event["verifyKind"] = "turn"
+            event["verifyVerdict"] = verdict
+            event["passes"] = int(verify_state.passes)
+            event["highTotal"] = int(stats["highTotal"])
+            event["highResolved"] = int(stats["highResolved"])
+            event["highAcknowledged"] = int(stats["highAcknowledged"])
+            event["highIgnored"] = int(stats["highIgnored"])
+            event["advisoryTotal"] = int(stats["advisoryTotal"])
+            event["advisoryIgnored"] = int(stats["advisoryIgnored"])
+            event["shipMarkerUsed"] = bool(verify_state.ship_marker_used)
+            event["loopBackToolCalls"] = int(verify_state.loopback_tool_calls)
+            event["skepticRan"] = bool(verify_state.skeptic_ran)
+            event["corpusRecordCount"] = int(corpus_record_count)
+            if context is not None:
+                event["context"] = context
+            self._observe_event(dict(event), session_id, turn_id)
+        except Exception:
+            return
+
     def _emit_verify_reply_verdict(
         self,
         *,
@@ -2077,6 +2147,15 @@ class MagiEngineDriver:
                 record=record,
                 tool_call_id=f"verify-before-replying:{turn_id}",
                 producing_rule_id="verify_before_replying.audit",
+            )
+            self._emit_verify_verdict_observability(
+                session_id=session_id,
+                turn_id=turn_id,
+                verdict=verdict,
+                verify_state=verify_state,
+                stats=stats,
+                corpus_record_count=len(turn_records) + len(session_records),
+                context=context,
             )
         except Exception:
             return

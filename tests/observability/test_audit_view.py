@@ -445,3 +445,177 @@ def test_non_citation_row_has_no_affordances(tmp_path):
     )
     verdict = build_session_audit("s1", store=store)["runs"][0]["verdicts"][0]
     assert verdict["affordances"] == []
+
+
+# ---------------------------------------------------------------------------
+# Verify turn-verdict twin projection (PR-1)
+# ---------------------------------------------------------------------------
+
+
+def _verify_turn_event(*, session_id, run_id, ts, verify_verdict, verdict, **scalars):
+    payload = {
+        "verdict": verdict,
+        "ruleId": "verify_before_replying.audit",
+        "sourceType": "verify",
+        "verifyKind": "turn",
+        "verifyVerdict": verify_verdict,
+    }
+    payload.update(scalars)
+    return ActivityEvent(
+        kind="rule_check",
+        session_id=session_id,
+        run_id=run_id,
+        ts=ts,
+        payload=payload,
+    )
+
+
+def test_project_verdict_verify_turn_row(tmp_path):
+    """B4 turn arm: verifyKind=='turn' rows project to the correct display label
+    and carry a 'verify' wire object with all scalar fields."""
+    store = _store(tmp_path)
+    store.record_event(
+        _verify_turn_event(
+            session_id="s1",
+            run_id="r",
+            ts=1.0,
+            verify_verdict="revised",
+            verdict="ok",
+            passes=2,
+            highTotal=1,
+            highResolved=1,
+            highAcknowledged=0,
+            highIgnored=0,
+            advisoryTotal=0,
+            advisoryIgnored=0,
+            shipMarkerUsed=False,
+            loopBackToolCalls=3,
+            skepticRan=False,
+            corpusRecordCount=12,
+            detail="verify verdict=revised: passes=2 high=1/1 resolved, loopback_tools=3",
+        )
+    )
+    out = build_session_audit("s1", store=store)
+    row = out["runs"][0]["verdicts"][0]
+    assert row["displayLabel"] == "REVISED"
+    assert row["severity"] == "pass"
+    assert row["status"] == "revised"
+    # verify wire object must be present with all scalar fields.
+    verify_obj = row.get("verify")
+    assert verify_obj is not None, "Expected 'verify' wire object on turn row"
+    assert verify_obj["kind"] == "turn"
+    assert verify_obj["verdict"] == "revised"
+    assert verify_obj["passes"] == 2
+    assert verify_obj["loopBackToolCalls"] == 3
+    assert verify_obj["shipMarkerUsed"] is False
+    assert verify_obj["highTotal"] == 1
+    assert verify_obj["highResolved"] == 1
+    assert verify_obj["highAcknowledged"] == 0
+    assert verify_obj["highIgnored"] == 0
+    assert verify_obj["advisoryTotal"] == 0
+    assert verify_obj["advisoryIgnored"] == 0
+    assert verify_obj["corpusRecordCount"] == 12
+    # findingsOmitted and context must be absent when not in payload.
+    assert "findingsOmitted" not in verify_obj
+    assert "context" not in verify_obj
+
+
+def test_project_verdict_verify_turn_nudge_ignored(tmp_path):
+    """nudge_ignored verdict maps to NUDGE IGNORED / deny severity."""
+    store = _store(tmp_path)
+    store.record_event(
+        _verify_turn_event(
+            session_id="s1",
+            run_id="r",
+            ts=1.0,
+            verify_verdict="nudge_ignored",
+            verdict="violation",
+            passes=2,
+            highTotal=1,
+            highResolved=0,
+            highAcknowledged=0,
+            highIgnored=1,
+            advisoryTotal=0,
+            advisoryIgnored=0,
+            shipMarkerUsed=False,
+            loopBackToolCalls=0,
+            skepticRan=False,
+            corpusRecordCount=5,
+        )
+    )
+    row = build_session_audit("s1", store=store)["runs"][0]["verdicts"][0]
+    assert row["displayLabel"] == "NUDGE IGNORED"
+    assert row["severity"] == "deny"
+
+
+def test_project_verdict_verify_turn_unknown_verdict_never_crashes(tmp_path):
+    """Unknown verifyVerdict falls back to UNKNOWN via audit_labels without crashing.
+    The verify wire object is still present with kind=='turn'."""
+    store = _store(tmp_path)
+    store.record_event(
+        _verify_turn_event(
+            session_id="s1",
+            run_id="r",
+            ts=1.0,
+            verify_verdict="garbage",
+            verdict="pending",
+        )
+    )
+    row = build_session_audit("s1", store=store)["runs"][0]["verdicts"][0]
+    # Must not raise; label may be UNKNOWN or any fallback, severity info.
+    assert isinstance(row["displayLabel"], str)
+    assert row["severity"] == "info"
+    verify_obj = row.get("verify")
+    assert verify_obj is not None
+    assert verify_obj["kind"] == "turn"
+
+
+def test_project_verdict_verify_pass_row_gains_kind_object(tmp_path):
+    """U1's pass arm (verifyKind=='pass') now also carries verify=={'kind': 'pass'}.
+    Display label and severity remain AUDIT PASS / info (U1 behavior unchanged)."""
+    store = _store(tmp_path)
+    store.record_event(
+        ActivityEvent(
+            kind="rule_check",
+            session_id="s1",
+            run_id="r",
+            ts=1.0,
+            payload={
+                "verdict": "ok",
+                "ruleId": "verify_before_replying.audit",
+                "sourceType": "verify",
+                "verifyKind": "pass",
+            },
+        )
+    )
+    row = build_session_audit("s1", store=store)["runs"][0]["verdicts"][0]
+    assert row["displayLabel"] == "AUDIT PASS"
+    assert row["severity"] == "info"
+    verify_obj = row.get("verify")
+    assert verify_obj is not None, "Expected verify wire object on pass row"
+    assert verify_obj == {"kind": "pass"}
+
+
+def test_project_verdict_legacy_verify_row_has_no_verify_object(tmp_path):
+    """Legacy rows (sourceType==verify, no verifyKind) keep U1 behavior
+    (AUDIT PASS / info) and must NOT gain a half-filled verify object."""
+    store = _store(tmp_path)
+    store.record_event(
+        ActivityEvent(
+            kind="rule_check",
+            session_id="s1",
+            run_id="r",
+            ts=1.0,
+            payload={
+                "verdict": "ok",
+                "ruleId": "verify_before_replying.audit",
+                "sourceType": "verify",
+                # No verifyKind key at all (legacy row).
+            },
+        )
+    )
+    row = build_session_audit("s1", store=store)["runs"][0]["verdicts"][0]
+    assert row["displayLabel"] == "AUDIT PASS"
+    assert row["severity"] == "info"
+    # Legacy row must NOT have a verify wire object.
+    assert row.get("verify") is None
