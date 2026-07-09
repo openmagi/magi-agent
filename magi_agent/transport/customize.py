@@ -28,6 +28,8 @@ from magi_agent.customize.store import (
     set_builtin_policy_override,
     set_control_plane_override,
     set_custom_rule,
+    set_egress_allowlist,
+    set_egress_mode,
     set_tool_override,
     set_user_rules,
     set_verification_budgets,
@@ -324,6 +326,76 @@ def _make_json_safe(obj: Any) -> Any:
         return obj
     # Fallback: coerce unknown types to string.
     return str(obj)
+
+
+def _valid_allowlist_pattern(pattern: object) -> bool:
+    """True when *pattern* is a valid egress allowlist entry (design 5.5 grammar).
+
+    Grammar v1: an exact host or a single-suffix wildcard (``*.github.com``).
+    A wildcard is validated by stripping the leading ``*`` and validating the
+    remaining ``.host`` with the shared host validator. No ports, no paths, no
+    scheme, no regex.
+    """
+    from magi_agent.security.egress_destinations import validate_host  # noqa: PLC0415
+
+    if not isinstance(pattern, str):
+        return False
+    token = pattern.strip().lower()
+    if not token:
+        return False
+    if token.startswith("*."):
+        return validate_host(token[2:]) is not None
+    return validate_host(token) is not None
+
+
+def _content_hash(value: Any) -> str:
+    """A stable sha256 of a JSON-normalized value, for before/after audit rows."""
+    import hashlib
+    import json as _json
+
+    try:
+        payload = _json.dumps(value, sort_keys=True, ensure_ascii=False, default=str)
+    except Exception:  # noqa: BLE001
+        payload = str(value)
+    return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _emit_config_change_audit(
+    *,
+    surface: str,
+    policy_id: str,
+    before: Any,
+    after: Any,
+    delta: int,
+) -> None:
+    """Emit a config-change audit row through the process-global observability sink.
+
+    Design 5.6 / 11: every allowlist / mode / builtin-policy-toggle write that
+    goes through the transport endpoints leaves an Audit-feed row, so tampering
+    through any remaining seam AND legitimate operator changes are both visible.
+    Shape ``{surface, policyId, beforeHash, afterHash, delta}``. Fail-quiet: a
+    missing or broken sink must never break the write it audits.
+    """
+    try:
+        from magi_agent.observability.runtime_sink import get_active_sink  # noqa: PLC0415
+
+        sink = get_active_sink()
+        if sink is None:
+            return
+        sink(
+            {
+                "kind": "config_change_audit",
+                "surface": surface,
+                "policyId": policy_id,
+                "beforeHash": _content_hash(before),
+                "afterHash": _content_hash(after),
+                "delta": int(delta),
+            },
+            None,
+            None,
+        )
+    except Exception:  # noqa: BLE001 - audit emission must never break the write
+        return
 
 
 def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
@@ -1158,6 +1230,7 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
                 },
             )
         enabled = body["enabled"]
+        before = load_overrides().get("builtin_policies", {}).get(policy_id)
         overrides = set_builtin_policy_override(policy_id, enabled)
         # Project onto the live process env so the next turn's gate reads the
         # toggle without a restart (the driver reads ``os.environ`` per turn).
@@ -1165,7 +1238,100 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         apply_builtin_policy_overrides_to_env(
             os.environ, {"builtin_policies": {policy_id: enabled}}
         )
+        # Config-change audit row (design 5.6): toggling a security policy is a
+        # weakening change; leave a trail in the Audit feed attributed to the
+        # toggled policy's id.
+        _emit_config_change_audit(
+            surface="builtin_policy_toggle",
+            policy_id=policy_id,
+            before=before,
+            after=enabled,
+            delta=0 if before == enabled else 1,
+        )
         return JSONResponse(content={"overrides": overrides})
+
+    # ------------------------------------------------------------------
+    # U4 -- egress_guard allowlist + mode surface (design 5.5 / 5.6).
+    # The allowlist and the mode both live in ~/.magi/customize.json, which the
+    # AGENT cannot write (safety config protection); these authenticated
+    # endpoints are the operator's sanctioned edit path, and every write leaves a
+    # config-change audit row so tampering (and legitimate change) is visible.
+    # ------------------------------------------------------------------
+
+    @app.get("/v1/app/customize/egress-allowlist")
+    async def get_egress_allowlist(request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        section = load_overrides().get("egress_guard", {})
+        allowlist = section.get("allowlist", []) if isinstance(section, dict) else []
+        mode = section.get("mode", "") if isinstance(section, dict) else ""
+        return JSONResponse(content={"allowlist": allowlist, "mode": mode})
+
+    @app.put("/v1/app/customize/egress-allowlist")
+    async def put_egress_allowlist(request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        if not isinstance(body, dict) or not isinstance(body.get("allowlist"), list):
+            return JSONResponse(status_code=400, content={"error": "allowlist_list_required"})
+        raw = body["allowlist"]
+        if not all(isinstance(item, str) for item in raw):
+            return JSONResponse(status_code=400, content={"error": "allowlist_entries_must_be_strings"})
+        invalid = [item for item in raw if not _valid_allowlist_pattern(item)]
+        if invalid:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "invalid_allowlist_pattern", "details": invalid},
+            )
+        # Normalize (lowercased, de-duplicated) so persisted == matched.
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in raw:
+            token = item.strip().lower()
+            if token and token not in seen:
+                seen.add(token)
+                normalized.append(token)
+        before = load_overrides().get("egress_guard", {}).get("allowlist", [])
+        overrides = set_egress_allowlist(normalized)
+        _emit_config_change_audit(
+            surface="egress_allowlist",
+            policy_id="egress_guard",
+            before=before,
+            after=normalized,
+            delta=abs(len(normalized) - len(before if isinstance(before, list) else [])),
+        )
+        return JSONResponse(content={"allowlist": normalized})
+
+    @app.put("/v1/app/customize/egress-mode")
+    async def put_egress_mode(request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        if not isinstance(body, dict) or body.get("mode") not in ("audit", "block"):
+            return JSONResponse(status_code=400, content={"error": "mode_audit_or_block_required"})
+        mode = body["mode"]
+        before = load_overrides().get("egress_guard", {}).get("mode", "")
+        overrides = set_egress_mode(mode)
+        # Project onto the live process env so the next turn's arbiter reads the
+        # mode without a restart (overwrite beats the profile seed).
+        os.environ["MAGI_EGRESS_GUARD_MODE"] = mode
+        _emit_config_change_audit(
+            surface="egress_mode",
+            policy_id="egress_guard",
+            before=before,
+            after=mode,
+            delta=0 if before == mode else 1,
+        )
+        return JSONResponse(content={"mode": mode, "overrides": overrides.get("egress_guard", {})})
 
     @app.put("/v1/app/customize/rules")
     async def put_rules(request: Request) -> JSONResponse:
