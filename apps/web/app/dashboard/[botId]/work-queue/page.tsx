@@ -90,7 +90,7 @@ function TaskCard({ task, onClick }: TaskCardProps): React.ReactElement {
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
         <Badge variant={taskStatusVariant(task.status)}>{task.status}</Badge>
         {task.consecutive_failures > 0 ? (
-          <span className="inline-flex items-center gap-1 rounded-full border border-red-500/20 bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-400">
+          <span className="inline-flex items-center gap-1 rounded-full border border-red-500/20 bg-red-500/10 px-2 py-0.5 text-xs font-medium text-[var(--color-deny-fg)]">
             <AlertTriangle className="h-3 w-3" strokeWidth={2} />
             {task.consecutive_failures} failure{task.consecutive_failures !== 1 ? "s" : ""}
           </span>
@@ -312,7 +312,7 @@ function TaskDetailModal({ task, open, onClose, agentFetch: agentFetchFn }: Task
                         <span className="text-muted">{formatTimestamp(run.started_at)}</span>
                       </div>
                       {run.summary ? <p className="text-secondary">{run.summary}</p> : null}
-                      {run.error ? <p className="text-red-400">{run.error}</p> : null}
+                      {run.error ? <p className="text-[var(--color-deny-fg)]">{run.error}</p> : null}
                       {run.ended_at ? (
                         <p className="text-muted">Ended: {formatTimestamp(run.ended_at)}</p>
                       ) : null}
