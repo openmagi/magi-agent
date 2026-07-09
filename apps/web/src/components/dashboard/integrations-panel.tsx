@@ -599,7 +599,7 @@ export function IntegrationsPanel({ botId }: IntegrationsPanelProps) {
       {open && (
         <div className="border-t border-gray-200 px-5 pb-5 pt-4 space-y-3">
           {error && (
-            <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400">
+            <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-[var(--color-deny-fg)]">
               {error}
             </div>
           )}
@@ -634,7 +634,7 @@ export function IntegrationsPanel({ botId }: IntegrationsPanelProps) {
                     <button
                       onClick={handleGoogleDisconnect}
                       disabled={googleActionLoading}
-                      className="text-xs text-red-400 hover:text-red-300 transition-colors cursor-pointer disabled:opacity-40"
+                      className="text-xs text-[var(--color-deny-fg)] hover:opacity-80 transition-colors cursor-pointer disabled:opacity-40"
                     >
                       {googleActionLoading ? t.settingsPage.googleDisconnecting : t.settingsPage.googleDisconnect}
                     </button>
@@ -677,7 +677,7 @@ export function IntegrationsPanel({ botId }: IntegrationsPanelProps) {
                 {googleScopes?.includes("https://www.googleapis.com/auth/adwords") && (
                   <div className="space-y-2">
                     <div className="p-2.5 rounded-lg bg-amber-500/5 border border-amber-500/10">
-                      <p className="text-[11px] text-amber-400/90 font-medium mb-1">{t.settingsPage.googleAdsSetupTitle}</p>
+                      <p className="text-[11px] text-[var(--color-review-fg)]/90 font-medium mb-1">{t.settingsPage.googleAdsSetupTitle}</p>
                       <p className="text-[10px] text-secondary/70 leading-relaxed whitespace-pre-line">{t.settingsPage.googleAdsSetupSteps}</p>
                     </div>
                     {adsDevTokenSaved ? (
@@ -750,7 +750,7 @@ export function IntegrationsPanel({ botId }: IntegrationsPanelProps) {
                         </div>
                         <button
                           onClick={() => handleRemoveGoogleFile(f.file_id)}
-                          className="text-[10px] text-red-400/60 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                          className="text-[10px] text-[var(--color-deny-fg)]/60 hover:text-[var(--color-deny-fg)] opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                         >
                           {t.settingsPage.googlePickerRemove}
                         </button>
@@ -796,7 +796,7 @@ export function IntegrationsPanel({ botId }: IntegrationsPanelProps) {
                     <button
                       onClick={handleNotionDisconnect}
                       disabled={notionActionLoading}
-                      className="text-xs text-red-400 hover:text-red-300 transition-colors cursor-pointer disabled:opacity-40"
+                      className="text-xs text-[var(--color-deny-fg)] hover:opacity-80 transition-colors cursor-pointer disabled:opacity-40"
                     >
                       {notionActionLoading ? t.settingsPage.notionDisconnecting : t.settingsPage.notionDisconnect}
                     </button>
@@ -818,7 +818,7 @@ export function IntegrationsPanel({ botId }: IntegrationsPanelProps) {
                   {notionWorkspaceName && (
                     <p className="text-[11px] text-secondary/70">{notionWorkspaceName}</p>
                   )}
-                  <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${notionHasWrite ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" : "bg-slate-500/10 text-slate-400 border border-slate-500/20"}`}>
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${notionHasWrite ? "bg-[var(--color-review-bg)] text-[var(--color-review-fg)] border border-[var(--color-review-fg)]/20" : "bg-slate-500/10 text-slate-400 border border-slate-500/20"}`}>
                     {notionHasWrite ? t.settingsPage.notionReadWrite : t.settingsPage.notionReadOnly}
                   </span>
                 </div>
@@ -887,7 +887,7 @@ export function IntegrationsPanel({ botId }: IntegrationsPanelProps) {
                     <button
                       onClick={handleTwitterDisconnect}
                       disabled={twitterActionLoading}
-                      className="text-xs text-red-400 hover:text-red-300 transition-colors cursor-pointer disabled:opacity-40"
+                      className="text-xs text-[var(--color-deny-fg)] hover:opacity-80 transition-colors cursor-pointer disabled:opacity-40"
                     >
                       {twitterActionLoading ? t.settingsPage.twitterDisconnecting : t.settingsPage.twitterDisconnect}
                     </button>
@@ -908,7 +908,7 @@ export function IntegrationsPanel({ botId }: IntegrationsPanelProps) {
                 {twitterUsername && (
                   <p className="text-[11px] text-secondary/70">@{twitterUsername}</p>
                 )}
-                <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${twitterHasWrite ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" : "bg-slate-500/10 text-slate-400 border border-slate-500/20"}`}>
+                <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${twitterHasWrite ? "bg-[var(--color-review-bg)] text-[var(--color-review-fg)] border border-[var(--color-review-fg)]/20" : "bg-slate-500/10 text-slate-400 border border-slate-500/20"}`}>
                   {twitterHasWrite ? t.settingsPage.twitterReadWrite : t.settingsPage.twitterReadOnly}
                 </span>
               </div>
@@ -959,7 +959,7 @@ export function IntegrationsPanel({ botId }: IntegrationsPanelProps) {
                     <button
                       onClick={handleMetaDisconnect}
                       disabled={metaActionLoading}
-                      className="text-xs text-red-400 hover:text-red-300 transition-colors cursor-pointer disabled:opacity-40"
+                      className="text-xs text-[var(--color-deny-fg)] hover:opacity-80 transition-colors cursor-pointer disabled:opacity-40"
                     >
                       {metaActionLoading ? t.settingsPage.metaDisconnecting : t.settingsPage.metaDisconnect}
                     </button>
@@ -983,7 +983,7 @@ export function IntegrationsPanel({ botId }: IntegrationsPanelProps) {
                 {metaIgUsername && (
                   <p className="text-[11px] text-secondary/70">@{metaIgUsername}</p>
                 )}
-                <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${metaHasWrite ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" : "bg-slate-500/10 text-slate-400 border border-slate-500/20"}`}>
+                <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${metaHasWrite ? "bg-[var(--color-review-bg)] text-[var(--color-review-fg)] border border-[var(--color-review-fg)]/20" : "bg-slate-500/10 text-slate-400 border border-slate-500/20"}`}>
                   {metaHasWrite ? t.settingsPage.metaReadWrite : t.settingsPage.metaReadOnly}
                 </span>
               </div>
@@ -1031,7 +1031,7 @@ export function IntegrationsPanel({ botId }: IntegrationsPanelProps) {
                     <button
                       onClick={handleDropboxDisconnect}
                       disabled={dropboxActionLoading}
-                      className="text-xs text-red-400 hover:text-red-300 transition-colors cursor-pointer disabled:opacity-40"
+                      className="text-xs text-[var(--color-deny-fg)] hover:opacity-80 transition-colors cursor-pointer disabled:opacity-40"
                     >
                       {dropboxActionLoading ? t.settingsPage.dropboxDisconnecting : t.settingsPage.dropboxDisconnect}
                     </button>
@@ -1052,7 +1052,7 @@ export function IntegrationsPanel({ botId }: IntegrationsPanelProps) {
                 {dropboxEmail && (
                   <p className="text-[11px] text-secondary/70">{dropboxEmail}</p>
                 )}
-                <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${dropboxHasWrite ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" : "bg-slate-500/10 text-slate-400 border border-slate-500/20"}`}>
+                <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${dropboxHasWrite ? "bg-[var(--color-review-bg)] text-[var(--color-review-fg)] border border-[var(--color-review-fg)]/20" : "bg-slate-500/10 text-slate-400 border border-slate-500/20"}`}>
                   {dropboxHasWrite ? t.settingsPage.dropboxReadWrite : t.settingsPage.dropboxReadOnly}
                 </span>
               </div>
