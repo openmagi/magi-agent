@@ -1,0 +1,35 @@
+schema_version: 1
+id: gen_policy_send_payment_europa_eu_default_en
+flow: linked_policy
+archetype: linked
+language: en
+turn_budget: 4
+generated:
+  slots:
+    quirk: none
+    gatedTool: send_payment
+    domain: europa.eu
+    onUnavailable: default
+  generator_version: 1
+  paraphrase_model: null
+turns:
+- say: block send_payment until a source from europa.eu is verified this session
+- say: the source credibility label
+llm_script:
+- '{"assistant_message": "One more detail.", "param_updates": {"gatedTool": "send_payment",
+  "allowlistDomains": ["europa.eu"]}, "questions": ["What are you verifying?"]}'
+- '{"assistant_message": "Done.", "param_updates": {"evidenceLabel": "source credibility"}}'
+save: from_plan
+oracle:
+  expect_ready: true
+  max_turns_to_ready: 2
+  plan:
+    gate.what.payload.match.tool: send_payment
+    gate.what.payload.requireEvidence.onEvidenceUnavailable: deny
+    producer.trigger.domainAllowlist:
+    - europa.eu
+  persisted:
+    from_plan_triple: true
+    policy_intent_is_first_utterance: true
+    no_orphan_rules: true
+  forbidden_strings: default

@@ -1,0 +1,41 @@
+schema_version: 1
+id: gen_rule_shell_check_before_tool_use_audit_delivery_en_none
+flow: single_rule
+archetype: happy_path
+language: en
+turn_budget: 4
+generated:
+  slots:
+    quirk: none
+    kind: shell_check
+    firesAt: before_tool_use
+    action: audit
+    scope: delivery
+  generator_version: 1
+  paraphrase_model: null
+seed_draft:
+  what:
+    payload:
+      source: inline
+      inline: exit 0
+turns:
+- say: run a shell verifier before finishing
+  answers:
+    q_what.kind: shell_check
+    q_scope: delivery
+    q_firesAt: before_tool_use
+    q_action: audit
+save: envelope
+oracle:
+  expect_ready: true
+  max_turns_to_ready: 1
+  draft:
+    what.kind: shell_check
+    firesAt: before_tool_use
+    action: audit
+    scope: delivery
+  persisted:
+    rule_valid_and_clean: true
+    policy_intent_is_first_utterance: true
+    no_orphan_rules: true
+  forbidden_strings: default

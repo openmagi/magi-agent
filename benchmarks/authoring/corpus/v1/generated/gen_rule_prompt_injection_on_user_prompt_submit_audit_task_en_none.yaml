@@ -1,0 +1,41 @@
+schema_version: 1
+id: gen_rule_prompt_injection_on_user_prompt_submit_audit_task_en_none
+flow: single_rule
+archetype: happy_path
+language: en
+turn_budget: 4
+generated:
+  slots:
+    quirk: none
+    kind: prompt_injection
+    firesAt: on_user_prompt_submit
+    action: audit
+    scope: task
+  generator_version: 1
+  paraphrase_model: null
+seed_draft:
+  what:
+    payload:
+      mode: append
+      value: stay within policy
+      target: system_prompt
+turns:
+- say: append a safety note to the prompt
+  answers:
+    q_what.kind: prompt_injection
+    q_scope: task
+    q_firesAt: on_user_prompt_submit
+save: envelope
+oracle:
+  expect_ready: true
+  max_turns_to_ready: 1
+  draft:
+    what.kind: prompt_injection
+    firesAt: on_user_prompt_submit
+    action: audit
+    scope: task
+  persisted:
+    rule_valid_and_clean: true
+    policy_intent_is_first_utterance: true
+    no_orphan_rules: true
+  forbidden_strings: default

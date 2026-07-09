@@ -1,0 +1,43 @@
+schema_version: 1
+id: gen_rule_llm_criterion_pre_final_retry_always_en_corrective
+flow: single_rule
+archetype: corrective
+language: en
+turn_budget: 4
+generated:
+  slots:
+    quirk: corrective
+    kind: llm_criterion
+    firesAt: pre_final
+    action: retry
+    scope: always
+  generator_version: 1
+  paraphrase_model: null
+seed_draft:
+  what:
+    payload:
+      criterion: Does the reply contain financial advice?
+turns:
+- say: have an AI judge check the reply for financial advice
+  answers:
+    q_what.kind: llm_criterion
+    q_scope: always
+    q_firesAt: pre_final
+    q_action: audit
+- say: actually change what it does
+  answers:
+    q_action: retry
+save: envelope
+oracle:
+  expect_ready: true
+  max_turns_to_ready: 2
+  draft:
+    what.kind: llm_criterion
+    firesAt: pre_final
+    action: retry
+    scope: always
+  persisted:
+    rule_valid_and_clean: true
+    policy_intent_is_first_utterance: true
+    no_orphan_rules: true
+  forbidden_strings: default
