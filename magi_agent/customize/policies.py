@@ -262,8 +262,53 @@ _VERIFY_BEFORE_REPLYING_POLICY = Policy(
     userDisableable=True,
 )
 
+
+# The system-safety policy: visibility and audit attribution for the
+# hard-safety layer already enforced by tools/safety.py, unconditionally and
+# regardless of permission mode. No enforcement change -- the deny layer
+# predates this policy; this card names it and makes its denies attributable
+# in the audit/evidence trail. Floor: not user-disableable; absent from
+# BUILTIN_POLICY_TOGGLES by construction (floors by absence). No PolicyBinding:
+# system_safety attribution records are audit records, not unlock evidence.
+_SYSTEM_SAFETY_POLICY = Policy(
+    id="system_safety",
+    displayName="System Safety",
+    intent=(
+        "Hard runtime denials that protect the machine regardless of "
+        "permission mode: destructive shell (recursive rm of /, dd to "
+        "devices, mkfs, disk erase, recursive chmod/chown of /), piping "
+        "a download into a shell, upload-shaped network commands (scp, "
+        "rsync, sftp, piped or upload-argument curl/wget/nc/ssh), "
+        "workspace path confinement with secret-path and sealed-file "
+        "guards, shell hygiene denials (path expansion into guarded "
+        "paths, mutating or unsafe command flags), and unsafe git "
+        "operations. Inline interpreter code (python -c and friends) is "
+        "denied in the default posture but allowed under an explicit "
+        "bypassPermissions scope, which is the operator's own machine "
+        "and choice. Detection is command-string analysis: it is a "
+        "strong guard against agent mistakes and casual injection, not "
+        "a sandbox against a determined obfuscated adversary."
+    ),
+    ruleIds=(
+        "system_safety.destructive_shell",
+        "system_safety.curl_pipe_exec",
+        "system_safety.network_exfiltration",
+        "system_safety.inline_interpreter",
+        "system_safety.workspace_confinement",
+        "system_safety.secret_paths",
+        "system_safety.shell_hygiene",
+        "system_safety.unsafe_git",
+    ),
+    origin="builtin",
+    # Floor: enforcement is unconditional in tools/safety.py and fires even
+    # under bypassPermissions. Absent from BUILTIN_POLICY_TOGGLES.
+    userDisableable=False,
+)
+
+
 BUILTIN_POLICIES: tuple[Policy, ...] = (
     _SOURCE_CITATION_POLICY,
+    _SYSTEM_SAFETY_POLICY,
     _VERIFY_BEFORE_REPLYING_POLICY,
 )
 
@@ -331,9 +376,19 @@ def get_policy(policy_id: str, path: Path | None = None) -> Policy | None:
     return None
 
 
+_FLOOR_IDS: frozenset[str] = frozenset(
+    p.policy_id for p in BUILTIN_POLICIES if not p.user_disableable
+)
+
+
 def upsert_policy(policy: Policy, path: Path | None = None) -> None:
     if policy.origin == "builtin":
         raise ValueError("built-in policies are read-only; clone to a new id to customize")
+    if policy.policy_id in _FLOOR_IDS:
+        raise ValueError(
+            f"'{policy.policy_id}' is a builtin floor policy id and cannot be used for "
+            "a user policy; choose a different id"
+        )
     overrides = load_overrides(path)
     policies = dict(
         overrides.get("policies", {}) if isinstance(overrides.get("policies"), dict) else {}
