@@ -143,7 +143,7 @@ _PAGE_HTML = """<!doctype html>
     <span class="header-sep"></span>
     <div class="token-wrap">
       <label for="obs-token">Gateway token</label>
-      <input id="obs-token" type="password" autocomplete="current-password" value="local-dev-token">
+      <input id="obs-token" type="password" autocomplete="current-password" value="" placeholder="paste ~/.magi/serve_token">
     </div>
   </header>
 

@@ -186,11 +186,13 @@ def _local_full_access(runtime: object) -> bool:
     the transport layer. Hosted/multi-user deployments have real user/bot/token
     values and therefore keep the normal permission gate.
     """
+    from magi_agent.config.serve_token import is_local_serve_token  # noqa: PLC0415
+
     config = getattr(runtime, "config", None)
     return (
         getattr(config, "bot_id", None) == "local-bot"
         and getattr(config, "user_id", None) == "local-user"
-        and getattr(config, "gateway_token", None) == "local-dev-token"
+        and is_local_serve_token(getattr(config, "gateway_token", None))
     )
 
 
@@ -991,8 +993,24 @@ def register_streaming_chat_routes(
         from magi_agent.config.flags import flag_str  # noqa: PLC0415
 
         cwd = flag_str("MAGI_AGENT_WORKSPACE") or os.getcwd()
-        full_access = _local_full_access(runtime) or _hosted_full_access(runtime)
-        permission_mode = "bypassPermissions" if full_access else "default"
+        local_full = _local_full_access(runtime)
+        hosted_full = _hosted_full_access(runtime)
+        full_access = local_full or hosted_full
+        if local_full:
+            # Exposure<->authority coupling (P0): the LOCAL serve owner keeps the
+            # YOLO baseline only on a loopback bind (or the explicit
+            # MAGI_SERVE_REMOTE_YOLO opt-in); a non-loopback bind downgrades to
+            # the ask-capable ``default`` mode. Tool availability (routing) is
+            # unchanged; only the permission posture is coupled to exposure.
+            from magi_agent.transport.chat_shared import (  # noqa: PLC0415
+                local_serve_permission_mode,
+            )
+
+            permission_mode = local_serve_permission_mode()
+        elif hosted_full:
+            permission_mode = "bypassPermissions"
+        else:
+            permission_mode = "default"
         # An active mode may TIGHTEN (never loosen) the permission posture.
         from magi_agent.customize.modes import (  # noqa: PLC0415
             active_permission_mode as _active_permission_mode,

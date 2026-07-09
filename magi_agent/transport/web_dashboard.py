@@ -31,10 +31,10 @@ from fastapi.staticfiles import StaticFiles
 
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 
-# Token sentinel mirrored from main.py. The gateway token is only surfaced to
-# the page when it is the well-known local-dev default, so a real
-# ``GATEWAY_TOKEN`` secret is never embedded in a digest-safe surface.
-_LOCAL_DEV_TOKEN = "local-dev-token"
+# The gateway token is only surfaced to the page when it is this install's
+# per-install local serve token (``~/.magi/serve_token``, see
+# ``config.serve_token``), so a real hosted ``GATEWAY_TOKEN`` secret is never
+# embedded in the bootstrap surface. Detection keys on ``is_local_serve_token``.
 
 BUNDLE_ROOT = Path(__file__).resolve().parent.parent / "web_dashboard"
 
@@ -110,9 +110,10 @@ def local_dashboard_bootstrap(runtime: OpenMagiRuntime) -> dict[str, object]:
     from magi_agent.engine import providers
     from magi_agent.engine.providers import SUPPORTED_PROVIDERS
     from magi_agent.config.flags import flag_bool
+    from magi_agent.config.serve_token import is_local_serve_token
 
     token = runtime.config.gateway_token
-    expose = token == _LOCAL_DEV_TOKEN
+    expose = is_local_serve_token(token)
     # Use the SAME canonical resolver the chat path uses so the onboarding
     # signal matches reality across every key location ([model].api_key,
     # [providers.*].api_key, env). ``configured_providers()`` reads only the
