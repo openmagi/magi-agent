@@ -123,7 +123,7 @@ export function IntegrationsManager() {
         </div>
       )}
       {error && (
-        <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400">
+        <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-[var(--color-deny-fg)]">
           {error}
         </div>
       )}
@@ -319,7 +319,7 @@ function ComposioSection({
       description="Connect Gmail, Slack, Notion, GitHub and 250+ apps via OAuth. Managed by Open Magi, no Composio key needed."
     >
       {err && (
-        <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400">
+        <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-[var(--color-deny-fg)]">
           {err}
         </div>
       )}
@@ -402,7 +402,7 @@ function ComposioSection({
                   <button
                     onClick={removeKey}
                     disabled={busy}
-                    className="text-[11px] text-red-400 hover:text-red-300 transition-colors disabled:opacity-40"
+                    className="text-[11px] text-[var(--color-deny-fg)] hover:opacity-80 transition-colors disabled:opacity-40"
                   >
                     Remove key
                   </button>
@@ -448,7 +448,7 @@ function ComposioSection({
                         </span>
                         <button
                           onClick={() => disconnect(conn.connection_id)}
-                          className="text-[10px] text-red-400 hover:text-red-300"
+                          className="text-[10px] text-[var(--color-deny-fg)] hover:opacity-80"
                         >
                           Disconnect
                         </button>
@@ -566,7 +566,7 @@ function TelegramSection({
       description="Run your agent as a Telegram bot."
     >
       {err && (
-        <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400">
+        <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-[var(--color-deny-fg)]">
           {err}
         </div>
       )}
@@ -581,7 +581,7 @@ function TelegramSection({
           <button
             onClick={remove}
             disabled={busy}
-            className="text-[11px] text-red-400 hover:text-red-300 transition-colors disabled:opacity-40"
+            className="text-[11px] text-[var(--color-deny-fg)] hover:opacity-80 transition-colors disabled:opacity-40"
           >
             Disconnect
           </button>
@@ -629,7 +629,7 @@ function ConnectedRow({
       <button
         onClick={onDisconnect}
         disabled={busy}
-        className="text-[11px] text-red-400 hover:text-red-300 transition-colors disabled:opacity-40"
+        className="text-[11px] text-[var(--color-deny-fg)] hover:opacity-80 transition-colors disabled:opacity-40"
       >
         Disconnect
       </button>
@@ -683,7 +683,7 @@ function DiscordSection({
       description="Run your agent as a Discord bot (replies to mentions & DMs)."
     >
       {err && (
-        <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400">
+        <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-[var(--color-deny-fg)]">
           {err}
         </div>
       )}
@@ -802,7 +802,7 @@ function SlackSection({
       description="Run your agent as a Slack bot via Socket Mode (no public URL needed)."
     >
       {err && (
-        <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400">
+        <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-[var(--color-deny-fg)]">
           {err}
         </div>
       )}

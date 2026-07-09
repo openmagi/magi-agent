@@ -786,7 +786,7 @@ export function AgentRulesSection({
         </div>
 
         {disabled && (
-          <p className="text-xs text-amber-400/80">{ownerOnlyMsg}</p>
+          <p className="text-xs text-[var(--color-review-fg)]/90">{ownerOnlyMsg}</p>
         )}
 
         <div className="flex flex-col gap-2 rounded-xl border border-primary/10 bg-primary/[0.03] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -909,9 +909,9 @@ export function AgentRulesSection({
           <span
             className={`text-[11px] tabular-nums ${
               overLimit
-                ? "text-red-400"
+                ? "text-[var(--color-deny-fg)]"
                 : warn
-                  ? "text-amber-400"
+                  ? "text-[var(--color-review-fg)]"
                   : "text-secondary/70"
             }`}
           >
@@ -947,7 +947,7 @@ export function AgentRulesSection({
         {success && (
           <p className="text-xs text-emerald-400">{success}</p>
         )}
-        {error && <p className="text-xs text-red-400">{error}</p>}
+        {error && <p className="text-xs text-[var(--color-deny-fg)]">{error}</p>}
       </div>
     </GlassCard>
 
