@@ -52,7 +52,7 @@ const KIND_LABEL: Record<NamedConditionEntry["kind"], string> = {
   // PR-F-MUT1 — mutator surface; the row label distinguishes it from gate
   // kinds so an operator scanning the table sees "this rewrites traffic"
   // before opening the row.
-  prompt_injection: "Prompt injection (mutator)",
+  prompt_injection: "Prompt append (authored) (mutator)",
   // PR-F-MUT2 — second mutator kind; same labelling treatment as F-MUT1 so
   // the Conditions tab honestly signals "rewrites traffic" before the row
   // opens.

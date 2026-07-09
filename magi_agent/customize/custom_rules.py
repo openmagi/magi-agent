@@ -619,7 +619,9 @@ def validate_custom_rule(rule: Any) -> list[str]:
         # F-MUT1: operator-authored mutator (append to tool args or system
         # prompt). The shape varies by firesAt slot, so the validator takes
         # the resolved fires_at as input.
-        from magi_agent.customize.prompt_injection import (  # noqa: PLC0415
+        # Note: kind id "prompt_injection" is retained for stored rule
+        # compatibility; module renamed to authored_prompt_append (U8).
+        from magi_agent.customize.authored_prompt_append import (  # noqa: PLC0415
             validate_prompt_injection_payload,
         )
 
