@@ -585,6 +585,15 @@ def test_turn_timeout_explicit_budget_ms_still_honoured() -> None:
     assert runner._turn_timeout_s(_request(budget_ms=5000)) == 5.0
 
 
+def test_turn_timeout_no_budget_model_timeout_clamps_default() -> None:
+    """MAGI_MODEL_TIMEOUT_S lowers the no-budget default below its own value."""
+    runner = RealLocalChildRunner(
+        provider_config=_provider_config(),
+        env={"MAGI_MODEL_TIMEOUT_S": "60"},  # below the 300s default
+    )
+    assert runner._turn_timeout_s(_request()) == 60.0
+
+
 def test_run_child_propagates_cancellation() -> None:
     """``asyncio.CancelledError`` from the turn must PROPAGATE, never become a
     degraded mapping."""

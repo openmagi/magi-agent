@@ -833,9 +833,12 @@ _MAX_TURN_TIMEOUT_S = 600.0
 #: spirals (ramble hundreds of deltas, call tools it lacks, loop internal turns)
 #: ran the full 600s ceiling before ending non-completed, which starved the
 #: parent turn and surfaced as ``child_turn_timeout`` /
-#: ``child_llm_collector_status_failed``. Generous but finite; env-tunable via
-#: ``MAGI_CHILD_TURN_TIMEOUT_S``. Still clamped to ``_MAX_TURN_TIMEOUT_S``.
-_DEFAULT_CHILD_TURN_TIMEOUT_S = 180.0
+#: ``child_llm_collector_status_failed``. Generous but finite (generous-budget
+#: policy: comfortably fits a legitimate multi-fetch deep-research or coding
+#: child, while still killing a "1+1" child that spirals for minutes);
+#: env-tunable via ``MAGI_CHILD_TURN_TIMEOUT_S``. Still clamped to
+#: ``_MAX_TURN_TIMEOUT_S`` (and lowered by ``MAGI_MODEL_TIMEOUT_S`` when set).
+_DEFAULT_CHILD_TURN_TIMEOUT_S = 300.0
 _CHILD_TURN_TIMEOUT_ENV = "MAGI_CHILD_TURN_TIMEOUT_S"
 
 
