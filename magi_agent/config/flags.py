@@ -1743,6 +1743,24 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
+    FlagSpec(
+        name="MAGI_EGRESS_GUARD_ALLOWLIST",
+        # Comma-separated host patterns (exact host or single-suffix wildcard
+        # like *.github.com). UNIONED with the persisted customize.json
+        # egress_guard.allowlist (env adds, never removes) so a shell export
+        # cannot silently shrink a user-authored list. Only consulted in block
+        # mode. Empty default: block mode with no allowlist denies every host.
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Comma-separated egress_guard host allowlist patterns (exact host "
+            "or single-suffix wildcard, e.g. *.github.com), UNIONED with the "
+            "persisted customize.json egress_guard.allowlist. Env adds, never "
+            "removes. Only consulted in block mode."
+        ),
+        kind="str",
+    ),
     _pb(
         "MAGI_SOURCE_CITATION_ENABLED",
         stage="stage1",

@@ -42,6 +42,10 @@ SAFETY_REASON_TO_MEMBER: dict[str, str] = {
     "safe_command_shell_expansion_denied": "system_safety.shell_hygiene",
     # Unsafe git: push --force, reset --hard, gc/prune/reflog/fsck subcommands
     "unsafe_git": "system_safety.unsafe_git",
+    # Config protection (U4): agent write into the resolved ~/.magi config
+    # directory (shell append or FileWrite/FileEdit/PatchApply). Hard deny even
+    # under bypass -- the allowlist/mode/toggle must not be agent-self-tamperable.
+    "protected_config_write_denied": "system_safety.config_protection",
 }
 
 EXCLUDED_DENY_REASONS: frozenset[str] = frozenset(

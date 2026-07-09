@@ -281,8 +281,11 @@ _SYSTEM_SAFETY_POLICY = Policy(
         "rsync, sftp, piped or upload-argument curl/wget/nc/ssh), "
         "workspace path confinement with secret-path and sealed-file "
         "guards, shell hygiene denials (path expansion into guarded "
-        "paths, mutating or unsafe command flags), and unsafe git "
-        "operations. Inline interpreter code (python -c and friends) is "
+        "paths, mutating or unsafe command flags), unsafe git "
+        "operations, and agent writes into the runtime configuration "
+        "directory (~/.magi: customize.json and siblings), so the agent "
+        "cannot self-disable a security policy or edit its own egress "
+        "allowlist. Inline interpreter code (python -c and friends) is "
         "denied in the default posture but allowed under an explicit "
         "bypassPermissions scope, which is the operator's own machine "
         "and choice. Detection is command-string analysis: it is a "
@@ -298,6 +301,11 @@ _SYSTEM_SAFETY_POLICY = Policy(
         "system_safety.secret_paths",
         "system_safety.shell_hygiene",
         "system_safety.unsafe_git",
+        # U4: hard-deny AGENT writes into the resolved ~/.magi config directory
+        # (customize.json and siblings), so an injection-influenced agent cannot
+        # self-disable a security policy, enlarge its own egress allowlist, or
+        # flip its mode. Fires even under bypass; operator hand-edits untouched.
+        "system_safety.config_protection",
     ),
     origin="builtin",
     # Floor: enforcement is unconditional in tools/safety.py and fires even

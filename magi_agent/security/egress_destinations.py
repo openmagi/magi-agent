@@ -130,6 +130,38 @@ def _validate_ipv6(value: str) -> str | None:
 
 
 # --------------------------------------------------------------------------- #
+# Allowlist matching (design 5.5): exact host + single-suffix wildcard.
+# --------------------------------------------------------------------------- #
+
+
+def host_matches_pattern(host: str, pattern: str) -> bool:
+    """True when a lowercased host matches a single allowlist pattern.
+
+    Grammar (v1): exact host (``api.github.com``) OR single-suffix wildcard
+    (``*.github.com``, matching one-or-more leading labels, NOT the bare apex).
+    No regex, no CIDR, no ports. Both sides are lowercased before comparison.
+    A malformed pattern never matches (fail-closed for block mode).
+    """
+    if not isinstance(host, str) or not isinstance(pattern, str):
+        return False
+    h = host.strip().lower()
+    p = pattern.strip().lower()
+    if not h or not p:
+        return False
+    if p.startswith("*."):
+        suffix = p[1:]  # ".github.com"
+        # one-or-more leading labels: host must END with ".github.com" and be
+        # strictly longer than the suffix (so the bare apex does not match).
+        return h.endswith(suffix) and len(h) > len(suffix)
+    return h == p
+
+
+def host_in_allowlist(host: str, patterns: "tuple[str, ...] | list[str]") -> bool:
+    """True when *host* matches ANY pattern in *patterns*. Empty list = no match."""
+    return any(host_matches_pattern(host, p) for p in patterns)
+
+
+# --------------------------------------------------------------------------- #
 # web_search provider mapping (design 5.3: destination is the provider host).
 # --------------------------------------------------------------------------- #
 

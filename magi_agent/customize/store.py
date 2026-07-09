@@ -73,6 +73,15 @@ DEFAULT_OVERRIDES: dict[str, Any] = {
     # floor policy (``source_citation``) is never in the catalog, so it cannot
     # be disabled through this seam. Empty by default so OFF is byte-identical.
     "builtin_policies": {},
+    # EGRESS GUARD: the operator-managed destination allowlist + enforcement
+    # mode for the egress_guard first-party security policy (design 5.5). The
+    # ``allowlist`` is a JSON list of host patterns (exact host or single-suffix
+    # wildcard). ``mode`` mirrors MAGI_EGRESS_GUARD_MODE ("audit"|"block") so the
+    # dashboard save survives a restart. Empty by default so OFF is
+    # byte-identical. The whole ~/.magi directory (this file included) is
+    # write-protected from the AGENT (safety.py protected_config_write_denied),
+    # so only the operator (or the audited transport endpoints) can edit it.
+    "egress_guard": {"allowlist": [], "mode": ""},
 }
 
 _USER_RULES_MAX = 20_000
@@ -168,6 +177,22 @@ def _normalize(data: dict[str, Any]) -> dict[str, Any]:
             for key, value in builtin_policies_raw.items()
             if isinstance(key, str) and isinstance(value, bool)
         }
+    # Egress guard allowlist + mode (design 5.5). ``allowlist`` keeps only
+    # non-empty string entries (host patterns); ``mode`` keeps only a known
+    # enum. Malformed entries are dropped so the runtime allowlist matcher and
+    # the projection never see junk. Persisted values are the operator's; the
+    # AGENT cannot write this file (config protection), so no attacker-string
+    # bounding is needed here beyond the structural filter.
+    egress_guard_raw = data.get("egress_guard")
+    if isinstance(egress_guard_raw, dict):
+        allowlist_raw = egress_guard_raw.get("allowlist")
+        if isinstance(allowlist_raw, list):
+            merged["egress_guard"]["allowlist"] = [
+                item for item in allowlist_raw if isinstance(item, str) and item.strip()
+            ]
+        mode_raw = egress_guard_raw.get("mode")
+        if isinstance(mode_raw, str) and mode_raw in ("audit", "block", ""):
+            merged["egress_guard"]["mode"] = mode_raw
     return merged
 
 
@@ -263,6 +288,35 @@ def set_builtin_policy_override(
     target = path or customize_path()
     overrides = load_overrides(target)
     overrides.setdefault("builtin_policies", {})[policy_id] = bool(enabled)
+    save_overrides(overrides, target)
+    return overrides
+
+
+def set_egress_allowlist(
+    allowlist: list[str], path: Path | None = None
+) -> dict[str, Any]:
+    """Persist the egress_guard host allowlist (list of patterns). Returns overrides.
+
+    ``_normalize`` drops non-string / empty entries on the way in, so the caller
+    is responsible only for host-pattern validity (the transport endpoint does
+    that). This is the ONLY sanctioned write path into the allowlist besides the
+    operator's own editor -- the AGENT cannot write ~/.magi (config protection).
+    """
+    target = path or customize_path()
+    overrides = load_overrides(target)
+    overrides.setdefault("egress_guard", {"allowlist": [], "mode": ""})["allowlist"] = [
+        str(item) for item in allowlist if isinstance(item, str) and item.strip()
+    ]
+    save_overrides(overrides, target)
+    return overrides
+
+
+def set_egress_mode(mode: str, path: Path | None = None) -> dict[str, Any]:
+    """Persist the egress_guard enforcement mode ("audit"|"block"). Returns overrides."""
+    target = path or customize_path()
+    overrides = load_overrides(target)
+    normalized = mode if mode in ("audit", "block") else "audit"
+    overrides.setdefault("egress_guard", {"allowlist": [], "mode": ""})["mode"] = normalized
     save_overrides(overrides, target)
     return overrides
 

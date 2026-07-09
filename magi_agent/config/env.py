@@ -3834,6 +3834,25 @@ def parse_egress_guard_mode(env: Mapping[str, str]) -> str:
     return "audit"
 
 
+def parse_egress_guard_allowlist(env: Mapping[str, str]) -> tuple[str, ...]:
+    """MAGI_EGRESS_GUARD_ALLOWLIST -- comma-separated host allowlist patterns.
+
+    Returns the lowercased, de-duplicated, order-preserving tuple of non-empty
+    patterns from the env var. UNIONED (by the caller) with the persisted
+    customize.json ``egress_guard.allowlist``; env adds, never removes. Only
+    consulted in ``block`` mode.
+    """
+    raw = env.get("MAGI_EGRESS_GUARD_ALLOWLIST") or ""
+    seen: set[str] = set()
+    patterns: list[str] = []
+    for part in raw.split(","):
+        token = part.strip().lower()
+        if token and token not in seen:
+            seen.add(token)
+            patterns.append(token)
+    return tuple(patterns)
+
+
 def parse_source_citation_enabled(env: Mapping[str, str]) -> bool:
     """MAGI_SOURCE_CITATION_ENABLED -- session source-citation substrate.
 
