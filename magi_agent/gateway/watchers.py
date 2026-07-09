@@ -676,7 +676,7 @@ def build_default_watchers() -> tuple[GatewayWatcher, ...]:
     )
 
     # Hosted inbound mission action reconciler (PR-M8; self-gated on config
-    # presence — inert on OSS local, pairs with the M7 outbound projector).
+    # presence -- inert on OSS local, pairs with the M7 outbound projector).
     watchers.append(
         build_mission_action_reconciler_watcher(
             reconciler=build_local_mission_action_reconciler(),
@@ -684,6 +684,12 @@ def build_default_watchers() -> tuple[GatewayWatcher, ...]:
             is_enabled=_mission_action_reconciler_enabled,
         )
     )
+
+    # Heartbeat watcher (Track-F U4; self-gated by MAGI_HEARTBEAT_ENABLED,
+    # default OFF -- additive, byte-identical when the flag is unset).
+    from magi_agent.gateway.heartbeat_watcher import build_heartbeat_watcher  # noqa: PLC0415
+
+    watchers.append(build_heartbeat_watcher())
 
     return tuple(watchers)
 
