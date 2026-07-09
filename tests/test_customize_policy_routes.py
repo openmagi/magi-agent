@@ -8,9 +8,21 @@ from fastapi.testclient import TestClient
 
 from magi_agent.app import create_app
 from magi_agent.config.models import BuildInfo, RuntimeConfig
+from magi_agent.customize.policies import BUILTIN_POLICIES
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 
 _TOKEN = "test-gateway-token"
+
+# Derive the always-present first-party builtin ids from the source of truth so
+# these expectations track the builtin set as the security-policy stack grows
+# (system_safety today; egress_guard / injection_guard downstream) rather than
+# re-breaking on every new builtin.
+_BUILTIN_IDS: tuple[str, ...] = tuple(p.policy_id for p in BUILTIN_POLICIES)
+
+
+def _expected_ids(*extra: str) -> list[str]:
+    """The full listing (builtins + any user ids), sorted by id like the route."""
+    return sorted({*_BUILTIN_IDS, *extra})
 
 _POLICY = {
     "displayName": "Verify source before high-risk tool",
@@ -51,10 +63,10 @@ def test_list_only_builtins(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     client = _authed(tmp_path, monkeypatch)
     resp = client.get("/v1/app/policies")
     assert resp.status_code == 200
-    # An empty store still surfaces the first-party builtin(s).
+    # An empty store still surfaces exactly the first-party builtin(s).
     body = resp.json()
-    assert [p["id"] for p in body["policies"]] == ["source_citation", "verify_before_replying"]
-    assert body["policies"][0]["origin"] == "builtin"
+    assert [p["id"] for p in body["policies"]] == _expected_ids()
+    assert all(p["origin"] == "builtin" for p in body["policies"])
 
 
 def test_upsert_and_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -65,18 +77,10 @@ def test_upsert_and_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     assert body["policy"]["id"] == "verify-source"
     assert body["policy"]["ruleIds"] == ["cr_gate"]
     # The list is builtins + stored, sorted by id.
-    assert [p["id"] for p in body["policies"]] == [
-        "source_citation",
-        "verify-source",
-        "verify_before_replying",
-    ]
+    assert [p["id"] for p in body["policies"]] == _expected_ids("verify-source")
     # Follow-up GET agrees.
     listing = client.get("/v1/app/policies").json()
-    assert [p["id"] for p in listing["policies"]] == [
-        "source_citation",
-        "verify-source",
-        "verify_before_replying",
-    ]
+    assert [p["id"] for p in listing["policies"]] == _expected_ids("verify-source")
 
 
 def test_path_id_is_authoritative(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -123,13 +127,13 @@ def test_delete(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     resp = client.request("DELETE", "/v1/app/policies/verify-source")
     assert resp.status_code == 200
     # Deleting the user policy leaves the first-party builtins intact.
-    assert [p["id"] for p in resp.json()["policies"]] == ["source_citation", "verify_before_replying"]
+    assert [p["id"] for p in resp.json()["policies"]] == _expected_ids()
     # Idempotent second delete.
     assert client.request("DELETE", "/v1/app/policies/verify-source").status_code == 200
     # Deleting a builtin id is a no-op: the first-party policies stay present.
     resp2 = client.request("DELETE", "/v1/app/policies/source_citation")
     assert resp2.status_code == 200
-    assert [p["id"] for p in resp2.json()["policies"]] == ["source_citation", "verify_before_replying"]
+    assert [p["id"] for p in resp2.json()["policies"]] == _expected_ids()
 
 
 def test_migrate_groups(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -153,11 +157,7 @@ def test_migrate_groups(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     assert resp.status_code == 200
     assert resp.json()["created"] == 1
     # The migrated policy plus the always-present first-party builtins.
-    assert sorted(p["id"] for p in resp.json()["policies"]) == [
-        "my-group",
-        "source_citation",
-        "verify_before_replying",
-    ]
+    assert sorted(p["id"] for p in resp.json()["policies"]) == _expected_ids("my-group")
 
 
 # --- U4: PATCH /v1/app/policies/{id} enabled cascade ----------------------

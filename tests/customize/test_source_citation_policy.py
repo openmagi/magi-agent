@@ -76,20 +76,46 @@ def test_policy_is_mode_scopable(tmp_path) -> None:
     )
 
 
-def test_stored_policy_can_shadow_builtin_id(tmp_path) -> None:
+def test_floor_builtin_id_cannot_be_shadowed(tmp_path) -> None:
+    # source_citation is a FLOOR builtin (its gate can BLOCK): U1's honesty fix
+    # makes upsert_policy reject a user policy that reuses a floor id, so a floor
+    # can never be silently shadowed by a display clone.
+    path = tmp_path / "customize.json"
+    with pytest.raises(ValueError, match="floor"):
+        upsert_policy(
+            Policy.model_validate(
+                {
+                    "id": "source_citation",
+                    "displayName": "My Citation Clone",
+                    "ruleIds": ["source_citation.capture"],
+                }
+            ),
+            path,
+        )
+    # The builtin remains the source_citation card (no user shadow was stored).
+    policy = get_policy("source_citation", path)
+    assert policy is not None
+    assert policy.origin == "builtin"
+
+
+def test_non_floor_builtin_id_can_be_shadowed(tmp_path) -> None:
+    # A NON-floor builtin (verify_before_replying is a nudge, user-disableable)
+    # is a strong default rather than a floor, so a stored user policy that
+    # reuses its id still wins (the original shadow guarantee, preserved for the
+    # ids where it is legitimate).
     path = tmp_path / "customize.json"
     upsert_policy(
         Policy.model_validate(
             {
-                "id": "source_citation",
-                "displayName": "My Citation Clone",
-                "ruleIds": ["source_citation.capture"],
+                "id": "verify_before_replying",
+                "displayName": "My Verify Clone",
+                "ruleIds": ["verify_before_replying.claim_citation"],
             }
         ),
         path,
     )
-    policy = get_policy("source_citation", path)
+    policy = get_policy("verify_before_replying", path)
     assert policy is not None
     # The stored clone shadows the builtin (user clone wins).
     assert policy.origin == "user"
-    assert policy.display_name == "My Citation Clone"
+    assert policy.display_name == "My Verify Clone"
