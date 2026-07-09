@@ -367,6 +367,17 @@ class ChildRunnerEnvelopeRef(BaseModel):
             return _sanitize_public_text(value, max_chars=512)
         return value
 
+    @field_validator("partial_summary", mode="before")
+    @classmethod
+    def _sanitize_partial_summary(cls, value: object) -> object:
+        # ``partial_summary`` carries RAW child output (a best-effort answer),
+        # so the leak-redaction invariant must be intrinsic to the model, not
+        # dependent on every construction site remembering to pre-scrub. Mirror
+        # ``_sanitize_summary`` so a validate-from-raw-dict path is also safe.
+        if isinstance(value, str):
+            return _sanitize_public_text(value, max_chars=512)
+        return value
+
     @field_validator("evidence_refs", mode="before")
     @classmethod
     def _sanitize_evidence_refs(cls, value: object) -> object:

@@ -1433,6 +1433,11 @@ class RealLocalChildRunner:
                 # silently collecting no text + returning status=ok — the
                 # latter masquerades the failed turn as a successful empty
                 # answer (the 0.1.62 multi-provider SpawnAgent bug).
+                #
+                # No partial_text is threaded here (unlike the governed
+                # non-completed path): a mid-stream PROVIDER error is a hard
+                # dispatch failure, not an "answered-then-capped" turn, so any
+                # bytes collected before it are not a usable answer.
                 raise _ChildLlmTurnError(error_reason)
             content = getattr(event, "content", None)
             event_texts: list[str] = []
