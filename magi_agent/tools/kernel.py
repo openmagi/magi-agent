@@ -47,6 +47,7 @@ from .output_budget import budget_tool_result
 from .permission import ToolPermissionPolicy
 from .registry import ToolRegistry
 from .result import ToolResult
+from .safety_policy_attribution import attribute_safety_decision
 from .schema_validation import validate_tool_arguments
 
 
@@ -434,6 +435,12 @@ class ToolExecutionKernel:
         has_resume_decision = _private_resume_decision_from_request(safe_request) is not None
         resume_grant_accepted = False
         if decision.action == "deny":
+            _safety_reason_codes = decision.metadata.get("reasonCodes", ())
+            _safety_rc = (
+                str(_safety_reason_codes[0])
+                if isinstance(_safety_reason_codes, (tuple, list)) and _safety_reason_codes
+                else ""
+            )
             return await self._emit_public_events(
                 safe_request,
                 self._blocked_outcome(
@@ -444,6 +451,7 @@ class ToolExecutionKernel:
                     evidence_reason="denied",
                     evidence_message=decision.reason,
                     tool_id=manifest.name,
+                    policy_attribution=attribute_safety_decision(_safety_rc),
                 ),
             )
         if decision.action == "ask":
@@ -724,6 +732,7 @@ class ToolExecutionKernel:
         evidence_reason: PolicyFailureReason,
         evidence_message: str,
         tool_id: str | None = None,
+        policy_attribution: dict[str, str] | None = None,
     ) -> ToolExecutionOutcome:
         name = tool_id or request.tool_name
         evidence = (
@@ -734,6 +743,7 @@ class ToolExecutionKernel:
                 reason=evidence_reason,
                 message=evidence_message,
                 observed_at=monotonic(),
+                policy_attribution=policy_attribution,
             ),
         )
         return ToolExecutionOutcome(
