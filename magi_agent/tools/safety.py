@@ -315,6 +315,15 @@ class RuntimePermissionArbiter:
         mode: RuntimeMode,
         scope: dict[str, object],
     ) -> RuntimeSafetyDecision:
+        # Config protection (U4 / B-1): a HARD deny for a native mutating file
+        # tool (FileWrite / FileEdit / PatchApply) whose target lands inside the
+        # resolved ~/.magi config directory. Placed BEFORE the per-tool decision
+        # functions so it wins over the normal path classification (an absolute
+        # ~/.magi path would otherwise deny with absolute_path_denied), fires
+        # even under bypass, and is attributed to system_safety.config_protection.
+        config_deny = _native_config_protection_decision(manifest, arguments, mode=mode, scope=scope)
+        if config_deny is not None:
+            return config_deny
         if manifest.name in {"Bash", "TestRun"}:
             return _shell_decision(manifest, arguments, mode=mode, scope=scope)
         if manifest.name == "SafeCommand":
@@ -336,6 +345,26 @@ class RuntimePermissionArbiter:
                 reason_code="plan_mode_mutation_blocked",
                 scope=scope,
             )
+
+        # egress_guard BLOCK mode (U4): net tools (web_fetch, browser, ...) have
+        # no dedicated decision function today -- they fall through to the
+        # terminal ``not_applicable`` allow with zero destination awareness. This
+        # is the one structural addition to the arbiter's dispatch: in block mode
+        # with the master flag on, a non-allowlisted first-hop destination is a
+        # DENY (design 5.4). Inert (returns None) in audit mode / OFF, so the
+        # fall-through below is byte-identical when block mode is not engaged.
+        if manifest.permission == "net":
+            blocked_host = _egress_block_host(manifest, arguments)
+            if blocked_host is not None:
+                return _decision(
+                    "deny",
+                    manifest,
+                    mode=mode,
+                    reason_code="egress_guard_blocked",
+                    scope=scope,
+                    status_metadata=_egress_block_status_metadata(blocked_host),
+                    reason_override=_egress_block_guidance(blocked_host),
+                )
 
         return _decision(
             "allow",
@@ -958,6 +987,21 @@ def _shell_decision(
             scope=scope,
             public_preview=_preview_command(command),
         )
+    # Config protection (U4 / B-1): a HARD deny for an AGENT write into the
+    # resolved ~/.magi config directory, so an injection-influenced agent cannot
+    # self-disable a security policy, enlarge its own egress allowlist, or flip
+    # its mode. Placed after the catastrophic hard denies (they keep their own
+    # reason) and BEFORE the bypass-preapprovable complex-shell / network asks,
+    # so it fires even under bypass. Reads stay allowed.
+    if _shell_command_writes_protected_config(command):
+        return _decision(
+            "deny",
+            manifest,
+            mode=mode,
+            reason_code="protected_config_write_denied",
+            scope=scope,
+            public_preview=_preview_command(command),
+        )
     if _has_inline_interpreter_code(command) and _scope_mode(scope) != "bypass":
         # Inline interpreters (``python3 -c ...``) are hard-denied in the default
         # (hosted/strict) posture because the shell-level guards cannot inspect
@@ -1022,6 +1066,24 @@ def _shell_decision(
             public_preview=_preview_command(command),
         )
     if _has_network_command(command):
+        # egress_guard BLOCK mode (U4): a non-allowlisted destination is a DENY
+        # (design principle 5 / B-2), not an ask -- an operator-configured policy
+        # verdict, and an ask would dead-end a headless/serve turn. Only fires in
+        # block mode with the master flag on; audit mode and OFF fall through to
+        # the existing network ask unchanged. A safety hard-deny above already
+        # kept its own reason, so this only reaches non-exfil network calls.
+        blocked_host = _egress_block_host(manifest, arguments)
+        if blocked_host is not None:
+            return _decision(
+                "deny",
+                manifest,
+                mode=mode,
+                reason_code="egress_guard_blocked",
+                scope=scope,
+                public_preview=_preview_command(command),
+                status_metadata=_egress_block_status_metadata(blocked_host),
+                reason_override=_egress_block_guidance(blocked_host),
+            )
         return _decision(
             "ask",
             manifest,
@@ -1204,6 +1266,7 @@ def _decision(
     preflight: dict[str, object] | None = None,
     status_metadata: dict[str, object] | None = None,
     policy_handled: bool = True,
+    reason_override: str | None = None,
 ) -> RuntimeSafetyDecision:
     metadata: dict[str, object] = {
         "toolName": manifest.name,
@@ -1214,7 +1277,10 @@ def _decision(
         "bypassRequested": scope["bypassRequested"],
         "dangerous": manifest.dangerous,
         "mutatesWorkspace": manifest.mutates_workspace,
-        "reason": reason_code.replace("_", " "),
+        # reason_override lets a caller supply human-facing guidance text (e.g.
+        # the egress_guard block deny names the blocked host + Customize
+        # allowlist) instead of the default "<reason code with spaces>".
+        "reason": reason_override if reason_override is not None else reason_code.replace("_", " "),
         "reasonCodes": (reason_code,),
         "securityPrecheck": "failed" if action == "deny" else "passed",
         "pathPolicyRecorded": path_policy_recorded,
@@ -1408,6 +1474,198 @@ def _is_secret_path(path: str) -> bool:
         or any(f"/{lowered}".endswith(suffix) for suffix in _SECRET_SUFFIXES)
         or _SECRET_NAME_RE.search(path) is not None
     )
+
+
+def _protected_config_dir() -> str | None:
+    """Absolute, normalized path of the protected agent config directory.
+
+    OQ-7: the WHOLE resolved ``~/.magi`` directory (the parent of the resolved
+    customize.json), never a hardcoded literal -- hosted pods relocate the
+    customize path onto a PVC via ``MAGI_CUSTOMIZE`` / ``MAGI_CONFIG``, and this
+    must protect the relocated directory. Reuses the store's own resolution so
+    the deny keys on exactly the file the runtime reads/writes. Returns ``None``
+    if resolution fails (fail-open: a resolution bug must not deny every path).
+    """
+    try:
+        from magi_agent.customize.store import customize_path  # noqa: PLC0415
+
+        config_dir = customize_path().parent.expanduser()
+        return os.path.normpath(os.path.abspath(str(config_dir)))
+    except Exception:  # noqa: BLE001 - resolution failure must never break a turn
+        return None
+
+
+def _resolve_token_abspath(token: str) -> str | None:
+    """Best-effort absolute path for a shell token or native path argument.
+
+    Expands a leading ``~`` (and ``~/``) and makes the token absolute against
+    the current working directory. Returns ``None`` for empty tokens. Command
+    substitution / variable expansion cannot be resolved and is left as-is
+    (the config-protection check simply will not match those, matching the
+    stated command-string-analysis limit of system_safety).
+    """
+    if not token:
+        return None
+    try:
+        expanded = os.path.expanduser(token)
+        return os.path.normpath(os.path.abspath(expanded))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _path_under_protected_config(abspath: str, config_dir: str) -> bool:
+    """True when *abspath* is the protected config dir itself or inside it."""
+    if not abspath or not config_dir:
+        return False
+    return abspath == config_dir or abspath.startswith(config_dir + os.sep)
+
+
+def _shell_command_writes_protected_config(command: str) -> bool:
+    """True when a shell command mutates the resolved ~/.magi config directory.
+
+    Command-string analysis (same tier + limits as the rest of system_safety):
+    tokenizes the command, resolves each path-shaped token to an absolute path,
+    and returns True when ANY token lands inside the protected config directory
+    AND the command carries a write/redirect/mutate shape (``>``, ``>>``,
+    ``tee``, ``cp``/``mv``/``rm``/``dd`` destinations, editor in-place, etc.).
+    Reads (``cat``, ``grep``) are NOT denied. Conservative-but-honest: an
+    obfuscated write (variable-expanded target) is a known blind spot, recorded
+    by the egress/audit trail, not caught here.
+    """
+    config_dir = _protected_config_dir()
+    if config_dir is None:
+        return False
+    lowered = command.lower()
+    # Redirect-into-config is the primary tamper shape (echo ... >> file).
+    if ">" in command:
+        # Find redirect targets: token following > or >>.
+        try:
+            tokens = shlex.split(command)
+        except ValueError:
+            tokens = command.split()
+        for index, tok in enumerate(tokens):
+            if tok in (">", ">>") and index + 1 < len(tokens):
+                target = _resolve_token_abspath(tokens[index + 1])
+                if target and _path_under_protected_config(target, config_dir):
+                    return True
+            # Attached redirect form: >>file or >file.
+            for prefix in (">>", ">"):
+                if tok.startswith(prefix) and len(tok) > len(prefix):
+                    target = _resolve_token_abspath(tok[len(prefix):])
+                    if target and _path_under_protected_config(target, config_dir):
+                        return True
+    # Write-shaped executables whose positional args target the config dir.
+    write_execs = ("tee ", "cp ", "mv ", "rm ", "dd ", "truncate ", "install ", "sponge ")
+    if any(exe in f" {lowered}" for exe in write_execs):
+        try:
+            tokens = shlex.split(command)
+        except ValueError:
+            tokens = command.split()
+        for tok in tokens[1:]:
+            if tok.startswith("-"):
+                continue
+            target = _resolve_token_abspath(tok)
+            if target and _path_under_protected_config(target, config_dir):
+                return True
+    return False
+
+
+def _native_path_writes_protected_config(path: str) -> bool:
+    """True when a native-tool path argument mutates the protected config dir."""
+    config_dir = _protected_config_dir()
+    if config_dir is None:
+        return False
+    target = _resolve_token_abspath(path)
+    if target is None:
+        return False
+    return _path_under_protected_config(target, config_dir)
+
+
+_CONFIG_PROTECTED_FILE_TOOLS = frozenset({"FileWrite", "FileEdit", "PatchApply"})
+
+
+def _native_config_protection_candidate_paths(
+    manifest: ToolManifest, arguments: dict[str, object]
+) -> tuple[str, ...]:
+    """Path-like targets of a native mutating file tool, for config-protection."""
+    if manifest.name == "PatchApply":
+        patch = _first_string(arguments, ("patch", "diff"))
+        if isinstance(patch, str) and patch:
+            try:
+                return _extract_patch_paths(patch)
+            except Exception:  # noqa: BLE001
+                return ()
+        return ()
+    path = _first_string(arguments, _PATH_ARG_NAMES)
+    return (path,) if isinstance(path, str) and path else ()
+
+
+def _native_config_protection_decision(
+    manifest: ToolManifest,
+    arguments: dict[str, object],
+    *,
+    mode: RuntimeMode,
+    scope: dict[str, object],
+) -> RuntimeSafetyDecision | None:
+    """A ``protected_config_write_denied`` deny for a native write into ~/.magi.
+
+    Covers FileWrite / FileEdit / PatchApply (mutating file tools). Returns None
+    (fall through to the normal per-tool decision) when the tool is not a
+    mutating file tool or no target lands inside the protected config dir. Fires
+    even under bypass (it is a hard deny, never routed through the ask/preapproval
+    machinery).
+    """
+    if manifest.name not in _CONFIG_PROTECTED_FILE_TOOLS:
+        return None
+    for path in _native_config_protection_candidate_paths(manifest, arguments):
+        if _native_path_writes_protected_config(path):
+            return _decision(
+                "deny",
+                manifest,
+                mode=mode,
+                reason_code="protected_config_write_denied",
+                scope=scope,
+                public_preview="path=[protected-config-path-redacted]",
+            )
+    return None
+
+
+def _egress_block_host(manifest: ToolManifest, arguments: dict[str, object]) -> str | None:
+    """The non-allowlisted host when egress_guard block mode should DENY, else None.
+
+    Delegates to :func:`magi_agent.tools.egress_guard.evaluate_block`, which is
+    inert (returns None) unless the master flag is on AND mode is ``block``.
+    Fail-open: any error degrades to None so a broken extractor never denies a
+    legitimate call.
+    """
+    try:
+        from magi_agent.tools.egress_guard import evaluate_block  # noqa: PLC0415
+
+        permission = getattr(manifest, "permission", None)
+        return evaluate_block(
+            manifest.name,
+            arguments,
+            permission=permission if isinstance(permission, str) else None,
+        )
+    except Exception:  # noqa: BLE001 - block evaluation must never break a decision
+        return None
+
+
+def _egress_block_guidance(host: str) -> str:
+    """Human-facing deny text: names the blocked host and the Customize allowlist."""
+    return (
+        f"egress_guard blocked an outbound request to {host}: the host is not in "
+        "the allowlist you manage in Customize (Egress Guard). Add the host to "
+        "the allowlist to permit it, or switch egress_guard back to audit mode."
+    )
+
+
+def _egress_block_status_metadata(host: str) -> dict[str, object]:
+    return {
+        "status": "denied",
+        "egressGuardBlocked": True,
+        "blockedHost": host,
+    }
 
 
 def _looks_like_path(value: str) -> bool:

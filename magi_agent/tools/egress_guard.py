@@ -26,6 +26,7 @@ from magi_agent.security.egress_destinations import (
     EgressDestination,
     extract_shell_destinations,
     extract_tool_destination,
+    host_in_allowlist,
 )
 
 # Shell tool names whose ``command`` argument may carry a network destination.
@@ -217,3 +218,95 @@ def egress_destination_records(
         return records
     except Exception:  # noqa: BLE001 - record synthesis must never break a turn
         return []
+
+
+# --------------------------------------------------------------------------- #
+# U4 -- BLOCK mode: allowlist resolution + block evaluation                    #
+# --------------------------------------------------------------------------- #
+
+
+def resolve_allowlist(env: Mapping[str, str] | None = None) -> tuple[str, ...]:
+    """The effective egress allowlist: persisted customize.json UNIONED with env.
+
+    Env adds, never removes (a shell export cannot silently SHRINK a
+    user-authored list, design 5.5). Patterns are lowercased and de-duplicated,
+    persisted-first order preserved. Never raises: a store/read problem degrades
+    to whatever the env provides (or an empty list).
+    """
+    source = env if env is not None else os.environ
+    patterns: list[str] = []
+    seen: set[str] = set()
+
+    def _add(raw: object) -> None:
+        if isinstance(raw, str):
+            token = raw.strip().lower()
+            if token and token not in seen:
+                seen.add(token)
+                patterns.append(token)
+
+    # Persisted customize.json egress_guard.allowlist.
+    try:
+        from magi_agent.customize.store import load_overrides  # noqa: PLC0415
+
+        section = load_overrides().get("egress_guard")
+        if isinstance(section, Mapping):
+            persisted = section.get("allowlist")
+            if isinstance(persisted, (list, tuple)):
+                for item in persisted:
+                    _add(item)
+    except Exception:  # noqa: BLE001 - a store problem must never break a decision
+        pass
+
+    # Env union.
+    try:
+        from magi_agent.config.env import parse_egress_guard_allowlist  # noqa: PLC0415
+
+        for item in parse_egress_guard_allowlist(source):
+            _add(item)
+    except Exception:  # noqa: BLE001
+        pass
+
+    return tuple(patterns)
+
+
+def evaluate_block(
+    tool_name: str,
+    arguments: object,
+    *,
+    permission: str | None = None,
+    env: Mapping[str, str] | None = None,
+) -> str | None:
+    """Return the blocked host when block mode should DENY this call, else None.
+
+    Returns ``None`` (fall through, no deny) when:
+      * the master flag is OFF, or the mode is not ``block``;
+      * the call is not outbound / no destination could be extracted; or
+      * extraction FAILED for every destination (OQ-2: v1 falls through on a
+        parser blind spot rather than turn-breaking; the audit trail keeps the
+        gap visible); or
+      * every extracted host matches the effective allowlist.
+
+    Returns the FIRST non-allowlisted, successfully-extracted host string when a
+    deny is warranted. Never raises: any internal error degrades to ``None``
+    (fail-open for block evaluation, the same posture as the audit stash -- a
+    broken extractor must not deny a legitimate call).
+    """
+    try:
+        if not egress_guard_enabled(env):
+            return None
+        if egress_guard_mode(env) != "block":
+            return None
+        destinations = extract_egress_destinations(
+            tool_name, arguments, permission=permission
+        )
+        if not destinations:
+            return None
+        allowlist = resolve_allowlist(env)
+        for dest in destinations:
+            if dest.extraction == "failed" or dest.host is None:
+                continue  # OQ-2: unextractable falls through, recorded elsewhere
+            if not host_in_allowlist(dest.host, allowlist):
+                return dest.host
+        return None
+    except Exception:  # noqa: BLE001 - block evaluation must never break a turn
+        return None
