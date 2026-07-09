@@ -171,6 +171,34 @@ def test_heartbeat_run_engine_error_does_not_crash(
     assert deliveries == []  # error => nothing delivered
 
 
+def test_heartbeat_run_engine_timeout_does_not_crash_and_does_not_deliver(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """P1-1: a hung engine (never returns) must time out and not deliver.
+
+    _run_heartbeat_tick wraps engine() in asyncio.wait_for with a configurable
+    bound.  On TimeoutError the tick returns cleanly with no delivery.
+    """
+    deliveries: list[str] = []
+
+    from magi_agent.gateway.heartbeat_watcher import _run_heartbeat_tick
+
+    async def hung_engine(prompt: str) -> str:
+        # Never returns -- simulates a wedged governed turn.
+        await asyncio.Event().wait()
+        return ""  # unreachable
+
+    # Inject a tiny timeout so the test completes fast.
+    asyncio.run(_run_heartbeat_tick(
+        engine=hung_engine,
+        suppress_token="HEARTBEAT_OK",
+        deliver=lambda output: deliveries.append(output),
+        timeout_seconds=0.05,
+    ))
+
+    assert deliveries == []  # timeout => nothing delivered
+
+
 # ---------------------------------------------------------------------------
 # Watcher loop: ticks on the configured interval, stops on stop_event
 # ---------------------------------------------------------------------------

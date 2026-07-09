@@ -61,16 +61,14 @@ def is_heartbeat_enabled(env: dict[str, str] | None = None) -> bool:
 def heartbeat_interval_seconds(env: dict[str, str] | None = None) -> int:
     """Return the configured heartbeat interval in seconds.
 
-    Reads MAGI_HEARTBEAT_INTERVAL_SECONDS.  Falls back to 1800 on missing or
-    invalid values.  Values below the 60-second floor are clamped to 60.
+    Reads MAGI_HEARTBEAT_INTERVAL_SECONDS via ``flag_int`` (registered in
+    ``magi_agent.config.flags``).  Falls back to 1800 on missing or invalid
+    values.  Values below the 60-second floor are clamped to 60.
     """
-    _env = env if env is not None else os.environ
-    raw = _env.get("MAGI_HEARTBEAT_INTERVAL_SECONDS")
-    if raw is None:
-        return _HEARTBEAT_INTERVAL_DEFAULT
-    try:
-        value = int(raw.strip())
-    except (ValueError, AttributeError):
+    from magi_agent.config.flags import flag_int  # noqa: PLC0415
+
+    value = flag_int("MAGI_HEARTBEAT_INTERVAL_SECONDS", env=env)
+    if value is None:
         return _HEARTBEAT_INTERVAL_DEFAULT
     return max(_HEARTBEAT_INTERVAL_FLOOR, value)
 
@@ -92,14 +90,29 @@ async def _run_heartbeat_tick(
     suppress_token: str,
     deliver: Callable[[str], None],
     prompt: str = _DEFAULT_HEARTBEAT_PROMPT,
+    timeout_seconds: float | None = None,
 ) -> None:
     """Run one heartbeat turn and deliver the output if not suppressed.
 
-    Best-effort: any exception from the engine is caught and logged; it must
-    never propagate (the watcher loop must stay alive).
+    Best-effort: any exception from the engine (including TimeoutError) is
+    caught and logged; it must never propagate (the watcher loop must stay alive).
+
+    Parameters
+    ----------
+    timeout_seconds:
+        When provided, the engine call is wrapped in ``asyncio.wait_for`` with
+        this timeout bound (capped at 600 s).  A timed-out tick is logged and
+        returns without delivery.  When ``None``, no timeout is applied.
     """
     try:
-        output = await engine(prompt)
+        if timeout_seconds is not None:
+            deadline = min(float(timeout_seconds), 600.0)
+            output = await asyncio.wait_for(engine(prompt), timeout=deadline)
+        else:
+            output = await engine(prompt)
+    except asyncio.TimeoutError:
+        _log.warning("heartbeat engine tick timed out -- skipping delivery")
+        return
     except Exception:  # noqa: BLE001 - heartbeat is best-effort
         _log.warning("heartbeat engine tick failed", exc_info=True)
         return
@@ -184,10 +197,14 @@ def build_heartbeat_watcher(
             # Evaluate interval fresh each tick so env changes are respected.
             tick_interval = interval_seconds if interval_seconds is not None else float(heartbeat_interval_seconds())
             token = heartbeat_suppress_token()
+            # Cap engine timeout at the tick interval (or 600 s) so a hung turn
+            # does not block the loop indefinitely.
+            engine_timeout = min(tick_interval, 600.0)
             await _run_heartbeat_tick(
                 engine=_engine,
                 suppress_token=token,
                 deliver=_deliver,
+                timeout_seconds=engine_timeout,
             )
             if stop_event.is_set():
                 break

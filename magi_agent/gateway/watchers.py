@@ -168,8 +168,10 @@ class _LiveLocalCronTurnRunner:
                 output="",
             )
 
+        # _status comes from collect_governed_child_turn: "completed" if
+        # terminal is Terminal.completed, "failed" otherwise.  Do NOT hard-code.
         return CronTurnResult(
-            status="completed",
+            status=_status,
             jobId=plan.job_id,
             runnerInvoked=True,
             output=summary[:2000] if isinstance(summary, str) else "",
@@ -183,11 +185,18 @@ def attach_local_scheduler() -> None:
     store so the native cron tools (CronCreate/CronUpdate/CronDelete) route past
     their honest-block to the live seam.  Idempotent: safe to call multiple times.
 
-    Gate: callers should only call this when MAGI_SCHEDULER_EXECUTOR_ENABLED is
-    truthy; calling unconditionally would expose the live tools even when the
-    scheduler loop is not running (the gate lives here for documentation, not
-    enforcement -- tests verify the conditional call from build_default_watchers).
+    Gate: MAGI_SCHEDULER_EXECUTOR_ENABLED must be truthy.  If it is not set,
+    the function logs a debug message and returns without modifying the environment.
+    This prevents accidental env pollution when called without the scheduler
+    executor actually running.
     """
+    if not _scheduler_executor_enabled():
+        _log.debug(
+            "attach_local_scheduler: MAGI_SCHEDULER_EXECUTOR_ENABLED is not set -- "
+            "refusing to set MAGI_SCHEDULER_ATTACHED"
+        )
+        return
+
     import os  # noqa: PLC0415
 
     from magi_agent.plugins.native.scheduled_work import SCHEDULER_ATTACHED_ENV  # noqa: PLC0415

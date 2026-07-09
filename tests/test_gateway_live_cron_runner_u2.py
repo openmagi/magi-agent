@@ -32,6 +32,22 @@ def _completed_stream_factory() -> Any:
     return _fake
 
 
+def _error_terminal_stream_factory() -> Any:
+    """Fake stream factory that yields a non-completed terminal (Terminal.error) -- no exception.
+
+    collect_governed_child_turn maps Terminal.error -> status='failed'.
+    This stream does NOT raise; it yields a proper EngineResult, so the P0-1
+    bug (hard-coded 'completed') would surface only if the collector status
+    is ignored.
+    """
+    from magi_agent.engine.contracts import EngineResult, Terminal
+
+    async def _fake(ctx: Any) -> Any:
+        yield EngineResult(terminal=Terminal.error)
+
+    return _fake
+
+
 def _error_stream_factory() -> Any:
     """Fake stream factory that raises before yielding any terminal."""
     async def _boom(ctx: Any) -> Any:
@@ -98,6 +114,77 @@ def test_flag_on_runner_error_maps_to_failed(monkeypatch: pytest.MonkeyPatch) ->
 
     assert result.status == "failed"
     assert result.runner_invoked is True
+
+
+def test_flag_on_non_completed_terminal_maps_to_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """P0-1 / P1-3: a clean Terminal.error (no exception) must NOT map to completed.
+
+    collect_governed_child_turn returns status='failed' for any non-completed
+    terminal (Terminal.error, Terminal.aborted, Terminal.max_turns).
+    The runner must propagate that status, not hard-code 'completed'.
+    """
+    monkeypatch.setenv("MAGI_BACKGROUND_LIVE_RUNNER_ENABLED", "1")
+
+    from magi_agent.gateway.watchers import _build_local_cron_turn_runner
+
+    runner = _build_local_cron_turn_runner(stream_factory=_error_terminal_stream_factory())
+    result = asyncio.run(runner.run_turn(_plan("job:u2-error-terminal")))
+
+    assert result.status == "failed", (
+        f"Terminal.error must map to CronTurnResult.status='failed', got {result.status!r}"
+    )
+    assert result.runner_invoked is True
+
+
+def test_flag_on_terminal_failed_does_not_deliver(monkeypatch: pytest.MonkeyPatch) -> None:
+    """P0-1 / P1-3 integration: _deliver_turn_result skips delivery for failed turns.
+
+    This test verifies two things in one shot:
+    1. A runner backed by Terminal.error returns status="failed" (P0-1 fix).
+    2. _deliver_turn_result returns a "skipped" receipt without calling deliver()
+       for a failed turn (delivery gate, scheduler_job_execution.py:737).
+    """
+    import unittest.mock as _mock
+    from datetime import UTC, datetime
+
+    monkeypatch.setenv("MAGI_BACKGROUND_LIVE_RUNNER_ENABLED", "1")
+
+    from magi_agent.gateway.watchers import _build_local_cron_turn_runner
+    from magi_agent.harness.scheduler_job_execution import (
+        _deliver_turn_result,
+        CronTurnResult,
+    )
+    from magi_agent.harness.scheduler_executor import ScheduledJobRecord
+
+    # Confirm the runner produces status="failed" from Terminal.error.
+    runner = _build_local_cron_turn_runner(stream_factory=_error_terminal_stream_factory())
+    turn_result = asyncio.run(runner.run_turn(_plan("job:deliver-gate")))
+    assert turn_result.status == "failed", (
+        f"Terminal.error must produce status='failed', got {turn_result.status!r}"
+    )
+
+    # Build a minimal ScheduledJobRecord (Pydantic model, not a Protocol).
+    record = ScheduledJobRecord(
+        jobId="job:deliver-gate",
+        scheduleExpr="@hourly",
+        nextRun=datetime.now(UTC),
+    )
+
+    # Verify the delivery gate: deliver() must NOT be called for a failed turn.
+    deliver_calls: list[Any] = []
+
+    with _mock.patch(
+        "magi_agent.harness.scheduler_delivery.deliver",
+        side_effect=lambda *a, **kw: deliver_calls.append(a),
+    ):
+        receipt = _deliver_turn_result(turn_result, record=record, now=datetime.now(UTC))
+
+    assert deliver_calls == [], (
+        f"deliver() must not be called for status='failed', was called: {deliver_calls}"
+    )
+    assert receipt.status == "skipped", (
+        f"Expected receipt.status='skipped', got {receipt.status!r}"
+    )
 
 
 def test_flag_on_disabled_toolset_strip_honored(monkeypatch: pytest.MonkeyPatch) -> None:
