@@ -3807,6 +3807,36 @@ def parse_source_ledger_evidence_gate_enabled(env: Mapping[str, str]) -> bool:
     return flag_bool("MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED", env=env)
 
 
+def parse_egress_guard_enabled(env: Mapping[str, str]) -> bool:
+    """MAGI_EGRESS_GUARD_ENABLED -- master switch for the egress_guard policy.
+
+    Profile-aware default-ON (full runtime profile); OFF under
+    ``MAGI_RUNTIME_PROFILE`` in ``safe``/``eval`` so scored benchmarks run with a
+    clean, unmodified tool corpus. When ON, first-hop destinations are extracted
+    for outbound tool calls and shell network commands, recorded to the evidence
+    ledger, and stashed in the permission-decision metadata. In the default
+    ``audit`` mode nothing is denied.
+    """
+    from .flags import flag_profile_bool
+
+    return flag_profile_bool("MAGI_EGRESS_GUARD_ENABLED", env=env)
+
+
+def parse_egress_guard_mode(env: Mapping[str, str]) -> str:
+    """MAGI_EGRESS_GUARD_MODE -- egress_guard enforcement mode.
+
+    Returns ``"audit"`` (observe-only, the default) or ``"block"`` (deny
+    non-allowlisted destinations, honored in a later unit). ``audit`` extracts +
+    records destinations and NEVER changes a tool decision. Unknown values fall
+    back to the FlagSpec default (``audit``). Only meaningful when
+    :func:`parse_egress_guard_enabled` is on.
+    """
+    raw = (env.get("MAGI_EGRESS_GUARD_MODE") or "").strip().lower()
+    if raw in ("audit", "block"):
+        return raw
+    return "audit"
+
+
 def parse_source_citation_enabled(env: Mapping[str, str]) -> bool:
     """MAGI_SOURCE_CITATION_ENABLED -- session source-citation substrate.
 

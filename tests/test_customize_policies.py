@@ -51,6 +51,7 @@ def test_empty_store_has_only_builtin_policies(tmp_path: Path) -> None:
     # Rules surface tells the truth about runtime-native policies).
     policies = list_policies(p)
     assert [pol.policy_id for pol in policies] == [
+        "egress_guard",
         "injection_guard",
         "source_citation",
         "system_safety",
@@ -83,6 +84,7 @@ def test_list_sorted_and_skips_malformed(tmp_path: Path) -> None:
     # sorted, always-present builtins included, malformed + mismatch skipped
     assert ids == [
         "alpha",
+        "egress_guard",
         "injection_guard",
         "source_citation",
         "system_safety",
@@ -107,6 +109,7 @@ def test_upsert_updates_in_place(tmp_path: Path) -> None:
     assert got is not None and got.rule_ids == ("cr_a", "cr_b")
     # In-place: one user policy (no duplicate) plus the always-present builtins.
     assert [pol.policy_id for pol in list_policies(p)] == [
+        "egress_guard",
         "injection_guard",
         "source_citation",
         "system_safety",
@@ -203,6 +206,7 @@ def test_old_store_without_policies_key_normalizes(tmp_path: Path) -> None:
     assert overrides["policies"] == {}  # default filled in, not dropped
     # No stored user policies; the surface still shows the first-party builtins.
     assert [pol.policy_id for pol in list_policies(p)] == [
+        "egress_guard",
         "injection_guard",
         "source_citation",
         "system_safety",
@@ -299,8 +303,8 @@ def test_migrate_groups_is_idempotent(tmp_path: Path) -> None:
         p,
     )
     # 'grp' is a single group -> exactly one policy; re-running creates nothing.
-    # The surface = the one migrated policy + the always-present builtins (4 now).
+    # The surface = the one migrated policy + the always-present builtins (5 now).
     assert migrate_groups_to_policies(p) == 1
-    assert len(list_policies(p)) == 5
+    assert len(list_policies(p)) == 6
     assert migrate_groups_to_policies(p) == 0
-    assert len(list_policies(p)) == 5
+    assert len(list_policies(p)) == 6

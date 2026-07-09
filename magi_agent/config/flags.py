@@ -1714,6 +1714,38 @@ FLAGS: tuple[FlagSpec, ...] = (
             "blocks. Strict default-OFF and inert unless explicitly set."
         ),
     ),
+    # --- First-party security policies -------------------------------------
+    _pb(
+        "MAGI_EGRESS_GUARD_ENABLED",
+        stage="stage1",
+        summary=(
+            "Master switch for the egress_guard first-party security policy: "
+            "first-hop destination extraction for outbound tool calls + shell "
+            "network commands, evidence emission, and (opt-in block mode) "
+            "allowlist denial. Profile-aware default-ON (full runtime profile); "
+            "OFF under safe/eval so scored benchmarks run uncontaminated. In the "
+            "default `audit` mode nothing is denied -- destinations are only "
+            "recorded to the evidence ledger and ride the permission-decision "
+            "metadata (so denied/asked exfil attempts carry the destination too)."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_EGRESS_GUARD_MODE",
+        # Default `audit` (observe-only): extract + record, never change the
+        # action. `block` (honored in U4) denies non-allowlisted destinations.
+        default="audit",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "egress_guard enforcement mode. Default `audit` records extracted "
+            "destinations to the evidence ledger and stashes them in the "
+            "permission-decision metadata without ever changing the action. "
+            "`block` (opt-in, honored in a later unit) denies destinations that "
+            "do not match the operator-managed allowlist. Only meaningful when "
+            "MAGI_EGRESS_GUARD_ENABLED is on."
+        ),
+        kind="str",
+    ),
     _pb(
         "MAGI_SOURCE_CITATION_ENABLED",
         stage="stage1",

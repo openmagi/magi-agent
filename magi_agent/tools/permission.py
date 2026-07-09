@@ -13,6 +13,7 @@ from magi_agent.customize.tool_perm import matched_decision
 from magi_agent.runtime.control import ControlRequest
 
 from .context import ToolContext
+from .egress_guard import maybe_stash_egress_destination
 from .manifest import RuntimeMode, ToolManifest
 from .safety import RuntimePermissionArbiter
 
@@ -121,6 +122,24 @@ class ToolPermissionPolicy:
         self._tool_evidence_collector = tool_evidence_collector
 
     def decide(
+        self,
+        manifest: ToolManifest,
+        arguments: dict[str, object],
+        context: ToolContext,
+        *,
+        mode: RuntimeMode,
+    ) -> ToolPermissionDecision:
+        decision = self._decide(manifest, arguments, context, mode=mode)
+        # egress_guard AUDIT stash (F-2): ``_decide`` has ~7 return paths, some of
+        # which build fresh metadata dicts, so stash on the SINGLE post-decision
+        # exit here rather than on the shared safety metadata. This guarantees
+        # DENIED and ASKED egress attempts (the most valuable exfil-forensic rows)
+        # carry ``egressDestination`` too, not only executed calls. Observe-only:
+        # it mutates the returned metadata dict and NEVER changes the action.
+        maybe_stash_egress_destination(manifest, arguments, decision.metadata)
+        return decision
+
+    def _decide(
         self,
         manifest: ToolManifest,
         arguments: dict[str, object],
