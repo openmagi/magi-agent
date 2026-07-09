@@ -20,3 +20,4 @@ apps/web/.next/
 .openmagi/
 # Local runtime state (durable evidence ledger, session logs)
 .magi/
+_corpus/
