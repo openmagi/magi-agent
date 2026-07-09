@@ -3886,6 +3886,40 @@ def parse_source_citation_induce_search_enabled(env: Mapping[str, str]) -> bool:
     return flag_profile_bool("MAGI_SOURCE_CITATION_INDUCE_SEARCH_ENABLED", env=env)
 
 
+def parse_injection_guard_enabled(env: Mapping[str, str]) -> bool:
+    """MAGI_INJECTION_GUARD_ENABLED -- master switch for the injection_guard policy.
+
+    Deterministic prompt-injection heuristics over EXTERNAL tool-result content
+    (web search / web fetch / research_fact / browser reads / KB search):
+    evidence records plus, in ``annotate`` mode, a static high-severity in-band
+    advisory header. Never blocks, never rewrites fetched content, no LLM judge.
+    Profile-aware default-ON (full runtime profile); OFF under
+    ``MAGI_RUNTIME_PROFILE`` in ``safe``/``eval`` so scored benchmarks run with
+    an unmodified tool corpus.
+    """
+    from .flags import flag_profile_bool
+
+    return flag_profile_bool("MAGI_INJECTION_GUARD_ENABLED", env=env)
+
+
+def parse_injection_guard_mode(env: Mapping[str, str]) -> str:
+    """MAGI_INJECTION_GUARD_MODE -- injection_guard action mode.
+
+    Returns ``"record"`` / ``"annotate"`` / ``"nudge"``. ``record`` emits
+    evidence records only and never mutates the tool result. ``annotate`` (the
+    default) additionally prepends a static advisory header to the model-facing
+    result on any HIGH-severity finding and neutralizes spoofed in-content
+    markers. ``nudge`` additionally adds a pre-final advisory nudge, honored by
+    U7 (inert in U6). Unknown values fall back to the FlagSpec default
+    (``annotate``). Only meaningful when :func:`parse_injection_guard_enabled` is
+    on.
+    """
+    raw = (env.get("MAGI_INJECTION_GUARD_MODE") or "").strip().lower()
+    if raw in ("record", "annotate", "nudge"):
+        return raw
+    return "annotate"
+
+
 def parse_verify_before_replying_enabled(env: Mapping[str, str]) -> bool:
     """MAGI_VERIFY_BEFORE_REPLYING_ENABLED -- master switch for the policy.
 

@@ -53,7 +53,11 @@ def test_list_only_builtins(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     assert resp.status_code == 200
     # An empty store still surfaces the first-party builtin(s).
     body = resp.json()
-    assert [p["id"] for p in body["policies"]] == ["source_citation", "verify_before_replying"]
+    assert [p["id"] for p in body["policies"]] == [
+        "injection_guard",
+        "source_citation",
+        "verify_before_replying",
+    ]
     assert body["policies"][0]["origin"] == "builtin"
 
 
@@ -66,6 +70,7 @@ def test_upsert_and_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     assert body["policy"]["ruleIds"] == ["cr_gate"]
     # The list is builtins + stored, sorted by id.
     assert [p["id"] for p in body["policies"]] == [
+        "injection_guard",
         "source_citation",
         "verify-source",
         "verify_before_replying",
@@ -73,6 +78,7 @@ def test_upsert_and_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     # Follow-up GET agrees.
     listing = client.get("/v1/app/policies").json()
     assert [p["id"] for p in listing["policies"]] == [
+        "injection_guard",
         "source_citation",
         "verify-source",
         "verify_before_replying",
@@ -123,13 +129,21 @@ def test_delete(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     resp = client.request("DELETE", "/v1/app/policies/verify-source")
     assert resp.status_code == 200
     # Deleting the user policy leaves the first-party builtins intact.
-    assert [p["id"] for p in resp.json()["policies"]] == ["source_citation", "verify_before_replying"]
+    assert [p["id"] for p in resp.json()["policies"]] == [
+        "injection_guard",
+        "source_citation",
+        "verify_before_replying",
+    ]
     # Idempotent second delete.
     assert client.request("DELETE", "/v1/app/policies/verify-source").status_code == 200
     # Deleting a builtin id is a no-op: the first-party policies stay present.
     resp2 = client.request("DELETE", "/v1/app/policies/source_citation")
     assert resp2.status_code == 200
-    assert [p["id"] for p in resp2.json()["policies"]] == ["source_citation", "verify_before_replying"]
+    assert [p["id"] for p in resp2.json()["policies"]] == [
+        "injection_guard",
+        "source_citation",
+        "verify_before_replying",
+    ]
 
 
 def test_migrate_groups(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -154,6 +168,7 @@ def test_migrate_groups(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     assert resp.json()["created"] == 1
     # The migrated policy plus the always-present first-party builtins.
     assert sorted(p["id"] for p in resp.json()["policies"]) == [
+        "injection_guard",
         "my-group",
         "source_citation",
         "verify_before_replying",

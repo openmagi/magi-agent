@@ -1770,6 +1770,35 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _pb(
+        "MAGI_INJECTION_GUARD_ENABLED",
+        stage="stage1",
+        summary=(
+            "Master switch for the injection_guard first-party policy: "
+            "deterministic prompt-injection heuristics over external tool-result "
+            "content (web/browser/KB reads), evidence records, and the "
+            "high-severity in-band advisory header. Profile default-ON (full); "
+            "OFF under safe/eval so scored benchmarks run uncontaminated. Never "
+            "blocks and never rewrites fetched content; the strongest action is a "
+            "static one-line header on HIGH-severity matches."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_INJECTION_GUARD_MODE",
+        default="annotate",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "injection_guard action mode. `record` emits evidence records only "
+            "(never mutates the tool result); `annotate` (the default) also "
+            "prepends a static advisory header to the model-facing result on any "
+            "HIGH-severity finding and neutralizes spoofed in-content markers; "
+            "`nudge` additionally adds a pre-final advisory nudge (honored in U7, "
+            "inert here). Unknown values fall back to `annotate`. Only meaningful "
+            "when MAGI_INJECTION_GUARD_ENABLED is on."
+        ),
+        kind="str",
+    ),
+    _pb(
         "MAGI_VERIFY_BEFORE_REPLYING_ENABLED",
         stage="stage1",
         summary=(
