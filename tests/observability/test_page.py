@@ -50,11 +50,17 @@ def test_page_uses_textcontent_for_event_data():
 
 
 def test_page_token_input_present():
-    """Gateway token input must be present so the JS can authenticate API calls."""
+    """Gateway token input must be present so the JS can authenticate API calls.
+
+    P0 security fix: the input must NOT prefill the old publicly-known
+    ``local-dev-token`` constant. The operator pastes their per-install token
+    (``~/.magi/serve_token``); the page ships an empty field with that hint.
+    """
     from magi_agent.observability.page import _PAGE_HTML
 
     assert 'id="obs-token"' in _PAGE_HTML
-    assert "local-dev-token" in _PAGE_HTML
+    assert "local-dev-token" not in _PAGE_HTML
+    assert "serve_token" in _PAGE_HTML
 
 
 def test_page_api_helper_uses_authorization_header():
