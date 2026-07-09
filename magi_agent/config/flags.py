@@ -4534,6 +4534,45 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
+    # --- Heartbeat watcher (Track-F U4) ------------------------------------
+    _b(
+        "MAGI_HEARTBEAT_ENABLED",
+        summary=(
+            "Enable the gateway heartbeat watcher: a periodic quiet self-check "
+            "agent turn that fires on MAGI_HEARTBEAT_INTERVAL_SECONDS (default "
+            "1800s, floor 60s). If the reply contains MAGI_HEARTBEAT_SUPPRESS_TOKEN "
+            "(default HEARTBEAT_OK), output is dropped silently; otherwise it is "
+            "delivered to the operator via the deliver sink (warning log). Default "
+            "OFF; additive-only -- watcher is included in build_default_watchers() "
+            "but is_enabled() returns False so the daemon never starts it."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_HEARTBEAT_INTERVAL_SECONDS",
+        default=1800,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Heartbeat watcher tick interval in seconds (floor: 60, default: 1800). "
+            "Values below the floor are clamped to 60. Non-integer values fall back "
+            "to the default. Only effective when MAGI_HEARTBEAT_ENABLED=1."
+        ),
+        kind="int",
+    ),
+    FlagSpec(
+        name="MAGI_HEARTBEAT_SUPPRESS_TOKEN",
+        default="HEARTBEAT_OK",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "String token that, when present in the heartbeat turn output, "
+            "suppresses delivery to the operator sink (the turn is considered "
+            "nominal). Default 'HEARTBEAT_OK'. Operators may set a custom token "
+            "to match their prompt engineering. Only effective when "
+            "MAGI_HEARTBEAT_ENABLED=1."
+        ),
+        kind="str",
+    ),
     # --- Deep-solve pipeline ------------------------------------------------
     _pb(
         "MAGI_DEEP_SOLVE_ENABLED",
