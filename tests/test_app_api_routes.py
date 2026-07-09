@@ -289,6 +289,41 @@ def test_skills_scan_finds_workspace_skill(tmp_path, monkeypatch) -> None:
     assert client.post("/v1/app/skills/reload").status_code == 200
 
 
+def test_skills_file_returns_source_for_scanned_dir(tmp_path, monkeypatch) -> None:
+    skill_dir = tmp_path / "skills" / "demo"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: demo-skill\ndescription: a demo\ntags: a, b\n---\nthe skill body\n",
+        encoding="utf-8",
+    )
+    client = _client(tmp_path, monkeypatch)
+
+    listing = client.get("/v1/app/skills").json()
+    entry = next(s for s in listing["loaded"] if s["name"] == "demo-skill")
+
+    res = client.get("/v1/app/skills/file", params={"dir": entry["dir"]})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["name"] == "demo-skill"
+    assert body["description"] == "a demo"
+    assert body["dir"] == entry["dir"]
+    assert body["source"] == entry["source"]
+    assert "the skill body" in body["content"]
+    assert body["truncated"] is False
+
+    # Unknown dir → 404 with the repo's error-body shape.
+    unknown = client.get("/v1/app/skills/file", params={"dir": "skills/nope"})
+    assert unknown.status_code == 404
+    assert unknown.json() == {"error": "not_found"}
+
+    # Traversal-shaped dir is never joined onto the filesystem → 404, not a leak.
+    traversal = client.get(
+        "/v1/app/skills/file", params={"dir": "../../etc/passwd"}
+    )
+    assert traversal.status_code == 404
+    assert traversal.json() == {"error": "not_found"}
+
+
 def test_memory_list_read_search(tmp_path, monkeypatch) -> None:
     (tmp_path / "MEMORY.md").write_text("alpha bravo charlie", encoding="utf-8")
     client = _client(tmp_path, monkeypatch)

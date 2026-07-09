@@ -520,6 +520,70 @@ def _scan_skills() -> dict[str, Any]:
     }
 
 
+def _find_skill_reference(requested_dir: str) -> dict[str, Any] | None:
+    """Resolve ``requested_dir`` to a scanned skill reference, or ``None``.
+
+    Security: the lookup re-runs the exact discovery ``_scan_skills`` uses and
+    only matches when ``requested_dir`` equals a scanned skill's ``dir`` field.
+    The request value is never joined onto the filesystem, so path traversal is
+    structurally impossible (bundled skills are importlib package resources).
+    """
+    seen: set[str] = set()
+    for root in _workspace_roots():
+        for relative in _skill_candidates(root):
+            ref = _skill_reference(root, relative)
+            if ref is None or ref["dir"] in seen:
+                continue
+            seen.add(ref["dir"])
+            if ref["dir"] == requested_dir:
+                return ref
+    return None
+
+
+def _skill_file_payload(ref: dict[str, Any]) -> dict[str, Any] | None:
+    """Build the skill-file response for a resolved reference, or ``None``.
+
+    Returns ``None`` when the SKILL.md is unreadable so the caller can surface an
+    honest error instead of pretending the skill does not exist.
+    """
+    text = _read_skill_text(ref)
+    if text is None:
+        return None
+    # Determine whether the source exceeded the read cap so callers know the
+    # content may be incomplete (mirrors the ``truncated`` field on
+    # /v1/app/knowledge/file).
+    raw_size: int | None = None
+    resource = ref.get("resource")
+    if isinstance(resource, Traversable):
+        try:
+            raw_size = len(resource.read_text(encoding="utf-8"))
+        except (FileNotFoundError, UnicodeDecodeError, OSError):
+            pass
+    else:
+        path = ref.get("filesystem_path")
+        if isinstance(path, Path):
+            try:
+                raw_size = path.stat().st_size
+            except OSError:
+                pass
+    truncated = raw_size is not None and raw_size > _MAX_SEARCH_BYTES
+    front = _parse_frontmatter(text)
+    tags = [t.strip() for t in front.get("tags", "").split(",") if t.strip()]
+    script_backed = _skill_has_script(ref)
+    return {
+        "name": front.get("name") or Path(ref["dir"]).name,
+        "dir": ref["dir"],
+        "path": ref["path"],
+        "source": ref["source"],
+        "description": front.get("description", ""),
+        "tags": tags,
+        "promptOnly": not script_backed,
+        "scriptBacked": script_backed,
+        "content": text,
+        "truncated": truncated,
+    }
+
+
 def _skill_reference(root: Path, relative: str) -> dict[str, Any] | None:
     path_parts = Path(relative).parts
     if not path_parts or path_parts[-1] != "SKILL.md":
@@ -1102,6 +1166,22 @@ def register_app_api_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             return denied
         # The scan does fresh disk I/O each call; "reload" is just a re-scan.
         return JSONResponse(content=_scan_skills())
+
+    @app.get("/v1/app/skills/file")
+    def app_skills_file(request: Request, dir: str) -> JSONResponse:
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        # Whitelist resolution only: `dir` must equal a scanned skill's dir.
+        # The value is never joined onto the filesystem, so traversal-shaped
+        # inputs (e.g. ../../etc/passwd) simply miss every scanned entry → 404.
+        ref = _find_skill_reference(dir)
+        if ref is None:
+            return JSONResponse(status_code=404, content={"error": "not_found"})
+        payload = _skill_file_payload(ref)
+        if payload is None:
+            return JSONResponse(status_code=500, content={"error": "unreadable"})
+        return JSONResponse(content=payload)
 
     # ---- memory --------------------------------------------------------- #
     @app.get("/v1/app/memory")
