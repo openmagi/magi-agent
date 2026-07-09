@@ -263,6 +263,15 @@ export interface CustomizeOverrides {
    * policy; only ids in the curated catalog project onto their master flag.
    */
   builtin_policies: Record<string, boolean>;
+  /**
+   * Egress-guard destination allowlist + enforcement mode (U4). The
+   * `allowlist` is a list of host patterns (exact host or single-suffix
+   * wildcard, e.g. `*.github.com`); `mode` mirrors `MAGI_EGRESS_GUARD_MODE`
+   * (`audit` | `block`, or `""` for the profile default). The whole `~/.magi`
+   * directory is agent-write-protected, so this surface is the operator's
+   * sanctioned edit path and every write emits a config-change audit row.
+   */
+  egress_guard?: { allowlist: string[]; mode: string };
 }
 
 /**
@@ -382,6 +391,69 @@ export async function patchBuiltinPolicyOverride(
   if (!res.ok) throw new Error(`Failed to update built-in policy (${res.status})`);
   const data = (await res.json()) as { overrides: CustomizeOverrides };
   return data.overrides;
+}
+
+/** The egress-guard allowlist + mode read from `GET .../egress-allowlist` (U4). */
+export interface EgressAllowlistState {
+  allowlist: string[];
+  mode: string;
+}
+
+/**
+ * Reads the egress-guard allowlist + mode via `GET /v1/app/customize/egress-allowlist`.
+ * Throws on non-2xx so the caller can surface the error.
+ */
+export async function getEgressAllowlist(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+): Promise<EgressAllowlistState> {
+  const res = await fetch(`/v1/app/customize/egress-allowlist`);
+  if (!res.ok) throw new Error(`Failed to load egress allowlist (${res.status})`);
+  const data = (await res.json()) as { allowlist?: string[]; mode?: string };
+  return { allowlist: data.allowlist ?? [], mode: data.mode ?? "" };
+}
+
+/**
+ * Persists the egress-guard allowlist via `PUT /v1/app/customize/egress-allowlist`.
+ *
+ * Each entry must be an exact host or a single-suffix wildcard (`*.github.com`);
+ * the backend validates + normalizes (lowercase, de-dup) and returns the stored
+ * list. Throws on non-2xx (e.g. an invalid host pattern) so the caller can
+ * surface the error and revert.
+ */
+export async function putEgressAllowlist(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  allowlist: string[],
+): Promise<string[]> {
+  const res = await fetch(`/v1/app/customize/egress-allowlist`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ allowlist }),
+  });
+  if (!res.ok) throw new Error(`Failed to save egress allowlist (${res.status})`);
+  const data = (await res.json()) as { allowlist: string[] };
+  return data.allowlist;
+}
+
+/**
+ * Persists the egress-guard enforcement mode via `PUT /v1/app/customize/egress-mode`.
+ *
+ * `mode` is `"audit"` (observe-only, records destinations) or `"block"` (denies
+ * a non-allowlisted destination). The backend projects the value onto the live
+ * `MAGI_EGRESS_GUARD_MODE` env so the next turn honors it without a restart.
+ * Throws on non-2xx.
+ */
+export async function putEgressMode(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  mode: "audit" | "block",
+): Promise<string> {
+  const res = await fetch(`/v1/app/customize/egress-mode`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode }),
+  });
+  if (!res.ok) throw new Error(`Failed to save egress mode (${res.status})`);
+  const data = (await res.json()) as { mode: string };
+  return data.mode;
 }
 
 /**
