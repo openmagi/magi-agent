@@ -16,10 +16,12 @@ from magi_agent.runtime.child_runner_boundary import (
 from magi_agent.runtime.child_runner_live import (
     LIVE_CHILD_RUNNER_ENABLED_ENV,
     LIVE_CHILD_RUNNER_KILL_SWITCH_ENV,
+    _DEFAULT_CHILD_TURN_TIMEOUT_S,
     _DEGRADE_KEY_MISSING,
     _DEGRADE_ROUTE_UNKNOWN,
     _DEGRADE_TIMEOUT,
     _DEGRADE_TURN_ERROR,
+    _MAX_TURN_TIMEOUT_S,
     RealLocalChildRunner,
     is_live_child_runner_enabled,
 )
@@ -550,6 +552,46 @@ def test_run_child_no_budget_ms_still_times_out_on_hang() -> None:
     assert slow.calls == 1
     assert output["status"] in {"failed", "blocked"}
     assert output["summary"] == _DEGRADE_TIMEOUT
+
+
+def test_turn_timeout_no_budget_uses_tight_default_not_ceiling() -> None:
+    """A child with NO budget_ms is bounded by the TIGHT default, not the full
+    600s ceiling: a runaway delegated subtask must not burn the whole ceiling."""
+    runner = RealLocalChildRunner(provider_config=_provider_config(), env={})
+    timeout = runner._turn_timeout_s(_request())  # budget_ms defaults to 0
+    assert timeout == _DEFAULT_CHILD_TURN_TIMEOUT_S
+    assert timeout < _MAX_TURN_TIMEOUT_S
+
+
+def test_turn_timeout_no_budget_env_override() -> None:
+    """MAGI_CHILD_TURN_TIMEOUT_S tunes the no-budget default (clamped to ceiling)."""
+    runner = RealLocalChildRunner(
+        provider_config=_provider_config(),
+        env={"MAGI_CHILD_TURN_TIMEOUT_S": "42"},
+    )
+    assert runner._turn_timeout_s(_request()) == 42.0
+
+    # A huge override is still clamped to the hard ceiling.
+    runner_hi = RealLocalChildRunner(
+        provider_config=_provider_config(),
+        env={"MAGI_CHILD_TURN_TIMEOUT_S": "99999"},
+    )
+    assert runner_hi._turn_timeout_s(_request()) == _MAX_TURN_TIMEOUT_S
+
+
+def test_turn_timeout_explicit_budget_ms_still_honoured() -> None:
+    """An explicit positive budget_ms still wins over the default (clamped)."""
+    runner = RealLocalChildRunner(provider_config=_provider_config(), env={})
+    assert runner._turn_timeout_s(_request(budget_ms=5000)) == 5.0
+
+
+def test_turn_timeout_no_budget_model_timeout_clamps_default() -> None:
+    """MAGI_MODEL_TIMEOUT_S lowers the no-budget default below its own value."""
+    runner = RealLocalChildRunner(
+        provider_config=_provider_config(),
+        env={"MAGI_MODEL_TIMEOUT_S": "60"},  # below the 300s default
+    )
+    assert runner._turn_timeout_s(_request()) == 60.0
 
 
 def test_run_child_propagates_cancellation() -> None:

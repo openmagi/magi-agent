@@ -827,6 +827,20 @@ def _classify_child_event_error(event: object) -> str | None:
 #: ``budget_ms``. Keeps a runaway/huge budget from blocking indefinitely.
 _MAX_TURN_TIMEOUT_S = 600.0
 
+#: Default bound for a child turn when the parent passes NO positive
+#: ``budget_ms`` (the common case: the model rarely sets one). Delegated
+#: subtasks should be TIGHT by default: without this a "compute 1+1" child that
+#: spirals (ramble hundreds of deltas, call tools it lacks, loop internal turns)
+#: ran the full 600s ceiling before ending non-completed, which starved the
+#: parent turn and surfaced as ``child_turn_timeout`` /
+#: ``child_llm_collector_status_failed``. Generous but finite (generous-budget
+#: policy: comfortably fits a legitimate multi-fetch deep-research or coding
+#: child, while still killing a "1+1" child that spirals for minutes);
+#: env-tunable via ``MAGI_CHILD_TURN_TIMEOUT_S``. Still clamped to
+#: ``_MAX_TURN_TIMEOUT_S`` (and lowered by ``MAGI_MODEL_TIMEOUT_S`` when set).
+_DEFAULT_CHILD_TURN_TIMEOUT_S = 300.0
+_CHILD_TURN_TIMEOUT_ENV = "MAGI_CHILD_TURN_TIMEOUT_S"
+
 
 class RealLocalChildRunner:
     """REAL, model-backed local child runner driving ONE sub-agent turn.
@@ -1730,10 +1744,13 @@ class RealLocalChildRunner:
         EVERY child turn is bounded — a turn that never finishes would otherwise
         hang the parent turn forever (the spawn_agent tool awaits the child
         boundary inline on the dispatch loop with no outer bound). When no
-        positive ``budget_ms`` is present the bound falls back to the ceiling
-        (``_MAX_TURN_TIMEOUT_S``, lowered by ``MAGI_MODEL_TIMEOUT_S`` when set)
-        rather than returning ``None`` (which would skip the bound entirely). A
-        positive ``budget_ms`` is clamped to ``[0, ceiling]``.
+        positive ``budget_ms`` is present the bound falls back to the TIGHT
+        per-turn default (``_DEFAULT_CHILD_TURN_TIMEOUT_S``, env-tunable via
+        ``MAGI_CHILD_TURN_TIMEOUT_S``) rather than the full ceiling: a delegated
+        subtask should be tight by default so a runaway child cannot burn the
+        whole 600s. A positive ``budget_ms`` is clamped to ``[0, ceiling]``.
+        Everything is still clamped to ``_MAX_TURN_TIMEOUT_S`` (lowered by
+        ``MAGI_MODEL_TIMEOUT_S`` when set).
         """
         ceiling = _MAX_TURN_TIMEOUT_S
         env_ceiling = _clean_str(self._env.get("MAGI_MODEL_TIMEOUT_S"))
@@ -1746,7 +1763,18 @@ class RealLocalChildRunner:
                 ceiling = min(ceiling, parsed)
         raw = getattr(request, "budget_ms", None)
         if isinstance(raw, bool) or not isinstance(raw, int) or raw <= 0:
-            return ceiling
+            # No caller budget: use the tight default (env-tunable), clamped to
+            # the ceiling so MAGI_MODEL_TIMEOUT_S still lowers it when set.
+            default_s = _DEFAULT_CHILD_TURN_TIMEOUT_S
+            env_default = _clean_str(self._env.get(_CHILD_TURN_TIMEOUT_ENV))
+            if env_default is not None:
+                try:
+                    parsed_default = float(env_default)
+                except ValueError:
+                    parsed_default = 0.0
+                if parsed_default > 0:
+                    default_s = parsed_default
+            return min(default_s, ceiling)
         return min(raw / 1000.0, ceiling)
 
     # ------------------------------------------------------------------ #
