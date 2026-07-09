@@ -56,7 +56,7 @@ def test_system_safety_is_floor() -> None:
 
 
 def test_system_safety_has_expected_rule_ids() -> None:
-    """system_safety must carry exactly the 8 U1 ruleIds."""
+    """system_safety must carry exactly the 9 ruleIds (8 U1 + config_protection from U4)."""
     from magi_agent.customize.policies import BUILTIN_POLICIES
 
     pol = next((p for p in BUILTIN_POLICIES if p.policy_id == "system_safety"), None)
@@ -70,6 +70,7 @@ def test_system_safety_has_expected_rule_ids() -> None:
         "system_safety.secret_paths",
         "system_safety.shell_hygiene",
         "system_safety.unsafe_git",
+        "system_safety.config_protection",
     }
     assert set(pol.rule_ids) == expected
 
@@ -165,6 +166,8 @@ _EXPECTED_DENY_REASON_CODES: frozenset[str] = frozenset(
         "sealed_file_write_blocked",
         "protected_memory_path",
         "secret_path_denied",
+        # config protection (U4: ~/.magi write deny)
+        "protected_config_write_denied",
         # plan-mode (EXCLUDED)
         "plan_mode_mutation_blocked",
         # missing-argument guard (EXCLUDED)
