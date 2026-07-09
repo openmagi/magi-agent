@@ -431,6 +431,7 @@ _INTENTIONALLY_NOT_IN_FULL_PROFILE: dict[str, str] = {
     "MAGI_LOCAL_VAULT_PROXY_ENABLED": "needs local credential vault setup",
     "MAGI_VAULT_ADMIN_ENABLED": "needs local credential vault setup",
     "MAGI_HOOK_ALLOW_INTERNAL_URLS": "security loosening; only meaningful with external hooks aimed at internal addrs",
+    "MAGI_SERVE_REMOTE_YOLO": "security loosening; keeps bypassPermissions on a LAN-reachable bind (defeats the non-loopback authority downgrade) — never dogfood on by default",
     "MAGI_EVAL_AUTONOMY_ENABLED": "eval-profile only",
     "MAGI_EVAL_ZERO_EDIT_GUARD_ENABLED": "eval-profile only",
     "MAGI_LEDGER_ORCHESTRATOR_ENABLED": "GAIA benchmark code",

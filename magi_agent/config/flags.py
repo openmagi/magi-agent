@@ -4296,16 +4296,33 @@ FLAGS: tuple[FlagSpec, ...] = (
     ),
     FlagSpec(
         name="MAGI_SERVE_HOST",
-        default="0.0.0.0",
+        default="127.0.0.1",
         scope="public",
         stage="stage1",
         summary=(
-            "Server bootstrap bind host. Defaults to ``0.0.0.0`` "
-            "(all interfaces) so hosted infra is byte-identical; the "
-            "``--host`` flag still wins when explicitly passed. The "
-            "desktop shell passes ``127.0.0.1`` to bind loopback only."
+            "Server bootstrap bind host. Defaults to ``127.0.0.1`` "
+            "(loopback only) so a stock ``magi serve`` is not reachable "
+            "from the LAN; set ``0.0.0.0`` (or a specific interface) to "
+            "expose it. The ``--host`` flag still wins when explicitly "
+            "passed; the desktop shell passes ``127.0.0.1`` explicitly. "
+            "Hosted infra sets this to ``0.0.0.0`` in its env."
         ),
         kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_SERVE_REMOTE_YOLO",
+        default=False,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Opt-in that lets the LOCAL ``magi serve`` owner keep the "
+            "``bypassPermissions`` (YOLO) baseline even when the bind host "
+            "is non-loopback (LAN-reachable). Default-OFF: on a non-loopback "
+            "bind the local serve authority downgrades to the ask-capable "
+            "``default`` mode unless this is set. Loopback binds are "
+            "unaffected (YOLO baseline preserved)."
+        ),
+        kind="bool",
     ),
     FlagSpec(
         name="MAGI_AGENT_REQUIRE_ENV",

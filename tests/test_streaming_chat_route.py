@@ -2440,12 +2440,26 @@ def test_streaming_chat_enabled_flag(monkeypatch) -> None:
         assert not _streaming_chat_enabled(), f"expected falsy for {falsy!r}"
 
 
-def test_local_full_access_only_matches_loopback_owner() -> None:
+def test_local_full_access_only_matches_loopback_owner(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    # P0: detection now keys on the per-install serve token, not the old
+    # publicly-known "local-dev-token" constant.
+    from magi_agent.config.serve_token import local_serve_gateway_token
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.delenv("MAGI_CONFIG", raising=False)
+    monkeypatch.delenv("MAGI_CUSTOMIZE", raising=False)
+    local_serve_gateway_token.cache_clear()
+    token = local_serve_gateway_token()
+
     local_runtime = OpenMagiRuntime(
         config=RuntimeConfig(
             bot_id="local-bot",
             user_id="local-user",
-            gateway_token="local-dev-token",
+            gateway_token=token,
             api_proxy_url="http://api-proxy.local",
             chat_proxy_url="http://chat-proxy.local",
             redis_url="redis://redis.local:6379/0",
@@ -2453,16 +2467,32 @@ def test_local_full_access_only_matches_loopback_owner() -> None:
             build=BuildInfo(version="0.1.0-test", build_sha="sha-test"),
         )
     )
-    hosted_runtime = _make_runtime(gateway_token="local-dev-token")
+    # hosted_runtime has a different bot_id/user_id even with the same token.
+    hosted_runtime = _make_runtime(gateway_token=token)
 
     assert _local_full_access(local_runtime)
     assert not _local_full_access(hosted_runtime)
+    local_serve_gateway_token.cache_clear()
 
 
 def test_default_stream_builder_bypasses_permissions_for_local_owner(
     monkeypatch,
+    tmp_path,
 ) -> None:
+    # P0: local owner still gets bypassPermissions on loopback (default).
     monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    # Ensure loopback host so the coupling helper returns bypassPermissions.
+    monkeypatch.setenv("MAGI_SERVE_HOST", "127.0.0.1")
+    # Isolate the serve token to tmp_path.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.delenv("MAGI_CONFIG", raising=False)
+    monkeypatch.delenv("MAGI_CUSTOMIZE", raising=False)
+    from magi_agent.config.serve_token import local_serve_gateway_token
+
+    local_serve_gateway_token.cache_clear()
+    token = local_serve_gateway_token()
+
     captured: dict[str, object] = {}
 
     class FakeEngine:
@@ -2484,7 +2514,7 @@ def test_default_stream_builder_bypasses_permissions_for_local_owner(
         config=RuntimeConfig(
             bot_id="local-bot",
             user_id="local-user",
-            gateway_token="local-dev-token",
+            gateway_token=token,
             api_proxy_url="http://api-proxy.local",
             chat_proxy_url="http://chat-proxy.local",
             redis_url="redis://redis.local:6379/0",
@@ -2496,7 +2526,7 @@ def test_default_stream_builder_bypasses_permissions_for_local_owner(
 
     response = client.post(
         "/v1/chat/stream",
-        headers={"authorization": "Bearer local-dev-token"},
+        headers={"authorization": f"Bearer {token}"},
         json={
             "sessionId": "s-local",
             "turnId": "t-local",
@@ -2506,6 +2536,7 @@ def test_default_stream_builder_bypasses_permissions_for_local_owner(
 
     assert response.status_code == 200
     assert captured["permission_mode"] == "bypassPermissions"
+    local_serve_gateway_token.cache_clear()
 
 
 def test_default_stream_builder_keeps_default_permissions_for_hosted_runtime(

@@ -64,15 +64,27 @@ def test_dashboard_bundle_uses_local_streaming_chat_contract() -> None:
     assert "/v1/chat/cancel" in bundle_text
 
 
-def test_dashboard_bootstrap_is_local_first() -> None:
-    # local-dev token is surfaced so the bundle auto-authenticates locally. The
-    # additive `setup` block is also present (default-OFF wizard -> not needed).
-    payload = _client("local-dev-token").get("/app/bootstrap.json").json()
+def test_dashboard_bootstrap_is_local_first(monkeypatch, tmp_path) -> None:
+    # P0: the local serve token is now a per-install random value (not the old
+    # publicly-known "local-dev-token" constant). The bootstrap still surfaces it
+    # so the bundle auto-authenticates locally -- detection keys on
+    # is_local_serve_token rather than a literal comparison.
+    from magi_agent.config.serve_token import local_serve_gateway_token
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.delenv("MAGI_CONFIG", raising=False)
+    monkeypatch.delenv("MAGI_CUSTOMIZE", raising=False)
+    local_serve_gateway_token.cache_clear()
+    token = local_serve_gateway_token()
+
+    payload = _client(token).get("/app/bootstrap.json").json()
     assert payload["ok"] is True
     assert payload["agentUrl"] == ""
     assert payload["tokenRequired"] is False
-    assert payload["token"] == "local-dev-token"
+    assert payload["token"] == token
     assert payload["setup"]["needed"] is False
+    local_serve_gateway_token.cache_clear()
 
 
 def test_dashboard_bootstrap_hides_real_gateway_token() -> None:

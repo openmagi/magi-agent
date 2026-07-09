@@ -47,8 +47,8 @@ def resolve_server_port(
     from magi_agent.config.flags import flag_str  # noqa: PLC0415
 
     default_port = flag_int("CORE_AGENT_PORT", env=env)
-    # ``flag_str`` returns the registry default ("0.0.0.0") when unset.
-    default_host = flag_str("MAGI_SERVE_HOST", env=env) or "0.0.0.0"
+    # ``flag_str`` returns the registry default ("127.0.0.1") when unset.
+    default_host = flag_str("MAGI_SERVE_HOST", env=env) or "127.0.0.1"
     raw_args = list(sys.argv[1:] if argv is None else argv)
 
     parser = argparse.ArgumentParser(prog="magi-agent")
@@ -62,7 +62,7 @@ def resolve_server_port(
         "--host",
         type=str,
         default=default_host,
-        help="Server bind host (env MAGI_SERVE_HOST, default 0.0.0.0).",
+        help="Server bind host (env MAGI_SERVE_HOST, default 127.0.0.1 loopback).",
     )
 
     if raw_args and raw_args[0] == "serve":
@@ -81,16 +81,16 @@ def resolve_server_host(
     """Resolve the uvicorn bind host for ``serve``.
 
     Mirrors :func:`resolve_server_port`: an optional ``--host`` CLI flag wins,
-    otherwise the typed ``MAGI_SERVE_HOST`` flag (env) is read, which defaults
-    to ``0.0.0.0``. Hosted behaviour is byte-identical to the historical
-    hard-coded ``host="0.0.0.0"``; the desktop shell passes ``--host
-    127.0.0.1`` so the local runtime binds loopback only.
+    otherwise the typed ``MAGI_SERVE_HOST`` flag (env) is read, which now
+    defaults to ``127.0.0.1`` (loopback only) so a stock ``magi serve`` is not
+    LAN-reachable. Hosted infra sets ``MAGI_SERVE_HOST=0.0.0.0`` in its env;
+    the desktop shell passes ``--host 127.0.0.1`` explicitly.
     """
     env = os.environ if environ is None else environ
     from magi_agent.config.flags import flag_str  # noqa: PLC0415
 
-    # ``flag_str`` returns the registry default ("0.0.0.0") when unset.
-    default_host = flag_str("MAGI_SERVE_HOST", env=env) or "0.0.0.0"
+    # ``flag_str`` returns the registry default ("127.0.0.1") when unset.
+    default_host = flag_str("MAGI_SERVE_HOST", env=env) or "127.0.0.1"
     raw_args = list(sys.argv[1:] if argv is None else argv)
 
     parser = argparse.ArgumentParser(prog="magi-agent")
@@ -146,6 +146,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         apply_memory_config_bootstrap(os.environ)
     port = resolve_server_port(argv)
     host = resolve_server_host(argv)
+    # Project the RESOLVED bind host (which honours the ``--host`` flag) back
+    # onto the env so the transport-layer exposure<->authority coupling
+    # (local_serve_permission_mode) sees the effective host, not just the raw
+    # ``MAGI_SERVE_HOST`` env. Overwrite so a ``--host`` that differs from the
+    # env value wins at request time too.
+    os.environ["MAGI_SERVE_HOST"] = host
     config = _parse_runtime_config(os.environ)
     if _local_runtime_defaults_active(config):
         # ``MAGI_RUNTIME_PROFILE=lab`` is local-full plus the experimental
@@ -208,10 +214,17 @@ def _parse_runtime_config(environ: Mapping[str, str]):
 
         if flag_bool("MAGI_AGENT_REQUIRE_ENV", env=environ):
             raise
+        # Per-install random gateway token (P0): replaces the publicly-known
+        # ``local-dev-token`` constant with a token generated + persisted 0600
+        # at ``~/.magi/serve_token`` and reused across runs. An explicit
+        # ``GATEWAY_TOKEN`` in ``environ`` still wins (the ``**dict(environ)``
+        # spread below), keeping the hosted path byte-identical.
+        from magi_agent.config.serve_token import local_serve_gateway_token
+
         local_env = {
             "BOT_ID": "local-bot",
             "USER_ID": "local-user",
-            "GATEWAY_TOKEN": "local-dev-token",
+            "GATEWAY_TOKEN": local_serve_gateway_token(),
             "CORE_AGENT_API_PROXY_URL": "http://127.0.0.1:0",
             "CORE_AGENT_CHAT_PROXY_URL": "http://127.0.0.1:0",
             "CORE_AGENT_REDIS_URL": "redis://127.0.0.1:0/0",
@@ -231,10 +244,14 @@ def _env_enabled(value: str | None) -> bool:
 
 
 def _local_runtime_defaults_active(config: RuntimeConfig) -> bool:
+    # Local-mode detection keys on the per-install serve token (P0): an explicit
+    # hosted ``GATEWAY_TOKEN`` never matches, so hosted behaviour is unchanged.
+    from magi_agent.config.serve_token import is_local_serve_token
+
     return (
         config.bot_id == "local-bot"
         and config.user_id == "local-user"
-        and config.gateway_token == "local-dev-token"
+        and is_local_serve_token(config.gateway_token)
     )
 
 

@@ -1199,9 +1199,19 @@ def test_build_headless_runtime_does_not_report_mcp_when_runner_has_no_agent(
 
 def test_local_serve_applies_full_runtime_defaults_without_route_hardblock(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     import magi_agent.main as main_module
     from magi_agent.config.env import LOCAL_DEV_MODEL_SENTINEL
+    from magi_agent.config.serve_token import local_serve_gateway_token
+
+    # P0: use the per-install local serve token rather than the old constant.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.delenv("MAGI_CONFIG", raising=False)
+    monkeypatch.delenv("MAGI_CUSTOMIZE", raising=False)
+    local_serve_gateway_token.cache_clear()
+    local_token = local_serve_gateway_token()
 
     monkeypatch.delenv("MAGI_RUNNER_POLICY_ROUTING_ENABLED", raising=False)
     monkeypatch.delenv("MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED", raising=False)
@@ -1209,7 +1219,7 @@ def test_local_serve_applies_full_runtime_defaults_without_route_hardblock(
     monkeypatch.delenv("MAGI_COMPOSIO_ENABLED", raising=False)
     monkeypatch.setenv("BOT_ID", "local-bot")
     monkeypatch.setenv("USER_ID", "local-user")
-    monkeypatch.setenv("GATEWAY_TOKEN", "local-dev-token")
+    monkeypatch.setenv("GATEWAY_TOKEN", local_token)
     monkeypatch.setenv("CORE_AGENT_API_PROXY_URL", "http://127.0.0.1:0")
     monkeypatch.setenv("CORE_AGENT_CHAT_PROXY_URL", "http://127.0.0.1:0")
     monkeypatch.setenv("CORE_AGENT_REDIS_URL", "redis://127.0.0.1:0/0")
@@ -1229,3 +1239,4 @@ def test_local_serve_applies_full_runtime_defaults_without_route_hardblock(
     assert os.environ["MAGI_BROWSER_TOOL_ENABLED"] == "1"
     assert os.environ["MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED"] == "1"
     assert "MAGI_COMPOSIO_ENABLED" not in os.environ
+    local_serve_gateway_token.cache_clear()

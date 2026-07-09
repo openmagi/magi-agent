@@ -263,8 +263,15 @@ async def _local_adk_chat_sse(
             capped_permission_mode as _capped_permission_mode,
         )
 
+        # Exposure<->authority coupling (P0): the local serve YOLO baseline holds
+        # on a loopback bind (or the explicit MAGI_SERVE_REMOTE_YOLO opt-in); a
+        # non-loopback bind downgrades it to the ask-capable ``default`` mode.
+        from magi_agent.transport.chat_shared import (  # noqa: PLC0415
+            local_serve_permission_mode as _local_serve_permission_mode,
+        )
+
         _effective_permission_mode = _capped_permission_mode(
-            _active_permission_mode(), _LOCAL_SERVE_PERMISSION_MODE
+            _active_permission_mode(), _local_serve_permission_mode()
         )
         # Reuse ONE session service per channel across per-turn engine rebuilds so
         # ADK session events accumulate and turn N+1 sees turn N. Shares the same
