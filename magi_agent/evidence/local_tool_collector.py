@@ -197,6 +197,15 @@ class LocalToolEvidenceCollector:
             _projected_source_inspection_records(tool_result.metadata)
         )
 
+        # egress_guard AUDIT (U3): emit an EgressDestination evidence record for
+        # each outbound destination of this executed call (net tool URL host,
+        # shell network-command host, or a "failed" blind-spot marker). No-op
+        # when the master flag is OFF or the call is not outbound, so the OFF /
+        # safe-profile path is byte-identical. Fail-quiet.
+        records.extend(
+            _egress_destination_records(tool_name=tool_name, arguments=arguments or {})
+        )
+
         receipt = None
         if not self._has_canonical_general_automation_entry(
             turn_id=turn_id,
@@ -851,6 +860,20 @@ def _source_citation_enabled() -> bool:
     from magi_agent.config.env import parse_source_citation_enabled  # noqa: PLC0415
 
     return parse_source_citation_enabled(os.environ)
+
+
+def _egress_destination_records(
+    *, tool_name: str, arguments: Mapping[str, object]
+) -> list[object]:
+    """egress_guard AUDIT records for an executed outbound call (fail-quiet)."""
+    try:
+        from magi_agent.tools.egress_guard import (  # noqa: PLC0415
+            egress_destination_records,
+        )
+
+        return egress_destination_records(tool_name, arguments)
+    except Exception:
+        return []
 
 
 def _update_authored_paths(

@@ -222,3 +222,39 @@ def test_user_disableable_surfaces_in_policy_payload() -> None:
 
     payload = get_policy("source_citation").to_payload()
     assert payload["userDisableable"] is False
+
+
+# --------------------------------------------------------------------------- #
+# egress_guard (U3): disableable toggle round-trip                             #
+# --------------------------------------------------------------------------- #
+EGRESS_ENV = "MAGI_EGRESS_GUARD_ENABLED"
+
+
+def test_egress_guard_is_in_catalog_mapped_to_its_flag() -> None:
+    by_id = {t.id: t for t in BUILTIN_POLICY_TOGGLES}
+    assert "egress_guard" in by_id
+    assert by_id["egress_guard"].env_var == EGRESS_ENV
+
+
+def test_egress_guard_catalog_enabled_reflects_default_on() -> None:
+    # egress_guard is default-ON via a profile_bool: with the flag UNSET it must
+    # still report enabled (a raw is_true(unset) would wrongly report "off").
+    entry = next(
+        e for e in builtin_policy_toggle_catalog({}) if e["id"] == "egress_guard"
+    )
+    assert entry["enabled"] is True
+
+
+def test_egress_guard_toggle_off_then_re_enable(tmp_path: Path) -> None:
+    # PATCH off -> env overwrite -> re-enable, the round-trip a setdefault applier
+    # could not do.
+    p = tmp_path / "customize.json"
+    set_builtin_policy_override("egress_guard", False, path=p)
+    env: dict[str, str] = {}
+    apply_builtin_policy_overrides_to_env(env, load_overrides(p))
+    assert env[EGRESS_ENV] == "0"
+
+    set_builtin_policy_override("egress_guard", True, path=p)
+    env = {EGRESS_ENV: "0"}
+    apply_builtin_policy_overrides_to_env(env, load_overrides(p))
+    assert env[EGRESS_ENV] == "1"
