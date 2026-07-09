@@ -50,6 +50,11 @@ dev = [
   "httpx==0.28.1",
   "pytest==9.0.3",
   "pytest-xdist==3.8.0",
+  # Property-based fuzzing for the authoring QA harness (tests/authoring_harness
+  # T0 tier). Dev-only; never a runtime dependency. CI determinism is pinned by
+  # the registered "ci" Hypothesis profile (see tests/authoring_harness/conftest.py):
+  # derandomize=True + database=None so a green run is reproducible and xdist-safe.
+  "hypothesis>=6.100,<7",
   "ruff==0.15.16",
   "mypy==2.1.0",
 ]
