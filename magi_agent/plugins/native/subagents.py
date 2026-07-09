@@ -267,7 +267,15 @@ def _child_result_status_and_reason(result: object) -> tuple[ToolStatus, str | N
     if boundary_status == "ok" and envelope_status in {"", "completed"}:
         return "ok", None, "ok"
     if boundary_status == "error" or envelope_status == "failed":
-        return "error", str(boundary_error or "live_child_runner_error"), "error"
+        # Surface the child's ACTUAL failure reason (carried on the envelope
+        # summary, e.g. ``child_llm_collector_status_failed`` /
+        # ``child_model_route_unknown``) before falling back to the generic
+        # code. Pre-fix, a runner that RETURNED a failed mapping (never raised)
+        # left ``error_code`` unset, so the real reason on the summary was
+        # dropped and the parent model saw only ``live_child_runner_error`` and
+        # confabulated a "connection error". Mirrors the ``blocked`` branch,
+        # which already prefers ``summary`` over the generic fallback.
+        return "error", str(boundary_error or summary or "live_child_runner_error"), "error"
     reason = str(boundary_error or summary or "child_runner_blocked")
     return "blocked", reason, "blocked"
 

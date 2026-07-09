@@ -224,7 +224,7 @@ def test_refresh_scenario_committed_text_survives_stream_close(monkeypatch) -> N
     LOCAL_TURN_STORE._reset_for_tests()
 
 
-def test_refresh_scenario_errored_turn_delivers_no_message(monkeypatch) -> None:
+def test_refresh_scenario_errored_turn_rehydrates_partial_incomplete(monkeypatch) -> None:
     monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
     LOCAL_TURN_STORE._reset_for_tests()
     sk = "agent:main:app:errch"
@@ -250,7 +250,43 @@ def test_refresh_scenario_errored_turn_delivers_no_message(monkeypatch) -> None:
     )
     assert resp.status_code == 200
 
-    # Errored turn: no committed message is offered on refresh.
+    # Errored turn WITH visible text (A1): the partial answer is rehydrated on
+    # refresh, flagged incomplete, so a truncated answer does not vanish.
+    msg_resp = client.get(f"/v1/chat/channel-messages?sessionId={sk}", headers=_auth())
+    assert msg_resp.status_code == 200
+    msgs = msg_resp.json()["messages"]
+    assert len(msgs) == 1
+    assert msgs[0]["content"] == "partial before crash"
+    assert msgs[0]["incomplete"] is True
+    LOCAL_TURN_STORE._reset_for_tests()
+
+
+def test_refresh_scenario_empty_errored_turn_delivers_no_message(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    LOCAL_TURN_STORE._reset_for_tests()
+    sk = "agent:main:app:errch"
+
+    class FakeEngine:
+        async def run_turn_stream(self, runtime, turn_input, *, cancel, gate):
+            yield EngineResult(
+                terminal=Terminal.error,
+                error="boom",
+                session_id=sk,
+                turn_id="t-err",
+            )
+
+    def fake_builder(session_id, sink, model_override=None):
+        return FakeEngine(), None
+
+    client = TestClient(_make_app(engine_builder=fake_builder))
+    resp = client.post(
+        "/v1/chat/stream",
+        headers=_auth(),
+        json={"sessionId": sk, "turnId": "t-err", "messages": [{"role": "user", "content": "x"}]},
+    )
+    assert resp.status_code == 200
+
+    # Genuinely empty errored turn: still no committed message (no phantom bubble).
     msg_resp = client.get(f"/v1/chat/channel-messages?sessionId={sk}", headers=_auth())
     assert msg_resp.status_code == 200
     assert msg_resp.json()["messages"] == []

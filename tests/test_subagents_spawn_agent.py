@@ -412,6 +412,52 @@ def test_spawn_agent_live_gate_on_runner_raises_falls_back(monkeypatch) -> None:
     assert "spawnDepth" in result.output
 
 
+def test_spawn_agent_failed_return_surfaces_real_reason(monkeypatch) -> None:
+    """A runner that RETURNS (never raises) a failed mapping must surface its
+    ACTUAL reason, not the generic ``live_child_runner_error``.
+
+    This is the real fireworks/kimi shape: the governed child turn's collector
+    returns ``status="failed"`` with the reason on ``summary``
+    (``child_llm_collector_status_failed``). Pre-fix the boundary result had
+    ``error_code=None`` (boundary itself succeeded) so the ``error/failed``
+    branch flattened the reason to ``live_child_runner_error`` and the parent
+    model confabulated a "connection error". The reason must reach the parent.
+    """
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+
+    import magi_agent.runtime.child_runner_live as _live_mod
+
+    class _FailingReturnRunner:
+        openmagi_live_provider = True
+
+        def __init__(self, *, tools: list[object] | None = None, **kwargs: object) -> None:
+            pass
+
+        async def run_child(self, request: object) -> Mapping[str, object]:
+            return {
+                "childExecutionId": "child-x",
+                "status": "failed",
+                "summary": "child_llm_collector_status_failed",
+                "evidenceRefs": (),
+                "artifactRefs": (),
+                "auditEventRefs": (),
+            }
+
+    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _FailingReturnRunner)
+
+    from magi_agent.plugins.native.subagents import spawn_agent
+
+    result = asyncio.run(spawn_agent({"prompt": "do it"}, _context()))
+
+    assert result.status == "error"
+    assert result.error_code == "child_llm_collector_status_failed"
+    assert result.error_code != "live_child_runner_error"
+    assert result.output is not None
+    assert result.output["status"] == "error"
+    assert result.output["childFailureReason"] == "child_llm_collector_status_failed"
+
+
 # ---------------------------------------------------------------------------
 # T4: toolset gate — runner gets the gate-resolved profile, no caller escalation
 # ---------------------------------------------------------------------------
