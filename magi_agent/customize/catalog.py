@@ -225,7 +225,10 @@ def build_catalog(runtime: Any) -> dict[str, Any]:
         # Unified Policies surface (PR-1): the full list of policies (user +
         # first-party builtin) with membership, origin, review-verdict summary,
         # binding presence, and derived on/off/mixed enabled state. The web
-        # Policies tab reads this so it needs no second fetch.
+        # Policies tab reads this so it needs no second fetch. The floored
+        # ``source_citation`` policy additionally carries a ``gateMode`` descriptor
+        # (repair/audit/off) so its always-on floor card can render the 3-way
+        # opt-DOWN selector; the boolean disable stays floored.
         "policies": _policy_entries(),
     }
 
@@ -263,7 +266,9 @@ def _policy_entries() -> list[dict[str, Any]]:
     always-on regardless of ``source``.
     """
     from magi_agent.customize.builtin_policy_overrides import (  # noqa: PLC0415
+        CITATION_GATE_MODE_VALUES,
         builtin_policy_toggle_catalog,
+        citation_gate_mode_effective,
     )
     from magi_agent.customize.control_plane_overrides import (  # noqa: PLC0415
         CONTROL_PLANE_BEHAVIORS,
@@ -319,20 +324,31 @@ def _policy_entries() -> list[dict[str, Any]]:
                 enabled_state = "off"
             else:
                 enabled_state = "mixed"
-        entries.append(
-            {
-                "id": policy.policy_id,
-                "displayName": policy.display_name,
-                "intent": policy.intent,
-                "ruleIds": list(policy.rule_ids),
-                "origin": policy.origin,
-                "userDisableable": policy.user_disableable,
-                "reviewVerdict": review_verdict,
-                "hasBinding": policy.binding is not None,
-                "enabledState": enabled_state,
-                "source": source,
+        entry: dict[str, Any] = {
+            "id": policy.policy_id,
+            "displayName": policy.display_name,
+            "intent": policy.intent,
+            "ruleIds": list(policy.rule_ids),
+            "origin": policy.origin,
+            "userDisableable": policy.user_disableable,
+            "reviewVerdict": review_verdict,
+            "hasBinding": policy.binding is not None,
+            "enabledState": enabled_state,
+            "source": source,
+        }
+        # The floored ``source_citation`` policy renders an always-on card. It
+        # cannot be turned off, but its enforcement STRICTNESS can be stepped
+        # down through a 3-way gate MODE (repair -> audit -> off). Attach that
+        # descriptor here so the floor card can render the selector WITH the row
+        # it governs, rather than as a detached sibling catalog array. Capture,
+        # inline citations, and the Sources panel stay on in all three modes
+        # (this never touches ``MAGI_SOURCE_CITATION_ENABLED``).
+        if policy.policy_id == "source_citation":
+            entry["gateMode"] = {
+                "value": citation_gate_mode_effective(),
+                "options": list(CITATION_GATE_MODE_VALUES),
             }
-        )
+        entries.append(entry)
 
     # Behavior→policy adapter (PR-3 / design D4): the 4 in-context control-plane
     # behaviors become first-party 1-rule ``action=nudge`` policy cards so the

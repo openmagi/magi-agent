@@ -13,7 +13,7 @@ projects the persisted ``customize.json`` ``builtin_policies`` section onto the
 environment **as an explicit overwrite** (not ``setdefault``). Wired at startup
 right after ``apply_control_plane_overrides_to_env`` AND re-projected by the
 PATCH endpoint, an explicit user toggle wins over the profile seed / a prior
-shell export, and — because the projection is an overwrite — a disabled policy
+shell export, and (because the projection is an overwrite) a disabled policy
 can be cleanly re-enabled without a restart (which a ``setdefault`` applier could
 not do: once ``…=0`` is set, ``setdefault`` can never flip it back to ``1``).
 
@@ -21,12 +21,27 @@ Tri-state, like ``control_plane``: a policy id absent from the section leaves it
 env flag untouched (OFF/empty is byte-identical to before this module existed).
 Only an explicit ``True`` / ``False`` projects.
 
-Security / floors: this catalog is deliberately limited to *non-blocking*
-first-party policies. ``source_citation`` — whose gate can BLOCK in ``repair``
-mode — is intentionally NOT listed, so a user cannot walk back that enforcement
-through this seam (mirroring ``control_plane_overrides``' refusal to expose hard
-safety flags). Adding a new opt-out is a one-line catalog entry; the projection
-NEVER touches a flag whose id is not in the curated catalog.
+Security / floors: this BOOLEAN opt-out catalog is deliberately limited to
+*non-blocking* first-party policies. ``source_citation`` (whose gate can BLOCK
+in ``repair`` mode) is intentionally NOT listed, so a user cannot turn that
+enforcement fully OFF through this seam (mirroring ``control_plane_overrides``'
+refusal to expose hard safety flags). Adding a new boolean opt-out is a one-line
+catalog entry; the projection NEVER touches a flag whose id is not in the curated
+catalog.
+
+A gate-mode opt-DOWN seam sits alongside the boolean catalog and is the opt-DOWN
+half of the story for ``source_citation``:
+
+* GATE-MODE OPT-DOWN (``source_citation`` only, via
+  ``apply_citation_gate_mode_override_to_env``): boolean-disable of the citation
+  policy stays floored, but a 3-way MODE step-down (``repair`` -> ``audit`` ->
+  ``off``) is an acceptable opt-DOWN lever, because capture, inline citations,
+  and the Sources panel (``MAGI_SOURCE_CITATION_ENABLED``) stay ON in all three
+  modes. The persisted override projects onto ``MAGI_SOURCE_CITATION_GATE_MODE``
+  using the same overwrite-both-ways discipline as the boolean catalog. The
+  floored policy itself is disclosed to the Customize surface by the unified
+  ``policies`` catalog array (``catalog._policy_entries``); this module only owns
+  the gate-mode step-down attached to that disclosure, not a separate floor list.
 """
 
 from __future__ import annotations
@@ -40,6 +55,9 @@ __all__ = [
     "BUILTIN_POLICY_TOGGLES",
     "builtin_policy_toggle_catalog",
     "apply_builtin_policy_overrides_to_env",
+    "CITATION_GATE_MODE_VALUES",
+    "citation_gate_mode_effective",
+    "apply_citation_gate_mode_override_to_env",
 ]
 
 
@@ -73,7 +91,10 @@ def _verify_effective(env: Mapping[str, str]) -> bool:
 # to the single master ``MAGI_*_ENABLED`` flag its runtime gate reads.
 #
 # ``source_citation`` is deliberately ABSENT: its gate can BLOCK (repair mode),
-# so it is a floor, not a user toggle. Flip it to disableable later by adding a
+# so it is a floor, not a boolean user toggle. It is disclosed as an always-on
+# card by the unified ``policies`` catalog array, and its opt-DOWN lever is the
+# 3-way gate MODE selector (``apply_citation_gate_mode_override_to_env``), not a
+# boolean off switch. Flip it to fully disableable later by adding a
 # BuiltinPolicyToggle entry here (and setting its Policy.user_disableable True).
 BUILTIN_POLICY_TOGGLES: tuple[BuiltinPolicyToggle, ...] = (
     BuiltinPolicyToggle(
@@ -143,7 +164,7 @@ def apply_builtin_policy_overrides_to_env(
     For every catalog policy whose id maps to an explicit ``bool`` in the
     section, set its master env flag to ``"1"`` / ``"0"`` (overwrite, so the user
     toggle beats the profile seed and re-enable works cleanly). Absent ids,
-    non-bool values, and — critically — ids that are NOT in the curated catalog
+    non-bool values, and (critically) ids that are NOT in the curated catalog
     (a floor policy id, a flag-shaped id, a hand-edited typo) are ignored, so
     this seam can only ever move a flag it explicitly owns. Never raises: a
     malformed overrides document degrades to a no-op.
@@ -163,5 +184,68 @@ def apply_builtin_policy_overrides_to_env(
                 # own -- in particular never a floor policy's flag.
                 continue
             env[toggle.env_var] = "1" if value else "0"
+    except Exception:  # noqa: BLE001 - fail-soft; a bad file must not break startup
+        return
+
+
+# --------------------------------------------------------------------------- #
+# source_citation gate-mode opt-down (3-way step, NOT a boolean off switch)      #
+# --------------------------------------------------------------------------- #
+
+#: The three source_citation gate modes, most to least enforcing. ``repair`` is
+#: the fleet default (see ``config.flags.MAGI_SOURCE_CITATION_GATE_MODE``);
+#: ``audit`` and ``off`` are the opt-DOWN steps.
+CITATION_GATE_MODE_VALUES: tuple[str, ...] = ("repair", "audit", "off")
+
+_CITATION_GATE_MODE_ENV = "MAGI_SOURCE_CITATION_GATE_MODE"
+
+
+def citation_gate_mode_effective(env: Mapping[str, str] | None = None) -> str:
+    """Current source_citation gate mode (``repair`` / ``audit`` / ``off``).
+
+    Reads through the same parser the driver uses, so an unset / unparseable
+    flag reports the fleet default (``repair``).
+    """
+
+    from magi_agent.config.env import (  # noqa: PLC0415
+        parse_source_citation_gate_mode,
+    )
+
+    source = env if env is not None else os.environ
+    return parse_source_citation_gate_mode(source)
+
+
+def _coerce_gate_mode_section(
+    overrides: Mapping[str, object] | None,
+) -> str | None:
+    """Extract a valid persisted gate-mode string, or ``None`` when absent."""
+
+    if not isinstance(overrides, Mapping):
+        return None
+    value = overrides.get("citation_gate_mode")
+    if isinstance(value, str) and value in CITATION_GATE_MODE_VALUES:
+        return value
+    return None
+
+
+def apply_citation_gate_mode_override_to_env(
+    env: MutableMapping[str, str],
+    overrides: Mapping[str, object] | None,
+) -> None:
+    """Project ``overrides['citation_gate_mode']`` onto the gate-mode env flag.
+
+    When the section holds one of ``repair`` / ``audit`` / ``off``, overwrite
+    ``MAGI_SOURCE_CITATION_GATE_MODE`` with it (overwrite-both-ways, so the user
+    choice beats the profile seed and can be stepped back up cleanly). Absent /
+    invalid values are ignored, so an unset override is byte-identical to today
+    (default ``repair``). NEVER touches ``MAGI_SOURCE_CITATION_ENABLED``: capture,
+    inline citations, and the Sources panel stay on in every mode. Never raises.
+    """
+
+    try:
+        mode = _coerce_gate_mode_section(overrides)
+        if mode is None:
+            return
+        env[_CITATION_GATE_MODE_ENV] = mode
     except Exception:  # noqa: BLE001 - fail-soft; a bad file must not break startup
         return

@@ -119,6 +119,18 @@ export interface BuiltinPolicyToggleItem {
 }
 
 /**
+ * The 3-way source-citation gate mode opt-DOWN descriptor attached to the
+ * source_citation floor card. `repair` is the fleet default (active
+ * enforcement), `audit` records but never alters, `off` skips the gate. Capture,
+ * inline citations, and the Sources panel stay on in all three modes; this is
+ * the opt-DOWN lever, not a boolean off switch.
+ */
+export interface CitationGateModeDescriptor {
+  value: string;
+  options: string[];
+}
+
+/**
  * A unified Policy summary from the `GET /v1/app/customize` catalog (PR-1 U3).
  *
  * A *policy* is the user's unit of intent — a named 1..N-rule bundle. The
@@ -167,6 +179,13 @@ export interface PolicyCatalogEntry {
    * `"nudge"` lets the card render a NUDGE chip without member rules.
    */
   actionHint?: string;
+  /**
+   * Present only on the floored `source_citation` policy: the 3-way gate-mode
+   * opt-DOWN selector (repair/audit/off) its always-on floor card renders. The
+   * boolean disable stays floored; this steps enforcement STRICTNESS down only.
+   * Absent on every other policy, so consumers must treat it as optional.
+   */
+  gateMode?: CitationGateModeDescriptor;
 }
 
 export interface CustomizeCatalog {
@@ -209,7 +228,9 @@ export interface CustomizeCatalog {
    * Unified Policies surface (PR-1 U3): the full list of policies (user +
    * first-party builtin) with membership, origin, review verdict, binding
    * flag, and derived `enabledState`. The Policies card list renders from
-   * this; drill-down member rows come from the flat rule-row list.
+   * this; drill-down member rows come from the flat rule-row list. The floored
+   * `source_citation` entry additionally carries a `gateMode` descriptor so its
+   * always-on card can render the 3-way opt-DOWN selector.
    *
    * Optional at the type level so a pre-U3 backend (no `policies` key) still
    * type-checks; the UI treats an absent value as an empty list.
@@ -263,6 +284,14 @@ export interface CustomizeOverrides {
    * policy; only ids in the curated catalog project onto their master flag.
    */
   builtin_policies: Record<string, boolean>;
+  /**
+   * source_citation gate-mode opt-DOWN (`repair` | `audit` | `off`, or `null`
+   * when unset -> the fleet default `repair`). Distinct from `builtin_policies`:
+   * the citation policy's BOOLEAN disable stays floored; this MODE step-down is
+   * the acceptable opt-DOWN lever (capture / inline citations / Sources stay on
+   * in all three modes).
+   */
+  citation_gate_mode?: string | null;
 }
 
 /**
@@ -380,6 +409,31 @@ export async function patchBuiltinPolicyOverride(
     },
   );
   if (!res.ok) throw new Error(`Failed to update built-in policy (${res.status})`);
+  const data = (await res.json()) as { overrides: CustomizeOverrides };
+  return data.overrides;
+}
+
+/**
+ * Persists the source_citation gate-mode opt-DOWN via
+ * `PATCH /v1/app/customize/citation-gate-mode`.
+ *
+ * `mode` must be one of `repair` | `audit` | `off`. This is a MODE step-down,
+ * NOT a boolean off switch: it projects onto `MAGI_SOURCE_CITATION_GATE_MODE`
+ * and never touches `MAGI_SOURCE_CITATION_ENABLED`, so capture, inline
+ * citations, and the Sources panel stay on in every mode. The server 400s an
+ * unknown mode. Returns the updated overrides; throws on non-2xx so the caller
+ * can surface the error and revert.
+ */
+export async function patchCitationGateMode(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  mode: string,
+): Promise<CustomizeOverrides> {
+  const res = await fetch(`/v1/app/customize/citation-gate-mode`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode }),
+  });
+  if (!res.ok) throw new Error(`Failed to update citation gate mode (${res.status})`);
   const data = (await res.json()) as { overrides: CustomizeOverrides };
   return data.overrides;
 }

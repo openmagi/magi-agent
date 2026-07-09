@@ -222,3 +222,105 @@ def test_user_disableable_surfaces_in_policy_payload() -> None:
 
     payload = get_policy("source_citation").to_payload()
     assert payload["userDisableable"] is False
+
+
+# --------------------------------------------------------------------------- #
+# source_citation gate-mode opt-down (repair/audit/off), NOT a boolean switch    #
+# --------------------------------------------------------------------------- #
+GATE_MODE_ENV = "MAGI_SOURCE_CITATION_GATE_MODE"
+
+
+def test_gate_mode_values_are_repair_audit_off() -> None:
+    from magi_agent.customize.builtin_policy_overrides import (
+        CITATION_GATE_MODE_VALUES,
+    )
+
+    assert CITATION_GATE_MODE_VALUES == ("repair", "audit", "off")
+
+
+def test_gate_mode_default_is_repair_when_unset() -> None:
+    from magi_agent.customize.builtin_policy_overrides import (
+        citation_gate_mode_effective,
+    )
+
+    assert citation_gate_mode_effective({}) == "repair"
+
+
+def test_gate_mode_override_projects_each_mode() -> None:
+    from magi_agent.customize.builtin_policy_overrides import (
+        apply_citation_gate_mode_override_to_env,
+    )
+
+    for mode in ("repair", "audit", "off"):
+        env: dict[str, str] = {}
+        apply_citation_gate_mode_override_to_env(
+            env, {"citation_gate_mode": mode}
+        )
+        assert env[GATE_MODE_ENV] == mode
+
+
+def test_gate_mode_override_overwrites_both_ways() -> None:
+    from magi_agent.customize.builtin_policy_overrides import (
+        apply_citation_gate_mode_override_to_env,
+    )
+
+    env = {GATE_MODE_ENV: "off"}
+    apply_citation_gate_mode_override_to_env(
+        env, {"citation_gate_mode": "repair"}
+    )
+    assert env[GATE_MODE_ENV] == "repair"
+
+
+def test_gate_mode_override_absent_leaves_env_untouched() -> None:
+    from magi_agent.customize.builtin_policy_overrides import (
+        apply_citation_gate_mode_override_to_env,
+    )
+
+    env = {GATE_MODE_ENV: "audit"}
+    apply_citation_gate_mode_override_to_env(env, {})
+    apply_citation_gate_mode_override_to_env(env, None)
+    assert env[GATE_MODE_ENV] == "audit"
+
+
+def test_gate_mode_override_ignores_bad_value() -> None:
+    from magi_agent.customize.builtin_policy_overrides import (
+        apply_citation_gate_mode_override_to_env,
+    )
+
+    env: dict[str, str] = {}
+    apply_citation_gate_mode_override_to_env(
+        env, {"citation_gate_mode": "nonsense"}
+    )
+    assert GATE_MODE_ENV not in env
+
+
+def test_gate_mode_override_never_touches_source_citation_enabled() -> None:
+    from magi_agent.customize.builtin_policy_overrides import (
+        apply_citation_gate_mode_override_to_env,
+    )
+
+    env = {CITATION_ENV: "1"}
+    for mode in ("repair", "audit", "off"):
+        apply_citation_gate_mode_override_to_env(
+            env, {"citation_gate_mode": mode}
+        )
+        assert env[CITATION_ENV] == "1"
+
+
+def test_set_citation_gate_mode_override_roundtrips(tmp_path: Path) -> None:
+    from magi_agent.customize.store import set_citation_gate_mode_override
+
+    p = tmp_path / "customize.json"
+    out = set_citation_gate_mode_override("audit", path=p)
+    assert out["citation_gate_mode"] == "audit"
+    assert load_overrides(p)["citation_gate_mode"] == "audit"
+
+
+def test_default_overrides_gate_mode_is_none() -> None:
+    assert DEFAULT_OVERRIDES["citation_gate_mode"] is None
+
+
+def test_normalize_drops_bad_gate_mode(tmp_path: Path) -> None:
+    p = tmp_path / "customize.json"
+    p.write_text('{"citation_gate_mode": "loud"}', encoding="utf-8")
+    assert load_overrides(p)["citation_gate_mode"] is None

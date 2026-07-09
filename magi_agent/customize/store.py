@@ -73,6 +73,14 @@ DEFAULT_OVERRIDES: dict[str, Any] = {
     # floor policy (``source_citation``) is never in the catalog, so it cannot
     # be disabled through this seam. Empty by default so OFF is byte-identical.
     "builtin_policies": {},
+    # source_citation gate-mode opt-DOWN (``repair`` / ``audit`` / ``off``). The
+    # citation policy's BOOLEAN disable stays floored (absent from
+    # ``builtin_policies``); this MODE step-down is the acceptable opt-DOWN lever
+    # because capture / inline citations / Sources stay on in all three modes. An
+    # explicit value projects onto ``MAGI_SOURCE_CITATION_GATE_MODE`` as an
+    # overwrite; ``None`` (the default) leaves the flag untouched so it resolves
+    # to the fleet default (``repair``) -- byte-identical to before this seam.
+    "citation_gate_mode": None,
 }
 
 _USER_RULES_MAX = 20_000
@@ -168,6 +176,12 @@ def _normalize(data: dict[str, Any]) -> dict[str, Any]:
             for key, value in builtin_policies_raw.items()
             if isinstance(key, str) and isinstance(value, bool)
         }
+    # source_citation gate-mode opt-down: keep only a valid enum string; anything
+    # else (absent, wrong type, out-of-set) falls back to None so the projection
+    # leaves the env flag at its fleet default (``repair``).
+    gate_mode_raw = data.get("citation_gate_mode")
+    if isinstance(gate_mode_raw, str) and gate_mode_raw in ("repair", "audit", "off"):
+        merged["citation_gate_mode"] = gate_mode_raw
     return merged
 
 
@@ -263,6 +277,24 @@ def set_builtin_policy_override(
     target = path or customize_path()
     overrides = load_overrides(target)
     overrides.setdefault("builtin_policies", {})[policy_id] = bool(enabled)
+    save_overrides(overrides, target)
+    return overrides
+
+
+def set_citation_gate_mode_override(
+    mode: str, path: Path | None = None
+) -> dict[str, Any]:
+    """Persist the source_citation gate-mode opt-down, save, return overrides.
+
+    ``mode`` must be one of ``repair`` / ``audit`` / ``off``. Validation that the
+    value is a real mode is the API layer's job; the store records what it is
+    given (the projection step ignores anything outside the enum anyway). This is
+    a MODE step-down, NOT a boolean off switch: it never touches
+    ``MAGI_SOURCE_CITATION_ENABLED``.
+    """
+    target = path or customize_path()
+    overrides = load_overrides(target)
+    overrides["citation_gate_mode"] = str(mode)
     save_overrides(overrides, target)
     return overrides
 
