@@ -969,8 +969,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               }`}
               title={t(
                 language,
-                "Run this message as a goal mission — the agent keeps acting until the task is complete (Phase 1 opt-in)",
-                "이 메시지를 목표 미션으로 실행 — 작업이 끝날 때까지 에이전트가 계속 진행합니다 (Phase 1 옵트인)",
+                "Deep run for long tasks: raises the budget (20 to 40 turns, 1 to 2 hours) so the agent pushes longer. Finishing the task is the default behavior; this button increases the intensity for long work.",
+                "긴 작업용 집중 모드: 예산을 늘려(20-40턴, 1-2시간) 더 오래 밀어붙입니다. 작업 완수는 기본 동작이며, 이 버튼은 긴 작업의 강도를 높입니다.",
               )}
             >
               <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -978,7 +978,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v3m0 12v3m9-9h-3M6 12H3" />
               </svg>
               <span className="hidden whitespace-nowrap sm:inline">
-                {t(language, "Goal mission", "목표 미션")}
+                {t(language, "Deep run", "집중 모드")}
               </span>
             </button>
 

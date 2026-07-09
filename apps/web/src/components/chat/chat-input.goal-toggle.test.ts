@@ -25,9 +25,9 @@ describe("ChatInput goal-mode toggle (Phase 1)", () => {
     expect(source).toMatch(/data-chat-goal-toggle="true"/);
   });
 
-  it("labels the toggle as a Goal mission in English and 목표 미션 in Korean", () => {
-    expect(source).toContain("Goal mission");
-    expect(source).toContain("목표 미션");
+  it("labels the toggle as Deep run in English and 집중 모드 in Korean", () => {
+    expect(source).toContain("Deep run");
+    expect(source).toContain("집중 모드");
   });
 
   it("declares a goalMode state hook initialized to false (Phase 1 opt-in)", () => {
