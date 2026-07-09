@@ -176,6 +176,25 @@ class _LiveLocalCronTurnRunner:
         )
 
 
+def attach_local_scheduler() -> None:
+    """Set MAGI_SCHEDULER_ATTACHED in the process environment.
+
+    This must be called when the local gateway daemon wires up a real scheduler
+    store so the native cron tools (CronCreate/CronUpdate/CronDelete) route past
+    their honest-block to the live seam.  Idempotent: safe to call multiple times.
+
+    Gate: callers should only call this when MAGI_SCHEDULER_EXECUTOR_ENABLED is
+    truthy; calling unconditionally would expose the live tools even when the
+    scheduler loop is not running (the gate lives here for documentation, not
+    enforcement -- tests verify the conditional call from build_default_watchers).
+    """
+    import os  # noqa: PLC0415
+
+    from magi_agent.plugins.native.scheduled_work import SCHEDULER_ATTACHED_ENV  # noqa: PLC0415
+
+    os.environ[SCHEDULER_ATTACHED_ENV] = "1"
+
+
 def _build_local_cron_turn_runner(*, stream_factory: Any = None) -> Any:
     """Select the cron turn runner based on ``MAGI_BACKGROUND_LIVE_RUNNER_ENABLED``.
 
@@ -589,6 +608,13 @@ def build_default_watchers() -> tuple[GatewayWatcher, ...]:
     The channel-watcher builders are imported lazily so importing this module
     never pulls a network client (the concrete providers live behind that seam).
     """
+    # U3: when the scheduler executor is wired (executor enabled), expose the
+    # native cron tools by setting MAGI_SCHEDULER_ATTACHED.  This must happen
+    # before any agent turn so that CronCreate/CronUpdate/CronDelete are
+    # unblocked for turns that the scheduler loop may itself spawn.
+    if _scheduler_executor_enabled():
+        attach_local_scheduler()
+
     watchers: list[GatewayWatcher] = [
         build_scheduler_cron_watcher(
             driver=build_local_scheduler_cron_driver(),
