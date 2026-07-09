@@ -20,6 +20,38 @@ export type AuditSeverity = "pass" | "deny" | "review" | "info";
 
 export type AuditCredibility = "credible" | "unverified" | "contradicted";
 
+/**
+ * Verify-before-replying process data, present only on rows with
+ * `sourceType="verify"` (kind = "turn" | "finding" | "pass").
+ * Absent for every non-verify verdict row.
+ */
+export interface AuditVerdictVerify {
+  kind: "turn" | "finding" | "pass";
+  // kind === "turn"
+  verdict?: "verified_clean" | "revised" | "shipped_acknowledged" | "nudge_ignored";
+  passes?: number;
+  loopBackToolCalls?: number;
+  shipMarkerUsed?: boolean;
+  highTotal?: number;
+  highResolved?: number;
+  highAcknowledged?: number;
+  highIgnored?: number;
+  advisoryTotal?: number;
+  advisoryIgnored?: number;
+  corpusRecordCount?: number;
+  findingsOmitted?: number;
+  context?: string;
+  // kind === "finding"
+  findingId?: string;
+  confidence?: "high" | "advisory";
+  claimClass?: string;
+  resolution?: "resolved" | "acknowledged_shipped" | "ignored";
+  claimText?: string;
+  expected?: string;
+  observed?: string;
+  suggestedAction?: string;
+}
+
 export interface AuditVerdict {
   id: string | null;
   kind: string;
@@ -35,6 +67,11 @@ export interface AuditVerdict {
   affordances: string[];
   summary: string;
   evidenceRefs: string[];
+  /**
+   * Verify-before-replying process data. Present only on verify rows;
+   * undefined for every non-verify verdict row.
+   */
+  verify?: AuditVerdictVerify;
 }
 
 export interface AuditRunGroup {
@@ -96,9 +133,140 @@ const AUDIT_CREDIBILITIES: ReadonlySet<string> = new Set([
   "contradicted",
 ]);
 
+const VERIFY_KINDS: ReadonlySet<string> = new Set(["turn", "finding", "pass"]);
+
+const VERIFY_VERDICTS: ReadonlySet<string> = new Set([
+  "verified_clean",
+  "revised",
+  "shipped_acknowledged",
+  "nudge_ignored",
+]);
+
+const VERIFY_CONFIDENCES: ReadonlySet<string> = new Set(["high", "advisory"]);
+
+const VERIFY_RESOLUTIONS: ReadonlySet<string> = new Set([
+  "resolved",
+  "acknowledged_shipped",
+  "ignored",
+]);
+
+function asFiniteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function asBoolean(value: unknown): boolean | undefined {
+  return value === true || value === false ? value : undefined;
+}
+
+function asStringEnum<T extends string>(
+  value: unknown,
+  allowed: ReadonlySet<string>,
+): T | undefined {
+  return typeof value === "string" && allowed.has(value)
+    ? (value as T)
+    : undefined;
+}
+
+function asOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * Defensive normalizer for the verify process blob.
+ * Returns undefined unless kind is exactly "turn", "finding", or "pass".
+ * Validates enum fields against allowlists; invalid values are dropped.
+ */
+function normalizeVerify(value: unknown): AuditVerdictVerify | undefined {
+  if (!isRecord(value)) return undefined;
+  const kind = asStringEnum<"turn" | "finding" | "pass">(
+    value.kind,
+    VERIFY_KINDS,
+  );
+  if (!kind) return undefined;
+
+  const result: AuditVerdictVerify = { kind };
+
+  if (kind === "turn") {
+    const verdict = asStringEnum<
+      "verified_clean" | "revised" | "shipped_acknowledged" | "nudge_ignored"
+    >(value.verdict, VERIFY_VERDICTS);
+    if (verdict !== undefined) result.verdict = verdict;
+
+    const passes = asFiniteNumber(value.passes);
+    if (passes !== undefined) result.passes = passes;
+
+    const loopBackToolCalls = asFiniteNumber(value.loopBackToolCalls);
+    if (loopBackToolCalls !== undefined) result.loopBackToolCalls = loopBackToolCalls;
+
+    const shipMarkerUsed = asBoolean(value.shipMarkerUsed);
+    if (shipMarkerUsed !== undefined) result.shipMarkerUsed = shipMarkerUsed;
+
+    const highTotal = asFiniteNumber(value.highTotal);
+    if (highTotal !== undefined) result.highTotal = highTotal;
+
+    const highResolved = asFiniteNumber(value.highResolved);
+    if (highResolved !== undefined) result.highResolved = highResolved;
+
+    const highAcknowledged = asFiniteNumber(value.highAcknowledged);
+    if (highAcknowledged !== undefined) result.highAcknowledged = highAcknowledged;
+
+    const highIgnored = asFiniteNumber(value.highIgnored);
+    if (highIgnored !== undefined) result.highIgnored = highIgnored;
+
+    const advisoryTotal = asFiniteNumber(value.advisoryTotal);
+    if (advisoryTotal !== undefined) result.advisoryTotal = advisoryTotal;
+
+    const advisoryIgnored = asFiniteNumber(value.advisoryIgnored);
+    if (advisoryIgnored !== undefined) result.advisoryIgnored = advisoryIgnored;
+
+    const corpusRecordCount = asFiniteNumber(value.corpusRecordCount);
+    if (corpusRecordCount !== undefined) result.corpusRecordCount = corpusRecordCount;
+
+    const findingsOmitted = asFiniteNumber(value.findingsOmitted);
+    if (findingsOmitted !== undefined) result.findingsOmitted = findingsOmitted;
+
+    const context = asOptionalString(value.context);
+    if (context !== undefined) result.context = context;
+  }
+
+  if (kind === "finding") {
+    const findingId = asOptionalString(value.findingId);
+    if (findingId !== undefined) result.findingId = findingId;
+
+    const confidence = asStringEnum<"high" | "advisory">(
+      value.confidence,
+      VERIFY_CONFIDENCES,
+    );
+    if (confidence !== undefined) result.confidence = confidence;
+
+    const claimClass = asOptionalString(value.claimClass);
+    if (claimClass !== undefined) result.claimClass = claimClass;
+
+    const resolution = asStringEnum<
+      "resolved" | "acknowledged_shipped" | "ignored"
+    >(value.resolution, VERIFY_RESOLUTIONS);
+    if (resolution !== undefined) result.resolution = resolution;
+
+    const claimText = asOptionalString(value.claimText);
+    if (claimText !== undefined) result.claimText = claimText;
+
+    const expected = asOptionalString(value.expected);
+    if (expected !== undefined) result.expected = expected;
+
+    const observed = asOptionalString(value.observed);
+    if (observed !== undefined) result.observed = observed;
+
+    const suggestedAction = asOptionalString(value.suggestedAction);
+    if (suggestedAction !== undefined) result.suggestedAction = suggestedAction;
+  }
+
+  return result;
+}
+
 function normalizeVerdict(value: unknown): AuditVerdict {
   const r = isRecord(value) ? value : {};
   const severity = asString(r.severity);
+  const verify = normalizeVerify(r.verify);
   return {
     id: typeof r.id === "string" ? r.id : null,
     kind: asString(r.kind),
@@ -112,6 +280,7 @@ function normalizeVerdict(value: unknown): AuditVerdict {
     affordances: asStringArray(r.affordances),
     summary: asString(r.summary),
     evidenceRefs: asStringArray(r.evidenceRefs),
+    ...(verify !== undefined ? { verify } : {}),
   };
 }
 
