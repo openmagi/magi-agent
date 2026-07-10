@@ -20,3 +20,5 @@ apps/web/.next/
 .openmagi/
 # Local runtime state (durable evidence ledger, session logs)
 .magi/
+# Authoring QA harness live-run artefacts (python -m benchmarks.authoring.run)
+runs/
