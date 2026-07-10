@@ -1,0 +1,36 @@
+schema_version: 1
+id: grouped_hybrid_two_rules_en_001
+flow: single_rule
+archetype: grouped_hybrid
+language: en
+turn_budget: 4
+turns: []
+save: grouped
+grouped_save:
+  group_id: grp_pii_001
+  display_name: "PII guardrails"
+  intent: "redact emails from tool output and block replies that leak them"
+  rules:
+    - scope: always
+      enabled: true
+      firesAt: after_tool_use
+      action: audit
+      what:
+        kind: output_rewrite
+        payload:
+          mode: redact
+          pattern: "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+"
+          replacement: "[redacted-email]"
+    - scope: always
+      enabled: true
+      firesAt: pre_final
+      action: block
+      what:
+        kind: llm_criterion
+        payload:
+          criterion: "Does the reply expose a personal email address?"
+oracle:
+  expect_ready: false
+  persisted:
+    group_single_policy: true
+    no_double_representation: true

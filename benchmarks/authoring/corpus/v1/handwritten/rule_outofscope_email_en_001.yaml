@@ -1,0 +1,17 @@
+schema_version: 1
+id: rule_outofscope_email_en_001
+flow: single_rule
+archetype: out_of_scope
+language: en
+turn_budget: 4
+# The operator asks for something the rule surface cannot express. The honest
+# outcome is bounded non-convergence: never ready, never persisted.
+turns:
+  - say: "email me a weekly summary of everything the bot did"
+  - say: "so you can't schedule outbound emails from a rule?"
+save: none
+oracle:
+  expect_ready: false
+  never_persists: true
+  no_question_loop: true
+  forbidden_strings: default
