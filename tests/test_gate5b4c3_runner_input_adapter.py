@@ -282,6 +282,43 @@ def test_runner_input_adapter_full_toolhost_instructs_direct_answers_before_tool
     assert "SpawnAgent" in instruction
     assert "delegated subtask" in normalized_instruction
     assert "selected full toolhost" in normalized_instruction
+    # B1: widened tool-permission enumeration anchor phrases.
+    assert "read the artifact first, then answer" in instruction
+    assert "Installed skills live under the workspace" in instruction
+    # B1: honest-constraints clause anchor phrase.
+    assert "do not attribute the choice to a nonexistent restriction" in instruction
+
+
+def test_runner_input_adapter_full_toolhost_b1_anchors_absent_from_other_branches() -> None:
+    """B1 prompt additions must appear in selected_full_toolhost and not in other branches."""
+    shadow_readonly_request = _request(
+        recipeProfile={
+            **_payload()["recipeProfile"],  # type: ignore[arg-type]
+            "toolsPolicy": "shadow_readonly",
+        },
+        policy={
+            **_payload()["policy"],  # type: ignore[arg-type]
+            "toolsDisabled": False,
+            "toolHostDispatchAllowed": True,
+        },
+    )
+    disabled_request = _request()
+
+    readonly_result = build_gate5b4c3_runner_input(shadow_readonly_request)
+    disabled_result = build_gate5b4c3_runner_input(disabled_request)
+
+    assert readonly_result.runner_input is not None
+    assert disabled_result.runner_input is not None
+    for branch_instruction in (
+        readonly_result.runner_input.system_instruction,
+        disabled_result.runner_input.system_instruction,
+    ):
+        assert "read the artifact first, then answer" not in branch_instruction
+        assert "Installed skills live under the workspace" not in branch_instruction
+        assert (
+            "do not attribute the choice to a nonexistent restriction"
+            not in branch_instruction
+        )
 
 
 def test_runner_input_adapter_rejects_incoherent_tool_policy_metadata() -> None:
