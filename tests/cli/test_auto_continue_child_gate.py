@@ -108,8 +108,8 @@ async def test_governed_child_build_passes_auto_continue_allowed_false(
         captured.update(kwargs)
         return object()
 
-    async def _fake_collector(_stream: object) -> tuple[str, tuple[str, ...], str]:
-        return "2", ("evidence:calc",), "completed"
+    async def _fake_collector(_stream: object, **_kw: object) -> tuple[str, tuple[str, ...], str, str | None]:
+        return "2", ("evidence:calc",), "completed", None
 
     monkeypatch.setattr(
         "magi_agent.cli.wiring.build_headless_runtime",

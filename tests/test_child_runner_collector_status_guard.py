@@ -111,8 +111,8 @@ async def test_governed_guard_raises_on_failed_status(
     status-aware guard added by this PR MUST raise.
     """
 
-    async def _fake_collector(_stream: object) -> tuple[str, tuple[str, ...], str]:
-        return "x", (), "failed"
+    async def _fake_collector(_stream: object, **_kw: object) -> tuple[str, tuple[str, ...], str, str | None]:
+        return "x", (), "failed", None
 
     monkeypatch.setattr(
         "magi_agent.runtime.child_governed_collector.collect_governed_child_turn",
@@ -141,8 +141,8 @@ async def test_governed_guard_passes_on_completed_status(
 
     The status-aware guard MUST NOT fire (status is the good case)."""
 
-    async def _fake_collector(_stream: object) -> tuple[str, tuple[str, ...], str]:
-        return "x", (), "completed"
+    async def _fake_collector(_stream: object, **_kw: object) -> tuple[str, tuple[str, ...], str, str | None]:
+        return "x", (), "completed", None
 
     monkeypatch.setattr(
         "magi_agent.runtime.child_governed_collector.collect_governed_child_turn",
@@ -170,8 +170,10 @@ async def test_governed_guard_raises_even_with_evidence_when_failed(
 
     eighteen_refs = tuple(f"evidence:ref-{i:02d}" for i in range(18))
 
-    async def _fake_collector(_stream: object) -> tuple[str, tuple[str, ...], str]:
-        return "", eighteen_refs, "failed"
+    async def _fake_collector(
+        _stream: object, **_kw: object
+    ) -> tuple[str, tuple[str, ...], str, str | None]:
+        return "", eighteen_refs, "failed", None
 
     monkeypatch.setattr(
         "magi_agent.runtime.child_governed_collector.collect_governed_child_turn",

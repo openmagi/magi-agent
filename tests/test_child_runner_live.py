@@ -891,3 +891,86 @@ if loaded:
     )
 
     assert completed.returncode == 0, completed.stderr
+
+
+# ---------------------------------------------------------------------------
+# Fix F: missing-tool streak fast-fail (legacy path, end-to-end via run_child)
+# ---------------------------------------------------------------------------
+
+
+class _FakeFunctionResponse:
+    def __init__(self, name: str, response: dict) -> None:
+        self.name = name
+        self.id = f"call-{name}"
+        self.response = response
+
+
+class _FakeToolPart:
+    def __init__(self, function_response: object) -> None:
+        self.text = None
+        self.function_call = None
+        self.function_response = function_response
+
+
+class _MissingToolSpiralRunner:
+    """Emits one text event, then `n` missing-tool function_response events
+    (name-cycling), mimicking a child that hallucinates tools it lacks."""
+
+    openmagi_live_provider = True
+
+    def __init__(self, n: int = 5, *, tools: object = None, **kwargs: object) -> None:
+        self._n = n
+        self.calls = 0
+
+    async def run_async(self, **kwargs: object) -> AsyncGenerator[object, None]:
+        self.calls += 1
+        yield _FakeEvent("partial answer so far")
+        names = ["XLSXRead", "BrowserTask"]
+        codes = ["tool_not_found", "tool_not_exposed"]
+        for i in range(self._n):
+            part = _FakeToolPart(
+                _FakeFunctionResponse(
+                    names[i % 2],
+                    {
+                        "response_type": "MAGI_TOOL_NOT_FOUND_SOFT_FAIL",
+                        "status": "error",
+                        "error_code": codes[i % 2],
+                    },
+                )
+            )
+
+            class _E:
+                content = type("C", (), {"parts": [part]})()
+
+            yield _E()
+
+
+def test_legacy_missing_tool_streak_trips_with_partial(monkeypatch) -> None:
+    """A legacy child spiraling on missing tools trips fast with the typed
+    reason and preserves its best-effort text (composes with #1458)."""
+    runner = _MissingToolSpiralRunner(n=5)
+    child = RealLocalChildRunner(
+        provider_config=_provider_config(),
+        runner=runner,
+        env={**_GOVERNED_OFF_ENV, "MAGI_CHILD_MISSING_TOOL_STREAK_CAP": "4"},
+    )
+    output = asyncio.run(child.run_child(_request()))
+
+    assert output["status"] == "failed"
+    assert output["summary"] == "child_llm_missing_tool_streak_exhausted"
+    # Best-effort partial answer preserved on the separate channel (#1458).
+    assert output.get("partialSummary") == "partial answer so far"
+
+
+def test_legacy_missing_tool_streak_cap_zero_disables(monkeypatch) -> None:
+    """cap=0 disables the guard: the child runs to normal completion."""
+    runner = _MissingToolSpiralRunner(n=5)
+    child = RealLocalChildRunner(
+        provider_config=_provider_config(),
+        runner=runner,
+        env={**_GOVERNED_OFF_ENV, "MAGI_CHILD_MISSING_TOOL_STREAK_CAP": "0"},
+    )
+    output = asyncio.run(child.run_child(_request()))
+    # No trip; the turn completed (text was collected).
+    assert output["status"] == "completed"
+    assert "partial answer so far" in str(output["summary"])

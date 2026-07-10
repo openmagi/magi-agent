@@ -95,10 +95,10 @@ async def test_governed_branch_empty_stream_surfaces_as_failed(
     """
     import magi_agent.runtime.child_runner_live as crl
 
-    async def _fake_governed_collector(_stream: object) -> tuple[str, tuple[str, ...], str]:
+    async def _fake_governed_collector(_stream: object, **_kw: object) -> tuple[str, tuple[str, ...], str, str | None]:
         # (summary, evidence_refs, status) — empty/empty/"completed" is the
         # silent-no-op shape: governed runner said "all good, nothing came back".
-        return "", (), "completed"
+        return "", (), "completed", None
 
     monkeypatch.setattr(
         "magi_agent.runtime.child_governed_collector.collect_governed_child_turn",
@@ -139,10 +139,10 @@ async def test_governed_non_completed_with_text_returns_best_partial(
     """
     import magi_agent.runtime.child_runner_live as crl
 
-    async def _fake_governed_collector(_stream: object) -> tuple[str, tuple[str, ...], str]:
+    async def _fake_governed_collector(_stream: object, **_kw: object) -> tuple[str, tuple[str, ...], str, str | None]:
         # Non-completed terminal (e.g. hit an internal cap) but the child DID
         # produce a real answer before the terminal.
-        return "The answer is 2.", (), "failed"
+        return "The answer is 2.", (), "failed", None
 
     monkeypatch.setattr(
         "magi_agent.runtime.child_governed_collector.collect_governed_child_turn",

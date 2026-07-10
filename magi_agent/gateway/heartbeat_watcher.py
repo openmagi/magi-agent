@@ -148,7 +148,11 @@ async def _default_engine(prompt: str) -> str:
         turn_id=uuid.uuid4().hex,
         memory_mode="normal",
     )
-    summary, _refs, _status = await collect_governed_child_turn(run_governed_turn(ctx))
+    # The missing-tool streak guard is child-runner-only; this caller does not
+    # opt in (cap defaults to 0), so trip_reason is always None here.
+    summary, _refs, _status, _trip = await collect_governed_child_turn(
+        run_governed_turn(ctx)
+    )
     return summary
 
 

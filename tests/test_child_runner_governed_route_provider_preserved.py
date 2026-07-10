@@ -93,11 +93,11 @@ def _install_governed_capture(
         return object()
 
     async def _fake_governed_collector(
-        _stream: object,
-    ) -> tuple[str, tuple[str, ...], str]:
+        _stream: object, **_kw: object
+    ) -> tuple[str, tuple[str, ...], str, str | None]:
         # Non-empty summary so the silent-no-op guard does NOT fire; the route
         # capture is what we are asserting, not the silent-empty containment.
-        return "ok", (), "completed"
+        return "ok", (), "completed", None
 
     monkeypatch.setattr(
         "magi_agent.cli.wiring.build_headless_runtime",

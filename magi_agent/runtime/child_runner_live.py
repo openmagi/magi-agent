@@ -58,6 +58,11 @@ from typing import Any
 # 21:59:24 while SQLite kept getting writes until 22:04:34). The dedicated
 # sink FD is distinct from the uvicorn stdout/stderr handles so a wedged
 # uvicorn FD no longer freezes the diagnostic channel.
+from magi_agent.runtime.child_missing_tool_guard import (
+    MissingToolStreak,
+    classify_missing_tool_response,
+    resolve_missing_tool_streak_cap,
+)
 from magi_agent.runtime.trace_sink import _emit_trace
 
 #: Operator opt-in env for verbose child-runner empty-stream diagnostics.
@@ -1328,8 +1333,12 @@ class RealLocalChildRunner:
 
         # --- Drive the governed turn + collect summary + evidence_refs -------
         cancel = asyncio.Event()
-        summary, evidence_refs, _status = await collect_governed_child_turn(
-            run_governed_turn(ctx, runtime=rt, cancel=cancel)
+        summary, evidence_refs, _status, _trip_reason = await collect_governed_child_turn(
+            run_governed_turn(ctx, runtime=rt, cancel=cancel),
+            # Fix F backstop: trip a missing-tool spiral (child calling tools it
+            # does not have). cap<=0 disables (byte-identical collection).
+            missing_tool_streak_cap=resolve_missing_tool_streak_cap(self._env),
+            cancel=cancel,
         )
         # Debug observability (default-OFF). Kevin's 0.1.77 repro showed
         # status=ok with empty content even though the guard below should
@@ -1369,6 +1378,14 @@ class RealLocalChildRunner:
         # Raising the typed exception here routes through ``run_child``'s
         # existing catch as ``status="failed"`` reason
         # ``child_llm_collector_status_<status>`` (sanitised slug).
+        if _trip_reason:
+            # Fix F: the child spiraled on tools it does not have. Surface the
+            # TYPED reason (not the generic collector_status_failed the cancel
+            # terminal would otherwise map to) plus best-effort text (#1458).
+            raise _ChildLlmTurnError(
+                f"{_DEGRADE_LLM_ERROR_PREFIX}missing_tool_streak_exhausted",
+                partial_text=summary or "",
+            )
         if _status != "completed":
             # Preserve any real answer the child produced before the
             # non-completed terminal so the parent still gets its best work.
@@ -1452,6 +1469,12 @@ class RealLocalChildRunner:
         prompt = _child_prompt(request)
         new_message = types.Content(role="user", parts=[types.Part(text=prompt)])
         texts: list[str] = []
+        # Fix F backstop: trip if the child spirals on tools it does not have
+        # (consecutive tool_not_found / tool_not_exposed responses). cap<=0
+        # disables (byte-identical collection).
+        _missing_tool_streak = MissingToolStreak(
+            resolve_missing_tool_streak_cap(self._env)
+        )
         async for event in runner.run_async(
             user_id=self._child_user_id(request),
             session_id=session_id,
@@ -1490,7 +1513,8 @@ class RealLocalChildRunner:
                             "detail": f"Tool: {fcall_name} | start",
                         }
                     )
-                fresp_name = _safe_tool_phase_name(getattr(part, "function_response", None))
+                function_response = getattr(part, "function_response", None)
+                fresp_name = _safe_tool_phase_name(function_response)
                 if fresp_name is not None:
                     await self._emit_progress(
                         {
@@ -1498,6 +1522,20 @@ class RealLocalChildRunner:
                             "detail": f"Tool: {fresp_name} | end",
                         }
                     )
+                # Fix F: fold this tool response into the missing-tool streak.
+                if function_response is not None:
+                    tripped = _missing_tool_streak.update(
+                        classify_missing_tool_response(
+                            getattr(function_response, "response", None)
+                        )
+                    )
+                    if tripped:
+                        # A runaway hallucination spiral: fail fast with the
+                        # typed reason + best-effort text (composes with #1458).
+                        raise _ChildLlmTurnError(
+                            f"{_DEGRADE_LLM_ERROR_PREFIX}missing_tool_streak_exhausted",
+                            partial_text="\n".join(texts),
+                        )
             if event_texts:
                 await self._emit_progress(
                     {

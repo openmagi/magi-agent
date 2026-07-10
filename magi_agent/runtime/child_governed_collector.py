@@ -72,7 +72,10 @@ from __future__ import annotations
 
 import os
 from collections.abc import AsyncGenerator, Mapping
-from typing import Union
+from typing import TYPE_CHECKING, Union
+
+if TYPE_CHECKING:
+    import asyncio
 
 from magi_agent.engine.contracts import EngineResult, Terminal
 from magi_agent.runtime.child_runner_live import (
@@ -111,8 +114,11 @@ def _collect_public_refs(value: object, refs: set[str]) -> None:
 
 async def collect_governed_child_turn(
     stream: AsyncGenerator[Union[RuntimeEvent, EngineResult], None],
-) -> tuple[str, tuple[str, ...], str]:
-    """Consume *stream* and return ``(summary, evidence_refs, status)``.
+    *,
+    missing_tool_streak_cap: int = 0,
+    cancel: "asyncio.Event | None" = None,
+) -> tuple[str, tuple[str, ...], str, str | None]:
+    """Consume *stream* and return ``(summary, evidence_refs, status, trip_reason)``.
 
     Parameters
     ----------
@@ -134,15 +140,31 @@ async def collect_governed_child_turn(
     status:
         ``"completed"`` when the terminal ``EngineResult`` carries
         ``Terminal.completed``; ``"failed"`` for any other terminal value.
+    trip_reason:
+        ``None`` normally; the typed missing-tool-streak reason when
+        ``missing_tool_streak_cap`` (Fix F) is reached (the child spiraled on
+        tools it does not have). When it trips, ``cancel`` is signalled so the
+        driver winds the turn down, and the caller raises the typed
+        ``_ChildLlmTurnError`` with this reason to preserve it (the terminal
+        would otherwise map to a generic ``failed``). ``cap <= 0`` disables the
+        guard (byte-identical collection: this stays ``None``).
 
     Raises
     ------
     ValueError
         If the stream ends without yielding an ``EngineResult`` terminal.
     """
+    from magi_agent.runtime.child_missing_tool_guard import (  # noqa: PLC0415
+        MISSING_TOOL_ERROR_CODES,
+        MISSING_TOOL_STREAK_REASON,
+        MissingToolStreak,
+    )
+
     text_chunks: list[str] = []
     raw_refs: set[str] = set()
     terminal: EngineResult | None = None
+    _streak = MissingToolStreak(missing_tool_streak_cap)
+    trip_reason: str | None = None
     # PR-K: count non-terminal events drained from the stream so the
     # terminal_consumed trace can surface the silent-empty-dispatch
     # signature (items_yielded == 0).
@@ -175,6 +197,24 @@ async def collect_governed_child_turn(
             text_chunks.clear()
             boundary_pending = False
             continue
+        if payload_type == "tool_end":
+            # Fix F: fold this tool result into the missing-tool streak. A
+            # missing-tool result (status=error + errorCode in the missing set)
+            # increments; any other tool_end resets. A non-error tool_end (ok)
+            # also resets. cap<=0 => _streak.update always returns False.
+            _err_code = payload.get("errorCode") or payload.get("error_code")
+            _is_missing = (
+                payload.get("status") == "error"
+                and isinstance(_err_code, str)
+                and _err_code in MISSING_TOOL_ERROR_CODES
+            )
+            if _streak.update(True if _is_missing else False):
+                trip_reason = MISSING_TOOL_STREAK_REASON
+                if cancel is not None:
+                    cancel.set()
+                # Keep consuming until the terminal EngineResult so the
+                # "terminal is the final item" convention holds; the caller
+                # raises the typed error to preserve trip_reason.
         if payload_type == "turn_end" or payload_type == "tool_end":
             # PR-U: real-trace response-block boundary. Do NOT clear here;
             # arm the flag so the NEXT non-empty ``text_delta`` clears
@@ -191,6 +231,15 @@ async def collect_governed_child_turn(
                 text_chunks.append(delta)
 
     if terminal is None:
+        # Fix F defensive: if the missing-tool guard tripped and signalled
+        # ``cancel``, the engine may end the stream WITHOUT a terminal
+        # EngineResult. Preserve the typed trip reason (a failed turn) rather
+        # than raising the generic ValueError that the caller would flatten to
+        # ``child_turn_error``, losing the whole point of the guard.
+        if trip_reason is not None:
+            summary = "".join(text_chunks)[:_MAX_SUMMARY_CHARS]
+            evidence_refs = _public_evidence_refs(list(raw_refs))
+            return summary, evidence_refs, "failed", trip_reason
         raise ValueError(
             "collect_governed_child_turn: stream ended with no terminal EngineResult"
         )
@@ -213,4 +262,4 @@ async def collect_governed_child_turn(
         items_yielded=items_yielded,
     )
 
-    return summary, evidence_refs, status
+    return summary, evidence_refs, status, trip_reason
