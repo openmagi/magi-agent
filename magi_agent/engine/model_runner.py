@@ -168,6 +168,7 @@ def build_cli_model_runner(
     bot_id: str = "local",
     owner_user_id: str = "local",
     learning_live_readiness: object | None = None,
+    advertised_tool_names: "Sequence[str] | None" = None,
     task_profile: Mapping[str, object] | None = None,
     general_automation_receipts: object | None = None,
     local_tool_evidence_collector: object | None = None,
@@ -249,6 +250,7 @@ def build_cli_model_runner(
             bot_id=bot_id,
             user_id=owner_user_id,
             learning_live_readiness=learning_live_readiness,
+            advertised_tool_names=advertised_tool_names,
         )
     )
 

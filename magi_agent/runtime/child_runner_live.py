@@ -1289,6 +1289,14 @@ class RealLocalChildRunner:
             session_id=session_id,
             model=route_model,
             tools=tools,
+            # Prompt/tool alignment: advertise EXACTLY the child's forwarded
+            # tools so the system prompt never induces the child to call a tool
+            # it lacks (the tool_not_found hallucination spiral). A governed
+            # ``tools == []`` child gets an empty allowlist, which suppresses the
+            # whole tool catalog and every tool-usage block.
+            advertised_tool_names=[
+                n for n in (_tool_name(t) for t in tools) if n is not None
+            ],
             memory_mode=ctx.memory_mode,  # single source: derived TurnContext
             # A-8 fail-closed: thread the child's derived permission_mode
             # (default deny/ask) instead of a hard-coded bypass.
@@ -1407,6 +1415,15 @@ class RealLocalChildRunner:
                 # instruction. A tool-enabled child keeps the default tool
                 # system prompt so it knows how to use the forwarded tools.
                 instruction=_CHILD_INSTRUCTION if not tools else None,
+                # Prompt/tool alignment: advertise exactly the forwarded tools
+                # so the tool-enabled child's prompt never names a tool it lacks.
+                # (The tools=[] branch already takes _CHILD_INSTRUCTION, so this
+                # value is unused there; None keeps the expression total.)
+                advertised_tool_names=(
+                    [n for n in (_tool_name(t) for t in tools) if n is not None]
+                    if tools
+                    else None
+                ),
                 model_factory=self._model_factory,
                 workspace_root=workspace,
                 # Child runners may intentionally share the parent workspace for

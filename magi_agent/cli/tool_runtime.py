@@ -23,6 +23,8 @@ from typing import TYPE_CHECKING, Callable
 from magi_agent.runtime.session_identity import MemoryMode
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from magi_agent.evidence.local_tool_collector import LocalToolEvidenceCollector
     from magi_agent.harness.general_automation.live_gate import (
         GeneralAutomationReceiptLedgerStore,
@@ -680,7 +682,11 @@ def _citation_evidence_sink_for_session(
     return _sink
 
 
-def build_tool_advertisement_block(*, workspace_root: str | None = None) -> str:
+def build_tool_advertisement_block(
+    *,
+    workspace_root: str | None = None,
+    allowed_tool_names: "frozenset[str] | None" = None,
+) -> str:
     """Build an ``<available_tools>`` XML block from the currently-enabled tool set.
 
     Assembles a throw-away local runtime using the same env-gated registration
@@ -696,6 +702,13 @@ def build_tool_advertisement_block(*, workspace_root: str | None = None) -> str:
     so the model can identify the catalog section unambiguously.  A newly-
     registered tool group (file tools, browser tool, …) automatically becomes
     visible as soon as its env gate is turned on — no manual prompt edits needed.
+
+    ``allowed_tool_names`` restricts the advertised catalog to EXACTLY those
+    names (used for a delegated child whose function declarations are filtered
+    to a subset, so the prompt never advertises a tool the child cannot call).
+    ``None`` (default) advertises every enabled tool, so the top-level agent
+    path is byte-identical. An empty frozenset advertises nothing (a text-only
+    child gets no ``<available_tools>`` block at all).
 
     Fail-open: any error returns an empty string so prompt assembly never breaks.
     """
@@ -715,6 +728,10 @@ def build_tool_advertisement_block(*, workspace_root: str | None = None) -> str:
             if not registration.enabled:
                 continue
             manifest = registration.manifest
+            # Restrict the advertised catalog to the child's actual forwarded
+            # tools when an allowlist is supplied (None = advertise everything).
+            if allowed_tool_names is not None and manifest.name not in allowed_tool_names:
+                continue
             # Emit: ToolName [permission] — first sentence of description
             desc = manifest.description.split("\n")[0].rstrip()
             lines.append(f"  {manifest.name} [{manifest.permission}] — {desc}")
@@ -1003,6 +1020,7 @@ def build_cli_instruction(
     bot_id: str = "local",
     user_id: str = "local",
     learning_live_readiness: object | None = None,
+    advertised_tool_names: "Sequence[str] | None" = None,
 ) -> str:
     """Build the real system prompt for the CLI agent (coding-agent path).
 
@@ -1178,33 +1196,66 @@ def build_cli_instruction(
         okf_guidance_block=_okf_guidance_block(),
     )
 
+    # Child prompt/tool alignment: when a delegated child forwards only a subset
+    # of tools, restrict every tool-advertising block to EXACTLY those names so
+    # the prompt never induces the child to call a tool it lacks (the
+    # tool_not_found hallucination spiral). ``None`` => no restriction, so the
+    # top-level agent prompt is byte-identical. An empty set => no tool blocks.
+    _advertised_set: "frozenset[str] | None" = (
+        frozenset(advertised_tool_names) if advertised_tool_names is not None else None
+    )
+
+    def _tool_allowed(name: str) -> bool:
+        return _advertised_set is None or name in _advertised_set
+
     # Registry-driven tool advertisement (Principle P2: "built ≠ used").
     # Dynamically reflects which tools are attached — file/browser tools only
     # appear when their env gate is on.  Fail-open: empty string when unavailable.
-    _tool_ad_block = build_tool_advertisement_block(workspace_root=workspace_root)
+    _tool_ad_block = build_tool_advertisement_block(
+        workspace_root=workspace_root, allowed_tool_names=_advertised_set
+    )
 
     # File-tool usage guidance — only injected when file tools are actually
-    # enabled so the model is not directed to use unavailable tools.
+    # enabled so the model is not directed to use unavailable tools. When an
+    # advertised-tool allowlist is present, each line is emitted only if its
+    # tool survives the filter (so a readonly child is not told to use
+    # ImageUnderstand/DocumentRead/XLSXRead/Bash it cannot call).
     from magi_agent.config.env import file_tools_enabled  # noqa: PLC0415
 
     _file_tools_block = ""
     if file_tools_enabled():
-        _file_tools_block = (
-            "<file_tools>\n"
-            "When the task involves an image, document, spreadsheet, or other "
-            "attached file:\n"
-            "- Use ImageUnderstand(path=..., prompt=...) for image files "
-            "(.png/.jpg/.jpeg/.gif/.webp/.bmp).\n"
-            "- Use DocumentRead(path=...) for document files "
-            "(.pdf/.docx/.pptx/.xml/.csv/.txt/.md/.rst).\n"
-            "- Use XLSXRead(path=...) for spreadsheet files (.xlsx/.xls).\n"
-            "- If a tool returns status='blocked' or status='needs_approval', "
-            "attempt an alternative approach: read the file with Bash (e.g. "
-            "`cat`, `python3`) before concluding the file is inaccessible.\n"
-            "- Never conclude 'unable to determine' solely because a tool returned "
-            "an error; try at least one alternative access path first.\n"
-            "</file_tools>"
-        )
+        _file_lines = ["When the task involves an image, document, spreadsheet, "
+                       "or other attached file:"]
+        if _tool_allowed("ImageUnderstand"):
+            _file_lines.append(
+                "- Use ImageUnderstand(path=..., prompt=...) for image files "
+                "(.png/.jpg/.jpeg/.gif/.webp/.bmp)."
+            )
+        if _tool_allowed("DocumentRead"):
+            _file_lines.append(
+                "- Use DocumentRead(path=...) for document files "
+                "(.pdf/.docx/.pptx/.xml/.csv/.txt/.md/.rst)."
+            )
+        if _tool_allowed("XLSXRead"):
+            _file_lines.append(
+                "- Use XLSXRead(path=...) for spreadsheet files (.xlsx/.xls)."
+            )
+        if _tool_allowed("Bash"):
+            _file_lines.append(
+                "- If a tool returns status='blocked' or status='needs_approval', "
+                "attempt an alternative approach: read the file with Bash (e.g. "
+                "`cat`, `python3`) before concluding the file is inaccessible."
+            )
+        # Only ship the block if at least one concrete tool line survived (the
+        # header alone is not useful and could still nudge the model).
+        if len(_file_lines) > 1:
+            _file_lines.append(
+                "- Never conclude 'unable to determine' solely because a tool "
+                "returned an error; try at least one alternative access path first."
+            )
+            _file_tools_block = (
+                "<file_tools>\n" + "\n".join(_file_lines) + "\n</file_tools>"
+            )
 
     # Web-research cross-check guidance — gated on
     # MAGI_RESEARCH_FACT_GUIDANCE_ENABLED AND both provider keys
@@ -1217,6 +1268,13 @@ def build_cli_instruction(
     )
 
     _web_research_block = web_research_guidance_block()
+    # Suppress for a child that has none of the web-research tools it advertises
+    # (research_fact / web_search), so the child is not nudged to a tool it lacks.
+    if (
+        _advertised_set is not None
+        and not (_tool_allowed("research_fact") or _tool_allowed("web_search"))
+    ):
+        _web_research_block = ""
 
     # Source-citation static guidance (Wave 2, design 9.3/13) is now emitted by
     # ``build_system_prompt`` (via ``_assemble_prompt_sections``), which SWAPS the
@@ -1231,15 +1289,20 @@ def build_cli_instruction(
     # leading "\n\n" is stripped below so the join spacing stays uniform.
     _decomposition_block = step_decomposition_block()
 
-    _skills_block = (
-        "<skills>\n"
-        "Bundled first-party skills, including superpowers-style workflows, are "
-        "available through the SkillLoader tool. Before specialized work such "
-        "as debugging, planning, code review, research, writing, or UI work, "
-        "load the relevant skill and follow its instructions.\n"
-        "</skills>"
-        + eval_autonomy_block()
-    )
+    # Skills guidance presumes SkillLoader; suppress for a child that lacks it
+    # (the eval_autonomy suffix presumes Bash/write tools, so it goes with it).
+    if _tool_allowed("SkillLoader"):
+        _skills_block = (
+            "<skills>\n"
+            "Bundled first-party skills, including superpowers-style workflows, are "
+            "available through the SkillLoader tool. Before specialized work such "
+            "as debugging, planning, code review, research, writing, or UI work, "
+            "load the relevant skill and follow its instructions.\n"
+            "</skills>"
+            + eval_autonomy_block()
+        )
+    else:
+        _skills_block = ""
 
     # Live-SWE-style "creating your own tools" recipe block. Default-OFF
     # (MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED) and frontier-tier gated; returns ""
@@ -1248,7 +1311,13 @@ def build_cli_instruction(
         build_tool_synthesis_instruction_block,
     )
 
-    _tool_synthesis_block = build_tool_synthesis_instruction_block(model_label=model)
+    # Tool synthesis presumes script execution (Bash/write); never nudge a
+    # tool-restricted child to synthesize tools. Default-OFF flag makes this a
+    # no-op today, but suppress unconditionally for a restricted child.
+    if _advertised_set is not None and not _tool_allowed("Bash"):
+        _tool_synthesis_block = ""
+    else:
+        _tool_synthesis_block = build_tool_synthesis_instruction_block(model_label=model)
 
     # Fable-pattern guidance blocks — default-OFF; each returns "" when
     # inactive so prompt assembly stays byte-identical (same contract as the
@@ -1307,7 +1376,15 @@ def build_cli_instruction(
     # Multi-file cross-reference robustness (MAGI_MULTI_FILE_JOIN_ENABLED).
     # Default-OFF separate concatenated string ("" when the flag is unset), so
     # the returned prompt is byte-identical to pre-change behavior off the flag.
+    # The block explicitly names XLSXInfo/XLSXRead/DocumentRead/Bash, so suppress
+    # it for a tool-restricted child that lacks them (prompt/tool alignment).
     _multi_file_join_block = multi_file_join_block()
+    if _advertised_set is not None and not (
+        _tool_allowed("XLSXRead")
+        or _tool_allowed("DocumentRead")
+        or _tool_allowed("Bash")
+    ):
+        _multi_file_join_block = ""
 
     parts = [prompt]
     if _tool_ad_block:
