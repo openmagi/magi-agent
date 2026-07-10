@@ -1185,3 +1185,61 @@ def test_event_bridge_drops_duplicate_aggregate_text_after_streaming_partials() 
 
     # Only the tool_start survives — the duplicate text aggregate is dropped.
     assert [e["type"] for e in projection.agent_events] == ["tool_start"]
+
+
+def test_event_bridge_tool_end_carries_error_code_on_missing_tool() -> None:
+    """Fix F: a local tool_end for a missing-tool corrective response carries an
+    additive ``errorCode`` field so the governed collector can detect the spiral
+    without fragile output_preview matching."""
+    bridge = OpenMagiEventBridge()
+    event = Event(
+        id="event-mt",
+        author="tool",
+        content=types.Content(
+            role="tool",
+            parts=[
+                types.Part(
+                    function_response=types.FunctionResponse(
+                        id="tool-x",
+                        name="XLSXRead",
+                        response={
+                            "response_type": "MAGI_TOOL_NOT_FOUND_SOFT_FAIL",
+                            "status": "error",
+                            "error_code": "tool_not_found",
+                            "error_message": "Tool 'XLSXRead' does not exist.",
+                        },
+                    )
+                )
+            ],
+        ),
+        invocation_id="turn-1",
+    )
+    projection = bridge.project_adk_event(event, turn_id="turn-1")
+    end = next(e for e in projection.agent_events if e["type"] == "tool_end")
+    assert end["status"] == "error"
+    assert end["errorCode"] == "tool_not_found"
+
+
+def test_event_bridge_tool_end_ok_has_no_error_code_key() -> None:
+    """Shape preservation: a successful tool_end must NOT gain an errorCode key."""
+    bridge = OpenMagiEventBridge()
+    event = Event(
+        id="event-ok",
+        author="tool",
+        content=types.Content(
+            role="tool",
+            parts=[
+                types.Part(
+                    function_response=types.FunctionResponse(
+                        id="tool-ok",
+                        name="FileRead",
+                        response={"status": "ok", "content": "hi"},
+                    )
+                )
+            ],
+        ),
+        invocation_id="turn-1",
+    )
+    projection = bridge.project_adk_event(event, turn_id="turn-1")
+    end = next(e for e in projection.agent_events if e["type"] == "tool_end")
+    assert "errorCode" not in end

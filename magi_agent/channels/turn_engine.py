@@ -68,7 +68,11 @@ async def run_channel_turn_async(
     items = 0
     exception_cls: type | None = None
     try:
-        summary, _evidence_refs, status = await collect_governed_child_turn(stream_factory(ctx))
+        # The missing-tool streak guard is child-runner-only; this caller does
+        # not opt in (cap defaults to 0), so trip_reason is always None here.
+        summary, _evidence_refs, status, _trip = await collect_governed_child_turn(
+            stream_factory(ctx)
+        )
         items = len(summary)
         terminal_kind = status
     except Exception as exc:  # noqa: BLE001 - re-raised; captured for trace.

@@ -1129,6 +1129,18 @@ def _project_function_response_part(
             "status": status,
             "output_preview": _public_preview(response),
         }
+        # Additive observability field (local path only): surface a string
+        # ``error_code``/``errorCode`` from the tool response on error tool_ends
+        # so the governed child collector can detect a missing-tool spiral
+        # (Fix F) without fragile output_preview text matching. Only emitted on
+        # errors that carry a code; a success/ok tool_end is unchanged. The
+        # HOSTED wire_profile branch above is not touched.
+        if is_error:
+            _err_code = None
+            if isinstance(response, dict):
+                _err_code = response.get("error_code") or response.get("errorCode")
+            if isinstance(_err_code, str) and _err_code:
+                agent_event["errorCode"] = _err_code
         if local_duration_ms is not None:
             agent_event["durationMs"] = local_duration_ms
         if live_compatible:
