@@ -126,3 +126,45 @@ async def test_governed_branch_empty_stream_surfaces_as_failed(
     )
     summary = str(result.get("summary", ""))
     assert "empty_response" in summary or "child_llm_empty" in summary, summary
+
+
+@pytest.mark.asyncio
+async def test_governed_non_completed_with_text_returns_best_partial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A governed child that ends non-completed but PRODUCED usable text must
+    return that text as ``partialSummary`` (best-effort), while still surfacing
+    the failure status + reason. Pre-fix the text was thrown away: a slow child
+    that actually answered looked like a total failure to the parent.
+    """
+    import magi_agent.runtime.child_runner_live as crl
+
+    async def _fake_governed_collector(_stream: object) -> tuple[str, tuple[str, ...], str]:
+        # Non-completed terminal (e.g. hit an internal cap) but the child DID
+        # produce a real answer before the terminal.
+        return "The answer is 2.", (), "failed"
+
+    monkeypatch.setattr(
+        "magi_agent.runtime.child_governed_collector.collect_governed_child_turn",
+        _fake_governed_collector,
+    )
+    monkeypatch.setattr(
+        "magi_agent.cli.wiring.build_headless_runtime",
+        lambda **_kw: object(),
+    )
+    monkeypatch.setattr(
+        "magi_agent.runtime.governed_turn.run_governed_turn",
+        lambda *_a, **_kw: object(),
+    )
+
+    child = crl.RealLocalChildRunner(
+        provider_config=_provider_config(),
+        runner=_EmptyStreamRunner(),
+    )
+    result = await child.run_child(_request())
+
+    # Still a failure (no silent ship-as-completed) with the real reason...
+    assert result["status"] == "failed", dict(result)
+    assert "collector_status_failed" in str(result.get("summary", "")), dict(result)
+    # ...but the child's actual answer is preserved on partialSummary.
+    assert result.get("partialSummary") == "The answer is 2.", dict(result)

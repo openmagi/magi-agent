@@ -758,3 +758,42 @@ def test_child_runner_boundary_imports_no_live_runner_or_runtime_surfaces() -> N
         "subprocess.run",
     ):
         assert fragment not in source
+
+
+def test_partial_summary_is_redacted_at_model_validation() -> None:
+    """The best-effort ``partialSummary`` channel carries RAW child output, so
+    its leak-redaction must be intrinsic to the model (field_validator), not
+    only the call-site scrub in ``_envelope_from_output``. Validate straight
+    from a raw dict with secret/private-path content and assert redaction +
+    roundtrip survival.
+    """
+    from magi_agent.runtime.child_runner_boundary import ChildRunnerEnvelopeRef
+
+    ref = ChildRunnerEnvelopeRef.model_validate(
+        {
+            "childRef": "child:abc",
+            "taskId": "task-1",
+            "childExecutionId": "child-exec-1",
+            "parentExecutionId": "parent-exec-1",
+            "status": "failed",
+            "summary": "child_llm_collector_status_failed",
+            "partialSummary": (
+                "The answer is 2.\n"
+                "/Users/kevin/private/notes.txt\n"
+                "Authorization: Bearer sk-child-secret\n"
+                "chain_of_thought: hidden reasoning"
+            ),
+        }
+    )
+
+    # The usable answer survives...
+    assert "The answer is 2." in ref.partial_summary
+    # ...but the secrets/paths are stripped by the intrinsic validator.
+    assert "/Users/kevin" not in ref.partial_summary
+    assert "sk-child-secret" not in ref.partial_summary
+    assert "chain_of_thought" not in ref.partial_summary
+
+    # Survives a by-alias dump -> re-validate roundtrip (still redacted).
+    roundtrip = ChildRunnerEnvelopeRef.model_validate(ref.model_dump(by_alias=True))
+    assert "The answer is 2." in roundtrip.partial_summary
+    assert "sk-child-secret" not in roundtrip.partial_summary

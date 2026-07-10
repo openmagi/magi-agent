@@ -320,6 +320,12 @@ class ChildRunnerEnvelopeRef(BaseModel):
     parent_execution_id: str = Field(alias="parentExecutionId")
     status: Literal["completed", "blocked", "failed"]
     summary: str = ""
+    # Best-effort partial answer text on a non-completed turn (e.g. a child that
+    # produced a real answer before hitting an internal cap). Separate from
+    # ``summary`` (which carries the failure reason on the degraded path) so the
+    # parent can surface the child's actual work without colliding with the
+    # reason. Empty on the happy path.
+    partial_summary: str = Field(default="", alias="partialSummary")
     evidence_refs: tuple[str, ...] = Field(default=(), alias="evidenceRefs")
     artifact_refs: tuple[str, ...] = Field(default=(), alias="artifactRefs")
     audit_event_refs: tuple[str, ...] = Field(default=(), alias="auditEventRefs")
@@ -357,6 +363,17 @@ class ChildRunnerEnvelopeRef(BaseModel):
     @field_validator("summary", mode="before")
     @classmethod
     def _sanitize_summary(cls, value: object) -> object:
+        if isinstance(value, str):
+            return _sanitize_public_text(value, max_chars=512)
+        return value
+
+    @field_validator("partial_summary", mode="before")
+    @classmethod
+    def _sanitize_partial_summary(cls, value: object) -> object:
+        # ``partial_summary`` carries RAW child output (a best-effort answer),
+        # so the leak-redaction invariant must be intrinsic to the model, not
+        # dependent on every construction site remembering to pre-scrub. Mirror
+        # ``_sanitize_summary`` so a validate-from-raw-dict path is also safe.
         if isinstance(value, str):
             return _sanitize_public_text(value, max_chars=512)
         return value
@@ -1152,6 +1169,9 @@ def _envelope_from_output(
         parentExecutionId=request.parent_execution_id,
         status=status,
         summary=_sanitize_public_text(str(data.get("summary") or ""), max_chars=512),
+        partialSummary=_sanitize_public_text(
+            str(data.get("partialSummary") or ""), max_chars=512
+        ),
         evidenceRefs=_runtime_issued_refs(
             request,
             child_execution_id,

@@ -458,6 +458,54 @@ def test_spawn_agent_failed_return_surfaces_real_reason(monkeypatch) -> None:
     assert result.output["childFailureReason"] == "child_llm_collector_status_failed"
 
 
+def test_spawn_agent_failed_with_partial_surfaces_answer_and_reason(monkeypatch) -> None:
+    """A failed child that PRODUCED a real answer must surface BOTH: the child's
+    actual answer as the LLM-facing ``result`` (from partialSummary) AND the
+    failure reason, without one clobbering the other.
+
+    This is the slow-but-answered child (e.g. ended on an internal cap): pre-fix
+    the answer was thrown away and the parent saw only the reason token, so a
+    child that DID compute the answer looked like a total failure.
+    """
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+
+    import magi_agent.runtime.child_runner_live as _live_mod
+
+    class _FailingWithPartialRunner:
+        openmagi_live_provider = True
+
+        def __init__(self, *, tools: list[object] | None = None, **kwargs: object) -> None:
+            pass
+
+        async def run_child(self, request: object) -> Mapping[str, object]:
+            return {
+                "childExecutionId": "child-x",
+                "status": "failed",
+                "summary": "child_llm_collector_status_failed",
+                "partialSummary": "The answer is 2.",
+                "evidenceRefs": (),
+                "artifactRefs": (),
+                "auditEventRefs": (),
+            }
+
+    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _FailingWithPartialRunner)
+
+    from magi_agent.plugins.native.subagents import spawn_agent
+
+    result = asyncio.run(spawn_agent({"prompt": "do it"}, _context()))
+
+    assert result.status == "error"
+    assert result.error_code == "child_llm_collector_status_failed"
+    # The child's actual answer reached the parent as the LLM-facing result...
+    llm = result.llm_output
+    assert isinstance(llm, Mapping)
+    assert llm["result"] == "The answer is 2."
+    # ...while the reason is surfaced separately (no clobbering).
+    assert llm["reason"] == "child_llm_collector_status_failed"
+    assert result.output["partialSummary"] == "The answer is 2."
+
+
 # ---------------------------------------------------------------------------
 # T4: toolset gate — runner gets the gate-resolved profile, no caller escalation
 # ---------------------------------------------------------------------------

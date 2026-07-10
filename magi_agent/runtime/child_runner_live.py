@@ -786,9 +786,15 @@ class _ChildLlmTurnError(Exception):
     children returned ``status=ok`` in 60-130ms with no result text).
     """
 
-    def __init__(self, reason: str) -> None:
+    def __init__(self, reason: str, *, partial_text: str = "") -> None:
         super().__init__(reason)
         self.reason = reason
+        # Best-effort partial answer the child produced BEFORE the non-completed
+        # terminal (e.g. a real answer that ended on an internal cap). Carried
+        # so ``run_child`` can return it as ``partialSummary`` instead of
+        # throwing it away: a slow-but-answered child should not look like a
+        # total failure. Empty for genuinely empty / no-output failures.
+        self.partial_text = partial_text
 
 
 def _classify_child_event_error(event: object) -> str | None:
@@ -989,10 +995,12 @@ class RealLocalChildRunner:
         except _ChildLlmTurnError as exc:
             # Surface the actual provider-error class (rate_limit / model_not_found
             # / bad_request / ...) instead of collapsing it into the generic
-            # child_turn_error blob the next branch ships.
+            # child_turn_error blob the next branch ships. Preserve any partial
+            # answer the child produced so the parent gets its best work.
             return self._failed(
                 child_execution_id,
                 reason=exc.reason,
+                partial_text=getattr(exc, "partial_text", "") or "",
             )
         except Exception:  # noqa: BLE001 — NEVER raise across the seam.
             return self._failed(
@@ -1362,7 +1370,12 @@ class RealLocalChildRunner:
         # existing catch as ``status="failed"`` reason
         # ``child_llm_collector_status_<status>`` (sanitised slug).
         if _status != "completed":
-            raise _ChildLlmTurnError(f"{_DEGRADE_LLM_ERROR_PREFIX}collector_status_{_status}")
+            # Preserve any real answer the child produced before the
+            # non-completed terminal so the parent still gets its best work.
+            raise _ChildLlmTurnError(
+                f"{_DEGRADE_LLM_ERROR_PREFIX}collector_status_{_status}",
+                partial_text=summary or "",
+            )
         # Silent-no-op detection (governed-path parity with PR #854's legacy
         # guard). The governed collector returned ``("", (), "completed")``
         # which is the same shape as the anthropic/google 100ms repro Kevin
@@ -1451,6 +1464,11 @@ class RealLocalChildRunner:
                 # silently collecting no text + returning status=ok — the
                 # latter masquerades the failed turn as a successful empty
                 # answer (the 0.1.62 multi-provider SpawnAgent bug).
+                #
+                # No partial_text is threaded here (unlike the governed
+                # non-completed path): a mid-stream PROVIDER error is a hard
+                # dispatch failure, not an "answered-then-capped" turn, so any
+                # bytes collected before it are not a usable answer.
                 raise _ChildLlmTurnError(error_reason)
             content = getattr(event, "content", None)
             event_texts: list[str] = []
@@ -1802,22 +1820,35 @@ class RealLocalChildRunner:
         _maybe_log_trace_degraded(self._env, status="blocked", reason=reason)
         return self._degraded(child_execution_id, status="blocked", reason=reason)
 
-    def _failed(self, child_execution_id: str, *, reason: str) -> dict[str, object]:
+    def _failed(
+        self, child_execution_id: str, *, reason: str, partial_text: str = ""
+    ) -> dict[str, object]:
         _maybe_log_trace_degraded(self._env, status="failed", reason=reason)
-        return self._degraded(child_execution_id, status="failed", reason=reason)
+        return self._degraded(
+            child_execution_id, status="failed", reason=reason, partial_text=partial_text
+        )
 
     @staticmethod
-    def _degraded(child_execution_id: str, *, status: str, reason: str) -> dict[str, object]:
-        return {
+    def _degraded(
+        child_execution_id: str, *, status: str, reason: str, partial_text: str = ""
+    ) -> dict[str, object]:
+        mapping: dict[str, object] = {
             "childExecutionId": child_execution_id,
             "status": status,
             # The reason is a safe, fixed token (no raw error text) — the
-            # boundary sanitises ``summary`` regardless.
+            # boundary sanitises ``summary`` regardless. ``summary`` keeps
+            # carrying the REASON so the parent-facing reason projection is
+            # unchanged.
             "summary": reason,
             "evidenceRefs": (),
             "artifactRefs": (),
             "auditEventRefs": (),
         }
+        # Best-effort partial answer travels on a SEPARATE channel so it never
+        # collides with the reason on ``summary`` (the boundary re-sanitises it).
+        if isinstance(partial_text, str) and partial_text.strip():
+            mapping["partialSummary"] = partial_text
+        return mapping
 
     @staticmethod
     def _child_execution_id(request: object) -> str:
