@@ -112,3 +112,40 @@ def test_instruction_empty_allowlist_has_no_tool_blocks() -> None:
     assert "<available_tools>" not in instr
     assert "<file_tools>" not in instr
     assert "<skills>" not in instr
+
+
+# --- wiring-level threading (P2: prove the passthrough, not just the leaf) --- #
+
+
+def test_advertised_tool_names_threads_through_model_runner(monkeypatch) -> None:
+    """A future refactor dropping the passthrough at any middle layer would pass
+    the leaf-level tests above; this asserts build_cli_model_runner actually
+    forwards advertised_tool_names into build_cli_instruction."""
+    import magi_agent.cli.tool_runtime as tr
+    import magi_agent.engine.model_runner as mr
+
+    captured: dict[str, object] = {}
+
+    def _fake_build_cli_instruction(**kwargs: object) -> str:
+        captured["advertised_tool_names"] = kwargs.get("advertised_tool_names")
+        return "STUB INSTRUCTION"
+
+    # Stub the heavy build (imported locally inside build_cli_model_runner from
+    # cli.tool_runtime) so the test stays a pure threading assertion.
+    monkeypatch.setattr(tr, "build_cli_instruction", _fake_build_cli_instruction)
+
+    from magi_agent.cli.providers import ProviderConfig
+
+    config = ProviderConfig(provider="anthropic", model="claude-sonnet-4-6", api_key="sk-test")
+
+    mr.build_cli_model_runner(
+        config,
+        tools=[],  # empty forwarded set
+        advertised_tool_names=["FileRead", "Glob"],
+        instruction=None,
+        workspace_root="/tmp",
+    )
+
+    # The stubbed build_cli_instruction recorded the kwarg it received, proving
+    # build_cli_model_runner forwards advertised_tool_names into the prompt build.
+    assert captured["advertised_tool_names"] == ["FileRead", "Glob"]
