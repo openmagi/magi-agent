@@ -121,6 +121,32 @@ describe("unifyRuleRows — merges all four backend stores into a single RuleRow
     expect(sources).toContain("dashboard_check");
   });
 
+  it("does not crash on a domain-allowlist dashboard check (match: null)", () => {
+    // Regression: the arguments-based domainAllowlist trigger leaves
+    // ``trigger.match`` null; unconditionally reading ``match.pattern`` used
+    // to throw "Cannot read properties of null (reading 'pattern')" and blew
+    // up the entire Customize page.
+    const policies = unifyRuleRows({
+      catalog: buildCatalog(),
+      overrides: buildOverrides(),
+      dashboardChecks: [
+        {
+          id: "source-credibility",
+          label: "Records custom:SourceCredibility for trusted sources",
+          scope: "always",
+          enabled: true,
+          trigger: { tool: "web_fetch", match: null, domainAllowlist: ["sec.gov"] },
+          action: "audit",
+        },
+      ],
+    });
+    const row = policies.find((p) => p.id === "dashboard_check:source-credibility");
+    expect(row).toBeDefined();
+    expect(row?.description).toContain("sec.gov");
+    expect(row?.condition.summary).toContain("sec.gov");
+    expect(row?.condition.payload).toMatchObject({ domainAllowlist: ["sec.gov"] });
+  });
+
   it("respects preset_overrides — coding-verification toggled OFF surfaces as disabled", () => {
     const policies = unifyRuleRows({
       catalog: buildCatalog(),

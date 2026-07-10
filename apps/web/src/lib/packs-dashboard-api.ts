@@ -22,10 +22,22 @@ export interface DashboardTriggerMatch {
   isRegex: boolean;
 }
 
-/** Tool name + content match that fires the check on `on_after_tool`. */
+/** Tool name + trigger that fires the check on `on_after_tool`. */
 export interface DashboardTrigger {
   tool: string;
-  match: DashboardTriggerMatch;
+  /**
+   * A result-text match. Optional now that an arguments-based
+   * `domainAllowlist` trigger exists (mirrors the backend
+   * `DashboardTrigger.match: DashboardTriggerMatch | None`); at least one of
+   * `match` / `domainAllowlist` is present.
+   */
+  match?: DashboardTriggerMatch | null;
+  /**
+   * An ARGUMENTS-based domain allowlist. When set, the check fires on the
+   * tool's URL-argument host (not the result text) — a deterministic source
+   * credibility signal. Mirrors the backend `domain_allowlist` field.
+   */
+  domainAllowlist?: string[];
 }
 
 /** A single dashboard-authored custom check. */
