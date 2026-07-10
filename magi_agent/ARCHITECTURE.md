@@ -1527,7 +1527,7 @@ graph LR
 | missions.py | — | _common, context, env, flags, policy, result | — |
 | okf.py | The redaction-free ``OkfLookup`` native tool (PR2). | _common, bundle_loader, config, context, result | — |
 | scheduled_work.py | — | _common, context, env, models, policy, projection, projector, result, store | gateway/watchers.py |
-| skills.py | — | _common, context, env, result | cli/commands/builtins.py, transport/app_api.py |
+| skills.py | — | _common, context, env, result | cli/commands/builtins.py, runtime/skill_slash.py, transport/app_api.py |
 | source_ledger.py | — | _common, context, result | — |
 | subagents.py | — | _common, child_runner_boundary, child_runner_live, child_toolset, context, public_events, result | plugins/native/deep_solve.py |
 | taskboard.py | — | _common, context, env, result | — |
@@ -1746,6 +1746,7 @@ graph LR
 | session_extract_runtime.py | Glue that runs session-end memory extraction at real session boundaries. | flags, local_file_writable, memory_session_extract, summarizer_runtime | cli/headless.py, runtime/active_sessions.py |
 | session_identity.py | — | — | cli/tool_runtime.py, cli/wiring.py, engine/model_runner.py, gates/gate5b_full_toolhost.py, runtime/memory_mode_context.py, tools/context.py, tools/memory_mode_guard.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/gate5b_serving.py, transport/generation_request.py |
 | session_ownership.py | Consolidated session-ownership primitives for governed hosted turns (WS-A). | env, hosted_session_substrate, session_service_registry | shadow/gate5b4c3_live_runner_boundary.py, transport/gate5b_serving.py |
+| skill_slash.py | Transport-agnostic slash-to-skill resolver for hosted and CLI surfaces. | skills | runtime/tests/test_skill_slash.py |
 | slash_control_boundary.py | — | — | cli/commands/builtins.py |
 | stale_run_detector.py | — | heartbeat_contract, heartbeat_store | — |
 | stream_fallback.py | — | error_taxonomy, flags, sse, sse_buffer, stream_withholding | — |
@@ -1785,6 +1786,13 @@ graph LR
 | rate_limit.py | — | types | cli/tests/test_engine_recovery.py, runtime/error_recovery/strategies/__init__.py |
 | reactive_compact.py | — | _token_utils, types | adk_bridge/context_compaction.py, context/hook.py, runtime/error_recovery/__init__.py, runtime/error_recovery/strategies/__init__.py |
 | recovery_message.py | — | types | runtime/error_recovery/strategies/__init__.py |
+
+### runtime/tests/
+
+| Module | Purpose | Depends On | Depended By |
+|---|---|---|---|
+| __init__.py | — | — | — |
+| test_skill_slash.py | Unit tests for magi_agent.runtime.skill_slash. | skill_slash | — |
 
 ### sandbox/
 
