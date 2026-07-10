@@ -355,21 +355,45 @@ function customRuleCondition(
 
 
 function dashboardCheckToRow(check: DashboardCheck): RuleRow {
-  const pattern = check.trigger.match.pattern;
-  const isRegex = check.trigger.match.isRegex;
+  const tool = check.trigger.tool;
+  const match = check.trigger.match;
+  const domainAllowlist = Array.isArray(check.trigger.domainAllowlist)
+    ? check.trigger.domainAllowlist
+    : [];
+
+  // Two trigger shapes share the after-tool check: the historic result-text
+  // ``match`` and the newer arguments-based ``domainAllowlist`` (which leaves
+  // ``match`` null). Guard the null so a domain-allowlist check does not crash
+  // the whole Customize page on ``match.pattern``.
+  let description: string;
+  let condition: PolicyCondition;
+  if (match) {
+    const { pattern, isRegex } = match;
+    description = `After-tool: ${tool} matches ${isRegex ? "regex" : "literal"} "${pattern}"`;
+    condition = {
+      kind: "regex",
+      summary: `${tool} result ${isRegex ? "matches regex" : "contains"} "${pattern}"`,
+      payload: { pattern, isRegex, tools: [tool] },
+    };
+  } else {
+    const domains = domainAllowlist.join(", ");
+    description = `After-tool: ${tool} fetches a source in [${domains}]`;
+    condition = {
+      kind: "regex",
+      summary: `${tool} fetches a source domain in [${domains}]`,
+      payload: { domainAllowlist, tools: [tool] },
+    };
+  }
+
   return {
     id: `dashboard_check:${check.id}`,
     name: check.label,
-    description: `After-tool: ${check.trigger.tool} matches ${isRegex ? "regex" : "literal"} "${pattern}"`,
+    description,
     origin: "user",
     source: "dashboard_check",
     state: check.enabled ? "enabled" : "disabled",
     when: { scope: check.scope, firesAt: "after_tool_use" },
-    condition: {
-      kind: "regex",
-      summary: `${check.trigger.tool} result ${isRegex ? "matches regex" : "contains"} "${pattern}"`,
-      payload: { pattern, isRegex, tools: [check.trigger.tool] },
-    },
+    condition,
     action: check.action,
     togglable: true,
     editable: true,
