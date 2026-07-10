@@ -72,7 +72,7 @@ function TrashIcon({ onClick }: { onClick: () => void }) {
     <button
       onClick={(e) => { e.stopPropagation(); onClick(); }}
       onPointerDown={(e) => e.stopPropagation()}
-      className="p-0.5 text-secondary/40 hover:text-red-400 transition-colors cursor-pointer shrink-0"
+      className="p-0.5 text-secondary/40 hover:text-[var(--color-deny-fg)] transition-colors cursor-pointer shrink-0"
       title="Delete"
     >
       <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -827,7 +827,7 @@ export function ChatSidebar({
           >
             <button
               onClick={() => { onDeleteChannel(contextMenu.channelName); setContextMenu(null); }}
-              className="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-black/5 transition-colors cursor-pointer"
+              className="w-full text-left px-3 py-2 text-sm text-[var(--color-deny-fg)] hover:bg-black/5 transition-colors cursor-pointer"
             >
               Delete #{contextMenu.channelName}
             </button>

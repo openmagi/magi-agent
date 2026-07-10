@@ -1977,7 +1977,7 @@ export function ChatViewClient({
 
             {channelState.error && (
               <div className="px-4 pb-1">
-                <div className="max-w-3xl mx-auto text-xs text-red-400/80 bg-red-500/[0.06] rounded-xl px-3 py-2">
+                <div className="max-w-3xl mx-auto text-xs text-[var(--color-deny-fg)]/80 bg-red-500/[0.06] rounded-xl px-3 py-2">
                   {channelState.error}
                 </div>
               </div>
