@@ -55,7 +55,10 @@ from magi_agent.runtime.events import RuntimeEvent
 
 
 def _run(stream):
-    return asyncio.run(collect_governed_child_turn(stream))
+    # Drop the 4th tuple element (trip_reason, Fix F) so the existing
+    # 3-tuple unpack call sites below are unchanged.
+    summary, refs, status, _trip = asyncio.run(collect_governed_child_turn(stream))
+    return summary, refs, status
 
 
 def test_turn_end_between_two_deltas_keeps_only_second():

@@ -253,3 +253,21 @@ def test_collector_missing_errorcode_absent_does_not_count() -> None:
         collect_governed_child_turn(_stream_old_shape(), missing_tool_streak_cap=4)
     )
     assert trip is None
+
+
+def test_collector_trip_without_terminal_preserves_reason() -> None:
+    from magi_agent.runtime.child_governed_collector import collect_governed_child_turn
+
+    async def _stream_trip_no_terminal():
+        # Missing-tool spiral that the guard trips on, but the stream ends
+        # WITHOUT an EngineResult terminal (cancel closed it early).
+        yield RuntimeEvent(type="token", payload={"type": "text_delta", "delta": "x"})
+        for _ in range(4):
+            yield _tool_end("error", "tool_not_found")
+        # no EngineResult
+
+    _s, _r, status, trip = asyncio.run(
+        collect_governed_child_turn(_stream_trip_no_terminal(), missing_tool_streak_cap=4)
+    )
+    assert status == "failed"
+    assert trip == "child_llm_missing_tool_streak_exhausted"

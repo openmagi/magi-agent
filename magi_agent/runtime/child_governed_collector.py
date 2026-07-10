@@ -231,6 +231,15 @@ async def collect_governed_child_turn(
                 text_chunks.append(delta)
 
     if terminal is None:
+        # Fix F defensive: if the missing-tool guard tripped and signalled
+        # ``cancel``, the engine may end the stream WITHOUT a terminal
+        # EngineResult. Preserve the typed trip reason (a failed turn) rather
+        # than raising the generic ValueError that the caller would flatten to
+        # ``child_turn_error``, losing the whole point of the guard.
+        if trip_reason is not None:
+            summary = "".join(text_chunks)[:_MAX_SUMMARY_CHARS]
+            evidence_refs = _public_evidence_refs(list(raw_refs))
+            return summary, evidence_refs, "failed", trip_reason
         raise ValueError(
             "collect_governed_child_turn: stream ended with no terminal EngineResult"
         )

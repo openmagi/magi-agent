@@ -157,7 +157,10 @@ class _LiveLocalCronTurnRunner:
         )
 
         try:
-            summary, _evidence_refs, _status = await collect_governed_child_turn(
+            # The missing-tool streak guard is child-runner-only; this cron
+            # caller does not opt in (cap defaults to 0), so trip_reason is
+            # always None here.
+            summary, _evidence_refs, _status, _trip = await collect_governed_child_turn(
                 stream_factory(ctx)
             )
         except Exception:  # noqa: BLE001 - any engine error is a failed cron turn
