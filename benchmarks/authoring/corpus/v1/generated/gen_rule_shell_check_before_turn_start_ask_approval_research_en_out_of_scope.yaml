@@ -1,0 +1,24 @@
+schema_version: 1
+id: gen_rule_shell_check_before_turn_start_ask_approval_research_en_out_of_scope
+flow: single_rule
+archetype: out_of_scope
+language: en
+turn_budget: 4
+generated:
+  slots:
+    quirk: out_of_scope
+    kind: shell_check
+    firesAt: before_turn_start
+    action: ask_approval
+    scope: research
+  generator_version: 1
+  paraphrase_model: null
+turns:
+- say: email me a weekly summary of everything the bot did
+- say: so a rule can't schedule outbound email?
+save: none
+oracle:
+  expect_ready: false
+  forbidden_strings: default
+  never_persists: true
+  no_question_loop: true

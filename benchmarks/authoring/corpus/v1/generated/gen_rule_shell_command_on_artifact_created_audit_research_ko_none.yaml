@@ -1,0 +1,40 @@
+schema_version: 1
+id: gen_rule_shell_command_on_artifact_created_audit_research_ko_none
+flow: single_rule
+archetype: happy_path
+language: ko
+turn_budget: 4
+generated:
+  slots:
+    quirk: none
+    kind: shell_command
+    firesAt: on_artifact_created
+    action: audit
+    scope: research
+  generator_version: 1
+  paraphrase_model: null
+seed_draft:
+  what:
+    payload:
+      source: inline
+      inline: echo audit
+turns:
+- say: 감사용 셸 후크를 실행해줘
+  answers:
+    q_what.kind: shell_command
+    q_scope: research
+    q_firesAt: on_artifact_created
+save: envelope
+oracle:
+  expect_ready: true
+  max_turns_to_ready: 1
+  draft:
+    what.kind: shell_command
+    firesAt: on_artifact_created
+    action: audit
+    scope: research
+  persisted:
+    rule_valid_and_clean: true
+    policy_intent_is_first_utterance: true
+    no_orphan_rules: true
+  forbidden_strings: default

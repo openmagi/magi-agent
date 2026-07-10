@@ -10,14 +10,17 @@ from pathlib import Path
 
 import pytest
 
-_HANDWRITTEN = (
+_CORPUS_V1 = (
     Path(__file__).resolve().parents[2]
     / "benchmarks"
     / "authoring"
     / "corpus"
     / "v1"
-    / "handwritten"
 )
+_HANDWRITTEN = _CORPUS_V1 / "handwritten"
+#: U5 oracle-first generator output. Replayed through THIS existing T1 module
+#: (design 12 U5: no new CI entry) so every generated scenario is a CI gate.
+_GENERATED = _CORPUS_V1 / "generated"
 
 
 def _runtime():
@@ -38,13 +41,31 @@ def _runtime():
     )
 
 
-def _scenario_files() -> list[Path]:
+def _handwritten_files() -> list[Path]:
     return sorted(p for p in _HANDWRITTEN.glob("*.yaml"))
 
 
+def _generated_files() -> list[Path]:
+    return sorted(p for p in _GENERATED.glob("*.yaml")) if _GENERATED.is_dir() else []
+
+
+def _scenario_files() -> list[Path]:
+    # Both corpora replay through this ONE module (design 12 U5: the generated
+    # corpus adds no new CI entry).
+    return _handwritten_files() + _generated_files()
+
+
 def test_corpus_dir_has_scenarios() -> None:
-    files = _scenario_files()
+    files = _handwritten_files()
     assert len(files) >= 12, f"expected >=12 handwritten scenarios, got {len(files)}"
+
+
+def test_generated_corpus_present() -> None:
+    files = _generated_files()
+    assert len(files) >= 40, (
+        f"expected the U5 generated corpus (>=40 pairwise scenarios), got "
+        f"{len(files)} — run `python -m benchmarks.authoring.gen`"
+    )
 
 
 def test_loader_and_lint_all_files() -> None:
