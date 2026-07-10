@@ -25,7 +25,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Switch } from "@/components/ui/_ds";
+import { Switch, Skeleton } from "@/components/ui/_ds";
 import { ShieldCheck, Wrench, Layers, Webhook, Plus, Gauge, Drama } from "lucide-react";
 import {
   useCustomize,
@@ -641,8 +641,14 @@ export function CustomizeHub({
 
   if (loading) {
     return (
-      <div className="flex h-64 items-center justify-center text-sm text-secondary">
-        Loading customize catalog…
+      <div className="space-y-3" aria-busy="true" aria-label="Loading customize catalog">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-4 w-72" />
+        <div className="mt-4 space-y-2">
+          <Skeleton className="h-14 w-full" />
+          <Skeleton className="h-14 w-full" />
+          <Skeleton className="h-14 w-full" />
+        </div>
       </div>
     );
   }
