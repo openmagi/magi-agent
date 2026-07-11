@@ -374,14 +374,39 @@ def run_cli(
     if judge and tier == "t3":
         from benchmarks.authoring.judge import annotate_with_judge
 
+        # Resolve a real model factory for the advisory judge. Reuse the SAME
+        # production factory the live tiers + preflight already validated
+        # (_build_criterion_model_factory), so an operator who can run T2/T3 at
+        # all gets a working judge with no extra config. --usersim-model, when
+        # given, overrides the model id for the cheap judge pass.
         judge_factory = None
-        if usersim_model:
-            # Production: resolve a real cheap-model factory. For tests this is
-            # never reached (judge=False in tests).
-            pass  # pragma: no cover
+        try:
+            from magi_agent.cli import wiring
+
+            base_factory = getattr(wiring, "_build_criterion_model_factory", None)
+            if base_factory is not None:
+                if usersim_model:
+                    import os as _os
+
+                    def judge_factory() -> Any:  # type: ignore[misc]
+                        prev = _os.environ.get("MAGI_EGRESS_CRITIC_MODEL")
+                        _os.environ["MAGI_EGRESS_CRITIC_MODEL"] = usersim_model
+                        try:
+                            return base_factory()()
+                        finally:
+                            if prev is None:
+                                _os.environ.pop("MAGI_EGRESS_CRITIC_MODEL", None)
+                            else:
+                                _os.environ["MAGI_EGRESS_CRITIC_MODEL"] = prev
+                else:
+                    judge_factory = base_factory()
+        except Exception:  # noqa: BLE001 - judge is advisory; never break the run
+            judge_factory = None
 
         for r in results:
-            ann = annotate_with_judge(r, judge_factory=judge_factory or (lambda: None))  # type: ignore
+            ann = annotate_with_judge(
+                r, judge_factory=judge_factory or (lambda: None)
+            )
             judge_annotations[r.scenario_id] = ann
 
     # Promote failures
