@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from magi_agent.config.env import is_egress_gate_enabled
-from magi_agent.config.flags import flag_profile_bool, flag_str
+from magi_agent.config.flags import flag_bool, flag_int, flag_profile_bool, flag_str
 from magi_agent.evidence.gate1a_egress_correlation import GATE1A_EGRESS_CORRELATION_MODE, GATE1A_EGRESS_TELEMETRY_SOURCE, Gate1AEgressCorrelationContext
 from magi_agent.evidence.observed_egress import ObservedEgressEvidence, get_observed_egress_evidence_provider
 from magi_agent.gates.gate1a_readonly_tools import Gate1AReadOnlyToolBundle, Gate1AReadOnlyToolConfig, build_gate1a_readonly_tool_bundle
@@ -492,6 +492,13 @@ async def _run_live_chat_runner(
             canary_request_digest=request.headers.get("x-gate5b-canary-request-digest"),
             gate1a_bundle=gate1a_bundle,
             request_headers=request.headers,
+            slash_skill_activation_enabled=flag_bool(
+                "MAGI_HOSTED_SLASH_SKILL_ACTIVATION_ENABLED"
+            ),
+            slash_skill_workspace_root=_gate5b_full_toolhost_workspace_root(),
+            slash_skill_body_max_chars=(
+                flag_int("MAGI_SLASH_SKILL_BODY_MAX_CHARS") or 32000
+            ),
         )
     except (ValidationError, ValueError, TypeError):
         return _fallback_response(
@@ -781,18 +788,33 @@ async def _run_live_chat_runner(
                     # registered.
                     _transcript_session_id = _shadow_session_id(generation)
                     _transcript_turn_id = generation.turn.turn_id
+                    _turn_start_record: dict[str, object] = {
+                        "type": "turn_start",
+                        "prompt": getattr(
+                            runner_input, "sanitized_user_input", None
+                        ),
+                        "provider": getattr(runner_input, "provider_label", None),
+                        "model": getattr(runner_input, "model_label", None),
+                        "session_reused": session_reused,
+                        "session_event_count": int(session_event_count or 0),
+                        "seeded_message_count": seeded_message_count,
+                    }
+                    # A3: surface slash-to-skill activation on the turn_start
+                    # record so observability.db and the dashboard can count
+                    # activations and misses. Absent field => key omitted.
+                    _activated = generation.turn.activated_skill
+                    if _activated is not None:
+                        _turn_start_record["activated_skill"] = (
+                            {"miss": True, "invoked_token": _activated.invoked_token}
+                            if _activated.miss
+                            else {
+                                "skill": _activated.skill_name,
+                                "source": _activated.source,
+                                "truncated": _activated.truncated,
+                            }
+                        )
                     emit_transcript_record(
-                        {
-                            "type": "turn_start",
-                            "prompt": getattr(
-                                runner_input, "sanitized_user_input", None
-                            ),
-                            "provider": getattr(runner_input, "provider_label", None),
-                            "model": getattr(runner_input, "model_label", None),
-                            "session_reused": session_reused,
-                            "session_event_count": int(session_event_count or 0),
-                            "seeded_message_count": seeded_message_count,
-                        },
+                        _turn_start_record,
                         _transcript_session_id,
                         _transcript_turn_id,
                     )
