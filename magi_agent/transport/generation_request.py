@@ -11,6 +11,8 @@ names for compatibility.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import logging
+from pathlib import Path
 import re
 import time
 import uuid
@@ -22,6 +24,11 @@ from magi_agent.gates.gate5b_full_toolhost import Gate5BFullToolBundle
 from magi_agent.runtime.message_builder import _collect_image_blocks
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 from magi_agent.runtime.session_identity import session_key_from_headers
+from magi_agent.runtime.skill_slash import (
+    SkillSlashActivation,
+    SkillSlashMiss,
+    resolve_skill_slash,
+)
 from magi_agent.runtime.user_visible_model_routing import (
     _select_user_visible_model_route,
 )
@@ -45,6 +52,8 @@ from magi_agent.transport.chat_shared import (
 # alias; the Gate5B4C3* class name remains until the physical rename of the
 # contract module lands (wire schemaVersion is unchanged either way).
 UserVisibleGenerationRequest = Gate5B4C3ShadowGenerationRequest
+
+_logger = logging.getLogger(__name__)
 
 _APP_CHANNEL_HISTORY_SCHEMA = "openmagi.app_channel_history.v1"
 
@@ -79,6 +88,56 @@ _LEGACY_IDENTITY_PATTERNS: tuple[tuple[re.Pattern[str], str, str], ...] = (
 _MODEL_VISIBLE_CONTEXT_MAX_CHARS = 1_000_000
 
 
+def _resolve_activated_skill_payload(
+    user_text: str,
+    *,
+    workspace_root: Path,
+    max_body_chars: int,
+) -> dict[str, object] | None:
+    """Resolve a leading /skill-name to a contract-shaped activatedSkill payload.
+
+    Fail-open: any resolver error is swallowed (logged) and None is returned so
+    a broken skill file can never break chat. Returns None for a non-slash
+    message or a reserved command word.
+    """
+    try:
+        resolved = resolve_skill_slash(
+            user_text,
+            workspace_root=workspace_root,
+            max_body_chars=max_body_chars,
+        )
+    except Exception:  # noqa: BLE001 - fail-open by design
+        _logger.warning("slash-to-skill resolution failed; proceeding without activation", exc_info=True)
+        return None
+    if resolved is None:
+        return None
+    if isinstance(resolved, SkillSlashMiss):
+        return {
+            "skillName": "",
+            "invokedToken": resolved.invoked_token,
+            "sourcePath": "",
+            "source": "",
+            "body": "",
+            "bodyDigest": _sha256_digest(""),
+            "truncated": False,
+            "miss": True,
+            "nearMatches": list(resolved.near_matches),
+        }
+    if isinstance(resolved, SkillSlashActivation):
+        return {
+            "skillName": resolved.skill_name,
+            "invokedToken": resolved.invoked_token,
+            "sourcePath": resolved.source_path,
+            "source": resolved.source,
+            "body": resolved.body,
+            "bodyDigest": _sha256_digest(resolved.body),
+            "truncated": resolved.truncated,
+            "miss": False,
+            "nearMatches": [],
+        }
+    return None
+
+
 def _build_user_visible_generation_request(
     *,
     runtime: OpenMagiRuntime,
@@ -89,6 +148,9 @@ def _build_user_visible_generation_request(
     canary_request_digest: str | None = None,
     gate1a_bundle: Gate1AReadOnlyToolBundle | Gate5BFullToolBundle | None = None,
     request_headers: Mapping[str, str] | None = None,
+    slash_skill_activation_enabled: bool = False,
+    slash_skill_workspace_root: Path | None = None,
+    slash_skill_body_max_chars: int = 32000,
 ) -> UserVisibleGenerationRequest:
     if not isinstance(payload, Mapping):
         raise ValueError("chat payload must be an object")
@@ -172,6 +234,22 @@ def _build_user_visible_generation_request(
             {"mediaType": b["source"]["media_type"], "data": b["source"]["data"]}
             for b in image_blocks
         ]
+    # Slash-to-skill activation (A3). Resolved from the RAW user text (which
+    # still carries the leading slash), not the sanitized/identity-wrapped text.
+    # The user message is never modified; only the optional activatedSkill field
+    # is added, which the adapter injects into the system-instruction channel.
+    if (
+        slash_skill_activation_enabled
+        and slash_skill_workspace_root is not None
+        and user_text.lstrip().startswith("/")
+    ):
+        activated_skill = _resolve_activated_skill_payload(
+            user_text,
+            workspace_root=slash_skill_workspace_root,
+            max_body_chars=slash_skill_body_max_chars,
+        )
+        if activated_skill is not None:
+            turn_payload["activatedSkill"] = activated_skill
     redacted_byte_count = len(sanitized_text.encode("utf-8")) + sum(
         len(str(item["sanitizedText"]).encode("utf-8"))
         for item in history_messages

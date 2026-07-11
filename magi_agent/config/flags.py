@@ -4590,6 +4590,36 @@ FLAGS: tuple[FlagSpec, ...] = (
             "registered) overrides this flag to OFF fleet-wide when set."
         ),
     ),
+    # --- Hosted slash-to-skill activation -----------------------------------
+    _b(
+        "MAGI_HOSTED_SLASH_SKILL_ACTIVATION_ENABLED",
+        default=False,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "When ON, a hosted chat message that begins with /<installed-skill-"
+            "name> activates that skill: its SKILL.md body is injected as a "
+            "system-instruction block for the turn so the model holds the skill "
+            "without having to call SkillLoader first. The user message is never "
+            "modified. Default OFF; canary-pin per bot, flip fleet-wide after "
+            "telemetry. Resolution is fail-open (a broken skill file never breaks "
+            "chat)."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_SLASH_SKILL_BODY_MAX_CHARS",
+        default=32000,
+        scope="hosted",
+        stage="stage1",
+        summary=(
+            "Character cap on the SKILL.md body injected by hosted slash-to-skill "
+            "activation (MAGI_HOSTED_SLASH_SKILL_ACTIVATION_ENABLED). Fits the "
+            "typical custom skill while staying below the 64000-char SkillLoader "
+            "cap; a truncated body is marked and the model is told to reload the "
+            "full skill with SkillLoader."
+        ),
+        kind="int",
+    ),
 )
 
 

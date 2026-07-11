@@ -235,15 +235,26 @@ def resolve_skill_slash(
     source: str = str(body_dict.get("source", "workspace"))
 
     # Strip frontmatter from body (the loader does not strip it for us).
-    _, body_stripped = _parse_frontmatter_lazy(raw_body)
+    frontmatter, body_stripped = _parse_frontmatter_lazy(raw_body)
 
     truncated = False
     if len(body_stripped) > max_body_chars:
         body_stripped = body_stripped[:max_body_chars]
         truncated = True
 
-    # Canonical skill name: frontmatter name if available, else dir name.
-    skill_name = best.fm_name if best.fm_name else best.dir_name
+    # Canonical skill name: always the frontmatter name when the skill declares
+    # one, regardless of which spelling the user typed, so the same skill never
+    # reports two different names across resolution rungs. A rung-1 (directory)
+    # match reuses the frontmatter already parsed above (no extra file read);
+    # falls back to the frontmatter name captured during scanning, then the
+    # directory name.
+    fm_name_from_body = frontmatter.get("name") if isinstance(frontmatter, dict) else None
+    canonical_fm = (
+        str(fm_name_from_body).strip()
+        if isinstance(fm_name_from_body, str) and str(fm_name_from_body).strip()
+        else best.fm_name
+    )
+    skill_name = canonical_fm if canonical_fm else best.dir_name
 
     return SkillSlashActivation(
         skill_name=skill_name,
