@@ -405,6 +405,7 @@ def test_every_profile_listed_registry_flag_is_enabled(
 # block in scripts/dogfood-full-on.env; this dict is the machine-checked source
 # of truth for the completeness gate below.
 _INTENTIONALLY_NOT_IN_FULL_PROFILE: dict[str, str] = {
+    "MAGI_GOAL_NUDGE_ENABLED": "legacy self-check nudge, SUPERSEDED by the ambient goal loop (F1-B strict default-OFF); reviving it caused response duplication when the goal-loop toggle was off",
     "MAGI_VERIFY_ANSWER_QUALITY": "LLM-judge block gate; enable behind a measured false-positive pass",
     "MAGI_VERIFY_CLAIM_CITATION": "LLM-judge block gate; enable behind a measured false-positive pass",
     "MAGI_VERIFY_COMPLETION_EVIDENCE": "LLM-judge block gate; enable behind a measured false-positive pass",

@@ -820,3 +820,37 @@ class TestNudgeRunError:
         assert terminal.error is not None and "exploded" in terminal.error, (
             f"Expected error message to contain 'exploded', got {terminal.error!r}"
         )
+
+
+class TestGoalNudgeResponseClear:
+    """F1-A: the nudge re-invocation must emit a response_clear boundary so the
+    nudged attempt does not concatenate its full answer onto the prior attempt
+    (the response-duplication incident)."""
+
+    def test_nudge_emits_response_clear_between_attempts(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Two attempts: each streams a full answer, then a nudge fires between.
+        runner = FakeRunner(
+            events_per_call=[
+                [{"type": "text_delta", "text": "answer A"}],
+                [{"type": "text_delta", "text": "answer B"}],
+                [],
+            ]
+        )
+        _patch_lazy_deps(monkeypatch, runner)
+        nudge = GoalNudge(goal="keep going", mode="grind", max_nudges=1, required_evidence=())
+        driver, _ = _make_driver(runner, goal_nudge=nudge)
+        items = _run_drive(driver)
+
+        # A response_clear with the nudge reason was emitted before the re-invoke.
+        clears = [
+            it
+            for it in items
+            if getattr(it, "payload", None)
+            and it.payload.get("type") == "response_clear"
+            and it.payload.get("reason") == "goal_nudge_continuation"
+        ]
+        assert len(clears) == 1, [getattr(it, "payload", it) for it in items]
+        # The nudge did re-invoke (2 model calls: initial + 1 nudge).
+        assert len(runner.calls) == 2
