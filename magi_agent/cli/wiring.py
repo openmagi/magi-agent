@@ -383,6 +383,7 @@ def build_headless_runtime(
     session_service_factory: "Callable[[str], object] | None" = None,
     auto_continue_allowed: bool = True,
     no_tool_finalizer_allowed: bool = True,
+    pre_final_llm_gates_allowed: bool = True,
 ) -> HeadlessRuntime:
     """Construct the complete headless dependency set.
 
@@ -609,6 +610,13 @@ def build_headless_runtime(
         # pre-final. None unless MAGI_EGRESS_GATE_ENABLED + custom-rules flag →
         # llm rules stay inert (fail-open) and the turn is byte-identical.
         criterion_model_factory=_build_criterion_model_factory(),
+        # F2-A containment: a contained child turn (depth>0) does NOT run the
+        # pre-final LLM criterion gate chain (it would false-fail the child's
+        # already-streamed correct answer as child_llm_collector_status_failed
+        # and burn 1-6 critic calls). Same containment family as
+        # no_tool_finalizer_allowed / auto_continue_allowed. Default True keeps
+        # top-level turns byte-identical.
+        pre_final_llm_gates_allowed=pre_final_llm_gates_allowed,
         # PR-C goal-loop judge factory (clean-break "is the objective complete?"
         # check). The factory only fires when PR-B published a GoalLoopPolicy
         # for the turn; absent that, this argument is dormant and streaming

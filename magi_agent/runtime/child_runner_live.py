@@ -1329,6 +1329,14 @@ class RealLocalChildRunner:
             # return (child_governed_collector); forcing chat text would corrupt
             # it (same containment reason as auto_continue_allowed, see #1329).
             no_tool_finalizer_allowed=False,
+            # F2-A containment: a child does NOT run the pre-final LLM criterion
+            # gate chain. A gate blocking the child's already-streamed correct
+            # answer turns a valid sub-answer into a false
+            # child_llm_collector_status_failed (the incident) and burns 1-6
+            # sequential critic calls per child (the 179-238s child latency). The
+            # parent's own pre-final gates still audit the composed user-facing
+            # answer, so no honesty is lost.
+            pre_final_llm_gates_allowed=False,
         )
 
         # --- Drive the governed turn + collect summary + evidence_refs -------
