@@ -368,10 +368,12 @@ def run_cli(
                 old_customize = os.environ.get("MAGI_CUSTOMIZE")
                 old_nl = os.environ.get("MAGI_CUSTOMIZE_NL_INTERACTIVE_ENABLED")
                 old_search = _discovery.default_search_bases
-                os.environ["MAGI_CUSTOMIZE"] = str(tmp_path / "customize.json")
-                os.environ["MAGI_CUSTOMIZE_NL_INTERACTIVE_ENABLED"] = "1"
-                _discovery.default_search_bases = lambda: [tmp_path]
                 try:
+                    # Set the isolation state INSIDE the try so the finally
+                    # restore always matches, even if an assignment raised.
+                    os.environ["MAGI_CUSTOMIZE"] = str(tmp_path / "customize.json")
+                    os.environ["MAGI_CUSTOMIZE_NL_INTERACTIVE_ENABLED"] = "1"
+                    _discovery.default_search_bases = lambda: [tmp_path]
                     result = run_scenario(
                         unit_sc, runtime, token=token, tier=tier, user_sim=user_sim
                     )
@@ -443,10 +445,16 @@ def run_cli(
         except Exception:  # noqa: BLE001 - judge is advisory; never break the run
             judge_factory = None
 
+        # annotate_with_judge is internally fail-soft, but guard the loop too so
+        # a judge annotation can NEVER abort the run (which would skip
+        # write_report). Per-unit results are already flushed to disk above.
         for r in results:
-            ann = annotate_with_judge(
-                r, judge_factory=judge_factory or (lambda: None)
-            )
+            try:
+                ann = annotate_with_judge(
+                    r, judge_factory=judge_factory or (lambda: None)
+                )
+            except Exception:  # noqa: BLE001 - judge is advisory; never break the run
+                continue
             judge_annotations[r.scenario_id] = ann
 
     # Promote failures
