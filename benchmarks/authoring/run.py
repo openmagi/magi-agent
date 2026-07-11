@@ -304,70 +304,110 @@ def run_cli(
     budget_stopped = False
     estimated_spend = 0.0
 
+    # T3 fans each scenario out into one work-unit per persona, each driven by a
+    # live PersonaUserSim. T1/T2 have exactly one unit per scenario, canned-replay
+    # driven (user_sim=None). The unit id is the scenario id, suffixed with the
+    # persona for T3 so per-persona results / transcripts don't collide.
+    from dataclasses import replace as _replace
+
+    from benchmarks.authoring.usersim import PersonaUserSim
+
+    persona_names: tuple[str, ...] = ()
+    persona_factory = None
+    if tier == "t3":
+        if personas:
+            persona_names = tuple(
+                p.strip() for p in personas.split(",") if p.strip()
+            )
+        else:
+            persona_names = _DEFAULT_PERSONAS
+        persona_factory = _resolve_persona_factory(usersim_model)
+
+    def _work_units(sc: Scenario):
+        """Yield (unit_id, scenario, user_sim) tuples for one scenario."""
+        if tier == "t3":
+            for persona in persona_names:
+                unit_id = f"{sc.id}::{persona}"
+                yield (
+                    unit_id,
+                    _replace(sc, id=unit_id),
+                    PersonaUserSim(persona=persona, scripted_llm=persona_factory),
+                )
+        else:
+            yield (sc.id, sc, None)
+
     for sc in scenarios:
-        if budget_usd is not None and estimated_spend >= budget_usd:
-            budget_stopped = True
+        if budget_stopped:
             break
 
         # Apply turn_cap by clipping the scenario's budget
         if turn_cap is not None:
             sc = _cap_turns(sc, turn_cap)
 
-        # Per-scenario isolation. MUST mirror the T1 pytest fixture exactly
-        # (test_t1_golden_corpus.py), or the CLI measures a DIFFERENT, dirtier
-        # world than CI and reports spurious failures:
-        #   1. tmp MAGI_CUSTOMIZE store,
-        #   2. NL interactive flag on (route A's authoring path),
-        #   3. the dashboard-authored sidecar redirected to tmp. Without this,
-        #      from-plan producers read/write the REAL host ~/.magi sidecar and
-        #      leak state ACROSS scenarios (a prior run's domainAllowlist bleeds
-        #      into the next), which is exactly the host-global-sidecar hazard
-        #      the harness exists to keep out of its own measurements.
-        import tempfile
+        for unit_id, unit_sc, user_sim in _work_units(sc):
+            if budget_usd is not None and estimated_spend >= budget_usd:
+                budget_stopped = True
+                break
 
-        import magi_agent.packs.discovery as _discovery
+            # Per-scenario isolation. MUST mirror the T1 pytest fixture exactly
+            # (test_t1_golden_corpus.py), or the CLI measures a DIFFERENT, dirtier
+            # world than CI and reports spurious failures:
+            #   1. tmp MAGI_CUSTOMIZE store,
+            #   2. NL interactive flag on (route A's authoring path),
+            #   3. the dashboard-authored sidecar redirected to tmp. Without this,
+            #      from-plan producers read/write the REAL host ~/.magi sidecar and
+            #      leak state ACROSS scenarios (a prior run's domainAllowlist bleeds
+            #      into the next), which is exactly the host-global-sidecar hazard
+            #      the harness exists to keep out of its own measurements.
+            import tempfile
 
-        with tempfile.TemporaryDirectory() as tmpd:
-            tmp_path = Path(tmpd)
-            old_customize = os.environ.get("MAGI_CUSTOMIZE")
-            old_nl = os.environ.get("MAGI_CUSTOMIZE_NL_INTERACTIVE_ENABLED")
-            old_search = _discovery.default_search_bases
-            os.environ["MAGI_CUSTOMIZE"] = str(tmp_path / "customize.json")
-            os.environ["MAGI_CUSTOMIZE_NL_INTERACTIVE_ENABLED"] = "1"
-            _discovery.default_search_bases = lambda: [tmp_path]
-            try:
-                result = run_scenario(sc, runtime, token=token, tier=tier)
-            except Exception as exc:  # noqa: BLE001
-                result = RunResult(
-                    scenario_id=sc.id,
-                    passed=False,
-                    turns=0,
-                    first_divergence={"oracle": "runner_exception", "expected": "no exception", "got": str(exc)},
-                )
-            finally:
-                _discovery.default_search_bases = old_search
-                if old_customize is not None:
-                    os.environ["MAGI_CUSTOMIZE"] = old_customize
-                elif "MAGI_CUSTOMIZE" in os.environ:
-                    del os.environ["MAGI_CUSTOMIZE"]
-                if old_nl is not None:
-                    os.environ["MAGI_CUSTOMIZE_NL_INTERACTIVE_ENABLED"] = old_nl
-                elif "MAGI_CUSTOMIZE_NL_INTERACTIVE_ENABLED" in os.environ:
-                    del os.environ["MAGI_CUSTOMIZE_NL_INTERACTIVE_ENABLED"]
+            import magi_agent.packs.discovery as _discovery
 
-        results.append(result)
+            with tempfile.TemporaryDirectory() as tmpd:
+                tmp_path = Path(tmpd)
+                old_customize = os.environ.get("MAGI_CUSTOMIZE")
+                old_nl = os.environ.get("MAGI_CUSTOMIZE_NL_INTERACTIVE_ENABLED")
+                old_search = _discovery.default_search_bases
+                os.environ["MAGI_CUSTOMIZE"] = str(tmp_path / "customize.json")
+                os.environ["MAGI_CUSTOMIZE_NL_INTERACTIVE_ENABLED"] = "1"
+                _discovery.default_search_bases = lambda: [tmp_path]
+                try:
+                    result = run_scenario(
+                        unit_sc, runtime, token=token, tier=tier, user_sim=user_sim
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    result = RunResult(
+                        scenario_id=unit_id,
+                        passed=False,
+                        turns=0,
+                        first_divergence={"oracle": "runner_exception", "expected": "no exception", "got": str(exc)},
+                    )
+                finally:
+                    _discovery.default_search_bases = old_search
+                    if old_customize is not None:
+                        os.environ["MAGI_CUSTOMIZE"] = old_customize
+                    elif "MAGI_CUSTOMIZE" in os.environ:
+                        del os.environ["MAGI_CUSTOMIZE"]
+                    if old_nl is not None:
+                        os.environ["MAGI_CUSTOMIZE_NL_INTERACTIVE_ENABLED"] = old_nl
+                    elif "MAGI_CUSTOMIZE_NL_INTERACTIVE_ENABLED" in os.environ:
+                        del os.environ["MAGI_CUSTOMIZE_NL_INTERACTIVE_ENABLED"]
 
-        # Write per-scenario artefacts immediately (so partial runs are triageable)
-        sc_dir = run_dir / "scenario" / sc.id
-        _write_transcript(sc_dir, result)
-        _write_result(sc_dir, result)
+            results.append(result)
 
-        # Budget estimation (chars/4 tokens × rough cost)
-        token_est = sum(
-            len(json.dumps(e.get("response") or {}, ensure_ascii=False)) // 4
-            for e in result.transcript
-        )
-        estimated_spend += token_est * 0.000001  # rough $1/1M token estimate
+            # Write per-unit artefacts immediately (so partial runs are triageable).
+            # The unit id (scenario id, ``::persona``-suffixed for T3) keeps the
+            # per-persona transcript / result dirs from colliding.
+            sc_dir = run_dir / "scenario" / unit_id
+            _write_transcript(sc_dir, result)
+            _write_result(sc_dir, result)
+
+            # Budget estimation (chars/4 tokens × rough cost)
+            token_est = sum(
+                len(json.dumps(e.get("response") or {}, ensure_ascii=False)) // 4
+                for e in result.transcript
+            )
+            estimated_spend += token_est * 0.000001  # rough $1/1M token estimate
 
     # Judge annotations (T3 + --judge)
     judge_annotations: dict[str, Any] = {}
@@ -449,6 +489,45 @@ def _cap_turns(scenario: Scenario, cap: int) -> Scenario:
     from dataclasses import replace
 
     return replace(scenario, turn_budget=min(scenario.turn_budget, cap))
+
+
+#: Default persona set for T3 when --personas is not given.
+_DEFAULT_PERSONAS = ("cooperative", "corrective", "confused", "adversarial")
+
+
+def _resolve_persona_factory(usersim_model: str | None):
+    """Resolve the persona live-model factory from the SAME production wiring the
+    judge uses (``_build_criterion_model_factory``).
+
+    Mirrors the judge factory resolution in :func:`run_cli`: ``--usersim-model``,
+    when given, overrides the model id via ``MAGI_EGRESS_CRITIC_MODEL`` for the
+    persona pass. Returns a ``() -> model`` factory, or ``None`` when the
+    production factory is absent (persona then fails soft to empty utterances).
+    """
+    try:
+        from magi_agent.cli import wiring
+
+        base_factory = getattr(wiring, "_build_criterion_model_factory", None)
+        if base_factory is None:
+            return None
+        if usersim_model:
+            import os as _os
+
+            def _persona_factory() -> Any:
+                prev = _os.environ.get("MAGI_EGRESS_CRITIC_MODEL")
+                _os.environ["MAGI_EGRESS_CRITIC_MODEL"] = usersim_model
+                try:
+                    return base_factory()()
+                finally:
+                    if prev is None:
+                        _os.environ.pop("MAGI_EGRESS_CRITIC_MODEL", None)
+                    else:
+                        _os.environ["MAGI_EGRESS_CRITIC_MODEL"] = prev
+
+            return _persona_factory
+        return base_factory()
+    except Exception:  # noqa: BLE001 - fail soft; persona is not the critical path
+        return None
 
 
 # ---------------------------------------------------------------------------

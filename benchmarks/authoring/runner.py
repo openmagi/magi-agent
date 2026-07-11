@@ -92,8 +92,20 @@ def run_scenario(
     *,
     token: str,
     tier: str = "t1",
+    user_sim: Any = None,
 ) -> RunResult:
-    """Execute one scenario and return a RunResult with first_divergence."""
+    """Execute one scenario and return a RunResult with first_divergence.
+
+    When ``user_sim`` is None (the default, used by T0/T1) the loop replays the
+    scenario's canned ``turns`` literally — byte-identical to the pre-UserSim
+    behaviour. When a ``user_sim`` (a :class:`~benchmarks.authoring.usersim.UserSim`)
+    is provided, the loop is driven by :meth:`UserSim.next_turn`: a ``Stop``
+    ends the turn loop, a ``UserTurn`` supplies ``say``/``answers``. Either way
+    every per-turn invariant, the M4 question-loop tracker, and the final oracle
+    are applied identically, and the transcript entry shape is unchanged.
+    """
+    from benchmarks.authoring.usersim import Stop  # noqa: PLC0415
+
     shim = _MonkeyShim()
     try:
         # T1: inject the scripted compiler. Live tiers leave the factory alone.
@@ -116,13 +128,26 @@ def run_scenario(
         question_history: list[tuple[set[str], str]] = []
 
         turn_index = 0
-        for turn in scenario.turns:
+        # Canned replay iterates scenario.turns; a UserSim produces turns lazily.
+        canned_turns = iter(scenario.turns)
+        while True:
             if turn_index >= scenario.turn_budget:
                 break
-            answers = _resolve_answers(scenario, turn)
-            result = adapter.step(state, say=turn.say, answers=answers)
+            if user_sim is None:
+                turn = next(canned_turns, None)
+                if turn is None:
+                    break
+                say = turn.say
+                answers = _resolve_answers(scenario, turn)
+            else:
+                user_turn = user_sim.next_turn(scenario, transcript)
+                if isinstance(user_turn, Stop):
+                    break
+                say = user_turn.say
+                answers = dict(user_turn.answers or {})
+            result = adapter.step(state, say=say, answers=answers)
             transcript.append(
-                {"turn": turn_index, "say": turn.say, "answers": answers,
+                {"turn": turn_index, "say": say, "answers": answers,
                  "response": result.raw, "http_status": result.http_status}
             )
 
