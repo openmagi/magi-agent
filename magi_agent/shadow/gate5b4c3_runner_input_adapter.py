@@ -8,6 +8,7 @@ from typing import Any, Literal, Self, TypeAlias
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
 from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
+    Gate5B4C3ActivatedSkill,
     Gate5B4C3ModelRoutingSource,
     Gate5B4C3ShadowGenerationAuthorityFlags,
     Gate5B4C3ShadowGenerationImageBlock,
@@ -294,11 +295,21 @@ def build_gate5b4c3_runner_input(
 
     from magi_agent.config.env import model_aware_prompts_enabled
 
+    system_instruction = _build_system_instruction(
+        request,
+        model_aware=model_aware_prompts_enabled(os.environ if env is None else env),
+    )
+    # Slash-to-skill activation (A2). Behavior-inert unless a producer set the
+    # optional activatedSkill field: absent field leaves the instruction
+    # byte-identical. The block rides the trusted system-instruction channel
+    # (never the sanitized user-input channel, which the gates above would drop
+    # for a 19.5KB body carrying URLs or absolute paths), and is intentionally
+    # uncounted in the token budgets, matching the existing convention.
+    if request.turn.activated_skill is not None:
+        system_instruction += _build_skill_activation_block(request.turn.activated_skill)
+
     runner_input = Gate5B4C3RunnerInput(
-        systemInstruction=_build_system_instruction(
-            request,
-            model_aware=model_aware_prompts_enabled(os.environ if env is None else env),
-        ),
+        systemInstruction=system_instruction,
         sanitizedUserInput=sanitized_input,
         sanitizedInputTextDigest=request.turn.sanitized_input_text_digest,
         sanitizedRecentHistory=sanitized_history,
@@ -340,6 +351,50 @@ def _result(
         if runner_input is not None
         else None,
     )
+
+
+def _build_skill_activation_block(activated: Gate5B4C3ActivatedSkill) -> str:
+    """Render the slash-to-skill activation block appended to the system instruction.
+
+    Two shapes (A2, design 4.1): a hit carries the SKILL.md body between markers
+    with a directive to treat it as the active skill for this turn while still
+    satisfying the user's residual request; a miss states honestly that no
+    installed skill matched and offers close names, never inventing the skill.
+    """
+    if activated.miss:
+        lines = [
+            "\n\n[Skill activation]",
+            f'The user message begins with "/{activated.invoked_token}", but no '
+            "installed skill matches that name. Do not pretend the skill exists or "
+            "invent its contents. Say so plainly.",
+        ]
+        if activated.near_matches:
+            names = ", ".join(f'"{name}"' for name in activated.near_matches)
+            lines.append(f"Close installed names you could offer: {names}.")
+        lines.append("You may list installed skills with the SkillLoader tool.")
+        return "\n".join(lines)
+
+    truncated_flag = "true" if activated.truncated else "false"
+    lines = [
+        "\n\n[Skill activation]",
+        f'The user invoked the installed skill "{activated.skill_name}" '
+        f"(directory: {activated.source_path}). The full SKILL.md body follows "
+        "between the markers. Treat it as the active skill instructions and context "
+        "for this turn. The user's message text after the slash command is the "
+        "actual request; satisfy that request using this skill body. If the user "
+        "gave no request text, carry out the skill as written.",
+    ]
+    if activated.truncated:
+        lines.append(
+            "The skill body below is truncated; load the full skill with the "
+            "SkillLoader tool before relying on details near the end."
+        )
+    lines.append(
+        f'<<<SKILL_BODY skill="{activated.skill_name}" truncated="{truncated_flag}">>>'
+    )
+    lines.append(activated.body)
+    lines.append("<<<END_SKILL_BODY>>>")
+    return "\n".join(lines)
 
 
 def _resolved_max_output_tokens(request: Gate5B4C3ShadowGenerationRequest) -> int:

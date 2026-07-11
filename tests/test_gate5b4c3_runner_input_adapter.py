@@ -472,3 +472,113 @@ if loaded:
     )
 
     assert completed.returncode == 0, completed.stderr
+
+
+# --- A2: slash-to-skill activation block injection ------------------------
+
+SKILL_BODY_DIGEST = "sha256:" + "9" * 64
+
+
+def _activated_skill_request(
+    activated_skill: dict[str, object] | None,
+) -> Gate5B4C3ShadowGenerationRequest:
+    """A selected_full_toolhost request, optionally carrying an activatedSkill."""
+    payload = _payload()
+    payload["recipeProfile"] = {
+        **payload["recipeProfile"],
+        "toolsPolicy": "selected_full_toolhost",
+    }
+    payload["policy"] = {
+        **payload["policy"],
+        "toolsDisabled": False,
+        "toolHostDispatchAllowed": True,
+    }
+    if activated_skill is not None:
+        payload["turn"] = {**payload["turn"], "activatedSkill": activated_skill}
+    return Gate5B4C3ShadowGenerationRequest.model_validate(payload)
+
+
+def _hit_activated_skill(**overrides: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "skillName": "stock-multibagger-screening",
+        "invokedToken": "custom-stock-multibagger-screening",
+        "sourcePath": "skills/custom-stock-multibagger-screening/SKILL.md",
+        "source": "workspace",
+        "body": "# Screening skill\nStep 1: gather fundamentals.",
+        "bodyDigest": SKILL_BODY_DIGEST,
+        "truncated": False,
+        "miss": False,
+        "nearMatches": [],
+    }
+    base.update(overrides)
+    return base
+
+
+def test_activation_absent_field_is_byte_identical() -> None:
+    without = build_gate5b4c3_runner_input(_activated_skill_request(None))
+    with_none = build_gate5b4c3_runner_input(_activated_skill_request(None))
+    assert without.status == "accepted"
+    assert without.runner_input is not None
+    assert with_none.runner_input is not None
+    # No producer set the field => instruction carries no activation block.
+    assert "[Skill activation]" not in without.runner_input.system_instruction
+    assert (
+        without.runner_input.system_instruction
+        == with_none.runner_input.system_instruction
+    )
+
+
+def test_activation_hit_appends_delimited_skill_body() -> None:
+    baseline = build_gate5b4c3_runner_input(_activated_skill_request(None))
+    result = build_gate5b4c3_runner_input(
+        _activated_skill_request(_hit_activated_skill())
+    )
+    assert result.status == "accepted"
+    assert result.runner_input is not None
+    assert baseline.runner_input is not None
+    instruction = result.runner_input.system_instruction
+    # Everything before the block is byte-identical to the no-activation case.
+    assert instruction.startswith(baseline.runner_input.system_instruction)
+    assert "[Skill activation]" in instruction
+    assert "stock-multibagger-screening" in instruction
+    assert "skills/custom-stock-multibagger-screening/SKILL.md" in instruction
+    assert '<<<SKILL_BODY skill="stock-multibagger-screening" truncated="false">>>' in instruction
+    assert "Step 1: gather fundamentals." in instruction
+    assert "<<<END_SKILL_BODY>>>" in instruction
+
+
+def test_activation_truncated_hit_flags_and_advises_skillloader() -> None:
+    result = build_gate5b4c3_runner_input(
+        _activated_skill_request(_hit_activated_skill(truncated=True))
+    )
+    assert result.runner_input is not None
+    instruction = result.runner_input.system_instruction
+    assert 'truncated="true"' in instruction
+    assert "load the full skill with the SkillLoader tool" in instruction
+
+
+def test_activation_miss_states_not_installed_with_no_body_marker() -> None:
+    miss = _hit_activated_skill(
+        skillName="",
+        sourcePath="",
+        source="",
+        body="",
+        bodyDigest="sha256:" + "0" * 64,
+        miss=True,
+        nearMatches=["stock-multibagger-screening"],
+    )
+    result = build_gate5b4c3_runner_input(_activated_skill_request(miss))
+    assert result.runner_input is not None
+    instruction = result.runner_input.system_instruction
+    assert "[Skill activation]" in instruction
+    assert "no installed skill matches that name" in instruction
+    assert "stock-multibagger-screening" in instruction
+    assert "SKILL_BODY" not in instruction
+
+
+def test_activation_contract_rejects_oversized_body() -> None:
+    import pytest
+
+    oversized = _hit_activated_skill(body="x" * (128 * 1024 + 1))
+    with pytest.raises(ValueError):
+        _activated_skill_request(oversized)
