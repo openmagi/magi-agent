@@ -59,7 +59,14 @@ def classify_line(line: str, commands: CommandRegistry) -> Submission:
     if stripped.startswith("/"):
         body = stripped[1:]
         name, _, args = body.partition(" ")
-        command = commands.lookup(name) if name else None
+        if name:
+            # Use the shared resolver so ``/custom-<slug>`` resolves the skill
+            # registered under its clean ``<slug>`` name.
+            from magi_agent.cli.headless import resolve_command  # noqa: PLC0415
+
+            command = resolve_command(commands, name)
+        else:
+            command = None
         return Submission(
             kind="command",
             text=line,
