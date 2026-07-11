@@ -156,11 +156,12 @@ def test_full_profile_does_not_force_required_evidence(hermetic_env: None) -> No
     # evidence branch is reached ONLY when a recipe declares it.
     assert _REQUIRED_EVIDENCE_FLAG not in env
     assert read_goal_required_evidence(env) == ()
-    # WS3 itself never SETS the synthetic-nudge flag; MAGI_GOAL_NUDGE_ENABLED was
-    # promoted to profile-aware default-ON (_pb), so its activation now follows
-    # the full-profile default rather than being wired by WS3.
+    # WS3 itself never SETS the synthetic-nudge flag. F1-B demoted
+    # MAGI_GOAL_NUDGE_ENABLED to STRICT default-OFF (the legacy nudge is
+    # superseded by the ambient goal loop; profile-ON revival caused response
+    # duplication), so with the flag unset the legacy nudge stays OFF.
     assert _NUDGE_FLAG not in env
-    assert is_goal_nudge_enabled(env) is True
+    assert is_goal_nudge_enabled(env) is False
 
 
 @pytest.mark.parametrize("profile", ["safe", "off", "minimal", "conservative"])

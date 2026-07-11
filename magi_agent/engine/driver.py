@@ -3393,6 +3393,24 @@ class MagiEngineDriver:
                                 payload=nudge_status_payload,
                                 turn_id=turn_id,
                             )
+                            # F1-A: emit the SAME re-answer boundary as the judge
+                            # continuation (goal_loop_continuation) so the nudged
+                            # re-invocation does not CONCATENATE its full answer
+                            # onto the prior attempt on the wire and in the
+                            # transcript (the response-duplication incident). The
+                            # reducer, frontend, and child collector all reset on
+                            # response_clear; without it the nudge branch was the
+                            # one re-invocation path with no display boundary.
+                            yield RuntimeEvent(
+                                type=_map_event_kind("response_clear"),
+                                payload={
+                                    "type": "response_clear",
+                                    "turnId": turn_id,
+                                    "reason": "goal_nudge_continuation",
+                                },
+                                turn_id=turn_id,
+                            )
+                            emitted_text = ""
                             continue  # re-invoke run_async (genuine new model call)
                     # U4 unified clean-break ladder (design 5.2). Fires AFTER the
                     # legacy goal_nudge branch (above) and BEFORE the final break.

@@ -155,3 +155,30 @@ def test_store_to_env_end_to_end(tmp_path: Path) -> None:
     env = {FACTS_ENV: "1"}
     apply_control_plane_overrides_to_env(env, overrides)
     assert env[FACTS_ENV] == "0"
+
+
+def test_goal_loop_toggle_off_also_pins_legacy_goal_nudge() -> None:
+    # F1-B: turning "Goal nudge" (goal-loop) OFF must ALSO disable the legacy
+    # goal-nudge, so no ambient re-invocation family stays live (the response-
+    # duplication root cause: goal-loop OFF used to REVIVE the legacy nudge).
+    env = {"MAGI_GOAL_LOOP_ENABLED": "1", "MAGI_GOAL_NUDGE_ENABLED": "1"}
+    apply_control_plane_overrides_to_env(env, {"control_plane": {"goal-loop": False}})
+    assert env["MAGI_GOAL_LOOP_ENABLED"] == "0"
+    assert env["MAGI_GOAL_NUDGE_ENABLED"] == "0"
+
+
+def test_goal_loop_toggle_on_pins_both() -> None:
+    env: dict[str, str] = {}
+    apply_control_plane_overrides_to_env(env, {"control_plane": {"goal-loop": True}})
+    assert env["MAGI_GOAL_LOOP_ENABLED"] == "1"
+    assert env["MAGI_GOAL_NUDGE_ENABLED"] == "1"
+
+
+def test_goal_nudge_flag_is_strict_default_off() -> None:
+    # F1-B: the legacy nudge no longer defaults ON under lab; it fires ONLY on an
+    # explicit MAGI_GOAL_NUDGE_ENABLED=1.
+    from magi_agent.config.env import is_goal_nudge_enabled
+
+    assert is_goal_nudge_enabled({}) is False
+    assert is_goal_nudge_enabled({"MAGI_RUNTIME_PROFILE": "lab"}) is False
+    assert is_goal_nudge_enabled({"MAGI_GOAL_NUDGE_ENABLED": "1"}) is True

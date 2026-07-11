@@ -354,7 +354,7 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
-    _pb(
+    _b(
         "MAGI_GOAL_NUDGE_ENABLED",
         summary=(
             "Legacy self-check goal-nudge: a bounded continuation that fires "
@@ -364,10 +364,13 @@ FLAGS: tuple[FlagSpec, ...] = (
             "stronger unified ladder owns finish-the-job whenever the loop is "
             "ON. It remains the escape hatch (and the "
             "MAGI_GOAL_NUDGE_REQUIRED_EVIDENCE reader) for goal-loop-OFF "
-            "operators. Profile-aware default-ON (full/lab; OFF under the "
-            "safe-family); when the nudge is inactive the wiring injects "
-            "goal_nudge=None and the driver behaves byte-identically to "
-            "pre-PR4."
+            "operators. STRICT default-OFF (F1-B): it was profile-aware "
+            "default-ON, so turning the dashboard goal-loop toggle OFF "
+            "(MAGI_GOAL_LOOP_ENABLED=0) REVIVED the legacy nudge and re-invoked "
+            "the model up to max_nudges extra times per turn (response "
+            "duplication). It now fires ONLY when an operator explicitly sets "
+            "MAGI_GOAL_NUDGE_ENABLED=1. When inactive the wiring injects "
+            "goal_nudge=None and the driver behaves byte-identically to pre-PR4."
         ),
     ),
     _pb(

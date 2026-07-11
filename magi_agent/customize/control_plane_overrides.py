@@ -54,6 +54,11 @@ class ControlPlaneBehavior:
     env_var: str
     label: str
     description: str
+    #: Additional env flags pinned to the SAME value as ``env_var`` when this
+    #: behavior is toggled. Used to disable an entire re-invocation family with
+    #: one toggle: the "goal-loop" toggle also pins the legacy goal-nudge so
+    #: turning it OFF cannot leave an ambient re-invocation path live (F1-B).
+    also_env_vars: tuple[str, ...] = ()
 
 
 # Curated, conservative catalog. Each entry maps a stable UI id to the single
@@ -81,6 +86,11 @@ CONTROL_PLANE_BEHAVIORS: tuple[ControlPlaneBehavior, ...] = (
             "Periodically re-injects the active goal so a long turn does not "
             "drift away from what you asked for."
         ),
+        # F1-B: the same toggle also pins the LEGACY goal-nudge, so turning
+        # "Goal nudge" OFF disables every ambient re-invocation family. Without
+        # this, disabling the goal loop revived the legacy nudge (which re-
+        # invoked the model and duplicated the answer).
+        also_env_vars=("MAGI_GOAL_NUDGE_ENABLED",),
     ),
     ControlPlaneBehavior(
         id="tool-synthesis-nudge",
@@ -169,6 +179,11 @@ def apply_control_plane_overrides_to_env(
                 # do not own -- in particular never a safety flag not in the
                 # curated catalog.
                 continue
-            env[behavior.env_var] = "1" if value else "0"
+            projected = "1" if value else "0"
+            env[behavior.env_var] = projected
+            # F1-B: pin any coupled flags to the SAME value (disable a whole
+            # re-invocation family with one toggle).
+            for coupled in behavior.also_env_vars:
+                env[coupled] = projected
     except Exception:  # noqa: BLE001 - fail-soft; a bad file must not break startup
         return

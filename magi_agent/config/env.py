@@ -2413,10 +2413,13 @@ def is_goal_nudge_enabled(env: Mapping[str, str] | None = None) -> bool:
     ``False`` default and the same strict-truthy parser. Imported lazily to
     avoid a config<->flags import cycle.
     """
-    from .flags import flag_profile_bool
+    from .flags import flag_bool
 
     source = os.environ if env is None else env
-    return flag_profile_bool(MAGI_GOAL_NUDGE_ENABLED_ENV, env=source)
+    # F1-B: strict default-OFF (was flag_profile_bool default-ON). The legacy
+    # nudge fires ONLY on an explicit MAGI_GOAL_NUDGE_ENABLED=1, so flipping the
+    # dashboard goal-loop toggle OFF no longer revives it (response duplication).
+    return flag_bool(MAGI_GOAL_NUDGE_ENABLED_ENV, env=source)
 
 
 MAGI_PLAN_LEDGER_DURABLE_ENABLED_ENV = "MAGI_PLAN_LEDGER_DURABLE_ENABLED"
