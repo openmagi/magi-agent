@@ -10,10 +10,10 @@ generated:
     gatedTool: publish_report
     domain: europa.eu
     onUnavailable: ask
-  generator_version: 1
+  generator_version: 2
   paraphrase_model: null
 turns:
-- say: europa.eu 출처가 검증되기 전에는 publish_report 을(를) 막아줘
+- say: europa.eu 출처가 검증되기 전에는 publish_report 을(를) 막아줘. 출처가 검증되지 않으면 승인을 물어봐 줘
 - say: 출처 신뢰도 라벨
 llm_script:
 - '{"assistant_message": "One more detail.", "param_updates": {"gatedTool": "publish_report",

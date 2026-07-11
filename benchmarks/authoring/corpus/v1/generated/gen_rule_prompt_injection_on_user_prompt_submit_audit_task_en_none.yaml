@@ -11,7 +11,7 @@ generated:
     firesAt: on_user_prompt_submit
     action: audit
     scope: task
-  generator_version: 1
+  generator_version: 2
   paraphrase_model: null
 seed_draft:
   what:
