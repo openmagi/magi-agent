@@ -10,7 +10,7 @@ generated:
     gatedTool: send_payment
     domain: fda.gov
     onUnavailable: default
-  generator_version: 1
+  generator_version: 2
   paraphrase_model: null
 turns:
 - say: fda.gov 출처가 검증되기 전에는 send_payment 을(를) 막아줘

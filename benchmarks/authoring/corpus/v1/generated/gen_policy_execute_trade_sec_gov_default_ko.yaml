@@ -10,7 +10,7 @@ generated:
     gatedTool: execute_trade
     domain: sec.gov
     onUnavailable: default
-  generator_version: 1
+  generator_version: 2
   paraphrase_model: null
 turns:
 - say: sec.gov 출처가 검증되기 전에는 execute_trade 을(를) 막아줘

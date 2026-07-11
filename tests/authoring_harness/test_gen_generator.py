@@ -266,3 +266,37 @@ def test_expand_corpus_dedups_and_drops() -> None:
     assert len(out) >= 1
     assert all(o.id.endswith("_pp") for o in out)
     assert len({o.id for o in out}) == len(out)
+
+
+def test_flow_b_ask_slot_utterance_carries_approval_intent() -> None:
+    """oracle-first invariant: when the onUnavailable slot is 'ask', the
+    generated UTTERANCE must express approval intent - otherwise a live compiler
+    (T2/T3) cannot extract it and the plan falls back to the runtime default
+    (deny), while the T1 llm_script silently forces the param and hides the gap.
+    Regression for a real T2 finding (3/3 live failures on ask-slot scenarios).
+    """
+    ask = [s for s in flow_b_matrix() if s.on_unavailable == "ask"]
+    assert ask, "no ask-slot flow-B combos"
+    for slots in ask:
+        sc = derive_scenario(slots)
+        utterance = " ".join(t.say for t in sc.turns).lower()
+        # The oracle demands ask...
+        assert sc.oracle.plan[
+            "gate.what.payload.requireEvidence.onEvidenceUnavailable"
+        ] == "ask"
+        # ...so the utterance must actually ask for it (en OR ko cue).
+        assert ("approval" in utterance or "ask me" in utterance
+                or "승인" in utterance), (slots, utterance)
+
+
+def test_flow_b_default_slot_utterance_has_no_ask_cue() -> None:
+    """The default (deny) slot must NOT leak an approval cue - the runtime
+    default is deny and the utterance should stay clean so the oracle and the
+    utterance still agree."""
+    default = [s for s in flow_b_matrix() if s.on_unavailable != "ask"]
+    assert default
+    for slots in default:
+        sc = derive_scenario(slots)
+        utterance = " ".join(t.say for t in sc.turns).lower()
+        assert "approval" not in utterance and "ask me" not in utterance
+        assert "승인" not in utterance

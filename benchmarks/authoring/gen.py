@@ -41,7 +41,7 @@ from magi_agent.customize.custom_rules import _LEGAL
 #: Corpus/generator version. Additive growth stays here; a breaking DSL change
 #: bumps the corpus to ``v2/`` (design section 8, stage 5).
 CORPUS_VERSION = 1
-GENERATOR_VERSION = 1
+GENERATOR_VERSION = 2
 
 _LANGUAGES = ("en", "ko")
 
@@ -350,7 +350,7 @@ def _derive_flow_b(slots: Slots) -> Scenario:
     domain = slots.domain
     lang = slots.language
     onu = slots.on_unavailable
-    say1 = _flow_b_say(tool, domain, lang)
+    say1 = _flow_b_say(tool, domain, lang, onu)
     say2 = _flow_b_label_say(lang)
 
     import json
@@ -387,10 +387,21 @@ def _derive_flow_b(slots: Slots) -> Scenario:
     )
 
 
-def _flow_b_say(tool: str, domain: str, lang: str) -> str:
+def _flow_b_say(tool: str, domain: str, lang: str, on_unavailable: str = "deny") -> str:
+    # The utterance must CARRY the onUnavailable intent, or a live compiler
+    # (T2/T3) cannot extract it and the plan falls back to the runtime default
+    # (deny). The T1 llm_script can force the param, but that hides the gap -
+    # the utterance and the oracle must agree (oracle-first invariant). `deny`
+    # is the runtime default and needs no explicit clause; `ask` does.
     if lang == "ko":
-        return f"{domain} 출처가 검증되기 전에는 {tool} 을(를) 막아줘"
-    return f"block {tool} until a source from {domain} is verified this session"
+        base = f"{domain} 출처가 검증되기 전에는 {tool} 을(를) 막아줘"
+        if on_unavailable == "ask":
+            return f"{base}. 출처가 검증되지 않으면 승인을 물어봐 줘"
+        return base
+    base = f"block {tool} until a source from {domain} is verified this session"
+    if on_unavailable == "ask":
+        return f"{base}, and if it is not verified ask me for approval instead of blocking"
+    return base
 
 
 def _flow_b_label_say(lang: str) -> str:
