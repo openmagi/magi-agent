@@ -303,6 +303,10 @@ class Gate5B4C3ShadowGenerationHistoryMessage(_Gate5B4C3Model):
 
 
 MAX_USER_VISIBLE_IMAGE_BYTES = 5 * 1024 * 1024  # 5 MiB per image, defense-in-depth
+MAX_ACTIVATED_SKILL_BODY_BYTES = 128 * 1024  # 128 KiB, defense-in-depth
+
+# Maximum byte length for skill source paths (workspace-relative).
+_MAX_SOURCE_PATH_BYTES = 512
 
 
 class Gate5B4C3ShadowGenerationImageBlock(_Gate5B4C3Model):
@@ -329,6 +333,73 @@ class Gate5B4C3ShadowGenerationImageBlock(_Gate5B4C3Model):
         return self
 
 
+class Gate5B4C3ActivatedSkill(_Gate5B4C3Model):
+    """Resolved skill activation passed from the intake layer to the adapter.
+
+    This model carries the output of a resolved ``/skill-name ...`` invocation.
+    The ``body`` field holds the full SKILL.md text and is intentionally exempt
+    from the ``_UNSAFE_TEXT_RE`` scan (skill bodies are trusted server-side
+    content; the scan applies only to user-visible sanitized input).
+
+    When ``miss`` is ``True`` the skill was not found; ``body`` is empty and
+    ``near_matches`` lists close candidates.
+    """
+
+    skill_name: str = Field(alias="skillName")
+    invoked_token: str = Field(alias="invokedToken")
+    source_path: str = Field(alias="sourcePath")
+    source: str
+    body: str
+    body_digest: str = Field(alias="bodyDigest")
+    truncated: bool
+    miss: bool
+    near_matches: list[str] = Field(default_factory=list, alias="nearMatches")
+
+    @model_validator(mode="after")
+    def _validate_activated_skill(self) -> Self:
+        # invokedToken and nearMatches are present on both shapes.
+        _validate_safe_label(
+            self.invoked_token,
+            "invoked token must be opaque public-safe metadata",
+        )
+        for name in self.near_matches:
+            _validate_safe_label(name, "near-match skill name must be opaque public-safe metadata")
+
+        if self.miss:
+            # Miss shape: the hit-only fields are empty. Reject a mislabelled
+            # miss that smuggles a body/path so the two shapes stay disjoint.
+            if self.skill_name or self.source_path or self.source or self.body:
+                raise ValueError("a miss activation must carry no skill body or path")
+            return self
+
+        # Hit shape: full validation of the skill body and provenance.
+        _validate_safe_label(
+            self.skill_name,
+            "skill name must be opaque public-safe metadata",
+        )
+        # sourcePath is a workspace-relative path (contains '/') so the strict
+        # _SAFE_LABEL_RE cannot be used. Apply a narrow negative check instead:
+        # no leading '/', no '..', no _UNSAFE_TEXT_RE match, bounded length.
+        sp = self.source_path
+        if (
+            not sp
+            or len(sp.encode("utf-8")) > _MAX_SOURCE_PATH_BYTES
+            or sp != sp.strip()
+            or sp.startswith("/")
+            or ".." in sp.split("/")
+            or _UNSAFE_TEXT_RE.search(sp)
+        ):
+            raise ValueError("source path must be a safe workspace-relative path")
+        _validate_safe_label(
+            self.source,
+            "skill source must be opaque public-safe metadata",
+        )
+        if len(self.body.encode("utf-8")) > MAX_ACTIVATED_SKILL_BODY_BYTES:
+            raise ValueError("activated skill body exceeds the byte cap")
+        _validate_digest(self.body_digest, "skill body digest must be a sha256 digest")
+        return self
+
+
 class Gate5B4C3ShadowGenerationTurn(_Gate5B4C3Model):
     turn_id: str = Field(alias="turnId")
     turn_digest: str = Field(alias="turnDigest")
@@ -352,6 +423,10 @@ class Gate5B4C3ShadowGenerationTurn(_Gate5B4C3Model):
     ts_response_correlation_id: str | None = Field(
         default=None,
         alias="tsResponseCorrelationId",
+    )
+    activated_skill: Gate5B4C3ActivatedSkill | None = Field(
+        default=None,
+        alias="activatedSkill",
     )
 
     @model_validator(mode="after")
