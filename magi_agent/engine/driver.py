@@ -4286,25 +4286,25 @@ class MagiEngineDriver:
             llm_block_reason = await self._maybe_llm_criterion_block(
                 final_text=emitted_text, turn_id=turn_id
             )
-            # C1 — built-in answer-quality llm gate (independent of user rules).
+            # C1: built-in answer-quality llm gate (independent of user rules).
             # Shares the same abort path; flag/preset + model gated, fail-open.
             if llm_block_reason is None:
                 llm_block_reason = await self._answer_quality_llm_block(
                     prompt=prompt, final_text=emitted_text
                 )
-            # C2 — built-in premature-refusal llm gate (same shape/gating as C1).
+            # C2: built-in premature-refusal llm gate (same shape/gating as C1).
             if llm_block_reason is None:
                 llm_block_reason = await self._pre_refusal_llm_block(
                     prompt=prompt, final_text=emitted_text
                 )
-            # C-MERGE-1 — built-in completion/promise-without-action llm gate.
+            # C-MERGE-1: built-in completion/promise-without-action llm gate.
             # Collects the turn's evidence itself (only when its gate is on) for
             # the det pre-gate; fail-open → None.
             if llm_block_reason is None:
                 llm_block_reason = await self._completion_evidence_llm_block(
                     turn_id=turn_id, final_text=emitted_text
                 )
-            # C-MERGE-2 — built-in resource/self-claim llm gate. Same shape, but
+            # C-MERGE-2: built-in resource/self-claim llm gate. Same shape, but
             # the det pre-gate counts SOURCE/READ evidence (SourceInspection /
             # WebSearch / KnowledgeSearch), so a turn that actually inspected ≥1
             # source skips the model call.
@@ -4312,14 +4312,14 @@ class MagiEngineDriver:
                 llm_block_reason = await self._resource_claim_llm_block(
                     turn_id=turn_id, final_text=emitted_text
                 )
-            # C4 — built-in claim-citation (free-text claim-coverage) llm gate.
+            # C4: built-in claim-citation (free-text claim-coverage) llm gate.
             # Det pre-gate keys off the answer text only (contains [src_N]?), so a
             # turn that already cited sources skips the model call.
             if llm_block_reason is None:
                 llm_block_reason = await self._claim_citation_llm_block(
                     final_text=emitted_text
                 )
-            # C3 — built-in output-purity llm gate. Det pre-gate skips the model
+            # C3: built-in output-purity llm gate. Det pre-gate skips the model
             # call unless the answer contains a canonical private/reasoning key in
             # JSON shape, then the criterion judge distinguishes a legitimate JSON
             # answer from a raw internal-envelope leak.
