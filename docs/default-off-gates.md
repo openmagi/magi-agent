@@ -131,9 +131,11 @@ retained as a kill switch / honesty selector rather than an opt-in:
   profile-resolved, not a flat constant.
 - `MAGI_CHILD_RUNNER_LIVE_ENABLED` remains an explicit safety gate at the env
   seam, but the installed full runtime profile now sets it to `1` with
-  `MAGI_CHILD_RUNNER_TOOLSET=readonly`. That gives full-profile installs real
-  read-only child delegation by default while keeping mutating child turns a
-  separate `full` operator choice.
+  `MAGI_CHILD_RUNNER_TOOLSET=inherit`. That gives full-profile installs real
+  child delegation where the child inherits the parent's capabilities by
+  default. The rollback lever is `MAGI_CHILD_RUNNER_TOOLSET=readonly` (explicit
+  operator choice to cap the child). Mutating child turns still require the
+  parent itself to have mutating tools — the inherit profile never escalates.
 
 ## Promotion and the "don't strand a seam" policy
 

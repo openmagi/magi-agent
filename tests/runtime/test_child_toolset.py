@@ -11,6 +11,7 @@ import pytest
 
 from magi_agent.runtime.child_toolset import (
     CHILD_TOOLSET_ENV,
+    MUTATING_TOOL_NAMES,
     READONLY_TOOL_NAMES,
     resolve_child_toolset_profile,
     toolset_allowlist,
@@ -32,11 +33,16 @@ def test_resolve_known_profiles(value: str, expected: str) -> None:
 
 
 def test_resolve_unset_defaults_to_none() -> None:
-    assert resolve_child_toolset_profile({}) == "none"
+    # NOTE: this expectation changes to "inherit" in the new design.
+    # Replaced by test_resolve_unset_defaults_to_inherit below.
+    # Keep as a renamed tombstone so git blame is traceable.
+    pass  # superseded — see test_resolve_unset_defaults_to_inherit
 
 
 def test_resolve_empty_defaults_to_none() -> None:
-    assert resolve_child_toolset_profile({CHILD_TOOLSET_ENV: ""}) == "none"
+    # NOTE: this expectation changes to "inherit" in the new design.
+    # Replaced by test_resolve_empty_defaults_to_inherit below.
+    pass  # superseded — see test_resolve_empty_defaults_to_inherit
 
 
 @pytest.mark.parametrize("bad", ["bogus", "read-only", "all", "rw", "1", "true"])
@@ -79,3 +85,49 @@ def test_toolset_allowlist_readonly_is_readonly_names() -> None:
 def test_toolset_allowlist_full_is_none_sentinel() -> None:
     """``full`` → ``None`` sentinel meaning 'no name filter' (whole toolset)."""
     assert toolset_allowlist("full") is None
+
+
+# ---------------------------------------------------------------------------
+# inherit profile — RED tests (written before implementation)
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_unset_defaults_to_inherit() -> None:
+    """UNSET env → 'inherit' (the new default)."""
+    assert resolve_child_toolset_profile({}) == "inherit"
+
+
+def test_resolve_empty_defaults_to_inherit() -> None:
+    """Empty string env → 'inherit'."""
+    assert resolve_child_toolset_profile({CHILD_TOOLSET_ENV: ""}) == "inherit"
+
+
+def test_resolve_whitespace_only_defaults_to_inherit() -> None:
+    """Whitespace-only value → 'inherit'."""
+    assert resolve_child_toolset_profile({CHILD_TOOLSET_ENV: "   "}) == "inherit"
+
+
+def test_resolve_inherit_literal_is_recognised() -> None:
+    """'inherit' is a recognised profile literal."""
+    assert resolve_child_toolset_profile({CHILD_TOOLSET_ENV: "inherit"}) == "inherit"
+
+
+def test_resolve_inherit_case_insensitive() -> None:
+    """'INHERIT' is normalised to 'inherit'."""
+    assert resolve_child_toolset_profile({CHILD_TOOLSET_ENV: "INHERIT"}) == "inherit"
+
+
+def test_toolset_allowlist_inherit_is_none_sentinel() -> None:
+    """'inherit' → None sentinel (no name filter; parent-cap applied later)."""
+    assert toolset_allowlist("inherit") is None
+
+
+def test_mutating_tool_names_contains_expected_tools() -> None:
+    """MUTATING_TOOL_NAMES must include all write-class tools from EDIT_CLASS_TOOLS."""
+    for name in ("FileEdit", "FileWrite", "Edit", "Write", "ApplyPatch", "Bash"):
+        assert name in MUTATING_TOOL_NAMES, f"Expected {name!r} in MUTATING_TOOL_NAMES"
+
+
+def test_mutating_tool_names_is_frozenset() -> None:
+    """MUTATING_TOOL_NAMES should be a frozenset for O(1) membership tests."""
+    assert isinstance(MUTATING_TOOL_NAMES, frozenset)

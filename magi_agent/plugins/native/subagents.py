@@ -349,6 +349,28 @@ def _child_workspace_for_toolset(
             return fallback, None
         return None, "child_workspace_unavailable"
 
+    # ``inherit``: workspace policy is capability-based — if the resolved toolset
+    # ends up read-only (parent had no mutating tools), the child shares the
+    # parent workspace (same as ``readonly``). If the parent had mutating tools,
+    # the child gets an isolated directory (same as ``full``). Because the
+    # mutation question is only answerable after ``_resolve_turn_toolset`` runs,
+    # we conservatively give inherit an isolated workspace here (the isolated
+    # path is a SUBDIRECTORY of the parent root, so it is accessible for reads
+    # while keeping writes separated). Falls back to shared parent root if
+    # isolation is unavailable, and to temp if no parent root exists.
+    if toolset_profile == "inherit":
+        if workspace_root is not None:
+            isolated = _isolated_child_workspace_under(workspace_root)
+            if isolated is not None:
+                return isolated, None
+            # Isolation failed; share parent root (safe — inherit will strip
+            # mutating tools when the parent cap excludes them).
+            return workspace_root, None
+        fallback = _default_temp_child_workspace()
+        if fallback is not None:
+            return fallback, None
+        return None, "child_workspace_unavailable"
+
     # ``full`` can mutate, so give it an isolated writable child directory when
     # a parent workspace is available. This keeps hosted read-only-root pods
     # working while preserving separation for mutating children.
