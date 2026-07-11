@@ -78,7 +78,12 @@ def project_public_event(
         status = payload.get("status")
         tool_name = payload.get("toolName") or payload.get("name")
         error = payload.get("error") or payload.get("message")
+        code = payload.get("code")
         summary = error if isinstance(error, str) else None
+        if isinstance(code, str) and code and summary:
+            summary = f"{code}: {summary}"
+        elif isinstance(code, str) and code and summary is None:
+            summary = code
         safe_payload: dict = {}
         for k, v in payload.items():
             if k == "type":

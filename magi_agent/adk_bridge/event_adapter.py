@@ -314,7 +314,7 @@ class OpenMagiEventBridge:
             event.error_code, event.error_message
         ):
             message = event.error_message or event.error_code or "adk_error"
-            public_message = _public_preview(message)
+            public_message = _public_error_text(message)
             agent_events: list[dict[str, object]] = [
                 {
                     "type": "runtime_trace",
@@ -1611,6 +1611,28 @@ def _rich_preview_safe_keys(tool_name: str) -> frozenset[str]:
     if not flag_profile_bool("MAGI_RICH_TOOL_PREVIEW"):
         return frozenset()
     return _RICH_PREVIEW_TOOL_ARG_ALLOWLIST.get(_normalize_preview_key(tool_name), frozenset())
+
+
+def _public_error_text(value: object) -> str:
+    """Secret-scrubbed, bounded preview of an ADK/provider error message.
+
+    Error diagnostics are provider/runtime text (rate limit, content filter,
+    context length, malformed call), not private user data. They must stay
+    READABLE: never whole-string digest on a private-KEY vocabulary match.
+    Structured payloads still route through _public_preview so private dict
+    KEYS keep their digesting.
+    """
+    if not isinstance(value, str):
+        return _public_preview(value)
+    parsed = _parse_json_container(value)
+    if parsed is not None:
+        # A whole-JSON error body may embed prompt/tool-arg keys: keep the
+        # key-digesting semantics for structured content.
+        return _public_preview(parsed)
+    redacted = _public_text(value)
+    if len(redacted) > _tool_preview.MAX_TOOL_PREVIEW:
+        return f"{redacted[: _tool_preview.MAX_TOOL_PREVIEW - 3]}..."
+    return redacted
 
 
 def _public_preview(value: object, *, safe_keys: frozenset[str] = frozenset()) -> str:
