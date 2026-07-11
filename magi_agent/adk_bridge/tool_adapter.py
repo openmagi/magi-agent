@@ -19,6 +19,67 @@ if TYPE_CHECKING:
 
 
 ToolContextFactory = Callable[[object], ToolContext]
+
+
+def _normalize_tool_call_args(args: object) -> object:
+    """Accept BOTH the wrapped and the flat model tool-call shape.
+
+    First-party tools are exposed through a generic
+    ``invoke_openmagi_tool(arguments)`` callable, so the ADVERTISED schema is the
+    wrapped shape ``{"arguments": {<real params>}}``. Some models (Claude Sonnet
+    5 especially) frequently emit the real params FLAT instead
+    (``{"path": ...}``). ADK's ``FunctionTool.run_async`` filters unknown keys
+    against the signature BEFORE calling, so a flat call drops every real key and
+    then fails the mandatory-``arguments`` check with "mandatory input parameters
+    are not present: arguments", never reaching the dispatcher (a whole turn of
+    tool calls dies silently).
+
+    This normalizer wraps a flat call into ``{"arguments": {...}}`` so both
+    shapes dispatch identically. When the wrapped ``arguments`` object is already
+    present, sibling flat keys (if any) are merged UNDER it with the wrapped keys
+    winning, so a mixed call never loses the explicit wrapped values.
+
+    Fail-open: anything that is not a dict is returned unchanged.
+    """
+    if not isinstance(args, dict):
+        return args
+    inner = args.get("arguments")
+    if isinstance(inner, dict):
+        siblings = {k: v for k, v in args.items() if k != "arguments"}
+        if siblings:
+            return {"arguments": {**siblings, **inner}}
+        return args
+    # Flat shape (no dict ``arguments``): wrap all keys under ``arguments``.
+    return {"arguments": dict(args)}
+
+
+class _FlatArgsNormalizingMixin:
+    """Mixin that normalizes a flat model tool-call into the wrapped shape.
+
+    Applied BEFORE ADK's mandatory-arg check + unknown-key filter in
+    ``FunctionTool.run_async``, so a model that sends the real params flat
+    dispatches identically to one that sends the advertised wrapped shape.
+    """
+
+    async def run_async(  # type: ignore[override]
+        self, *, args: dict[str, object], tool_context: object
+    ) -> object:
+        normalized = _normalize_tool_call_args(args)
+        return await super().run_async(  # type: ignore[misc]
+            args=normalized, tool_context=tool_context
+        )
+
+
+class OpenMagiFunctionTool(_FlatArgsNormalizingMixin, FunctionTool):
+    """FunctionTool that accepts both the wrapped and the flat tool-call shape."""
+
+
+class OpenMagiLongRunningFunctionTool(
+    _FlatArgsNormalizingMixin, LongRunningFunctionTool
+):
+    """LongRunningFunctionTool that accepts both call shapes (see the mixin)."""
+
+
 AdkLocalTool = FunctionTool | LongRunningFunctionTool
 
 #: Tool names kept registered (and therefore dispatchable) for backward
@@ -159,12 +220,13 @@ def build_adk_tool_for_manifest(
     )
     if manifest.adk_tool_type == "FunctionTool":
         tool = _enrich_arguments_schema(
-            FunctionTool(invoke_openmagi_tool, require_confirmation=False), manifest
+            OpenMagiFunctionTool(invoke_openmagi_tool, require_confirmation=False),
+            manifest,
         )
         return apply_provider_repair(tool)
     if manifest.adk_tool_type == "LongRunningFunctionTool":
         tool = _enrich_arguments_schema(
-            LongRunningFunctionTool(invoke_openmagi_tool), manifest
+            OpenMagiLongRunningFunctionTool(invoke_openmagi_tool), manifest
         )
         return apply_provider_repair(tool)
     raise ValueError(f"unsupported ADK tool type: {manifest.adk_tool_type}")
