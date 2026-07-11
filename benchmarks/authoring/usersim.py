@@ -281,6 +281,17 @@ _PERSONA_PROMPT: dict[str, str] = {
 
 _PERSONAS = frozenset(_PERSONA_PROMPT)
 
+# Generic system framing for the persona live call. The persona-specific
+# behaviour + goal + conversation context is carried in the user prompt built by
+# ``_build_prompt`` (byte-faithful to the pre-_invoke_llm behaviour); this
+# instruction only frames the response contract for the ADK ``LlmRequest``,
+# which requires a non-empty system_instruction.
+_PERSONA_SYSTEM_INSTRUCTION = (
+    "You are role-playing a bot operator in a policy-authoring conversation. "
+    "Follow the persona and goal given in the user message. "
+    "Respond ONLY with a single JSON object of the form {\"say\": \"<message>\"}."
+)
+
 
 class PersonaUserSim:
     """Cheap-LLM persona user-sim for T3.
@@ -338,27 +349,25 @@ class PersonaUserSim:
         return prompt
 
     async def _call_llm_async(self, prompt: str) -> str:
-        """Async call to the persona LLM."""
+        """Async call to the persona LLM.
+
+        Reuses the production ADK invocation helper
+        (``shacl_compiler._invoke_llm``) so the persona speaks the exact ADK
+        ``LlmRequest`` contract the live model expects (role-tagged Content).
+        The prior hand-rolled ``GenerateContentRequest`` used a role-less
+        ``Content`` which the ADK LiteLlm model rejects at runtime
+        ('_MinimalContent object has no attribute role'). The persona system
+        prompt is passed as ``system_instruction``; the ``prompt`` carries the
+        goal + current conversation state built by :meth:`_build_prompt`.
+        """
         if self._factory is None:
             return '{"say": ""}'
         model = self._factory()
-        # Build minimal LlmRequest shape the fake / real model accepts
-        try:
-            from google.genai import types as genai_types  # type: ignore
+        from magi_agent.customize.shacl_compiler import _invoke_llm  # noqa: PLC0415
 
-            req = genai_types.GenerateContentRequest(
-                contents=[genai_types.Content(parts=[genai_types.Part(text=prompt)])],
-            )
-        except (ImportError, AttributeError):
-            # Fallback: use a plain object the ScriptedLlm can consume
-            req = _MinimalLlmRequest(prompt)
-
-        result_text = ""
-        async for resp in model.generate_content_async(req, stream=False):
-            parts = getattr(getattr(resp, "content", None), "parts", []) or []
-            for part in parts:
-                result_text += getattr(part, "text", "") or ""
-        return result_text
+        return await _invoke_llm(
+            model, prompt, system_instruction=_PERSONA_SYSTEM_INSTRUCTION
+        )
 
     def next_turn(
         self, scenario: Any, transcript: list[dict[str, Any]]
@@ -402,35 +411,6 @@ class PersonaUserSim:
 
         self._turn_count += 1
         return UserTurn(say=say, answers={})
-
-
-@dataclass
-class _MinimalLlmRequest:
-    """Minimal LlmRequest shape consumed by ScriptedLlm (no google-genai dep)."""
-
-    _text: str
-
-    @property
-    def contents(self):
-        return [_MinimalContent(self._text)]
-
-    @property
-    def config(self):
-        return None
-
-
-@dataclass
-class _MinimalContent:
-    _text: str
-
-    @property
-    def parts(self):
-        return [_MinimalPart(self._text)]
-
-
-@dataclass
-class _MinimalPart:
-    text: str
 
 
 __all__ = [

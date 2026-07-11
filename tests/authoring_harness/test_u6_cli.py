@@ -440,3 +440,66 @@ def test_run_cli_self_isolates_sidecar_and_store(
     ]
     # The CLI restored the caller's search-base function on exit.
     assert discovery.default_search_bases is baseline
+
+
+def test_run_cli_judge_resolves_production_factory(
+    tmp_path, monkeypatch
+) -> None:
+    """When --judge is set, run_cli must resolve a REAL judge model factory
+    from the production wiring (_build_criterion_model_factory), not leave it
+    None. Regression for a live-run finding: the judge annotation was a
+    `pass # pragma: no cover` stub, so every T3 judge verdict came back
+    'unknown' (NoneType has no generate_content_async). The judge stays
+    advisory / non-gating regardless."""
+    import benchmarks.authoring.judge as judge_mod
+    from benchmarks.authoring.run import run_cli
+
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "c.json"))
+    monkeypatch.setenv("MAGI_CUSTOMIZE_NL_INTERACTIVE_ENABLED", "1")
+    monkeypatch.setattr(
+        "magi_agent.packs.discovery.default_search_bases", lambda: [tmp_path]
+    )
+
+    # A fake production factory: base_factory() -> model factory -> model.
+    class _FakeModel:
+        async def generate_content_async(self, req, stream=False):
+            class _P:
+                text = '{"verdict": "pass", "confidence": 0.9, "reasoning": "ok"}'
+
+            class _C:
+                parts = [_P()]
+
+            class _R:
+                content = _C()
+
+            yield _R()
+
+    monkeypatch.setattr(
+        "magi_agent.cli.wiring._build_criterion_model_factory",
+        lambda: (lambda: _FakeModel()),
+    )
+
+    seen: dict = {}
+    real_annotate = judge_mod.annotate_with_judge
+
+    def _spy(run_result, *, judge_factory):
+        model = judge_factory()
+        seen["model_type"] = type(model).__name__
+        return real_annotate(run_result, judge_factory=judge_factory)
+
+    # run.py imports annotate_with_judge function-locally, so patch the source module.
+    monkeypatch.setattr(judge_mod, "annotate_with_judge", _spy)
+
+    run_cli(
+        tier="t3",
+        corpus_dir=_HANDWRITTEN,
+        runtime=_runtime(),
+        token="test-gateway-token",
+        out_dir=tmp_path / "runs",
+        max_scenarios=1,
+        turn_cap=8,
+        judge=True,
+        skip_preflight=True,
+    )
+    # The judge got a REAL model (not the None stub).
+    assert seen.get("model_type") == "_FakeModel", seen

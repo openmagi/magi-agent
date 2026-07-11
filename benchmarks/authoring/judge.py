@@ -99,26 +99,20 @@ async def _call_judge_async(
     prompt: str,
     judge_factory: Callable[[], Any],
 ) -> str:
-    """Call the judge LLM; return the raw text."""
+    """Call the judge LLM; return the raw text.
+
+    Reuses the production ADK invocation helper (``shacl_compiler._invoke_llm``)
+    so the judge speaks the exact ADK ``LlmRequest`` contract the live model
+    expects (role-tagged Content), instead of a hand-rolled request shape that
+    drifted from it. The judge is advisory: a resolution failure is caught by
+    the caller and surfaces as an ``unknown`` verdict, never a gate.
+    """
     model = judge_factory()
-    try:
-        from google.genai import types as genai_types  # type: ignore
+    from magi_agent.customize.shacl_compiler import _invoke_llm  # noqa: PLC0415
 
-        req = genai_types.GenerateContentRequest(
-            contents=[genai_types.Content(parts=[genai_types.Part(text=prompt)])],
-            config=genai_types.GenerateContentConfig(
-                system_instruction=_JUDGE_SYSTEM_PROMPT,
-            ),
-        )
-    except (ImportError, AttributeError):
-        req = _MinimalLlmRequest(prompt, _JUDGE_SYSTEM_PROMPT)
-
-    raw = ""
-    async for resp in model.generate_content_async(req, stream=False):
-        parts = getattr(getattr(resp, "content", None), "parts", []) or []
-        for part in parts:
-            raw += getattr(part, "text", "") or ""
-    return raw
+    return await _invoke_llm(
+        model, prompt, system_instruction=_JUDGE_SYSTEM_PROMPT
+    )
 
 
 def annotate_with_judge(
@@ -193,39 +187,6 @@ def annotate_with_judge(
         non_gating=True,  # INVARIANT: always True
         raw=raw_text,
     )
-
-
-@dataclass
-class _MinimalLlmRequest:
-    _text: str
-    _system: str
-
-    @property
-    def contents(self):
-        return [_MinimalContent(self._text)]
-
-    @property
-    def config(self):
-        return _MinimalConfig(self._system)
-
-
-@dataclass
-class _MinimalConfig:
-    system_instruction: str
-
-
-@dataclass
-class _MinimalContent:
-    _text: str
-
-    @property
-    def parts(self):
-        return [_MinimalPart(self._text)]
-
-
-@dataclass
-class _MinimalPart:
-    text: str
 
 
 __all__ = ["JudgeAnnotation", "annotate_with_judge"]
