@@ -36,13 +36,13 @@ def test_resolve_unset_defaults_to_none() -> None:
     # NOTE: this expectation changes to "inherit" in the new design.
     # Replaced by test_resolve_unset_defaults_to_inherit below.
     # Keep as a renamed tombstone so git blame is traceable.
-    pass  # superseded — see test_resolve_unset_defaults_to_inherit
+    pass  # superseded - see test_resolve_unset_defaults_to_inherit
 
 
 def test_resolve_empty_defaults_to_none() -> None:
     # NOTE: this expectation changes to "inherit" in the new design.
     # Replaced by test_resolve_empty_defaults_to_inherit below.
-    pass  # superseded — see test_resolve_empty_defaults_to_inherit
+    pass  # superseded - see test_resolve_empty_defaults_to_inherit
 
 
 @pytest.mark.parametrize("bad", ["bogus", "read-only", "all", "rw", "1", "true"])
@@ -88,7 +88,7 @@ def test_toolset_allowlist_full_is_none_sentinel() -> None:
 
 
 # ---------------------------------------------------------------------------
-# inherit profile — RED tests (written before implementation)
+# inherit profile - RED tests (written before implementation)
 # ---------------------------------------------------------------------------
 
 

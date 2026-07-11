@@ -13,7 +13,7 @@ prefer gate) — capability and activation are decoupled.
 
 Profiles
 --------
-* ``inherit``  — DEFAULT (unset resolves here). The child receives the core
+* ``inherit``  - DEFAULT (unset resolves here). The child receives the core
                  toolset intersected with the parent's forwarded
                  ``parentToolNames``. Mutating tools
                  (:data:`MUTATING_TOOL_NAMES`) are stripped unless the parent
@@ -21,10 +21,10 @@ Profiles
                  escalation. Empty-parent-cap fallback: the ``readonly`` floor
                  is applied (never full, never none). Rollback lever:
                  set ``MAGI_CHILD_RUNNER_TOOLSET=readonly``.
-* ``none``     — empty toolset (text-only child, byte-identical to v1).
+* ``none``     - empty toolset (text-only child, byte-identical to v1).
                  Activated only by an explicit ``MAGI_CHILD_RUNNER_TOOLSET=none``
-                 (or an unrecognised garbage value — fail-closed).
-* ``readonly`` — non-mutating source-inspection tools FileRead/Glob/Grep/
+                 (or an unrecognised garbage value - fail-closed).
+* ``readonly`` - non-mutating source-inspection tools FileRead/Glob/Grep/
                  GitDiff, plus pure side-effect-free helpers like Calculation,
                  a deterministic AST expression evaluator. Safe to enable
                  without the child-sandbox/permissions decision (doc 09)

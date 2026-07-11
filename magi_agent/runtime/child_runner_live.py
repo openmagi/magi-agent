@@ -1678,7 +1678,7 @@ class RealLocalChildRunner:
             tools = wrap_child_bash_tool(tools, sandbox=ChildBashSandbox())
 
         if allowlist is None:
-            # ``full`` or ``inherit`` profile — start with the whole core toolset.
+            # ``full`` or ``inherit`` profile - start with the whole core toolset.
             profile_tools: list[object] = list(tools)
         else:
             # ``readonly`` profile — filter to the read-only allowlist by tool name.
@@ -1687,7 +1687,7 @@ class RealLocalChildRunner:
 
         # ``inherit`` profile: intersect with parent's forwarded tool names so the
         # child never exceeds the parent's capability. Applied UNCONDITIONALLY (not
-        # flag-gated) — this is structural, not a feature flag.
+        # flag-gated) - this is structural, not a feature flag.
         #
         # Safety chain (D1/D2 from design doc):
         #   1. ``parentToolNames`` is always populated by all producer paths
@@ -1695,7 +1695,7 @@ class RealLocalChildRunner:
         #   2. Empty-parent-cap fallback → ``readonly`` floor (never full, never
         #      none) so the child is never silently over-privileged.
         #   3. MUTATING_TOOL_NAMES are stripped from an inherit child whose parent
-        #      did NOT have them — so a read-only parent cannot spawn a writing
+        #      did NOT have them - so a read-only parent cannot spawn a writing
         #      child even if the core toolset contains those tools.
         if self._toolset_profile == "inherit":
             from magi_agent.runtime.child_toolset import (  # noqa: PLC0415

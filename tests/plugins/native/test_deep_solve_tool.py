@@ -111,7 +111,7 @@ class TestClampStageToolset:
     def test_gate_full_request_full_returns_full(self) -> None:
         assert self._clamp("full", "full") == "full"
 
-    # inherit profile — RED tests (written before implementation)
+    # inherit profile - RED tests (written before implementation)
 
     def test_gate_inherit_request_none_returns_none(self) -> None:
         assert self._clamp("inherit", "none") == "none"

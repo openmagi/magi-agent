@@ -349,7 +349,7 @@ def _child_workspace_for_toolset(
             return fallback, None
         return None, "child_workspace_unavailable"
 
-    # ``inherit``: workspace policy is capability-based — if the resolved toolset
+    # ``inherit``: workspace policy is capability-based - if the resolved toolset
     # ends up read-only (parent had no mutating tools), the child shares the
     # parent workspace (same as ``readonly``). If the parent had mutating tools,
     # the child gets an isolated directory (same as ``full``). Because the
@@ -363,7 +363,7 @@ def _child_workspace_for_toolset(
             isolated = _isolated_child_workspace_under(workspace_root)
             if isolated is not None:
                 return isolated, None
-            # Isolation failed; share parent root (safe — inherit will strip
+            # Isolation failed; share parent root (safe - inherit will strip
             # mutating tools when the parent cap excludes them).
             return workspace_root, None
         fallback = _default_temp_child_workspace()
