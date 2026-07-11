@@ -731,6 +731,7 @@ class MagiEngineDriver:
         evidence_collector: Callable[[str], Sequence[object]] | None = None,
         user_hook_bus: object | None = None,
         criterion_model_factory: Callable[[], object] | None = None,
+        pre_final_llm_gates_allowed: bool = True,
         wire_profile: object | None = None,
         # PR-C goal-loop judge factory. Builds a ``JudgeCaller`` (str -> async
         # str) from a :class:`GoalLoopPolicy`. ``None`` (default) means the
@@ -899,6 +900,15 @@ class MagiEngineDriver:
         self._criterion_model_factory: Callable[[], object] | None = (
             criterion_model_factory
         )
+        # F2-A containment: a SpawnAgent child (depth>0) is a bounded delegated
+        # computation whose output is CONSUMED BY THE PARENT, not shipped to the
+        # user, so it must NOT run the pre-final LLM criterion gate chain. A gate
+        # blocking a child's already-streamed correct answer turns a valid
+        # sub-answer into a false ``child_llm_collector_status_failed`` and burns
+        # 1-6 sequential critic calls per child. The parent's own pre-final gates
+        # still audit the composed user-facing answer, so no honesty is lost.
+        # Default True keeps top-level turns byte-identical.
+        self._pre_final_llm_gates_allowed: bool = pre_final_llm_gates_allowed
 
     async def _maybe_llm_criterion_block(
         self, *, final_text: str, turn_id: str = ""
@@ -4263,55 +4273,60 @@ class MagiEngineDriver:
             final_text=emitted_text,
         )
 
-        # P3: custom llm_criterion gate (pre-final). Independent of the
-        # deterministic verifier-bus loop below + the coding-repair loop. A clear
-        # FAIL verdict from an enabled block rule aborts the turn with a custom
-        # error (mirrors the deterministic block-error return). Flag-gated +
-        # fail-open → byte-identical when off.
-        llm_block_reason = await self._maybe_llm_criterion_block(
-            final_text=emitted_text, turn_id=turn_id
-        )
-        # C1 — built-in answer-quality llm gate (independent of user custom rules).
-        # Shares the same abort path; flag/preset + model gated, fail-open → None.
-        if llm_block_reason is None:
-            llm_block_reason = await self._answer_quality_llm_block(
-                prompt=prompt, final_text=emitted_text
+        # F2-A containment: the pre-final LLM criterion gate chain does NOT run
+        # in a contained child turn (depth>0). See ``_pre_final_llm_gates_allowed``.
+        # For a top-level turn (default) this runs exactly as before.
+        llm_block_reason: str | None = None
+        if self._pre_final_llm_gates_allowed:
+            # P3: custom llm_criterion gate (pre-final). Independent of the
+            # deterministic verifier-bus loop below + the coding-repair loop. A
+            # clear FAIL verdict from an enabled block rule aborts the turn with a
+            # custom error (mirrors the deterministic block-error return).
+            # Flag-gated + fail-open → byte-identical when off.
+            llm_block_reason = await self._maybe_llm_criterion_block(
+                final_text=emitted_text, turn_id=turn_id
             )
-        # C2 — built-in premature-refusal llm gate (same shape/gating as C1).
-        if llm_block_reason is None:
-            llm_block_reason = await self._pre_refusal_llm_block(
-                prompt=prompt, final_text=emitted_text
-            )
-        # C-MERGE-1 — built-in completion/promise-without-action llm gate. Collects
-        # the turn's evidence itself (only when its gate is on) for the det
-        # pre-gate; fail-open → None.
-        if llm_block_reason is None:
-            llm_block_reason = await self._completion_evidence_llm_block(
-                turn_id=turn_id, final_text=emitted_text
-            )
-        # C-MERGE-2 — built-in resource/self-claim llm gate. Same shape, but the
-        # det pre-gate counts SOURCE/READ evidence (SourceInspection / WebSearch
-        # / KnowledgeSearch), so a turn that actually inspected ≥1 source skips
-        # the model call.
-        if llm_block_reason is None:
-            llm_block_reason = await self._resource_claim_llm_block(
-                turn_id=turn_id, final_text=emitted_text
-            )
-        # C4 — built-in claim-citation (free-text claim-coverage) llm gate. Det
-        # pre-gate keys off the answer text only (contains [src_N]?), so a turn
-        # that already cited sources skips the model call.
-        if llm_block_reason is None:
-            llm_block_reason = await self._claim_citation_llm_block(
-                final_text=emitted_text
-            )
-        # C3 — built-in output-purity llm gate. Det pre-gate skips the model call
-        # unless the answer contains a canonical private/reasoning key in JSON
-        # shape, then the criterion judge distinguishes a legitimate JSON answer
-        # from a raw internal-envelope leak.
-        if llm_block_reason is None:
-            llm_block_reason = await self._output_purity_llm_block(
-                final_text=emitted_text
-            )
+            # C1: built-in answer-quality llm gate (independent of user rules).
+            # Shares the same abort path; flag/preset + model gated, fail-open.
+            if llm_block_reason is None:
+                llm_block_reason = await self._answer_quality_llm_block(
+                    prompt=prompt, final_text=emitted_text
+                )
+            # C2: built-in premature-refusal llm gate (same shape/gating as C1).
+            if llm_block_reason is None:
+                llm_block_reason = await self._pre_refusal_llm_block(
+                    prompt=prompt, final_text=emitted_text
+                )
+            # C-MERGE-1: built-in completion/promise-without-action llm gate.
+            # Collects the turn's evidence itself (only when its gate is on) for
+            # the det pre-gate; fail-open → None.
+            if llm_block_reason is None:
+                llm_block_reason = await self._completion_evidence_llm_block(
+                    turn_id=turn_id, final_text=emitted_text
+                )
+            # C-MERGE-2: built-in resource/self-claim llm gate. Same shape, but
+            # the det pre-gate counts SOURCE/READ evidence (SourceInspection /
+            # WebSearch / KnowledgeSearch), so a turn that actually inspected ≥1
+            # source skips the model call.
+            if llm_block_reason is None:
+                llm_block_reason = await self._resource_claim_llm_block(
+                    turn_id=turn_id, final_text=emitted_text
+                )
+            # C4: built-in claim-citation (free-text claim-coverage) llm gate.
+            # Det pre-gate keys off the answer text only (contains [src_N]?), so a
+            # turn that already cited sources skips the model call.
+            if llm_block_reason is None:
+                llm_block_reason = await self._claim_citation_llm_block(
+                    final_text=emitted_text
+                )
+            # C3: built-in output-purity llm gate. Det pre-gate skips the model
+            # call unless the answer contains a canonical private/reasoning key in
+            # JSON shape, then the criterion judge distinguishes a legitimate JSON
+            # answer from a raw internal-envelope leak.
+            if llm_block_reason is None:
+                llm_block_reason = await self._output_purity_llm_block(
+                    final_text=emitted_text
+                )
         if llm_block_reason is not None:
             yield RuntimeEvent(
                 type="status",
