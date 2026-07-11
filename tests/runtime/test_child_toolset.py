@@ -123,9 +123,21 @@ def test_toolset_allowlist_inherit_is_none_sentinel() -> None:
 
 
 def test_mutating_tool_names_contains_expected_tools() -> None:
-    """MUTATING_TOOL_NAMES must include all write-class tools from EDIT_CLASS_TOOLS."""
-    for name in ("FileEdit", "FileWrite", "Edit", "Write", "ApplyPatch", "Bash"):
-        assert name in MUTATING_TOOL_NAMES, f"Expected {name!r} in MUTATING_TOOL_NAMES"
+    """MUTATING_TOOL_NAMES must include all write-class tools from EDIT_CLASS_TOOLS.
+
+    EDIT_CLASS_TOOLS (magi_agent/cli/permissions.py) is the authoritative source
+    for file-edit-class permission gating. MUTATING_TOOL_NAMES is a superset that
+    also adds Bash (subprocess surface), NotebookEdit, and MultiEdit.
+    """
+    from magi_agent.cli.permissions import EDIT_CLASS_TOOLS
+
+    # EDIT_CLASS_TOOLS is a strict subset of MUTATING_TOOL_NAMES.
+    assert EDIT_CLASS_TOOLS.issubset(MUTATING_TOOL_NAMES), (
+        f"EDIT_CLASS_TOOLS {sorted(EDIT_CLASS_TOOLS)!r} is not a subset of "
+        f"MUTATING_TOOL_NAMES {sorted(MUTATING_TOOL_NAMES)!r}"
+    )
+    # Bash is also required (subprocess surface, not in EDIT_CLASS_TOOLS).
+    assert "Bash" in MUTATING_TOOL_NAMES, "Expected 'Bash' in MUTATING_TOOL_NAMES"
 
 
 def test_mutating_tool_names_is_frozenset() -> None:

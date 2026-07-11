@@ -542,9 +542,14 @@ class _CapturingProfileRunner:
         }
 
 
-def test_spawn_agent_default_toolset_gate_unset_is_none_profile(monkeypatch) -> None:
+def test_spawn_agent_default_toolset_gate_unset_is_inherit_profile(monkeypatch) -> None:
     """With MAGI_CHILD_RUNNER_TOOLSET unset the live runner is constructed with
-    the text-only ``none`` profile (no caller ``tools`` escalation)."""
+    the ``inherit`` profile (the new default; old default was ``none``).
+
+    No caller-supplied ``tools`` escalation. The workspace is non-None because
+    the inherit profile with an empty parent cap falls back to a temp directory
+    via ``_default_temp_child_workspace`` (same as the readonly floor path).
+    """
     monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
     monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
     monkeypatch.delenv("MAGI_CHILD_RUNNER_TOOLSET", raising=False)
@@ -558,11 +563,12 @@ def test_spawn_agent_default_toolset_gate_unset_is_none_profile(monkeypatch) -> 
     asyncio.run(spawn_agent({"prompt": "test", "tools": ["some_tool"]}, _context()))
 
     captured = _CapturingProfileRunner.captured
-    # No caller-supplied tools escalation; default text-only profile.
-    assert captured["toolset_profile"] == "none"
+    # No caller-supplied tools escalation; inherit profile is the new default.
+    assert captured["toolset_profile"] == "inherit"
     assert captured["tools"] is None
-    # ``none`` profile shares the parent cwd (no isolated workspace needed).
-    assert captured["workspace_root"] is None
+    # ``inherit`` with empty parent cap takes the readonly floor path, which
+    # calls ``_default_temp_child_workspace``; the result is a temp dir (not None).
+    assert captured["workspace_root"] is not None
 
 
 def test_spawn_agent_readonly_toolset_gate_uses_context_workspace_root(
@@ -653,6 +659,124 @@ def test_spawn_agent_readonly_toolset_reports_workspace_unavailable(
     assert result.error_code == "child_workspace_unavailable"
     assert result.output["status"] == "blocked"
     assert result.output["liveChildRunnerAttached"] is False
+
+
+# ---------------------------------------------------------------------------
+# T4b: workspace assignment for the ``inherit`` profile
+# ---------------------------------------------------------------------------
+
+
+def test_spawn_agent_inherit_readonly_parent_shares_workspace(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Inherit profile + readonly parent cap -> read-only floor -> share parent
+    workspace (same as ``readonly`` profile).
+
+    When the parent had no mutating tools the child inherits a read-only cap.
+    ``_child_workspace_for_toolset`` detects this via
+    ``context.parent_tool_names`` intersection with MUTATING_TOOL_NAMES (empty
+    intersection) and shares the parent workspace root instead of isolating.
+    """
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_TOOLSET", "inherit")
+
+    import magi_agent.runtime.child_runner_live as _live_mod
+
+    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _CapturingProfileRunner)
+
+    from magi_agent.plugins.native.subagents import spawn_agent
+
+    # Context with a readonly parent cap and an explicit workspace root.
+    ctx = _context(
+        workspaceRoot=str(tmp_path),
+        parentToolNames=("FileRead", "Glob", "Grep"),  # no mutating tools
+    )
+    asyncio.run(spawn_agent({"prompt": "read-only task"}, ctx))
+
+    captured = _CapturingProfileRunner.captured
+    assert captured["toolset_profile"] == "inherit"
+    # Read-only cap: shared workspace (not an isolated subdir).
+    assert captured["workspace_root"] == str(tmp_path)
+
+
+def test_spawn_agent_inherit_mutating_parent_gets_isolated_workspace(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Inherit profile + mutating parent cap -> isolated child workspace under
+    the parent root (same as ``full`` profile).
+
+    When the parent had Bash/FileWrite the child inherits a mutating cap.
+    ``_child_workspace_for_toolset`` isolates it under
+    ``<workspace_root>/.magi/child-workspaces/magi-child-*``.
+    """
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_TOOLSET", "inherit")
+
+    import magi_agent.runtime.child_runner_live as _live_mod
+
+    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _CapturingProfileRunner)
+
+    from magi_agent.plugins.native.subagents import spawn_agent
+
+    # Context with a mutating parent cap.
+    ctx = _context(
+        workspaceRoot=str(tmp_path),
+        parentToolNames=("FileRead", "Bash", "FileWrite"),  # mutating tools present
+    )
+    asyncio.run(spawn_agent({"prompt": "write task"}, ctx))
+
+    captured = _CapturingProfileRunner.captured
+    assert captured["toolset_profile"] == "inherit"
+    ws = captured["workspace_root"]
+    assert ws is not None
+    # Isolated: must be a child subdir, NOT the shared parent root.
+    assert ws != str(tmp_path), (
+        "Mutating inherit child must get an isolated workspace, not the parent root"
+    )
+    # Must be under the parent workspace.
+    assert str(ws).startswith(str(tmp_path)), (
+        f"Isolated workspace {ws!r} not under parent root {tmp_path!r}"
+    )
+
+
+def test_spawn_agent_inherit_empty_parent_cap_uses_temp_workspace(
+    monkeypatch,
+) -> None:
+    """Inherit profile + empty parent cap + no context workspace -> temp dir.
+
+    The readonly floor fallback path (empty parent cap, no workspace root
+    available on context) calls ``_default_temp_child_workspace`` and returns
+    a tempdir. The workspace_root must be non-None.
+    """
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_TOOLSET", "inherit")
+    # Clear workspace env keys so no context root is found.
+    for key in (
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
+        "MAGI_AGENT_WORKSPACE",
+        "MAGI_WORKSPACE_ROOT",
+        "MAGI_WORKSPACE",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    import magi_agent.runtime.child_runner_live as _live_mod
+
+    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _CapturingProfileRunner)
+
+    from magi_agent.plugins.native.subagents import spawn_agent
+
+    # _context() with no workspaceRoot and no parentToolNames (empty by default).
+    asyncio.run(spawn_agent({"prompt": "test"}, _context()))
+
+    captured = _CapturingProfileRunner.captured
+    assert captured["toolset_profile"] == "inherit"
+    # Temp dir must have been created (readonly floor, no parent root -> tempdir).
+    assert captured["workspace_root"] is not None
 
 
 # ---------------------------------------------------------------------------

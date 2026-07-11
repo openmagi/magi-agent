@@ -1692,14 +1692,13 @@ class RealLocalChildRunner:
         # Safety chain (D1/D2 from design doc):
         #   1. ``parentToolNames`` is always populated by all producer paths
         #      (wiring.py, tool_runtime.py, gate5b) unconditionally.
-        #   2. Empty-parent-cap fallback → ``readonly`` floor (never full, never
+        #   2. Empty-parent-cap fallback -> ``readonly`` floor (never full, never
         #      none) so the child is never silently over-privileged.
-        #   3. MUTATING_TOOL_NAMES are stripped from an inherit child whose parent
-        #      did NOT have them - so a read-only parent cannot spawn a writing
-        #      child even if the core toolset contains those tools.
+        #   3. The parent-cap intersection naturally excludes mutating tools when
+        #      the parent itself lacked them - no explicit MUTATING_TOOL_NAMES check
+        #      is needed.
         if self._toolset_profile == "inherit":
             from magi_agent.runtime.child_toolset import (  # noqa: PLC0415
-                MUTATING_TOOL_NAMES,
                 READONLY_TOOL_NAMES,
             )
 
