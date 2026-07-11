@@ -4,14 +4,22 @@ flow: linked_policy
 archetype: linked
 language: en
 turn_budget: 4
+# Two turns, mirroring the generated flow-B corpus: the first utterance carries
+# the tool + domain intent; the evidence label is supplied on the follow-up.
+# The prior single-turn variant expected the compiler to invent an evidence
+# label it was never told, which deterministically failed the live tier (T2) -
+# the utterance and the oracle must agree, so the label the oracle needs is
+# actually said.
 turns:
   - say: "block execute_trade until a source from sec.gov was verified this session"
+  - say: "the source credibility label"
 llm_script:
-  - '{"assistant_message": "Assembling the policy.", "param_updates": {"gatedTool": "execute_trade", "evidenceLabel": "source credibility", "allowlistDomains": ["sec.gov"]}}'
+  - '{"assistant_message": "One more detail.", "param_updates": {"gatedTool": "execute_trade", "allowlistDomains": ["sec.gov"]}, "questions": ["What are you verifying?"]}'
+  - '{"assistant_message": "Assembling the policy.", "param_updates": {"evidenceLabel": "source credibility"}}'
 save: from_plan
 oracle:
   expect_ready: true
-  max_turns_to_ready: 1
+  max_turns_to_ready: 2
   plan:
     gate.what.payload.match.tool: execute_trade
     gate.what.payload.requireEvidence.onEvidenceUnavailable: deny
