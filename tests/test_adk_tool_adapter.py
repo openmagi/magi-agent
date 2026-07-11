@@ -413,3 +413,112 @@ def test_tool_adapter_does_not_import_production_or_implementation_tool_modules(
         for module in imported_modules
         if any(module == prefix or module.startswith(f"{prefix}.") for prefix in forbidden_prefixes)
     ]
+
+
+# ---------------------------------------------------------------------------
+# F3-A: accept both the wrapped and the flat model tool-call shape
+# ---------------------------------------------------------------------------
+
+
+def _echo_tool(handler_calls: list[dict[str, object]]):
+    manifest = make_manifest(
+        "FlatEcho",
+        input_schema={
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        },
+    )
+
+    def handler(arguments: dict[str, object], context: OpenMagiToolContext) -> ToolResult:
+        handler_calls.append(dict(arguments))
+        return ToolResult(status="ok", output={"read": arguments.get("path")})
+
+    registry = ToolRegistry()
+    registry.register(manifest, handler=handler)
+    dispatcher = ToolDispatcher(registry)
+    return tool_adapter.build_adk_tool_for_manifest(
+        manifest,
+        dispatcher,
+        mode="act",
+        tool_context_factory=make_context_factory(),
+    )
+
+
+def test_flat_tool_call_dispatches_like_wrapped() -> None:
+    """A model that sends real params FLAT (Sonnet 5 habit) must dispatch
+    identically to one that sends the advertised wrapped shape, instead of
+    failing ADK's mandatory-arguments check and dying silently."""
+    wrapped_calls: list[dict[str, object]] = []
+    flat_calls: list[dict[str, object]] = []
+
+    wrapped = asyncio.run(
+        _echo_tool(wrapped_calls).run_async(
+            args={"arguments": {"path": "/x/y.pdf"}}, tool_context=object()
+        )
+    )
+    flat = asyncio.run(
+        _echo_tool(flat_calls).run_async(
+            args={"path": "/x/y.pdf"}, tool_context=object()
+        )
+    )
+
+    assert wrapped["status"] == "ok"
+    assert flat["status"] == "ok"
+    # Both reached the handler with the SAME real params (no mandatory-arg error).
+    assert wrapped_calls == [{"path": "/x/y.pdf"}]
+    assert flat_calls == [{"path": "/x/y.pdf"}]
+    assert "error" not in wrapped
+    assert "error" not in flat
+
+
+def test_mixed_shape_wrapped_keys_win() -> None:
+    calls: list[dict[str, object]] = []
+    out = asyncio.run(
+        _echo_tool(calls).run_async(
+            args={"arguments": {"path": "wrapped.pdf"}, "path": "sibling.pdf"},
+            tool_context=object(),
+        )
+    )
+    assert out["status"] == "ok"
+    assert calls == [{"path": "wrapped.pdf"}]
+
+
+def test_normalize_tool_call_args_unit() -> None:
+    from magi_agent.adk_bridge.tool_adapter import _normalize_tool_call_args
+
+    assert _normalize_tool_call_args({"path": "x"}) == {"arguments": {"path": "x"}}
+    assert _normalize_tool_call_args({"arguments": {"path": "x"}}) == {
+        "arguments": {"path": "x"}
+    }
+    assert _normalize_tool_call_args({"arguments": {"a": 1}, "b": 2}) == {
+        "arguments": {"b": 2, "a": 1}
+    }
+    assert _normalize_tool_call_args({}) == {"arguments": {}}
+    # Fail-open on non-dict.
+    assert _normalize_tool_call_args("nope") == "nope"
+
+
+def test_long_running_tool_also_accepts_flat() -> None:
+    calls: list[dict[str, object]] = []
+    manifest = make_manifest(
+        "FlatLong",
+        adk_tool_type="LongRunningFunctionTool",
+        should_defer=True,
+        latency_class="background",
+        input_schema={"type": "object", "properties": {"q": {"type": "string"}}},
+    )
+
+    def handler(arguments: dict[str, object], context: OpenMagiToolContext) -> ToolResult:
+        calls.append(dict(arguments))
+        return ToolResult(status="ok", output={"q": arguments.get("q")})
+
+    registry = ToolRegistry()
+    registry.register(manifest, handler=handler)
+    dispatcher = ToolDispatcher(registry)
+    tool = tool_adapter.build_adk_tool_for_manifest(
+        manifest, dispatcher, mode="act", tool_context_factory=make_context_factory()
+    )
+    out = asyncio.run(tool.run_async(args={"q": "hi"}, tool_context=object()))
+    assert out["status"] == "ok"
+    assert calls == [{"q": "hi"}]
