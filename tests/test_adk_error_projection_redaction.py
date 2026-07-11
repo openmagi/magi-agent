@@ -103,8 +103,12 @@ def test_prompt_keyword_error_not_whole_digested() -> None:
 def test_function_call_keyword_error_not_whole_digested() -> None:
     """An error containing 'function call' must NOT be whole-string digested.
 
-    'function call' matches _PRIVATE_TEXT_RE so it gets partial redaction,
-    but the surrounding terms survive readable.
+    Spaced "function call" / "tool call" do NOT match _PRIVATE_TEXT_RE in
+    event_adapter and pass through _public_text fully readable. The old bug
+    was the alnum-normalized substring check in _mentions_private_preview_key
+    ("functioncall" in "malformedfunctioncallarguments..." = True), which
+    triggered a whole-string digest. That check no longer runs on error
+    messages after the fix.
     """
     bridge = _bridge()
     event = _error_event(error_message="malformed function call arguments: bad shape")
@@ -356,3 +360,55 @@ def test_sse_sanitize_error_event_returns_str_not_digest() -> None:
     result = sse._sanitize_error_event(event_dict)
     assert isinstance(result.get("message"), str)
     assert not str(result.get("message", "")).startswith('{"digest"')
+
+
+# ---------------------------------------------------------------------------
+# Two-layer inoculation pin (security review Fix 1)
+# ---------------------------------------------------------------------------
+
+
+def test_two_layer_prompt_message_survives_sse_sanitizer() -> None:
+    """Two-layer pin: event_adapter inline-masks 'prompt' first; SSE passes it through.
+
+    This guards against regex drift in either layer breaking the chain.
+
+    Without the event_adapter fix, _public_preview would whole-digest
+    "invalid prompt: too long" to {"digest":"sha256:..."}. With the fix,
+    _public_text inline-masks the 'prompt' token to '[redacted-private]',
+    producing "invalid [redacted-private]: too long". Because the masked
+    string no longer contains the literal word 'prompt', sse.py's
+    _PRIVATE_TEXT_RE (which does match bare prompt) finds nothing to act on
+    and returns the string unchanged.
+
+    The end-to-end result must: contain 'invalid', contain 'too long',
+    and NOT be a whole-digest or a bare '[redacted-private]'.
+    """
+    bridge = _bridge()
+    event = _error_event(error_message="invalid prompt: too long")
+    proj = bridge.project_adk_event(event, turn_id="turn-pin")
+
+    error_item = next(e for e in proj.agent_events if e["type"] == "error")
+    msg_after_adapter = str(error_item["message"])
+
+    # Layer 1 (event_adapter): must not be a digest.
+    assert not msg_after_adapter.startswith('{"digest"'), (
+        f"layer-1 whole-digested: {msg_after_adapter}"
+    )
+
+    # Layer 2 (sse): pass the adapter-projected message through SSE.
+    sse_result = sse._sanitize_error_event(
+        {"type": "error", "code": "adk_error", "message": msg_after_adapter}
+    )
+    msg_after_sse = str(sse_result.get("message", ""))
+
+    # Both layers together must keep the non-private surrounding text readable.
+    assert "invalid" in msg_after_sse, (
+        f"'invalid' lost after SSE: {msg_after_sse!r}"
+    )
+    assert "too long" in msg_after_sse, (
+        f"'too long' lost after SSE: {msg_after_sse!r}"
+    )
+    # Must not have been whole-killed to the bare marker.
+    assert msg_after_sse != "[redacted-private]", (
+        "SSE whole-killed to bare marker; event_adapter inoculation failed"
+    )
