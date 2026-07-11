@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from magi_agent.cli.session_log import SessionLog
 
 from magi_agent.cli.contracts import (
+    Command,
     CommandContext,
     CommandRegistry,
     CommandSurface,
@@ -765,6 +766,37 @@ def _parse_slash(prompt: str) -> tuple[str, str]:
     return name, args
 
 
+_CUSTOM_PREFIX = "custom-"
+
+
+def _strip_custom_prefix(name: str) -> str:
+    """Strip exactly one leading ``custom-`` prefix (case-insensitive).
+
+    Returns the name unchanged if it does not start with ``custom-``.
+    This intentionally does NOT import from ``magi_agent.runtime.skill_slash``
+    so that the CLI unit remains independent.
+    """
+    if name.lower().startswith(_CUSTOM_PREFIX):
+        return name[len(_CUSTOM_PREFIX):]
+    return name
+
+
+def resolve_command(commands: CommandRegistry, name: str) -> Command | None:
+    """Look up ``name`` in ``commands``, retrying with ``custom-`` prefix stripped.
+
+    This shared helper is used by both the headless dispatch path and the TUI
+    classify path so that dashboard-synced skills stored as ``custom-<slug>``
+    dirs (whose frontmatter ``name`` is the clean ``<slug>``) are reachable by
+    either spelling.
+    """
+    cmd = commands.lookup(name)
+    if cmd is None:
+        stripped = _strip_custom_prefix(name)
+        if stripped != name:
+            cmd = commands.lookup(stripped)
+    return cmd
+
+
 async def _dispatch_headless_command(
     prompt: str,
     *,
@@ -786,14 +818,18 @@ async def _dispatch_headless_command(
     from magi_agent.cli.commands import dispatch
 
     name, args = _parse_slash(prompt)
-    command = commands.lookup(name)
+    command = resolve_command(commands, name)
     if command is None:
         return "error", None, f"unknown command: /{name}"
 
+    # Use the canonical name from the resolved command so that ``dispatch``'s
+    # own ``registry.lookup`` (which only knows the clean slug) finds it even
+    # when the user typed ``/custom-<slug>``.
+    dispatch_name = command.name
     ctx = CommandContext(cwd=cwd)
     try:
         result = await dispatch(
-            commands, name, args, ctx, surface=_HEADLESS_SURFACE
+            commands, dispatch_name, args, ctx, surface=_HEADLESS_SURFACE
         )
     except PermissionError as exc:
         # A WidgetCommand is interactive-only; dispatch raises in headless.

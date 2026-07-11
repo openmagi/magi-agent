@@ -79,8 +79,21 @@ class SkillPromptCommand(PromptCommand):
     async def build_prompt(  # type: ignore[override]
         self, args: object, ctx: CommandContext
     ) -> list[ContentBlock]:
-        _ = (args, ctx)
-        return [ContentBlock(type="text", text=self.body)]
+        _ = ctx
+        # Lazy import to keep module-level deps minimal (mirrors _parse_skill_md).
+        from magi_agent.cli.commands.discovery import _TOKEN_RE, _substitute_args
+
+        arg_str = "" if args is None else str(args)
+        if _TOKEN_RE.search(self.body):
+            # Body has $ARGUMENTS or $N placeholders -- substitute positionally.
+            text = _substitute_args(self.body, args)
+        elif arg_str:
+            # No placeholders but caller supplied trailing text -- append it.
+            text = self.body + "\n\nUser request: " + arg_str
+        else:
+            # No args at all -- return the body byte-identical.
+            text = self.body
+        return [ContentBlock(type="text", text=text)]
 
 
 def _parse_skill_md(path: Path, fallback_name: str) -> SkillPromptCommand | None:
