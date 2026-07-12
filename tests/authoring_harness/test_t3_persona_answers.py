@@ -217,3 +217,42 @@ def test_deterministic_sim_uses_shared_derive_answers() -> None:
         [{"id": qid} for qid in question_ids], "single_rule", _SLOTS_FLOW_A
     )
     assert turn.answers == expected
+
+
+def test_deterministic_sim_explicit_answer_wins_over_slot_derived() -> None:
+    """Refactor regression guard: an explicit turn answer must override the
+    slot-derived value for the same question id (explicit wins). Locks the
+    ordering across the `_derive_answers` extraction (reviewer P3)."""
+    from benchmarks.authoring.scenario import Turn
+
+    question_ids = ["q_what.kind", "q_firesAt", "q_action", "q_scope"]
+    transcript = _transcript_with_questions(question_ids)
+    scenario = type(
+        "S",
+        (),
+        {
+            "turns": [
+                Turn(
+                    say="block Bash",
+                    answers_from_slots=True,
+                    answers={"q_what.kind": "OVERRIDDEN"},
+                )
+            ],
+            "turn_budget": 8,
+            "generated": {"slots": _SLOTS_FLOW_A},
+            "flow": "single_rule",
+        },
+    )()
+
+    sim = DeterministicUserSim()
+    turn = sim.next_turn(scenario, transcript)
+    # Explicit answer wins for the overridden id...
+    assert turn.answers["q_what.kind"] == "OVERRIDDEN"
+    # ...while the remaining ids are still slot-derived.
+    slot_only, _ = _derive_answers(
+        [{"id": qid} for qid in question_ids if qid != "q_what.kind"],
+        "single_rule",
+        _SLOTS_FLOW_A,
+    )
+    for qid, val in slot_only.items():
+        assert turn.answers[qid] == val
