@@ -429,11 +429,18 @@ def _check_persisted(
             # t3 by comparing against what the user ACTUALLY said (a runtime
             # artifact, not an LLM-authored label) instead of the canned first
             # utterance. Do NOT skip the whole assertion.
+            # For t3 also allow the documented server-side intent truncation:
+            # a persona's long injection-laden utterance is stored truncated at
+            # the server cap, which is an honest prefix, not corruption.
             if t3:
                 intent = actual_first_say if actual_first_say else _first_utterance(scenario)
             else:
                 intent = _first_utterance(scenario)
-            P.assert_policy_intent(snap, ref_id, intent, expected_display=display)
+            P.assert_policy_intent(
+                snap, ref_id, intent,
+                expected_display=display,
+                allow_server_truncation=t3,
+            )
         if pers.get("no_orphan_rules"):
             P.assert_no_orphan_rules(snap)
         if pers.get("no_double_representation") and scenario.save == "grouped":
