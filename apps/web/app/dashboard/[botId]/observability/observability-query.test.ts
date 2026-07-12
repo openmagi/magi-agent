@@ -10,6 +10,8 @@ import {
   formatSessionBreakdown,
   extractVerdict,
   resolveKindCategories,
+  deriveSessionChannel,
+  deriveSessionTitle,
   type ActivityFilters,
 } from "./observability-query";
 
@@ -973,5 +975,87 @@ describe("resolveKindCategories", () => {
     expect(Object.keys(result.categories)).toContain("policy");
     expect(result.categories["policy"]).toContain("rule_check");
     expect(result.noiseKinds).toEqual(serverPayload.noise_kinds);
+  });
+});
+
+describe("deriveSessionChannel", () => {
+  it("classifies app channel from agent:main:app:<id>", () => {
+    expect(deriveSessionChannel("agent:main:app:default:abc12345")).toEqual({
+      key: "app",
+      label: "App chat",
+    });
+  });
+
+  it("classifies telegram/discord/slack/web channels", () => {
+    expect(deriveSessionChannel("agent:main:telegram:987654").key).toBe("telegram");
+    expect(deriveSessionChannel("agent:main:discord:123").key).toBe("discord");
+    expect(deriveSessionChannel("agent:main:slack:C99").key).toBe("slack");
+    expect(deriveSessionChannel("agent:main:web:xyz").key).toBe("web");
+  });
+
+  it("classifies subagent (child-session) sessions", () => {
+    expect(deriveSessionChannel("child-session-95e2d5f6b14962fb")).toEqual({
+      key: "subagent",
+      label: "Subagent",
+    });
+  });
+
+  it("classifies cron sessions in both key shapes", () => {
+    expect(deriveSessionChannel("cron:daily-digest").key).toBe("cron");
+    expect(deriveSessionChannel("agent:cron:daily-digest").key).toBe("cron");
+  });
+
+  it("classifies the local CLI session", () => {
+    expect(deriveSessionChannel("cli-session")).toEqual({ key: "cli", label: "CLI" });
+  });
+
+  it("title-cases unknown agent channel types", () => {
+    expect(deriveSessionChannel("agent:main:sms:555")).toEqual({
+      key: "unknown",
+      label: "Sms",
+    });
+  });
+
+  it("falls back to a generic Session for empty/opaque ids", () => {
+    expect(deriveSessionChannel("")).toEqual({ key: "unknown", label: "Session" });
+    expect(deriveSessionChannel(null)).toEqual({ key: "unknown", label: "Session" });
+    expect(deriveSessionChannel("d41d8cd98f00b204").label).toBe("Session");
+  });
+});
+
+describe("deriveSessionTitle", () => {
+  it("labels the default app conversation as Main chat", () => {
+    expect(deriveSessionTitle("agent:main:app:default:abc12345")).toBe("Main chat");
+  });
+
+  it("appends a trailing numeric reset/turn counter as #N", () => {
+    expect(deriveSessionTitle("agent:main:app:demo:32")).toBe("demo · #32");
+    expect(deriveSessionTitle("agent:main:app:default:abc12345:2")).toBe("Main chat · #2");
+  });
+
+  it("uses the channel id as the title for non-app channels", () => {
+    expect(deriveSessionTitle("agent:main:telegram:987654")).toBe("987654");
+  });
+
+  it("renders a short, distinguishable subagent title", () => {
+    expect(deriveSessionTitle("child-session-95e2d5f6b14962fb")).toBe("Subagent 95e2d5f6");
+  });
+
+  it("renders scheduled/cron titles", () => {
+    expect(deriveSessionTitle("agent:cron:daily-digest")).toBe("Scheduled: daily-digest");
+    expect(deriveSessionTitle("cron:daily-digest")).toBe("Scheduled: daily-digest");
+    expect(deriveSessionTitle("cron:")).toBe("Scheduled run");
+  });
+
+  it("labels the local CLI session", () => {
+    expect(deriveSessionTitle("cli-session")).toBe("CLI session");
+  });
+
+  it("uses the backend label only for genuinely opaque ids", () => {
+    // A recognizable id never surfaces the tool-name jumble as its title.
+    expect(deriveSessionTitle("agent:main:app:demo:32", "XLSXInfo, XLSXRead")).toBe("demo · #32");
+    // An opaque id (no known shape) falls back to the provided label, then the id.
+    expect(deriveSessionTitle("d41d8cd98f00b204", "Bash, Calculation")).toBe("Bash, Calculation");
+    expect(deriveSessionTitle("d41d8cd98f00b204")).toBe("d41d8cd98f00b204");
   });
 });

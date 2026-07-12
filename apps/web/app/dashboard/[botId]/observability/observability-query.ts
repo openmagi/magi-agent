@@ -341,6 +341,125 @@ export function extractVerdict(event: unknown): RuleCheckVerdict | null {
 }
 
 /**
+ * Stable channel classification for a session, derived purely from its
+ * `session_id`. The runtime encodes the originating channel in the session key
+ * (see magi_agent/runtime/session_identity.py and channels/turn_bridge.py):
+ *
+ *   agent:main:<channel>:<channelId>[:<reset>]   → a live channel conversation
+ *   child-session-<hash>                          → a delegated subagent turn
+ *   agent:cron:<suffix>  |  cron:<suffix>         → a scheduled (cron) run
+ *   cli-session                                   → the local CLI/headless turn
+ *
+ * `key` drives the icon + tone in the UI; `label` is the human-readable channel
+ * name shown on the chip. This is intentionally UI-agnostic (no JSX/colors) so
+ * it stays unit-testable — the page maps `key` to an icon + tone class.
+ */
+export interface SessionChannel {
+  key:
+    | "app"
+    | "telegram"
+    | "discord"
+    | "slack"
+    | "web"
+    | "cli"
+    | "cron"
+    | "subagent"
+    | "unknown";
+  label: string;
+}
+
+/** Known `agent:main:<type>:…` channel types → chip key + label. */
+const CHANNEL_TYPE_LABELS: Record<string, { key: SessionChannel["key"]; label: string }> = {
+  app: { key: "app", label: "App chat" },
+  telegram: { key: "telegram", label: "Telegram" },
+  discord: { key: "discord", label: "Discord" },
+  slack: { key: "slack", label: "Slack" },
+  web: { key: "web", label: "Web" },
+  cli: { key: "cli", label: "CLI" },
+};
+
+function titleCase(value: string): string {
+  const s = value.trim();
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/**
+ * Classify a session's originating channel from its `session_id`.
+ * Never throws; returns the `unknown` channel for empty/opaque ids.
+ */
+export function deriveSessionChannel(sessionId: string | null | undefined): SessionChannel {
+  const id = (sessionId ?? "").trim();
+  if (!id) return { key: "unknown", label: "Session" };
+  if (id.startsWith("child-session-")) return { key: "subagent", label: "Subagent" };
+
+  const parts = id.split(":");
+  if (parts[0] === "cron" || (parts[0] === "agent" && parts[1] === "cron")) {
+    return { key: "cron", label: "Scheduled" };
+  }
+  if (parts[0] === "agent" && parts.length >= 4) {
+    const type = (parts[2] || "app").toLowerCase();
+    const mapped = CHANNEL_TYPE_LABELS[type];
+    return mapped ?? { key: "unknown", label: titleCase(type) };
+  }
+  if (id === "cli-session" || parts[0] === "cli") return { key: "cli", label: "CLI" };
+  return { key: "unknown", label: "Session" };
+}
+
+/**
+ * Derive a short, human-readable session title from its `session_id`.
+ *
+ * The goal is a ChatGPT-style recognizable name rather than a raw hash or a
+ * jumble of tool names:
+ *   agent:main:app:default:<bot>       → "Main chat"
+ *   agent:main:app:demo:32             → "demo · #32"      (trailing reset/turn #)
+ *   agent:main:telegram:987654         → "987654"          (chip carries platform)
+ *   child-session-95e2d5f6b14962fb…    → "Subagent 95e2d5f6"
+ *   agent:cron:daily-digest            → "Scheduled: daily-digest"
+ *   cli-session                        → "CLI session"
+ *
+ * `fallbackLabel` (the backend-derived `label`) is used only for genuinely
+ * opaque ids that match none of the known shapes, so the tool-name jumble never
+ * surfaces as the title of a recognizable session.
+ */
+export function deriveSessionTitle(
+  sessionId: string | null | undefined,
+  fallbackLabel?: string | null,
+): string {
+  const id = (sessionId ?? "").trim();
+  const fallback = (fallbackLabel ?? "").trim();
+  if (!id) return fallback || "Session";
+
+  if (id.startsWith("child-session-")) {
+    const hash = id.slice("child-session-".length);
+    const short = hash.slice(0, 8);
+    return short ? `Subagent ${short}` : "Subagent";
+  }
+
+  const parts = id.split(":");
+  if (parts[0] === "cron") return cronTitle(parts.slice(1).join(":"));
+  if (parts[0] === "agent" && parts[1] === "cron") return cronTitle(parts.slice(2).join(":"));
+
+  if (parts[0] === "agent" && parts.length >= 4) {
+    const channelId = parts[3] || "default";
+    // A trailing numeric segment is the reset/turn counter — surface it as "#N"
+    // so otherwise-identical conversations stay distinguishable.
+    const last = parts[parts.length - 1];
+    const resetSuffix = parts.length >= 5 && /^\d+$/.test(last) ? ` · #${last}` : "";
+    if (channelId === "default") return `Main chat${resetSuffix}`;
+    return `${channelId}${resetSuffix}`;
+  }
+
+  if (id === "cli-session") return "CLI session";
+  return fallback || id;
+}
+
+function cronTitle(suffix: string): string {
+  const s = suffix.trim();
+  return s ? `Scheduled: ${s}` : "Scheduled run";
+}
+
+/**
  * Resolve kind categories and noise kinds from the /meta endpoint's `categories`
  * payload, falling back to the FE constants (CATEGORY_KINDS / NOISE_KINDS) when
  * the server payload is absent or malformed (older runtimes without Task 7).
