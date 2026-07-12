@@ -244,13 +244,15 @@ def _render_t3_headline(
     )
     # (3) Structural convergence: passed/total under the relaxed t3 oracle.
     convergence = (summary.passed / total) if total else 0.0
-    # (4) Expected persona-variance bucket: dotted-path plan/param deviations
-    # arrive as oracle:draft.* / oracle:params.* in failures_by_code. Per OQ2
-    # these are still failures, but named as prose-override findings here.
+    # (4) Expected persona-variance bucket: dotted-path deviations where persona
+    # prose overrode the structured answer. Flow-A deviations arrive as
+    # oracle:draft.* / oracle:params.*, flow-B (linked_policy) as oracle:plan.*
+    # in failures_by_code. Per OQ2 these are still failures, but named as
+    # prose-override findings here.
     variance_codes = {
         code: sids
         for code, sids in summary.failures_by_code.items()
-        if code.startswith("oracle:draft.") or code.startswith("oracle:params.")
+        if code.startswith(("oracle:draft.", "oracle:params.", "oracle:plan."))
     }
     # (5) Persona-LLM liveness: fraction of runs with an empty persona say.
     empty_say_runs = _count_empty_say_runs(results)

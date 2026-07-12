@@ -76,6 +76,31 @@ def _fail_oracle_draft(sid: str) -> RunResult:
     )
 
 
+def _fail_oracle_plan(sid: str) -> RunResult:
+    """Flow-B (linked_policy) prose-override deviation: arrives as oracle:plan.*"""
+    return RunResult(
+        scenario_id=sid, passed=False, turns=2,
+        first_divergence={
+            "turn": 2,
+            "oracle": "plan.gate.what.payload.requireEvidence.onEvidenceUnavailable",
+            "expected": "deny", "got": "ask",
+        },
+        transcript=[{"turn": 0, "say": "x", "answers": {}, "response": {}, "http_status": 200}],
+    )
+
+
+def test_t3_variance_bucket_includes_flow_b_plan_deviations(tmp_path: Path) -> None:
+    """Regression (final live T3 run): flow-B prose-override deviations arrive as
+    oracle:plan.* in failures_by_code; the variance bucket must include them, not
+    mislabel the run 'Expected persona variance: none'."""
+    results = [_pass("a::cooperative"), _fail_oracle_plan("b::adversarial")]
+    write_report(tmp_path, results, tier="t3")
+    md = (tmp_path / "report.md").read_text(encoding="utf-8")
+    assert "persona variance" in md.lower()
+    assert "oracle:plan.gate.what.payload.requireEvidence.onEvidenceUnavailable" in md
+    assert "variance**: none" not in md.lower()
+
+
 def _pass_with_empty_say(sid: str) -> RunResult:
     return RunResult(
         scenario_id=sid, passed=True, turns=2, reached_ready_at=2,
