@@ -781,11 +781,47 @@ _FIRST_PARTY_TYPE_PREFIX = "custom:FirstParty"
 
 # Static model-family lexicon (2.5 arm 1b). Matching AID only, consulted INSIDE
 # an already-matched delegation claim. Staleness degrades recall, never
-# precision.
+# precision. Includes provider aliases (anthropic/openai/google/...) so
+# provider-alias phrasing ("the Anthropic subagent", "the OpenAI reviewer") is
+# both catchable and alias-suppressible against a matching spawn record.
 _MODEL_FAMILY_TOKENS: tuple[str, ...] = (
-    "gpt", "opus", "claude", "sonnet", "haiku", "fable", "gemini", "kimi",
-    "glm", "grok", "llama", "mistral", "deepseek", "qwen", "minimax",
+    "gpt", "o3", "o4", "opus", "claude", "sonnet", "haiku", "fable", "gemini",
+    "kimi", "glm", "grok", "llama", "mistral", "deepseek", "qwen", "minimax",
+    "anthropic", "openai", "chatgpt", "google", "zhipu", "moonshot", "alibaba",
+    "meta", "xai",
 )
+
+# Bidirectional alias groups (design 2.4.1 / 2.5). A spawn record whose derived
+# family keys land in group G alias-satisfies ANY claimed family also in G, so a
+# real "opus-4-8 anthropic" record suppresses a claimed "claude"/"sonnet"/
+# "anthropic" family and vice versa. Groups are disjoint, so the incident-catch
+# invariant holds: an anthropic-group record never satisfies a claimed "gpt".
+_MODEL_FAMILY_ALIAS_GROUPS: tuple[frozenset[str], ...] = (
+    frozenset({"claude", "opus", "sonnet", "haiku", "anthropic"}),
+    frozenset({"gpt", "o3", "o4", "openai", "chatgpt"}),
+    frozenset({"gemini", "google"}),
+    frozenset({"glm", "zhipu"}),
+    frozenset({"kimi", "moonshot"}),
+    frozenset({"minimax"}),
+    frozenset({"qwen", "alibaba"}),
+    frozenset({"deepseek"}),
+    frozenset({"llama", "meta"}),
+    frozenset({"mistral"}),
+    frozenset({"grok", "xai"}),
+)
+
+
+def _alias_expand(token: str) -> frozenset[str]:
+    """Return token plus its bidirectional alias siblings (design 2.4.1).
+
+    A token with no alias group expands to just itself, so novel/ungrouped
+    family tokens keep exact-match semantics.
+    """
+    token = token.casefold()
+    for group in _MODEL_FAMILY_ALIAS_GROUPS:
+        if token in group:
+            return group
+    return frozenset({token})
 
 # Sub-check 1 claim lexicon (2.5): first-person completed delegation only.
 _SPAWN_CLAIM_EN_RE = re.compile(
@@ -915,6 +951,12 @@ def _variant_regex_for_slug(slug: str) -> re.Pattern[str] | None:
     if not fragments:
         return None
     joined = r"[-_./: ]?".join(re.escape(f) for f in fragments)
+    # Word-anchor short alpha-leading slug variants (whole slug len <= 5, e.g.
+    # "o3", "glm-4") so a short token does not match mid-word ("o3" inside
+    # "cargo3d", "glm-4" inside "aglm-4x"). Longer variants (e.g. "gpt-5.5") are
+    # specific enough that a mid-word coincidence is negligible.
+    if len(slug) <= 5 and slug[:1].isalpha():
+        joined = r"\b" + joined + r"\b"
     return re.compile(joined, re.IGNORECASE)
 
 
@@ -982,22 +1024,55 @@ def _exec_window_guarded(text: str, match: re.Match[str], *, radius: int = 120) 
     return False
 
 
-def _record_token_matches_any(regexes: Sequence[re.Pattern[str]], record: Any) -> bool:
-    """True when any of the mention regexes matches this record's own tokens.
+def _record_family_candidate_keys(record: Any) -> set[str]:
+    """Candidate family keys derived FROM a spawn record (design 2.4.1 / 2.5).
 
-    Used by arm 1b to decide whether a claimed family already has a spawn
-    record. The record's model/persona strings are the haystack.
+    Keys = leading-alpha run of the model slug, plus the provider token, plus
+    every _MODEL_FAMILY_TOKENS entry that word-matches the record's own haystack
+    (model + provider + persona). These are the pre-alias-expansion families the
+    record can vouch for.
     """
     detail = _spawn_record_detail(record)
+    keys: set[str] = set()
+
+    model = detail.get("model")
+    if isinstance(model, str) and model.strip():
+        m = model.casefold().strip()
+        for half in (h for h in m.split(":") if h) if ":" in m else (m,):
+            family_match = re.match(r"[a-z]+", half)
+            if family_match and len(family_match.group(0)) >= 3:
+                keys.add(family_match.group(0))
+
+    provider = detail.get("provider")
+    if isinstance(provider, str) and provider.strip():
+        keys.add(provider.casefold().strip())
+
     haystack_parts = [
         str(detail.get("model") or ""),
         str(detail.get("provider") or ""),
         str(detail.get("persona") or ""),
     ]
     haystack = " ".join(p for p in haystack_parts if p)
-    if not haystack:
-        return False
-    return any(rx.search(haystack) for rx in regexes)
+    if haystack:
+        for token in _MODEL_FAMILY_TOKENS:
+            if re.search(r"\b" + re.escape(token) + r"\b", haystack, re.IGNORECASE):
+                keys.add(token)
+
+    return keys
+
+
+def _expanded_families_for_records(records: Sequence[Any]) -> set[str]:
+    """Union of alias-expanded family keys across every spawn record (2.5).
+
+    A claimed family present in this set is vouched for by some spawn record
+    (directly or via a bidirectional alias sibling), so arm 1b must not fire on
+    it.
+    """
+    expanded: set[str] = set()
+    for record in records:
+        for key in _record_family_candidate_keys(record):
+            expanded |= _alias_expand(key)
+    return expanded
 
 
 def _check_failed_execution_success(
@@ -1159,15 +1234,20 @@ def _check_fabricated_execution(
         ))
         return findings
 
-    # Arm 1b: model-named absence. Scan the claim window for a family token.
+    # Arm 1b: model-named absence. Scan the claim window for a family token, then
+    # suppress any family that a spawn record vouches for directly or through a
+    # bidirectional alias sibling (design 2.4.1 / 2.5). "opus-4-8 anthropic" thus
+    # suppresses a claimed "claude"/"sonnet"/"anthropic"; a claimed "gpt" (a
+    # different alias group) is never suppressed by an anthropic-group record, so
+    # the incident-catch invariant holds.
     win_start = max(0, claim_match.start() - 120)
     win_end = min(len(text), claim_match.end() + 120)
     window = text[win_start:win_end]
+    covered_families = _expanded_families_for_records(all_spawns)
     matched_families: list[str] = []
     for family in _MODEL_FAMILY_TOKENS:
         if re.search(r"\b" + re.escape(family) + r"\b", window, re.IGNORECASE):
-            family_rx = re.compile(r"\b" + re.escape(family) + r"\b", re.IGNORECASE)
-            if not any(_record_token_matches_any([family_rx], r) for r in all_spawns):
+            if family.casefold() not in covered_families:
                 matched_families.append(family)
     if not matched_families:
         return findings

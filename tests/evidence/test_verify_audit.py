@@ -23,6 +23,8 @@ from magi_agent.evidence.citation_gate import (
 from magi_agent.evidence.verify_audit import (
     VerifyAuditResult,  # noqa: F401 (schema import, validates shape)
     VerifyFinding,
+    _record_status,  # noqa: PLC2701 (blocked-status predicate pin, design 2.2)
+    _variant_regex_for_slug,  # noqa: PLC2701 (slug-anchor test, design 2.4.1)
     activity_grounding_findings,
     audit_candidate,  # noqa: F401 (imported; end-to-end tested in PR-V3)
     build_nudge_message,
@@ -1218,3 +1220,102 @@ def test_execution_adversarial_benign_silent(text: str, desc: str) -> None:
     ]
     findings = execution_claims_findings(text, corpus, [], collector_present=True)
     assert findings == (), f"{desc}: must stay silent"
+
+
+# ---------------------------------------------------------------------------
+# Arm 1b family-alias false-positive suppression (design 2.4.1 / 2.5, FPR-0)
+# ---------------------------------------------------------------------------
+
+
+def test_arm1b_family_alias_claude_opus_no_fp() -> None:
+    """Honest 'reviewed by Claude' + an ok anthropic/opus-4-8 record: ZERO findings.
+
+    The record derives family 'opus', which is alias-sibling of 'claude', so a
+    claimed 'claude' family must not fire arm 1b (FPR-0 over an alias-named model).
+    """
+    corpus = [
+        _subagent_spawn(status="ok", reason=None, model="opus-4-8", provider="anthropic", ref="sp_ok"),
+    ]
+    text = "The debate was reviewed by Claude, which signed off."
+    findings = execution_claims_findings(text, corpus, [], collector_present=True)
+    assert findings == (), (
+        "claimed 'claude' family is alias-satisfied by an opus/anthropic record"
+    )
+
+
+def test_arm1b_family_alias_sonnet_no_fp() -> None:
+    """'reviewed by Sonnet' + an ok record whose family derives to 'claude': ZERO.
+
+    Record model 'claude' (no 'sonnet' substring) derives leading-alpha family
+    'claude'; claimed 'sonnet' is alias-sibling so arm 1b must stay silent.
+    """
+    corpus = [
+        _subagent_spawn(status="ok", reason=None, model="claude", provider="anthropic", ref="sp_s"),
+    ]
+    text = "The plan was reviewed by Sonnet, which approved it."
+    findings = execution_claims_findings(text, corpus, [], collector_present=True)
+    assert findings == (), (
+        "claimed 'sonnet' family is alias-satisfied by a claude/anthropic record"
+    )
+
+
+def test_arm1b_incident_regression_gpt_vs_opus_still_fires() -> None:
+    """Incident regression: 'reviewed by GPT-5.5' + only opus records STILL fires.
+
+    'gpt' is in a different alias group from {claude,opus,...}, so the opus
+    records do not alias-satisfy it (2.5 incident-catch invariant preserved)."""
+    corpus = [
+        _subagent_spawn(status="error", reason="child_turn_timeout", model="opus-4-8", provider="anthropic", ref="c1"),
+        _subagent_spawn(status="ok", reason=None, model="opus-4-8", provider="anthropic", ref="c2"),
+    ]
+    text = "The debate was reviewed by GPT-5.5, which signed off on the design."
+    findings = execution_claims_findings(text, corpus, [], collector_present=True)
+    assert _exec_classes(findings) == ["fabricated_execution"], (
+        "gpt claim over opus-only records must still fire arm 1b (incident leg 3)"
+    )
+
+
+def test_arm1b_provider_alias_phrasing_no_fp() -> None:
+    """'the Anthropic subagent reviewed it' + ok opus record: ZERO findings.
+
+    Provider-alias phrasing names 'anthropic' as the family; the opus/anthropic
+    record derives 'anthropic' (provider candidate key) and its alias group
+    covers it, so arm 1b stays silent."""
+    corpus = [
+        _subagent_spawn(status="ok", reason=None, model="opus-4-8", provider="anthropic", ref="sp_ok"),
+    ]
+    text = (
+        "I had the Anthropic subagent review the design and it concluded it is sound."
+    )
+    findings = execution_claims_findings(text, corpus, [], collector_present=True)
+    assert findings == (), (
+        "provider-alias 'anthropic' is satisfied by an opus/anthropic record"
+    )
+
+
+def test_spawn_record_blocked_status_predicate() -> None:
+    """A blocked spawn (EvidenceRecord status 'unknown', fields.status 'blocked')
+    is still read as FAILED via fields.status (design 2.2 predicate)."""
+    rec = _subagent_spawn(
+        status="blocked", reason="child_runner_blocked", model="opus-4-8", ref="b1"
+    )
+    assert _record_status(rec) == "unknown", "blocked maps EvidenceRecord status to unknown"
+    text = "Opus reviewed this and concluded the design is sound."
+    findings = execution_claims_findings(text, [rec], [], collector_present=True)
+    assert _exec_classes(findings) == ["failed_execution_presented_as_success"], (
+        "fields.status='blocked' must be read as a failed spawn (2.2)"
+    )
+
+
+def test_variant_regex_short_slug_word_anchored() -> None:
+    """Short single-fragment slugs (len<=4 alpha) are \\b-anchored so they do not
+    match inside unrelated words (2.4.1 slug-anchor hardening)."""
+    rx_o3 = _variant_regex_for_slug("o3")
+    assert rx_o3 is not None
+    assert rx_o3.search("the o3 model") is not None, "o3 matches as a standalone token"
+    assert rx_o3.search("cargo3d rendering") is None, "o3 does not match inside a word"
+
+    rx_glm = _variant_regex_for_slug("glm-4")
+    assert rx_glm is not None
+    assert rx_glm.search("glm-4 reviewed it") is not None, "glm-4 matches as a token"
+    assert rx_glm.search("aglm-4x pipeline") is None, "glm-4 does not match mid-word"
