@@ -55,7 +55,7 @@ from magi_agent.runtime.per_turn_goal_loop_context import (
 from magi_agent.runtime.public_events import tool_end_event, tool_progress_event, tool_start_event, turn_phase_event
 from magi_agent.runtime.session_identity import _memory_mode_from_header
 from magi_agent.runtime.session_ownership import acquire_hosted_session_lease, probe_session_event_count, resolve_include_history, seeded_history_message_count
-from magi_agent.shadow.gate5b4c3_live_runner_boundary import _gate1a_correlated_model_or_label, _shadow_session_id, run_gate5b4c3_live_runner_boundary_async
+from magi_agent.shadow.gate5b4c3_live_runner_boundary import _gate1a_correlated_model_or_label, _shadow_session_id, load_gate5b4c3_live_adk_primitives, run_gate5b4c3_live_runner_boundary_async
 from magi_agent.shadow.gate5b4c3_runner_input_adapter import build_gate5b4c3_runner_input
 from magi_agent.shadow.gate5b4c3_shadow_generation_contract import build_gate5b4c3_shadow_generation_diagnostic
 from magi_agent.shadow.hosted_session_substrate import DEFAULT_NUM_RECENT_EVENTS, durable_hosted_session_factory
@@ -618,6 +618,19 @@ async def _run_live_chat_runner(
         # OFF (safe-family profile or an explicit "0") = byte-identical to the
         # legacy boundary call, taken without any additional overhead.
         if flag_profile_bool("MAGI_HOSTED_GOVERNED_TURN_ENABLED"):
+            # The env-built route config never carries an ADK primitives loader
+            # (build_gate5b_user_visible_chat_route_config_from_env leaves it
+            # None; only tests inject one), so resolve the loader ONCE here to
+            # the SAME default the legacy boundary uses. Pre-fix, the two direct
+            # call sites below (primitives construction and build_hosted_runtime)
+            # dereferenced None and every hosted governed turn died with a
+            # TypeError before the runner started (live-diagnosed on canary
+            # 186bf3d7, 2026-07-11: governed became profile-default-ON while the
+            # June canary had only ever validated the legacy branch).
+            adk_primitives_loader = (
+                route_config.adk_primitives_loader
+                or load_gate5b4c3_live_adk_primitives
+            )
             # 1. Build the runner input (input adapter + policy checks).
             runner_input_result = build_gate5b4c3_runner_input(generation)
             if runner_input_result.status != "accepted" or runner_input_result.runner_input is None:
@@ -627,7 +640,7 @@ async def _run_live_chat_runner(
                 boundary_result = await run_gate5b4c3_live_runner_boundary_async(
                     generation,
                     config=generation_config,
-                    adk_primitives_loader=route_config.adk_primitives_loader,
+                    adk_primitives_loader=adk_primitives_loader,
                     adk_tools=gate1a_bundle.tools if gate1a_bundle.status == "ready" else (),
                     gate1a_egress_correlation_context=gate1a_egress_context,
                     gate1a_egress_proxy_url=gate1a_egress_proxy_url,
@@ -645,8 +658,9 @@ async def _run_live_chat_runner(
                     proxy_url=gate1a_egress_proxy_url,
                 )
                 # 3. Build generate_content_config via the ADK primitives loader
-                # (matches gate5b4c3's own construction path).
-                primitives = route_config.adk_primitives_loader()
+                # (matches gate5b4c3's own construction path; loader resolved
+                # None-safe at governed-branch entry above).
+                primitives = adk_primitives_loader()
                 generate_content_config = primitives.GenerateContentConfig(
                     maxOutputTokens=runner_input.max_output_tokens,
                 )
@@ -720,7 +734,9 @@ async def _run_live_chat_runner(
                         else None
                     )
                     hosted_rt = build_hosted_runtime(
-                        adk_primitives_loader=route_config.adk_primitives_loader,
+                        # None-safe: resolved at governed-branch entry
+                        # (hosted_runtime dereferences the loader directly).
+                        adk_primitives_loader=adk_primitives_loader,
                         adk_tools=adk_tools,
                         model=model_for_agent,
                         instruction=runner_input.system_instruction,

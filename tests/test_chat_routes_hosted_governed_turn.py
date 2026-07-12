@@ -618,3 +618,77 @@ def test_flag_off_and_on_produce_same_response_top_level_shape(monkeypatch) -> N
             f"Type mismatch for key {key!r}: "
             f"OFF={type(body_off[key]).__name__}, ON={type(body_on[key]).__name__}"
         )
+
+
+# ---------------------------------------------------------------------------
+# 1c. Regression (2026-07-11 canary): the governed branch must not assume the
+#     route config carries an ADK primitives loader. The env builder
+#     (build_gate5b_user_visible_chat_route_config_from_env) NEVER sets one, so
+#     on a real hosted bot route_config.adk_primitives_loader is None and the
+#     pre-fix code died with `TypeError: 'NoneType' object is not callable`
+#     before the runner started (502 runner_error on every governed turn).
+#     Every earlier test injected adkPrimitivesLoader=_fake_primitives, which is
+#     exactly why the crash was never caught. This test omits the loader, the
+#     way the env builder does.
+# ---------------------------------------------------------------------------
+
+
+def test_governed_turn_defaults_primitives_loader_when_route_config_has_none(
+    monkeypatch, tmp_path: Any
+) -> None:
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "1")
+
+    governed_called: dict[str, int] = {"count": 0}
+    default_loader_called: dict[str, int] = {"count": 0}
+
+    async def _noop_gen():  # noqa: ANN202
+        yield EngineResult(terminal=Terminal.completed, session_id="s", turn_id="t")
+
+    def fake_governed_turn(ctx: object, *, runtime: object, cancel: object = None):  # noqa: ANN201
+        governed_called["count"] += 1
+        return _noop_gen()
+
+    async def fake_collect(*args: object, **kwargs: object) -> Gate5B4C3LiveRunnerBoundaryResult:
+        return _make_boundary_result(output_text="governed answer")
+
+    def fake_default_loader() -> Gate5B4C3LiveAdkPrimitives:
+        default_loader_called["count"] += 1
+        return _fake_primitives()
+
+    monkeypatch.setattr(
+        "magi_agent.transport.gate5b_serving.run_governed_turn", fake_governed_turn
+    )
+    monkeypatch.setattr(
+        "magi_agent.transport.gate5b_serving.collect_engine_to_boundary_result",
+        fake_collect,
+    )
+    monkeypatch.setattr(
+        "magi_agent.transport.gate5b_serving.load_gate5b4c3_live_adk_primitives",
+        fake_default_loader,
+    )
+
+    runtime = _make_canary_runtime(tmp_path)
+    # The env-built shape: no loader on the route config.
+    runtime.gate5b_user_visible_chat_route_config = Gate5BUserVisibleChatRouteConfig(
+        enabled=True,
+        killSwitchEnabled=False,
+        selectedBotDigest=_sha256("bot-test"),
+        selectedOwnerUserIdDigest=_sha256("user-test"),
+        environment="production",
+        environmentAllowlist=("production",),
+        # adkPrimitivesLoader intentionally OMITTED (None).
+    )
+    assert runtime.gate5b_user_visible_chat_route_config.adk_primitives_loader is None
+
+    response = TestClient(create_app(runtime)).post(
+        "/v1/chat/completions",
+        headers=_canary_headers("c" * 64),
+        json=_CANARY_BODY,
+    )
+
+    assert response.status_code == 200, response.json()
+    assert governed_called["count"] == 1, "governed turn must run despite a None loader"
+    assert default_loader_called["count"] >= 1, (
+        "the governed branch must fall back to load_gate5b4c3_live_adk_primitives"
+    )
