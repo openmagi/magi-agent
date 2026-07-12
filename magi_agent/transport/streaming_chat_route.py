@@ -168,6 +168,10 @@ _SELECTED_STREAM_HEARTBEAT_INTERVAL_SECONDS = 5.0
 # Maximum allowed size (bytes) of the JSON-serialised ``response`` dict in
 # a control-response request.  Protects against oversized payloads.
 _MAX_CONTROL_RESPONSE_BYTES = 8192
+
+# Initial-load cap for GET /v1/chat/channel-messages?full=1.
+# Keeps the first-load payload bounded; incremental after= polls are unbounded.
+_LOCAL_CHANNEL_HISTORY_FULL_LIMIT = 500
 _SSE_HEADERS = {
     "Cache-Control": "no-cache, no-transform",
     "X-Accel-Buffering": "no",
@@ -1515,5 +1519,69 @@ def register_streaming_chat_routes(
         session_id = request.query_params.get("sessionId", "").strip()
         if not session_id:
             return JSONResponse(status_code=400, content={"error": "missing_session_id"})
+
+        # U3: optional durable-history params.
+        # ``full=1`` (or "true"/"yes"/"on") fetches up to
+        # _LOCAL_CHANNEL_HISTORY_FULL_LIMIT rows from ChannelMessageStore.
+        # ``after=<seq>`` fetches only rows with seq > <seq> (unbounded).
+        # Both fall back to legacy LOCAL_TURN_STORE when the store is
+        # unavailable or the flag is OFF.
+        full_raw = request.query_params.get("full", "").strip().lower()
+        full = full_raw in ("1", "true", "yes", "on")
+        after_raw = request.query_params.get("after", "").strip()
+        after_seq: int | None = None
+        if after_raw:
+            try:
+                after_seq = int(after_raw)
+            except ValueError:
+                after_seq = None  # treat bad value as absent; do not 400
+
+        if full or after_seq is not None:
+            from magi_agent.config.flags import flag_str  # noqa: PLC0415
+            from magi_agent.storage.channel_message_store import (  # noqa: PLC0415
+                channel_message_store_for,
+            )
+
+            # Resolve the workspace root the SAME way the U2 turn-handler writer
+            # does (chat_routes_local.py: ``flag_str("MAGI_AGENT_WORKSPACE") or
+            # os.getcwd()``) so reader and writer provably hit one db. Using
+            # app_api._workspace_root() here would consult a wider env-var list
+            # and could resolve a different root than the writer.
+            workspace_root = flag_str("MAGI_AGENT_WORKSPACE") or os.getcwd()
+            store = channel_message_store_for(workspace_root)
+            if store is not None:
+                try:
+                    # Unbounded when using the cursor; capped for full initial load.
+                    limit = (
+                        None
+                        if after_seq is not None
+                        else _LOCAL_CHANNEL_HISTORY_FULL_LIMIT
+                    )
+                    rows = await store.list_messages(
+                        session_id=session_id,
+                        app_name="",
+                        after_seq=after_seq,
+                        limit=limit,
+                    )
+                    messages = [
+                        {
+                            "seq": r["seq"],
+                            "messageId": r["message_id"],
+                            "role": r["role"],
+                            "content": r["content"],
+                            "createdAt": r["created_at"],
+                            "turnId": r["turn_id"],
+                            "incomplete": r["incomplete"],
+                            "terminal": r["terminal"],
+                        }
+                        for r in rows
+                    ]
+                    return JSONResponse(
+                        status_code=200, content={"messages": messages}
+                    )
+                except Exception:  # noqa: BLE001
+                    pass  # fall through to legacy on any store error
+
+        # Legacy path: flag OFF, store unavailable, no new params, or store error.
         messages = LOCAL_TURN_STORE.completed_messages(session_id)
         return JSONResponse(status_code=200, content={"messages": messages})
