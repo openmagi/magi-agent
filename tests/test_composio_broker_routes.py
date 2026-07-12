@@ -31,7 +31,9 @@ class _FakeConnectedAccounts:
 
     def list(self, **kwargs: object) -> dict[str, object]:
         self.last_kwargs = kwargs
-        return {"items": [{"id": "conn_1", "toolkit": "gmail", "status": "ACTIVE"}]}
+        # A different toolkit than gmail (the connect-test target), so connect
+        # takes the fresh-link path instead of the already-connected short-circuit.
+        return {"items": [{"id": "conn_1", "toolkit": "slack", "status": "ACTIVE"}]}
 
     def delete(self, connection_id: str) -> dict[str, object]:
         return {"deleted": True}

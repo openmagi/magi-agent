@@ -81,6 +81,19 @@ def initiate_connection(
     returned.
     """
 
+    # If the entity already has an ACTIVE account for this toolkit, don't create
+    # a second one — Composio's ``link`` raises ComposioMultipleConnectedAccounts
+    # Error when >1 account exists on an auth config (surfaced to the dashboard as
+    # a 502 on the "Connect" re-click). Return the existing connection instead so
+    # the UI can reflect the already-connected state.
+    existing = _find_active_connection(client, entity_id=entity_id, toolkit=toolkit)
+    if existing is not None:
+        return {
+            "connection_id": existing.get("connection_id"),
+            "status": existing.get("status"),
+            "redirect_url": None,
+        }
+
     auth_config_id = _resolve_auth_config_id(client, toolkit)
     request = client.connected_accounts.link(
         user_id=entity_id, auth_config_id=auth_config_id
@@ -90,6 +103,19 @@ def initiate_connection(
         "status": _attr(request, "status"),
         "redirect_url": _attr(request, "redirect_url"),
     }
+
+
+def _find_active_connection(
+    client: _ConnectionsClient, *, entity_id: str, toolkit: str
+) -> dict[str, Any] | None:
+    """Return the entity's existing ACTIVE connection for ``toolkit``, if any."""
+    for conn in list_connections(client, entity_id=entity_id):
+        if (
+            conn.get("toolkit") == toolkit
+            and str(conn.get("status") or "").upper() == "ACTIVE"
+        ):
+            return conn
+    return None
 
 
 def _resolve_auth_config_id(client: _ConnectionsClient, toolkit: str) -> str:
@@ -201,9 +227,23 @@ def _normalize_toolkit(item: object) -> dict[str, Any]:
 def _normalize_connection(item: object) -> dict[str, Any]:
     return {
         "connection_id": _attr(item, "id"),
-        "toolkit": _attr(item, "toolkit"),
+        "toolkit": _toolkit_slug(_attr(item, "toolkit")),
         "status": _attr(item, "status"),
     }
+
+
+def _toolkit_slug(toolkit: object) -> Any:
+    """Coerce a connection's ``toolkit`` to its slug string.
+
+    The v3 SDK returns ``toolkit`` as an ``ItemToolkit(slug=...)`` object on
+    ``connected_accounts.list`` (not a bare string). The dashboard matches a
+    connection to a catalog row by slug equality, so a raw object never matches
+    and a just-connected app keeps showing "Connect". Extract the slug
+    (tolerating a plain string too)."""
+    if toolkit is None or isinstance(toolkit, str):
+        return toolkit
+    slug = _attr(toolkit, "slug")
+    return slug if slug is not None else toolkit
 
 
 def _category_name(category: object) -> Any:
