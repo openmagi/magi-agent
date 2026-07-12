@@ -342,6 +342,43 @@ def test_i1_documented_error_envelope_is_ok() -> None:
     assert "I1" not in _ids(check_invariants(r, flow="single_rule", answers={}))
 
 
+def test_i1_error_envelope_without_ok_key_is_ok() -> None:
+    """Regression (live T3 finding): the flow-B interactive compile-policy route
+    emits ``{"ready_to_save": False, "error": "compile timed out"}`` on timeout
+    (transport/customize.py:858-866) with NO ``ok`` key. The old detector keyed on
+    ``ok is False`` and misclassified this honest fail-soft envelope as an I1
+    shape violation (missing response keys). The server contract is: a top-level
+    ``error`` string IS the error envelope."""
+    from benchmarks.authoring.invariants import check_invariants
+
+    r = _tr(http_status=200, raw={"ready_to_save": False, "error": "compile timed out"})
+    assert "I1" not in _ids(check_invariants(r, flow="linked_policy", answers={}))
+    # The other two documented shapes (route A/B, which DO carry ok:False):
+    r_a = _tr(http_status=200, raw={"ok": False, "error": "compile timed out", "draft": None})
+    assert "I1" not in _ids(check_invariants(r_a, flow="single_rule", answers={}))
+    r_b = _tr(http_status=200, raw={"ok": False, "error": "compile timed out", "plan": None})
+    assert "I1" not in _ids(check_invariants(r_b, flow="linked_policy", answers={}))
+
+
+def test_i1_missing_keys_without_error_still_fails() -> None:
+    """The widened detector must NOT swallow a genuine shape bug: a 200 response
+    that is NOT an error envelope (no ``error`` key) but is missing required keys
+    still hard-fails I1."""
+    from benchmarks.authoring.invariants import check_invariants
+
+    r = _tr(http_status=200, raw={"assistant_message": "hi"})  # missing the rest, no error
+    assert "I1" in _ids(check_invariants(r, flow="single_rule", answers={}))
+
+
+def test_i1_error_key_but_ok_true_is_not_error_envelope() -> None:
+    """Defensive: a response that carries ``ok: True`` is a success envelope even
+    if it happens to include an ``error`` field, so it is still shape-checked."""
+    from benchmarks.authoring.invariants import check_invariants
+
+    r = _tr(http_status=200, raw={"ok": True, "error": "", "assistant_message": "hi"})
+    assert "I1" in _ids(check_invariants(r, flow="single_rule", answers={}))
+
+
 # --- I2 ready-truth (flow A) ---
 
 
@@ -575,6 +612,91 @@ def test_assert_rule_clean_and_intent(tmp_path: Path, monkeypatch: pytest.Monkey
 
     assert_rule_clean(snap, rule_id)                       # no raise
     assert_policy_intent(snap, rule_id, "block bash tool", expected_display="No Bash")
+
+
+def _intent_snap(intent: str):
+    """Synthetic snapshot: one user policy referencing rule 'cr_1' with `intent`."""
+    from benchmarks.authoring.adapter import PersistedSnapshot
+
+    return PersistedSnapshot(
+        store={}, customize={}, store_hash="",
+        policies={"policies": [
+            {"id": "p1", "ruleIds": ["cr_1"], "intent": intent, "origin": "user"}
+        ]},
+    )
+
+
+def test_intent_server_truncation_prefix_ok_only_under_flag() -> None:
+    """Live T3 finding: the server stores the policy intent truncated at 200
+    chars (nl_policy_interactive `_LABEL_MAX`). A persona's long utterance yields
+    a persisted intent that is an exact 200-char prefix of the actual say — an
+    honest truncation, accepted ONLY when allow_server_truncation is set."""
+    from benchmarks.authoring.oracles.persisted import (
+        OracleFailure, assert_policy_intent,
+    )
+
+    full = "A" * 200 + "B" * 62          # 262-char actual utterance
+    persisted = "A" * 200                # server-truncated at 200
+    snap = _intent_snap(persisted)
+
+    # Under the flag (t3): honest truncation passes.
+    assert_policy_intent(snap, "cr_1", full, allow_server_truncation=True)
+    # Without the flag (t1/t2): still an exact-match failure.
+    try:
+        assert_policy_intent(snap, "cr_1", full, allow_server_truncation=False)
+        raise AssertionError("expected intent_mismatch without the flag")
+    except OracleFailure as exc:
+        assert exc.code == "intent_mismatch"
+
+
+def test_intent_corruption_still_fails_under_truncation_flag() -> None:
+    """The truncation allowance must NOT swallow real corruption: a persisted
+    intent that is NOT a prefix of the expected say fails even under t3, and a
+    persisted intent shorter/longer than the exact server cap is not a
+    truncation."""
+    from benchmarks.authoring.oracles.persisted import (
+        OracleFailure, assert_policy_intent,
+    )
+
+    full = "A" * 200 + "B" * 62
+    # (a) different text at 200 chars = corruption, not truncation.
+    snap_corrupt = _intent_snap("X" * 200)
+    try:
+        assert_policy_intent(snap_corrupt, "cr_1", full, allow_server_truncation=True)
+        raise AssertionError("expected intent_mismatch for corrupted intent")
+    except OracleFailure as exc:
+        assert exc.code == "intent_mismatch"
+
+    # (b) a prefix but NOT at the server cap length is not the documented
+    # truncation (e.g. arbitrary mid-string cut) -> still fails.
+    snap_short = _intent_snap("A" * 150)
+    try:
+        assert_policy_intent(snap_short, "cr_1", full, allow_server_truncation=True)
+        raise AssertionError("expected intent_mismatch for non-cap-length prefix")
+    except OracleFailure as exc:
+        assert exc.code == "intent_mismatch"
+
+
+def test_intent_ref_count_still_hard_under_truncation_flag() -> None:
+    """allow_server_truncation only touches the string leg; ref-count stays hard."""
+    from benchmarks.authoring.adapter import PersistedSnapshot
+    from benchmarks.authoring.oracles.persisted import (
+        OracleFailure, assert_policy_intent,
+    )
+
+    # Two policies reference the same rule -> ref_count leg must fire.
+    snap = PersistedSnapshot(
+        store={}, customize={}, store_hash="",
+        policies={"policies": [
+            {"id": "p1", "ruleIds": ["cr_1"], "intent": "A" * 200, "origin": "user"},
+            {"id": "p2", "ruleIds": ["cr_1"], "intent": "A" * 200, "origin": "user"},
+        ]},
+    )
+    try:
+        assert_policy_intent(snap, "cr_1", "A" * 262, allow_server_truncation=True)
+        raise AssertionError("expected intent_ref_count failure")
+    except OracleFailure as exc:
+        assert exc.code == "intent_ref_count"
 
 
 def test_assert_rule_clean_fails_when_envelope_leaked(

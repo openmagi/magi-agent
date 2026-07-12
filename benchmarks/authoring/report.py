@@ -216,6 +216,91 @@ def write_report(
     return summary
 
 
+def _count_empty_say_runs(results: list[RunResult]) -> int:
+    """Number of runs whose transcript carried a ``persona_llm_empty_say``
+    observation on any entry (Fix 2 persona-LLM liveness signal)."""
+    count = 0
+    for r in results:
+        for entry in r.transcript:
+            obs = entry.get("observations") if isinstance(entry, dict) else None
+            if obs and any(
+                o.get("type") == "persona_llm_empty_say" for o in obs
+            ):
+                count += 1
+                break
+    return count
+
+
+def _render_t3_headline(
+    summary: RunSummary, results: list[RunResult]
+) -> list[str]:
+    """T3-only headline block (design §2.3). Never rendered for non-t3."""
+    total = summary.total
+    # (1) Invariant health: runs whose first_divergence carried an invariant key
+    # (I1-I9). THE product-health signal — should be 0.
+    invariant_failures = sum(
+        1 for r in results
+        if not r.passed and r.first_divergence and "invariant" in r.first_divergence
+    )
+    # (3) Structural convergence: passed/total under the relaxed t3 oracle.
+    convergence = (summary.passed / total) if total else 0.0
+    # (4) Expected persona-variance bucket: dotted-path deviations where persona
+    # prose overrode the structured answer. Flow-A deviations arrive as
+    # oracle:draft.* / oracle:params.*, flow-B (linked_policy) as oracle:plan.*
+    # in failures_by_code. Per OQ2 these are still failures, but named as
+    # prose-override findings here.
+    variance_codes = {
+        code: sids
+        for code, sids in summary.failures_by_code.items()
+        if code.startswith(("oracle:draft.", "oracle:params.", "oracle:plan."))
+    }
+    # (5) Persona-LLM liveness: fraction of runs with an empty persona say.
+    empty_say_runs = _count_empty_say_runs(results)
+    empty_frac = (empty_say_runs / total) if total else 0.0
+
+    lines: list[str] = []
+    lines.append("## T3 Headline")
+    lines.append("")
+    if total and empty_say_runs == total:
+        # (c) 100%-empty -> LOUD harness-health warning (not a scenario failure).
+        lines.append(
+            "> WARNING: 100% of runs had an empty persona utterance — "
+            "the persona LLM never fired. T3 degenerated into an empty-prose "
+            "deterministic run; the convergence numbers below are NOT a real "
+            "persona-pressure signal."
+        )
+        lines.append("")
+    lines.append(
+        f"- **Invariant health**: {invariant_failures} per-turn invariant "
+        f"failure(s) (target 0 — THE product-health signal)"
+    )
+    lines.append(
+        f"- **Containment**: M5 forbidden_string_hits={summary.M5_forbidden_string_hits}, "
+        f"M6 containment_violations={summary.M6_containment_violations}"
+    )
+    lines.append(
+        f"- **Structural convergence**: {summary.passed}/{total} "
+        f"({convergence:.1%}) reached ready AND passed the relaxed T3 oracle"
+    )
+    lines.append(
+        f"- **Persona-LLM liveness**: empty persona-say fraction "
+        f"{empty_say_runs}/{total} ({empty_frac:.1%})"
+    )
+    if variance_codes:
+        total_variance = sum(len(sids) for sids in variance_codes.values())
+        lines.append(
+            f"- **Expected persona variance** ({total_variance}): dotted-path "
+            f"deviations where persona prose overrode the structured answer "
+            f"(still failures per OQ2, surfaced here as prose-override findings):"
+        )
+        for code in sorted(variance_codes):
+            lines.append(f"  - `{code}`: {', '.join(variance_codes[code])}")
+    else:
+        lines.append("- **Expected persona variance**: none")
+    lines.append("")
+    return lines
+
+
 def _render_markdown(
     summary: RunSummary,
     results: list[RunResult],
@@ -242,6 +327,13 @@ def _render_markdown(
         lines.append("")
         lines.append("> WARNING: run stopped early due to `--max-scenarios` or `--budget-usd` limit.")
     lines.append("")
+
+    # 1b. T3-only headline block (design 2026-07-12 §2.3). Foregrounds the
+    # primary product-health signals (invariant health, containment, structural
+    # convergence, persona-LLM liveness) ABOVE the M1-M7 table so a relaxed-t3
+    # run reads honestly. Non-t3 runs render nothing here (byte-identical).
+    if tier == "t3":
+        lines.extend(_render_t3_headline(summary, results))
 
     # 2. Metric table M1..M7
     lines.append("## Metrics")

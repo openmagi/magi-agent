@@ -82,13 +82,34 @@ def assert_rule_clean(snap: PersistedSnapshot, rule_id: str) -> None:
             )
 
 
+#: Server-side policy-intent length cap. flow-B interactive derives the policy
+#: intent from the first user-history entry and stores it truncated to this many
+#: characters (nl_policy_interactive.py:315 `_LABEL_MAX`). When the harness
+#: compares the persisted intent to the actual first utterance (T3 personas,
+#: which can produce very long injection-laden utterances), a persisted value
+#: that is an EXACT PREFIX of the expected intent AND exactly this long is an
+#: honest server truncation, not intent corruption.
+_SERVER_INTENT_MAX = 200
+
+
 def assert_policy_intent(
     snap: PersistedSnapshot,
     rule_id: str,
     expected_intent: str,
     expected_display: str | None = None,
+    *,
+    allow_server_truncation: bool = False,
 ) -> None:
-    """Exactly one USER policy references ``rule_id``; its intent matches."""
+    """Exactly one USER policy references ``rule_id``; its intent matches.
+
+    When ``allow_server_truncation`` is set (T3, where ``expected_intent`` is the
+    persona's actual — possibly very long — first utterance), a persisted intent
+    that is an exact prefix of ``expected_intent`` truncated at the documented
+    server cap (``_SERVER_INTENT_MAX``) is accepted as an honest truncation. A
+    persisted intent that DIFFERS from that prefix (real corruption / prose
+    override) still fails. ``intent_ref_count`` and ``display_mismatch`` are
+    unaffected and stay hard in every tier.
+    """
     refs = [p for p in _user_policies(snap) if rule_id in (p.get("ruleIds") or [])]
     if len(refs) != 1:
         raise OracleFailure(
@@ -96,11 +117,19 @@ def assert_policy_intent(
             f"expected exactly one user policy referencing {rule_id!r}, got {len(refs)}",
         )
     policy = refs[0]
-    if policy.get("intent") != expected_intent:
-        raise OracleFailure(
-            "intent_mismatch",
-            f"policy intent {policy.get('intent')!r} != expected {expected_intent!r}",
+    persisted_intent = policy.get("intent")
+    if persisted_intent != expected_intent:
+        truncated_ok = (
+            allow_server_truncation
+            and isinstance(persisted_intent, str)
+            and len(persisted_intent) == _SERVER_INTENT_MAX
+            and expected_intent.startswith(persisted_intent)
         )
+        if not truncated_ok:
+            raise OracleFailure(
+                "intent_mismatch",
+                f"policy intent {persisted_intent!r} != expected {expected_intent!r}",
+            )
     if expected_display is not None and policy.get("displayName") != expected_display:
         raise OracleFailure(
             "display_mismatch",

@@ -133,6 +133,7 @@ def run_scenario(
         while True:
             if turn_index >= scenario.turn_budget:
                 break
+            observations: list[dict[str, Any]] = []
             if user_sim is None:
                 turn = next(canned_turns, None)
                 if turn is None:
@@ -145,11 +146,17 @@ def run_scenario(
                     break
                 say = user_turn.say
                 answers = dict(user_turn.answers or {})
+                observations = list(user_turn.observations or [])
             result = adapter.step(state, say=say, answers=answers)
-            transcript.append(
-                {"turn": turn_index, "say": say, "answers": answers,
-                 "response": result.raw, "http_status": result.http_status}
-            )
+            entry: dict[str, Any] = {
+                "turn": turn_index, "say": say, "answers": answers,
+                "response": result.raw, "http_status": result.http_status,
+            }
+            # Only add the key when the sim emitted observations, so the
+            # canned-replay path stays byte-identical to the pre-UserSim shape.
+            if observations:
+                entry["observations"] = observations
+            transcript.append(entry)
 
             # Per-turn invariants.
             violations = check_invariants(
@@ -195,14 +202,18 @@ def run_scenario(
         # Final per-scenario oracle.
         final = _last_turn_result(adapter, state, scenario, transcript)
         divergence = _check_final_oracle(
-            scenario, final, reached_ready_at, turn_index
+            scenario, final, reached_ready_at, turn_index, tier=tier
         )
         if divergence is not None:
             return _fail_final(scenario, turn_index, transcript, divergence)
 
         # Save leg + persisted oracles.
         save_result = _do_save(adapter, state, scenario)
-        divergence = _check_persisted(adapter, scenario, save_result)
+        actual_first_say = _actual_first_say(transcript)
+        divergence = _check_persisted(
+            adapter, scenario, save_result,
+            tier=tier, actual_first_say=actual_first_say,
+        )
         if divergence is not None:
             return _fail_final(scenario, turn_index, transcript, divergence)
 
@@ -280,14 +291,29 @@ def _last_turn_result(adapter, state, scenario: Scenario, transcript) -> TurnRes
 
 
 def _check_final_oracle(
-    scenario: Scenario, final: TurnResult, reached_ready_at: int | None, turns: int
+    scenario: Scenario,
+    final: TurnResult,
+    reached_ready_at: int | None,
+    turns: int,
+    *,
+    tier: str = "t1",
 ):
     oracle = scenario.oracle
+    # Only exact tier == "t3" relaxes; any other/omitted value stays STRICT
+    # (default-strict guard: a forgetful call site cannot leak relaxation into
+    # the T2 gate). Design 2026-07-12 §2.2 + Fix 5.
+    t3 = tier == "t3"
     # expect_ready within max_turns_to_ready.
     if oracle.expect_ready:
         if not final.ready_to_save:
             return _div("expect_ready", "ready_to_save=true", "never reached ready")
-        if oracle.max_turns_to_ready is not None and reached_ready_at is not None:
+        # T3 relaxes ONLY the canned turn-count cap (personas pace differently).
+        # expect_ready reach + turn_budget runaway guard both stay hard.
+        if (
+            not t3
+            and oracle.max_turns_to_ready is not None
+            and reached_ready_at is not None
+        ):
             if reached_ready_at > oracle.max_turns_to_ready:
                 return _div(
                     "max_turns_to_ready",
@@ -365,8 +391,18 @@ def _do_grouped_save(adapter, scenario: Scenario) -> SaveResult:
     )
 
 
-def _check_persisted(adapter, scenario: Scenario, save_result):
+def _check_persisted(
+    adapter,
+    scenario: Scenario,
+    save_result,
+    *,
+    tier: str = "t1",
+    actual_first_say: str | None = None,
+):
     oracle = scenario.oracle
+    # Only exact tier == "t3" relaxes the intent-string leg; strict otherwise
+    # (Fix 5). All structural persisted checks stay hard in every tier.
+    t3 = tier == "t3"
     snap = adapter.snapshot_persisted()
     pers = oracle.persisted or {}
     try:
@@ -380,7 +416,6 @@ def _check_persisted(adapter, scenario: Scenario, save_result):
         if pers.get("rule_valid_and_clean") and save_result is not None:
             P.assert_rule_clean(snap, save_result.rule_id)
         if pers.get("policy_intent_is_first_utterance") and save_result is not None:
-            intent = _first_utterance(scenario)
             # envelope save -> the promoted 1-rule policy references rule_id;
             # from-plan save -> the policy references the gate rule id.
             ref_id = save_result.rule_id or save_result.gate_id
@@ -389,7 +424,23 @@ def _check_persisted(adapter, scenario: Scenario, save_result):
                 if scenario.save == "envelope" and scenario.save_spec
                 else None
             )
-            P.assert_policy_intent(snap, ref_id, intent, expected_display=display)
+            # Fix 1 (§2.2): keep intent_ref_count + display_mismatch HARD in
+            # every tier; only relax the persona-coupled intent STRING leg for
+            # t3 by comparing against what the user ACTUALLY said (a runtime
+            # artifact, not an LLM-authored label) instead of the canned first
+            # utterance. Do NOT skip the whole assertion.
+            # For t3 also allow the documented server-side intent truncation:
+            # a persona's long injection-laden utterance is stored truncated at
+            # the server cap, which is an honest prefix, not corruption.
+            if t3:
+                intent = actual_first_say if actual_first_say else _first_utterance(scenario)
+            else:
+                intent = _first_utterance(scenario)
+            P.assert_policy_intent(
+                snap, ref_id, intent,
+                expected_display=display,
+                allow_server_truncation=t3,
+            )
         if pers.get("no_orphan_rules"):
             P.assert_no_orphan_rules(snap)
         if pers.get("no_double_representation") and scenario.save == "grouped":
@@ -410,6 +461,21 @@ def _first_utterance(scenario: Scenario) -> str:
         if t.say and t.say.strip():
             return t.say.strip()
     return ""
+
+
+def _actual_first_say(transcript: list[dict[str, Any]]) -> str | None:
+    """The first non-empty user ``say`` actually sent in this run.
+
+    For a persona run this is the persona's own utterance (which becomes the
+    persisted policy intent), letting the T3 persisted oracle assert
+    "persisted intent equals what the user actually said" instead of the canned
+    first utterance. Returns None when no user turn carried a say.
+    """
+    for entry in transcript:
+        say = entry.get("say") if isinstance(entry, dict) else None
+        if say and str(say).strip():
+            return str(say).strip()
+    return None
 
 
 def _div(code: str, expected: Any, got: Any) -> dict[str, Any]:
