@@ -2989,6 +2989,24 @@ FLAGS: tuple[FlagSpec, ...] = (
             "sessions live in process memory."
         ),
     ),
+    _pb(
+        "MAGI_LOCAL_CHANNEL_HISTORY_ENABLED",
+        stage="stage2",
+        summary=(
+            "Enable the durable per-channel message log for local-serve "
+            "(``ChannelMessageStore``, migration 8). Appends user and "
+            "assistant messages to ``channel_messages`` in the shared "
+            "``.openmagi/sessions.db`` (WAL); the GET "
+            "``/v1/chat/channel-messages`` endpoint gains ``full=1`` / "
+            "``after=<seq>`` params so all open windows share one history "
+            "source and survive refresh without clobbering each other. "
+            "Profile default-ON (full/default); OFF under "
+            "safe/minimal/off. Explicit ``0`` disables. Independent of "
+            "``MAGI_SESSION_PERSISTENCE_ENABLED`` (same DB, separate "
+            "feature). Local-serve only; hosted gate5b path is "
+            "byte-identical when this flag is absent."
+        ),
+    ),
     FlagSpec(
         name="MAGI_DEFERRED_TOOL_THRESHOLD",
         default=30,
