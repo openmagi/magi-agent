@@ -148,6 +148,36 @@ def _last_questions(transcript: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list(response.get("questions") or [])
 
 
+def _derive_answers(
+    questions: list[dict[str, Any]],
+    flow: str,
+    slots: dict[str, Any],
+) -> tuple[dict[str, str], list[dict[str, Any]]]:
+    """Map a list of server questions to slot-derived answers.
+
+    Shared by :class:`DeterministicUserSim` (T2) and :class:`PersonaUserSim`
+    (T3) so the slot-answer equivalence holds by construction. Unknown question
+    ids produce an ``unanswerable_question`` observation (feeds M4). Field VALUES
+    always come from ``slots``; the LLM never supplies them (oracle-first N2).
+    """
+    answers: dict[str, str] = {}
+    observations: list[dict[str, Any]] = []
+    for q in questions:
+        qid = q.get("id") or ""
+        if not qid or qid in answers:
+            continue
+        val, answerable = _answer_from_slots(qid, flow, slots)
+        if answerable and val is not None:
+            answers[qid] = val
+        elif not answerable:
+            observations.append({
+                "type": "unanswerable_question",
+                "question_id": qid,
+                "prompt": q.get("prompt", ""),
+            })
+    return answers, observations
+
+
 # ---------------------------------------------------------------------------
 # ScriptedUserSim (T1)
 # ---------------------------------------------------------------------------
@@ -225,22 +255,12 @@ class DeterministicUserSim:
         flow = getattr(scenario, "flow", "single_rule") or "single_rule"
 
         questions = _last_questions(transcript)
+        # Explicit answers win; drop them from the questions we still need to
+        # derive so the shared helper does not re-answer (or flag) them.
+        pending = [q for q in questions if (q.get("id") or "") not in explicit_answers]
+        derived, observations = _derive_answers(pending, flow, slots)
         answers: dict[str, str] = dict(explicit_answers)  # explicit wins
-        observations: list[dict[str, Any]] = []
-
-        for q in questions:
-            qid = q.get("id") or ""
-            if not qid or qid in answers:
-                continue
-            val, answerable = _answer_from_slots(qid, flow, slots)
-            if answerable and val is not None:
-                answers[qid] = val
-            elif not answerable:
-                observations.append({
-                    "type": "unanswerable_question",
-                    "question_id": qid,
-                    "prompt": q.get("prompt", ""),
-                })
+        answers.update(derived)
 
         return UserTurn(say=say, answers=answers, observations=observations)
 
@@ -401,7 +421,8 @@ class PersonaUserSim:
         except Exception:  # noqa: BLE001
             raw_text = '{"say": ""}'
 
-        # Parse the LLM's JSON output
+        # Parse the LLM's JSON output. Only ``say`` ever comes from the LLM;
+        # structured field VALUES come from slots (oracle-first N2).
         say: str | None = None
         try:
             parsed = json.loads(raw_text)
@@ -409,8 +430,28 @@ class PersonaUserSim:
         except (json.JSONDecodeError, AttributeError):
             say = None
 
+        # Slot-derived answers for whatever the server just asked (§2.1). The
+        # persona's distinctive behaviour lives entirely in ``say``; the answers
+        # channel is deterministic and slot-driven, identical to the T2 sim.
+        generated = getattr(scenario, "generated", None) or {}
+        slots: dict[str, Any] = (
+            generated.get("slots", {}) if isinstance(generated, dict) else {}
+        )
+        flow = getattr(scenario, "flow", "single_rule") or "single_rule"
+        answers, observations = _derive_answers(
+            _last_questions(transcript), flow, slots
+        )
+
+        # Fix 2 (liveness): a dead / parse-failing persona LLM degenerates T3
+        # into an empty-prose deterministic run that now converges and reports
+        # healthy. Emit an explicit signal so the report can surface it.
+        if say is None:
+            observations.append(
+                {"type": "persona_llm_empty_say", "persona": self.persona}
+            )
+
         self._turn_count += 1
-        return UserTurn(say=say, answers={})
+        return UserTurn(say=say, answers=answers, observations=observations)
 
 
 __all__ = [
@@ -420,4 +461,5 @@ __all__ = [
     "Stop",
     "UserSim",
     "UserTurn",
+    "_derive_answers",
 ]
