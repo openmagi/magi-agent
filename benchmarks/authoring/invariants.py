@@ -89,7 +89,23 @@ _MISSING = _Missing()
 
 
 def _is_error_envelope(raw: dict[str, Any]) -> bool:
-    return isinstance(raw, dict) and raw.get("ok") is False and "error" in raw
+    """A documented fail-soft error envelope (HTTP 200 with an ``error`` key).
+
+    The server emits THREE shapes for a fail-soft compile error/timeout
+    (transport/customize.py): route A ``{"ok": False, "error": ..., "draft": None}``,
+    route B ``{"ok": False, "error": ..., "plan": None}``, and the flow-B
+    interactive compile-policy route ``{"ready_to_save": False, "error": ...}``
+    (customize.py:858-866) which carries NO ``ok`` key. Keying on ``ok is False``
+    alone missed the third shape and misclassified an honest ``compile timed out``
+    as an I1 shape violation (missing response keys). The server contract is: the
+    presence of a top-level ``error`` string IS the error envelope. I9 (error
+    honesty) separately catches an error envelope that dishonestly claims
+    ``ready_to_save: true``, so widening the detector does not weaken honesty.
+    """
+    if not isinstance(raw, dict) or "error" not in raw:
+        return False
+    # ok:False is one signal; absence of ok with a top-level error is another.
+    return raw.get("ok") is not True
 
 
 def check_invariants(

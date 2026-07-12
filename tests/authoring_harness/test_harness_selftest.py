@@ -342,6 +342,43 @@ def test_i1_documented_error_envelope_is_ok() -> None:
     assert "I1" not in _ids(check_invariants(r, flow="single_rule", answers={}))
 
 
+def test_i1_error_envelope_without_ok_key_is_ok() -> None:
+    """Regression (live T3 finding): the flow-B interactive compile-policy route
+    emits ``{"ready_to_save": False, "error": "compile timed out"}`` on timeout
+    (transport/customize.py:858-866) with NO ``ok`` key. The old detector keyed on
+    ``ok is False`` and misclassified this honest fail-soft envelope as an I1
+    shape violation (missing response keys). The server contract is: a top-level
+    ``error`` string IS the error envelope."""
+    from benchmarks.authoring.invariants import check_invariants
+
+    r = _tr(http_status=200, raw={"ready_to_save": False, "error": "compile timed out"})
+    assert "I1" not in _ids(check_invariants(r, flow="linked_policy", answers={}))
+    # The other two documented shapes (route A/B, which DO carry ok:False):
+    r_a = _tr(http_status=200, raw={"ok": False, "error": "compile timed out", "draft": None})
+    assert "I1" not in _ids(check_invariants(r_a, flow="single_rule", answers={}))
+    r_b = _tr(http_status=200, raw={"ok": False, "error": "compile timed out", "plan": None})
+    assert "I1" not in _ids(check_invariants(r_b, flow="linked_policy", answers={}))
+
+
+def test_i1_missing_keys_without_error_still_fails() -> None:
+    """The widened detector must NOT swallow a genuine shape bug: a 200 response
+    that is NOT an error envelope (no ``error`` key) but is missing required keys
+    still hard-fails I1."""
+    from benchmarks.authoring.invariants import check_invariants
+
+    r = _tr(http_status=200, raw={"assistant_message": "hi"})  # missing the rest, no error
+    assert "I1" in _ids(check_invariants(r, flow="single_rule", answers={}))
+
+
+def test_i1_error_key_but_ok_true_is_not_error_envelope() -> None:
+    """Defensive: a response that carries ``ok: True`` is a success envelope even
+    if it happens to include an ``error`` field, so it is still shape-checked."""
+    from benchmarks.authoring.invariants import check_invariants
+
+    r = _tr(http_status=200, raw={"ok": True, "error": "", "assistant_message": "hi"})
+    assert "I1" in _ids(check_invariants(r, flow="single_rule", answers={}))
+
+
 # --- I2 ready-truth (flow A) ---
 
 
