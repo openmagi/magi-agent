@@ -1223,6 +1223,24 @@ def _is_image_block_mapping(value: Mapping) -> bool:  # type: ignore[type-arg]
     )
 
 
+def _is_activated_skill_mapping(value: Mapping) -> bool:  # type: ignore[type-arg]
+    """Return True if *value* looks like a serialized activated-skill block.
+
+    Detection keys on the co-presence of the activation provenance fields
+    (str skillName/invokedToken/bodyDigest plus a bool miss alongside a str
+    body). Mirrors _is_image_block_mapping: intentionally narrow so the scan
+    resumes fail-safe if the shape ever changes, and arbitrary mappings that
+    merely carry a 'body' field stay fully scanned.
+    """
+    return (
+        isinstance(value.get("body"), str)
+        and isinstance(value.get("skillName"), str)
+        and isinstance(value.get("invokedToken"), str)
+        and isinstance(value.get("bodyDigest"), str)
+        and isinstance(value.get("miss"), bool)
+    )
+
+
 def _reject_unsafe_value(value: object) -> None:
     if isinstance(value, str):
         if _UNSAFE_TEXT_RE.search(value):
@@ -1230,12 +1248,24 @@ def _reject_unsafe_value(value: object) -> None:
         return
     if isinstance(value, Mapping):
         image_block = _is_image_block_mapping(value)
+        activated_skill = _is_activated_skill_mapping(value)
         for key, child in value.items():
             _reject_unsafe_key(key)
             # base64 image bytes are opaque binary, not sanitized text; the
             # unsafe-text regex false-matches long base64 runs. Exempt only the
             # encoded image payload from the scan (media type is still checked).
             if image_block and key == "data":
+                continue
+            # An activated skill body is trusted server-side content read from
+            # the bot's own workspace SKILL.md and delivered only on the
+            # system-instruction channel; real skill bodies legitimately contain
+            # URLs, absolute workspace paths, and api_key-shaped example prose
+            # that the unsafe-text regex is designed to catch on the SANITIZED
+            # USER channel. Exempt only the body; every other activation field
+            # (names, paths, digests, near-matches) stays scanned, and the
+            # Gate5B4C3ActivatedSkill validator separately enforces the byte cap
+            # and safe-path/label rules.
+            if activated_skill and key == "body":
                 continue
             _reject_unsafe_value(child)
         return

@@ -33,6 +33,7 @@ from magi_agent.runtime.user_visible_model_routing import (
     _select_user_visible_model_route,
 )
 from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
+    Gate5B4C3ActivatedSkill,
     Gate5B4C3ShadowGenerationConfig,
     Gate5B4C3ShadowGenerationRequest,
 )
@@ -112,7 +113,7 @@ def _resolve_activated_skill_payload(
     if resolved is None:
         return None
     if isinstance(resolved, SkillSlashMiss):
-        return {
+        payload: dict[str, object] = {
             "skillName": "",
             "invokedToken": resolved.invoked_token,
             "sourcePath": "",
@@ -123,8 +124,8 @@ def _resolve_activated_skill_payload(
             "miss": True,
             "nearMatches": list(resolved.near_matches),
         }
-    if isinstance(resolved, SkillSlashActivation):
-        return {
+    elif isinstance(resolved, SkillSlashActivation):
+        payload = {
             "skillName": resolved.skill_name,
             "invokedToken": resolved.invoked_token,
             "sourcePath": resolved.source_path,
@@ -135,7 +136,23 @@ def _resolve_activated_skill_payload(
             "miss": False,
             "nearMatches": [],
         }
-    return None
+    else:
+        return None
+    # Fail-open, attach-time proof: validate the sub-model NOW so a payload the
+    # contract would reject drops only the activation (log + plain turn) instead
+    # of 422-ing the whole request later inside
+    # UserVisibleGenerationRequest.model_validate. This is what turned the
+    # 2026-07-11 canary incident (real SKILL.md body vs the private-material
+    # scan) from a broken turn into a skipped activation.
+    try:
+        Gate5B4C3ActivatedSkill.model_validate(payload)
+    except Exception:  # noqa: BLE001 - fail-open by design
+        _logger.warning(
+            "activated-skill payload failed contract validation; proceeding without activation",
+            exc_info=True,
+        )
+        return None
+    return payload
 
 
 def _build_user_visible_generation_request(
