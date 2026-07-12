@@ -55,6 +55,11 @@ export default {
       // U4: local-serve channel-history client — cursor-aware fetch, messageId
       // mapping, and send-body turnId/userMessageId threading.
       "src/lib/chat/chat-client.test.ts",
+      // U5: frontend store/shell -- seq-aware merge, per-channel persist,
+      // and storage-event reset listener.
+      "src/chat-core/merge-server-messages.test.ts",
+      "src/chat-core/persist-messages.test.ts",
+      "app/dashboard/[botId]/chat/chat-view-client-reset-listener.test.ts",
     ],
   },
 };

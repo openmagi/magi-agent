@@ -202,6 +202,9 @@ function mapServerMessages(msgs: ServerMessage[]): ChatMessage[] {
     timestamp: new Date(m.created_at).getTime(),
     serverId: m.id,
     researchEvidence: researchEvidenceFromServerMessage(m),
+    // Thread seq onto ChatMessage so seq-aware sort can use server ordering.
+    // Absent on legacy/hosted rows -- comparator falls back to timestamp.
+    ...(m.seq != null ? { seq: m.seq } : {}),
   }));
 }
 
@@ -213,7 +216,11 @@ function mergeFetchedServerMessages(botId: string, channel: string, msgs: Server
   const prev = useChatStore.getState().serverMessages[channel] ?? [];
   const serverIds = new Set(mapped.map((m) => m.serverId));
   const kept = prev.filter((m) => !m.serverId || !serverIds.has(m.serverId));
-  const merged = [...kept, ...mapped].sort((a, b) => a.timestamp - b.timestamp);
+  // Seq-aware sort: when both rows carry a seq from the durable log, server
+  // ordering wins; fall back to timestamp for legacy/hosted/mixed rows.
+  const merged = [...kept, ...mapped].sort((a, b) =>
+    a.seq != null && b.seq != null ? a.seq - b.seq : a.timestamp - b.timestamp,
+  );
   useChatStore.getState().setServerMessages(channel, merged, { botId });
   useChatStore
     .getState()
@@ -859,13 +866,17 @@ export function ChatViewClient({
             if (!isCurrentBot()) return;
             const existing =
               useChatStore.getState().serverMessages[channel] ?? [];
-            // Deduplicate by serverId before appending
+            // Deduplicate by serverId before appending, then sort seq-aware
+            // so cross-window turns land in server order.
             const existingIds = new Set(existing.map((m) => m.serverId).filter(Boolean));
             const newOnly = mapped.filter((m) => !existingIds.has(m.serverId));
             if (newOnly.length > 0) {
+              const combined = [...existing, ...newOnly].sort((a, b) =>
+                a.seq != null && b.seq != null ? a.seq - b.seq : a.timestamp - b.timestamp,
+              );
               useChatStore
                 .getState()
-                .setServerMessages(channel, [...existing, ...newOnly], { botId });
+                .setServerMessages(channel, combined, { botId });
             }
             useChatStore
               .getState()
@@ -928,7 +939,9 @@ export function ChatViewClient({
             const prev = useChatStore.getState().serverMessages[channel] ?? [];
             const serverIds = new Set(mapped.map((m) => m.serverId));
             const kept = prev.filter((m) => !m.serverId || !serverIds.has(m.serverId));
-            const merged = [...kept, ...mapped].sort((a, b) => a.timestamp - b.timestamp);
+            const merged = [...kept, ...mapped].sort((a, b) =>
+              a.seq != null && b.seq != null ? a.seq - b.seq : a.timestamp - b.timestamp,
+            );
             useChatStore.getState().setServerMessages(channel, merged, { botId });
             useChatStore
               .getState()
@@ -944,6 +957,42 @@ export function ChatViewClient({
     document.addEventListener("visibilitychange", handleVisibility);
     return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, [botId, isCurrentBot, ready, authenticated]);
+
+  // Cross-tab reset-counter sync: when another tab increments the reset counter
+  // (localStorage "storage" event fires only in OTHER tabs), re-run the display
+  // sync and pull the latest server messages for the active channel.
+  useEffect(() => {
+    if (!ready || !authenticated) return;
+    const resetKey = `clawy:resetCounters:${botId}`;
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== resetKey) return;
+      // Re-sync display state with the updated counter
+      syncResetCounters(botId, getAccessToken).catch(() => {});
+      // Immediate fetch so the resetting tab's history appears here
+      const { activeChannel } = useChatStore.getState();
+      const channel = activeChannel;
+      if (!channel) return;
+      chatApi
+        .fetchChannelMessages(botId, channel, undefined, 50)
+        .then((msgs) => {
+          if (msgs.length === 0 || !isCurrentBot()) return;
+          const mapped = mapServerMessages(msgs);
+          const prev = useChatStore.getState().serverMessages[channel] ?? [];
+          const serverIds = new Set(mapped.map((m) => m.serverId));
+          const kept = prev.filter((m) => !m.serverId || !serverIds.has(m.serverId));
+          const merged = [...kept, ...mapped].sort((a, b) =>
+            a.seq != null && b.seq != null ? a.seq - b.seq : a.timestamp - b.timestamp,
+          );
+          useChatStore.getState().setServerMessages(channel, merged, { botId });
+          useChatStore
+            .getState()
+            .setLastServerFetch(channel, msgs[msgs.length - 1].created_at, { botId });
+        })
+        .catch(() => {});
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, [botId, isCurrentBot, ready, authenticated, getAccessToken]);
 
   // Poll E2EE messages from Supabase (messages sent from other clients)
   useEffect(() => {
