@@ -111,6 +111,29 @@ class TestClampStageToolset:
     def test_gate_full_request_full_returns_full(self) -> None:
         assert self._clamp("full", "full") == "full"
 
+    # inherit profile - RED tests (written before implementation)
+
+    def test_gate_inherit_request_none_returns_none(self) -> None:
+        assert self._clamp("inherit", "none") == "none"
+
+    def test_gate_inherit_request_readonly_returns_readonly(self) -> None:
+        assert self._clamp("inherit", "readonly") == "readonly"
+
+    def test_gate_inherit_request_inherit_returns_inherit(self) -> None:
+        assert self._clamp("inherit", "inherit") == "inherit"
+
+    def test_gate_inherit_request_full_degrades_to_inherit(self) -> None:
+        assert self._clamp("inherit", "full") == "inherit"
+
+    def test_gate_full_request_inherit_returns_inherit(self) -> None:
+        assert self._clamp("full", "inherit") == "inherit"
+
+    def test_gate_none_request_inherit_degrades_to_none(self) -> None:
+        assert self._clamp("none", "inherit") == "none"
+
+    def test_gate_readonly_request_inherit_degrades_to_readonly(self) -> None:
+        assert self._clamp("readonly", "inherit") == "readonly"
+
     def test_degraded_to_none_emits_trace_note(self, capsys: Any) -> None:
         """When gate forces request from readonly → none, a trace note is logged."""
         import magi_agent.plugins.native.deep_solve as mod

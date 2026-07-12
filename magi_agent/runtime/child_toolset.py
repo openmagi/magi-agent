@@ -6,19 +6,27 @@ gate to a profile literal and the corresponding read-only tool allowlist.
 Why a second gate (in addition to ``MAGI_CHILD_RUNNER_LIVE_ENABLED``)?
 ----------------------------------------------------------------------
 ``MAGI_CHILD_RUNNER_LIVE_ENABLED`` decides whether a *live* child runs at all.
-Even when live is on, the historical default is a TEXT-ONLY child with an empty
-toolset (``tools=[]``). Forwarding a real toolset is a SEPARATE opt-in so the
-existing text-only behaviour is preserved byte-for-byte unless an operator
-explicitly opts into ``readonly`` (or, post-permissions-unification, ``full``).
+Even when live is on, the historical default was a TEXT-ONLY child with an
+empty toolset (``tools=[]``). Forwarding a real toolset is a SEPARATE opt-in.
 This mirrors the project's twin-gate safety philosophy (e.g. the local-search
 prefer gate) — capability and activation are decoupled.
 
 Profiles
 --------
-* ``none``     — empty toolset (default; text-only child, byte-identical to v1).
-* ``readonly`` (non-mutating source-inspection tools FileRead/Glob/Grep/
+* ``inherit``  - DEFAULT (unset resolves here). The child receives the core
+                 toolset intersected with the parent's forwarded
+                 ``parentToolNames``. Mutating tools
+                 (:data:`MUTATING_TOOL_NAMES`) are stripped unless the parent
+                 itself had them, preserving capability parity without
+                 escalation. Empty-parent-cap fallback: the ``readonly`` floor
+                 is applied (never full, never none). Rollback lever:
+                 set ``MAGI_CHILD_RUNNER_TOOLSET=readonly``.
+* ``none``     - empty toolset (text-only child, byte-identical to v1).
+                 Activated only by an explicit ``MAGI_CHILD_RUNNER_TOOLSET=none``
+                 (or an unrecognised garbage value - fail-closed).
+* ``readonly`` - non-mutating source-inspection tools FileRead/Glob/Grep/
                  GitDiff, plus pure side-effect-free helpers like Calculation,
-                 a deterministic AST expression evaluator). Safe to enable
+                 a deterministic AST expression evaluator. Safe to enable
                  without the child-sandbox/permissions decision (doc 09)
                  because nothing in the allowlist mutates the workspace or
                  makes a network call. ``Calculation`` was added (PR-N) after
@@ -44,11 +52,11 @@ from magi_agent.tools.local_readonly import LOCAL_READONLY_TOOL_NAMES
 #: Env gate name (the SECOND, toolset-specific gate; see module docstring).
 CHILD_TOOLSET_ENV = "MAGI_CHILD_RUNNER_TOOLSET"
 
-ChildToolsetProfile = Literal["none", "readonly", "full"]
+ChildToolsetProfile = Literal["none", "readonly", "inherit", "full"]
 
-#: The recognised profile literals. The default (and fail-closed) value is the
-#: FIRST entry (``none``).
-_KNOWN_PROFILES: tuple[ChildToolsetProfile, ...] = ("none", "readonly", "full")
+#: The recognised profile literals. Unset/empty maps to ``"inherit"`` (the new
+#: default). Only ``"none"`` and unrecognised garbage values are fail-closed.
+_KNOWN_PROFILES: tuple[ChildToolsetProfile, ...] = ("none", "readonly", "inherit", "full")
 
 #: Pure, side-effect-free tools that are SAFE to expose to a readonly child
 #: even though they are NOT source-inspection tools. Each entry MUST be
@@ -73,6 +81,33 @@ READONLY_TOOL_NAMES: tuple[str, ...] = (
     tuple(LOCAL_READONLY_TOOL_NAMES) + _PURE_NON_INSPECTION_TOOL_NAMES
 )
 
+#: Tools that mutate the workspace or have significant side effects. Used by
+#: the ``inherit`` profile to strip mutation capability from a child that
+#: inherits a parent who did NOT have these tools.
+#:
+#: Mirrors :data:`magi_agent.cli.permissions.EDIT_CLASS_TOOLS` (FileEdit,
+#: FileWrite, Edit, Write, ApplyPatch) and adds Bash (subprocess surface),
+#: NotebookEdit, and MultiEdit. Any discrepancy between this set and the
+#: permissions module is intentional: this set is the SUPERSET that the
+#: inherit filter must block; the permissions module is the SUBSET used for
+#: class-permission gating. Cross-reference: ``magi_agent/cli/permissions.py``
+#: ``EDIT_CLASS_TOOLS``.
+MUTATING_TOOL_NAMES: frozenset[str] = frozenset(
+    {
+        # From EDIT_CLASS_TOOLS (magi_agent/cli/permissions.py):
+        "FileEdit",
+        "FileWrite",
+        "Edit",
+        "Write",
+        "ApplyPatch",
+        # Subprocess surface:
+        "Bash",
+        # Notebook / multi-file mutation:
+        "NotebookEdit",
+        "MultiEdit",
+    }
+)
+
 
 def resolve_child_toolset_profile(
     env: Mapping[str, str] | None = None,
@@ -80,14 +115,19 @@ def resolve_child_toolset_profile(
     """Resolve the child toolset profile from ``MAGI_CHILD_RUNNER_TOOLSET``.
 
     Evaluated at call time (not import time) so callers/tests can patch the env
-    without a module reload. The value is stripped and lower-cased; only the
-    exact literals ``none``/``readonly``/``full`` are recognised. Any other
-    value (unset, empty, typo, ``1``, ``true``, ...) degrades to ``none``.
+    without a module reload. The value is stripped and lower-cased; the
+    recognised literals are ``none``/``readonly``/``inherit``/``full``.
+
+    * Unset or empty → ``"inherit"`` (the new default).
+    * Recognised literal → that literal.
+    * Unrecognised garbage → ``"none"`` (fail-closed).
 
     :param env: Optional explicit env mapping; defaults to ``os.environ``.
     """
     source: Mapping[str, str] = env if env is not None else os.environ
     raw = str(source.get(CHILD_TOOLSET_ENV, "")).strip().lower()
+    if not raw:
+        return "inherit"
     if raw in _KNOWN_PROFILES:
         return raw  # type: ignore[return-value]
     return "none"
@@ -107,6 +147,10 @@ def toolset_allowlist(
                      pinning tests (``Bash not in READONLY_TOOL_NAMES``) still
                      hold; the expansion happens at read time so the flag-OFF
                      path is byte-identical to before.
+    * ``inherit``  → ``None`` sentinel meaning "no name filter". The actual
+                     parent-intersection is applied by the caller
+                     (``_resolve_turn_toolset`` in ``child_runner_live.py``)
+                     after this call returns.
     * ``full``     → ``None`` sentinel meaning "no name filter" (forward the
                      whole core toolset). Authorisation of ``full`` is the
                      caller's responsibility (doc 09 permissions).
@@ -121,13 +165,14 @@ def toolset_allowlist(
         if child_bash_sandbox_enabled(env):
             return READONLY_TOOL_NAMES + ("Bash",)
         return READONLY_TOOL_NAMES
-    if profile == "full":
+    if profile in ("full", "inherit"):
         return None
     return ()
 
 
 __all__ = [
     "CHILD_TOOLSET_ENV",
+    "MUTATING_TOOL_NAMES",
     "READONLY_TOOL_NAMES",
     "ChildToolsetProfile",
     "resolve_child_toolset_profile",

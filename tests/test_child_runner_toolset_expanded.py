@@ -100,9 +100,14 @@ def test_toolset_allowlist_readonly_includes_calculation() -> None:
 
 def test_resolve_profile_unchanged_for_known_values(monkeypatch) -> None:
     """Adding Calculation must NOT change ``resolve_child_toolset_profile``
-    semantics for any of the three documented profile literals."""
+    semantics for any of the documented profile literals.
+
+    Updated: unset -> ``"inherit"`` (the new default; old default was ``"none"``).
+    """
     monkeypatch.delenv("MAGI_CHILD_RUNNER_TOOLSET", raising=False)
-    assert resolve_child_toolset_profile() == "none"
+    assert resolve_child_toolset_profile() == "inherit"
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_TOOLSET", "inherit")
+    assert resolve_child_toolset_profile() == "inherit"
     monkeypatch.setenv("MAGI_CHILD_RUNNER_TOOLSET", "readonly")
     assert resolve_child_toolset_profile() == "readonly"
     monkeypatch.setenv("MAGI_CHILD_RUNNER_TOOLSET", "full")

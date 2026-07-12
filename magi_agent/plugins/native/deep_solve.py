@@ -48,8 +48,8 @@ from magi_agent.tools.result import ToolResult
 # Ordering for toolset clamping (B3)
 # ---------------------------------------------------------------------------
 
-_TOOLSET_ORDER: dict[str, int] = {"none": 0, "readonly": 1, "full": 2}
-_TOOLSET_NAMES: tuple[str, ...] = ("none", "readonly", "full")
+_TOOLSET_ORDER: dict[str, int] = {"none": 0, "readonly": 1, "inherit": 2, "full": 3}
+_TOOLSET_NAMES: tuple[str, ...] = ("none", "readonly", "inherit", "full")
 
 # Trace tag so the operator can grep for demotion events without touching logs.
 _CLAMP_TRACE_TAG = "[deep_solve.trace] toolset_demoted"

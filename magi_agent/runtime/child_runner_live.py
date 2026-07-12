@@ -1620,9 +1620,12 @@ class RealLocalChildRunner:
         1. An explicit caller-supplied ``tools`` override (``self._tools``) wins
            and is used verbatim (with the supplied/derived collector).
         2. Otherwise the resolved ``toolset_profile`` decides:
-           * ``none`` → empty toolset (byte-identical text-only v1; NO collector).
+           * ``none``    → empty toolset (byte-identical text-only v1; NO collector).
            * ``readonly`` → core toolset filtered to the read-only allowlist.
-           * ``full`` → the whole core toolset (authorisation is upstream's job).
+           * ``inherit`` → core toolset intersected with parent's ``parentToolNames``
+                           (unconditional structural enforcement; empty-parent-cap
+                           falls back to readonly floor).
+           * ``full``    → the whole core toolset (authorisation is upstream's job).
 
         For tool-enabled profiles a ``LocalToolEvidenceCollector`` is created (or
         the injected one reused) and threaded into ``build_cli_adk_tools`` so
@@ -1675,12 +1678,46 @@ class RealLocalChildRunner:
             tools = wrap_child_bash_tool(tools, sandbox=ChildBashSandbox())
 
         if allowlist is None:
-            # ``full`` profile — forward the whole toolset.
+            # ``full`` or ``inherit`` profile - start with the whole core toolset.
             profile_tools: list[object] = list(tools)
         else:
             # ``readonly`` profile — filter to the read-only allowlist by tool name.
             allowed = set(allowlist)
             profile_tools = [tool for tool in tools if _tool_name(tool) in allowed]
+
+        # ``inherit`` profile: intersect with parent's forwarded tool names so the
+        # child never exceeds the parent's capability. Applied UNCONDITIONALLY (not
+        # flag-gated) - this is structural, not a feature flag.
+        #
+        # Safety chain (D1/D2 from design doc):
+        #   1. ``parentToolNames`` is always populated by all producer paths
+        #      (wiring.py, tool_runtime.py, gate5b) unconditionally.
+        #   2. Empty-parent-cap fallback -> ``readonly`` floor (never full, never
+        #      none) so the child is never silently over-privileged.
+        #   3. The parent-cap intersection naturally excludes mutating tools when
+        #      the parent itself lacked them - no explicit MUTATING_TOOL_NAMES check
+        #      is needed.
+        if self._toolset_profile == "inherit":
+            from magi_agent.runtime.child_toolset import (  # noqa: PLC0415
+                READONLY_TOOL_NAMES,
+            )
+
+            metadata = getattr(request, "metadata", None) or {}
+            raw_parent_cap = (
+                metadata.get("parentToolNames") if isinstance(metadata, dict) else None
+            )
+            parent_cap = frozenset(raw_parent_cap) if raw_parent_cap else frozenset()
+
+            if parent_cap:
+                # Intersect with parent capability. Strip mutating tools when the
+                # parent itself did not have them (tighten-only, never widen).
+                profile_tools = [t for t in profile_tools if _tool_name(t) in parent_cap]
+            else:
+                # Empty-parent-cap fallback: apply readonly floor (D2).
+                readonly_floor = set(READONLY_TOOL_NAMES)
+                profile_tools = [
+                    t for t in profile_tools if _tool_name(t) in readonly_floor
+                ]
 
         # Task 2B.3: tighten-only intersection — apply AFTER profile filtering.
         # When the flag is ON and parent_cap is non-empty, intersect with the

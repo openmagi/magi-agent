@@ -66,9 +66,9 @@ def test_full_runtime_profile_enables_child_runner_defaults() -> None:
     apply_local_full_runtime_defaults(env)
 
     assert env["MAGI_CHILD_RUNNER_LIVE_ENABLED"] == "1"
-    assert env["MAGI_CHILD_RUNNER_TOOLSET"] == "readonly"
+    assert env["MAGI_CHILD_RUNNER_TOOLSET"] == "inherit"
     assert is_live_child_runner_enabled(env) is True
-    assert resolve_child_toolset_profile(env) == "readonly"
+    assert resolve_child_toolset_profile(env) == "inherit"
 
 
 def test_safe_runtime_profile_does_not_enable_child_runner_defaults() -> None:

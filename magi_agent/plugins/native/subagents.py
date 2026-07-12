@@ -349,6 +349,35 @@ def _child_workspace_for_toolset(
             return fallback, None
         return None, "child_workspace_unavailable"
 
+    # ``inherit``: D3 capability-based workspace. The child shares the parent
+    # workspace when it inherits a read-only cap (same as ``readonly`` profile),
+    # and gets an isolated subdir when it inherits a mutating cap (same as
+    # ``full``). parent_tool_names on a default context is () (empty), which
+    # triggers the readonly floor fallback - also read-only, so share.
+    if toolset_profile == "inherit":
+        from magi_agent.runtime.child_toolset import MUTATING_TOOL_NAMES  # noqa: PLC0415
+
+        inherited = set(context.parent_tool_names or ())
+        is_mutating = bool(inherited & MUTATING_TOOL_NAMES)
+        if is_mutating:
+            # Mutating inherited child: isolate like full.
+            if workspace_root is not None:
+                isolated = _isolated_child_workspace_under(workspace_root)
+                if isolated is not None:
+                    return isolated, None
+            fallback = _default_temp_child_workspace()
+            if fallback is not None:
+                return fallback, None
+            return None, "child_workspace_unavailable"
+        else:
+            # Read-only inherited child (or empty cap -> readonly floor): share like readonly.
+            if workspace_root is not None:
+                return workspace_root, None
+            fallback = _default_temp_child_workspace()
+            if fallback is not None:
+                return fallback, None
+            return None, "child_workspace_unavailable"
+
     # ``full`` can mutate, so give it an isolated writable child directory when
     # a parent workspace is available. This keeps hosted read-only-root pods
     # working while preserving separation for mutating children.
