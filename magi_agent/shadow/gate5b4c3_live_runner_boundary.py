@@ -22,6 +22,7 @@ from magi_agent.evidence.gate1a_egress_correlation import (
     Gate1AEgressCorrelationContext,
     build_gate1a_proxy_http_options,
 )
+from magi_agent.runtime.adk_instruction import state_injection_safe_instruction
 from magi_agent.runtime.output_continuation import (
     OutputContinuationConfig,
     build_continuation_message,
@@ -662,7 +663,13 @@ class Gate5B4C3LiveRunnerBoundary:
             "name": "openmagi_gate5b4c3_shadow_generation_agent",
             "description": "OpenMagi Gate 5B-4c-3 diagnostic shadow generation agent.",
             "model": model_for_agent,
-            "instruction": runner_input.system_instruction,
+            # State-injection-safe: a plain str is template-substituted by ADK
+            # ({identifier} placeholders raise KeyError when absent from session
+            # state), and the composed instruction can embed an activated
+            # SKILL.md body carrying brace-wrapped tokens.
+            "instruction": state_injection_safe_instruction(
+                runner_input.system_instruction
+            ),
             "tools": list(self._adk_tools),
             "generate_content_config": generate_content_config,
         }
@@ -2792,7 +2799,11 @@ async def _run_no_tool_finalizer(
     try:
         finalizer_agent_kwargs = {
             **dict(agent_kwargs),
-            "instruction": _no_tool_finalizer_instruction(request),
+            # Same state-injection-safe wrap as the main agent (consistency;
+            # the finalizer prose itself carries no braces today).
+            "instruction": state_injection_safe_instruction(
+                _no_tool_finalizer_instruction(request)
+            ),
             "tools": (),
         }
         finalizer_agent = primitives.Agent(

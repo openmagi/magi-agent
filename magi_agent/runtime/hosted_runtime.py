@@ -23,6 +23,7 @@ from dataclasses import dataclass
 
 from magi_agent.adk_bridge.wire_profile import HOSTED_PROFILE
 from magi_agent.engine.driver import MagiEngineDriver
+from magi_agent.runtime.adk_instruction import state_injection_safe_instruction
 
 
 # ---------------------------------------------------------------------------
@@ -189,12 +190,15 @@ def build_hosted_runtime(
     # Build session service.
     svc = session_service if session_service is not None else primitives.InMemorySessionService()
 
-    # Build ADK agent.
+    # Build ADK agent. The instruction is wrapped state-injection-safe: a plain
+    # str is template-substituted by ADK ({identifier} placeholders raise
+    # KeyError when absent from session state), and the composed instruction can
+    # embed an activated SKILL.md body carrying brace-wrapped tokens.
     agent = primitives.Agent(
         name=_agent_identifier(app_name),
         description="OpenMagi hosted governed-turn agent.",
         model=model,
-        instruction=instruction,
+        instruction=state_injection_safe_instruction(instruction),
         tools=list(adk_tools),
         generate_content_config=generate_content_config,
     )
