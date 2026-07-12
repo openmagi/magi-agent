@@ -12,6 +12,7 @@ import collections
 import json
 import os
 import time
+import uuid
 from collections.abc import AsyncIterator, Mapping, Sequence
 from fastapi.responses import StreamingResponse
 from magi_agent.config.flags import flag_str
@@ -20,6 +21,7 @@ from magi_agent.runtime.governed_turn import run_governed_turn
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 from magi_agent.runtime.turn_context import TurnContext
 from magi_agent.transport.chat_shared import _local_chat_string
+from magi_agent.storage.channel_message_store import channel_message_store_for
 
 
 _LOCAL_SERVE_PERMISSION_MODE = "bypassPermissions"
@@ -72,6 +74,31 @@ async def _local_adk_chat_sse(
 
     session_id = _local_chat_string(payload, "sessionId", "local-dashboard")
     turn_id = _local_chat_string(payload, "turnId", f"{session_id}:turn")
+    # U2 channel-history: derive a LOG-ONLY unique turn id and stable message ids
+    # for the durable channel_messages log (OQ2 decision: log-only, existing
+    # ``turn_id`` is unchanged for everything else).
+    #   - ``log_turn_id``: payload turnId when the client sent one, else a fresh
+    #     uuid so each distinct send gets a unique row pair.
+    #   - ``_user_message_id``: payload userMessageId else ``<log_turn_id>:user``.
+    #   - ``_assistant_message_id``: ``<log_turn_id>:assistant`` (stable pair key).
+    #   - ``_channel_for_log``: best-effort parse of the channel segment from
+    #     ``session_id`` (``agent:main:app:<channel>[:<n>]``); stored for
+    #     observability only, never used as a lookup key.
+    _client_turn_id = _local_chat_string(payload, "turnId", "")
+    log_turn_id = _client_turn_id if _client_turn_id else uuid.uuid4().hex
+    _client_user_msg_id = _local_chat_string(payload, "userMessageId", "")
+    _user_message_id = _client_user_msg_id if _client_user_msg_id else f"{log_turn_id}:user"
+    _assistant_message_id = f"{log_turn_id}:assistant"
+    # Parse channel segment from ``agent:main:app:<channel>[:<resetN>]``; fail-soft.
+    try:
+        _sid_parts = session_id.split(":")
+        _app_idx = next((i for i, p in enumerate(_sid_parts) if p == "app"), -1)
+        _channel_for_log = _sid_parts[_app_idx + 1] if _app_idx >= 0 and _app_idx + 1 < len(_sid_parts) else ""
+    except Exception:  # noqa: BLE001, S110 -- observability field, never raise
+        _channel_for_log = ""
+    # Snapshot the user-visible prompt text BEFORE KB-context / background-inject
+    # mutations so the durable log stores what the person actually typed.
+    _user_prompt_for_log = prompt
     # Self-host KB attachments: the dashboard prepends a ``[KB_CONTEXT: ...]``
     # marker when files are attached. Hosted deployments resolve this in the
     # chat-proxy (``infra/docker/chat-proxy/kb-context.js``); locally we inline
@@ -117,6 +144,24 @@ async def _local_adk_chat_sse(
     # or empty; the ``or os.getcwd()`` keeps the historical fallback semantics
     # byte-identical (non-empty env wins, empty/unset falls back to cwd).
     workspace_root = flag_str("MAGI_AGENT_WORKSPACE") or os.getcwd()
+    # U2 channel-history: resolve the process-level store (None when flag is OFF
+    # or init fails).  All store calls below are wrapped in try/except so a store
+    # fault NEVER breaks the SSE stream.
+    _ch_store = channel_message_store_for(workspace_root)
+    # Persist the user message NOW (before the engine runs) so that even a
+    # hard-crash turn leaves a durable user row.
+    if _ch_store is not None and _user_prompt_for_log:
+        try:
+            await _ch_store.append_message(
+                message_id=_user_message_id,
+                session_id=session_id,
+                role="user",
+                content=_user_prompt_for_log,
+                channel=_channel_for_log,
+                turn_id=log_turn_id,
+            )
+        except Exception:  # noqa: BLE001, S110 -- best-effort; never break the turn
+            pass
     # Per-turn query-based memory recall (PR-E item 3): pass the incoming user
     # message as the recall query so build_cli_instruction can search the
     # workspace memory tree and inject a <memory-recall> block. Gated + fail-soft
@@ -329,6 +374,7 @@ async def _local_adk_chat_sse(
         assistant_parts: list[str] = []
         used_tool = False
         turn_errored = False
+        turn_error_reason: str | None = None  # U2: captured for assistant-row terminal field
         async for item in stream:
             # Drain any agent-events SpawnAgent (or other tools) pushed during
             # the previous engine step, so the dashboard sees them in causal
@@ -338,6 +384,7 @@ async def _local_adk_chat_sse(
             if isinstance(item, EngineResult):
                 if item.error:
                     turn_errored = True
+                    turn_error_reason = item.error  # U2: persist as terminal field
                     yield _sse_event(
                         "agent",
                         {
@@ -420,6 +467,28 @@ async def _local_adk_chat_sse(
                     },
                 },
             )
+        # U2 channel-history: persist the assistant message at turn end.
+        # Runs INSIDE the try block so it executes before the ContextVar
+        # finally, and is reached even when turn_errored is True (partial
+        # text is stored with incomplete=True so it never vanishes).
+        # Skipped entirely when the assistant produced no text (empty turns
+        # deliver nothing, mirroring the existing honesty rule).
+        if _ch_store is not None:
+            _assistant_content = "".join(assistant_parts)
+            if _assistant_content:
+                try:
+                    await _ch_store.append_message(
+                        message_id=_assistant_message_id,
+                        session_id=session_id,
+                        role="assistant",
+                        content=_assistant_content,
+                        channel=_channel_for_log,
+                        turn_id=log_turn_id,
+                        incomplete=turn_errored,
+                        terminal=turn_error_reason,
+                    )
+                except Exception:  # noqa: BLE001, S110 -- best-effort; never break the turn
+                    pass
     finally:
         reset_per_turn_reasoning_effort(_reasoning_token)
         reset_per_turn_goal_loop_policy(_goal_loop_token)
