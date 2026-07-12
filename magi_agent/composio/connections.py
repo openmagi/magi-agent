@@ -14,7 +14,9 @@ from typing import Any, Protocol
 class _ToolkitsAPI(Protocol):
     def list(self, **kwargs: object) -> object: ...
 
-    def authorize(self, *, user_id: str, toolkit: str) -> object: ...
+
+class _AuthConfigsAPI(Protocol):
+    def list(self, **kwargs: object) -> object: ...
 
 
 class _ConnectedAccountsAPI(Protocol):
@@ -24,9 +26,12 @@ class _ConnectedAccountsAPI(Protocol):
 
     def delete(self, connection_id: str) -> object: ...
 
+    def link(self, *, user_id: str, auth_config_id: str) -> object: ...
+
 
 class _ConnectionsClient(Protocol):
     toolkits: _ToolkitsAPI
+    auth_configs: _AuthConfigsAPI
     connected_accounts: _ConnectedAccountsAPI
 
 
@@ -65,14 +70,49 @@ def initiate_connection(
     entity_id: str,
     toolkit: str,
 ) -> dict[str, Any]:
-    """Start an OAuth connection; returns the redirect URL the user must visit."""
+    """Start an OAuth connection; returns the redirect URL the user must visit.
 
-    request = client.toolkits.authorize(user_id=entity_id, toolkit=toolkit)
+    Composio retired the managed-OAuth ``toolkits.authorize`` endpoint (400
+    ``ConnectedAccount_BadRequest`` / ``ComposioLegacyConnectedAccountsEndpoint
+    RetiredError``). The supported v3 flow is: resolve the toolkit's auth config
+    (``auth_configs.list(toolkit_slug=...)``) then ``connected_accounts.link(
+    user_id, auth_config_id)`` → redirect URL. For Composio-managed toolkits an
+    auth config already exists; we prefer the managed one when several are
+    returned.
+    """
+
+    auth_config_id = _resolve_auth_config_id(client, toolkit)
+    request = client.connected_accounts.link(
+        user_id=entity_id, auth_config_id=auth_config_id
+    )
     return {
         "connection_id": _attr(request, "id"),
         "status": _attr(request, "status"),
         "redirect_url": _attr(request, "redirect_url"),
     }
+
+
+def _resolve_auth_config_id(client: _ConnectionsClient, toolkit: str) -> str:
+    """Return the auth config id to link against for ``toolkit``.
+
+    Prefers a Composio-managed config (one-click, no user-supplied OAuth app);
+    falls back to the first config returned. Raises when the toolkit has no auth
+    config (e.g. a non-managed toolkit that needs its OAuth app configured on
+    the Composio dashboard first).
+    """
+
+    response = client.auth_configs.list(toolkit_slug=toolkit)
+    items = _iter_items(response)
+    if not items:
+        raise ValueError(f"no Composio auth config available for toolkit {toolkit!r}")
+    chosen = next(
+        (item for item in items if _attr(item, "is_composio_managed")),
+        items[0],
+    )
+    auth_config_id = _attr(chosen, "id")
+    if not auth_config_id:
+        raise ValueError(f"Composio auth config for toolkit {toolkit!r} has no id")
+    return str(auth_config_id)
 
 
 def connection_status(

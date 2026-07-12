@@ -19,8 +19,10 @@ class _FakeToolkits:
     def list(self, **kwargs: object) -> dict[str, object]:
         return {"items": [{"slug": "gmail", "name": "Gmail"}], "next_cursor": None}
 
-    def authorize(self, *, user_id: str, toolkit: str) -> dict[str, object]:
-        return {"id": "conn_1", "status": "INITIATED", "redirect_url": "https://auth/x"}
+
+class _FakeAuthConfigs:
+    def list(self, **kwargs: object) -> dict[str, object]:
+        return {"items": [{"id": "ac_1", "is_composio_managed": True}]}
 
 
 class _FakeConnectedAccounts:
@@ -34,10 +36,15 @@ class _FakeConnectedAccounts:
     def delete(self, connection_id: str) -> dict[str, object]:
         return {"deleted": True}
 
+    def link(self, *, user_id: str, auth_config_id: str) -> dict[str, object]:
+        self.link_kwargs = {"user_id": user_id, "auth_config_id": auth_config_id}
+        return {"id": "conn_1", "status": "INITIATED", "redirect_url": "https://auth/x"}
+
 
 class _FakeMasterClient:
     def __init__(self) -> None:
         self.toolkits = _FakeToolkits()
+        self.auth_configs = _FakeAuthConfigs()
         self.connected_accounts = _FakeConnectedAccounts()
         self.create_calls: list[dict] = []
 

@@ -37,19 +37,26 @@ class _FakeToolkits:
     def __init__(self, response: object) -> None:
         self._response = response
         self.list_calls: list[dict[str, object]] = []
-        self.authorize_calls: list[dict[str, object]] = []
 
     def list(self, **kwargs: object) -> object:
         self.list_calls.append(dict(kwargs))
         return self._response
 
-    def authorize(self, *, user_id: str, toolkit: str) -> object:
-        self.authorize_calls.append({"user_id": user_id, "toolkit": toolkit})
-        return _FakeConnectionRequest(
-            id="conn_123",
-            status="INITIATED",
-            redirect_url="https://auth.example/redirect",
-        )
+
+class _FakeAuthConfig:
+    def __init__(self, id: str, is_composio_managed: bool = True) -> None:
+        self.id = id
+        self.is_composio_managed = is_composio_managed
+
+
+class _FakeAuthConfigs:
+    def __init__(self, items: list[object] | None = None) -> None:
+        self._items = items if items is not None else [_FakeAuthConfig("ac_managed")]
+        self.list_calls: list[dict[str, object]] = []
+
+    def list(self, **kwargs: object) -> object:
+        self.list_calls.append(dict(kwargs))
+        return _FakeToolkitListResponse(items=self._items)
 
 
 class _FakeConnectionRequest:
@@ -73,6 +80,7 @@ class _FakeConnectedAccounts:
         self.get_calls: list[str] = []
         self.list_calls: list[dict[str, object]] = []
         self.delete_calls: list[str] = []
+        self.link_calls: list[dict[str, object]] = []
 
     def get(self, connection_id: str) -> object:
         self.get_calls.append(connection_id)
@@ -86,11 +94,25 @@ class _FakeConnectedAccounts:
         self.delete_calls.append(connection_id)
         return {"deleted": True}
 
+    def link(self, *, user_id: str, auth_config_id: str) -> object:
+        self.link_calls.append({"user_id": user_id, "auth_config_id": auth_config_id})
+        return _FakeConnectionRequest(
+            id="conn_123",
+            status="INITIATED",
+            redirect_url="https://auth.example/redirect",
+        )
+
 
 class _FakeClient:
-    def __init__(self, toolkits: object, connected_accounts: object) -> None:
+    def __init__(
+        self,
+        toolkits: object,
+        connected_accounts: object,
+        auth_configs: object | None = None,
+    ) -> None:
         self.toolkits = toolkits
         self.connected_accounts = connected_accounts
+        self.auth_configs = auth_configs if auth_configs is not None else _FakeAuthConfigs()
 
 
 def test_list_catalog_filters_to_managed_and_normalizes_items() -> None:
@@ -140,20 +162,60 @@ def test_list_catalog_passes_query_cursor_limit_and_can_disable_managed_filter()
     assert "managed_by" not in call
 
 
-def test_initiate_connection_returns_redirect_url() -> None:
+def test_initiate_connection_resolves_auth_config_and_links() -> None:
     from magi_agent.composio.connections import initiate_connection
 
     toolkits = _FakeToolkits(_FakeToolkitListResponse(items=[]))
-    client = _FakeClient(toolkits, _FakeConnectedAccounts())
+    auth_configs = _FakeAuthConfigs([_FakeAuthConfig("ac_gmail")])
+    connected = _FakeConnectedAccounts()
+    client = _FakeClient(toolkits, connected, auth_configs=auth_configs)
 
     result = initiate_connection(client, entity_id="user-1", toolkit="gmail")
 
-    assert toolkits.authorize_calls[0] == {"user_id": "user-1", "toolkit": "gmail"}
+    # Resolves the toolkit's auth config, then links (retired authorize path gone).
+    assert auth_configs.list_calls[0] == {"toolkit_slug": "gmail"}
+    assert connected.link_calls[0] == {"user_id": "user-1", "auth_config_id": "ac_gmail"}
     assert result == {
         "connection_id": "conn_123",
         "status": "INITIATED",
         "redirect_url": "https://auth.example/redirect",
     }
+
+
+def test_initiate_connection_prefers_composio_managed_auth_config() -> None:
+    from magi_agent.composio.connections import initiate_connection
+
+    auth_configs = _FakeAuthConfigs(
+        [
+            _FakeAuthConfig("ac_byo", is_composio_managed=False),
+            _FakeAuthConfig("ac_managed", is_composio_managed=True),
+        ]
+    )
+    connected = _FakeConnectedAccounts()
+    client = _FakeClient(
+        _FakeToolkits(_FakeToolkitListResponse(items=[])),
+        connected,
+        auth_configs=auth_configs,
+    )
+
+    initiate_connection(client, entity_id="user-1", toolkit="gmail")
+
+    assert connected.link_calls[0]["auth_config_id"] == "ac_managed"
+
+
+def test_initiate_connection_raises_when_no_auth_config() -> None:
+    import pytest
+
+    from magi_agent.composio.connections import initiate_connection
+
+    client = _FakeClient(
+        _FakeToolkits(_FakeToolkitListResponse(items=[])),
+        _FakeConnectedAccounts(),
+        auth_configs=_FakeAuthConfigs([]),
+    )
+
+    with pytest.raises(ValueError, match="no Composio auth config"):
+        initiate_connection(client, entity_id="user-1", toolkit="obscure")
 
 
 def test_connection_status_reads_connected_account() -> None:

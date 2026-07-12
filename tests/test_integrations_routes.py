@@ -32,8 +32,10 @@ class _FakeToolkits:
     def list(self, **kwargs: object) -> dict[str, object]:
         return {"items": [{"slug": "gmail", "name": "Gmail"}], "next_cursor": None}
 
-    def authorize(self, *, user_id: str, toolkit: str) -> dict[str, object]:
-        return {"id": "conn_1", "status": "INITIATED", "redirect_url": "https://auth/x"}
+
+class _FakeAuthConfigs:
+    def list(self, **kwargs: object) -> dict[str, object]:
+        return {"items": [{"id": "ac_1", "is_composio_managed": True}]}
 
 
 class _FakeConnectedAccounts:
@@ -46,9 +48,13 @@ class _FakeConnectedAccounts:
     def delete(self, connection_id: str) -> dict[str, object]:
         return {"deleted": True}
 
+    def link(self, *, user_id: str, auth_config_id: str) -> dict[str, object]:
+        return {"id": "conn_1", "status": "INITIATED", "redirect_url": "https://auth/x"}
+
 
 class _FakeComposioClient:
     toolkits = _FakeToolkits()
+    auth_configs = _FakeAuthConfigs()
     connected_accounts = _FakeConnectedAccounts()
 
 
