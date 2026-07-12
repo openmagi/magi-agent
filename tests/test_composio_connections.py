@@ -246,6 +246,73 @@ def test_list_connections_normalizes_accounts() -> None:
     assert result == [{"connection_id": "conn_1", "toolkit": "slack", "status": "ACTIVE"}]
 
 
+class _ItemToolkit:
+    """Mirrors the v3 SDK's ``toolkit`` object (slug attr, not a bare string)."""
+
+    def __init__(self, slug: str) -> None:
+        self.slug = slug
+
+
+def test_list_connections_extracts_toolkit_slug_from_object() -> None:
+    from magi_agent.composio.connections import list_connections
+
+    # v3 SDK returns toolkit as ItemToolkit(slug=...), not a string. The
+    # dashboard matches by slug equality, so it must be coerced to the slug.
+    accounts = _FakeConnectedAccounts(
+        items=[_FakeConnectedAccount("ca_1", _ItemToolkit("gmail"), "ACTIVE")]
+    )
+    client = _FakeClient(_FakeToolkits(_FakeToolkitListResponse(items=[])), accounts)
+
+    result = list_connections(client, entity_id="user-1")
+
+    assert result == [{"connection_id": "ca_1", "toolkit": "gmail", "status": "ACTIVE"}]
+
+
+def test_initiate_connection_returns_existing_active_without_relinking() -> None:
+    from magi_agent.composio.connections import initiate_connection
+
+    # An ACTIVE gmail account already exists for this entity. Re-connecting must
+    # NOT call link again (Composio raises ComposioMultipleConnectedAccountsError
+    # → 502); return the existing connection instead.
+    accounts = _FakeConnectedAccounts(
+        items=[_FakeConnectedAccount("ca_active", _ItemToolkit("gmail"), "ACTIVE")]
+    )
+    auth_configs = _FakeAuthConfigs([_FakeAuthConfig("ac_gmail")])
+    client = _FakeClient(
+        _FakeToolkits(_FakeToolkitListResponse(items=[])),
+        accounts,
+        auth_configs=auth_configs,
+    )
+
+    result = initiate_connection(client, entity_id="user-1", toolkit="gmail")
+
+    assert accounts.link_calls == []  # no re-link
+    assert result == {
+        "connection_id": "ca_active",
+        "status": "ACTIVE",
+        "redirect_url": None,
+    }
+
+
+def test_initiate_connection_links_when_only_non_active_exists() -> None:
+    from magi_agent.composio.connections import initiate_connection
+
+    # A stale INITIATED (never-completed) account must NOT block a fresh link.
+    accounts = _FakeConnectedAccounts(
+        items=[_FakeConnectedAccount("ca_stale", _ItemToolkit("gmail"), "INITIATED")]
+    )
+    client = _FakeClient(
+        _FakeToolkits(_FakeToolkitListResponse(items=[])),
+        accounts,
+        auth_configs=_FakeAuthConfigs([_FakeAuthConfig("ac_gmail")]),
+    )
+
+    result = initiate_connection(client, entity_id="user-1", toolkit="gmail")
+
+    assert accounts.link_calls[0] == {"user_id": "user-1", "auth_config_id": "ac_gmail"}
+    assert result["redirect_url"] == "https://auth.example/redirect"
+
+
 def test_delete_connection_calls_sdk() -> None:
     from magi_agent.composio.connections import delete_connection
 
