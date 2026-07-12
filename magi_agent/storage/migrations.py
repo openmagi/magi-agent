@@ -165,6 +165,36 @@ MIGRATIONS: Sequence[tuple[int, str]] = (
         );
         """,
     ),
+    (
+        8,
+        # U1 local-serve durable channel message log (design 2026-07-13).
+        # Append-only log of user and assistant messages for local serve. The
+        # server-assigned monotonic ``seq`` is the cursor for incremental polling.
+        # ``INSERT OR IGNORE`` + UNIQUE(session_id, message_id) ensures idempotent
+        # appends when the same turn is replayed. session_id encodes the reset
+        # counter so a Reset naturally starts an empty history. ``incomplete`` and
+        # ``terminal`` capture errored/aborted turns that produced visible text so
+        # a partial answer is never silently dropped (mirrors PR #1435 honesty fix).
+        """
+        CREATE TABLE IF NOT EXISTS channel_messages (
+            seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+            message_id  TEXT NOT NULL,
+            app_name    TEXT NOT NULL DEFAULT '',
+            session_id  TEXT NOT NULL,
+            channel     TEXT NOT NULL DEFAULT '',
+            role        TEXT NOT NULL,
+            content     TEXT NOT NULL,
+            turn_id     TEXT,
+            created_at  INTEGER NOT NULL,
+            incomplete  INTEGER NOT NULL DEFAULT 0,
+            terminal    TEXT
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_messages_dedup
+            ON channel_messages(session_id, message_id);
+        CREATE INDEX IF NOT EXISTS idx_channel_messages_lookup
+            ON channel_messages(app_name, session_id, seq);
+        """,
+    ),
 )
 
 
