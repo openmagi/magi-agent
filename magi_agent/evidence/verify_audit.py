@@ -767,6 +767,477 @@ def activity_grounding_findings(
 
 
 # ---------------------------------------------------------------------------
+# execution_claims_findings (execution-claims member rule, design Section 2)
+# ---------------------------------------------------------------------------
+
+# Spawn-record predicates (2.2). The EvidenceRecord for a SubagentSpawn projects
+# the full FirstPartyActivity dump (camelCase) onto fields, so fields["status"]
+# is the raw ToolResult status (ok|error|blocked), authoritative over the
+# EvidenceRecord status which maps blocked -> "unknown"
+# (first_party_activity.py:44).
+_SPAWN_RECORD_TYPE = "custom:FirstPartySubagentSpawn"
+_SPAWN_FAILED_STATUSES = frozenset({"error", "blocked"})
+_FIRST_PARTY_TYPE_PREFIX = "custom:FirstParty"
+
+# Static model-family lexicon (2.5 arm 1b). Matching AID only, consulted INSIDE
+# an already-matched delegation claim. Staleness degrades recall, never
+# precision.
+_MODEL_FAMILY_TOKENS: tuple[str, ...] = (
+    "gpt", "opus", "claude", "sonnet", "haiku", "fable", "gemini", "kimi",
+    "glm", "grok", "llama", "mistral", "deepseek", "qwen", "minimax",
+)
+
+# Sub-check 1 claim lexicon (2.5): first-person completed delegation only.
+_SPAWN_CLAIM_EN_RE = re.compile(
+    r"\bI\s+(?:spawned|launched|dispatched|delegated(?:\s+\S+){0,3}\s+to)\b"
+    r"|\bI\s+(?:had|asked|got|instructed)\s+(?:\w+\s+){0,3}"
+    r"(?:sub[- ]?agents?|agents?|models?)\s+(?:\w+\s+){0,2}"
+    r"(?:debate|review|discuss|analy[sz]e|verify|evaluate)"
+    r"|\bsub[- ]?agents?\s+(?:debated|reviewed|discussed|analy[sz]ed|verified|evaluated)\b"
+    r"|\bwas\s+reviewed\s+by\b",
+    re.IGNORECASE,
+)
+_SPAWN_CLAIM_KR_RE = re.compile(
+    r"스폰했|(?:서브\s*)?에이전트(?:를|가|들이)?[^.\n]{0,30}?"
+    r"(?:토론(?:시켰|했)|검토(?:시켰|했)|리뷰(?:시켰|했)|분석(?:시켰|했)|돌렸|실행했|위임했)"
+    r"|리뷰를\s*받(?:았|아)|검토를\s*받(?:았|아)|토론시켰|위임했"
+)
+
+# Sub-check 2 success/completion predicates (2.4.2).
+_EXEC_SUCCESS_EN_RE = re.compile(
+    r"\b(?:reviewed|verified|confirmed|analy[sz]ed|debated|discussed|concluded|"
+    r"reported|completed|finished|delivered|evaluated|assessed|agreed|"
+    r"found|said|noted|argued|responded)\b",
+    re.IGNORECASE,
+)
+_EXEC_SUCCESS_KR_RE = re.compile(
+    r"검토했|검토를\s*마쳤|리뷰했|리뷰를\s*(?:완료|마쳤)|분석했|토론했|토론을\s*마쳤|"
+    r"결론(?:냈|을\s*내렸)|평가했|완료했|응답했|말했|밝혔|동의했|검증했"
+)
+
+# Global execution-failure disclosure suppression (2.4.4).
+_EXEC_DISCLOSURE_RE = re.compile(
+    r"\b(?:fail(?:ed|ure)?|timed?\s*[- ]?out|timeout|refused|declined|"
+    r"blocked|errored|did\s+not\s+(?:complete|run|respond)|"
+    r"couldn'?t\s+(?:be\s+)?(?:spawn|complete|reach)|never\s+ran|was\s+not\s+spawned)\b"
+    r"|실패|타임\s*아웃|시간\s*초과|거부|거절|차단|오류|에러|못\s*했|않았|불발|미완료|중단",
+    re.IGNORECASE,
+)
+
+# Execution-specific plan/hypothetical guard (2.6), in addition to _has_fp_guard.
+_EXEC_PLAN_GUARD_RE = re.compile(
+    r"\b(?:can|could|may|might|plan(?:s|ning)?\s+to|going\s+to|about\s+to|"
+    r"let\s+me|I(?:'ll| will| can| could)|option(?:s|ally)?|propose|would\s+like)\b"
+    r"|할게|하겠|해볼|해\s*드릴|예정|계획|가능|옵션|제안|요청|부탁|해\s*달|하라고|하시면",
+    re.IGNORECASE,
+)
+
+# Reason-token to human-readable rendering (Section 4). Unknown tokens fall
+# through to the raw token verbatim.
+_EXEC_REASON_HUMAN: Mapping[str, str] = {
+    "child_turn_timeout": "the child agent hit its turn timeout",
+    "child_turn_error": "the child agent's turn failed with an internal error",
+    "child_provider_key_missing": "no API key was available for the child's provider",
+    "child_model_route_unknown": "the requested child model route is not registered",
+    "live_child_runner_attach_failed": "the child runner could not be attached",
+    "child_runner_blocked": "the child run was blocked before starting",
+}
+
+
+def _spawn_records(records: Sequence[Any]) -> list[Any]:
+    """All SubagentSpawn evidence records in the corpus (2.2)."""
+    return [r for r in records if _record_type(r) == _SPAWN_RECORD_TYPE]
+
+
+def _spawn_record_status(record: Any) -> str:
+    """Raw ToolResult status (ok|error|blocked) from fields (2.2)."""
+    return str(_record_fields(record).get("status") or "")
+
+
+def _spawn_record_detail(record: Any) -> Mapping[str, Any]:
+    detail = _record_fields(record).get("detail")
+    return detail if isinstance(detail, Mapping) else {}
+
+
+def _spawn_record_failed(record: Any) -> bool:
+    """A spawn record is FAILED when its raw status is error/blocked (2.2).
+
+    fields["status"] is authoritative because the EvidenceRecord status maps
+    blocked -> "unknown" (first_party_activity.py:44).
+    """
+    if _spawn_record_status(record) in _SPAWN_FAILED_STATUSES:
+        return True
+    return _record_status(record) == "failed"
+
+
+def _spawn_record_ok(record: Any) -> bool:
+    """A spawn record is OK when its raw status is exactly "ok" (2.2)."""
+    return _spawn_record_status(record) == "ok"
+
+
+def _spawn_reason_token(record: Any) -> str:
+    """reason -> errorCode -> spawnStatus, in that order (2.2)."""
+    fields = _record_fields(record)
+    reason = fields.get("reason")
+    if isinstance(reason, str) and reason:
+        return reason
+    error_code = fields.get("errorCode")
+    if isinstance(error_code, str) and error_code:
+        return error_code
+    return str(_spawn_record_detail(record).get("spawnStatus") or "")
+
+
+def _human_reason(token: str) -> str:
+    """Render a reason token human-readably (Section 4); child_llm_ prefix and
+    unknown tokens fall through per the table."""
+    if not token:
+        return "the child run did not complete"
+    mapped = _EXEC_REASON_HUMAN.get(token)
+    if mapped is not None:
+        return mapped
+    if token.startswith("child_llm_"):
+        slug = token[len("child_llm_"):]
+        return f"the child's model provider returned an error ({slug})"
+    return token
+
+
+def _variant_regex_for_slug(slug: str) -> re.Pattern[str] | None:
+    """Build a separator-tolerant regex for a model slug (2.4.1).
+
+    Separators [-_./: ] in the slug each match [-_./: ]? so "gpt-5.5",
+    "gpt 5.5", "gpt5.5", "GPT-5.5" all match. Returns None for an empty slug.
+    """
+    slug = slug.strip()
+    if not slug:
+        return None
+    fragments = re.split(r"[-_./: ]+", slug)
+    fragments = [f for f in fragments if f]
+    if not fragments:
+        return None
+    joined = r"[-_./: ]?".join(re.escape(f) for f in fragments)
+    return re.compile(joined, re.IGNORECASE)
+
+
+def _spawn_mention_regexes(record: Any) -> list[re.Pattern[str]]:
+    """Mention-token regexes derived FROM the record, never a global list (2.4.1).
+
+    Returns model variant regex(es), the family token (leading alpha run of the
+    model, len >= 3, word-bounded), and the persona token (exact word, len >= 3).
+    Provider alone is never a mention token.
+    """
+    detail = _spawn_record_detail(record)
+    regexes: list[re.Pattern[str]] = []
+
+    model = detail.get("model")
+    if isinstance(model, str) and model.strip():
+        m = model.casefold().strip()
+        halves = [h for h in m.split(":") if h] if ":" in m else [m]
+        for half in halves:
+            variant = _variant_regex_for_slug(half)
+            if variant is not None:
+                regexes.append(variant)
+            family_match = re.match(r"[a-z]+", half)
+            if family_match and len(family_match.group(0)) >= 3:
+                regexes.append(
+                    re.compile(r"\b" + re.escape(family_match.group(0)) + r"\b", re.IGNORECASE)
+                )
+
+    persona = detail.get("persona")
+    if isinstance(persona, str) and len(persona.strip()) >= 3:
+        p = persona.strip()
+        # Word-boundary match for ASCII personas; bare token for non-ASCII (KO).
+        if re.fullmatch(r"[A-Za-z0-9_]+", p):
+            regexes.append(re.compile(r"\b" + re.escape(p) + r"\b", re.IGNORECASE))
+        else:
+            regexes.append(re.compile(re.escape(p), re.IGNORECASE))
+
+    return regexes
+
+
+def _spawn_record_label(record: Any) -> str:
+    """provider:model when both present, else model, else persona (2.4.5)."""
+    detail = _spawn_record_detail(record)
+    model = detail.get("model")
+    provider = detail.get("provider")
+    persona = detail.get("persona")
+    model_s = str(model).strip() if isinstance(model, str) else ""
+    provider_s = str(provider).strip() if isinstance(provider, str) else ""
+    persona_s = str(persona).strip() if isinstance(persona, str) else ""
+    if provider_s and model_s:
+        return f"{provider_s}:{model_s}"
+    if model_s:
+        return model_s
+    return persona_s
+
+
+def _exec_window_guarded(text: str, match: re.Match[str], *, radius: int = 120) -> bool:
+    """True when the +-radius window around match is FP-guarded (2.6 + _has_fp_guard)."""
+    start = max(0, match.start() - radius)
+    end = min(len(text), match.end() + radius)
+    window = text[start:end]
+    if _has_fp_guard(window):
+        return True
+    if _EXEC_PLAN_GUARD_RE.search(window):
+        return True
+    return False
+
+
+def _record_token_matches_any(regexes: Sequence[re.Pattern[str]], record: Any) -> bool:
+    """True when any of the mention regexes matches this record's own tokens.
+
+    Used by arm 1b to decide whether a claimed family already has a spawn
+    record. The record's model/persona strings are the haystack.
+    """
+    detail = _spawn_record_detail(record)
+    haystack_parts = [
+        str(detail.get("model") or ""),
+        str(detail.get("provider") or ""),
+        str(detail.get("persona") or ""),
+    ]
+    haystack = " ".join(p for p in haystack_parts if p)
+    if not haystack:
+        return False
+    return any(rx.search(haystack) for rx in regexes)
+
+
+def _check_failed_execution_success(
+    text: str,
+    records: Sequence[Any],
+) -> list[VerifyFinding]:
+    """Sub-check 2: a failed spawn presented as a success (2.4).
+
+    Global disclosure suppression (2.4.4): if the candidate discloses ANY
+    execution failure, emit nothing for the whole pass.
+    """
+    findings: list[VerifyFinding] = []
+    if _EXEC_DISCLOSURE_RE.search(text):
+        return findings
+
+    all_spawns = _spawn_records(records)
+    failed = [r for r in all_spawns if _spawn_record_failed(r)]
+    if not failed:
+        return findings
+    ok_records = [r for r in all_spawns if _spawn_record_ok(r)]
+
+    for rec in failed:
+        detail = _spawn_record_detail(rec)
+        model = detail.get("model")
+        persona = detail.get("persona")
+        model_s = str(model).strip().casefold() if isinstance(model, str) else ""
+        persona_s = str(persona).strip().casefold() if isinstance(persona, str) else ""
+
+        # Nothing safe to match on (2.4.1).
+        if not model_s and not persona_s:
+            continue
+
+        # Retry-ok suppression (2.4.3): a matching ok record excuses this failure.
+        if _has_retry_ok(ok_records, model_s, persona_s):
+            continue
+
+        mention_regexes = _spawn_mention_regexes(rec)
+        if not mention_regexes:
+            continue
+
+        indicting = _first_success_mention(text, mention_regexes)
+        if indicting is None:
+            continue
+
+        match = indicting
+        ref = _record_ref(rec)
+        status = _spawn_record_status(rec) or "error"
+        reason_token = _spawn_reason_token(rec)
+        label = _spawn_record_label(rec) or "the child agent"
+        human = _human_reason(reason_token)
+        token_suffix = f" ({reason_token})" if reason_token else ""
+        fid = fingerprint_finding(
+            "verify_before_replying.execution_claims",
+            "failed_execution_presented_as_success",
+            evidence_ref=ref,
+        )
+        findings.append(VerifyFinding(
+            finding_id=fid,
+            rule_id="verify_before_replying.execution_claims",
+            confidence="high",
+            claim_class="failed_execution_presented_as_success",
+            claim_text=match.group(0),
+            span=(match.start(), match.end()),
+            evidence_refs=(ref,),
+            expected=f"SpawnAgent completed for {label}",
+            observed=f"SpawnAgent {status}: {human}{token_suffix}",
+            detail=(
+                f"spawn of {label} ended {status} reason={reason_token or 'unknown'} "
+                f"but the reply presents its output as delivered (evidence: {ref})"
+            ),
+            suggested_action="recheck",
+        ))
+
+    return findings
+
+
+def _has_retry_ok(ok_records: Sequence[Any], model_s: str, persona_s: str) -> bool:
+    """Retry-ok suppression predicate (2.4.3).
+
+    Match on model slug equality (casefolded) when both records carry model;
+    when the failed record carries a persona, the ok record must ALSO match the
+    persona (a failed "optimistic" is not excused by a successful "skeptical").
+    """
+    for ok in ok_records:
+        detail = _spawn_record_detail(ok)
+        ok_model = str(detail.get("model") or "").strip().casefold()
+        ok_persona = str(detail.get("persona") or "").strip().casefold()
+        if model_s and ok_model != model_s:
+            continue
+        if persona_s and ok_persona != persona_s:
+            continue
+        if not model_s and not persona_s:
+            continue
+        return True
+    return False
+
+
+def _first_success_mention(
+    text: str,
+    mention_regexes: Sequence[re.Pattern[str]],
+) -> re.Match[str] | None:
+    """First mention token whose +-120 window carries a success predicate and
+    passes the FP guards (2.4.2)."""
+    for rx in mention_regexes:
+        for match in rx.finditer(text):
+            start = max(0, match.start() - 120)
+            end = min(len(text), match.end() + 120)
+            window = text[start:end]
+            if not (_EXEC_SUCCESS_EN_RE.search(window) or _EXEC_SUCCESS_KR_RE.search(window)):
+                continue
+            if _exec_window_guarded(text, match):
+                continue
+            return match
+    return None
+
+
+def _check_fabricated_execution(
+    text: str,
+    records: Sequence[Any],
+) -> list[VerifyFinding]:
+    """Sub-check 1: a delegation claim with no supporting spawn evidence (2.5).
+
+    Arm 1a: any spawn record set is empty -> generic absence.
+    Arm 1b: a model family is named in the claim window but no spawn record
+    matches that family -> model-named absence (the leg-3 catch).
+    """
+    findings: list[VerifyFinding] = []
+
+    claim_match = _SPAWN_CLAIM_EN_RE.search(text) or _SPAWN_CLAIM_KR_RE.search(text)
+    if claim_match is None:
+        return findings
+    if _exec_window_guarded(text, claim_match):
+        return findings
+
+    all_spawns = _spawn_records(records)
+
+    # Arm 1a: generic absence.
+    if not all_spawns:
+        fid = fingerprint_finding(
+            "verify_before_replying.execution_claims",
+            "fabricated_execution",
+            canonical_value="fabricated_execution|generic",
+        )
+        findings.append(VerifyFinding(
+            finding_id=fid,
+            rule_id="verify_before_replying.execution_claims",
+            confidence="high",
+            claim_class="fabricated_execution",
+            claim_text=claim_match.group(0),
+            span=(claim_match.start(), claim_match.end()),
+            evidence_refs=(),
+            expected="custom:FirstPartySubagentSpawn record",
+            observed="no SpawnAgent evidence found this session",
+            detail=(
+                "reply claims a subagent delegation but no SpawnAgent evidence "
+                "record exists this session"
+            ),
+            suggested_action="recheck",
+        ))
+        return findings
+
+    # Arm 1b: model-named absence. Scan the claim window for a family token.
+    win_start = max(0, claim_match.start() - 120)
+    win_end = min(len(text), claim_match.end() + 120)
+    window = text[win_start:win_end]
+    matched_families: list[str] = []
+    for family in _MODEL_FAMILY_TOKENS:
+        if re.search(r"\b" + re.escape(family) + r"\b", window, re.IGNORECASE):
+            family_rx = re.compile(r"\b" + re.escape(family) + r"\b", re.IGNORECASE)
+            if not any(_record_token_matches_any([family_rx], r) for r in all_spawns):
+                matched_families.append(family)
+    if not matched_families:
+        return findings
+
+    sorted_families = sorted(set(matched_families))
+    fid = fingerprint_finding(
+        "verify_before_replying.execution_claims",
+        "fabricated_execution",
+        canonical_value="fabricated_execution|" + "|".join(sorted_families),
+    )
+    family_label = ", ".join(sorted_families)
+    findings.append(VerifyFinding(
+        finding_id=fid,
+        rule_id="verify_before_replying.execution_claims",
+        confidence="high",
+        claim_class="fabricated_execution",
+        claim_text=claim_match.group(0),
+        span=(claim_match.start(), claim_match.end()),
+        evidence_refs=(),
+        expected=f"SpawnAgent record matching '{family_label}'",
+        observed="no SpawnAgent evidence for that model this session",
+        detail=(
+            f"reply claims a '{family_label}' subagent delegation but no "
+            f"SpawnAgent record matches that model this session"
+        ),
+        suggested_action="recheck",
+    ))
+    return findings
+
+
+def execution_claims_findings(
+    final_text: str,
+    turn_records: Sequence[Any],
+    session_records: Sequence[Any],
+    *,
+    collector_present: bool,
+) -> tuple[VerifyFinding, ...]:
+    """Deterministic execution-claims audit against the spawn ledger (design 2).
+
+    Two HIGH sub-checks over the turn+session record union (2.3):
+    - fabricated_execution (absence-based, arms 1a generic + 1b model-named).
+    - failed_execution_presented_as_success (contradiction-based, conservative).
+
+    FPR-0 guards (2.7): collector_present=False returns () entirely; sub-check 1
+    additionally requires at least one first-party record (producer-liveness),
+    so a producer-off gap is not read as a lie. Sub-check 2 needs no such guard
+    because it only ever fires ON an existing spawn record.
+    """
+    if not collector_present:
+        return ()
+
+    all_records = list(turn_records) + list(session_records)
+    findings: list[VerifyFinding] = []
+
+    # Producer-liveness guard for sub-check 1 (2.7): a collector can be present
+    # while the first-party producer is off. Zero first-party records then means
+    # a producer gap, not a fabrication.
+    producer_live = any(
+        _record_type(r).startswith(_FIRST_PARTY_TYPE_PREFIX) for r in all_records
+    )
+    if producer_live:
+        findings.extend(_check_fabricated_execution(final_text, all_records))
+
+    # Sub-check 2 only fires on an existing spawn record; no liveness guard.
+    findings.extend(_check_failed_execution_success(final_text, all_records))
+
+    return tuple(findings)
+
+
+# ---------------------------------------------------------------------------
 # sycophancy_findings (design Section 6.2 rule 1)
 # ---------------------------------------------------------------------------
 
@@ -990,6 +1461,12 @@ def audit_candidate(
     all_findings.extend(
         activity_grounding_findings(final_text, turn_records, collector_present=collector_present)
     )
+    all_findings.extend(
+        execution_claims_findings(
+            final_text, turn_records, session_records,
+            collector_present=collector_present,
+        )
+    )
     all_findings.extend(sycophancy_findings(final_text, prompt))
     if gate_result is not None:
         all_findings.extend(claim_citation_findings(gate_result))
@@ -1054,6 +1531,11 @@ def resolve_findings(
 
     for f in activity_grounding_findings(
         delivered_text, turn_records, collector_present=collector_present
+    ):
+        active.add(f.finding_id)
+
+    for f in execution_claims_findings(
+        delivered_text, turn_records, session_records, collector_present=collector_present
     ):
         active.add(f.finding_id)
 
