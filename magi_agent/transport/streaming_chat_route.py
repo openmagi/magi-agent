@@ -103,6 +103,65 @@ __all__ = [
     "_local_full_access",
 ]
 
+# ---------------------------------------------------------------------------
+# Local-serve slash→skill expansion
+# ---------------------------------------------------------------------------
+
+_LOCAL_SLASH_MAX_BODY_CHARS = 32_000
+
+
+def _resolve_local_slash_expansion(text: str) -> str:
+    """Expand a slash command into its SKILL.md body for the local engine.
+
+    This mirrors the CLI (``headless.py``) approach: when the user sends a
+    message starting with ``/``, resolve the skill name against the workspace
+    skills directory and replace the model-facing prompt with the SKILL.md body
+    (+ residual text, if any).  The caller must keep the original ``text`` for
+    the goal-loop objective and the transcript — only the engine's ``prompt``
+    argument receives the expanded body.
+
+    Design choices
+    --------------
+    - **Default-ON**, no flag gate — this is the local path's own canonical
+      feature.  The hosted flag ``MAGI_HOSTED_SLASH_SKILL_ACTIVATION_ENABLED``
+      must NOT gate the local path.
+    - **Fail-open**: any exception inside is silently swallowed and the
+      original ``text`` is returned unchanged.  The local turn must never be
+      disrupted by a resolver failure.
+    - **Reserved commands** (``/reset``, ``/help``, etc.) are handled inside
+      ``resolve_skill_slash`` itself (returns ``None``) and pass through.
+    - Non-slash text returns ``text`` unchanged — byte-identical behaviour.
+    """
+    if not text or not text.startswith("/"):
+        return text
+    try:
+        # Lazy imports to avoid adding top-level transport→runtime→plugins
+        # edges (layering ratchet).  generate_request.py uses the same pattern.
+        from pathlib import Path as _Path  # noqa: PLC0415
+
+        from magi_agent.config.flags import flag_str as _flag_str  # noqa: PLC0415
+        from magi_agent.runtime.skill_slash import (  # noqa: PLC0415
+            SkillSlashActivation,
+            resolve_skill_slash,
+        )
+
+        workspace_root = _Path(_flag_str("MAGI_AGENT_WORKSPACE") or os.getcwd())
+        result = resolve_skill_slash(
+            text,
+            workspace_root=workspace_root,
+            max_body_chars=_LOCAL_SLASH_MAX_BODY_CHARS,
+        )
+        if isinstance(result, SkillSlashActivation):
+            body = result.body
+            if result.residual_text:
+                body = body + "\n" + result.residual_text
+            return body
+        # Miss or None (unknown slash or reserved) → pass through
+        return text
+    except Exception:  # noqa: BLE001
+        return text
+
+
 _SELECTED_FULL_TOOLHOST_TURN_ID = "turn-gate5b-full-toolhost"
 _SELECTED_STREAM_HEARTBEAT_INTERVAL_SECONDS = 5.0
 
@@ -1083,6 +1142,15 @@ def register_streaming_chat_routes(
             os.environ, session_id=session_id, turn_id=turn_id
         )
         prompt = _extract_prompt_text(body)
+        # Local-serve slash→skill expansion (parity with CLI / hosted gate5b).
+        # ``model_prompt`` is what the engine receives; ``prompt`` is kept for
+        # the goal-loop objective and the transcript (original slash text).
+        # Outer try/except is defence-in-depth: the helper already catches its
+        # own faults, but guard here too so no resolver path can break a turn.
+        try:
+            model_prompt = _resolve_local_slash_expansion(prompt)
+        except Exception:  # noqa: BLE001
+            model_prompt = prompt
         # J-1: the dashboard sends the selected model in the body. Thread it into
         # the local headless builder as an override-with-fallback. The web client
         # default sentinel ``"auto"`` means "no override" (fall back to the serve
@@ -1221,7 +1289,7 @@ def register_streaming_chat_routes(
         undetached = drive_streaming_chat(
             engine,
             gate,
-            {"prompt": prompt, "session_id": session_id, "turn_id": turn_id},
+            {"prompt": model_prompt, "session_id": session_id, "turn_id": turn_id},
             cancel=cancel,
             queue=queue,
             sink=sink,
