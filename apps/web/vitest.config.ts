@@ -42,6 +42,10 @@ export default {
       // readFileSync string checks that pass under the node environment.
       "app/dashboard/[botId]/skills/skills-catalog.test.ts",
       "app/dashboard/[botId]/skills/skills-catalog.local.test.ts",
+      // Live-skills slash-autocomplete: pure buildSlashEntries unit tests and
+      // source-wiring checks confirming chat-view-client wires useLiveSkills.
+      "src/components/chat/chat-input.slash-live.test.ts",
+      "app/dashboard/chat/chat-view-client.slash-live.test.ts",
       // PR-3: verify-before-replying Audit panel section + citations mirror suite
       "src/components/chat/audit-panel.verify.test.tsx",
       "src/components/chat/audit-panel.citations.test.tsx",

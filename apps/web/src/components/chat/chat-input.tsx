@@ -7,7 +7,6 @@ import { extractClipboardImageFiles } from "@/chat-core";
 import { kbUploadKey } from "@/chat-core/kb-uploads";
 import type { ChatResponseLanguage, ReplyTo, KbDocReference, AgentModeSummary } from "@/chat-core";
 import { isStreamingComposerBlockedByQueue } from "@/chat-core";
-import { SKILLS } from "@/lib/skills-catalog";
 import type { KbDocEntry } from "@/hooks/use-kb-docs";
 import type { PendingKbUpload } from "@/chat-core/kb-uploads";
 import {
@@ -20,90 +19,36 @@ import {
   REASONING_EFFORT_VALUES,
   DEFAULT_REASONING_EFFORT,
 } from "@/chat-core";
+import {
+  buildSlashEntries as _buildSlashEntries,
+  getSlashMatches as _getSlashMatches,
+  normalizeSlashCommand,
+  type SlashEntry,
+  type SlashSkill,
+} from "./slash-entries";
 
 export type { ChatRecipeOption, ChatRecipeSelectionMode };
 
-interface SlashEntry {
-  command: string;
-  label: string;
-  category: string;
-  builtin?: boolean;
-  searchText?: string;
-}
+/** Shape of a custom or live skill entry passed into the slash-autocomplete. */
+export type ChatInputCustomSkill = SlashSkill;
 
-const BUILTIN_COMMANDS: SlashEntry[] = [
-  { command: "reset", label: "Reset conversation", category: "system", builtin: true },
-  { command: "status", label: "Show bot status", category: "system", builtin: true },
-  { command: "compact", label: "Compact memory", category: "system", builtin: true },
-  { command: "help", label: "Show help", category: "system", builtin: true },
-];
-
-const BUNDLED_SKILL_ENTRIES: SlashEntry[] = (() => {
-  const entries: SlashEntry[] = [];
-  for (const skill of SKILLS) {
-    if (!skill.commands?.length) continue;
-    for (const command of skill.commands) {
-      entries.push({ command, label: skill.id, category: skill.category });
-    }
-  }
-  return entries;
-})();
-
-export interface ChatInputCustomSkill {
-  name: string;
-  title: string;
-  description?: string;
-  tags?: string[];
-}
-
-export function buildSlashEntries(customSkills: ChatInputCustomSkill[] = []): SlashEntry[] {
-  // Order: system builtins, then the user's own custom/learned skills, then
-  // bundled skills. Custom skills come before the bundled catalog so they
-  // surface in the bare "/" browse list, which is capped downstream.
-  const entries: SlashEntry[] = [...BUILTIN_COMMANDS];
-  const seenCommands = new Set(entries.map((entry) => entry.command.toLowerCase()));
-
-  for (const skill of customSkills) {
-    const command = normalizeSlashCommand(skill.name);
-    if (!command) continue;
-    const dedupeKey = command.toLowerCase();
-    if (seenCommands.has(dedupeKey)) continue;
-    seenCommands.add(dedupeKey);
-    const label = skill.title.trim() || command;
-    entries.push({
-      command,
-      label,
-      category: "custom",
-      searchText: [
-        command,
-        label,
-        skill.description ?? "",
-        ...(skill.tags ?? []),
-      ].join(" "),
-    });
-  }
-
-  for (const entry of BUNDLED_SKILL_ENTRIES) {
-    if (seenCommands.has(entry.command.toLowerCase())) continue;
-    entries.push(entry);
-  }
-
-  return entries;
+/**
+ * Build the full slash-autocomplete entry list.
+ *
+ * Precedence: builtins > customSkills > liveSkills > static catalog.
+ *
+ * Re-exported so callers outside this module can invoke the pure function
+ * without importing the React component tree.
+ */
+export function buildSlashEntries(
+  customSkills: ChatInputCustomSkill[] = [],
+  liveSkills: ChatInputCustomSkill[] = [],
+): SlashEntry[] {
+  return _buildSlashEntries(customSkills, liveSkills);
 }
 
 export function getSlashMatches(entries: SlashEntry[], query: string): SlashEntry[] {
-  const normalizedQuery = query.toLowerCase();
-  if (normalizedQuery === "") return entries.slice(0, 12);
-  return entries
-    .filter((entry) => {
-      const haystack = `${entry.command} ${entry.label} ${entry.category} ${entry.searchText ?? ""}`.toLowerCase();
-      return haystack.includes(normalizedQuery);
-    })
-    .slice(0, 12);
-}
-
-function normalizeSlashCommand(command: string): string {
-  return command.trim().replace(/^\/+/, "").replace(/\s+/g, "-");
+  return _getSlashMatches(entries, query);
 }
 
 interface PendingFile {
@@ -195,6 +140,11 @@ interface ChatInputProps {
   uiLanguage?: ChatResponseLanguage;
   /** Custom skills installed for the current bot and exposed via slash autocomplete. */
   customSkills?: ChatInputCustomSkill[];
+  /** Live skills fetched from /v1/app/skills on the local agent. Merged into
+   *  slash autocomplete with precedence builtins > customSkills > liveSkills >
+   *  static catalog. Optional — autocomplete falls back to existing behavior
+   *  when absent or empty. */
+  liveSkills?: ChatInputCustomSkill[];
   /** Safe public recipe refs available for explicit per-turn/session requests. */
   availableRecipes?: ChatRecipeOption[];
   /** True when the currently-selected model supports a reasoning-effort knob
@@ -312,6 +262,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     composerAccessory,
     uiLanguage,
     customSkills,
+    liveSkills,
     availableRecipes = [],
     supportsReasoningEffort = false,
     reasoningEffort,
@@ -373,7 +324,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   }, [text, cursorPos]);
   const slashQuery = slashToken?.query ?? null;
   const prevQueryRef = useRef(slashQuery);
-  const slashEntries = useMemo(() => buildSlashEntries(customSkills), [customSkills]);
+  const slashEntries = useMemo(
+    () => buildSlashEntries(customSkills, liveSkills),
+    [customSkills, liveSkills],
+  );
   const safeRecipeOptions = useMemo(
     () => availableRecipes.flatMap((recipe) => {
       const safeRecipe = sanitizeChatRecipeOption(recipe);
