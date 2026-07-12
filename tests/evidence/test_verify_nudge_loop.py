@@ -752,3 +752,155 @@ def test_advisory_only_finding_nudges_once(monkeypatch) -> None:
     assert _status_types(items).count("verify_nudge_scheduled") == 1
     assert _client_answer(items) == still_praise
     assert _terminal(items).terminal == Terminal.completed
+
+
+# ---------------------------------------------------------------------------
+# 11. U2: execution_claims member fires end-to-end on a failed-spawn record
+# ---------------------------------------------------------------------------
+
+
+def _subagent_spawn(
+    *,
+    status: str = "error",
+    reason: str | None = "child_turn_timeout",
+    model: str | None = "opus-4-8",
+    provider: str | None = "anthropic",
+    persona: str | None = None,
+    ref: str = "sp_001",
+) -> object:
+    """Duck-typed SubagentSpawn evidence record (verified fields shape).
+
+    Mirrors first_party_activity.to_evidence_record: type
+    custom:FirstPartySubagentSpawn, camelCase fields with top-level status /
+    reason / errorCode and a nested detail{spawnStatus, persona, model,
+    provider}. Copied from tests/evidence/test_verify_audit.py to keep this
+    driver-level test self-contained.
+    """
+    detail: dict[str, object] = {
+        "spawnStatus": status,
+        "persona": persona or "",
+        "promptDigest": "",
+        "requestedDepth": 0,
+        "liveChildRunnerAttached": False,
+    }
+    if provider is not None:
+        detail["provider"] = provider
+    if model is not None:
+        detail["model"] = model
+    ev_status = {"ok": "ok", "error": "failed"}.get(status, "unknown")
+    return SimpleNamespace(
+        type="custom:FirstPartySubagentSpawn",
+        status=ev_status,
+        fields={
+            "status": status,
+            "reason": reason,
+            "errorCode": None,
+            "evidenceRef": ref,
+            "detail": detail,
+        },
+        observed_at=1000,
+    )
+
+
+class _CapturingScriptedAdapter(_ScriptedAdapter):
+    """Scripted adapter that records the newMessage text of every run_turn.
+
+    The nudge continuation is fed to the runner as the next ``newMessage``
+    (driver.py builds ``runner_turn_input_cls(newMessage=...)`` with the nudge
+    text on the repair round), so capturing the text the adapter receives is the
+    driver-level view of the nudge overlay handed back to the model."""
+
+    captured_messages: list[str] = []
+
+    async def run_turn(self, runner_input: object):
+        text = ""
+        kwargs = getattr(runner_input, "kwargs", None)
+        if isinstance(kwargs, Mapping):
+            message = kwargs.get("newMessage")
+            parts = getattr(message, "parts", None) or []
+            for part in parts:
+                part_text = getattr(part, "text", None)
+                if isinstance(part_text, str):
+                    text += part_text
+        type(self).captured_messages.append(text)
+        for event in self.runner.next_generation():
+            yield event
+
+
+def _capturing_engine_deps() -> dict[str, object]:
+    deps = _engine_deps()
+    deps["OpenMagiRunnerAdapter"] = _CapturingScriptedAdapter
+    return deps
+
+
+def test_execution_claims_nudge_fires_end_to_end(monkeypatch) -> None:
+    """U2 proof: a candidate presenting a FAILED Opus spawn as a completed
+    review, with the failing SubagentSpawn record in the collector corpus,
+    drives ``_verify_nudge_check`` to (a) hand the model a nudge overlay
+    containing the ``[verify_before_replying.execution_claims]`` finding with the
+    human-readable reason, and (b) emit a per-pass verify observability row whose
+    findings carry the new rule's claimClass."""
+    _CapturingScriptedAdapter.captured_messages = []
+    _verify_env(monkeypatch, enabled=True)
+    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _capturing_engine_deps)
+
+    failed = _subagent_spawn(
+        status="error", reason="child_turn_timeout", model="opus-4-8", ref="sp_001"
+    )
+    collector = _VerifyCollector(turn_records_script=[(failed,)])
+    sink = _SinkCapture()
+    # Primary presents the failed spawn as a completed review; the revision
+    # discloses the timeout so the finding resolves and the turn delivers.
+    original = "Opus reviewed this and concluded the design is sound."
+    revision = "Correction: the Opus review timed out and never completed."
+    runner = _ScriptedRunner(
+        generations=[
+            [{"type": "text_delta", "delta": original}],
+            [
+                {"type": "response_clear"},
+                {"type": "text_delta", "delta": revision},
+            ],
+        ],
+        collector=collector,
+    )
+    driver = MagiEngineDriver(
+        runner=runner, runner_policy_assembly=None, event_sink=sink
+    )
+
+    items = _drive(driver, prompt="did the review pass")
+
+    # (a) Exactly one nudge fired and the continuation handed to the model on the
+    #     nudge round carries the execution_claims rule id plus the human reason
+    #     and the raw token (auditable).
+    assert _status_types(items).count("verify_nudge_scheduled") == 1
+    nudge_messages = [
+        m
+        for m in _CapturingScriptedAdapter.captured_messages
+        if "verify_before_replying.execution_claims" in m
+    ]
+    assert len(nudge_messages) == 1
+    overlay = nudge_messages[0]
+    assert "turn timeout" in overlay, "human-readable reason renders in the nudge"
+    assert "child_turn_timeout" in overlay, "raw reason token renders for audit"
+
+    # (b) A per-pass verify observability row carries the new rule's claimClass.
+    pass_rows = [r for r in _verify_rows(sink) if r.get("verifyKind") == "pass"]
+    claim_classes = {
+        str(finding.get("claimClass"))
+        for row in pass_rows
+        for finding in row.get("findings", [])
+    }
+    assert (
+        "failed_execution_presented_as_success" in claim_classes
+        or "fabricated_execution" in claim_classes
+    )
+    exec_rule_findings = [
+        finding
+        for row in pass_rows
+        for finding in row.get("findings", [])
+        if finding.get("ruleId") == "verify_before_replying.execution_claims"
+    ]
+    assert exec_rule_findings, "an execution_claims finding row was recorded"
+
+    assert _client_answer(items) == revision
+    assert _terminal(items).terminal == Terminal.completed
