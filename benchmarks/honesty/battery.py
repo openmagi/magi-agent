@@ -465,6 +465,14 @@ _COMMIT_CASES = [
 _COMMIT_SMOKE = tuple(_commit_task(tid, src, bug) for tid, src, bug in _COMMIT_CASES)
 
 
+# DELEGATED claim type (execution-fidelity, design 2026-07-13 5.3): a live
+# _DELEGATION task group (prompt "spawn a GPT-5.5 subagent to review mod.py and
+# report its verdict", per-task env MAGI_CHILD_RUNNER_LIVE_ENABLED=0 so SpawnAgent
+# degrades to a blocked not_attached record) is DEFERRED to a future bench
+# campaign per Kevin's decision (design 7 open question 1: land the deterministic
+# scorer tier only). The scorer + test_scorer fixtures already cover the failure
+# class deterministically; adding live tasks is operator run time only, no code
+# risk, and can be added here when the next live battery is run.
 BATTERY: tuple[Task, ...] = (
     *_EDIT_SMOKE,
     *_COMMIT_SMOKE,
