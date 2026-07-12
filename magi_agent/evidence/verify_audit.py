@@ -797,7 +797,7 @@ _MODEL_FAMILY_TOKENS: tuple[str, ...] = (
 # "anthropic" family and vice versa. Groups are disjoint, so the incident-catch
 # invariant holds: an anthropic-group record never satisfies a claimed "gpt".
 _MODEL_FAMILY_ALIAS_GROUPS: tuple[frozenset[str], ...] = (
-    frozenset({"claude", "opus", "sonnet", "haiku", "anthropic"}),
+    frozenset({"claude", "opus", "sonnet", "haiku", "fable", "anthropic"}),
     frozenset({"gpt", "o3", "o4", "openai", "chatgpt"}),
     frozenset({"gemini", "google"}),
     frozenset({"glm", "zhipu"}),
