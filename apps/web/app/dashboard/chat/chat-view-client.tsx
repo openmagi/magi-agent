@@ -28,6 +28,7 @@ import { setAttachmentTokenGetter } from "@/chat-core";
 import { getNextChannelAfterDeletion } from "@/chat-core";
 import { useE2EE } from "@/lib/chat/use-e2ee";
 import { useAgentModes } from "@/hooks/use-agent-modes";
+import { useLiveSkills } from "@/hooks/use-live-skills";
 import { mergeChatHistoryPage } from "@/chat-core";
 import { persistUserHistoryMessage } from "@/chat-core";
 import {
@@ -263,6 +264,11 @@ export function ChatViewClient({
   const isCurrentBot = useCallback(() => useChatStore.getState().botId === botId, [botId]);
 
   const { modes: availableModes, activeMode: stickyAgentMode } = useAgentModes(botId);
+  // Live skills from the local agent's /v1/app/skills endpoint. Merged into
+  // slash-autocomplete so real installed skills appear even when the static
+  // catalog doesn't list them. This component is always local-only (botId
+  // "local"), so `enabled` is unconditionally true.
+  const { skills: liveSkills } = useLiveSkills(true);
   // Re-arm the seed and drop any carried-over selection when the bot changes,
   // so each bot reflects its own sticky mode.
   useEffect(() => {
@@ -1996,6 +2002,7 @@ export function ChatViewClient({
               queueFull={(queuedMessages[activeChannel] ?? []).length >= MAX_QUEUED_MESSAGES}
               uploadStates={uploadStates}
               customSkills={customSkills}
+              liveSkills={liveSkills}
               supportsReasoningEffort={modelSupportsReasoningEffort(
                 resolveChannelRuntimeModel(activeChannel),
               )}

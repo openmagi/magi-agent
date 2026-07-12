@@ -70,6 +70,7 @@ import type {
 } from "@/chat-core";
 import { useKbDocs } from "@/hooks/use-kb-docs";
 import { useAgentModes } from "@/hooks/use-agent-modes";
+import { useLiveSkills } from "@/hooks/use-live-skills";
 import { MAX_QUEUED_MESSAGES, getStreamingSendMode } from "@/chat-core";
 
 import {
@@ -296,6 +297,9 @@ export function ChatViewClient({
   // --- KB Context Picker ---
   const { collections: kbCollections, allDocs: kbAllDocs, loading: kbLoading, refreshing: kbRefreshing, refresh: kbRefresh } = useKbDocs(botId);
   const { modes: availableModes, activeMode: stickyAgentMode } = useAgentModes(botId);
+  // Live skills from /v1/app/skills — only valid for the local agent.
+  // useLiveSkills(false) is a no-op (no fetch, empty list) for hosted bots.
+  const { skills: liveSkills } = useLiveSkills(botId === "local");
   // Re-arm the seed and drop any carried-over selection when the bot changes,
   // so each bot reflects its own sticky mode (the [botId] route is reused
   // across bots in the hosted multi-bot dashboard without remounting).
@@ -2485,6 +2489,7 @@ export function ChatViewClient({
               onSelectKbDoc={handleToggleKbDoc}
               uploadStates={uploadStates}
               customSkills={customSkills}
+              liveSkills={liveSkills}
               supportsReasoningEffort={modelSupportsReasoningEffort(
                 resolveChannelRuntimeModel(activeChannel),
               )}
