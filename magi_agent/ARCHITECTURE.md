@@ -1655,6 +1655,7 @@ graph LR
 | active_sessions.py | In-process active-session transcript buffer for serve session-end extraction. | session_extract_runtime | (root)/app.py, transport/chat_routes_local.py |
 | active_turn_registry.py | Single-flight registry for active turns, keyed by session. | — | engine/driver.py |
 | activity_boundary.py | — | — | — |
+| adk_instruction.py | State-injection-safe ADK instruction wrapper. | — | runtime/hosted_runtime.py, runtime/tests/test_adk_instruction.py, shadow/gate5b4c3_live_runner_boundary.py |
 | adk_turn_runner.py | — | model_tiers, request_shape, runner_adapter | runtime/child_runner_boundary.py |
 | admission.py | — | — | — |
 | approval_resume.py | — | kernel, request_ledger, result | — |
@@ -1704,7 +1705,7 @@ graph LR
 | heartbeat_contract.py | — | safety | runtime/events.py, runtime/heartbeat_boundary.py, runtime/heartbeat_store.py, runtime/resume_decision.py, runtime/stale_run_detector.py |
 | heartbeat_store.py | — | heartbeat_contract | runtime/heartbeat_boundary.py, runtime/stale_run_detector.py |
 | hosted_defaults.py | Hosted-deployment control-stage overlay. | — | (root)/main.py, config/env.py |
-| hosted_runtime.py | Hosted-runtime foundation for governed-turn serving. | driver, wire_profile | transport/chat_routes.py, transport/gate5b_serving.py |
+| hosted_runtime.py | Hosted-runtime foundation for governed-turn serving. | adk_instruction, driver, wire_profile | transport/chat_routes.py, transport/gate5b_serving.py |
 | llm_stream_reader.py | — | — | — |
 | local_defaults.py | — | _truthy, env, flags, research_tools | (root)/main.py, cli/app.py |
 | long_running_activity.py | — | receipt_utils | missions/background_tasks.py |
@@ -1793,6 +1794,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | — | — |
+| test_adk_instruction.py | State-injection-safe instruction wrapper (live incident 2026-07-12). | adk_instruction | — |
 | test_skill_slash.py | Unit tests for magi_agent.runtime.skill_slash. | skill_slash | — |
 
 ### sandbox/
@@ -1852,7 +1854,7 @@ graph LR
 | gate5b4_internal_endpoint_contract.py | — | — | — |
 | gate5b4c2_shadow_invocation_contract.py | — | — | transport/shadow_invocations.py |
 | gate5b4c3_image_parts.py | Convert sanitized Anthropic-style image blocks into ADK content parts. | — | engine/driver.py, shadow/gate5b4c3_live_runner_boundary.py |
-| gate5b4c3_live_runner_boundary.py | — | env, flags, gate1a_egress_correlation, gate5b4c3_image_parts, gate5b4c3_runner_input_adapter, gate5b4c3_shadow_generation_contract, health, hosted_session_substrate, integration, ledger_store, model_factory, output_continuation, public_events, session_ownership, session_service_registry, transcript | shadow/gate5b4c3_shadow_parity.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/gate5b_serving.py, transport/hosted_engine_result.py, transport/hosted_turn_context.py |
+| gate5b4c3_live_runner_boundary.py | — | adk_instruction, env, flags, gate1a_egress_correlation, gate5b4c3_image_parts, gate5b4c3_runner_input_adapter, gate5b4c3_shadow_generation_contract, health, hosted_session_substrate, integration, ledger_store, model_factory, output_continuation, public_events, session_ownership, session_service_registry, transcript | shadow/gate5b4c3_shadow_parity.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/gate5b_serving.py, transport/hosted_engine_result.py, transport/hosted_turn_context.py |
 | gate5b4c3_runner_input_adapter.py | — | env, flags, gate5b4c3_shadow_generation_contract, message_builder, token_estimation | shadow/gate5b4c3_live_runner_boundary.py, transport/chat_routes.py, transport/gate5b_serving.py |
 | gate5b4c3_shadow_comparison.py | — | gate5b4c3_shadow_generation_contract, gate5b4c3_shadow_generation_report | — |
 | gate5b4c3_shadow_counter_store.py | — | — | config/env.py, shadow/gate5b4c3_shadow_generation_report.py, transport/chat.py, transport/chat_authority.py, transport/chat_routes.py, transport/shadow_generations.py |
