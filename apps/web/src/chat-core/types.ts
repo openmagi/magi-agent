@@ -96,6 +96,12 @@ export interface ChatMessage {
   /** If present, this message was authored as a reply to another. */
   replyTo?: ReplyTo;
   /**
+   * Server-assigned sequence number from the durable channel message log
+   * (local-serve only). When present on two messages, seq ordering is
+   * authoritative; absent on hosted/legacy messages where timestamp suffices.
+   */
+  seq?: number;
+  /**
    * Set on user messages that landed mid-turn via POST /v1/chat/:botId/inject
    * (#86). Rendered with a small indicator so the user can see that this
    * message was absorbed into the already-running turn rather than kicking

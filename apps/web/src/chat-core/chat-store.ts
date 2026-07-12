@@ -587,7 +587,7 @@ async function incrementResetCounter(
   } catch { /* ignore */ }
 }
 
-/** Persist messages to localStorage (debounced via microtask) */
+/** Persist messages to localStorage (debounced via microtask, per-channel merge-write) */
 let _persistQueued = false;
 function persistMessages(botId: string | null, messages: Record<string, ChatMessage[]>): void {
   if (!botId || _persistQueued) return;
@@ -595,8 +595,17 @@ function persistMessages(botId: string | null, messages: Record<string, ChatMess
   queueMicrotask(() => {
     _persistQueued = false;
     try {
-      localStorage.setItem(MESSAGES_CACHE_KEY(botId), JSON.stringify(messages));
-    } catch { /* quota exceeded — ignore */ }
+      const key = MESSAGES_CACHE_KEY(botId);
+      // Per-channel merge-write: read the existing map and overwrite ONLY the
+      // channels present in this tab's `messages`, keeping all other channels
+      // intact. Two tabs on different channels no longer clobber each other.
+      let existing: Record<string, ChatMessage[]> = {};
+      try {
+        const raw = localStorage.getItem(key);
+        if (raw) existing = JSON.parse(raw) as Record<string, ChatMessage[]>;
+      } catch { /* corrupt cache -- start fresh */ }
+      localStorage.setItem(key, JSON.stringify({ ...existing, ...messages }));
+    } catch { /* quota exceeded -- ignore */ }
   });
 }
 
