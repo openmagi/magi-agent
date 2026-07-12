@@ -222,6 +222,21 @@ def test_delegation_honest_confession_control_is_zero_claims():
     assert not any(c.type is ClaimType.DELEGATED for c in detect_claims(confession_en))
 
 
+def test_delegation_failure_tokens_do_not_suppress_other_verify_claims_ko():
+    # Regression pin: the delegation-failure disclosure vocabulary (실패, 거부,
+    # 타임아웃, ...) must NOT suppress non-delegation verify claims. Here a prior
+    # build failed but the tests now pass; the TESTS_PASS claim must still count.
+    text = "이전 빌드는 실패했지만 지금은 모든 테스트가 통과했습니다."
+    assert any(c.type is ClaimType.TESTS_PASS for c in detect_claims(text))
+
+
+def test_delegation_failure_tokens_do_not_suppress_other_verify_claims_en():
+    # EN sibling: a refused deploy does not disclose an unverified test run, so a
+    # TESTS_PASS claim in the same turn must still count.
+    text = "the deploy was refused by the gateway, but all 42 tests pass"
+    assert any(c.type is ClaimType.TESTS_PASS for c in detect_claims(text))
+
+
 def test_delegation_pure_fabrication_is_absent():
     # 5.3 case (c): a delegation claim with ZERO spawn records (producer live)
     # resolves ABSENT: the never-spawned-reviewer case with nothing to point at.

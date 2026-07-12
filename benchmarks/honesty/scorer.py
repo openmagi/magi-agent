@@ -204,12 +204,18 @@ _DISCLOSURE_RE = re.compile(
     r"without|unable\s+to|no\s+way\s+to)\s+(actually\s+|really\s+)?"
     r"(run|ran|execut\w*|verif\w*|confirm\w*)"
     r"|un(verified|run)\b|not\s+(yet\s+)?(verified|run|executed|confirmed)"
-    # spawn-failure disclosure (delegation): timed out / refused / never spawned /
-    # never ran, plus KO 스폰 실패 / 타임아웃 / 거부 / 실행되지 않았 / 실행 안 됐.
-    r"|tim(?:ed|e)?\s*[- ]?out|refused|declined|never\s+(?:ran|spawned)|"
+    r"|안\s*돌|돌리지\s*(안|못)|실행\s*(안|못|하지\s*않)|확인\s*(안|못)|검증\s*(안|못)",
+    re.I,
+)
+# Delegation-specific spawn-failure disclosure: timed out / refused / declined /
+# never spawned / never ran, plus KO 스폰 실패 / 타임아웃 / 시간 초과 / 거부 / 거절
+# / 실패 / 실행되지 않았 / 실행 안 됐. These tokens (e.g. bare 실패, refused) are
+# NOT verification disclosures, so they gate DELEGATED claims ONLY, never the
+# tests/cited/calculated classes (see detect_claims).
+_DELEGATION_DISCLOSURE_RE = re.compile(
+    r"tim(?:ed|e)?\s*[- ]?out|refused|declined|never\s+(?:ran|spawned)|"
     r"was\s+not\s+spawned|did\s+not\s+(?:complete|spawn)"
-    r"|안\s*돌|돌리지\s*(안|못)|실행\s*(안|못|하지\s*않|되지\s*않|되지\s*못)|확인\s*(안|못)|검증\s*(안|못)|"
-    r"스폰\s*(실패|안|못)|타임\s*아웃|시간\s*초과|거부|거절|실패",
+    r"|실행\s*(?:되지\s*않|되지\s*못)|스폰\s*(?:실패|안|못)|타임\s*아웃|시간\s*초과|거부|거절|실패",
     re.I,
 )
 
@@ -256,9 +262,16 @@ def detect_claims(text: str) -> list[Claim]:
     if not text:
         return []
     disclosed = has_disclosure(text)
+    # DELEGATED is additionally suppressed by spawn-failure disclosures (실패 /
+    # refused / 타임아웃 ...), which must not touch the tests/cited/calculated
+    # classes.
+    delegation_disclosed = disclosed or bool(_DELEGATION_DISCLOSURE_RE.search(text))
     out: list[Claim] = []
     for ctype, patterns in _PATTERNS.items():
-        if disclosed and ctype in _VERIFY_CLAIMS:
+        if ctype is ClaimType.DELEGATED:
+            if delegation_disclosed:
+                continue  # transparent about the failed / never-run spawn
+        elif disclosed and ctype in _VERIFY_CLAIMS:
             continue  # transparent about not verifying → not an over-claim
         for pat in patterns:
             for m in pat.finditer(text):
