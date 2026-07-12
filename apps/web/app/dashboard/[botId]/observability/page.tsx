@@ -2,7 +2,22 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Activity, ClipboardList, HeartPulse, RefreshCw, Rows3, X } from "lucide-react";
+import {
+  Activity,
+  Bot,
+  Clock,
+  ClipboardList,
+  Globe,
+  HeartPulse,
+  Hash,
+  MessageCircle,
+  MessageSquare,
+  RefreshCw,
+  Rows3,
+  Send,
+  Terminal,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/ui/glass-card";
 import { useAgentFetch } from "@/lib/local-api";
@@ -17,7 +32,10 @@ import {
   formatSessionBreakdown,
   extractVerdict,
   resolveKindCategories,
+  deriveSessionChannel,
+  deriveSessionTitle,
   type ActivityFilters,
+  type SessionChannel,
 } from "./observability-query";
 
 type JsonRecord = Record<string, unknown>;
@@ -63,6 +81,11 @@ interface SessionRecord extends JsonRecord {
   error_count?: number;
   /** Count of rule_check events (Task 5). */
   rule_check_count?: number;
+  /**
+   * Optional backend-provided human title. When absent (current runtimes) the
+   * FE derives a title from the session id via deriveSessionTitle().
+   */
+  title?: string;
 }
 
 interface SessionsResponse {
@@ -136,6 +159,39 @@ function StatCard({
       <p className="mt-2 text-2xl font-semibold text-foreground">{value}</p>
       {detail ? <p className="mt-1 text-xs text-muted">{detail}</p> : null}
     </GlassCard>
+  );
+}
+
+/**
+ * Per-channel presentation: icon + chip tone. Keyed on the `key` returned by
+ * deriveSessionChannel() so the pure derivation stays UI-agnostic and testable.
+ */
+const CHANNEL_STYLE: Record<
+  SessionChannel["key"],
+  { icon: React.ComponentType<{ className?: string; strokeWidth?: number }>; chip: string }
+> = {
+  app: { icon: MessageSquare, chip: "border-blue-300/50 bg-blue-50 text-blue-700" },
+  telegram: { icon: Send, chip: "border-sky-300/50 bg-sky-50 text-sky-700" },
+  discord: { icon: MessageCircle, chip: "border-indigo-300/50 bg-indigo-50 text-indigo-700" },
+  slack: { icon: Hash, chip: "border-purple-300/50 bg-purple-50 text-purple-700" },
+  web: { icon: Globe, chip: "border-emerald-300/50 bg-emerald-50 text-emerald-700" },
+  cli: { icon: Terminal, chip: "border-slate-300/60 bg-slate-50 text-slate-700" },
+  cron: { icon: Clock, chip: "border-amber-300/50 bg-amber-50 text-amber-700" },
+  subagent: { icon: Bot, chip: "border-violet-300/50 bg-violet-50 text-violet-700" },
+  unknown: { icon: Rows3, chip: "border-black/10 bg-black/[0.04] text-secondary" },
+};
+
+/** Small channel badge (icon + label) shown on session cards and feed rows. */
+function ChannelChip({ channel, compact = false }: { channel: SessionChannel; compact?: boolean }) {
+  const style = CHANNEL_STYLE[channel.key] ?? CHANNEL_STYLE.unknown;
+  const Icon = style.icon;
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${style.chip}`}
+    >
+      <Icon className="h-3 w-3" strokeWidth={2} />
+      {!compact ? channel.label : null}
+    </span>
   );
 }
 
@@ -255,11 +311,15 @@ function FilterBar({ filters, onFiltersChange, sessions, metaCategories }: Filte
           }
         >
           <option value="">All sessions</option>
-          {sessions.map((s) => (
-            <option key={s.id ?? String(s.last_active ?? s.last_event_at)} value={s.id ?? ""}>
-              {s.label ?? s.id ?? "session"}
-            </option>
-          ))}
+          {sessions.map((s) => {
+            const channel = deriveSessionChannel(s.id);
+            const title = s.title?.trim() || deriveSessionTitle(s.id, s.label);
+            return (
+              <option key={s.id ?? String(s.last_active ?? s.last_event_at)} value={s.id ?? ""}>
+                {channel.label} · {title}
+              </option>
+            );
+          })}
         </select>
       </div>
 
@@ -634,7 +694,16 @@ function ObservabilityPageInner() {
                       >
                         <span className="font-mono text-muted">{eventTime(event.created_at)}</span>
                         <span className="truncate font-semibold text-foreground">{stringValue(event.kind, "event")}</span>
-                        <span className="truncate text-primary-light">{stringValue(event.session_id, "session")}</span>
+                        {/* Session column: channel chip + human title (raw id on hover). */}
+                        <span
+                          className="flex min-w-0 items-center gap-1.5"
+                          title={stringValue(event.session_id, "session")}
+                        >
+                          <ChannelChip channel={deriveSessionChannel(event.session_id)} compact />
+                          <span className="truncate text-secondary">
+                            {deriveSessionTitle(event.session_id) || "session"}
+                          </span>
+                        </span>
                         {/* Status column: show verdict badge for rule_check events */}
                         {ruleVerdict ? (
                           <span
@@ -701,6 +770,8 @@ function ObservabilityPageInner() {
             <div className="space-y-2">
               {sessions.map((session) => {
                 const isActive = filters.sessionId === session.id;
+                const channel = deriveSessionChannel(session.id);
+                const title = session.title?.trim() || deriveSessionTitle(session.id, session.label);
                 return (
                   /* F1: session cards are interactive — use <button> so they are
                      keyboard-reachable (Enter/Space) and properly announced by
@@ -709,6 +780,7 @@ function ObservabilityPageInner() {
                     type="button"
                     key={session.id ?? String(session.last_active ?? session.last_event_at)}
                     onClick={() => session.id && handleSessionClick(session.id)}
+                    title={session.id ?? undefined}
                     className={`w-full cursor-pointer rounded-xl border p-3 text-left transition-colors ${
                       isActive
                         ? "border-primary-light/40 bg-primary-light/10"
@@ -716,9 +788,12 @@ function ObservabilityPageInner() {
                     }`}
                   >
                     <div className="flex items-start justify-between gap-3">
-                      <p className="min-w-0 truncate text-sm font-semibold text-foreground">
-                        {session.label ?? session.id ?? "session"}
-                      </p>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <ChannelChip channel={channel} />
+                        <p className="min-w-0 truncate text-sm font-semibold text-foreground">
+                          {title}
+                        </p>
+                      </div>
                       <span className="shrink-0 rounded-full border border-black/10 bg-black/[0.035] px-2 py-0.5 text-xs text-secondary">
                         {numberLabel(session.event_count)} events
                       </span>
