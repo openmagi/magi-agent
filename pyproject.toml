@@ -13,6 +13,21 @@ dependencies = [
   "google-adk==1.33.0",
   "httpx==0.28.1",
   "litellm>=1.74.0",
+  # litellm's non-proxy completion(tools=...) path lazily imports its MCP tool
+  # handler (litellm/main.py, "if not skip_mcp_handler and tools"), whose import
+  # chain reaches litellm.proxy and runs a bare "import orjson". litellm declares
+  # orjson only under its own "proxy" extra, so a plain "litellm" install (the
+  # Homebrew "pip install magi-agent" and the runtime Docker image, neither of
+  # which takes that extra) omits it, and every LiteLlm-routed provider (openai,
+  # gemini, fireworks/kimi) that passes tools then dies with
+  # "ModuleNotFoundError: No module named 'orjson'", surfaced only as
+  # child_llm_collector_status_failed. (The anthropic path uses the native
+  # cache-aware Claude model instead of litellm, so it never hit this and masked
+  # the gap.) orjson is therefore a de-facto core runtime dependency here; pin it
+  # to litellm's own supported range. Prebuilt wheels exist for every target
+  # platform (macOS arm64 bottle, linux runtime image), so this adds no
+  # build-time toolchain requirement.
+  "orjson>=3.11.6,<4.0",
   "lxml>=6.0",
   "markdownify==1.2.2",
   # Local credential-injecting forward proxy (Agent Vault). Bundled into core so
