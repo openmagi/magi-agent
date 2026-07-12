@@ -13,6 +13,8 @@ import {
   updateChannel,
   sendMessage,
   setChatTokenGetter,
+  fetchLocalChannelMessages,
+  _localChannelCursors,
 } from "./chat-client";
 import type {
   BrowserFrame,
@@ -2492,5 +2494,256 @@ describe("control request helpers", () => {
       selectedId: "regenerate",
       sessionKey: "agent:main:app:general",
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 17: fetchLocalChannelMessages — cursor-aware full/incremental mode
+// ---------------------------------------------------------------------------
+describe("fetchLocalChannelMessages — cursor-aware polling (Test 17)", () => {
+  const BOT_ID = "local-bot-test17";
+  const CHANNEL = "general";
+
+  beforeEach(() => {
+    setChatTokenGetter(async () => "test-token");
+    _localChannelCursors.clear();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    _localChannelCursors.clear();
+  });
+
+  it("first call uses ?full=1 and records cursor; second call uses ?after=<seq>", async () => {
+    const sessionKey = buildSessionKey(BOT_ID, CHANNEL);
+
+    // First call — server returns two full-mode rows.
+    const firstFetch = mockFetch(200, {
+      messages: [
+        { seq: 1, messageId: "msg-1", role: "user", content: "hello", createdAt: 1000, turnId: "t1", incomplete: false },
+        { seq: 2, messageId: "msg-2", role: "assistant", content: "hi there", createdAt: 2000, turnId: "t1", incomplete: false },
+      ],
+    });
+    const firstResult = await fetchLocalChannelMessages(BOT_ID, CHANNEL);
+
+    // Verify full=1 was sent on first call.
+    const [url1] = firstFetch.mock.calls[0] as [string];
+    expect(url1).toContain("full=1");
+    expect(url1).toContain(`sessionId=${encodeURIComponent(sessionKey)}`);
+    expect(url1).not.toContain("after=");
+
+    // Verify rows mapped correctly.
+    expect(firstResult).toHaveLength(2);
+    expect(firstResult[0].id).toBe("msg-1");
+    expect(firstResult[0].role).toBe("user");
+    expect(firstResult[1].id).toBe("msg-2");
+    expect(firstResult[1].role).toBe("assistant");
+
+    // Cursor should be set to highest seq (2).
+    expect(_localChannelCursors.get(sessionKey)).toBe(2);
+
+    // Second call — server returns one new row.
+    const secondFetch = mockFetch(200, {
+      messages: [
+        { seq: 3, messageId: "msg-3", role: "assistant", content: "new row", createdAt: 3000, turnId: "t2", incomplete: false },
+      ],
+    });
+    const secondResult = await fetchLocalChannelMessages(BOT_ID, CHANNEL);
+
+    // Verify after=2 was sent.
+    const [url2] = secondFetch.mock.calls[0] as [string];
+    expect(url2).toContain("after=2");
+    expect(url2).not.toContain("full=1");
+
+    // Only the new row.
+    expect(secondResult).toHaveLength(1);
+    expect(secondResult[0].id).toBe("msg-3");
+
+    // Cursor advanced to 3.
+    expect(_localChannelCursors.get(sessionKey)).toBe(3);
+  });
+
+  it("empty incremental response leaves cursor intact", async () => {
+    const sessionKey = buildSessionKey(BOT_ID, CHANNEL);
+    // Seed the cursor as if we already did a full call.
+    _localChannelCursors.set(sessionKey, 5);
+
+    mockFetch(200, { messages: [] });
+    const result = await fetchLocalChannelMessages(BOT_ID, CHANNEL);
+
+    expect(result).toHaveLength(0);
+    // Cursor unchanged — no rows were returned.
+    expect(_localChannelCursors.get(sessionKey)).toBe(5);
+  });
+
+  it("legacy payload (rows without seq) leaves cursor unset and maps as before", async () => {
+    const sessionKey = buildSessionKey(BOT_ID, CHANNEL);
+
+    mockFetch(200, {
+      messages: [
+        { role: "assistant", content: "legacy reply", createdAt: 9000, turnId: "t-legacy" },
+      ],
+    });
+    const result = await fetchLocalChannelMessages(BOT_ID, CHANNEL);
+
+    // No cursor set.
+    expect(_localChannelCursors.has(sessionKey)).toBe(false);
+
+    // Mapped via legacy path — id uses turnId prefix.
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe("local-turn-t-legacy");
+    expect(result[0].role).toBe("assistant");
+    // No seq or incomplete fields.
+    expect(result[0].seq).toBeUndefined();
+
+    // Subsequent call still uses legacy mode (no cursor → full=1 sent, but
+    // server returns legacy rows again → cursor still not set).
+    const fetch2 = mockFetch(200, {
+      messages: [
+        { role: "assistant", content: "still legacy", createdAt: 9100, turnId: "t-legacy2" },
+      ],
+    });
+    const result2 = await fetchLocalChannelMessages(BOT_ID, CHANNEL);
+
+    const [url2] = fetch2.mock.calls[0] as [string];
+    // With no cursor, we issue full=1 again.
+    expect(url2).toContain("full=1");
+    expect(_localChannelCursors.has(sessionKey)).toBe(false);
+    expect(result2[0].role).toBe("assistant");
+  });
+
+  it("returns [] on non-ok response without throwing", async () => {
+    mockFetch(500, { error: "internal" });
+    const result = await fetchLocalChannelMessages(BOT_ID, CHANNEL);
+    expect(result).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 19: messageId-as-id mapping for full-mode rows
+// ---------------------------------------------------------------------------
+describe("fetchLocalChannelMessages — messageId-as-id mapping (Test 19)", () => {
+  const BOT_ID = "local-bot-test19";
+  const CHANNEL = "general";
+
+  beforeEach(() => {
+    setChatTokenGetter(async () => "test-token");
+    _localChannelCursors.clear();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    _localChannelCursors.clear();
+  });
+
+  it("full-mode row whose messageId equals an optimistic bubble id maps to ServerMessage with id === messageId", async () => {
+    // Simulate the scenario: optimistic bubble was given id "user-1720000000000"
+    // and the server echoes that back as messageId.
+    const optimisticId = "user-1720000000000";
+
+    mockFetch(200, {
+      messages: [
+        {
+          seq: 1,
+          messageId: optimisticId,
+          role: "user",
+          content: "hello from user",
+          createdAt: 1720000000000,
+          turnId: "turn-abc",
+          incomplete: false,
+        },
+        {
+          seq: 2,
+          messageId: "msg-assistant-1",
+          role: "assistant",
+          content: "hello back",
+          createdAt: 1720000001000,
+          turnId: "turn-abc",
+          incomplete: false,
+        },
+      ],
+    });
+
+    const result = await fetchLocalChannelMessages(BOT_ID, CHANNEL);
+
+    // The user row must carry id === the original optimistic bubble id.
+    expect(result[0].id).toBe(optimisticId);
+    expect(result[0].role).toBe("user");
+
+    // Assistant row uses its own messageId.
+    expect(result[1].id).toBe("msg-assistant-1");
+  });
+
+  it("full-mode row without messageId falls back to local-turn-<turnId>", async () => {
+    mockFetch(200, {
+      messages: [
+        {
+          seq: 1,
+          // no messageId
+          role: "assistant",
+          content: "fallback test",
+          createdAt: 2000,
+          turnId: "turn-xyz",
+          incomplete: false,
+        },
+      ],
+    });
+
+    const result = await fetchLocalChannelMessages(BOT_ID, CHANNEL);
+    expect(result[0].id).toBe("local-turn-turn-xyz");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Send body: turnId + userMessageId included for local bots
+// ---------------------------------------------------------------------------
+describe("sendMessage — local bot send body includes turnId and userMessageId", () => {
+  beforeEach(() => {
+    setChatTokenGetter(async () => "test-token");
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("includes turnId and userMessageId in POST body for local bot", async () => {
+    // Use SSE mock so sendMessage can complete without error.
+    const ssePayload = [
+      "event: agent",
+      'data: {"type":"turn_start","turnId":"server-turn","channelName":"general"}',
+      "",
+      "event: agent",
+      'data: {"type":"text_delta","text":"hi"}',
+      "",
+      "event: agent",
+      'data: {"type":"turn_end","finalText":"hi","terminal":"done"}',
+      "",
+      "data: [DONE]",
+      "",
+    ].join("\n");
+
+    const fetchMock = mockSseFetch(ssePayload);
+
+    let doneCalled = false;
+    await sendMessage(
+      "local",
+      "general",
+      [{ role: "user", content: "hello" }],
+      {
+        model: "auto",
+        turnId: "client-turn-id-123",
+        userMessageId: "user-1720000000001",
+        onDelta: () => { /* noop */ },
+        onDone: () => { doneCalled = true; },
+        onError: (err) => { throw err; },
+      },
+    );
+
+    expect(doneCalled).toBe(true);
+    const [, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(opts.body as string) as Record<string, unknown>;
+    expect(body.turnId).toBe("client-turn-id-123");
+    expect(body.userMessageId).toBe("user-1720000000001");
+    expect(body.sessionId).toBeDefined();
   });
 });

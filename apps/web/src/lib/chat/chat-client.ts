@@ -799,47 +799,132 @@ export async function fetchChannelMessages(
 }
 
 /**
+ * Module-scope cursor map for cursor-aware local history polling.
+ * Key: full session key (e.g. `agent:main:app:general` or
+ *      `agent:main:app:general:1` after a reset).  Value: the highest `seq`
+ * seen from the server on a previous poll.
+ *
+ * A reset increments the reset counter which changes the session key, so the
+ * old cursor entry is simply ignored — no manual cleanup needed.
+ */
+export const _localChannelCursors = new Map<string, number>();
+
+/**
  * Local-serve variant of {@link fetchChannelMessages}. Reads the completed-turn
  * record the runtime holds in its process-local store via
  * `GET /v1/chat/channel-messages?sessionId=`, mapping the serve payload
  * (`{role, content, createdAt, turnId}`) onto the {@link ServerMessage} shape
  * the UI consumes. Returns `[]` for every "nothing to rehydrate" path.
+ *
+ * When the server returns rows that carry a `seq` field (new backend with
+ * channel-history support), the function operates in cursor-aware mode:
+ * - First call for a session key: fetches `?full=1&sessionId=<key>` and
+ *   records the highest `seq` received.
+ * - Subsequent calls: fetches `?after=<lastSeq>&sessionId=<key>` and appends
+ *   only newer rows, updating the cursor if any rows were returned.
+ *
+ * Legacy payloads (rows without `seq`) are handled exactly as before — no
+ * cursor is set and the rows are mapped in the old way.
  */
-async function fetchLocalChannelMessages(
+export async function fetchLocalChannelMessages(
   botId: string,
   channelName: string,
 ): Promise<ServerMessage[]> {
   try {
     const sessionId = buildSessionKey(botId, channelName);
+    const lastSeq = _localChannelCursors.get(sessionId);
+    const isFirstCall = lastSeq === undefined;
+    const params = new URLSearchParams({ sessionId });
+    if (isFirstCall) {
+      params.set("full", "1");
+    } else {
+      params.set("after", String(lastSeq));
+    }
     const res = await localRuntimeFetch(
-      `/v1/chat/channel-messages?sessionId=${encodeURIComponent(sessionId)}`,
+      `/v1/chat/channel-messages?${params.toString()}`,
       { headers: await localAuthHeaders() },
     );
     if (!res.ok) return [];
+
+    type LegacyRow = {
+      role?: string;
+      content?: string;
+      createdAt?: number;
+      turnId?: string | null;
+    };
+    type FullRow = LegacyRow & {
+      seq: number;
+      messageId?: string;
+      incomplete?: boolean;
+      terminal?: string | null;
+    };
+
     const data = (await res.json().catch(() => null)) as {
-      messages?: Array<{
-        role?: string;
-        content?: string;
-        createdAt?: number;
-        turnId?: string | null;
-      }>;
+      messages?: Array<LegacyRow | FullRow>;
     } | null;
     const messages = Array.isArray(data?.messages) ? data.messages : [];
-    return messages
+
+    // Detect whether the server returned cursor-aware (full-mode) rows.
+    // A single row with a numeric `seq` field is sufficient evidence.
+    const isFullMode = messages.some(
+      (m): m is FullRow => "seq" in m && typeof (m as FullRow).seq === "number",
+    );
+
+    if (!isFullMode) {
+      // Legacy path — behave exactly as before (no cursor update).
+      return messages
+        .filter((m) => typeof m?.content === "string" && m.content.length > 0)
+        .map((m, index) => ({
+          id:
+            typeof m.turnId === "string" && m.turnId
+              ? `local-turn-${m.turnId}`
+              : `local-turn-${sessionId}-${index}`,
+          role: (m.role === "system" ? "system" : "assistant") as "assistant" | "system",
+          content: m.content as string,
+          created_at: new Date(
+            typeof m.createdAt === "number" && Number.isFinite(m.createdAt)
+              ? m.createdAt
+              : Date.now(),
+          ).toISOString(),
+        }));
+    }
+
+    // Full-mode path — map rows and update cursor.
+    const fullRows = messages as FullRow[];
+    const result: ServerMessage[] = fullRows
       .filter((m) => typeof m?.content === "string" && m.content.length > 0)
-      .map((m, index) => ({
+      .map((m) => ({
         id:
-          typeof m.turnId === "string" && m.turnId
-            ? `local-turn-${m.turnId}`
-            : `local-turn-${sessionId}-${index}`,
-        role: m.role === "system" ? "system" : "assistant",
+          typeof m.messageId === "string" && m.messageId
+            ? m.messageId
+            : typeof m.turnId === "string" && m.turnId
+              ? `local-turn-${m.turnId}`
+              : `local-turn-${sessionId}-${m.seq}`,
+        role: (m.role === "user"
+          ? "user"
+          : m.role === "system"
+            ? "system"
+            : "assistant") as "user" | "assistant" | "system",
         content: m.content as string,
         created_at: new Date(
           typeof m.createdAt === "number" && Number.isFinite(m.createdAt)
             ? m.createdAt
             : Date.now(),
         ).toISOString(),
+        seq: m.seq,
+        ...(m.incomplete ? { incomplete: true } : {}),
       }));
+
+    // Update cursor to the highest seq we received (only when rows arrived).
+    if (fullRows.length > 0) {
+      const maxSeq = fullRows.reduce(
+        (acc, m) => (m.seq > acc ? m.seq : acc),
+        fullRows[0].seq,
+      );
+      _localChannelCursors.set(sessionId, maxSeq);
+    }
+
+    return result;
   } catch {
     return [];
   }
@@ -1252,6 +1337,16 @@ export interface SendMessageOptions {
   agentMode?: string;
   /** If set, the newest user message is a reply to this target. */
   replyTo?: ReplyTo;
+  /** Stable id for the optimistic user bubble pushed into the chat store for
+   *  this send.  The local-serve backend writes a matching user row in
+   *  `channel_messages` so that when the other window polls via
+   *  `fetchLocalChannelMessages` the full-mode row with this `messageId`
+   *  collapses against the already-visible bubble instead of duplicating it.
+   *  Only sent on local-bot requests. */
+  userMessageId?: string;
+  /** Unique id for this turn — used by the backend for deduplication.  Only
+   *  sent on local-bot requests. */
+  turnId?: string;
   onDelta: (text: string) => void;
   onThinkingDelta?: (text: string) => void;
   onResponseClear?: () => void;
@@ -1539,6 +1634,8 @@ export async function sendMessage(
     onDone,
     onError,
     signal,
+    turnId,
+    userMessageId,
   } = options;
 
   // Tool activity tracker — preserved across SSE chunks via closure.
@@ -2586,7 +2683,12 @@ export async function sendMessage(
       },
       body: JSON.stringify(
         isLocalBot(botId)
-          ? { ...requestBody, sessionId: sessionKey }
+          ? {
+              ...requestBody,
+              sessionId: sessionKey,
+              ...(turnId ? { turnId } : {}),
+              ...(userMessageId ? { userMessageId } : {}),
+            }
           : requestBody,
       ),
       signal: timeoutController.signal,
@@ -2806,7 +2908,7 @@ async function sendMessageNonStreaming(
   messages: Pick<ChatMessage, "role" | "content">[],
   options: SendMessageOptions,
 ): Promise<void> {
-  const { model = "auto", goalMode, reasoningEffort, agentMode, replyTo, onDelta, onDone, onError, signal } = options;
+  const { model = "auto", goalMode, reasoningEffort, agentMode, replyTo, turnId: nsTurnId, userMessageId: nsUserMessageId, onDelta, onDone, onError, signal } = options;
   const visibleText = createStreamingTextSmoother(onDelta);
 
   try {
@@ -2828,6 +2930,8 @@ async function sendMessageNonStreaming(
         messages: messages.map((m) => ({ role: m.role, content: m.content })),
         stream: !isLocalBot(botId) ? false : true,
         ...(isLocalBot(botId) ? { sessionId: sessionKey } : {}),
+        ...(isLocalBot(botId) && nsTurnId ? { turnId: nsTurnId } : {}),
+        ...(isLocalBot(botId) && nsUserMessageId ? { userMessageId: nsUserMessageId } : {}),
         ...(goalMode ? { goalMode: true } : {}),
         ...(reasoningEffort ? { reasoningEffort } : {}),
         ...(agentMode ? { agentMode } : {}),

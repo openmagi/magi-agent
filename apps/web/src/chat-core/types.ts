@@ -645,9 +645,11 @@ export interface ControlRequestResponse {
 
 export interface ServerMessage {
   id: string;
-  role: "assistant" | "system";
+  role: "user" | "assistant" | "system";
   content: string;
   created_at: string;
+  seq?: number;
+  incomplete?: boolean;
   research_evidence?: ResearchEvidenceSnapshot | null;
   researchEvidence?: ResearchEvidenceSnapshot | null;
   usage?: ResponseUsage | null;

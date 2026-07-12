@@ -52,6 +52,9 @@ export default {
       // source-citation gate-mode selector on the floored policy card. Standalone
       // react-dom/server snapshot suite (green under node).
       "src/components/dashboard/customize/policy-card-list.gate-mode.test.tsx",
+      // U4: local-serve channel-history client — cursor-aware fetch, messageId
+      // mapping, and send-body turnId/userMessageId threading.
+      "src/lib/chat/chat-client.test.ts",
     ],
   },
 };

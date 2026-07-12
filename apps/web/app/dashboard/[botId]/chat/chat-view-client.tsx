@@ -1023,8 +1023,19 @@ export function ChatViewClient({
         store.finalizeStream(channel, undefined, { botId });
       }
 
+      // Generate the user-message id once so the optimistic bubble and the
+      // POST body carry the same value.  The local-serve backend writes a user
+      // row with this `messageId`; when the other window polls history it
+      // matches the id and collapses instead of duplicating.
+      const userMessageId = `user-${Date.now()}`;
+      // Per-turn dedup id for the backend.
+      const turnId =
+        typeof crypto !== "undefined" &&
+        typeof (crypto as { randomUUID?: () => string }).randomUUID === "function"
+          ? (crypto as { randomUUID: () => string }).randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const userMsg: ChatMessage = {
-        id: `user-${Date.now()}`,
+        id: userMessageId,
         role: "user",
         content: messageText,
         timestamp: Date.now(),
@@ -1087,6 +1098,8 @@ export function ChatViewClient({
             ...(sendOptions?.reasoningEffort ? { reasoningEffort: sendOptions.reasoningEffort } : {}),
             ...(sendOptions?.agentMode ? { agentMode: sendOptions.agentMode } : {}),
             replyTo: activeReply ?? undefined,
+            turnId,
+            userMessageId,
             onDelta: (delta) => {
               if (!isCurrentBot()) return;
               const s = useChatStore.getState().channelStates[channel];
