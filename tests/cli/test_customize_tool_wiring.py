@@ -136,8 +136,19 @@ def cfg_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     return cfile
 
 
-def test_attach_returns_none_when_all_customize_flags_off() -> None:
-    """No customize master flag set -> attach is a no-op, callbacks untouched."""
+def test_attach_returns_none_when_all_customize_flags_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No customize master flag set -> attach is a no-op, callbacks untouched.
+
+    Explicitly zeroes every per-slot flag so the test is hermetic under the
+    full-profile overlay (which now seeds MAGI_CUSTOMIZE_SHELL_COMMAND_ENABLED=1
+    and peers ON by default).
+    """
+    monkeypatch.setenv("MAGI_CUSTOMIZE_PROMPT_INJECTION_ENABLED", "0")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_SHELL_COMMAND_ENABLED", "0")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_SHELL_CHECK_ENABLED", "0")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_OUTPUT_REWRITE_ENABLED", "0")
     assert customize_tool_boundary_enabled() is False
     state = _attach()
     assert state.attachment is None
