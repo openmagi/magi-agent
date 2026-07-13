@@ -23,12 +23,15 @@ from magi_agent.evidence.citation_gate import (
 from magi_agent.evidence.verify_audit import (
     VerifyAuditResult,  # noqa: F401 (schema import, validates shape)
     VerifyFinding,
+    _record_status,  # noqa: PLC2701 (blocked-status predicate pin, design 2.2)
+    _variant_regex_for_slug,  # noqa: PLC2701 (slug-anchor test, design 2.4.1)
     activity_grounding_findings,
     audit_candidate,  # noqa: F401 (imported; end-to-end tested in PR-V3)
     build_nudge_message,
     canonical_claim_value,
     claim_citation_findings,
     evidence_consistency_findings,
+    execution_claims_findings,
     filter_skeptic_findings,
     fingerprint_finding,
     ignore_rate_summary,
@@ -90,6 +93,53 @@ def _edit_match(*, path: str) -> Any:
 
 def _calculation(*, result: Any) -> Any:
     return _rec("Calculation", status="ok", fields={"result": result})
+
+
+def _subagent_spawn(
+    *,
+    status: str = "error",
+    reason: str | None = "child_turn_timeout",
+    model: str | None = "opus-4-8",
+    provider: str | None = "anthropic",
+    persona: str | None = None,
+    ref: str = "sp_001",
+    error_code: str | None = None,
+) -> Any:
+    """Duck-typed SubagentSpawn evidence record (verified fields shape).
+
+    Mirrors first_party_activity.to_evidence_record: type
+    custom:FirstPartySubagentSpawn, camelCase fields with top-level status/
+    reason/errorCode and a nested detail{spawnStatus, persona, model, provider}.
+    """
+    detail: dict[str, Any] = {
+        "spawnStatus": status,
+        "persona": persona or "",
+        "promptDigest": "",
+        "requestedDepth": 0,
+        "liveChildRunnerAttached": False,
+    }
+    if provider is not None:
+        detail["provider"] = provider
+    if model is not None:
+        detail["model"] = model
+    # EvidenceRecord.status maps ok->ok, error->failed, else unknown.
+    ev_status = {"ok": "ok", "error": "failed"}.get(status, "unknown")
+    return _rec(
+        "custom:FirstPartySubagentSpawn",
+        status=ev_status,
+        fields={
+            "status": status,
+            "reason": reason,
+            "errorCode": error_code,
+            "evidenceRef": ref,
+            "detail": detail,
+        },
+    )
+
+
+def _first_party_tool_call() -> Any:
+    """A first-party ToolCall record (producer-liveness witness)."""
+    return _rec("custom:FirstPartyToolCall", status="ok", fields={"status": "ok"})
 
 
 def _web_search() -> Any:
@@ -903,3 +953,369 @@ def test_build_nudge_message_format() -> None:
         assert empty == "", f"zero-findings must return '' not {empty!r}"
     except (ValueError, AssertionError):
         pass  # raising is also acceptable per spec
+
+
+# ---------------------------------------------------------------------------
+# execution_claims_findings (execution-claims member rule, design Section 2/5.1)
+# ---------------------------------------------------------------------------
+
+
+def _exec_classes(findings: Any) -> list[str]:
+    return [f.claim_class for f in findings]
+
+
+def test_fabricated_execution_generic_absence() -> None:
+    """Arm 1a: delegation claim + zero spawn records + a liveness record fires;
+    without liveness fires nothing (producer guard); collector off fires nothing."""
+    text = "I had two subagents debate this and reached a synthesis."
+
+    # Arm 1a fires with a first-party liveness record and zero spawn records.
+    findings = execution_claims_findings(
+        text, [_first_party_tool_call()], [], collector_present=True
+    )
+    assert _exec_classes(findings) == ["fabricated_execution"], (
+        "delegation claim + zero spawns + liveness record must fire arm 1a"
+    )
+
+    # No first-party record at all: producer-liveness guard keeps it silent.
+    findings_no_producer = execution_claims_findings(text, [], [], collector_present=True)
+    assert findings_no_producer == (), "no first-party producer record -> silent (2.7)"
+
+    # collector_present=False: entirely silent.
+    findings_no_collector = execution_claims_findings(
+        text, [_first_party_tool_call()], [], collector_present=False
+    )
+    assert findings_no_collector == (), "collector_present=False -> () (2.7)"
+
+
+def test_fabricated_execution_model_named() -> None:
+    """Arm 1b (incident leg 3): GPT-5.5 review claimed, only Opus spawns exist."""
+    corpus = [
+        _subagent_spawn(status="error", reason="child_turn_timeout", model="opus-4-8", ref="sp_1"),
+        _subagent_spawn(status="ok", reason=None, model="opus-4-8", ref="sp_2"),
+    ]
+    # EN text uses the "was reviewed by" lexicon form (2.5); bare "<Model>
+    # reviewed" is intentionally NOT in the lexicon (FP-driven, see case 5).
+    text_en = "The debate was reviewed by GPT-5.5, which signed off on the design."
+    findings_en = execution_claims_findings(text_en, corpus, [], collector_present=True)
+    assert _exec_classes(findings_en) == ["fabricated_execution"], (
+        "GPT-5.5 claim with only Opus records must fire arm 1b"
+    )
+
+    text_kr = "GPT-5.5의 리뷰를 받았습니다. 설계가 견고하다고 합니다."
+    findings_kr = execution_claims_findings(text_kr, corpus, [], collector_present=True)
+    assert _exec_classes(findings_kr) == ["fabricated_execution"], (
+        "KO GPT-5.5 delegation claim with only Opus records must fire arm 1b"
+    )
+
+    # Same text, but a gpt-family spawn record present: arm 1b silent.
+    corpus_with_gpt = corpus + [
+        _subagent_spawn(status="ok", reason=None, model="gpt-5.5", provider="openai", ref="sp_3")
+    ]
+    findings_present = execution_claims_findings(
+        text_kr, corpus_with_gpt, [], collector_present=True
+    )
+    assert findings_present == (), "gpt-family record present -> arm 1b silent"
+
+
+def test_failed_execution_presented_as_success() -> None:
+    """Sub-check 2 (incident leg 1, single-spawn variant)."""
+    rec = _subagent_spawn(
+        status="error", reason="child_turn_timeout", model="opus-4-8", ref="sp_001"
+    )
+    text = "Opus reviewed this and concluded the design is sound."
+    findings = execution_claims_findings(text, [rec], [], collector_present=True)
+    assert len(findings) == 1, "one failed-spawn success-presentation finding"
+    f = findings[0]
+    assert f.claim_class == "failed_execution_presented_as_success"
+    assert f.confidence == "high"
+    assert f.evidence_refs == ("sp_001",), "evidence ref points to the failed record"
+    assert "turn timeout" in (f.observed or ""), "human reason must render"
+    assert "child_turn_timeout" in (f.observed or ""), "raw token must render for audit"
+
+
+def test_failed_execution_retry_ok_suppression() -> None:
+    """Retry-ok suppression (2.4.3) and per-persona keying."""
+    # Same-model failed + ok: suppressed.
+    failed = _subagent_spawn(status="error", model="opus-4-8", ref="f1")
+    ok = _subagent_spawn(status="ok", reason=None, model="opus-4-8", ref="o1")
+    text = "Opus reviewed the draft and flagged two issues."
+    suppressed = execution_claims_findings(text, [failed, ok], [], collector_present=True)
+    assert suppressed == (), "same-model retry-ok suppresses sub-check 2 (2.4.3)"
+
+    # Distinct personas: failed optimistic NOT excused by ok skeptical.
+    failed_opt = _subagent_spawn(
+        status="error", model="opus-4-8", persona="optimistic", ref="fo"
+    )
+    ok_skep = _subagent_spawn(
+        status="ok", reason=None, model="opus-4-8", persona="skeptical", ref="os"
+    )
+    text2 = "The optimistic agent argued the plan was ready and concluded it is sound."
+    fires = execution_claims_findings(text2, [failed_opt, ok_skep], [], collector_present=True)
+    assert _exec_classes(fires) == ["failed_execution_presented_as_success"], (
+        "distinct-persona failure is not excused by a different-persona ok record"
+    )
+
+
+def test_honest_confession_control() -> None:
+    """FPR pin: the incident confession text produces zero execution_claims findings."""
+    confession = (
+        "첫 Opus 스폰은 타임아웃으로 실패했고, 두번째는 과제를 거부했으며, "
+        "GPT-5.5 리뷰는 실행되지 않았습니다."
+    )
+    corpus = [
+        _subagent_spawn(status="error", reason="child_turn_timeout", model="opus-4-8", ref="c1"),
+        _subagent_spawn(status="ok", reason=None, model="opus-4-8", ref="c2"),
+    ]
+    findings = execution_claims_findings(confession, corpus, [], collector_present=True)
+    assert findings == (), "honest confession over the incident corpus must be silent"
+
+
+def test_plan_and_quote_guards() -> None:
+    """Section 3 cases 1, 3, 8: zero findings."""
+    corpus = [_first_party_tool_call()]
+
+    # Case 1: "I could spawn ..." (plan guard + present tense).
+    case1 = "I could spawn Opus subagents to debate this, want me to?"
+    assert execution_claims_findings(case1, corpus, [], collector_present=True) == (), (
+        "case 1: could/plan guard keeps it silent"
+    )
+
+    # Case 3: user quote, not a first-person completed claim.
+    case3 = 'You asked me to "spawn a GPT-5.5 reviewer", so here is my plan:'
+    assert execution_claims_findings(case3, corpus, [], collector_present=True) == (), (
+        "case 3: quoted user request + plan -> silent"
+    )
+
+    # Case 8: "Plan: spawn ... then have GPT-5.5 review. Proceeding now."
+    case8 = (
+        "Plan: spawn optimistic and skeptical Opus agents, then have GPT-5.5 "
+        "review. Proceeding now."
+    )
+    assert execution_claims_findings(case8, corpus, [], collector_present=True) == (), (
+        "case 8: plan prose matches no past-tense lexicon; silent"
+    )
+
+
+def test_disclosure_global_suppression() -> None:
+    """2.4.4: disclosing one failure suppresses sub-check 2 for the whole pass;
+    sub-check 1 is unaffected."""
+    failed = _subagent_spawn(status="error", reason="child_turn_timeout", model="opus-4-8", ref="d1")
+    # Text presents opus as success but also discloses a failure elsewhere.
+    text = (
+        "The gpt reviewer failed to complete. Opus reviewed the design and "
+        "concluded it is sound."
+    )
+    findings = execution_claims_findings(text, [failed], [], collector_present=True)
+    classes = _exec_classes(findings)
+    assert "failed_execution_presented_as_success" not in classes, (
+        "global disclosure suppression silences sub-check 2 (2.4.4)"
+    )
+
+
+def test_execution_fingerprints_stable() -> None:
+    """Fingerprints per 2.4.5 / 2.5: rephrase-stable per class; distinct records distinct."""
+    # Arm 1b: two rephrasings of a GPT delegation claim -> same fingerprint.
+    corpus = [_subagent_spawn(status="ok", reason=None, model="opus-4-8", ref="o")]
+    t1 = "The plan was reviewed by GPT-5.5 and it signed off."
+    t2 = "My draft was reviewed by the GPT-5.5 reviewer, which approved it."
+    f1 = execution_claims_findings(t1, corpus, [], collector_present=True)
+    f2 = execution_claims_findings(t2, corpus, [], collector_present=True)
+    assert f1 and f2
+    assert f1[0].finding_id == f2[0].finding_id, "arm 1b fingerprint is rephrase-stable"
+
+    # Sub-check 2: distinct failed records -> distinct fingerprints.
+    rec_a = _subagent_spawn(status="error", model="opus-4-8", ref="ra")
+    rec_b = _subagent_spawn(status="error", model="gemini-3-pro", ref="rb")
+    text = "Opus reviewed this and concluded it is sound. Gemini analyzed it and agreed."
+    findings = execution_claims_findings(text, [rec_a, rec_b], [], collector_present=True)
+    ids = {f.finding_id for f in findings}
+    assert len(ids) == len(findings) >= 2, "distinct failed records produce distinct fingerprints"
+
+
+def test_resolve_findings_execution_claims() -> None:
+    """A surfaced sub-check-2 finding resolves when disclosure is added; ignored otherwise."""
+    rec = _subagent_spawn(
+        status="error", reason="child_turn_timeout", model="opus-4-8", ref="sp_001"
+    )
+    original = "Opus reviewed this and concluded the design is sound."
+    findings = execution_claims_findings(original, [rec], [], collector_present=True)
+    assert len(findings) == 1
+    history = findings
+
+    # Disclosure added: no longer detects -> resolved.
+    disclosed = (
+        "The Opus spawn timed out and did not complete, so I wrote the review myself."
+    )
+    resolutions = resolve_findings(
+        history,
+        disclosed,
+        turn_records=[rec],
+        session_records=[],
+        gate_result=None,
+        collector_present=True,
+        ship_marker_used=False,
+    )
+    res_by_id = {f.finding_id: r for f, r in resolutions}
+    assert res_by_id[history[0].finding_id] == "resolved", (
+        "adding disclosure resolves the sub-check-2 finding"
+    )
+
+    # Shipped unchanged, no marker -> ignored.
+    resolutions_ignored = resolve_findings(
+        history,
+        original,
+        turn_records=[rec],
+        session_records=[],
+        gate_result=None,
+        collector_present=True,
+        ship_marker_used=False,
+    )
+    ign_by_id = {f.finding_id: r for f, r in resolutions_ignored}
+    assert ign_by_id[history[0].finding_id] == "ignored", (
+        "shipping unchanged without a marker classifies as ignored"
+    )
+
+
+def test_nudge_renders_execution_reason() -> None:
+    """build_nudge_message output contains the human reason and raw token (Section 4)."""
+    rec = _subagent_spawn(
+        status="error", reason="child_turn_timeout", model="opus-4-8", provider="anthropic", ref="sp_001"
+    )
+    text = "Opus reviewed this and concluded the design is sound."
+    findings = execution_claims_findings(text, [rec], [], collector_present=True)
+    assert findings
+    msg = build_nudge_message(findings)
+    assert "turn timeout" in msg, "human reason must render in nudge"
+    assert "child_turn_timeout" in msg, "raw reason token must render in nudge"
+    assert "sp_001" in msg, "evidence ref must render in nudge"
+
+
+@pytest.mark.parametrize(
+    "text,desc",
+    [
+        (
+            "Opus 스폰이 타임아웃으로 실패했고, 재시도도 거부당했습니다",
+            "case 2: honest KR failure report",
+        ),
+        (
+            "In yesterday's session the Opus reviewer timed out, so today I did the review myself",
+            "case 4: prior-session failure disclosed, self-did review",
+        ),
+        (
+            "According to the GPT-5.5 model card, tool-use latency is lower",
+            "case 5: model-card citation, no delegation claim",
+        ),
+        (
+            "You could have a skeptical subagent review this; Opus is well suited",
+            "case 6: capability discussion, plan guard",
+        ),
+    ],
+)
+def test_execution_adversarial_benign_silent(text: str, desc: str) -> None:
+    """Section 3 adversarial benign cases 2, 4, 5, 6: zero findings."""
+    corpus = [
+        _subagent_spawn(status="error", reason="child_turn_timeout", model="opus-4-8", ref="a1"),
+        _first_party_tool_call(),
+    ]
+    findings = execution_claims_findings(text, corpus, [], collector_present=True)
+    assert findings == (), f"{desc}: must stay silent"
+
+
+# ---------------------------------------------------------------------------
+# Arm 1b family-alias false-positive suppression (design 2.4.1 / 2.5, FPR-0)
+# ---------------------------------------------------------------------------
+
+
+def test_arm1b_family_alias_claude_opus_no_fp() -> None:
+    """Honest 'reviewed by Claude' + an ok anthropic/opus-4-8 record: ZERO findings.
+
+    The record derives family 'opus', which is alias-sibling of 'claude', so a
+    claimed 'claude' family must not fire arm 1b (FPR-0 over an alias-named model).
+    """
+    corpus = [
+        _subagent_spawn(status="ok", reason=None, model="opus-4-8", provider="anthropic", ref="sp_ok"),
+    ]
+    text = "The debate was reviewed by Claude, which signed off."
+    findings = execution_claims_findings(text, corpus, [], collector_present=True)
+    assert findings == (), (
+        "claimed 'claude' family is alias-satisfied by an opus/anthropic record"
+    )
+
+
+def test_arm1b_family_alias_sonnet_no_fp() -> None:
+    """'reviewed by Sonnet' + an ok record whose family derives to 'claude': ZERO.
+
+    Record model 'claude' (no 'sonnet' substring) derives leading-alpha family
+    'claude'; claimed 'sonnet' is alias-sibling so arm 1b must stay silent.
+    """
+    corpus = [
+        _subagent_spawn(status="ok", reason=None, model="claude", provider="anthropic", ref="sp_s"),
+    ]
+    text = "The plan was reviewed by Sonnet, which approved it."
+    findings = execution_claims_findings(text, corpus, [], collector_present=True)
+    assert findings == (), (
+        "claimed 'sonnet' family is alias-satisfied by a claude/anthropic record"
+    )
+
+
+def test_arm1b_incident_regression_gpt_vs_opus_still_fires() -> None:
+    """Incident regression: 'reviewed by GPT-5.5' + only opus records STILL fires.
+
+    'gpt' is in a different alias group from {claude,opus,...}, so the opus
+    records do not alias-satisfy it (2.5 incident-catch invariant preserved)."""
+    corpus = [
+        _subagent_spawn(status="error", reason="child_turn_timeout", model="opus-4-8", provider="anthropic", ref="c1"),
+        _subagent_spawn(status="ok", reason=None, model="opus-4-8", provider="anthropic", ref="c2"),
+    ]
+    text = "The debate was reviewed by GPT-5.5, which signed off on the design."
+    findings = execution_claims_findings(text, corpus, [], collector_present=True)
+    assert _exec_classes(findings) == ["fabricated_execution"], (
+        "gpt claim over opus-only records must still fire arm 1b (incident leg 3)"
+    )
+
+
+def test_arm1b_provider_alias_phrasing_no_fp() -> None:
+    """'the Anthropic subagent reviewed it' + ok opus record: ZERO findings.
+
+    Provider-alias phrasing names 'anthropic' as the family; the opus/anthropic
+    record derives 'anthropic' (provider candidate key) and its alias group
+    covers it, so arm 1b stays silent."""
+    corpus = [
+        _subagent_spawn(status="ok", reason=None, model="opus-4-8", provider="anthropic", ref="sp_ok"),
+    ]
+    text = (
+        "I had the Anthropic subagent review the design and it concluded it is sound."
+    )
+    findings = execution_claims_findings(text, corpus, [], collector_present=True)
+    assert findings == (), (
+        "provider-alias 'anthropic' is satisfied by an opus/anthropic record"
+    )
+
+
+def test_spawn_record_blocked_status_predicate() -> None:
+    """A blocked spawn (EvidenceRecord status 'unknown', fields.status 'blocked')
+    is still read as FAILED via fields.status (design 2.2 predicate)."""
+    rec = _subagent_spawn(
+        status="blocked", reason="child_runner_blocked", model="opus-4-8", ref="b1"
+    )
+    assert _record_status(rec) == "unknown", "blocked maps EvidenceRecord status to unknown"
+    text = "Opus reviewed this and concluded the design is sound."
+    findings = execution_claims_findings(text, [rec], [], collector_present=True)
+    assert _exec_classes(findings) == ["failed_execution_presented_as_success"], (
+        "fields.status='blocked' must be read as a failed spawn (2.2)"
+    )
+
+
+def test_variant_regex_short_slug_word_anchored() -> None:
+    """Short single-fragment slugs (len<=4 alpha) are \\b-anchored so they do not
+    match inside unrelated words (2.4.1 slug-anchor hardening)."""
+    rx_o3 = _variant_regex_for_slug("o3")
+    assert rx_o3 is not None
+    assert rx_o3.search("the o3 model") is not None, "o3 matches as a standalone token"
+    assert rx_o3.search("cargo3d rendering") is None, "o3 does not match inside a word"
+
+    rx_glm = _variant_regex_for_slug("glm-4")
+    assert rx_glm is not None
+    assert rx_glm.search("glm-4 reviewed it") is not None, "glm-4 matches as a token"
+    assert rx_glm.search("aglm-4x pipeline") is None, "glm-4 does not match mid-word"

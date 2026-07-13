@@ -1,7 +1,7 @@
 """PR-V6: the first-party verify_before_replying policy.
 
 The verify-before-replying feature is expressed as one read-only first-party
-policy in the floor evidence pack, composed of five member rules, mode-scopable
+policy in the floor evidence pack, composed of six member rules, mode-scopable
 via ``policy:verify_before_replying``. The policy carries no PolicyBinding
 (design Section 11 note 3: verify findings must never satisfy an evidence gate).
 No em-dashes anywhere in this file per the citation feature style rule.
@@ -26,21 +26,27 @@ _MEMBERS = (
     "verify_before_replying.claim_citation",
     "verify_before_replying.evidence_consistency",
     "verify_before_replying.activity_grounding",
+    "verify_before_replying.execution_claims",
     "verify_before_replying.sycophancy_heuristics",
     "verify_before_replying.skeptic_review",
 )
 
 
 def test_builtin_policy_present_and_shaped(tmp_path) -> None:
-    """list_policies() contains verify_before_replying with exactly the five
-    member rule ids, origin == 'builtin', and binding is None (design Section
-    11 note 3: verify findings must never satisfy an evidence gate)."""
+    """list_policies() contains verify_before_replying with the member rule ids,
+    origin == 'builtin', and binding is None (design Section 11 note 3: verify
+    findings must never satisfy an evidence gate). Membership is asserted
+    dynamically (>= 6 members, new execution_claims rule present) rather than a
+    frozen equality so adding future member rules does not require editing this
+    assertion."""
     path = tmp_path / "customize.json"
     policies = {p.policy_id: p for p in list_policies(path)}
     assert "verify_before_replying" in policies
     policy = policies["verify_before_replying"]
     assert policy.origin == "builtin"
-    assert policy.rule_ids == _MEMBERS
+    assert set(_MEMBERS).issubset(set(policy.rule_ids))
+    assert "verify_before_replying.execution_claims" in policy.rule_ids
+    assert len(policy.rule_ids) >= 6
     assert policy.binding is None
 
 

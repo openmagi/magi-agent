@@ -229,10 +229,11 @@ _SOURCE_CITATION_POLICY = Policy(
 
 
 # The verify-before-replying policy: the pre-final nudge feature expressed as
-# one first-party policy composed of five member rules (design Section 11).
+# one first-party policy composed of six member rules (design Section 11).
 # The evidence-bound members (claim_citation, evidence_consistency,
-# activity_grounding) emit high-confidence findings; the heuristic and LLM-skeptic
-# members (sycophancy_heuristics, skeptic_review) emit advisory findings.
+# activity_grounding, execution_claims) emit high-confidence findings; the
+# heuristic and LLM-skeptic members (sycophancy_heuristics, skeptic_review) emit
+# advisory findings.
 # No PolicyBinding: verify findings are audit records, not unlock evidence, and
 # must never satisfy an evidence gate (design Section 11 note 3).
 _VERIFY_BEFORE_REPLYING_POLICY = Policy(
@@ -244,8 +245,10 @@ _VERIFY_BEFORE_REPLYING_POLICY = Policy(
         "back to the model so it can autonomously decide to ship as-is, revise, "
         "or loop back into more work. Nothing is blocked; the model decides. "
         "High-confidence findings are evidence-grounded (missing citations, "
-        "ledger contradictions, ungrounded action claims); advisory findings "
-        "flag sycophancy and overconfidence heuristics. All findings are durable "
+        "ledger contradictions, ungrounded action claims, and fabricated or "
+        "failed subagent-execution claims audited against the spawn ledger); "
+        "advisory findings flag sycophancy and overconfidence heuristics. All "
+        "findings are durable "
         "and observable, with a per-finding resolution status that makes the "
         "ignore-rate measurable -- the core quality signal of this policy."
     ),
@@ -253,6 +256,7 @@ _VERIFY_BEFORE_REPLYING_POLICY = Policy(
         "verify_before_replying.claim_citation",
         "verify_before_replying.evidence_consistency",
         "verify_before_replying.activity_grounding",
+        "verify_before_replying.execution_claims",
         "verify_before_replying.sycophancy_heuristics",
         "verify_before_replying.skeptic_review",
     ),
