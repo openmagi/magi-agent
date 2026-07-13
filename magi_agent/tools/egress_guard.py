@@ -22,11 +22,8 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 
-from magi_agent.security.egress_destinations import (
-    EgressDestination,
-    extract_shell_destinations,
-    extract_tool_destination,
-)
+# NOTE: magi_agent.security is lazy-imported inside each function that uses it
+# to avoid a tools->security layering edge. See ``extract_egress_destinations``.
 
 # Shell tool names whose ``command`` argument may carry a network destination.
 # Kept small and explicit (the core execute tools); an unlisted tool is treated
@@ -97,7 +94,7 @@ def extract_egress_destinations(
     arguments: object,
     *,
     permission: str | None = None,
-) -> tuple[EgressDestination, ...]:
+) -> tuple[object, ...]:
     """Extracted outbound destinations for a tool call, or an empty tuple.
 
     Net tools yield the single first-hop destination (``extraction == "args"``);
@@ -110,6 +107,11 @@ def extract_egress_destinations(
     passes it; the collector, which has no manifest, relies on the name list).
     """
     try:
+        from magi_agent.security.egress_destinations import (  # noqa: PLC0415
+            extract_shell_destinations,
+            extract_tool_destination,
+        )
+
         if tool_name in _NET_TOOL_NAMES or permission == "net":
             return (extract_tool_destination(tool_name, arguments),)
         if tool_name in _SHELL_TOOL_NAMES:
@@ -123,7 +125,7 @@ def extract_egress_destinations(
 
 
 def _destination_payload(
-    dest: EgressDestination,
+    dest: object,
     *,
     tool_name: str,
     mode: str,
