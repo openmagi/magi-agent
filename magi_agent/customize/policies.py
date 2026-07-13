@@ -384,8 +384,81 @@ _EGRESS_GUARD_POLICY = Policy(
 )
 
 
+# The final-output evidence gate: a pre-final gate that checks numeric claims in
+# the answer are backed by a deterministic evidence record (calculation, SQL,
+# spreadsheet validation, tool result) before the answer ships. Can repair or
+# block on unbacked numerics. Non-safety accuracy aid, so user-disableable and
+# listed in ``builtin_policy_overrides.BUILTIN_POLICY_TOGGLES``.
+_FINAL_OUTPUT_GATE_POLICY = Policy(
+    id="final_output_gate",
+    displayName="Final Output Evidence Gate",
+    intent=(
+        "At the pre-final boundary, check that every numeric claim in the "
+        "answer is supported by a deterministic evidence record produced this "
+        "turn (a calculation, SQL query result, spreadsheet validation, or "
+        "tool result) rather than asserted from the model's own arithmetic. "
+        "Unsupported numerics route to a repair or a block. Turn it off to let "
+        "numeric claims ship without an evidence check."
+    ),
+    ruleIds=(
+        "final_output_gate.calculation_evidence",
+        "final_output_gate.numeric_grounding",
+    ),
+    origin="builtin",
+    userDisableable=True,
+)
+
+
+# The grounded-answer guard: a deterministic anti-fabrication detector that flags
+# a specific numeric (>=3 significant digits) or hyphen/dot identifier asserted
+# in the answer that appears nowhere in the turn's collected tool corpus.
+# Conservative by design (skips years and small numbers). Non-blocking metadata
+# on its own; user-disableable.
+_GROUNDED_ANSWER_GUARD_POLICY = Policy(
+    id="grounded_answer_guard",
+    displayName="Grounded Answer Guard",
+    intent=(
+        "Detect a fabricated specific — a precise number (three or more "
+        "significant digits) or a dotted/hyphenated identifier that the answer "
+        "asserts but that appears nowhere in the tool evidence this turn — and "
+        "mark the answer as an ungrounded guess. Deliberately conservative "
+        "(skips years and small round numbers). Turn it off to skip the "
+        "specific-value grounding check."
+    ),
+    ruleIds=(
+        "grounded_answer_guard.specific_value_grounding",
+    ),
+    origin="builtin",
+    userDisableable=True,
+)
+
+
+# The cross-verify policy: when a turn delegates work to spawned subagents, this
+# cross-checks the composed answer against the subagents' returned results so a
+# child's claim cannot silently override the parent's evidence. Non-blocking
+# audit; user-disableable.
+_CROSS_VERIFY_POLICY = Policy(
+    id="cross_verify",
+    displayName="Cross-Verify Subagent Results",
+    intent=(
+        "When a turn spawns subagents, cross-check the composed final answer "
+        "against the results those subagents actually returned, so a delegated "
+        "child's claim cannot silently override the parent's own evidence. "
+        "Turn it off to skip the subagent-result cross-check."
+    ),
+    ruleIds=(
+        "cross_verify.subagent_result_check",
+    ),
+    origin="builtin",
+    userDisableable=True,
+)
+
+
 BUILTIN_POLICIES: tuple[Policy, ...] = (
+    _CROSS_VERIFY_POLICY,
     _EGRESS_GUARD_POLICY,
+    _FINAL_OUTPUT_GATE_POLICY,
+    _GROUNDED_ANSWER_GUARD_POLICY,
     _INJECTION_GUARD_POLICY,
     _SOURCE_CITATION_POLICY,
     _SYSTEM_SAFETY_POLICY,
