@@ -143,6 +143,7 @@ graph LR
     evidence --> packs
     evidence --> research
     evidence --> runtime
+    evidence --> security
     evidence --> shared
     evidence --> telemetry
     evidence --> tools
@@ -967,7 +968,7 @@ graph LR
 | ledger.py | — | authority, builtin, safety, types | evidence/__init__.py, evidence/first_party_activity.py, evidence/local_tool_collector.py, harness/general_automation/constraint_reinjection.py, harness/general_automation/live_gate.py, harness/general_automation/task_completion.py, harness/verifier_bus.py, introspection/projection.py, introspection/tool.py, shadow/audit_reporter.py |
 | ledger_semantics.py | — | — | — |
 | ledger_store.py | Reader + retention for the durable evidence-ledger files. | — | cli/headless.py, customize/live_catalog.py, evidence/local_tool_collector.py, evidence/run_view.py, runtime/durable_checkpoint_emitter.py, runtime/governed_turn.py, shadow/gate5b4c3_live_runner_boundary.py |
-| local_tool_collector.py | — | citation_capture, citation_injection, citation_registry, env, extraction, first_party_activity, ledger, ledger_store, result, source_ledger, types | cli/tests/test_evidence_turn_id_reconciliation.py, cli/tests/test_local_tool_evidence_wiring.py, cli/tests/test_real_runner.py, cli/tests/test_tool_runtime.py, cli/tool_runtime.py, cli/wiring.py, engine/model_runner.py, runtime/child_runner_live.py, tools/dispatcher.py, tools/tests/test_core_toolhost_source_projection.py |
+| local_tool_collector.py | — | citation_capture, citation_injection, citation_registry, env, extraction, first_party_activity, injection_detection, ledger, ledger_store, result, source_ledger, types | cli/tests/test_evidence_turn_id_reconciliation.py, cli/tests/test_local_tool_evidence_wiring.py, cli/tests/test_real_runner.py, cli/tests/test_tool_runtime.py, cli/tool_runtime.py, cli/wiring.py, engine/model_runner.py, runtime/child_runner_live.py, tools/dispatcher.py, tools/tests/test_core_toolhost_source_projection.py |
 | observed_egress.py | — | flags, gate1a_egress_correlation | (root)/main.py, transport/chat.py, transport/chat_authority.py, transport/chat_routes.py, transport/gate5b_serving.py, transport/health.py |
 | reports.py | — | authority, safety, tool_preview, types | evidence/citation_audit.py, evidence/coding_verification.py, evidence/event_projection.py, evidence/source_ledger.py, evidence/subagent.py, evidence/verify_audit.py, observability/audit_view.py, shadow/audit_reporter.py |
 | research_final_gate.py | — | authority, citation_audit, source_ledger, types | engine/driver.py, evidence/citation_gate.py, evidence/citation_render.py, research/live_research_final_gate.py, research/research_first_canary.py |
@@ -1821,7 +1822,7 @@ graph LR
 | credential_vocab.py | C-9 leaf — single vocabulary of "what counts as credential-shaped". | — | composio/config.py, security/credentials.py, security/ssrf.py |
 | credentials.py | — | credential_vocab | security/__init__.py |
 | external_surface.py | — | — | security/__init__.py |
-| injection_detection.py | Deterministic injection detector for untrusted tool-result content. | — | — |
+| injection_detection.py | Deterministic injection detector for untrusted tool-result content. | — | evidence/local_tool_collector.py |
 | posture.py | — | — | security/__init__.py |
 | sandbox_preflight.py | — | — | security/__init__.py |
 | ssrf.py | C-6 + C-7 leaf — single SSRF host classifier. | credential_vocab | channels/telegram_adapter.py, sandbox/network.py, web_acquisition/policy.py |
