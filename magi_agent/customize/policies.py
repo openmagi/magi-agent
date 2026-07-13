@@ -347,7 +347,45 @@ _INJECTION_GUARD_POLICY = Policy(
     userDisableable=True,
 )
 
+
+# The egress_guard policy: destination awareness for outbound tool calls and
+# shell network commands (design Section 5). Default `audit` mode records every
+# extracted first-hop destination to the evidence ledger and rides the
+# permission-decision metadata; nothing is denied. An opt-in `block` mode (a
+# later unit) denies destinations that miss the operator-managed allowlist.
+# Disableable: audit is observe-only and even block is the user's own opt-in, so
+# a user may walk it back -- this is a strong default, not a floor. Listed in
+# ``builtin_policy_overrides.BUILTIN_POLICY_TOGGLES``. No PolicyBinding: egress
+# destination records are audit records, not unlock evidence, and must never
+# satisfy an evidence gate (design Section 11 note 3).
+_EGRESS_GUARD_POLICY = Policy(
+    id="egress_guard",
+    displayName="Egress Guard",
+    intent=(
+        "Destination awareness for outbound activity: the first-hop network "
+        "host of web tools (web_fetch, web_search provider, browser) and of "
+        "shell network commands (curl, wget, ssh, scp, rsync, nc, ftp) is "
+        "extracted and recorded, so an exfiltration attempt leaves a trail. In "
+        "the default audit mode nothing is blocked; an opt-in block mode denies "
+        "destinations that miss the allowlist you manage in Customize. "
+        "Extraction is first-hop and best-effort: shell obfuscation (variable "
+        "expansion, command substitution) is recorded as an unextractable blind "
+        "spot rather than guessed, and only the opt-in egress proxy sees the "
+        "authoritative destination."
+    ),
+    ruleIds=(
+        "egress_guard.destinations",
+        "egress_guard.allowlist_gate",
+    ),
+    origin="builtin",
+    # Disableable: audit is observe-only and block is the user's own opt-in.
+    # Listed in BUILTIN_POLICY_TOGGLES.
+    userDisableable=True,
+)
+
+
 BUILTIN_POLICIES: tuple[Policy, ...] = (
+    _EGRESS_GUARD_POLICY,
     _INJECTION_GUARD_POLICY,
     _SOURCE_CITATION_POLICY,
     _SYSTEM_SAFETY_POLICY,

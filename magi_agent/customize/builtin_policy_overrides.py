@@ -94,6 +94,14 @@ def _injection_guard_effective(env: Mapping[str, str]) -> bool:
     return parse_injection_guard_enabled(env)
 
 
+def _egress_guard_effective(env: Mapping[str, str]) -> bool:
+    from magi_agent.config.env import (  # noqa: PLC0415
+        parse_egress_guard_enabled,
+    )
+
+    return parse_egress_guard_enabled(env)
+
+
 # Curated, conservative catalog. Each entry maps a builtin *policy* id (the same
 # id used in ``policies.BUILTIN_POLICIES`` and returned by ``list_policies()``)
 # to the single master ``MAGI_*_ENABLED`` flag its runtime gate reads.
@@ -105,6 +113,18 @@ def _injection_guard_effective(env: Mapping[str, str]) -> bool:
 # boolean off switch. Flip it to fully disableable later by adding a
 # BuiltinPolicyToggle entry here (and setting its Policy.user_disableable True).
 BUILTIN_POLICY_TOGGLES: tuple[BuiltinPolicyToggle, ...] = (
+    BuiltinPolicyToggle(
+        id="egress_guard",
+        env_var="MAGI_EGRESS_GUARD_ENABLED",
+        label="Egress guard",
+        description=(
+            "Records the first-hop network destination of web tools and shell "
+            "network commands so an exfiltration attempt leaves a trail. In the "
+            "default audit mode nothing is blocked. Turn it off to stop "
+            "recording outbound destinations entirely."
+        ),
+        effective=_egress_guard_effective,
+    ),
     BuiltinPolicyToggle(
         id="verify_before_replying",
         env_var="MAGI_VERIFY_BEFORE_REPLYING_ENABLED",
