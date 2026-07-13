@@ -476,6 +476,7 @@ def child_started_event(
     agent_name: str | None = None,
     model: str | None = None,
     task_title: str | None = None,
+    child_session_id: str | None = None,
     detail: str = "Delegated child started",
     event_family: str = "child_spawn_background_supported_core",
 ) -> PublicEvent:
@@ -485,6 +486,11 @@ def child_started_event(
     local-dashboard AGENTS chip label, model badge, and per-agent task hint
     respectively.  ``task_title`` is a public-safe short brief the LLM provides
     via SpawnAgent args — it is NOT the prompt body (privacy contract).
+
+    ``child_session_id`` is the observability session id the child turn records
+    under. Surfacing it here lets the Sessions view link this child back to the
+    parent session that spawned it (the event is recorded under the parent's
+    session), so subagent sessions can be nested under their parent.
     """
     _require_event_family(event_family, {"child_spawn_background_supported_core"})
     event: PublicEvent = {
@@ -497,6 +503,7 @@ def child_started_event(
     _put_text(event, "agentName", agent_name)
     _put_text(event, "model", model)
     _put_text(event, "taskTitle", task_title)
+    _put_text(event, "childSessionId", child_session_id)
     return event
 
 

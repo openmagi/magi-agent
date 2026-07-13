@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   Activity,
   Bot,
+  ChevronDown,
+  ChevronRight,
   Clock,
   ClipboardList,
   Globe,
@@ -34,6 +36,8 @@ import {
   resolveKindCategories,
   deriveSessionChannel,
   deriveSessionTitle,
+  buildSessionForest,
+  flattenSessionForest,
   type ActivityFilters,
   type SessionChannel,
 } from "./observability-query";
@@ -83,9 +87,15 @@ interface SessionRecord extends JsonRecord {
   rule_check_count?: number;
   /**
    * Optional backend-provided human title. When absent (current runtimes) the
-   * FE derives a title from the session id via deriveSessionTitle().
+   * FE derives a title from the session id via deriveSessionTitle(). For spawned
+   * subagents the backend supplies the delegated task title / agent name here.
    */
   title?: string;
+  /**
+   * Parent session id for a spawned subagent, resolved by the backend from the
+   * `child_started` event. Drives the collapsible parent→child Sessions tree.
+   */
+  parent_session_id?: string;
 }
 
 interface SessionsResponse {
@@ -390,6 +400,10 @@ function ObservabilityPageInner() {
   const [error, setError] = useState<string | null>(null);
   /** Tracks in-flight pagination direction; null when no page load is active. */
   const [paginatingDir, setPaginatingDir] = useState<"older" | "newer" | null>(null);
+  /** Session ids whose spawned-subagent children are collapsed in the tree. */
+  const [collapsedSessions, setCollapsedSessions] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   // Filter state backed by URL query params so audit views are shareable.
   // Initial state is read from the URL on mount; changes are written back via
@@ -589,6 +603,23 @@ function ObservabilityPageInner() {
     });
   }, [router]);
 
+  /** Collapse/expand a parent session's spawned-subagent subtree. */
+  const toggleSessionCollapse = useCallback((sessionId: string) => {
+    setCollapsedSessions((prev) => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) next.delete(sessionId);
+      else next.add(sessionId);
+      return next;
+    });
+  }, []);
+
+  // Group sessions into a parent→child forest, then flatten to render rows in
+  // tree order (children of collapsed parents omitted).
+  const sessionRows = useMemo(
+    () => flattenSessionForest(buildSessionForest(sessions), collapsedSessions),
+    [sessions, collapsedSessions],
+  );
+
   return (
     <div className="mx-auto max-w-7xl space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -768,40 +799,75 @@ function ObservabilityPageInner() {
             <p className="text-sm text-secondary">No sessions have emitted observability events.</p>
           ) : (
             <div className="space-y-2">
-              {sessions.map((session) => {
+              {sessionRows.map(({ session, depth, childCount, descendantCount }) => {
                 const isActive = filters.sessionId === session.id;
                 const channel = deriveSessionChannel(session.id);
                 const title = session.title?.trim() || deriveSessionTitle(session.id, session.label);
+                const isCollapsed = session.id != null && collapsedSessions.has(session.id);
                 return (
-                  /* F1: session cards are interactive — use <button> so they are
-                     keyboard-reachable (Enter/Space) and properly announced by
-                     screen readers. text-left + w-full preserve card layout. */
-                  <button
-                    type="button"
+                  <div
                     key={session.id ?? String(session.last_active ?? session.last_event_at)}
-                    onClick={() => session.id && handleSessionClick(session.id)}
-                    title={session.id ?? undefined}
-                    className={`w-full cursor-pointer rounded-xl border p-3 text-left transition-colors ${
-                      isActive
-                        ? "border-primary-light/40 bg-primary-light/10"
-                        : "border-black/[0.06] bg-white/70 hover:bg-white/90"
-                    }`}
+                    className="flex items-stretch gap-1"
+                    // Indent nested subagent rows; a left border gives a subtle
+                    // tree connector without extra DOM.
+                    style={depth > 0 ? { paddingLeft: depth * 16 } : undefined}
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <ChannelChip channel={channel} />
-                        <p className="min-w-0 truncate text-sm font-semibold text-foreground">
-                          {title}
-                        </p>
+                    {childCount > 0 ? (
+                      <button
+                        type="button"
+                        aria-label={isCollapsed ? "Expand subagents" : "Collapse subagents"}
+                        aria-expanded={!isCollapsed}
+                        onClick={() => session.id && toggleSessionCollapse(session.id)}
+                        className="flex w-5 shrink-0 items-center justify-center rounded-md text-muted hover:bg-black/[0.05] hover:text-foreground"
+                      >
+                        {isCollapsed ? (
+                          <ChevronRight className="h-4 w-4" strokeWidth={2} />
+                        ) : (
+                          <ChevronDown className="h-4 w-4" strokeWidth={2} />
+                        )}
+                      </button>
+                    ) : (
+                      <span
+                        aria-hidden
+                        className={`w-5 shrink-0 ${depth > 0 ? "border-l border-black/10" : ""}`}
+                      />
+                    )}
+                    {/* F1: session cards are interactive — use <button> so they are
+                        keyboard-reachable (Enter/Space) and properly announced by
+                        screen readers. text-left + w-full preserve card layout. */}
+                    <button
+                      type="button"
+                      onClick={() => session.id && handleSessionClick(session.id)}
+                      title={session.id ?? undefined}
+                      className={`min-w-0 flex-1 cursor-pointer rounded-xl border p-3 text-left transition-colors ${
+                        isActive
+                          ? "border-primary-light/40 bg-primary-light/10"
+                          : "border-black/[0.06] bg-white/70 hover:bg-white/90"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <ChannelChip channel={channel} />
+                          <p className="min-w-0 truncate text-sm font-semibold text-foreground">
+                            {title}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          {descendantCount > 0 ? (
+                            <span className="rounded-full border border-violet-300/50 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700">
+                              {descendantCount} {descendantCount === 1 ? "subagent" : "subagents"}
+                            </span>
+                          ) : null}
+                          <span className="rounded-full border border-black/10 bg-black/[0.035] px-2 py-0.5 text-xs text-secondary">
+                            {numberLabel(session.event_count)} events
+                          </span>
+                        </div>
                       </div>
-                      <span className="shrink-0 rounded-full border border-black/10 bg-black/[0.035] px-2 py-0.5 text-xs text-secondary">
-                        {numberLabel(session.event_count)} events
-                      </span>
-                    </div>
-                    <p className="mt-1 text-xs text-secondary">
-                      {formatSessionBreakdown(session)} · {eventTime(session.last_active ?? session.last_event_at)}
-                    </p>
-                  </button>
+                      <p className="mt-1 text-xs text-secondary">
+                        {formatSessionBreakdown(session)} · {eventTime(session.last_active ?? session.last_event_at)}
+                      </p>
+                    </button>
+                  </div>
                 );
               })}
             </div>

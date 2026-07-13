@@ -459,6 +459,119 @@ function cronTitle(suffix: string): string {
   return s ? `Scheduled: ${s}` : "Scheduled run";
 }
 
+/** Minimal shape needed to build the parent→child session tree. */
+export interface SessionTreeInput {
+  id?: string | null;
+  /** Parent session id (subagent linkage), when the backend resolved one. */
+  parent_session_id?: string | null;
+}
+
+/** A node in the session forest: a session plus its nested child sessions. */
+export interface SessionNode<T> {
+  session: T;
+  children: SessionNode<T>[];
+}
+
+/** A flattened, render-ready row produced by `flattenSessionForest`. */
+export interface FlatSessionRow<T> {
+  session: T;
+  /** Nesting depth (0 = top-level). */
+  depth: number;
+  /** Number of direct child sessions. */
+  childCount: number;
+  /** Total number of nested descendant sessions. */
+  descendantCount: number;
+}
+
+/**
+ * Group a flat session list into a parent→child forest.
+ *
+ * A session nests under `parent_session_id` when that parent is present in the
+ * same list; otherwise it stays at the top level (so a subagent whose parent
+ * fell outside the fetched window still renders, just un-nested). Input order
+ * is preserved for both roots and each parent's children, and self/cycle links
+ * are defended against (treated as roots). Sessions without an `id` are always
+ * roots. Neither the input array nor its elements are mutated.
+ */
+export function buildSessionForest<T extends SessionTreeInput>(
+  sessions: T[],
+): SessionNode<T>[] {
+  const nodeById = new Map<string, SessionNode<T>>();
+  const nodes: SessionNode<T>[] = sessions.map((session) => {
+    const node: SessionNode<T> = { session, children: [] };
+    if (session.id) nodeById.set(session.id, node);
+    return node;
+  });
+
+  const roots: SessionNode<T>[] = [];
+  for (const node of nodes) {
+    const id = node.session.id ?? null;
+    const parentId = node.session.parent_session_id ?? null;
+    const parent =
+      parentId && parentId !== id && !wouldCycle(nodeById, id, parentId)
+        ? nodeById.get(parentId)
+        : undefined;
+    if (parent) {
+      parent.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+  return roots;
+}
+
+/** True when attaching `childId` under `parentId` would form a parent cycle. */
+function wouldCycle<T extends SessionTreeInput>(
+  nodeById: Map<string, SessionNode<T>>,
+  childId: string | null,
+  parentId: string,
+): boolean {
+  if (!childId) return false;
+  let cursor: string | null = parentId;
+  const seen = new Set<string>();
+  while (cursor) {
+    if (cursor === childId) return true;
+    if (seen.has(cursor)) return true;
+    seen.add(cursor);
+    cursor = nodeById.get(cursor)?.session.parent_session_id ?? null;
+  }
+  return false;
+}
+
+function countDescendants<T>(node: SessionNode<T>): number {
+  let total = 0;
+  for (const child of node.children) total += 1 + countDescendants(child);
+  return total;
+}
+
+/**
+ * Flatten a session forest into display rows in tree order, skipping the
+ * children of any session id present in `collapsed`. Each row carries its
+ * nesting `depth` plus direct-child and total-descendant counts so the UI can
+ * render an expand/collapse affordance and a "N subagents" badge.
+ */
+export function flattenSessionForest<T extends SessionTreeInput>(
+  roots: SessionNode<T>[],
+  collapsed: ReadonlySet<string>,
+): FlatSessionRow<T>[] {
+  const out: FlatSessionRow<T>[] = [];
+  const visit = (node: SessionNode<T>, depth: number): void => {
+    out.push({
+      session: node.session,
+      depth,
+      childCount: node.children.length,
+      descendantCount: countDescendants(node),
+    });
+    const id = node.session.id ?? null;
+    const isCollapsed = id != null && collapsed.has(id);
+    if (!isCollapsed) {
+      for (const child of node.children) visit(child, depth + 1);
+    }
+  };
+  for (const root of roots) visit(root, 0);
+  return out;
+}
+
 /**
  * Resolve kind categories and noise kinds from the /meta endpoint's `categories`
  * payload, falling back to the FE constants (CATEGORY_KINDS / NOISE_KINDS) when

@@ -86,6 +86,55 @@ def test_list_sessions_groups_by_session(tmp_path):
     store.close()
 
 
+def test_list_sessions_links_subagent_to_parent(tmp_path):
+    import time as _t
+    store = ActivityStore(tmp_path / "obs.db")
+    now = _t.time()
+    # Parent session emits a child_started event carrying the child's session id
+    # and a task title (recorded under the PARENT session).
+    store.record_event(
+        ActivityEvent(kind="turn_start", session_id="agent:main:app:demo:1", ts=now - 5)
+    )
+    store.record_event(
+        ActivityEvent(
+            kind="child_started",
+            session_id="agent:main:app:demo:1",
+            ts=now - 4,
+            payload={"childSessionId": "child-session-abc", "taskTitle": "Research SMR"},
+        )
+    )
+    # The child session records its own events under the child session id.
+    store.record_event(ActivityEvent(kind="tool_start", session_id="child-session-abc", ts=now - 3))
+
+    rows = store.list_sessions()
+    by_id = {r["id"]: r for r in rows}
+
+    child = by_id["child-session-abc"]
+    assert child["parent_session_id"] == "agent:main:app:demo:1"
+    # Task title from the spawning event becomes the child's display title.
+    assert child["title"] == "Research SMR"
+    # The parent is not itself a child.
+    assert "parent_session_id" not in by_id["agent:main:app:demo:1"]
+
+    store.close()
+
+
+def test_list_sessions_no_parent_linkage_without_child_session_id(tmp_path):
+    # A child_started event with no childSessionId (older payloads) must not
+    # crash and must not invent a linkage.
+    store = ActivityStore(tmp_path / "obs.db")
+    store.record_event(
+        ActivityEvent(
+            kind="child_started",
+            session_id="agent:main:app:demo:1",
+            payload={"taskTitle": "no child id"},
+        )
+    )
+    rows = store.list_sessions()
+    assert all("parent_session_id" not in r for r in rows)
+    store.close()
+
+
 def test_list_sessions_empty_when_closed(tmp_path):
     store = ActivityStore(tmp_path / "obs.db")
     store.close()

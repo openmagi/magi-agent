@@ -1943,12 +1943,11 @@ class RealLocalChildRunner:
 
     @staticmethod
     def _child_session_id(request: object) -> str:
-        seed = (
-            f"{_clean_str(getattr(request, 'parent_execution_id', None)) or 'parent'}:"
-            f"{_clean_str(getattr(request, 'turn_id', None)) or 'turn'}:"
-            f"{_clean_str(getattr(request, 'task_id', None)) or 'task'}"
+        return derive_child_session_id(
+            parent_execution_id=_clean_str(getattr(request, "parent_execution_id", None)),
+            turn_id=_clean_str(getattr(request, "turn_id", None)),
+            task_id=_clean_str(getattr(request, "task_id", None)),
         )
-        return f"child-session-{hashlib.sha1(seed.encode('utf-8')).hexdigest()[:16]}"
 
     @staticmethod
     def _child_user_id(request: object) -> str:
@@ -1971,6 +1970,28 @@ def _clean_str(value: Any) -> str | None:
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
+
+
+def derive_child_session_id(
+    *,
+    parent_execution_id: str | None,
+    turn_id: str | None,
+    task_id: str | None,
+) -> str:
+    """Deterministic child session id from the spawn identifiers.
+
+    Single source of truth for the ``child-session-<hash>`` id so the spawner
+    (``plugins.native.subagents``) can compute the SAME id the live child runner
+    assigns — used to thread a parent→child linkage onto the ``child_started``
+    observability event. The seed and hash MUST stay identical to the runner's
+    historical formula, so unset parts fall back to the same sentinels.
+    """
+    seed = (
+        f"{parent_execution_id or 'parent'}:"
+        f"{turn_id or 'turn'}:"
+        f"{task_id or 'task'}"
+    )
+    return f"child-session-{hashlib.sha1(seed.encode('utf-8')).hexdigest()[:16]}"
 
 
 def _split_packed_route(model: str) -> tuple[str | None, str | None]:
