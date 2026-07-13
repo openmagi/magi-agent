@@ -209,7 +209,16 @@ def customize_on(monkeypatch: pytest.MonkeyPatch, tmp_path):
 def test_all_flags_off_agent_callbacks_untouched(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """No customize flag ON -> no bridge attached, callbacks stay None."""
+    """No customize flag ON -> no bridge attached, callbacks stay None.
+
+    Explicitly zeroes every per-slot flag so the test is hermetic under the
+    full-profile overlay (which now seeds MAGI_CUSTOMIZE_SHELL_COMMAND_ENABLED=1
+    and peers ON by default).
+    """
+    monkeypatch.setenv("MAGI_CUSTOMIZE_PROMPT_INJECTION_ENABLED", "0")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_SHELL_COMMAND_ENABLED", "0")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_SHELL_CHECK_ENABLED", "0")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_OUTPUT_REWRITE_ENABLED", "0")
     agent = _FakeAgent()
     runner = FakeRunner(agent=agent)
     _patch_lazy_deps(monkeypatch, runner)

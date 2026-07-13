@@ -1,0 +1,41 @@
+schema_version: 1
+id: gen_rule_tool_perm_before_tool_use_ask_approval_research_en_none
+flow: single_rule
+archetype: happy_path
+language: en
+turn_budget: 4
+generated:
+  slots:
+    quirk: none
+    kind: tool_perm
+    firesAt: before_tool_use
+    action: ask_approval
+    scope: research
+  generator_version: 2
+  paraphrase_model: null
+seed_draft:
+  what:
+    payload:
+      match:
+        tool: Bash
+      decision: deny
+turns:
+- say: restrict the Bash tool
+  answers:
+    q_what.kind: tool_perm
+    q_scope: research
+    q_action: ask_approval
+save: envelope
+oracle:
+  expect_ready: true
+  max_turns_to_ready: 1
+  draft:
+    what.kind: tool_perm
+    firesAt: before_tool_use
+    action: ask_approval
+    scope: research
+  persisted:
+    rule_valid_and_clean: true
+    policy_intent_is_first_utterance: true
+    no_orphan_rules: true
+  forbidden_strings: default

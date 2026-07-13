@@ -181,7 +181,13 @@ class TestDocumentReadSourceProjection:
     FileRead, so the evidence collector projects it as a SourceInspection.
     """
 
-    def test_flag_off_no_source_projection(self, tmp_path: Path) -> None:
+    def test_flag_off_no_source_projection(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Force the gate off explicitly: the full-profile overlay seeds it ON,
+        # so an implicit default would leak under xdist. This test asserts the
+        # sandbox-OFF byte-identical path.
+        monkeypatch.setenv("MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED", "0")
         (tmp_path / "notes.txt").write_text("the token economy section\n", encoding="utf-8")
         from magi_agent.tools.document_tools import document_read
 

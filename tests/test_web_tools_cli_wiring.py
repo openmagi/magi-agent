@@ -6,10 +6,9 @@ install with BRAVE+FIRECRAWL keys still had no live web capability ("built but
 unused", again). They now auto-activate on key presence via the existing
 key-gated builder (keyless installs byte-identical: builder returns []).
 
-(2) A1 is now a measurement task: the full local profile defaults research
-governance to AUDIT (observe-only, zero behavior change) and audit reports
-persist to the durable evidence dir, so default-ON enforce can be justified
-with real false-positive data instead of assertion.
+(2) The full local profile defaults research governance to ENFORCE (the
+deterministic cited-without-source class, one bounded re-prompt, ~0 FP).
+Steps down to "audit"/"off" via the same env var if needed.
 """
 from __future__ import annotations
 
@@ -99,10 +98,10 @@ def test_invoking_cli_web_fetch_routes_through_tool_dispatcher(tmp_path, monkeyp
     assert "web_fetch" in dispatched
 
 
-def test_full_profile_defaults_research_governance_to_audit():
+def test_full_profile_defaults_research_governance_to_enforce():
     from magi_agent.runtime.local_defaults import LOCAL_FULL_RUNTIME_ENV_DEFAULTS
 
-    assert LOCAL_FULL_RUNTIME_ENV_DEFAULTS.get("MAGI_RESEARCH_GOVERNANCE_MODE") == "audit"
+    assert LOCAL_FULL_RUNTIME_ENV_DEFAULTS.get("MAGI_RESEARCH_GOVERNANCE_MODE") == "enforce"
 
 
 def test_eval_profile_does_not_enable_research_governance():
