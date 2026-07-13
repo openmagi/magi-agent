@@ -27,6 +27,7 @@ from magi_agent.customize.store import (
     load_overrides,
     set_builtin_policy_override,
     set_citation_gate_mode_override,
+    set_gate_mode_override,
     set_control_plane_override,
     set_custom_rule,
     set_tool_override,
@@ -1206,6 +1207,48 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         apply_citation_gate_mode_override_to_env(
             os.environ, {"citation_gate_mode": mode}
         )
+        return JSONResponse(content={"overrides": overrides})
+
+    @app.patch("/v1/app/customize/gate-mode/{policy_id}")
+    async def patch_gate_mode(policy_id: str, request: Request) -> JSONResponse:
+        # Generalized gate-MODE step for the mode-gated first-party policies
+        # (answer_verifier / research_governance / edit_match). Same shape as the
+        # source_citation gate-mode route but table-driven: the id must be a
+        # registered gate-mode policy and the mode must be in that gate's ordered
+        # values. Projects onto the gate's env var so the next turn reads it
+        # without a restart.
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        from magi_agent.customize.builtin_policy_overrides import (  # noqa: PLC0415
+            apply_gate_mode_overrides_to_env,
+            gate_mode_policy_by_id,
+        )
+
+        gate = gate_mode_policy_by_id(policy_id)
+        if gate is None:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "error": "not_found",
+                    "message": f'"{policy_id}" is not a mode-gated first-party policy',
+                },
+            )
+        mode = body.get("mode") if isinstance(body, dict) else None
+        if not isinstance(mode, str) or mode not in gate.values:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "mode_required",
+                    "message": f"mode must be one of {', '.join(gate.values)}",
+                },
+            )
+        overrides = set_gate_mode_override(policy_id, mode)
+        apply_gate_mode_overrides_to_env(os.environ, {"gate_modes": {policy_id: mode}})
         return JSONResponse(content={"overrides": overrides})
 
     @app.put("/v1/app/customize/rules")

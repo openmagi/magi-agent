@@ -269,6 +269,8 @@ def _policy_entries() -> list[dict[str, Any]]:
         CITATION_GATE_MODE_VALUES,
         builtin_policy_toggle_catalog,
         citation_gate_mode_effective,
+        gate_mode_effective,
+        gate_mode_policy_by_id,
     )
     from magi_agent.customize.control_plane_overrides import (  # noqa: PLC0415
         CONTROL_PLANE_BEHAVIORS,
@@ -348,6 +350,19 @@ def _policy_entries() -> list[dict[str, Any]]:
                 "value": citation_gate_mode_effective(),
                 "options": list(CITATION_GATE_MODE_VALUES),
             }
+        else:
+            # The other mode-gated first-party policies (answer_verifier,
+            # research_governance, edit_match) render the same selector via the
+            # generalized gate-mode registry: off / audit / enforce (or
+            # block_final_answer). The card shows the current effective mode and
+            # the ordered options so the dashboard renders a mode dropdown
+            # instead of a boolean toggle.
+            gate = gate_mode_policy_by_id(policy.policy_id)
+            if gate is not None:
+                entry["gateMode"] = {
+                    "value": gate_mode_effective(policy.policy_id),
+                    "options": list(gate.values),
+                }
         entries.append(entry)
 
     # Behavior→policy adapter (PR-3 / design D4): the 4 in-context control-plane

@@ -111,6 +111,7 @@ graph LR
     customize --> harness
     customize --> introspection
     customize --> packs
+    customize --> research
     customize --> runtime
     customize --> tools
     customize --> transport
@@ -856,7 +857,7 @@ graph LR
 | apply.py | — | flags, verification_policy | customize/__init__.py, runtime/openmagi_runtime.py, transport/customize.py |
 | authored_prompt_append.py | F-MUT1 -- ``prompt_injection`` custom_rule kind (module: authored_prompt_append). | — | (root)/facades.py, customize/custom_rules.py, customize/prompt_injection.py, runtime/message_builder.py |
 | budgets_apply.py | F7 — Customize budgets applier. | flags, verification_policy | runtime/governed_turn.py, transport/customize.py |
-| builtin_policy_overrides.py | User-facing opt-out for first-party (builtin) *policies*. | env, flags | (root)/main.py, cli/app.py, customize/catalog.py, transport/customize.py |
+| builtin_policy_overrides.py | User-facing opt-out for first-party (builtin) *policies*. | answer_verifier, env, flags, live_audit | (root)/main.py, cli/app.py, customize/catalog.py, transport/customize.py |
 | capability_scope.py | Capability-scope custom rule (F4). | local_readonly, permissions | customize/custom_rules.py, runtime/child_runner_live.py |
 | catalog.py | — | app_api, builtin_policy_overrides, control_plane_overrides, policies, preset_map, presets, store, what_menu | engine/model_runner.py, transport/customize.py |
 | control_plane_overrides.py | User-facing toggles for in-context control-plane *behaviors*. | _truthy | (root)/main.py, cli/app.py, customize/catalog.py, transport/customize.py |
@@ -1633,7 +1634,7 @@ graph LR
 | acceptance_criteria.py | — | — | research/child_roles.py, research/evidence_graph.py, research/policy_pack.py, research/repair.py |
 | action_claims.py | — | runtime_issuance | research/boundary_enforcement.py, research/child_roles.py, research/evidence_graph.py, research/final_projection_gate.py, research/policy_pack.py |
 | answer_policy.py | Answer Policy — configurable commit-vs-abstain seam (first-party, P6). | — | runtime/best_effort_answer.py |
-| answer_verifier.py | Answer Verifier — value-level verification against already-gathered evidence. | answer_verifier_checks | research/answer_verifier_checks.py |
+| answer_verifier.py | Answer Verifier — value-level verification against already-gathered evidence. | answer_verifier_checks | customize/builtin_policy_overrides.py, research/answer_verifier_checks.py |
 | answer_verifier_checks.py | Answer Verifier Checks — detect type, build prompt, parse response, safety guards. | answer_verifier | research/answer_verifier.py |
 | boundary_enforcement.py | — | action_claims, evidence_graph, runtime_issuance | research/final_projection_gate.py |
 | child_roles.py | — | acceptance_criteria, action_claims, child_runtime_envelope, claim_graph, source_proof | recipes/ledger_task.py, recipes/ledger_workforce.py, recipes/opencode_child_lifecycle.py |
@@ -1642,7 +1643,7 @@ graph LR
 | evidence_graph.py | — | acceptance_criteria, action_claims, child_runtime_envelope, claim_graph, source_proof | research/boundary_enforcement.py, research/final_projection_gate.py, research/repair.py |
 | final_projection_gate.py | — | action_claims, boundary_enforcement, evidence_graph | engine/driver.py |
 | grounded_answer_guard.py | General grounded-answer guard (anti-fabrication lever). | — | evidence/citation_gate.py, evidence/claim_grounding.py, evidence/verify_audit.py, transport/gate5b_governance.py |
-| live_audit.py | Live, observe-only research-governance audit (audit-first). | flags | cli/headless.py |
+| live_audit.py | Live, observe-only research-governance audit (audit-first). | flags | cli/headless.py, customize/builtin_policy_overrides.py |
 | live_research_final_gate.py | Live-path construction of a research final-gate request (WS6 PR6a). | research_final_gate, source_ledger | engine/driver.py |
 | meta_adapter.py | — | child_acceptance, child_roles, task_plan | — |
 | output_contract_gate.py | Output-Contract Adherence Gate — general format-discipline gate for final answers. | — | — |

@@ -58,6 +58,11 @@ __all__ = [
     "CITATION_GATE_MODE_VALUES",
     "citation_gate_mode_effective",
     "apply_citation_gate_mode_override_to_env",
+    "GateModePolicy",
+    "GATE_MODE_POLICIES",
+    "gate_mode_policy_by_id",
+    "gate_mode_effective",
+    "apply_gate_mode_overrides_to_env",
 ]
 
 
@@ -348,5 +353,142 @@ def apply_citation_gate_mode_override_to_env(
         if mode is None:
             return
         env[_CITATION_GATE_MODE_ENV] = mode
+    except Exception:  # noqa: BLE001 - fail-soft; a bad file must not break startup
+        return
+
+
+# ---------------------------------------------------------------------------
+# Generalized gate-MODE selectors (final_output_gate / answer_verifier /
+# research_governance / edit_match). These first-party gates are not a boolean
+# on/off: their enforcement STRICTNESS steps through an ordered mode. This is the
+# same opt-DOWN seam as ``source_citation``'s gate mode, generalized to a small
+# registry so a new mode-gate is one table entry (no per-gate machinery). Each
+# entry declares the policy id (matching a ``policies.BUILTIN_POLICIES`` card),
+# the env var its runtime gate reads, the ordered valid values (strongest first),
+# and the effective-mode resolver (so an unset flag reports the real default,
+# including a profile/local-defaults seed). The persisted override lives under
+# ``overrides['gate_modes'][policy_id]`` and projects onto the env var as an
+# overwrite (user choice beats the profile seed and steps back up cleanly).
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class GateModePolicy:
+    """A first-party policy whose enforcement is a strictness MODE, not on/off."""
+
+    id: str
+    env_var: str
+    #: Ordered valid modes, STRONGEST first (e.g. ``("enforce", "audit", "off")``).
+    values: tuple[str, ...]
+    #: Profile-aware resolver returning the gate's current effective mode.
+    effective: Callable[[Mapping[str, str]], str]
+
+
+def _answer_verifier_mode_effective(env: Mapping[str, str]) -> str:
+    from magi_agent.research.answer_verifier import (  # noqa: PLC0415
+        read_verifier_mode_from_env,
+    )
+
+    return read_verifier_mode_from_env(env)
+
+
+def _research_governance_mode_effective(env: Mapping[str, str]) -> str:
+    from magi_agent.research.live_audit import (  # noqa: PLC0415
+        research_governance_mode,
+    )
+
+    return research_governance_mode(env)
+
+
+def _edit_match_mode_effective(env: Mapping[str, str]) -> str:
+    raw = (env.get("MAGI_EDIT_MATCH_EVIDENCE_ENFORCEMENT") or "").strip().lower()
+    if raw in ("off", "audit", "block_final_answer"):
+        return raw
+    return "off"
+
+
+GATE_MODE_POLICIES: tuple[GateModePolicy, ...] = (
+    GateModePolicy(
+        id="answer_verifier",
+        env_var="MAGI_ANSWER_VERIFIER_MODE",
+        values=("enforce", "audit", "off"),
+        effective=_answer_verifier_mode_effective,
+    ),
+    GateModePolicy(
+        id="research_governance",
+        env_var="MAGI_RESEARCH_GOVERNANCE_MODE",
+        values=("enforce", "audit", "off"),
+        effective=_research_governance_mode_effective,
+    ),
+    GateModePolicy(
+        id="edit_match",
+        env_var="MAGI_EDIT_MATCH_EVIDENCE_ENFORCEMENT",
+        values=("block_final_answer", "audit", "off"),
+        effective=_edit_match_mode_effective,
+    ),
+)
+
+_GATE_MODE_BY_ID: dict[str, GateModePolicy] = {g.id: g for g in GATE_MODE_POLICIES}
+
+
+def gate_mode_policy_by_id(policy_id: str) -> GateModePolicy | None:
+    """Return the registered gate-mode policy for ``policy_id``, or ``None``."""
+
+    return _GATE_MODE_BY_ID.get(policy_id)
+
+
+def gate_mode_effective(
+    policy_id: str, env: Mapping[str, str] | None = None
+) -> str | None:
+    """Current effective mode for a registered gate-mode policy, or ``None``.
+
+    Reads through the gate's own resolver so an unset / unparseable flag reports
+    the real default (profile / local-defaults seed included).
+    """
+
+    gate = _GATE_MODE_BY_ID.get(policy_id)
+    if gate is None:
+        return None
+    source = env if env is not None else os.environ
+    try:
+        return gate.effective(source)
+    except Exception:  # noqa: BLE001 - a broken resolver must not break the surface
+        return None
+
+
+def _coerce_gate_modes_section(
+    overrides: Mapping[str, object] | None,
+) -> Mapping[str, object] | None:
+    """Extract the persisted ``gate_modes`` mapping, or ``None`` when absent."""
+
+    if not isinstance(overrides, Mapping):
+        return None
+    section = overrides.get("gate_modes")
+    if isinstance(section, Mapping):
+        return section
+    return None
+
+
+def apply_gate_mode_overrides_to_env(
+    env: MutableMapping[str, str],
+    overrides: Mapping[str, object] | None,
+) -> None:
+    """Project ``overrides['gate_modes'][id]`` onto each gate's env var.
+
+    For every registered ``GateModePolicy`` whose id carries a persisted value in
+    that gate's ordered ``values``, overwrite its env var (overwrite-both-ways, so
+    the user choice beats the profile seed and steps back up cleanly). Absent /
+    invalid values are ignored, so an unset override is byte-identical to before
+    this seam. Never raises.
+    """
+
+    try:
+        section = _coerce_gate_modes_section(overrides)
+        if section is None:
+            return
+        for gate in GATE_MODE_POLICIES:
+            value = section.get(gate.id)
+            if isinstance(value, str) and value in gate.values:
+                env[gate.env_var] = value
     except Exception:  # noqa: BLE001 - fail-soft; a bad file must not break startup
         return

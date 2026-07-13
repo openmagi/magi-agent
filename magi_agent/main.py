@@ -312,12 +312,17 @@ def _apply_persisted_customize_policy_overrides(environ) -> None:
         from .customize.builtin_policy_overrides import (
             apply_builtin_policy_overrides_to_env,
             apply_citation_gate_mode_override_to_env,
+            apply_gate_mode_overrides_to_env,
         )
         from .customize.store import load_overrides
 
         overrides = load_overrides()
         apply_builtin_policy_overrides_to_env(environ, overrides)
         apply_citation_gate_mode_override_to_env(environ, overrides)
+        # Generalized gate-mode selections (answer_verifier / research_governance
+        # / edit_match). Same overwrite-both-ways discipline as the citation
+        # gate-mode step-down; an absent selection leaves the env untouched.
+        apply_gate_mode_overrides_to_env(environ, overrides)
     except Exception:  # noqa: BLE001 - never let a customize read break startup
         return
 
