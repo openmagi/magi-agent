@@ -489,6 +489,11 @@ def wrap_cli_adk_tools_with_evidence_collector(
     # producer_control records back so record_tool_result records the
     # ALREADY-injected result without re-registering.
     register_and_inject = getattr(collector, "register_and_inject_sources", None)
+    # injection_guard (U6): scan external tool-result content for injection
+    # heuristics and (annotate mode) prepend a static advisory header. Mirrors
+    # the citation wrap point; runs AFTER re-injection so the header sits above
+    # the citation-injected content.
+    scan_and_annotate = getattr(collector, "scan_and_annotate_untrusted_content", None)
 
     for tool in tools:
         original = getattr(tool, "func", None)
@@ -530,8 +535,28 @@ def wrap_cli_adk_tools_with_evidence_collector(
                     )
                 except Exception:
                     citation_records = None
-            # (4) record the ALREADY-injected result; precomputed records keep the
-            # single-registration invariant (no re-register inside the collector).
+            # injection_guard (U6): scan the (possibly citation-injected)
+            # model-facing result for prompt-injection heuristics. In annotate
+            # mode with a HIGH finding this prepends a static advisory header +
+            # neutralizes spoofed markers so the model sees "treat as data" at
+            # read time. Fail-quiet: on any error the unannotated result flows on
+            # and injection records are None.
+            injection_records: list[object] | None = None
+            if callable(scan_and_annotate):
+                try:
+                    result, injection_records = scan_and_annotate(
+                        session_id=session_id,
+                        turn_id=turn_id,
+                        tool_call_id=tool_call_id,
+                        tool_name=tool_name,
+                        result=result,
+                        arguments=arguments,
+                    )
+                except Exception:
+                    injection_records = None
+            # (4) record the ALREADY-injected + annotated result; precomputed
+            # records keep the single-scan/single-registration invariant (no
+            # re-register or re-scan inside the collector).
             try:
                 record_tool_result(
                     session_id=session_id,
@@ -541,6 +566,7 @@ def wrap_cli_adk_tools_with_evidence_collector(
                     result=result,
                     arguments=arguments,
                     precomputed_citation_records=citation_records,
+                    precomputed_injection_records=injection_records,
                 )
             except Exception:
                 pass

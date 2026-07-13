@@ -86,6 +86,14 @@ def _verify_effective(env: Mapping[str, str]) -> bool:
     return parse_verify_before_replying_enabled(env)
 
 
+def _injection_guard_effective(env: Mapping[str, str]) -> bool:
+    from magi_agent.config.env import (  # noqa: PLC0415
+        parse_injection_guard_enabled,
+    )
+
+    return parse_injection_guard_enabled(env)
+
+
 # Curated, conservative catalog. Each entry maps a builtin *policy* id (the same
 # id used in ``policies.BUILTIN_POLICIES`` and returned by ``list_policies()``)
 # to the single master ``MAGI_*_ENABLED`` flag its runtime gate reads.
@@ -109,6 +117,20 @@ BUILTIN_POLICY_TOGGLES: tuple[BuiltinPolicyToggle, ...] = (
             "self-audit entirely."
         ),
         effective=_verify_effective,
+    ),
+    BuiltinPolicyToggle(
+        id="injection_guard",
+        env_var="MAGI_INJECTION_GUARD_ENABLED",
+        label="Injection guard",
+        description=(
+            "Scans external tool-result content (web, browser, knowledge-base "
+            "reads) for prompt-injection heuristics, records findings as audit "
+            "evidence, and on a high-severity match prepends a static advisory "
+            "header so the model treats the content as untrusted data. It never "
+            "blocks and never rewrites the fetched content. Turn it off to skip "
+            "the scan and annotation entirely."
+        ),
+        effective=_injection_guard_effective,
     ),
 )
 

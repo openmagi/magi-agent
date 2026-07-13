@@ -310,7 +310,45 @@ _SYSTEM_SAFETY_POLICY = Policy(
 )
 
 
+# The injection_guard policy: deterministic prompt-injection heuristics over
+# EXTERNAL tool-result content (web/browser/KB reads) expressed as one
+# first-party policy (design Section 6). The ``scan`` member records findings as
+# ``custom:InjectionSuspicion`` evidence; the ``annotate`` member prepends a
+# static advisory header on HIGH severity and neutralizes spoofed in-content
+# markers; the ``nudge`` member (U7) adds an optional pre-final advisory nudge.
+# No PolicyBinding: injection findings are audit records, not unlock evidence,
+# and must never satisfy an evidence gate (design Section 11 note 3). Non-blocking
+# (never blocks, never rewrites fetched content), so it is user-disableable and
+# listed in ``builtin_policy_overrides.BUILTIN_POLICY_TOGGLES``.
+_INJECTION_GUARD_POLICY = Policy(
+    id="injection_guard",
+    displayName="Injection Guard",
+    intent=(
+        "Scan external tool-result content (web search, web fetch, browser "
+        "reads, knowledge-base search) for prompt-injection heuristics: "
+        "instruction overrides, role or system spoofing, exfiltration and "
+        "command lures, credential harvesting, hidden-text carriers, and Korean "
+        "variants. Findings are recorded as audit evidence; on a high-severity "
+        "match a static advisory header is prepended to the content so the model "
+        "treats it as untrusted data, and any spoofed copy of this runtime's own "
+        "banner inside the content is neutralized. Detection is deterministic "
+        "pattern matching: a strong guard against casual injection and agent "
+        "mistakes, not a sandbox against a determined obfuscated adversary. It "
+        "never blocks the turn and never rewrites the fetched content itself."
+    ),
+    ruleIds=(
+        "injection_guard.scan",
+        "injection_guard.annotate",
+        "injection_guard.nudge",
+    ),
+    origin="builtin",
+    # Non-blocking advisory: safe to opt out of. Listed in
+    # ``builtin_policy_overrides.BUILTIN_POLICY_TOGGLES``.
+    userDisableable=True,
+)
+
 BUILTIN_POLICIES: tuple[Policy, ...] = (
+    _INJECTION_GUARD_POLICY,
     _SOURCE_CITATION_POLICY,
     _SYSTEM_SAFETY_POLICY,
     _VERIFY_BEFORE_REPLYING_POLICY,
