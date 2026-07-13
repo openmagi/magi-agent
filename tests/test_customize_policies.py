@@ -13,6 +13,7 @@ import pytest
 from pydantic import ValidationError
 
 from magi_agent.customize.policies import (
+    BUILTIN_POLICIES,
     Policy,
     PolicyBinding,
     PolicyReview,
@@ -24,6 +25,16 @@ from magi_agent.customize.policies import (
     upsert_policy,
 )
 from magi_agent.customize.store import load_overrides, save_overrides
+
+# Derive the always-present first-party builtin ids from the source of truth so
+# these expectations track the builtin set automatically as new policies are added,
+# without re-breaking on every new builtin.
+_BUILTIN_IDS: tuple[str, ...] = tuple(p.policy_id for p in BUILTIN_POLICIES)
+
+
+def _expected_ids(*extra: str) -> list[str]:
+    """The full sorted listing (builtins + any user ids), mirroring list_policies order."""
+    return sorted({*_BUILTIN_IDS, *extra})
 
 
 def _path(tmp_path: Path) -> Path:
@@ -50,13 +61,7 @@ def test_empty_store_has_only_builtin_policies(tmp_path: Path) -> None:
     # policies (list_policies always includes the read-only builtins so the
     # Rules surface tells the truth about runtime-native policies).
     policies = list_policies(p)
-    assert [pol.policy_id for pol in policies] == [
-        "egress_guard",
-        "injection_guard",
-        "source_citation",
-        "system_safety",
-        "verify_before_replying",
-    ]
+    assert [pol.policy_id for pol in policies] == _expected_ids()
     assert all(pol.origin == "builtin" for pol in policies)
     assert get_policy("verify-source", p) is None
 
@@ -82,15 +87,7 @@ def test_list_sorted_and_skips_malformed(tmp_path: Path) -> None:
     save_overrides(overrides, p)
     ids = [pol.policy_id for pol in list_policies(p)]
     # sorted, always-present builtins included, malformed + mismatch skipped
-    assert ids == [
-        "alpha",
-        "egress_guard",
-        "injection_guard",
-        "source_citation",
-        "system_safety",
-        "verify_before_replying",
-        "zeta",
-    ]
+    assert ids == _expected_ids("alpha", "zeta")
 
 
 def test_delete(tmp_path: Path) -> None:
@@ -108,14 +105,7 @@ def test_upsert_updates_in_place(tmp_path: Path) -> None:
     got = get_policy("verify-source", p)
     assert got is not None and got.rule_ids == ("cr_a", "cr_b")
     # In-place: one user policy (no duplicate) plus the always-present builtins.
-    assert [pol.policy_id for pol in list_policies(p)] == [
-        "egress_guard",
-        "injection_guard",
-        "source_citation",
-        "system_safety",
-        "verify-source",
-        "verify_before_replying",
-    ]
+    assert [pol.policy_id for pol in list_policies(p)] == _expected_ids("verify-source")
 
 
 # --- validation ---
@@ -205,13 +195,7 @@ def test_old_store_without_policies_key_normalizes(tmp_path: Path) -> None:
     overrides = load_overrides(p)
     assert overrides["policies"] == {}  # default filled in, not dropped
     # No stored user policies; the surface still shows the first-party builtins.
-    assert [pol.policy_id for pol in list_policies(p)] == [
-        "egress_guard",
-        "injection_guard",
-        "source_citation",
-        "system_safety",
-        "verify_before_replying",
-    ]
+    assert [pol.policy_id for pol in list_policies(p)] == _expected_ids()
 
 
 def test_normalizer_drops_non_dict_policy_entries(tmp_path: Path) -> None:
@@ -303,8 +287,9 @@ def test_migrate_groups_is_idempotent(tmp_path: Path) -> None:
         p,
     )
     # 'grp' is a single group -> exactly one policy; re-running creates nothing.
-    # The surface = the one migrated policy + the always-present builtins (5 now).
+    # The surface = the one migrated policy + the always-present builtins.
+    _n = 1 + len(_BUILTIN_IDS)
     assert migrate_groups_to_policies(p) == 1
-    assert len(list_policies(p)) == 6
+    assert len(list_policies(p)) == _n
     assert migrate_groups_to_policies(p) == 0
-    assert len(list_policies(p)) == 6
+    assert len(list_policies(p)) == _n
