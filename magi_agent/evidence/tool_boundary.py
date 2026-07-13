@@ -90,6 +90,10 @@ class ToolEvidenceRecord(BaseModel):
     error_code: str | None = Field(default=None, alias="errorCode")
     error_message: str | None = Field(default=None, alias="errorMessage")
     duration_ms: int | None = Field(default=None, alias="durationMs")
+    # Policy attribution for denied tool events (U1: system_safety attribution).
+    # Set when the deny reason maps to a first-party builtin policy member.
+    policy_id: str | None = Field(default=None, alias="policyId")
+    rule_id: str | None = Field(default=None, alias="ruleId")
 
     @field_validator("arg_summary", "result_summary", mode="before")
     @classmethod
@@ -194,6 +198,7 @@ def build_denied_tool_error_evidence(
     reason: PolicyFailureReason,
     message: str,
     observed_at: int | float,
+    policy_attribution: dict[str, str] | None = None,
 ) -> ToolEvidenceRecord:
     return ToolEvidenceRecord(
         kind="tool_error",
@@ -206,6 +211,8 @@ def build_denied_tool_error_evidence(
         status=_POLICY_STATUSES[reason],
         errorCode=_POLICY_ERROR_CODES[reason],
         errorMessage=_sanitize_public_text(message),
+        policyId=policy_attribution.get("policyId") if policy_attribution else None,
+        ruleId=policy_attribution.get("ruleId") if policy_attribution else None,
     )
 
 
