@@ -45,9 +45,6 @@ from dataclasses import dataclass
 from typing import Literal
 from urllib.parse import urlsplit
 
-from magi_agent.credentials_admin.approval_resolver import extract_egress_host
-
-
 ExtractionStatus = Literal["args", "shell", "failed"]
 
 
@@ -183,7 +180,10 @@ def extract_tool_destination(
         return _FAILED
 
     # Reuse the shared best-effort extractor for the host; re-parse locally for
-    # the port so the two never disagree about the authority.
+    # the port so the two never disagree about the authority. Lazy-imported to
+    # avoid a security->credentials_admin top-level layering edge.
+    from magi_agent.credentials_admin.approval_resolver import extract_egress_host
+
     raw_host = extract_egress_host(tool_name, arguments)
     if raw_host is None:
         return _FAILED
