@@ -389,7 +389,7 @@ graph LR
 | __init__.py | — | — | (root)/main.py, cli/tui/app.py |
 | __main__.py | — | main | — |
 | app.py | — | active_sessions, app_api, board_api, bootstrap, chat, composio_broker, config, control_requests, credentials, customize, daemon, debug_trace, health, integrations, learning_dashboard, observability, openmagi_runtime, packs_dashboard, plugins, shadow_invocations, streaming_chat_route, tools, web_dashboard | (root)/main.py |
-| facades.py | High-level entry-point facades that compose existing modules. | bus, context, dispatcher, flags, lifecycle_audit, lifecycle_shell_command_control, manifest, output_rewrite, prompt_injection, replace_payloads, resolved, result, store, verification_policy | cli/customize_tool_wiring.py |
+| facades.py | High-level entry-point facades that compose existing modules. | authored_prompt_append, bus, context, dispatcher, flags, lifecycle_audit, lifecycle_shell_command_control, manifest, output_rewrite, replace_payloads, resolved, result, store, verification_policy | cli/customize_tool_wiring.py |
 | main.py | — | _truthy, app, builtin_policy_overrides, chat, control_plane_overrides, env, flags, hosted_defaults, install_profile_bootstrap, local_defaults, local_proxy, local_vault, memory_bootstrap, models, observed_egress, openmagi_runtime, otel_noise, providers, serve_token, store, vault_local, vault_server | (root)/__main__.py, cli/tests/test_app.py |
 
 ### adk_bridge/
@@ -851,13 +851,14 @@ graph LR
 | __init__.py | — | apply, store | — |
 | after_tool_gate.py | Customize after-tool-use ingestion gate (P4). | control_plane, criterion_engine, flags, receipt_redaction, store, types, verification_policy | engine/model_runner.py |
 | apply.py | — | flags, verification_policy | customize/__init__.py, runtime/openmagi_runtime.py, transport/customize.py |
+| authored_prompt_append.py | F-MUT1 -- ``prompt_injection`` custom_rule kind (module: authored_prompt_append). | — | (root)/facades.py, customize/custom_rules.py, customize/prompt_injection.py, runtime/message_builder.py |
 | budgets_apply.py | F7 — Customize budgets applier. | flags, verification_policy | runtime/governed_turn.py, transport/customize.py |
 | builtin_policy_overrides.py | User-facing opt-out for first-party (builtin) *policies*. | env | (root)/main.py, cli/app.py, customize/catalog.py, transport/customize.py |
 | capability_scope.py | Capability-scope custom rule (F4). | local_readonly, permissions | customize/custom_rules.py, runtime/child_runner_live.py |
 | catalog.py | — | app_api, builtin_policy_overrides, control_plane_overrides, policies, preset_map, presets, store, what_menu | engine/model_runner.py, transport/customize.py |
 | control_plane_overrides.py | User-facing toggles for in-context control-plane *behaviors*. | _truthy | (root)/main.py, cli/app.py, customize/catalog.py, transport/customize.py |
 | criterion_engine.py | Generic LLM criterion-judgment engine (P3). | egress_gate | customize/after_tool_gate.py, customize/lifecycle_audit.py, engine/driver.py |
-| custom_rules.py | Custom verification-rule schema + validation (spec §9.1). | capability_scope, output_rewrite, prompt_injection, shacl_verifier, shell_runner, what_menu | customize/nl_compiler_interactive.py, customize/nl_policy_interactive.py, customize/policy_compiler.py, customize/policy_persist.py, customize/rule_compiler.py, transport/customize.py |
+| custom_rules.py | Custom verification-rule schema + validation (spec §9.1). | authored_prompt_append, capability_scope, output_rewrite, shacl_verifier, shell_runner, what_menu | customize/nl_compiler_interactive.py, customize/nl_policy_interactive.py, customize/policy_compiler.py, customize/policy_persist.py, customize/rule_compiler.py, transport/customize.py |
 | field_constraint_compiler.py | Deterministic SHACL-shape synthesizer for the ``field_constraint`` IR. | shacl_compiler, shacl_ontology, types | customize/rule_compiler.py, transport/customize.py |
 | lifecycle_audit.py | Customize Tier 2 lifecycle audit gates (PR-F-UX1). | criterion_engine, flags, shell_check, shell_command, store, verification_policy | (root)/facades.py, adk_bridge/context_compaction.py, adk_bridge/lifecycle_llm_call_control.py, adk_bridge/lifecycle_session_control.py, adk_bridge/lifecycle_shell_command_control.py, artifacts/file_delivery.py, missions/work_queue/driver.py, runtime/governed_turn.py |
 | live_catalog.py | Live evidence-catalog view (PR-F2). | ledger_store, shacl_compiler, store, what_menu | transport/customize.py |
@@ -873,7 +874,7 @@ graph LR
 | policy_review.py | Policy review loop: deterministic integrity + advisory LLM intent-coverage. | policy_plan, rule_compiler | transport/customize.py |
 | prebuilt_components.py | PR-P4: prebuilt (always-on) runtime components catalog. | — | transport/customize.py |
 | preset_map.py | Canonical preset id → runtime-seam map for the Customize verification tab. | seam_apply, seam_spec | customize/catalog.py, customize/seam_apply.py, customize/seam_compiler.py, customize/seam_spec.py, engine/model_runner.py |
-| prompt_injection.py | F-MUT1 — ``prompt_injection`` custom_rule kind. | — | (root)/facades.py, customize/custom_rules.py, runtime/message_builder.py |
+| prompt_injection.py | — | authored_prompt_append | — |
 | rule_compiler.py | Unified NL → Rule compiler — single LLM call that routes a natural- | custom_rules, dashboard_authored, field_constraint_compiler, seam_spec, shacl_compiler, shacl_verifier | customize/mode_compiler.py, customize/nl_compiler_interactive.py, customize/nl_policy_interactive.py, customize/policy_compiler.py, customize/policy_review.py, transport/customize.py |
 | runtime_fields.py | Runtime-fields derivation for the wizard's variable chip picker (F-UX2 / F8). | shacl_compiler, tool_perm | transport/customize.py |
 | runtime_gate.py | Runtime-side query for Customize verification preset state. | flags, store, verification_policy | customize/what_menu.py, engine/driver.py, engine/engine_gates.py |
@@ -1716,7 +1717,7 @@ graph LR
 | memory_snapshot_cache.py | Session-scoped frozen snapshot cache for memory prompt projection. | prompt_projection | cli/tool_runtime.py |
 | memory_turn_hook.py | Turn-end memory hook: transcript→daily flush + compaction trigger (PR-B). | compaction_tree, config, local_file_writable, summarizer_runtime | cli/headless.py, transport/chat_routes_local.py |
 | memory_write_wiring.py | Gate-aware factory for the MemoryWrite tool host (Task D, PR2). | local_file_writable, memory_write_readiness, memory_write_tool | cli/tool_runtime.py, runtime/openmagi_runtime.py |
-| message_builder.py | — | _token_window_table, bus, child_runner_live, config, context, env, flags, injection, manifest, model_tiers, modes, per_turn_agent_mode_context, prompt_injection, provider_adapter, resolved, splitter, store, verification_policy | cli/clipboard_image.py, cli/tool_runtime.py, runtime/context_attachments.py, shadow/gate5b4c3_runner_input_adapter.py, transport/chat.py, transport/generation_request.py |
+| message_builder.py | — | _token_window_table, authored_prompt_append, bus, child_runner_live, config, context, env, flags, injection, manifest, model_tiers, modes, per_turn_agent_mode_context, provider_adapter, resolved, splitter, store, verification_policy | cli/clipboard_image.py, cli/tool_runtime.py, runtime/context_attachments.py, shadow/gate5b4c3_runner_input_adapter.py, transport/chat.py, transport/generation_request.py |
 | model_factory.py | E-7 — single seam for per-turn model construction. | anthropic_cache_model, env, metrics | shadow/gate5b4c3_live_runner_boundary.py |
 | model_tiers.py | — | catalog, env, flags, providers, safety, trace_sink | evidence/final_output_gate.py, gates/tool_usage_guidance.py, harness/long_context_eval.py, models/types.py, plugins/tool_projection.py, recipes/materializer.py, recipes/phase_routing_defaults.py, recipes/reliability_policy.py, runtime/adk_turn_runner.py, runtime/child_runner_boundary.py, runtime/child_runner_live.py, runtime/context_budget.py, runtime/message_builder.py, runtime/phase_routing.py, runtime/reliability_budget.py, runtime/request_shape.py, runtime/tool_synthesis.py, tools/image_tools.py |
 | no_agent_watchdog.py | — | safety | runtime/events.py |
