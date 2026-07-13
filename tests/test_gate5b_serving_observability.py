@@ -25,6 +25,11 @@ from fastapi.testclient import TestClient
 
 from magi_agent.app import create_app
 from magi_agent.cli.contracts import EngineResult, Terminal
+from magi_agent.observability.runtime_sink import (
+    compose_active_observability_sink,
+    get_active_sink,
+    set_active_sink,
+)
 from magi_agent.observability.transcript import (
     governed_transcript_event_sink,
     public_tool_event_to_transcript_record,
@@ -297,3 +302,91 @@ def test_flag_on_tool_events_reach_transcript_as_legacy_record_types(monkeypatch
     assert tool_records[0]["call_id"] == "tu_1"
     assert tool_records[1]["call_id"] == "tu_1"
     assert tool_records[1]["status"] == "ok"
+
+
+# ---------------------------------------------------------------------------
+# Observability-sink composition (activity_events on the governed path).
+#
+# The local ``build_headless_runtime`` path composes ``get_active_sink()`` into
+# the driver event_sink (cli/wiring combine_sinks + get_active_sink), so activity
+# rows land in observability.db. The governed hosted serving path never wired
+# this, so NO activity rows were written after the gate5b flip. These mirror the
+# transcript-sink tests above but for ``compose_active_observability_sink``.
+# ---------------------------------------------------------------------------
+
+
+def test_compose_observability_sink_is_identity_when_no_sink() -> None:
+    """When no observability sink is registered, the inner sink is returned
+    unchanged so the driver event_sink path stays byte-identical (the local path
+    keeps ``event_sink=None`` semantics when nothing is mounted)."""
+    set_active_sink(None)
+    inner = object()
+    assert compose_active_observability_sink(inner) is inner
+
+
+def test_compose_observability_sink_forwards_raw_events_to_active_sink() -> None:
+    """When a sink IS registered, the composed 3-arg sink forwards each raw
+    driver event to ``get_active_sink()`` (this is what writes activity_events)."""
+    obs_calls: list[tuple] = []
+    set_active_sink(lambda event, s, t: obs_calls.append((dict(event), s, t)))
+    try:
+        composed = compose_active_observability_sink(None)
+        assert composed is not None
+        composed({"type": "tool_start", "id": "tu_5", "name": "Bash"}, "sess", "turn")
+        composed({"type": "text_delta", "delta": "hi"}, "sess", "turn")
+    finally:
+        set_active_sink(None)
+
+    assert [e["type"] for (e, _s, _t) in obs_calls] == ["tool_start", "text_delta"]
+    assert obs_calls[0][1] == "sess" and obs_calls[0][2] == "turn"
+
+
+def test_compose_observability_sink_forwards_inner_and_active() -> None:
+    """The composed sink fans the SAME raw event out to BOTH the inner sink
+    (governance / SSE) and the observability sink -- exactly as combine_sinks."""
+    obs_calls: list[tuple] = []
+    inner_calls: list[tuple] = []
+    set_active_sink(lambda event, s, t: obs_calls.append((event, s, t)))
+    try:
+        composed = compose_active_observability_sink(
+            lambda event, s, t: inner_calls.append((event, s, t))
+        )
+        composed({"type": "tool_end", "id": "tu_5", "status": "ok"}, "sess", "turn")
+    finally:
+        set_active_sink(None)
+
+    assert [e["type"] for (e, _s, _t) in obs_calls] == ["tool_end"]
+    assert [e["type"] for (e, _s, _t) in inner_calls] == ["tool_end"]
+
+
+def test_flag_on_governed_turn_projects_activity_events_to_observability_sink(
+    monkeypatch, tmp_path: Any
+) -> None:
+    """End-to-end: the composed public_event_sink wired into build_hosted_runtime
+    on the governed serving path forwards raw driver events to the process-global
+    observability sink (``get_active_sink``) -- the sink ``register_observability``
+    mounts to write observability.db activity rows. Regression guard for the
+    activity_events silence after the gate5b (U11) flip."""
+    obs_events: list[tuple] = []
+    set_active_sink(lambda event, s, t: obs_events.append((dict(event), s, t)))
+    capture_sink: dict = {}
+    try:
+        _drive_flag_on_governed_turn(monkeypatch, tmp_path, capture_sink=capture_sink)
+        sink = capture_sink.get("public_event_sink")
+        assert sink is not None, (
+            "build_hosted_runtime must receive a composed public_event_sink"
+        )
+        # Drive the composed sink with the wire-shape events the driver emits.
+        sink({"type": "tool_start", "id": "tu_1", "name": "Bash"}, "sess", "turn")
+        sink({"type": "tool_end", "id": "tu_1", "status": "ok"}, "sess", "turn")
+        sink({"type": "text_delta", "delta": "hi"}, "sess", "turn")
+    finally:
+        set_active_sink(None)
+
+    # Every raw driver event reached the observability sink -> activity rows.
+    assert [e["type"] for (e, _s, _t) in obs_events] == [
+        "tool_start",
+        "tool_end",
+        "text_delta",
+    ]
+    assert obs_events[0][1] == "sess" and obs_events[0][2] == "turn"

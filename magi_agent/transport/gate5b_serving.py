@@ -32,6 +32,7 @@ from magi_agent.evidence.observed_egress import ObservedEgressEvidence, get_obse
 from magi_agent.gates.gate1a_readonly_tools import Gate1AReadOnlyToolBundle, Gate1AReadOnlyToolConfig, build_gate1a_readonly_tool_bundle
 from magi_agent.gates.gate5b_full_toolhost import Gate5BFullToolBundle, Gate5BFullToolHostConfig, build_gate5b_full_toolhost_bundle
 from magi_agent.introspection.egress_gate import EgressVerifierStatus
+from magi_agent.observability.runtime_sink import compose_active_observability_sink
 from magi_agent.observability.transcript import emit_transcript_record, governed_transcript_event_sink
 from magi_agent.recipes.compiler import AgentRecipeCompiler, ProfileResolutionRequest
 from magi_agent.recipes.materializer import RecipeMaterializer
@@ -752,8 +753,19 @@ async def _run_live_chat_runner(
                         # ``governance_event_sink`` unchanged, so the driver
                         # event_sink path is byte-identical to pre-U8; the hosted
                         # public/SSE path is never altered by this unit.
+                        #
+                        # Also compose the process-global OBSERVABILITY sink so the
+                        # governed serving path writes ``observability.db`` activity
+                        # rows the same way the local ``build_headless_runtime`` path
+                        # does (cli/wiring combine_sinks + get_active_sink). Without
+                        # this the governed hosted path emits no activity events (the
+                        # dashboard observability panel stayed silent after the
+                        # gate5b flip). When no observability sink is registered
+                        # (MAGI_OBSERVABILITY_ENABLED unset) this returns its inner
+                        # sink unchanged, so the driver event_sink path is
+                        # byte-identical; the public / SSE path is never altered.
                         public_event_sink=governed_transcript_event_sink(
-                            governance_event_sink
+                            compose_active_observability_sink(governance_event_sink)
                         ),
                         app_name=GATE5B_SHADOW_APP_NAME,
                         user_id=GATE5B_SHADOW_USER_ID,
