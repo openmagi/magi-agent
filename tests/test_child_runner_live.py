@@ -23,6 +23,7 @@ from magi_agent.runtime.child_runner_live import (
     _DEGRADE_TURN_ERROR,
     _MAX_TURN_TIMEOUT_S,
     RealLocalChildRunner,
+    derive_child_session_id,
     is_live_child_runner_enabled,
 )
 
@@ -974,3 +975,31 @@ def test_legacy_missing_tool_streak_cap_zero_disables(monkeypatch) -> None:
     # No trip; the turn completed (text was collected).
     assert output["status"] == "completed"
     assert "partial answer so far" in str(output["summary"])
+
+
+def test_derive_child_session_id_matches_runner_formula() -> None:
+    # The shared helper MUST produce the exact id the runner assigns, otherwise
+    # the child_started linkage would point at a session that never exists.
+    req = ChildTaskRequest(
+        parentExecutionId="agent:main:app:demo:50",
+        turnId="turn-x",
+        taskId="task-9",
+        objective="do it",
+    )
+    assert derive_child_session_id(
+        parent_execution_id="agent:main:app:demo:50",
+        turn_id="turn-x",
+        task_id="task-9",
+    ) == RealLocalChildRunner._child_session_id(req)
+
+
+def test_derive_child_session_id_uses_sentinels_for_missing_parts() -> None:
+    # Byte-stable fallback seed (parent/turn/task) so ids stay deterministic.
+    import hashlib
+
+    seed = "parent:turn:task"
+    expected = "child-session-" + hashlib.sha1(seed.encode("utf-8")).hexdigest()[:16]
+    assert (
+        derive_child_session_id(parent_execution_id=None, turn_id=None, task_id=None)
+        == expected
+    )

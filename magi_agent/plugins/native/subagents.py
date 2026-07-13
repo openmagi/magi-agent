@@ -140,6 +140,7 @@ async def _emit_child_started(
     agent_name: str | None = None,
     model: str | None = None,
     task_title: str | None = None,
+    child_session_id: str | None = None,
 ) -> None:
     event = child_started_event(
         task_id=task_id,
@@ -148,6 +149,7 @@ async def _emit_child_started(
         agent_name=agent_name,
         model=model,
         task_title=task_title,
+        child_session_id=child_session_id,
     )
     await _emit_agent_event(context, event)
     await _emit_agent_event(
@@ -462,6 +464,7 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
         )
         from magi_agent.runtime.child_runner_live import (  # noqa: PLC0415
             RealLocalChildRunner,
+            derive_child_session_id,
         )
         from magi_agent.runtime.child_toolset import (  # noqa: PLC0415
             resolve_child_toolset_profile,
@@ -479,6 +482,15 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
         )
         child_receipt_ref = _child_event_receipt_ref(
             parent_execution_id=parent_exec_id,
+            task_id=task_id,
+        )
+        # The observability session id the child turn will record under — computed
+        # from the SAME identifiers the live runner hashes (see
+        # derive_child_session_id / RealLocalChildRunner._child_session_id) so the
+        # child_started event (recorded under the parent session) links the two.
+        child_session_id = derive_child_session_id(
+            parent_execution_id=parent_exec_id,
+            turn_id=turn_id,
             task_id=task_id,
         )
 
@@ -602,6 +614,7 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
             agent_name=_agent_name_for_task(task_id),
             model=_model_label(req_provider, req_model),
             task_title=_sanitized_task_title(arguments),
+            child_session_id=child_session_id,
         )
         result = await boundary.run(request)
 

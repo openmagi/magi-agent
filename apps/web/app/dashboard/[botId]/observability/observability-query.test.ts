@@ -12,6 +12,8 @@ import {
   resolveKindCategories,
   deriveSessionChannel,
   deriveSessionTitle,
+  buildSessionForest,
+  flattenSessionForest,
   type ActivityFilters,
 } from "./observability-query";
 
@@ -1057,5 +1059,93 @@ describe("deriveSessionTitle", () => {
     // An opaque id (no known shape) falls back to the provided label, then the id.
     expect(deriveSessionTitle("d41d8cd98f00b204", "Bash, Calculation")).toBe("Bash, Calculation");
     expect(deriveSessionTitle("d41d8cd98f00b204")).toBe("d41d8cd98f00b204");
+  });
+});
+
+describe("buildSessionForest", () => {
+  it("nests children under a present parent, preserving order", () => {
+    const sessions = [
+      { id: "agent:main:app:demo:1" },
+      { id: "child-a", parent_session_id: "agent:main:app:demo:1" },
+      { id: "child-b", parent_session_id: "agent:main:app:demo:1" },
+      { id: "agent:main:app:demo:2" },
+    ];
+    const forest = buildSessionForest(sessions);
+    expect(forest.map((n) => n.session.id)).toEqual([
+      "agent:main:app:demo:1",
+      "agent:main:app:demo:2",
+    ]);
+    expect(forest[0].children.map((n) => n.session.id)).toEqual(["child-a", "child-b"]);
+    expect(forest[1].children).toEqual([]);
+  });
+
+  it("keeps a child as a root when its parent is not in the list", () => {
+    const forest = buildSessionForest([
+      { id: "child-orphan", parent_session_id: "agent:main:app:demo:99" },
+    ]);
+    expect(forest.map((n) => n.session.id)).toEqual(["child-orphan"]);
+  });
+
+  it("supports multi-level nesting (subagent spawns subagent)", () => {
+    const forest = buildSessionForest([
+      { id: "root" },
+      { id: "mid", parent_session_id: "root" },
+      { id: "leaf", parent_session_id: "mid" },
+    ]);
+    expect(forest).toHaveLength(1);
+    expect(forest[0].children[0].session.id).toBe("mid");
+    expect(forest[0].children[0].children[0].session.id).toBe("leaf");
+  });
+
+  it("defends against self-parent and cycles (treats them as roots)", () => {
+    const selfRef = buildSessionForest([{ id: "x", parent_session_id: "x" }]);
+    expect(selfRef.map((n) => n.session.id)).toEqual(["x"]);
+    const cyclic = buildSessionForest([
+      { id: "a", parent_session_id: "b" },
+      { id: "b", parent_session_id: "a" },
+    ]);
+    // At least one is promoted to a root so no node is lost to a cycle.
+    const totalNodes = cyclic.length + cyclic.reduce((n, r) => n + r.children.length, 0);
+    expect(totalNodes).toBe(2);
+  });
+
+  it("treats id-less sessions as roots and never mutates the input", () => {
+    const sessions = [{ label: "no-id" }, { id: "p" }, { id: "c", parent_session_id: "p" }];
+    const snapshot = JSON.stringify(sessions);
+    const forest = buildSessionForest(sessions);
+    expect(forest.map((n) => n.session)).toContainEqual({ label: "no-id" });
+    expect(JSON.stringify(sessions)).toBe(snapshot);
+  });
+});
+
+describe("flattenSessionForest", () => {
+  const forest = buildSessionForest([
+    { id: "p" },
+    { id: "c1", parent_session_id: "p" },
+    { id: "c1a", parent_session_id: "c1" },
+    { id: "c2", parent_session_id: "p" },
+  ]);
+
+  it("flattens in tree order with depth and descendant counts", () => {
+    const rows = flattenSessionForest(forest, new Set());
+    expect(rows.map((r) => [r.session.id, r.depth])).toEqual([
+      ["p", 0],
+      ["c1", 1],
+      ["c1a", 2],
+      ["c2", 1],
+    ]);
+    const p = rows.find((r) => r.session.id === "p")!;
+    expect(p.childCount).toBe(2);
+    expect(p.descendantCount).toBe(3);
+  });
+
+  it("hides the descendants of a collapsed session", () => {
+    const rows = flattenSessionForest(forest, new Set(["c1"]));
+    expect(rows.map((r) => r.session.id)).toEqual(["p", "c1", "c2"]);
+  });
+
+  it("collapsing the root hides the whole subtree", () => {
+    const rows = flattenSessionForest(forest, new Set(["p"]));
+    expect(rows.map((r) => r.session.id)).toEqual(["p"]);
   });
 });

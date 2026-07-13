@@ -445,12 +445,26 @@ class ActivityStore:
             "ORDER BY session_id, MIN(ts) ASC"
         )
 
+        # Query 5: child_started events carry the spawned child's session id in
+        # their payload (childSessionId) and are recorded under the PARENT
+        # session — this is the parent→child linkage for the Sessions tree.
+        # ORDER BY id ASC so the earliest spawn wins deterministically if a child
+        # id somehow appears twice.
+        sql_children = (
+            "SELECT session_id, payload_json "
+            "FROM activity_events "
+            "WHERE kind = 'child_started' AND session_id IS NOT NULL "
+            "AND payload_json IS NOT NULL "
+            "ORDER BY id ASC"
+        )
+
         try:
             with self._lock:
                 main_rows = self._conn.execute(sql_main, (limit,)).fetchall()
                 breakdown_rows = self._conn.execute(sql_breakdown).fetchall()
                 first_turn_rows = self._conn.execute(sql_first_turn).fetchall()
                 tool_rows = self._conn.execute(sql_tools).fetchall()
+                child_rows = self._conn.execute(sql_children).fetchall()
         except Exception:
             logger.debug("activity store list_sessions failed", exc_info=True)
             return []
@@ -472,6 +486,28 @@ class ActivityStore:
         for r in tool_rows:
             tool_names_by_session.setdefault(r["session_id"], []).append(r["tool_name"])
 
+        # child session id -> parent session id, and child session id -> a
+        # human title (taskTitle preferred, else agentName) from the spawning
+        # child_started event. First spawn wins (rows are id-ASC ordered).
+        parent_of: dict[str, str] = {}
+        child_title: dict[str, str] = {}
+        for r in child_rows:
+            payload = r["payload_json"]
+            if not payload:
+                continue
+            try:
+                data = json.loads(payload)
+            except (ValueError, TypeError):
+                continue
+            child_sid = data.get("childSessionId")
+            if not isinstance(child_sid, str) or not child_sid:
+                continue
+            if child_sid not in parent_of:
+                parent_of[child_sid] = r["session_id"]
+                title = data.get("taskTitle") or data.get("agentName")
+                if isinstance(title, str) and title.strip():
+                    child_title[child_sid] = title.strip()
+
         result: list[dict] = []
         for row in main_rows:
             sid = row["id"]
@@ -482,6 +518,13 @@ class ActivityStore:
                 first_turn_summary.get(sid),
                 tool_names_by_session.get(sid, []),
             )
+            # Parent linkage + a friendly title for spawned subagent sessions.
+            parent_sid = parent_of.get(sid)
+            if parent_sid is not None:
+                session["parent_session_id"] = parent_sid
+            title = child_title.get(sid)
+            if title is not None:
+                session["title"] = title
             result.append(session)
         return result
 

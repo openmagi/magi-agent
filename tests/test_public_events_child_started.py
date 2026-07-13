@@ -61,6 +61,27 @@ def test_event_includes_model_when_provided() -> None:
     assert evt["model"] == "anthropic:claude-opus-4-8"
 
 
+def test_event_includes_child_session_id_when_provided() -> None:
+    # childSessionId is the linkage the Sessions tree uses to nest a subagent
+    # under the parent session (this event is recorded under the parent).
+    evt = child_started_event(
+        task_id="task-1",
+        parent_turn_id="turn-1",
+        child_receipt_ref="receipt:sha256:abc",
+        child_session_id="child-session-687a759cc94386e6",
+    )
+    assert evt["childSessionId"] == "child-session-687a759cc94386e6"
+
+
+def test_event_omits_child_session_id_when_absent() -> None:
+    evt = child_started_event(
+        task_id="task-1",
+        parent_turn_id="turn-1",
+        child_receipt_ref="receipt:sha256:abc",
+    )
+    assert "childSessionId" not in evt
+
+
 def test_event_includes_task_title_when_provided() -> None:
     evt = child_started_event(
         task_id="task-1",
