@@ -325,6 +325,7 @@ def agent(
         from magi_agent.customize.builtin_policy_overrides import (  # noqa: PLC0415
             apply_builtin_policy_overrides_to_env,
             apply_citation_gate_mode_override_to_env,
+            apply_gate_mode_overrides_to_env,
         )
         from magi_agent.customize.store import load_overrides  # noqa: PLC0415
 
@@ -335,6 +336,9 @@ def agent(
         # MAGI_SOURCE_CITATION_GATE_MODE and never touches the ENABLED master
         # flag, so capture / inline citations / Sources stay on in every mode.
         apply_citation_gate_mode_override_to_env(os.environ, overrides)
+        # Generalized gate-mode selections (answer_verifier / research_governance
+        # / edit_match): same overwrite-both-ways step-down discipline.
+        apply_gate_mode_overrides_to_env(os.environ, overrides)
     except Exception:  # noqa: BLE001 - never let a customize read break startup
         pass
 

@@ -454,12 +454,84 @@ _CROSS_VERIFY_POLICY = Policy(
 )
 
 
+# The answer-verifier policy: a mode-gated research check that detects value
+# mismatches (numeric / list / entity) in the final answer not supported by the
+# collected evidence. Unlike a boolean toggle it steps through off -> audit ->
+# enforce; the mode selector (not a boolean off) is its opt-DOWN lever, so it is
+# NOT listed in BUILTIN_POLICY_TOGGLES and instead carries a gateMode descriptor.
+_ANSWER_VERIFIER_POLICY = Policy(
+    id="answer_verifier",
+    displayName="Answer Value Verifier",
+    intent=(
+        "Detect value mismatches in the final answer -- a number, list, or "
+        "named entity that the collected evidence does not support. In 'audit' "
+        "it records the mismatch; in 'enforce' it applies a bounded correction "
+        "before the answer ships; 'off' skips the check. Step the mode down if "
+        "the corrections are too aggressive for your use."
+    ),
+    ruleIds=(
+        "answer_verifier.value_mismatch",
+    ),
+    origin="builtin",
+    # Mode-gated (off/audit/enforce): opt-DOWN is the mode selector, not a
+    # boolean off. userDisableable=False keeps it out of BUILTIN_POLICY_TOGGLES;
+    # the catalog attaches a gateMode descriptor instead.
+    userDisableable=False,
+)
+
+
+# The research-governance policy: a mode-gated citation-integrity gate for
+# research turns. In 'enforce' it drives one bounded re-prompt on the
+# deterministic cited-without-source class (citing a URL the turn never fetched
+# is verifiably wrong); 'audit' records only; 'off' skips.
+_RESEARCH_GOVERNANCE_POLICY = Policy(
+    id="research_governance",
+    displayName="Research Citation Integrity",
+    intent=(
+        "For research turns, check that cited sources were actually fetched this "
+        "turn. In 'enforce' a citation of a URL the turn never fetched drives one "
+        "bounded re-prompt (never a silent rewrite); 'audit' records the issue "
+        "only; 'off' skips the check. Step the mode down to relax enforcement."
+    ),
+    ruleIds=(
+        "research_governance.cited_without_source",
+    ),
+    origin="builtin",
+    userDisableable=False,
+)
+
+
+# The edit-match evidence policy: a mode-gated coding gate. A low-confidence
+# fuzzy edit (block_anchor / context_aware tier) that lacks GitDiff + TestRun
+# evidence can, in 'block_final_answer', block the final answer; 'audit' records
+# the low-confidence edit only; 'off' skips.
+_EDIT_MATCH_POLICY = Policy(
+    id="edit_match",
+    displayName="Edit-Match Evidence",
+    intent=(
+        "Guard low-confidence fuzzy code edits: when an edit matched on a weak "
+        "tier and lacks GitDiff + TestRun evidence, 'block_final_answer' blocks "
+        "the answer until the edit is verified, 'audit' records it only, and "
+        "'off' skips. Step down to 'audit' if the block is too strict for your "
+        "editing style."
+    ),
+    ruleIds=(
+        "edit_match.low_confidence_evidence",
+    ),
+    origin="builtin",
+    userDisableable=False,
+)
+
+
 BUILTIN_POLICIES: tuple[Policy, ...] = (
+    _ANSWER_VERIFIER_POLICY,
     _CROSS_VERIFY_POLICY,
+    _EDIT_MATCH_POLICY,
     _EGRESS_GUARD_POLICY,
     _FINAL_OUTPUT_GATE_POLICY,
     _GROUNDED_ANSWER_GUARD_POLICY,
     _INJECTION_GUARD_POLICY,
+    _RESEARCH_GOVERNANCE_POLICY,
     _SOURCE_CITATION_POLICY,
     _SYSTEM_SAFETY_POLICY,
     _VERIFY_BEFORE_REPLYING_POLICY,

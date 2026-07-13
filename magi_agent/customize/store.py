@@ -81,6 +81,12 @@ DEFAULT_OVERRIDES: dict[str, Any] = {
     # overwrite; ``None`` (the default) leaves the flag untouched so it resolves
     # to the fleet default (``repair``) -- byte-identical to before this seam.
     "citation_gate_mode": None,
+    # Mode selections for the generalized gate-mode first-party policies
+    # (answer_verifier / research_governance / edit_match). Maps a policy id to
+    # its chosen mode string; an absent id leaves that gate's env var untouched
+    # (byte-identical to before this seam). Projected by
+    # ``apply_gate_mode_overrides_to_env``.
+    "gate_modes": {},
 }
 
 _USER_RULES_MAX = 20_000
@@ -182,6 +188,14 @@ def _normalize(data: dict[str, Any]) -> dict[str, Any]:
     gate_mode_raw = data.get("citation_gate_mode")
     if isinstance(gate_mode_raw, str) and gate_mode_raw in ("repair", "audit", "off"):
         merged["citation_gate_mode"] = gate_mode_raw
+    # Generalized gate-mode selections: keep a shallow str->str mapping. The
+    # projection (``apply_gate_mode_overrides_to_env``) validates each value
+    # against its gate's ordered enum, so we only shape-check the container here.
+    gate_modes_raw = data.get("gate_modes")
+    if isinstance(gate_modes_raw, dict):
+        merged["gate_modes"] = {
+            str(k): v for k, v in gate_modes_raw.items() if isinstance(v, str)
+        }
     return merged
 
 
@@ -295,6 +309,29 @@ def set_citation_gate_mode_override(
     target = path or customize_path()
     overrides = load_overrides(target)
     overrides["citation_gate_mode"] = str(mode)
+    save_overrides(overrides, target)
+    return overrides
+
+
+def set_gate_mode_override(
+    policy_id: str, mode: str, path: Path | None = None
+) -> dict[str, Any]:
+    """Persist a mode-gated first-party policy's mode selection, save, return.
+
+    Records ``overrides['gate_modes'][policy_id] = mode`` for the generalized
+    gate-mode policies (answer_verifier / research_governance / edit_match). The
+    API layer validates that ``policy_id`` is a registered gate-mode policy and
+    ``mode`` is in that gate's ordered values; the projection step
+    (``apply_gate_mode_overrides_to_env``) ignores anything outside each gate's
+    enum, so a stray value is inert.
+    """
+    target = path or customize_path()
+    overrides = load_overrides(target)
+    section = overrides.get("gate_modes")
+    if not isinstance(section, dict):
+        section = {}
+    section[str(policy_id)] = str(mode)
+    overrides["gate_modes"] = section
     save_overrides(overrides, target)
     return overrides
 
