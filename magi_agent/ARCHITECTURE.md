@@ -1821,6 +1821,7 @@ graph LR
 | credential_vocab.py | C-9 leaf — single vocabulary of "what counts as credential-shaped". | — | composio/config.py, security/credentials.py, security/ssrf.py |
 | credentials.py | — | credential_vocab | security/__init__.py |
 | external_surface.py | — | — | security/__init__.py |
+| injection_detection.py | Deterministic injection detector for untrusted tool-result content. | — | — |
 | posture.py | — | — | security/__init__.py |
 | sandbox_preflight.py | — | — | security/__init__.py |
 | ssrf.py | C-6 + C-7 leaf — single SSRF host classifier. | credential_vocab | channels/telegram_adapter.py, sandbox/network.py, web_acquisition/policy.py |
