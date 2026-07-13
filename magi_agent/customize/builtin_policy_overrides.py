@@ -94,6 +94,28 @@ def _injection_guard_effective(env: Mapping[str, str]) -> bool:
     return parse_injection_guard_enabled(env)
 
 
+def _final_output_gate_effective(env: Mapping[str, str]) -> bool:
+    from magi_agent.config.env import (  # noqa: PLC0415
+        parse_final_output_gate_local_enabled,
+    )
+
+    return parse_final_output_gate_local_enabled(env)
+
+
+def _grounded_answer_guard_effective(env: Mapping[str, str]) -> bool:
+    from magi_agent.config.env import (  # noqa: PLC0415
+        is_grounded_answer_guard_enabled,
+    )
+
+    return is_grounded_answer_guard_enabled(env)
+
+
+def _cross_verify_effective(env: Mapping[str, str]) -> bool:
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_CROSS_VERIFY_ENABLED", env=env)
+
+
 def _egress_guard_effective(env: Mapping[str, str]) -> bool:
     from magi_agent.config.env import (  # noqa: PLC0415
         parse_egress_guard_enabled,
@@ -151,6 +173,43 @@ BUILTIN_POLICY_TOGGLES: tuple[BuiltinPolicyToggle, ...] = (
             "the scan and annotation entirely."
         ),
         effective=_injection_guard_effective,
+    ),
+    BuiltinPolicyToggle(
+        id="final_output_gate",
+        env_var="MAGI_FINAL_OUTPUT_GATE_LOCAL_ENABLED",
+        label="Final Output Evidence Gate",
+        description=(
+            "Before the final answer, checks that numeric claims are backed by "
+            "a deterministic evidence record (calculation, SQL, spreadsheet, "
+            "tool result) produced this turn rather than asserted from the "
+            "model's own arithmetic. Turn it off to let numeric claims ship "
+            "without an evidence check."
+        ),
+        effective=_final_output_gate_effective,
+    ),
+    BuiltinPolicyToggle(
+        id="grounded_answer_guard",
+        env_var="MAGI_GROUNDED_ANSWER_GUARD_ENABLED",
+        label="Grounded Answer Guard",
+        description=(
+            "Flags a fabricated specific — a precise number or dotted/hyphenated "
+            "identifier the answer asserts but that appears nowhere in the tool "
+            "evidence this turn. Conservative (skips years and small numbers). "
+            "Turn it off to skip the specific-value grounding check."
+        ),
+        effective=_grounded_answer_guard_effective,
+    ),
+    BuiltinPolicyToggle(
+        id="cross_verify",
+        env_var="MAGI_CROSS_VERIFY_ENABLED",
+        label="Cross-Verify Subagent Results",
+        description=(
+            "When a turn spawns subagents, cross-checks the composed answer "
+            "against the results those subagents returned so a child's claim "
+            "cannot silently override the parent's evidence. Turn it off to "
+            "skip the subagent-result cross-check."
+        ),
+        effective=_cross_verify_effective,
     ),
 )
 
