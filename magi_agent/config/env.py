@@ -3983,28 +3983,55 @@ def parse_verify_before_replying_skeptic_enabled(env: Mapping[str, str]) -> bool
 
 
 def parse_verify_before_replying_backstop_mode(env: Mapping[str, str]) -> str:
-    """MAGI_VERIFY_BEFORE_REPLYING_BACKSTOP_MODE -- reserved backstop seam.
+    """MAGI_VERIFY_BEFORE_REPLYING_BACKSTOP_MODE -- verify backstop seam.
 
-    Returns ``"off"`` (the sole shipped value).  Reserved values
-    ``"block_high"`` and ``"repair_high"`` are registered in the flag registry
-    but not yet implemented; any non-off value logs a WARNING and falls back to
-    ``"off"`` so that a mis-configured environment is safe and auditable.
+    Returns ``"off"`` / ``"repair_high"`` / ``"block_high"``. In ``off`` (the
+    default) the verify overlay is a pure advisory nudge. In ``repair_high`` a
+    pass that produced a CRISP high-confidence finding (claim_citation /
+    evidence_consistency / activity_grounding / execution_claims -- advisory
+    findings are structurally excluded) escalates the returned continuation from
+    an advisory nudge to a DIRECTIVE repair instruction, bounded by
+    ``MAGI_VERIFY_BEFORE_REPLYING_BACKSTOP_MAX_ATTEMPTS`` (default 2); on
+    exhaustion it falls through to the normal advisory nudge and ships (fail-open
+    honesty, mirroring the citation repair overlay). ``block_high`` is identical
+    except the exhaustion fallback is a blocked notice rather than a nudge-ship.
+    Only crisp high-confidence findings can ever route to the backstop.
 
-    See Section 13 of the verify-before-replying policy design for the
-    backstop promotion criteria.
+    Any unknown value logs a WARNING and falls back to ``"off"`` so a
+    mis-configured environment is safe and auditable.
+
+    See Section 13 of the verify-before-replying policy design.
     """
     import logging
 
     raw = (env.get("MAGI_VERIFY_BEFORE_REPLYING_BACKSTOP_MODE") or "").strip().lower()
     if not raw or raw == "off":
         return "off"
+    if raw in ("repair_high", "block_high"):
+        return raw
     logging.getLogger(__name__).warning(
-        "MAGI_VERIFY_BEFORE_REPLYING_BACKSTOP_MODE=%r is not implemented in "
-        "this release; the backstop seam is reserved but non-off values are "
-        "no-ops. Falling back to 'off'.",
+        "MAGI_VERIFY_BEFORE_REPLYING_BACKSTOP_MODE=%r is not a recognized value "
+        "(off / repair_high / block_high); falling back to 'off'.",
         raw,
     )
     return "off"
+
+
+def parse_verify_before_replying_backstop_max_attempts(env: Mapping[str, str]) -> int:
+    """MAGI_VERIFY_BEFORE_REPLYING_BACKSTOP_MAX_ATTEMPTS -- bounded repair budget.
+
+    The number of directive-repair rounds the ``repair_high`` / ``block_high``
+    backstop may drive before falling through (ship on ``repair_high``, blocked
+    notice on ``block_high``). Default 2, clamped to ``[1, 5]`` so a
+    mis-configuration can never spin unbounded. Mirrors
+    ``MAGI_SOURCE_CITATION_REPAIR_MAX_ATTEMPTS``.
+    """
+    raw = (env.get("MAGI_VERIFY_BEFORE_REPLYING_BACKSTOP_MAX_ATTEMPTS") or "").strip()
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 2
+    return max(1, min(5, value))
 
 
 def parse_taskboard_completion_verification_enabled(env: Mapping[str, str]) -> bool:

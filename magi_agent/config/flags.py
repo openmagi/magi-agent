@@ -1865,12 +1865,26 @@ FLAGS: tuple[FlagSpec, ...] = (
         scope="public",
         stage="stage1",
         summary=(
-            "Reserved backstop seam for the verify-before-replying policy "
-            "(Section 13 of the design). Sole shipped value is 'off' (no-op). "
-            "Reserved values 'block_high' and 'repair_high' are registered but "
-            "not implemented: any non-off value logs a warning and behaves as "
-            "'off'. Only crisp high-confidence findings may ever route to a "
-            "backstop; advisory findings are structurally excluded."
+            "Backstop seam for the verify-before-replying policy (Section 13 of "
+            "the design). Values: 'off' (default -- pure advisory nudge), "
+            "'repair_high' (a pass with a crisp high-confidence finding escalates "
+            "to a directive repair, bounded by BACKSTOP_MAX_ATTEMPTS, then ships "
+            "via the advisory nudge), 'block_high' (same but the exhaustion "
+            "fallback is an honest blocked notice instead of a nudge-ship). Only "
+            "crisp high-confidence findings route to the backstop; advisory "
+            "findings are structurally excluded."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_VERIFY_BEFORE_REPLYING_BACKSTOP_MAX_ATTEMPTS",
+        default="2",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Bounded number of directive-repair rounds the repair_high/block_high "
+            "verify backstop may drive before falling through. Default 2, clamped "
+            "to [1, 5]. Mirrors MAGI_SOURCE_CITATION_REPAIR_MAX_ATTEMPTS."
         ),
         kind="str",
     ),

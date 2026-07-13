@@ -193,6 +193,13 @@ class _VerifyTurnState:
     # message string, these two feed the observability status event).
     pending_new_count: int = 0
     pending_high_count: int = 0
+    # WS-B backstop (Section 13): count of DIRECTIVE-repair rounds already driven
+    # by the repair_high / block_high backstop this turn. Bounded by
+    # MAGI_VERIFY_BEFORE_REPLYING_BACKSTOP_MAX_ATTEMPTS; on exhaustion the overlay
+    # falls through to the advisory nudge (repair_high) or a blocked notice
+    # (block_high). 0 (and the whole mechanism) is inert when the backstop mode
+    # is "off" -- byte-identical to the pre-backstop nudge behavior.
+    backstop_attempts: int = 0
     # U7: injection_guard nudge dedup set (analogous to ``surfaced`` for verify).
     # Holds pattern_id fingerprints already shown to the model this turn so the
     # same HIGH finding does not trigger a second nudge on a subsequent loop
@@ -1947,7 +1954,39 @@ class MagiEngineDriver:
                 1 for finding in result.new_findings if finding.confidence == "high"
             )
 
-            # 11. render the nudge continuation message.
+            # 11. WS-B backstop (Section 13): when the backstop mode is active
+            #     AND this pass produced crisp high-confidence findings, escalate
+            #     from the advisory nudge to a DIRECTIVE repair instruction,
+            #     bounded by the attempt budget. Advisory-only passes and the
+            #     "off" mode fall through to the normal nudge (byte-identical).
+            from magi_agent.config.env import (  # noqa: PLC0415
+                parse_verify_before_replying_backstop_max_attempts,
+                parse_verify_before_replying_backstop_mode,
+            )
+
+            backstop_mode = parse_verify_before_replying_backstop_mode(os.environ)
+            if backstop_mode != "off":
+                high_new = [
+                    f for f in result.new_findings if f.confidence == "high"
+                ]
+                if high_new:
+                    max_attempts = (
+                        parse_verify_before_replying_backstop_max_attempts(os.environ)
+                    )
+                    if verify_state.backstop_attempts < max_attempts:
+                        verify_state.backstop_attempts += 1
+                        return verify_audit.build_backstop_repair_message(
+                            high_new,
+                            attempt=verify_state.backstop_attempts,
+                            max_attempts=max_attempts,
+                        )
+                    # Budget exhausted: repair_high ships via the advisory nudge
+                    # (fail-open honesty); block_high emits a blocked notice so
+                    # the turn does not silently ship an unresolved high finding.
+                    if backstop_mode == "block_high":
+                        return verify_audit.build_backstop_block_notice(high_new)
+
+            # 11b. render the advisory nudge continuation message.
             return verify_audit.build_nudge_message(result.new_findings)
         except Exception:
             return None
