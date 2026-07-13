@@ -78,7 +78,13 @@ def test_toolset_allowlist_none_is_empty() -> None:
     assert toolset_allowlist("none") == ()
 
 
-def test_toolset_allowlist_readonly_is_readonly_names() -> None:
+def test_toolset_allowlist_readonly_is_readonly_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Explicitly disable the child-Bash sandbox so the allowlist equals the
+    # static READONLY_TOOL_NAMES constant (sandbox ON adds "Bash" at read time,
+    # which the full-profile overlay now seeds ON).
+    monkeypatch.setenv("MAGI_CHILD_BASH_SANDBOX_ENABLED", "0")
     assert toolset_allowlist("readonly") == READONLY_TOOL_NAMES
 
 

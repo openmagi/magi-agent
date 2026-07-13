@@ -134,6 +134,12 @@ def test_resolve_turn_toolset_readonly_exposes_calculation(
     """
     import magi_agent.cli.tool_runtime as tool_runtime
 
+    # Explicitly disable the child-Bash sandbox so Bash does not appear in the
+    # readonly toolset. The full-profile overlay now seeds
+    # MAGI_CHILD_BASH_SANDBOX_ENABLED=1; this test asserts the baseline
+    # readonly contract (sandbox OFF = no Bash).
+    monkeypatch.setenv("MAGI_CHILD_BASH_SANDBOX_ENABLED", "0")
+
     # Guard: the readonly profile must NOT pull in the writable local handlers
     # (preserves the no-write invariant). If it does, the test itself fails.
     def _fail_full_handler_bind(*args: object, **kwargs: object) -> None:

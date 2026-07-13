@@ -171,7 +171,16 @@ def _bus(point: HookPoint, handler) -> HookBus:
 
 
 def test_gate_off_no_bus_byte_identical(monkeypatch: pytest.MonkeyPatch) -> None:
-    """user_hook_bus=None -> agent callbacks untouched, turn completes."""
+    """user_hook_bus=None -> agent callbacks untouched, turn completes.
+
+    Explicitly zeroes every per-slot customize flag so the test is hermetic
+    under the full-profile overlay (which now seeds customize flags ON, causing
+    the customize bridge to attach a callback even when user_hook_bus=None).
+    """
+    monkeypatch.setenv("MAGI_CUSTOMIZE_PROMPT_INJECTION_ENABLED", "0")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_SHELL_COMMAND_ENABLED", "0")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_SHELL_CHECK_ENABLED", "0")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_OUTPUT_REWRITE_ENABLED", "0")
     agent = _FakeAgent()
     runner = FakeRunner(agent=agent)
     _patch_lazy_deps(monkeypatch, runner)
@@ -195,7 +204,15 @@ def test_agentless_runner_with_bus_is_noop(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_bridge_attached_during_run_and_restored(monkeypatch: pytest.MonkeyPatch) -> None:
     """With a bus, the before-tool bridge is attached DURING the run and the
-    agent's callbacks are restored (to None) afterwards."""
+    agent's callbacks are restored (to None) afterwards.
+
+    Explicitly zeroes every per-slot customize flag so the customize bridge does
+    not add an extra callback (full-profile overlay seeds these ON).
+    """
+    monkeypatch.setenv("MAGI_CUSTOMIZE_PROMPT_INJECTION_ENABLED", "0")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_SHELL_COMMAND_ENABLED", "0")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_SHELL_CHECK_ENABLED", "0")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_OUTPUT_REWRITE_ENABLED", "0")
     observed: list[str] = []
 
     def _observer(ctx):
@@ -219,7 +236,15 @@ def test_bridge_attached_during_run_and_restored(monkeypatch: pytest.MonkeyPatch
 
 def test_bridge_preserves_existing_gate_callback(monkeypatch: pytest.MonkeyPatch) -> None:
     """A pre-existing gate callback on the agent stays FIRST; the hook bridge is
-    appended after it, then both are removed on restore."""
+    appended after it, then both are removed on restore.
+
+    Explicitly zeroes every per-slot customize flag so the customize bridge does
+    not add a third callback (full-profile overlay seeds these ON).
+    """
+    monkeypatch.setenv("MAGI_CUSTOMIZE_PROMPT_INJECTION_ENABLED", "0")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_SHELL_COMMAND_ENABLED", "0")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_SHELL_CHECK_ENABLED", "0")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_OUTPUT_REWRITE_ENABLED", "0")
 
     async def _gate_cb(*, tool, args, tool_context=None):
         return None
