@@ -38,6 +38,32 @@ def pytest_configure(config: pytest.Config) -> None:
     # substrate opt in explicitly via monkeypatch.setenv (which still wins).
     os.environ.setdefault("MAGI_HOSTED_SESSION_REUSE", "0")
     os.environ.setdefault("MAGI_HOSTED_SESSION_DB", "0")
+    # WS-A (full first-party activation): the full-profile overlay now seeds
+    # every first-party accuracy/verification/guard gate ON. A test that runs
+    # the profile bootstrap against os.environ leaks these ON to every later
+    # test in the same xdist worker, so the many "gate off by default" contract
+    # tests (which assert the byte-identical OFF path without forcing it) fail
+    # non-deterministically per shard. Pin each OFF at configure time so every
+    # leaker's setdefault is a no-op; tests exercising the ON behavior opt in
+    # explicitly via monkeypatch.setenv (which still wins over setdefault).
+    for _ws_a_gate in (
+        "MAGI_VERIFY_BEFORE_REPLYING_SKEPTIC_ENABLED",
+        "MAGI_FINAL_OUTPUT_GATE_LOCAL_ENABLED",
+        "MAGI_GROUNDED_ANSWER_GUARD_ENABLED",
+        "MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED",
+        "MAGI_CHILD_BASH_SANDBOX_ENABLED",
+        "MAGI_SERVE_EVIDENCE_ENABLED",
+        "MAGI_FORMAT_ADHERENCE_ENABLED",
+        "MAGI_COMPUTE_VIA_CODE_ENABLED",
+        "MAGI_CUSTOMIZE_LLM_CALL_HOOKS_ENABLED",
+        "MAGI_CUSTOMIZE_SHELL_COMMAND_ENABLED",
+        "MAGI_CUSTOMIZE_SHELL_CHECK_ENABLED",
+        "MAGI_CUSTOMIZE_OUTPUT_REWRITE_ENABLED",
+        "MAGI_CUSTOMIZE_PROMPT_INJECTION_ENABLED",
+        "MAGI_CUSTOMIZE_LIFECYCLE_EXPANSION_ENABLED",
+        "MAGI_GATE5B_GOVERNANCE_ENABLED",
+    ):
+        os.environ.setdefault(_ws_a_gate, "0")
 
 
 @pytest.hookimpl(tryfirst=True)
