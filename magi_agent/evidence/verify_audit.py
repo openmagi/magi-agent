@@ -1703,6 +1703,94 @@ def build_nudge_message(new_findings: Sequence[VerifyFinding]) -> str:
     return "\n".join(lines)
 
 
+def build_backstop_repair_message(
+    high_findings: Sequence[VerifyFinding],
+    *,
+    attempt: int,
+    max_attempts: int,
+) -> str:
+    """Render the DIRECTIVE repair message for the repair_high/block_high backstop.
+
+    Unlike ``build_nudge_message`` (advisory, offers a SHIP_AS_IS escape), this
+    is a hard directive: the pass produced crisp high-confidence, evidence-backed
+    findings, so the model MUST revise or ground them before the answer is
+    accepted. There is no SHIP_AS_IS escape while the bounded attempt budget
+    remains. Only high-confidence findings are passed in (the caller filters);
+    advisory findings never reach the backstop.
+    """
+    lines: list[str] = []
+    lines.append('<verify_before_replying backstop="repair_high">')
+    lines.append(
+        f"Your reply above failed the evidence backstop (attempt {attempt} of "
+        f"{max_attempts}). The following high-confidence findings are backed by "
+        "this session's evidence ledger -- they are not heuristics. You must "
+        "revise the reply to fix or explicitly ground each one before it can be "
+        "delivered."
+    )
+    lines.append("")
+    lines.append("VERIFIED ISSUES YOU MUST ADDRESS (evidence-backed, high confidence):")
+    counter = 0
+    for f in high_findings:
+        counter += 1
+        ref_str = f.evidence_refs[0] if f.evidence_refs else "no ref"
+        obs_str = f.observed or ""
+        exp_str = f.expected or ""
+        entry_lines = [
+            f'{counter}. [{f.rule_id}] Your reply states "{f.claim_text}"'
+            f" (chars {f.span[0]}-{f.span[1]}).",
+        ]
+        if obs_str:
+            entry_lines.append(
+                f"   Observed: {obs_str}  Expected: {exp_str}  (evidence: {ref_str})"
+            )
+        else:
+            entry_lines.append(f"   (evidence: {ref_str})")
+        entry_lines.append(f"   Required: {f.suggested_action}.")
+        lines.append("\n".join(entry_lines))
+    lines.append("")
+    lines.append(
+        "Emit the corrected reply now, or use tools to gather the missing "
+        "evidence first. Do NOT respond with SHIP_AS_IS: these findings are "
+        "evidence-backed and must be resolved, not acknowledged."
+    )
+    lines.append("</verify_before_replying>")
+    return "\n".join(lines)
+
+
+def build_backstop_block_notice(high_findings: Sequence[VerifyFinding]) -> str:
+    """Render the exhaustion notice for the ``block_high`` backstop.
+
+    Reached only when the ``block_high`` mode has spent its bounded repair
+    budget and the pass STILL produces crisp high-confidence findings. Rather
+    than silently shipping an unresolved evidence-backed contradiction, the model
+    is directed to deliver an HONEST answer that states the unresolved issue
+    (never to fabricate). This is a directive continuation, not a hard runtime
+    block (the driver contract returns a message, not a terminal); it keeps the
+    turn honest at the end of the budget without a dead-end.
+    """
+    lines: list[str] = []
+    lines.append('<verify_before_replying backstop="block_high" exhausted="true">')
+    lines.append(
+        "The evidence backstop budget is exhausted and these high-confidence, "
+        "evidence-backed findings are still unresolved. Do NOT ship the reply as "
+        "if they were resolved. Produce a final answer that states plainly what "
+        "could not be verified or is contradicted by the evidence, and give only "
+        "the parts you can support. Never fabricate to fill the gap."
+    )
+    lines.append("")
+    lines.append("UNRESOLVED VERIFIED ISSUES:")
+    counter = 0
+    for f in high_findings:
+        counter += 1
+        ref_str = f.evidence_refs[0] if f.evidence_refs else "no ref"
+        lines.append(
+            f'{counter}. [{f.rule_id}] "{f.claim_text}" '
+            f"(chars {f.span[0]}-{f.span[1]}; evidence: {ref_str})."
+        )
+    lines.append("</verify_before_replying>")
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # ignore_rate_summary (design Section 12.4)
 # ---------------------------------------------------------------------------
