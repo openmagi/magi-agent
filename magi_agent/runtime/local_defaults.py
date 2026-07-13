@@ -62,10 +62,36 @@ LOCAL_FULL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     "MAGI_MODEL_AWARE_PROMPTS_ENABLED": "1",
     "MAGI_CODING_REPAIR_LOOP_ENABLED": "1",
     "MAGI_GA_LIVE_ENABLED": "1",
-    # A1 measurement: observe-only citation audit on by default in the full
-    # local profile; reports persist to the durable evidence dir so the
-    # default-ON enforce flip can be justified with measured FP data.
-    "MAGI_RESEARCH_GOVERNANCE_MODE": "audit",
+    # 2026-07-13 full-activation (Kevin: "다 풀로 활성화"): the accuracy /
+    # verification mode-gates default to their strongest non-dead-end value on
+    # the full local profile. Research governance enforces the deterministic
+    # cited-without-source class (one bounded re-prompt, ~0 FP); the answer
+    # verifier enforces value-mismatch correction; the missing-tool retry cap is
+    # bounded so a tool_not_found spiral can't run unbounded. All step down to
+    # "audit"/"off" via the same env var if they cause friction in use.
+    "MAGI_RESEARCH_GOVERNANCE_MODE": "enforce",
+    "MAGI_ANSWER_VERIFIER_MODE": "enforce",
+    "MAGI_EDIT_MATCH_EVIDENCE_ENFORCEMENT": "block_final_answer",
+    "MAGI_TOOL_NOT_FOUND_ATTEMPT_CAP": "6",
+    # 2026-07-13 full-activation: the remaining opt-in (_b) accuracy/verification
+    # gates are seeded ON in the full local profile (setdefault → explicit
+    # operator MAGI_X=0 still wins; safe/eval never apply this overlay so they
+    # stay OFF). Seeded here rather than flipped to _pb because several are read
+    # via flag_bool() which raises on a profile_bool kind — the seed is
+    # reader-agnostic. Covers OSS `magi serve` + hosted standard bots (both apply
+    # this overlay via main.py under the full profile).
+    "MAGI_VERIFY_BEFORE_REPLYING_SKEPTIC_ENABLED": "1",
+    "MAGI_FINAL_OUTPUT_GATE_LOCAL_ENABLED": "1",
+    "MAGI_GROUNDED_ANSWER_GUARD_ENABLED": "1",
+    "MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED": "1",
+    "MAGI_CHILD_BASH_SANDBOX_ENABLED": "1",
+    "MAGI_SERVE_EVIDENCE_ENABLED": "1",
+    "MAGI_FORMAT_ADHERENCE_ENABLED": "1",
+    "MAGI_COMPUTE_VIA_CODE_ENABLED": "1",
+    "MAGI_CUSTOMIZE_LLM_CALL_HOOKS_ENABLED": "1",
+    "MAGI_CUSTOMIZE_SHELL_COMMAND_ENABLED": "1",
+    "MAGI_CUSTOMIZE_LIFECYCLE_EXPANSION_ENABLED": "1",
+    "MAGI_GATE5B_GOVERNANCE_ENABLED": "1",
     "MAGI_MESSAGE_CACHE_ENABLED": "1",
     "MAGI_PROMPT_CACHE_ENABLED": "1",
     "MAGI_FILE_TOOLS_ENABLED": "1",

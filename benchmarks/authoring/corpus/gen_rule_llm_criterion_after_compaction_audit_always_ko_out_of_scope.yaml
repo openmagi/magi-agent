@@ -1,0 +1,24 @@
+schema_version: 1
+id: gen_rule_llm_criterion_after_compaction_audit_always_ko_out_of_scope
+flow: single_rule
+archetype: out_of_scope
+language: ko
+turn_budget: 4
+generated:
+  slots:
+    quirk: out_of_scope
+    kind: llm_criterion
+    firesAt: after_compaction
+    action: audit
+    scope: always
+  generator_version: 2
+  paraphrase_model: null
+turns:
+- say: 봇이 한 일을 매주 이메일로 보내줘
+- say: 규칙으로 이메일 예약은 못 하는 거야?
+save: none
+oracle:
+  expect_ready: false
+  forbidden_strings: default
+  never_persists: true
+  no_question_loop: true

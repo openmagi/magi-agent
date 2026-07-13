@@ -1,0 +1,40 @@
+schema_version: 1
+id: gen_rule_capability_scope_spawn_block_memory_en_none
+flow: single_rule
+archetype: happy_path
+language: en
+turn_budget: 4
+generated:
+  slots:
+    quirk: none
+    kind: capability_scope
+    firesAt: spawn
+    action: block
+    scope: memory
+  generator_version: 2
+  paraphrase_model: null
+seed_draft:
+  what:
+    payload:
+      tightenOnly: true
+      denyTools:
+      - Bash
+turns:
+- say: stop spawned subagents from using Bash
+  answers:
+    q_what.kind: capability_scope
+    q_scope: memory
+save: envelope
+oracle:
+  expect_ready: true
+  max_turns_to_ready: 1
+  draft:
+    what.kind: capability_scope
+    firesAt: spawn
+    action: block
+    scope: memory
+  persisted:
+    rule_valid_and_clean: true
+    policy_intent_is_first_utterance: true
+    no_orphan_rules: true
+  forbidden_strings: default
