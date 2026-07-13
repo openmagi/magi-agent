@@ -2058,7 +2058,9 @@ const CONDITION_META: Record<ConditionKind, { label: string; description: string
     // render the right picker (tool-arg append vs system-prompt section
     // append). The Mutator trust badge (F-MUT3) makes it explicit that this
     // policy rewrites traffic.
-    label: "Append context (mutator)",
+    // UI label: "Prompt append (authored)" (renamed from "Prompt injection"
+    // in U8; stored kind id prompt_injection is retained for compatibility).
+    label: "Prompt append (authored)",
     description:
       "Mutator: appends a value to a tool's argument (before tool use) or to the assembled system prompt (on user prompt submit). v1 is append-only.",
   },

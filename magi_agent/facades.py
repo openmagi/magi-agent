@@ -250,7 +250,7 @@ def _maybe_apply_prompt_injection_to_tool_args(
             return arguments
         # Lazy imports keep the facades module's hot-path free of customize/
         # transitive imports when the flag is OFF.
-        from magi_agent.customize.prompt_injection import (  # noqa: PLC0415
+        from magi_agent.customize.authored_prompt_append import (  # noqa: PLC0415
             apply_prompt_injection_to_tool_args,
         )
         from magi_agent.customize.store import load_overrides  # noqa: PLC0415

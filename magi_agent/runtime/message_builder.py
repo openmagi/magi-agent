@@ -515,7 +515,7 @@ def _maybe_apply_prompt_injection_sections(sections: list[str]) -> list[str]:
     try:
         if not _prompt_injection_enabled():
             return sections
-        from magi_agent.customize.prompt_injection import (  # noqa: PLC0415
+        from magi_agent.customize.authored_prompt_append import (  # noqa: PLC0415
             apply_prompt_injection_to_prompt_sections,
         )
         from magi_agent.customize.store import load_overrides  # noqa: PLC0415

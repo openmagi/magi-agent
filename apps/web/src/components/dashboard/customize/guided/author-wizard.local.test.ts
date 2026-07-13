@@ -1908,7 +1908,9 @@ describe("AuthorWizard — F-MUT1 prompt_injection kind", () => {
   });
 
   it("CONDITION_META exposes a prompt_injection entry labelled as a mutator", () => {
-    expect(src).toMatch(/prompt_injection: \{[\s\S]*?label: "Append context \(mutator\)"/);
+    // U8: label renamed from "Append context (mutator)" to "Prompt append (authored)"
+    // stored kind id prompt_injection is retained for compatibility.
+    expect(src).toMatch(/prompt_injection: \{[\s\S]*?label: "Prompt append \(authored\)"/);
     expect(src).toMatch(/prompt_injection: \{[\s\S]*?Mutator/);
   });
 
