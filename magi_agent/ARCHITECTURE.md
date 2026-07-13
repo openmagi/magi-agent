@@ -305,6 +305,7 @@ graph LR
     runtime --> transport
     runtime --> web_acquisition
     sandbox --> security
+    security --> credentials_admin
     security --> ops
     shadow --> adk_bridge
     shadow --> config
@@ -834,7 +835,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | Local "Credentials" registration admin surface for the OSS dashboard. | credentials_admin | channels/channel_credentials.py, channels/telegram_credentials.py, credentials_admin/approval_resolver.py, credentials_admin/local_proxy.py, credentials_admin/vault_server.py, transport/credentials.py, transport/integrations.py |
-| approval_resolver.py | Credential-use approval resolver seam (in-chat approval, phase 1). | credentials_admin, flags, local_proxy_decision | tools/permission.py |
+| approval_resolver.py | Credential-use approval resolver seam (in-chat approval, phase 1). | credentials_admin, flags, local_proxy_decision | security/egress_destinations.py, tools/permission.py |
 | approvals_store.py | Local approval-request store for guarded credentials. | flags | — |
 | local_proxy.py | mitmproxy addon + lifecycle for the local credential-injecting forward proxy. | credentials_admin, local_proxy_decision, local_vault | (root)/main.py, credentials_admin/vault_server.py |
 | local_proxy_decision.py | Pure decision core for the local credential-injecting forward proxy. | — | credentials_admin/approval_resolver.py, credentials_admin/local_proxy.py |
@@ -1819,6 +1820,7 @@ graph LR
 | context_guard.py | — | — | security/__init__.py |
 | credential_vocab.py | C-9 leaf — single vocabulary of "what counts as credential-shaped". | — | composio/config.py, security/credentials.py, security/ssrf.py |
 | credentials.py | — | credential_vocab | security/__init__.py |
+| egress_destinations.py | U2 -- egress destination extraction (pure module, no wiring). | approval_resolver | — |
 | external_surface.py | — | — | security/__init__.py |
 | posture.py | — | — | security/__init__.py |
 | sandbox_preflight.py | — | — | security/__init__.py |
