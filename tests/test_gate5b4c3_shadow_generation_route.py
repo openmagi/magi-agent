@@ -439,7 +439,7 @@ def test_shadow_generation_bot_config_fallback_requires_server_fallback_approval
 
 def test_shadow_generation_live_smoke_env_rejects_caps_above_selected_user_visible_limit() -> None:
     env = _live_smoke_env(
-        CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_MAX_OUTPUT_TOKENS="4097",
+        CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_MAX_OUTPUT_TOKENS="65537",
     )
 
     with pytest.raises(RuntimeEnvError) as excinfo:

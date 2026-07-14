@@ -592,8 +592,18 @@ class Gate5B4C3ShadowGenerationPolicy(_Gate5B4C3Model):
 MAX_PYTHON_RUNNER_TIMEOUT_MS = 600_000
 MAX_USER_VISIBLE_SANITIZED_INPUT_BYTES = 1_000_000
 MAX_USER_VISIBLE_ESTIMATED_INPUT_TOKENS = 1_000_000
-MAX_USER_VISIBLE_OUTPUT_TOKENS = 4096
-MAX_USER_VISIBLE_TOTAL_ESTIMATED_TOKENS = 1_004_096
+# Validator CEILING for the per-turn output budget, not the operative value:
+# the served value still comes from the deployment env
+# (CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_MAX_OUTPUT_TOKENS), so ops can
+# tune per fleet without a code change. 4096 was the June shadow-diagnostic
+# cap; once this route became the primary hosted serving path (U11 flip,
+# 2026-07-13) it silently killed thinking-heavy tool turns: on Anthropic,
+# extended-thinking tokens count against max_tokens, so a Sonnet 5 turn
+# composing SpawnAgent prompts exhausted 4096 mid function_call and the
+# truncated call (empty args) died without executing (live incident, canary
+# 186bf3d7, 2026-07-14). 65536 matches the largest picker-model output window.
+MAX_USER_VISIBLE_OUTPUT_TOKENS = 65_536
+MAX_USER_VISIBLE_TOTAL_ESTIMATED_TOKENS = 1_000_000 + MAX_USER_VISIBLE_OUTPUT_TOKENS
 MAX_USER_VISIBLE_SANITIZED_HISTORY_MESSAGES = 16
 MAX_USER_VISIBLE_CONCURRENT_GENERATION_RUNS = 4
 MAX_USER_VISIBLE_PENDING_GENERATION_RUNS = 16
