@@ -734,6 +734,7 @@ _EXECUTION_AUTHORITY_FORBIDDEN_IMPORT_PREFIXES = (
     "anthropic",
     "asyncio",
     "boto3",
+    "builtins",
     "concurrent.futures",
     "discord",
     "ftplib",
@@ -818,11 +819,15 @@ def _execution_authority_forbidden_call_target(target: str) -> bool:
     if not target.startswith("os."):
         return False
     member = target.removeprefix("os.")
+    if member == "<dynamic-attribute>":
+        return True
+    normalized_member = member.lstrip("_")
     return (
-        member in {"fork", "forkpty", "popen", "system"}
-        or member.startswith("exec")
-        or member.startswith("spawn")
-        or member.startswith("posix_spawn")
+        normalized_member
+        in {"fork", "fork1", "forkpty", "popen", "startfile", "system", "vfork"}
+        or normalized_member.startswith("exec")
+        or normalized_member.startswith("spawn")
+        or normalized_member.startswith("posix_spawn")
     )
 
 
@@ -866,6 +871,8 @@ class _ExecutionAuthorityCallVisitor(ast.NodeVisitor):
             member = expression.args[1]
             if base and isinstance(member, ast.Constant) and isinstance(member.value, str):
                 return f"{base}.{member.value}"
+            if base in {"builtins", "importlib", "os"}:
+                return f"{base}.<dynamic-attribute>"
         return None
 
     def _record(self, node: ast.expr | ast.stmt, target: str | None) -> None:
@@ -939,6 +946,89 @@ class _ExecutionAuthorityCallVisitor(ast.NodeVisitor):
         self._record(node, self._expression_target(node.func))
         self._record(node, self._expression_target(node))
         self.generic_visit(node)
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if isinstance(node.ctx, ast.Load):
+            target = self._lookup(node.id)
+            if target in {"__import__", "eval", "exec"}:
+                self._record(node, target)
+
+    def visit_For(self, node: ast.For) -> None:
+        self.visit(node.iter)
+        self._bind_assignment(node.target, None)
+        for statement in (*node.body, *node.orelse):
+            self.visit(statement)
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+        self.visit_For(node)
+
+    def visit_With(self, node: ast.With) -> None:
+        for item in node.items:
+            self.visit(item.context_expr)
+            if item.optional_vars is not None:
+                self._bind_assignment(item.optional_vars, None)
+        for statement in node.body:
+            self.visit(statement)
+
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
+        self.visit_With(node)
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        if node.type is not None:
+            self.visit(node.type)
+        previous = self._scopes[-1].get(node.name) if node.name is not None else None
+        had_previous = node.name in self._scopes[-1] if node.name is not None else False
+        if node.name is not None:
+            self._scopes[-1][node.name] = None
+        try:
+            for statement in node.body:
+                self.visit(statement)
+        finally:
+            if node.name is not None:
+                if had_previous:
+                    self._scopes[-1][node.name] = previous
+                else:
+                    self._scopes[-1].pop(node.name, None)
+
+    def _visit_comprehension(
+        self,
+        generators: list[ast.comprehension],
+        values: tuple[ast.expr, ...],
+    ) -> None:
+        if not generators:
+            for value in values:
+                self.visit(value)
+            return
+
+        self.visit(generators[0].iter)
+        self._scopes.append({})
+        self._scope_kinds.append("comprehension")
+        try:
+            self._bind_assignment(generators[0].target, None)
+            for condition in generators[0].ifs:
+                self.visit(condition)
+            for generator in generators[1:]:
+                self.visit(generator.iter)
+                self._bind_assignment(generator.target, None)
+                for condition in generator.ifs:
+                    self.visit(condition)
+            for value in values:
+                self.visit(value)
+        finally:
+            self._scope_kinds.pop()
+            self._scopes.pop()
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+        self._visit_comprehension(node.generators, (node.elt,))
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:
+        self._visit_comprehension(node.generators, (node.elt,))
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
+        self._visit_comprehension(node.generators, (node.elt,))
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:
+        self._visit_comprehension(node.generators, (node.key, node.value))
 
     def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
         self._scopes[-1][node.name] = None
@@ -1106,6 +1196,125 @@ def test_execution_authority_source_guard_resolves_lazy_imported_modules(
     assert not any("safe_symbol.py" in item for item in violations)
 
 
+def test_execution_authority_static_guard_is_primary_when_runtime_import_is_cached(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "magi_agent" / "execution_authority"
+    package.mkdir(parents=True)
+    (package / "cached_escape.py").write_text(
+        "import subprocess\n",
+        encoding="utf-8",
+    )
+
+    # tests/test_import_boundaries.py imported subprocess before this test was
+    # collected. A sys.modules delta cannot see that cached import, so the
+    # source policy is the primary boundary and the runtime delta is only a
+    # defense-in-depth signal.
+    assert "subprocess" in sys.modules
+
+    violations = _execution_authority_source_violations(package)
+
+    assert any("cached_escape.py:1:subprocess" in item for item in violations)
+
+
+@pytest.mark.parametrize("builtin_name", ("__import__", "eval", "exec"))
+def test_execution_authority_source_guard_rejects_sensitive_callable_references(
+    tmp_path: Path,
+    builtin_name: str,
+) -> None:
+    package = tmp_path / "magi_agent" / "execution_authority"
+    package.mkdir(parents=True)
+    (package / "higher_order_escape.py").write_text(
+        f"def escape(callback={builtin_name}):\n"
+        "    return callback('subprocess')\n"
+        f"callbacks = [{builtin_name}]\n",
+        encoding="utf-8",
+    )
+
+    violations = _execution_authority_source_violations(package)
+
+    assert any(
+        f"higher_order_escape.py:1:{builtin_name}" in item for item in violations
+    )
+    assert any(
+        f"higher_order_escape.py:3:{builtin_name}" in item for item in violations
+    )
+
+
+def test_execution_authority_source_guard_rejects_computed_getattr_escapes(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "magi_agent" / "execution_authority"
+    package.mkdir(parents=True)
+    (package / "computed_getattr_escape.py").write_text(
+        "import builtins\n"
+        "import os\n"
+        "load = getattr(builtins, '__' + 'import__')\n"
+        "launch = getattr(os, 'sys' + 'tem')\n",
+        encoding="utf-8",
+    )
+
+    violations = _execution_authority_source_violations(package)
+
+    assert any("computed_getattr_escape.py:1:builtins" in item for item in violations)
+    assert any(
+        "computed_getattr_escape.py:3:builtins.<dynamic-attribute>" in item
+        for item in violations
+    )
+    assert any(
+        "computed_getattr_escape.py:4:os.<dynamic-attribute>" in item
+        for item in violations
+    )
+
+
+@pytest.mark.parametrize(
+    "member",
+    (
+        "_execvpe",
+        "_spawnvef",
+        "execl",
+        "execle",
+        "execlp",
+        "execlpe",
+        "execv",
+        "execve",
+        "execvp",
+        "execvpe",
+        "fork",
+        "fork1",
+        "forkpty",
+        "popen",
+        "posix_spawn",
+        "posix_spawnp",
+        "spawnl",
+        "spawnle",
+        "spawnlp",
+        "spawnlpe",
+        "spawnv",
+        "spawnve",
+        "spawnvp",
+        "spawnvpe",
+        "startfile",
+        "system",
+        "vfork",
+    ),
+)
+def test_execution_authority_source_guard_rejects_os_process_launch_family(
+    tmp_path: Path,
+    member: str,
+) -> None:
+    package = tmp_path / "magi_agent" / "execution_authority"
+    package.mkdir(parents=True)
+    (package / "process_escape.py").write_text(
+        f"import os\nos.{member}('escaped')\n",
+        encoding="utf-8",
+    )
+
+    violations = _execution_authority_source_violations(package)
+
+    assert any(f"process_escape.py:2:os.{member}" in item for item in violations)
+
+
 def test_execution_authority_source_guard_rejects_indirect_import_and_process_escape(
     tmp_path: Path,
 ) -> None:
@@ -1173,6 +1382,73 @@ def test_execution_authority_source_guard_tracks_assignment_aliases_without_shad
     assert not any("shadowed_domain.py" in item for item in violations)
 
 
+def test_execution_authority_source_guard_honors_block_and_comprehension_shadows(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "magi_agent" / "execution_authority"
+    package.mkdir(parents=True)
+    (package / "for_shadow.py").write_text(
+        "import os\n"
+        "def render(values):\n"
+        "    for os in values:\n"
+        "        os.system('a harmless domain method')\n",
+        encoding="utf-8",
+    )
+    (package / "with_shadow.py").write_text(
+        "import os\n"
+        "def render(factory):\n"
+        "    with factory() as os:\n"
+        "        os.system('a harmless domain method')\n",
+        encoding="utf-8",
+    )
+    (package / "except_shadow.py").write_text(
+        "import os\n"
+        "def render():\n"
+        "    try:\n"
+        "        raise RuntimeError\n"
+        "    except RuntimeError as os:\n"
+        "        os.system('a harmless domain method')\n",
+        encoding="utf-8",
+    )
+    (package / "comprehension_shadow.py").write_text(
+        "import os\n"
+        "def render(values):\n"
+        "    return [os.system('a harmless domain method') for os in values]\n",
+        encoding="utf-8",
+    )
+    (package / "builtin_shadow.py").write_text(
+        "def render(values, manager):\n"
+        "    for exec in values:\n"
+        "        exec('a harmless domain callback')\n"
+        "    with manager() as eval:\n"
+        "        eval('a harmless domain callback')\n"
+        "    return [__import__('domain') for __import__ in values]\n",
+        encoding="utf-8",
+    )
+
+    violations = _execution_authority_source_violations(package)
+
+    assert not violations
+
+
+def test_execution_authority_source_guard_restores_comprehension_outer_scope(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "magi_agent" / "execution_authority"
+    package.mkdir(parents=True)
+    (package / "comprehension_escape.py").write_text(
+        "import os\n"
+        "def launch(values):\n"
+        "    [value for os in values]\n"
+        "    os.system('echo escaped')\n",
+        encoding="utf-8",
+    )
+
+    violations = _execution_authority_source_violations(package)
+
+    assert any("comprehension_escape.py:4:os.system" in item for item in violations)
+
+
 def test_execution_authority_source_guard_isolates_class_scope(
     tmp_path: Path,
 ) -> None:
@@ -1211,7 +1487,10 @@ def test_execution_authority_source_guard_isolates_class_scope(
     assert not any("shadowing_class.py" in item for item in violations)
 
 
-def test_execution_authority_imports_add_no_live_engine_network_or_process_modules() -> None:
+def test_execution_authority_runtime_import_delta_adds_no_live_engine_network_or_process_modules() -> None:
+    # Defense in depth only: a sys.modules delta cannot detect a forbidden
+    # module that a dependency cached before the measurement. The recursive
+    # static source guard above is the primary execution-authority boundary.
     completed = _run_fresh_python(
         """
 import importlib
