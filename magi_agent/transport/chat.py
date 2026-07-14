@@ -94,7 +94,6 @@ from magi_agent.shadow.gate2_activation_loop_a import (
 )
 from magi_agent.shadow.gate5b4c3_live_runner_boundary import (
     AdkPrimitivesLoader,
-    run_gate5b4c3_live_runner_boundary_async,
 )
 from magi_agent.shadow.gate5b4c3_shadow_counter_store import (
     Gate5B4C3ShadowCounterReservation,

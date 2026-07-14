@@ -99,7 +99,6 @@ PUBLIC_SYMBOLS = [
     "register_chat_routes",
     "research_first_selected_canary_active",
     "run_gate2_sandbox_workspace_canary",
-    "run_gate5b4c3_live_runner_boundary_async",
     "run_gate5b_user_visible_chat_response",
     "sanitize_gate5b_model_visible_identity_text",
     "time",

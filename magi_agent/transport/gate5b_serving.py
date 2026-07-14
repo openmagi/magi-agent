@@ -56,7 +56,7 @@ from magi_agent.runtime.per_turn_goal_loop_context import (
 from magi_agent.runtime.public_events import tool_end_event, tool_progress_event, tool_start_event, turn_phase_event
 from magi_agent.runtime.session_identity import _memory_mode_from_header
 from magi_agent.runtime.session_ownership import acquire_hosted_session_lease, probe_session_event_count, resolve_include_history, seeded_history_message_count
-from magi_agent.shadow.gate5b4c3_live_runner_boundary import _gate1a_correlated_model_or_label, _shadow_session_id, build_gate5b4c3_input_drop_boundary_result, load_gate5b4c3_live_adk_primitives, run_gate5b4c3_live_runner_boundary_async
+from magi_agent.shadow.gate5b4c3_live_runner_boundary import _gate1a_correlated_model_or_label, _shadow_session_id, build_gate5b4c3_input_drop_boundary_result, load_gate5b4c3_live_adk_primitives
 from magi_agent.shadow.gate5b4c3_runner_input_adapter import build_gate5b4c3_runner_input
 from magi_agent.shadow.gate5b4c3_shadow_generation_contract import build_gate5b4c3_shadow_generation_diagnostic
 from magi_agent.shadow.hosted_session_substrate import DEFAULT_NUM_RECENT_EVENTS, durable_hosted_session_factory
@@ -127,11 +127,11 @@ async def run_gate5b_user_visible_chat_response(
     ``/v1/chat/completions`` route reach the driver through this function, so a
     single set/reset here keeps the ContextVars live for the governed turn in
     both. ``goalMode`` absent leaves both ContextVars at their defaults, so
-    behavior is byte-identical to pre-U6. On hosted the governed turn reaches
-    ``MagiEngineDriver._drive`` whenever ``MAGI_HOSTED_GOVERNED_TURN_ENABLED``
-    resolves ON (profile-aware default-ON: the full/lab profile; OFF under the
-    safe-family or an explicit "0"); active immediately for the local-engine
-    branch of the streaming route. Mirrors ``chat_routes_local`` set/reset.
+    behavior is byte-identical to pre-U6. On hosted the governed turn always
+    reaches ``MagiEngineDriver._drive`` (P5-M1b retired the legacy runner engine
+    and the ``MAGI_HOSTED_GOVERNED_TURN_ENABLED`` flag; governed is the only
+    hosted engine); active immediately for the local-engine branch of the
+    streaming route. Mirrors ``chat_routes_local`` set/reset.
     """
     _goal_mode_requested = (
         bool(payload.get("goalMode")) if isinstance(payload, Mapping) else False
@@ -629,333 +629,319 @@ async def _run_live_chat_runner(
         except Exception:  # noqa: BLE001 — registration must never break a turn
             active_turn_claim = None
     try:
-        # MAGI_HOSTED_GOVERNED_TURN_ENABLED (profile-aware default-ON, hosted
-        # scope): when ON (the default under the full/lab runtime profile),
-        # route through run_governed_turn → MagiEngineDriver (Phase 2 flip)
-        # instead of gate5b4c3._invoke_async_turn. The result shim
-        # (collect_engine_to_boundary_result) produces a wire-compatible
-        # Gate5B4C3LiveRunnerBoundaryResult so all downstream code is unchanged.
-        # OFF (safe-family profile or an explicit "0") = byte-identical to the
-        # legacy boundary call, taken without any additional overhead.
-        if flag_profile_bool("MAGI_HOSTED_GOVERNED_TURN_ENABLED"):
-            # The env-built route config never carries an ADK primitives loader
-            # (build_gate5b_user_visible_chat_route_config_from_env leaves it
-            # None; only tests inject one), so resolve the loader ONCE here to
-            # the SAME default the legacy boundary uses. Pre-fix, the two direct
-            # call sites below (primitives construction and build_hosted_runtime)
-            # dereferenced None and every hosted governed turn died with a
-            # TypeError before the runner started (live-diagnosed on canary
-            # 186bf3d7, 2026-07-11: governed became profile-default-ON while the
-            # June canary had only ever validated the legacy branch).
-            adk_primitives_loader = (
-                route_config.adk_primitives_loader
-                or load_gate5b4c3_live_adk_primitives
+        # The hosted turn is served exclusively through run_governed_turn ->
+        # MagiEngineDriver. The result shim (collect_engine_to_boundary_result)
+        # produces a wire-compatible Gate5B4C3LiveRunnerBoundaryResult so all
+        # downstream response-building code is unchanged. (P5-M1b retired the
+        # MAGI_HOSTED_GOVERNED_TURN_ENABLED flag and the legacy
+        # run_gate5b4c3_live_runner_boundary_async engine that used to serve the
+        # flag-OFF / safe-family branch; governed is now the only hosted engine.)
+        #
+        # The env-built route config never carries an ADK primitives loader
+        # (build_gate5b_user_visible_chat_route_config_from_env leaves it
+        # None; only tests inject one), so resolve the loader ONCE here to the
+        # default primitives loader. Pre-fix, the two direct call sites below
+        # (primitives construction and build_hosted_runtime) dereferenced None
+        # and every hosted governed turn died with a TypeError before the runner
+        # started (live-diagnosed on canary 186bf3d7, 2026-07-11).
+        adk_primitives_loader = (
+            route_config.adk_primitives_loader
+            or load_gate5b4c3_live_adk_primitives
+        )
+        # 1. Build the runner input (input adapter + policy checks).
+        runner_input_result = build_gate5b4c3_runner_input(generation)
+        if runner_input_result.status != "accepted" or runner_input_result.runner_input is None:
+            # Input adapter dropped the request: synthesize the drop
+            # error-result directly (P5-M1a). Pre-M1a this fell through to
+            # run_gate5b4c3_live_runner_boundary_async purely so the legacy
+            # boundary's error-result path would build the same response; that
+            # was the last governed -> legacy-engine call. The helper produces
+            # the byte-identical wire shape (status="dropped",
+            # reason="input_adapter_drop", the same runner_error_diagnostic,
+            # and the same turn_end transcript record) WITHOUT starting the
+            # boundary orchestration, so the legacy engine can retire (M1b).
+            boundary_result = build_gate5b4c3_input_drop_boundary_result(
+                generation,
+                diagnostic=diagnostic,
+                drop_reason=runner_input_result.reason,
+                active_tools=gate1a_bundle.tools if gate1a_bundle.status == "ready" else (),
+                gate1a_egress_correlation_context=gate1a_egress_context,
+                gate1a_egress_proxy_url=gate1a_egress_proxy_url,
             )
-            # 1. Build the runner input (input adapter + policy checks).
-            runner_input_result = build_gate5b4c3_runner_input(generation)
-            if runner_input_result.status != "accepted" or runner_input_result.runner_input is None:
-                # Input adapter dropped the request: synthesize the drop
-                # error-result directly (P5-M1a). Pre-M1a this fell through to
-                # run_gate5b4c3_live_runner_boundary_async purely so the legacy
-                # boundary's error-result path would build the same response; that
-                # was the last governed -> legacy-engine call. The helper produces
-                # the byte-identical wire shape (status="dropped",
-                # reason="input_adapter_drop", the same runner_error_diagnostic,
-                # and the same turn_end transcript record) WITHOUT starting the
-                # boundary orchestration, so the legacy engine can retire (M1b).
-                boundary_result = build_gate5b4c3_input_drop_boundary_result(
-                    generation,
-                    diagnostic=diagnostic,
-                    drop_reason=runner_input_result.reason,
-                    active_tools=gate1a_bundle.tools if gate1a_bundle.status == "ready" else (),
-                    gate1a_egress_correlation_context=gate1a_egress_context,
-                    gate1a_egress_proxy_url=gate1a_egress_proxy_url,
-                )
+        else:
+            runner_input = runner_input_result.runner_input
+            adk_tools = gate1a_bundle.tools if gate1a_bundle.status == "ready" else ()
+            # 2. Build model (gate1a-correlated — caller-responsibility per PR1).
+            model_for_agent = _gate1a_correlated_model_or_label(
+                provider_label=runner_input.provider_label,
+                model_label=runner_input.model_label,
+                context=gate1a_egress_context,
+                proxy_url=gate1a_egress_proxy_url,
+            )
+            # 3. Build generate_content_config via the ADK primitives loader
+            # (matches gate5b4c3's own construction path; loader resolved
+            # None-safe at governed-branch entry above).
+            primitives = adk_primitives_loader()
+            generate_content_config = primitives.GenerateContentConfig(
+                maxOutputTokens=runner_input.max_output_tokens,
+            )
+            # 4. Assemble HostedRuntime (PR1) over the single-flight session
+            # lease (B3/U3). The governed fork historically fronted the
+            # durable SqliteSessionService by calling the bare per-turn
+            # factory (no registry, no lease, no release), so two overlapping
+            # same-session turns could interleave reads/appends into ONE
+            # durable SQLite session. Acquire through the SAME ownership
+            # chokepoint the legacy boundary uses
+            # (magi_agent.runtime.session_ownership) so the governed path gets
+            # the per-key single-flight busy-fallback (an overlapping same-key
+            # turn gets a DISTINCT fresh in-memory service), the durable
+            # substrate fronting, and the seed-aware release. A ``None`` lease
+            # is the historical bypass (reuse flag OFF, or empty
+            # session_key_digest whose session id is per-request-unique):
+            # build a fresh in-memory service and never touch the registry,
+            # byte-identical to the legacy boundary bypass.
+            lease = acquire_hosted_session_lease(
+                bot_id_digest=generation.selection.bot_id_digest,
+                session_id=_shadow_session_id(generation),
+                session_key_digest=generation.selection.session_key_digest,
+                in_memory_factory=primitives.InMemorySessionService,
+            )
+            if lease is None:
+                governed_session_service = primitives.InMemorySessionService()
             else:
-                runner_input = runner_input_result.runner_input
-                adk_tools = gate1a_bundle.tools if gate1a_bundle.status == "ready" else ()
-                # 2. Build model (gate1a-correlated — caller-responsibility per PR1).
-                model_for_agent = _gate1a_correlated_model_or_label(
-                    provider_label=runner_input.provider_label,
-                    model_label=runner_input.model_label,
-                    context=gate1a_egress_context,
-                    proxy_url=gate1a_egress_proxy_url,
+                governed_session_service = lease.service
+            # Registry reuse verdict, consumed by the seed-on-empty probe
+            # (U4) below and by U8 for the continuity result field
+            # (sessionReused).
+            session_reused = lease.reused if lease is not None else False
+            # Seed-on-empty (U4 / B2): decide ONCE, at the serving seam,
+            # whether this turn's inline history must be seeded. Probe the
+            # SAME service instance the governed runner will front
+            # (governed_session_service) under the SAME legacy identity
+            # triple it runs with (app_name GATE5B_SHADOW_APP_NAME, user_id
+            # GATE5B_SHADOW_USER_ID, session_id _shadow_session_id) so the
+            # probe reads the exact row the ADK Runner reads/writes. Probing
+            # under the wrong identity would always read 0 and always seed,
+            # re-opening the #1364 double-seed (history via persisted session
+            # events AND via an inline resume prefix). The probe is fully
+            # fail-open (None -> registry verdict), and resolve_include_history
+            # suppresses only when the durable session already holds events.
+            session_event_count = await probe_session_event_count(
+                governed_session_service,
+                app_name=GATE5B_SHADOW_APP_NAME,
+                user_id=GATE5B_SHADOW_USER_ID,
+                session_id=_shadow_session_id(generation),
+            )
+            include_history = resolve_include_history(
+                session_reused=session_reused,
+                session_event_count=session_event_count,
+            )
+            # Observability count for U8 (the number of history messages this
+            # turn actually seeds); threaded into the boundary result and the
+            # turn_start transcript record below.
+            seeded_message_count = (
+                seeded_history_message_count(runner_input) if include_history else 0
+            )
+            boundary_result = None
+            try:
+                # B5: mirror the legacy gate5b4c3 fetch-bound activation
+                # condition (gate5b4c3:770-774). When the durable session
+                # substrate is active the adapter injects GetSessionConfig so
+                # long sessions do not load unbounded events every turn.
+                # ``None`` keeps the non-durable and flag-OFF paths unchanged.
+                _num_recent_events: int | None = (
+                    DEFAULT_NUM_RECENT_EVENTS
+                    if durable_hosted_session_factory() is not None
+                    else None
                 )
-                # 3. Build generate_content_config via the ADK primitives loader
-                # (matches gate5b4c3's own construction path; loader resolved
-                # None-safe at governed-branch entry above).
-                primitives = adk_primitives_loader()
-                generate_content_config = primitives.GenerateContentConfig(
-                    maxOutputTokens=runner_input.max_output_tokens,
-                )
-                # 4. Assemble HostedRuntime (PR1) over the single-flight session
-                # lease (B3/U3). The governed fork historically fronted the
-                # durable SqliteSessionService by calling the bare per-turn
-                # factory (no registry, no lease, no release), so two overlapping
-                # same-session turns could interleave reads/appends into ONE
-                # durable SQLite session. Acquire through the SAME ownership
-                # chokepoint the legacy boundary uses
-                # (magi_agent.runtime.session_ownership) so the governed path gets
-                # the per-key single-flight busy-fallback (an overlapping same-key
-                # turn gets a DISTINCT fresh in-memory service), the durable
-                # substrate fronting, and the seed-aware release. A ``None`` lease
-                # is the historical bypass (reuse flag OFF, or empty
-                # session_key_digest whose session id is per-request-unique):
-                # build a fresh in-memory service and never touch the registry,
-                # byte-identical to the legacy boundary bypass.
-                lease = acquire_hosted_session_lease(
-                    bot_id_digest=generation.selection.bot_id_digest,
-                    session_id=_shadow_session_id(generation),
-                    session_key_digest=generation.selection.session_key_digest,
-                    in_memory_factory=primitives.InMemorySessionService,
-                )
-                if lease is None:
-                    governed_session_service = primitives.InMemorySessionService()
-                else:
-                    governed_session_service = lease.service
-                # Registry reuse verdict, consumed by the seed-on-empty probe
-                # (U4) below and by U8 for the continuity result field
-                # (sessionReused).
-                session_reused = lease.reused if lease is not None else False
-                # Seed-on-empty (U4 / B2): decide ONCE, at the serving seam,
-                # whether this turn's inline history must be seeded. Probe the
-                # SAME service instance the governed runner will front
-                # (governed_session_service) under the SAME legacy identity
-                # triple it runs with (app_name GATE5B_SHADOW_APP_NAME, user_id
-                # GATE5B_SHADOW_USER_ID, session_id _shadow_session_id) so the
-                # probe reads the exact row the ADK Runner reads/writes. Probing
-                # under the wrong identity would always read 0 and always seed,
-                # re-opening the #1364 double-seed (history via persisted session
-                # events AND via an inline resume prefix). The probe is fully
-                # fail-open (None -> registry verdict), and resolve_include_history
-                # suppresses only when the durable session already holds events.
-                session_event_count = await probe_session_event_count(
-                    governed_session_service,
+                hosted_rt = build_hosted_runtime(
+                    # None-safe: resolved at governed-branch entry
+                    # (hosted_runtime dereferences the loader directly).
+                    adk_primitives_loader=adk_primitives_loader,
+                    adk_tools=adk_tools,
+                    model=model_for_agent,
+                    instruction=runner_input.system_instruction,
+                    generate_content_config=generate_content_config,
+                    control_plane_plugins=control_plane_plugins,
+                    # U8 (B4): compose the process-global transcript sink into
+                    # the driver event_sink the way the CLI does
+                    # (cli/wiring combine_sinks + get_active_transcript_sink),
+                    # with a D4 translation shim that maps the engine-native
+                    # public tool events (tool_start/tool_end) onto the legacy
+                    # tool_call/tool_result transcript record TYPES. When no
+                    # transcript sink is registered this returns
+                    # ``governance_event_sink`` unchanged, so the driver
+                    # event_sink path is byte-identical to pre-U8; the hosted
+                    # public/SSE path is never altered by this unit.
+                    #
+                    # Also compose the process-global OBSERVABILITY sink so the
+                    # governed serving path writes ``observability.db`` activity
+                    # rows the same way the local ``build_headless_runtime`` path
+                    # does (cli/wiring combine_sinks + get_active_sink). Without
+                    # this the governed hosted path emits no activity events (the
+                    # dashboard observability panel stayed silent after the
+                    # gate5b flip). When no observability sink is registered
+                    # (MAGI_OBSERVABILITY_ENABLED unset) this returns its inner
+                    # sink unchanged, so the driver event_sink path is
+                    # byte-identical; the public / SSE path is never altered.
+                    public_event_sink=governed_transcript_event_sink(
+                        compose_active_observability_sink(governance_event_sink)
+                    ),
                     app_name=GATE5B_SHADOW_APP_NAME,
                     user_id=GATE5B_SHADOW_USER_ID,
-                    session_id=_shadow_session_id(generation),
+                    session_service=governed_session_service,
+                    num_recent_events=_num_recent_events,
+                    # U9 (P1-1): mirror the legacy truncated-output
+                    # auto-continue wiring. Resolved from env at the serving
+                    # seam, gated on ``selected_full_toolhost`` exactly as the
+                    # legacy boundary (gate5b4c3:834-836). ``None`` for
+                    # non-full-toolhost routes and under the safe profile /
+                    # explicit MAGI_OUTPUT_CONTINUATION_ENABLED=0, byte-identical
+                    # to pre-U9 on those paths. The driver ctor stays env-pure.
+                    output_continuation=_resolve_output_continuation_config(
+                        generation
+                    ),
+                    # B9 unlock: run one tool-less finalizer pass when a
+                    # selected_full_toolhost turn stops with no text, matching
+                    # the legacy boundary. None on other routes / OFF profile.
+                    no_tool_finalizer=_resolve_no_tool_finalizer_config(
+                        generation
+                    ),
                 )
-                include_history = resolve_include_history(
+                # 5. Build TurnContext (PR2). Suppress inline history when the
+                # durable session already holds it (U4 seed-on-empty verdict).
+                ctx = hosted_request_to_turn_context(
+                    generation, include_history=include_history
+                )
+                # 6. Reuse the already-built diagnostic (built earlier in the
+                # function; same object the legacy boundary would compute).
+                # 7. Drive the turn via run_governed_turn.
+                started_at_monotonic = time.monotonic()
+                # Cancel event: the active_turn_claim holds the registered
+                # turn; look it up to get the cooperative cancel handle (None
+                # is safe: task-level CancelledError still aborts the turn).
+                cancel_event: asyncio.Event | None = None
+                if active_turn_claim is not None and active_session_id:
+                    registered = ACTIVE_TURNS.get(active_session_id, active_turn_id)
+                    cancel_event = (
+                        registered.cancel if registered is not None else None
+                    )
+                # U8 (B4): emit the ``turn_start`` transcript record BEFORE the
+                # turn runs, mirroring the legacy boundary shape
+                # (gate5b4c3:837-848) and carrying the three #1364 continuity
+                # fields. session_id/turn_id match the identity the governed
+                # driver stamps on its tool records (ctx.session_id /
+                # ctx.turn_id below), so every record in this turn shares one
+                # (session_id, turn_id). No-op when no transcript sink is
+                # registered.
+                _transcript_session_id = _shadow_session_id(generation)
+                _transcript_turn_id = generation.turn.turn_id
+                _turn_start_record: dict[str, object] = {
+                    "type": "turn_start",
+                    "prompt": getattr(
+                        runner_input, "sanitized_user_input", None
+                    ),
+                    "provider": getattr(runner_input, "provider_label", None),
+                    "model": getattr(runner_input, "model_label", None),
+                    "session_reused": session_reused,
+                    "session_event_count": int(session_event_count or 0),
+                    "seeded_message_count": seeded_message_count,
+                }
+                # A3: surface slash-to-skill activation on the turn_start
+                # record so observability.db and the dashboard can count
+                # activations and misses. Absent field => key omitted.
+                _activated = generation.turn.activated_skill
+                if _activated is not None:
+                    _turn_start_record["activated_skill"] = (
+                        {"miss": True, "invoked_token": _activated.invoked_token}
+                        if _activated.miss
+                        else {
+                            "skill": _activated.skill_name,
+                            "source": _activated.source,
+                            "truncated": _activated.truncated,
+                        }
+                    )
+                emit_transcript_record(
+                    _turn_start_record,
+                    _transcript_session_id,
+                    _transcript_turn_id,
+                )
+                event_stream = run_governed_turn(
+                    ctx, runtime=hosted_rt, cancel=cancel_event
+                )
+                # 8. Collect result (PR3). U8 threads the continuity verdicts
+                # (B3 lease reuse, B2 probe / seed count) onto the result so
+                # the hosted #1364 dashboard fields are populated.
+                boundary_result = await collect_engine_to_boundary_result(
+                    generation=generation,
+                    config=generation_config,
+                    diagnostic=diagnostic,
+                    event_stream=event_stream,
+                    started_at_monotonic=started_at_monotonic,
+                    timeout_ms=getattr(
+                        generation.budgets, "python_runner_timeout_ms", 0
+                    ),
                     session_reused=session_reused,
-                    session_event_count=session_event_count,
+                    session_event_count=int(session_event_count or 0),
+                    seeded_message_count=seeded_message_count,
+                    # B8: forward the governed turn's public content events
+                    # (text_delta / thinking_delta / tool_start / tool_end)
+                    # to the route's 1-arg SSE sink LIVE as they are drained,
+                    # so ``/v1/chat/stream`` streams the answer frame-by-frame
+                    # exactly like the legacy boundary. This is the SAME 1-arg
+                    # public/SSE sink the legacy path threads
+                    # (``public_event_sink`` -> ``governance_event_sink``); it
+                    # is DISTINCT from the driver's 3-arg observability
+                    # event_sink (``governed_transcript_event_sink``) wired
+                    # into ``build_hosted_runtime`` above. ``None`` on the
+                    # completions route (no sink) keeps the buffered-only path
+                    # byte-identical.
+                    public_event_sink=governance_event_sink,
                 )
-                # Observability count for U8 (the number of history messages this
-                # turn actually seeds); threaded into the boundary result and the
-                # turn_start transcript record below.
-                seeded_message_count = (
-                    seeded_history_message_count(runner_input) if include_history else 0
-                )
-                boundary_result = None
-                try:
-                    # B5: mirror the legacy gate5b4c3 fetch-bound activation
-                    # condition (gate5b4c3:770-774). When the durable session
-                    # substrate is active the adapter injects GetSessionConfig so
-                    # long sessions do not load unbounded events every turn.
-                    # ``None`` keeps the non-durable and flag-OFF paths unchanged.
-                    _num_recent_events: int | None = (
-                        DEFAULT_NUM_RECENT_EVENTS
-                        if durable_hosted_session_factory() is not None
-                        else None
-                    )
-                    hosted_rt = build_hosted_runtime(
-                        # None-safe: resolved at governed-branch entry
-                        # (hosted_runtime dereferences the loader directly).
-                        adk_primitives_loader=adk_primitives_loader,
-                        adk_tools=adk_tools,
-                        model=model_for_agent,
-                        instruction=runner_input.system_instruction,
-                        generate_content_config=generate_content_config,
-                        control_plane_plugins=control_plane_plugins,
-                        # U8 (B4): compose the process-global transcript sink into
-                        # the driver event_sink the way the CLI does
-                        # (cli/wiring combine_sinks + get_active_transcript_sink),
-                        # with a D4 translation shim that maps the engine-native
-                        # public tool events (tool_start/tool_end) onto the legacy
-                        # tool_call/tool_result transcript record TYPES. When no
-                        # transcript sink is registered this returns
-                        # ``governance_event_sink`` unchanged, so the driver
-                        # event_sink path is byte-identical to pre-U8; the hosted
-                        # public/SSE path is never altered by this unit.
-                        #
-                        # Also compose the process-global OBSERVABILITY sink so the
-                        # governed serving path writes ``observability.db`` activity
-                        # rows the same way the local ``build_headless_runtime`` path
-                        # does (cli/wiring combine_sinks + get_active_sink). Without
-                        # this the governed hosted path emits no activity events (the
-                        # dashboard observability panel stayed silent after the
-                        # gate5b flip). When no observability sink is registered
-                        # (MAGI_OBSERVABILITY_ENABLED unset) this returns its inner
-                        # sink unchanged, so the driver event_sink path is
-                        # byte-identical; the public / SSE path is never altered.
-                        public_event_sink=governed_transcript_event_sink(
-                            compose_active_observability_sink(governance_event_sink)
-                        ),
-                        app_name=GATE5B_SHADOW_APP_NAME,
-                        user_id=GATE5B_SHADOW_USER_ID,
-                        session_service=governed_session_service,
-                        num_recent_events=_num_recent_events,
-                        # U9 (P1-1): mirror the legacy truncated-output
-                        # auto-continue wiring. Resolved from env at the serving
-                        # seam, gated on ``selected_full_toolhost`` exactly as the
-                        # legacy boundary (gate5b4c3:834-836). ``None`` for
-                        # non-full-toolhost routes and under the safe profile /
-                        # explicit MAGI_OUTPUT_CONTINUATION_ENABLED=0, byte-identical
-                        # to pre-U9 on those paths. The driver ctor stays env-pure.
-                        output_continuation=_resolve_output_continuation_config(
-                            generation
-                        ),
-                        # B9 unlock: run one tool-less finalizer pass when a
-                        # selected_full_toolhost turn stops with no text, matching
-                        # the legacy boundary. None on other routes / OFF profile.
-                        no_tool_finalizer=_resolve_no_tool_finalizer_config(
-                            generation
-                        ),
-                    )
-                    # 5. Build TurnContext (PR2). Suppress inline history when the
-                    # durable session already holds it (U4 seed-on-empty verdict).
-                    ctx = hosted_request_to_turn_context(
-                        generation, include_history=include_history
-                    )
-                    # 6. Reuse the already-built diagnostic (built earlier in the
-                    # function; same object the legacy boundary would compute).
-                    # 7. Drive the turn via run_governed_turn.
-                    started_at_monotonic = time.monotonic()
-                    # Cancel event: the active_turn_claim holds the registered
-                    # turn; look it up to get the cooperative cancel handle (None
-                    # is safe: task-level CancelledError still aborts the turn).
-                    cancel_event: asyncio.Event | None = None
-                    if active_turn_claim is not None and active_session_id:
-                        registered = ACTIVE_TURNS.get(active_session_id, active_turn_id)
-                        cancel_event = (
-                            registered.cancel if registered is not None else None
-                        )
-                    # U8 (B4): emit the ``turn_start`` transcript record BEFORE the
-                    # turn runs, mirroring the legacy boundary shape
-                    # (gate5b4c3:837-848) and carrying the three #1364 continuity
-                    # fields. session_id/turn_id match the identity the governed
-                    # driver stamps on its tool records (ctx.session_id /
-                    # ctx.turn_id below), so every record in this turn shares one
-                    # (session_id, turn_id). No-op when no transcript sink is
-                    # registered.
-                    _transcript_session_id = _shadow_session_id(generation)
-                    _transcript_turn_id = generation.turn.turn_id
-                    _turn_start_record: dict[str, object] = {
-                        "type": "turn_start",
-                        "prompt": getattr(
-                            runner_input, "sanitized_user_input", None
-                        ),
-                        "provider": getattr(runner_input, "provider_label", None),
-                        "model": getattr(runner_input, "model_label", None),
-                        "session_reused": session_reused,
-                        "session_event_count": int(session_event_count or 0),
-                        "seeded_message_count": seeded_message_count,
-                    }
-                    # A3: surface slash-to-skill activation on the turn_start
-                    # record so observability.db and the dashboard can count
-                    # activations and misses. Absent field => key omitted.
-                    _activated = generation.turn.activated_skill
-                    if _activated is not None:
-                        _turn_start_record["activated_skill"] = (
-                            {"miss": True, "invoked_token": _activated.invoked_token}
-                            if _activated.miss
-                            else {
-                                "skill": _activated.skill_name,
-                                "source": _activated.source,
-                                "truncated": _activated.truncated,
-                            }
-                        )
-                    emit_transcript_record(
-                        _turn_start_record,
-                        _transcript_session_id,
-                        _transcript_turn_id,
-                    )
-                    event_stream = run_governed_turn(
-                        ctx, runtime=hosted_rt, cancel=cancel_event
-                    )
-                    # 8. Collect result (PR3). U8 threads the continuity verdicts
-                    # (B3 lease reuse, B2 probe / seed count) onto the result so
-                    # the hosted #1364 dashboard fields are populated.
-                    boundary_result = await collect_engine_to_boundary_result(
-                        generation=generation,
-                        config=generation_config,
-                        diagnostic=diagnostic,
-                        event_stream=event_stream,
-                        started_at_monotonic=started_at_monotonic,
-                        timeout_ms=getattr(
-                            generation.budgets, "python_runner_timeout_ms", 0
-                        ),
-                        session_reused=session_reused,
-                        session_event_count=int(session_event_count or 0),
-                        seeded_message_count=seeded_message_count,
-                        # B8: forward the governed turn's public content events
-                        # (text_delta / thinking_delta / tool_start / tool_end)
-                        # to the route's 1-arg SSE sink LIVE as they are drained,
-                        # so ``/v1/chat/stream`` streams the answer frame-by-frame
-                        # exactly like the legacy boundary. This is the SAME 1-arg
-                        # public/SSE sink the legacy path threads
-                        # (``public_event_sink`` -> ``governance_event_sink``); it
-                        # is DISTINCT from the driver's 3-arg observability
-                        # event_sink (``governed_transcript_event_sink``) wired
-                        # into ``build_hosted_runtime`` above. ``None`` on the
-                        # completions route (no sink) keeps the buffered-only path
-                        # byte-identical.
-                        public_event_sink=governance_event_sink,
-                    )
-                    # U8 (B4): emit the assembled ``message`` (when non-empty) and
-                    # ``turn_end`` records after collection, mirroring the legacy
-                    # boundary chokepoint (_emit_turn_completion, gate5b4c3:1449-1465).
-                    if boundary_result.output_text_internal:
-                        emit_transcript_record(
-                            {
-                                "type": "message",
-                                "role": "assistant",
-                                "content": boundary_result.output_text_internal,
-                            },
-                            _transcript_session_id,
-                            _transcript_turn_id,
-                        )
+                # U8 (B4): emit the assembled ``message`` (when non-empty) and
+                # ``turn_end`` records after collection, mirroring the legacy
+                # boundary chokepoint (_emit_turn_completion, gate5b4c3:1449-1465).
+                if boundary_result.output_text_internal:
                     emit_transcript_record(
                         {
-                            "type": "turn_end",
-                            "terminal": boundary_result.status,
-                            "reason": boundary_result.reason,
-                            "usage": boundary_result.usage_internal,
-                            "provider": boundary_result.selected_provider,
-                            "model": boundary_result.selected_model,
-                            "event_count": boundary_result.event_count,
-                            "latency_ms": boundary_result.latency_ms,
+                            "type": "message",
+                            "role": "assistant",
+                            "content": boundary_result.output_text_internal,
                         },
                         _transcript_session_id,
                         _transcript_turn_id,
                     )
-                finally:
-                    # Release the single-flight lease exactly once, with the seed
-                    # verdict the legacy boundary applies on its first runner
-                    # event (mark_session_seeded at gate5b4c3:1367). A turn that
-                    # produced any event or completed has seeded the ADK session,
-                    # so promote the provisional miss entry to reusable; a
-                    # pre-result failure (a raise before collect returns) leaves
-                    # ``boundary_result`` None, so release with seeded=False to
-                    # discard the unseeded provisional entry and make the next
-                    # same-key turn reseed. The bypass (lease is None) never
-                    # registered anything, so there is nothing to release.
-                    if lease is not None:
-                        _lease_seeded = boundary_result is not None and (
-                            boundary_result.event_count > 0
-                            or boundary_result.status == "completed"
-                        )
-                        lease.release(seeded=_lease_seeded)
-        else:
-            boundary_result = await run_gate5b4c3_live_runner_boundary_async(
-                generation,
-                config=generation_config,
-                adk_primitives_loader=route_config.adk_primitives_loader,
-                adk_tools=gate1a_bundle.tools if gate1a_bundle.status == "ready" else (),
-                gate1a_egress_correlation_context=gate1a_egress_context,
-                gate1a_egress_proxy_url=gate1a_egress_proxy_url,
-                public_event_sink=governance_event_sink,
-                control_plane_plugins=control_plane_plugins,
-            )
+                emit_transcript_record(
+                    {
+                        "type": "turn_end",
+                        "terminal": boundary_result.status,
+                        "reason": boundary_result.reason,
+                        "usage": boundary_result.usage_internal,
+                        "provider": boundary_result.selected_provider,
+                        "model": boundary_result.selected_model,
+                        "event_count": boundary_result.event_count,
+                        "latency_ms": boundary_result.latency_ms,
+                    },
+                    _transcript_session_id,
+                    _transcript_turn_id,
+                )
+            finally:
+                # Release the single-flight lease exactly once, with the seed
+                # verdict the legacy boundary applies on its first runner
+                # event (mark_session_seeded at gate5b4c3:1367). A turn that
+                # produced any event or completed has seeded the ADK session,
+                # so promote the provisional miss entry to reusable; a
+                # pre-result failure (a raise before collect returns) leaves
+                # ``boundary_result`` None, so release with seeded=False to
+                # discard the unseeded provisional entry and make the next
+                # same-key turn reseed. The bypass (lease is None) never
+                # registered anything, so there is nothing to release.
+                if lease is not None:
+                    _lease_seeded = boundary_result is not None and (
+                        boundary_result.event_count > 0
+                        or boundary_result.status == "completed"
+                    )
+                    lease.release(seeded=_lease_seeded)
         model_call_window_end = _utc_now_iso()
         report_digest = _sha256_digest(
             "|".join(
