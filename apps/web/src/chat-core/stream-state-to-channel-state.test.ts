@@ -17,6 +17,7 @@ function makeToolCard(overrides: Partial<ToolCardState> = {}): ToolCardState {
     durationMs: null,
     kind: "tool",
     rejected: false,
+    startedAt: 1_700_000_000_000,
     ...overrides,
   };
 }
@@ -219,4 +220,12 @@ describe("streamStateToChannelState", () => {
     expect(cs.streaming).toBe(true);
     expect(cs.activeTools?.[0]).toMatchObject({ id: "x", label: "BashTool" });
   });
+
+  it("forwards the card's real startedAt (regression: hardcoded 0 rendered epoch-1970 elapsed)", () => {
+    const cs = streamStateToChannelState(
+      withTools([makeToolCard({ id: "llm:t:0", name: "ModelProgress", startedAt: 1_800_000_000_123 })]),
+    );
+    expect(cs.activeTools[0]?.startedAt).toBe(1_800_000_000_123);
+  });
+
 });

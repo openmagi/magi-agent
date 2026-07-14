@@ -38,6 +38,8 @@ export interface ToolCardState {
   kind: "tool" | "todo";
   /** True when tool_end status is a rejected/interrupted-class status. */
   rejected: boolean;
+  /** Wall-clock ms when this card first appeared (drives elapsed timers). */
+  startedAt: number;
 }
 
 export interface ControlRequestState {
@@ -358,6 +360,7 @@ function upsertModelProgress(
     durationMs: previous?.durationMs ?? null,
     kind: "tool",
     rejected: false,
+    startedAt: previous?.startedAt ?? Date.now(),
   });
   if (elapsedMs !== null) next.heartbeatElapsedMs = elapsedMs;
   next.streaming = true;
@@ -405,6 +408,7 @@ function noteHeartbeat(
     durationMs: previous?.durationMs ?? null,
     kind: "tool",
     rejected: false,
+    startedAt: previous?.startedAt ?? Date.now(),
   });
   next.streaming = true;
 }
@@ -629,6 +633,7 @@ export function foldRuntimeEvent(
         // a known limitation; structured todos are a later follow-up.
         kind: name === "TodoWrite" ? "todo" : "tool",
         rejected: false,
+        startedAt: next.tools.get(id)?.startedAt ?? Date.now(),
       });
       // Record the tool in the ordered segment list AFTER commitText above has
       // committed any in-flight text, so the segment order is text-then-tool.

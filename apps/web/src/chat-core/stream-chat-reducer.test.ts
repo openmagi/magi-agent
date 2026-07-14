@@ -27,6 +27,7 @@ describe("stream-chat-reducer", () => {
       phase: "preparing",
       label: "Preparing",
       detail: null,
+      status: null,
     });
     expect(state.terminal).toBeNull();
     expect(state.controlRequest).toBeNull();
@@ -539,4 +540,20 @@ describe("stream-chat-reducer", () => {
     expect(state.activities[0]?.type).toBe("browser_frame");
     expect(state.activities[1]?.type).toBe("document_draft");
   });
+
+  it("stamps startedAt on model-progress and tool cards (regression: epoch-0 elapsed)", () => {
+    const before = Date.now();
+    const state = foldRuntimeEvents([
+      { type: "llm_progress", turnId: "t", iter: 0, stage: "started" },
+      { type: "tool_start", id: "tool-1", name: "BashTool", input_preview: "ls" },
+      // a second progress frame must NOT reset the original start time
+      { type: "llm_progress", turnId: "t", iter: 0, stage: "waiting" },
+    ]);
+    const llm = state.tools.get("llm:t:0");
+    const tool = state.tools.get("tool-1");
+    expect(llm?.startedAt).toBeGreaterThanOrEqual(before);
+    expect(llm?.startedAt).toBeLessThanOrEqual(Date.now());
+    expect(tool?.startedAt).toBeGreaterThanOrEqual(before);
+  });
+
 });
