@@ -1,7 +1,8 @@
 """Deterministic, authority-safe resource canonicalization.
 
-The functions in this module only derive opaque identities.  They do not open
-resources, perform network requests, or attach any live execution path.
+The functions in this module only derive opaque identities.  They may acquire
+metadata-only filesystem handles to prove path identity, but never read or
+write resource contents, perform network requests, or attach a live executor.
 """
 
 from __future__ import annotations
@@ -270,8 +271,8 @@ def _validate_no_descendant_mount_crossing(
 def _validate_linux_mount_boundary(root: Path, candidate: Path) -> tuple[int, int]:
     try:
         namespace_before = os.stat("/proc/thread-self/ns/mnt")
-        o_path = os.O_PATH
-    except (AttributeError, OSError) as exc:
+        o_path = _linux_o_path_flag()
+    except (CanonicalizationError, OSError) as exc:
         raise CanonicalizationError(
             "secure workspace mount-boundary verification is unavailable"
         ) from exc
@@ -366,7 +367,7 @@ def _linux_openat2(root_fd: int, relative: str, *, resolve_flags: int) -> int:
     if b"\x00" in path_bytes:
         raise CanonicalizationError("path contains a noncanonical segment")
     how = _LinuxOpenHow(
-        flags=os.O_PATH | os.O_CLOEXEC,
+        flags=_linux_o_path_flag() | os.O_CLOEXEC,
         mode=0,
         resolve=resolve_flags,
     )
@@ -386,6 +387,15 @@ def _linux_openat2(root_fd: int, relative: str, *, resolve_flags: int) -> int:
     return int(result)
 
 
+def _linux_o_path_flag() -> int:
+    flag = getattr(os, "O_PATH", None)
+    if type(flag) is not int:
+        raise CanonicalizationError(
+            "secure workspace mount-boundary verification is unavailable"
+        )
+    return flag
+
+
 def _validate_darwin_mount_boundary(root: Path, candidate: Path) -> tuple[int, int]:
     try:
         root_stat_before = root.stat()
@@ -397,6 +407,10 @@ def _validate_darwin_mount_boundary(root: Path, candidate: Path) -> tuple[int, i
                 resolved = proposed.resolve(strict=True)
             except FileNotFoundError:
                 break
+            except NotADirectoryError as exc:
+                raise CanonicalizationError(
+                    "nearest existing path ancestor must be a directory"
+                ) from exc
             if os.path.ismount(proposed) or resolved.stat().st_dev != root_stat_before.st_dev:
                 raise CanonicalizationError(
                     "path crosses a descendant mount boundary"

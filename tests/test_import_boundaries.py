@@ -816,6 +816,11 @@ def _execution_authority_forbidden_call_target(target: str) -> bool:
         "importlib.import_module",
     }:
         return True
+    if target in {
+        "builtins.<dynamic-attribute>",
+        "importlib.<dynamic-attribute>",
+    }:
+        return True
     if not target.startswith("os."):
         return False
     member = target.removeprefix("os.")
