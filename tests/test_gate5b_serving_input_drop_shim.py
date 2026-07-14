@@ -1,21 +1,19 @@
-"""Characterization + byte-equivalence tests for the P5-M1a input-drop shim.
+"""Characterization tests for the P5-M1a input-drop shim.
 
 The governed serving path (``transport/gate5b_serving.py``) used to delegate a
 dropped runner input to ``run_gate5b4c3_live_runner_boundary_async`` purely so the
-legacy boundary's error-result path would build the drop response — the last
-governed -> legacy-engine call. P5-M1a replaces that call with
-``build_gate5b4c3_input_drop_boundary_result`` so the boundary class can retire
-(M1b) without the governed path losing its refusal behavior.
-
-These tests LOCK the equivalence: for every distinct input-adapter drop reason,
-the shim must produce a boundary result whose serialized wire shape is identical
-to what the legacy boundary produces for the same request+diagnostic, and it must
-emit the same turn-completion transcript record (a single ``turn_end`` for a drop;
-no ``turn_start``, no ``message``) through the same process-global sink.
+legacy boundary's error-result path would build the drop response. P5-M1a
+replaced that call with ``build_gate5b4c3_input_drop_boundary_result``, and
+P5-M1b retired the legacy boundary entirely. These tests LOCK the shim contract
+directly: for every distinct input-adapter drop reason, the shim must produce a
+boundary result with status ``dropped`` / reason ``input_adapter_drop`` /
+error_preview == the adapter drop reason, and it must emit exactly one
+``turn_end`` transcript record (no ``turn_start``, no ``message``) through the
+process-global sink. (Before M1b these expectations were phrased as a
+byte-equivalence to the legacy boundary's drop path; the shim's output is now the
+contract of record.)
 """
 from __future__ import annotations
-
-from typing import Any
 
 import pytest
 
@@ -23,7 +21,6 @@ from magi_agent.observability.transcript import (
     set_active_transcript_sink,
 )
 from magi_agent.shadow.gate5b4c3_live_runner_boundary import (
-    Gate5B4C3LiveRunnerBoundary,
     Gate5B4C3LiveRunnerBoundaryResult,
     build_gate5b4c3_input_drop_boundary_result,
 )
@@ -100,10 +97,6 @@ def _diagnostic(
     )
 
 
-def _loader_that_must_not_run() -> Any:
-    raise AssertionError("ADK primitives loader must not run on the drop path")
-
-
 def _wire(result: Gate5B4C3LiveRunnerBoundaryResult) -> dict[str, object]:
     """Serialize both internal (excluded) and wire fields for full comparison."""
     dumped = result.model_dump(by_alias=True, mode="python", warnings=False)
@@ -129,47 +122,41 @@ def test_fixture_produces_intended_distinct_drop_reason(expected_reason: str) ->
 
 
 # ---------------------------------------------------------------------------
-# 2. Byte-equivalence: the shim's boundary result == the legacy boundary's drop
-#    result for the SAME request+diagnostic, per distinct drop reason.
+# 2. Drop-result contract: the shim produces the ``dropped`` refusal shape for
+#    every distinct input-adapter drop reason.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("drop_reason", sorted(_DROP_CASES))
-def test_shim_result_is_wire_identical_to_legacy_boundary_drop(drop_reason: str) -> None:
+def test_shim_result_has_dropped_refusal_wire_shape(drop_reason: str) -> None:
     request = _DROP_CASES[drop_reason]()
     diagnostic = _diagnostic(request)
     adapter_reason = build_gate5b4c3_runner_input(request).reason
 
-    # Legacy path: the boundary must NOT load ADK for a drop (loader raises).
-    legacy = Gate5B4C3LiveRunnerBoundary(_loader_that_must_not_run).invoke(
-        request, config=_enabled_config()
-    )
-
-    # Shim path: same request+diagnostic, no boundary orchestration.
     shim = build_gate5b4c3_input_drop_boundary_result(
         request,
         diagnostic=diagnostic,
         drop_reason=adapter_reason,
     )
 
-    assert legacy.status == shim.status == "dropped"
-    assert legacy.reason == shim.reason == "input_adapter_drop"
-    assert legacy.error_preview == shim.error_preview == drop_reason
-
-    legacy_wire = _wire(legacy)
-    shim_wire = _wire(shim)
-    # latencyMs is trivially-small wall-clock elapsed on both paths (the drop
-    # never runs the engine); it is timing noise, not part of the response
-    # contract. Everything else must match byte-for-byte.
-    legacy_wire.pop("latencyMs", None)
-    shim_wire.pop("latencyMs", None)
-    assert shim_wire == legacy_wire
+    assert shim.status == "dropped"
+    assert shim.reason == "input_adapter_drop"
+    assert shim.error_preview == drop_reason
+    # The drop never runs the engine: no model call, no output, typescript
+    # authority (the governed serving path reads these to build the 502 refusal).
+    assert shim.output_text_internal is None
+    assert shim.usage_internal is None
+    assert shim.response_authority == "typescript"
+    assert shim.adk_invoked is False
+    assert shim.runner_attempted is False
+    # The runnerErrorDiagnostic surfaces the drop reason for observability.
+    wire = _wire(shim)
+    assert wire["runnerErrorDiagnostic"] is not None
 
 
 # ---------------------------------------------------------------------------
-# 3. Transcript emission parity: for a drop the shim emits exactly ONE turn_end
-#    record (no turn_start, no message) through the process-global sink, matching
-#    the legacy boundary's _emit_turn_completion chokepoint.
+# 3. Transcript emission: for a drop the shim emits exactly ONE turn_end record
+#    (no turn_start, no message) through the process-global sink.
 # ---------------------------------------------------------------------------
 
 
@@ -188,16 +175,11 @@ def _capture_records(fn) -> list[tuple[dict, str | None, str | None]]:
 
 
 @pytest.mark.parametrize("drop_reason", sorted(_DROP_CASES))
-def test_shim_emits_same_turn_completion_records_as_legacy(drop_reason: str) -> None:
+def test_shim_emits_single_turn_end_record(drop_reason: str) -> None:
     request = _DROP_CASES[drop_reason]()
     diagnostic = _diagnostic(request)
     adapter_reason = build_gate5b4c3_runner_input(request).reason
 
-    legacy_records = _capture_records(
-        lambda: Gate5B4C3LiveRunnerBoundary(_loader_that_must_not_run).invoke(
-            request, config=_enabled_config()
-        )
-    )
     shim_records = _capture_records(
         lambda: build_gate5b4c3_input_drop_boundary_result(
             request,
@@ -207,18 +189,8 @@ def test_shim_emits_same_turn_completion_records_as_legacy(drop_reason: str) -> 
     )
 
     # A drop emits exactly ONE record: turn_end. No turn_start, no message.
-    assert [r[0]["type"] for r in legacy_records] == ["turn_end"]
     assert [r[0]["type"] for r in shim_records] == ["turn_end"]
-
-    legacy_event, legacy_sid, legacy_tid = legacy_records[0]
-    shim_event, shim_sid, shim_tid = shim_records[0]
-    # Identity coordinates identical.
-    assert shim_sid == legacy_sid
-    assert shim_tid == legacy_tid
-    # turn_end record content identical except latency_ms timing noise.
-    legacy_event.pop("latency_ms", None)
-    shim_event.pop("latency_ms", None)
-    assert shim_event == legacy_event
+    shim_event, _shim_sid, _shim_tid = shim_records[0]
     assert shim_event["terminal"] == "dropped"
     assert shim_event["reason"] == "input_adapter_drop"
 
@@ -240,7 +212,7 @@ def test_shim_emits_nothing_when_no_transcript_sink_registered() -> None:
 
 # ---------------------------------------------------------------------------
 # 4. Active-tools threading: the runnerErrorDiagnostic must reflect the tools
-#    passed to the shim exactly as the legacy boundary reflects its adk_tools.
+#    passed to the shim.
 # ---------------------------------------------------------------------------
 
 
@@ -249,15 +221,12 @@ class _NamedTool:
         self.name = name
 
 
-def test_shim_threads_active_tool_names_like_legacy() -> None:
+def test_shim_threads_active_tool_names() -> None:
     request = _input_token_budget_drop_request()
     diagnostic = _diagnostic(request)
     adapter_reason = build_gate5b4c3_runner_input(request).reason
     tool = _NamedTool("Bash")
 
-    legacy = Gate5B4C3LiveRunnerBoundary(
-        _loader_that_must_not_run, adk_tools=(tool,)
-    ).invoke(request, config=_enabled_config())
     shim = build_gate5b4c3_input_drop_boundary_result(
         request,
         diagnostic=diagnostic,
@@ -265,11 +234,7 @@ def test_shim_threads_active_tool_names_like_legacy() -> None:
         active_tools=(tool,),
     )
 
-    legacy_wire = _wire(legacy)
     shim_wire = _wire(shim)
-    legacy_wire.pop("latencyMs", None)
-    shim_wire.pop("latencyMs", None)
-    assert shim_wire == legacy_wire
-    # And the tool name is actually surfaced in the diagnostic.
+    # The tool name is surfaced in the diagnostic.
     active_names = shim_wire["runnerErrorDiagnostic"]["activeToolNames"]  # type: ignore[index]
     assert "Bash" in active_names

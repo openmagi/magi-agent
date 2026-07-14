@@ -1,15 +1,17 @@
-"""Tests for the MAGI_HOSTED_GOVERNED_TURN_ENABLED flag-gated branch in chat_routes.
+"""Tests for the hosted governed-turn path in chat_routes (P5-M1b state).
 
-PR4 flip: when the flag is ON, chat_routes routes hosted turns through
-run_governed_turn + collect_engine_to_boundary_result instead of
-run_gate5b4c3_live_runner_boundary_async. Flag-OFF (default) must be byte-
-identical to today.
+P5-M1b: the legacy run_gate5b4c3_live_runner_boundary_async engine and the
+MAGI_HOSTED_GOVERNED_TURN_ENABLED flag are deleted. Hosted turns now route
+unconditionally through run_governed_turn -> MagiEngineDriver, collected by
+collect_engine_to_boundary_result. This suite covers:
 
-Three test groups:
-1. Flag OFF (default): gate5b4c3 boundary is called; governed-turn path is NOT.
-2. Flag ON: run_governed_turn + collect_engine_to_boundary_result ARE called;
-   gate5b4c3 boundary is NOT called (happy path with accepted runner_input).
-3. Same response shape: both paths produce a compatible response for downstream code.
+1. Governed path is called (run_governed_turn + collect called, no legacy boundary).
+2. Profile-aware default: with flag unset and no safe-family profile, governed runs.
+3. Same response shape as the pre-M1b flag-ON leg (the OFF leg is gone).
+4. Durable session fronting via the single-flight session lease.
+5. Regression: governed branch must default the primitives loader when route config
+   has none.
+6. P5-M1a regression: dropped runner input uses the drop shim, not the legacy boundary.
 """
 from __future__ import annotations
 
@@ -240,74 +242,17 @@ _CANARY_BODY = {"messages": [{"role": "user", "content": "test prompt"}]}
 
 
 # ---------------------------------------------------------------------------
-# 1. Flag explicitly OFF ("0") — gate5b4c3 boundary called, governed-turn NOT
-#    called. The flag is now profile-aware default-ON, so the legacy path is the
-#    explicit escape hatch (an explicit "0" or a safe-family profile).
-# ---------------------------------------------------------------------------
-
-
-def test_flag_explicit_off_uses_gate5b4c3_boundary(monkeypatch, tmp_path: Any) -> None:
-    """Flag explicitly OFF ("0"): only run_gate5b4c3_live_runner_boundary_async
-    is called. The legacy boundary is the escape hatch now that the flag defaults
-    ON under the full/lab profile."""
-    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
-    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "0")
-
-    boundary_called: dict[str, int] = {"count": 0}
-    governed_called: dict[str, int] = {"count": 0}
-    collect_called: dict[str, int] = {"count": 0}
-
-    async def fake_boundary(*args: object, **kwargs: object) -> Gate5B4C3LiveRunnerBoundaryResult:
-        boundary_called["count"] += 1
-        return _make_boundary_result()
-
-    async def _noop_gen():  # noqa: ANN202
-        yield EngineResult(terminal=Terminal.completed, session_id="s", turn_id="t")
-
-    def fake_governed_turn(ctx: object, *, runtime: object, cancel: object = None):  # noqa: ANN201
-        # Track the call synchronously (generator body is lazy — track at call site).
-        governed_called["count"] += 1
-        return _noop_gen()
-
-    async def fake_collect(*args: object, **kwargs: object) -> object:
-        collect_called["count"] += 1
-        return _make_boundary_result()
-
-    monkeypatch.setattr("magi_agent.transport.gate5b_serving.run_gate5b4c3_live_runner_boundary_async", fake_boundary)
-    monkeypatch.setattr("magi_agent.transport.gate5b_serving.run_governed_turn", fake_governed_turn)
-    monkeypatch.setattr("magi_agent.transport.gate5b_serving.collect_engine_to_boundary_result", fake_collect)
-
-    runtime = _make_canary_runtime(tmp_path)
-    response = TestClient(create_app(runtime)).post(
-        "/v1/chat/completions",
-        headers=_canary_headers("a" * 64),
-        json=_CANARY_BODY,
-    )
-
-    assert boundary_called["count"] == 1, "gate5b4c3 boundary must be called (flag OFF)"
-    assert governed_called["count"] == 0, "run_governed_turn must NOT be called (flag OFF)"
-    assert collect_called["count"] == 0, "collect_engine_to_boundary_result must NOT be called (flag OFF)"
-    assert response.status_code == 200, response.json()
-
-
-# ---------------------------------------------------------------------------
-# 2. Flag ON — governed-turn path called, gate5b4c3 boundary NOT called
+# 1. Governed path is called unconditionally (P5-M1b: no flag, no legacy engine)
 # ---------------------------------------------------------------------------
 
 
 def test_flag_on_uses_governed_turn(monkeypatch, tmp_path: Any) -> None:
-    """Flag ON: run_governed_turn + collect are called; gate5b4c3 boundary is NOT."""
+    """Governed path: run_governed_turn + collect are called unconditionally."""
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
-    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "1")
 
-    boundary_called: dict[str, int] = {"count": 0}
     governed_called: dict[str, int] = {"count": 0}
     collect_called: dict[str, int] = {"count": 0}
     turn_ctx_seen: list[object] = []
-
-    async def fail_boundary(*args: object, **kwargs: object) -> object:
-        boundary_called["count"] += 1
-        raise AssertionError("gate5b4c3 boundary must NOT be called when flag is ON")
 
     async def _noop_gen():  # noqa: ANN202
         yield EngineResult(terminal=Terminal.completed, session_id="s", turn_id="t")
@@ -322,7 +267,6 @@ def test_flag_on_uses_governed_turn(monkeypatch, tmp_path: Any) -> None:
         collect_called["count"] += 1
         return _make_boundary_result(output_text="governed answer")
 
-    monkeypatch.setattr("magi_agent.transport.gate5b_serving.run_gate5b4c3_live_runner_boundary_async", fail_boundary)
     monkeypatch.setattr("magi_agent.transport.gate5b_serving.run_governed_turn", fake_governed_turn)
     monkeypatch.setattr("magi_agent.transport.gate5b_serving.collect_engine_to_boundary_result", fake_collect)
 
@@ -333,9 +277,8 @@ def test_flag_on_uses_governed_turn(monkeypatch, tmp_path: Any) -> None:
         json=_CANARY_BODY,
     )
 
-    assert boundary_called["count"] == 0, "gate5b4c3 boundary must NOT be called (flag ON)"
-    assert governed_called["count"] == 1, "run_governed_turn must be called exactly once (flag ON)"
-    assert collect_called["count"] == 1, "collect_engine_to_boundary_result must be called (flag ON)"
+    assert governed_called["count"] == 1, "run_governed_turn must be called exactly once"
+    assert collect_called["count"] == 1, "collect_engine_to_boundary_result must be called"
     # Verify TurnContext type was passed
     assert len(turn_ctx_seen) == 1
     from magi_agent.runtime.turn_context import TurnContext
@@ -346,20 +289,16 @@ def test_flag_on_uses_governed_turn(monkeypatch, tmp_path: Any) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 1b. Profile-aware default: flag UNSET under a non-safe/full profile resolves
-#     ON (governed path); a safe-family profile resolves OFF (legacy boundary).
+# 1b. The governed path runs regardless of runtime profile (P5-M1b: the legacy
+#     boundary and the MAGI_HOSTED_GOVERNED_TURN_ENABLED escape hatch are gone,
+#     so even a safe-family profile now serves through run_governed_turn).
 # ---------------------------------------------------------------------------
 
 
 def _count_route_paths(monkeypatch, tmp_path: Any, *, digest: str) -> dict[str, int]:
-    """Wire the boundary/governed/collect fakes and issue one canary request;
-    return the per-path call counts. The caller sets the env that selects the
-    route."""
-    counts: dict[str, int] = {"boundary": 0, "governed": 0, "collect": 0, "status": 0}
-
-    async def fake_boundary(*args: object, **kwargs: object) -> Gate5B4C3LiveRunnerBoundaryResult:
-        counts["boundary"] += 1
-        return _make_boundary_result()
+    """Wire the governed/collect fakes and issue one canary request; return the
+    per-path call counts. The caller sets the env that selects the profile."""
+    counts: dict[str, int] = {"governed": 0, "collect": 0, "status": 0}
 
     async def _noop_gen():  # noqa: ANN202
         yield EngineResult(terminal=Terminal.completed, session_id="s", turn_id="t")
@@ -372,7 +311,6 @@ def _count_route_paths(monkeypatch, tmp_path: Any, *, digest: str) -> dict[str, 
         counts["collect"] += 1
         return _make_boundary_result(output_text="governed answer")
 
-    monkeypatch.setattr("magi_agent.transport.gate5b_serving.run_gate5b4c3_live_runner_boundary_async", fake_boundary)
     monkeypatch.setattr("magi_agent.transport.gate5b_serving.run_governed_turn", fake_governed_turn)
     monkeypatch.setattr("magi_agent.transport.gate5b_serving.collect_engine_to_boundary_result", fake_collect)
 
@@ -386,35 +324,30 @@ def _count_route_paths(monkeypatch, tmp_path: Any, *, digest: str) -> dict[str, 
     return counts
 
 
-def test_flag_unset_full_profile_uses_governed_turn(monkeypatch, tmp_path: Any) -> None:
-    """Profile-aware default-ON: with the flag UNSET and no safe-family profile
-    (the hosted/full default), the served turn routes through run_governed_turn,
-    NOT the legacy gate5b4c3 boundary."""
+def test_full_profile_uses_governed_turn(monkeypatch, tmp_path: Any) -> None:
+    """Under the full/default profile the served turn routes through
+    run_governed_turn (governed is the only hosted engine)."""
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
-    monkeypatch.delenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", raising=False)
     monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
 
     counts = _count_route_paths(monkeypatch, tmp_path, digest="e" * 64)
 
     assert counts["status"] == 200, counts
-    assert counts["governed"] == 1, "governed path must run when flag unset under full profile"
+    assert counts["governed"] == 1, "governed path must run under the full profile"
     assert counts["collect"] == 1
-    assert counts["boundary"] == 0, "legacy boundary must NOT run when the default resolves ON"
 
 
-def test_flag_unset_safe_profile_uses_gate5b4c3_boundary(monkeypatch, tmp_path: Any) -> None:
-    """Escape hatch parity: under a safe-family runtime profile the unset flag
-    resolves OFF, so the served turn takes the legacy gate5b4c3 boundary."""
+def test_safe_profile_still_uses_governed_turn(monkeypatch, tmp_path: Any) -> None:
+    """P5-M1b: the safe-family escape hatch to the legacy boundary is gone, so a
+    safe-family runtime profile also serves through the governed path."""
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
-    monkeypatch.delenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", raising=False)
     monkeypatch.setenv("MAGI_RUNTIME_PROFILE", "safe")
 
     counts = _count_route_paths(monkeypatch, tmp_path, digest="f" * 64)
 
     assert counts["status"] == 200, counts
-    assert counts["boundary"] == 1, "legacy boundary must run under a safe-family profile"
-    assert counts["governed"] == 0, "governed path must NOT run when the safe profile forces OFF"
-    assert counts["collect"] == 0
+    assert counts["governed"] == 1, "governed path runs even under a safe-family profile"
+    assert counts["collect"] == 1
 
 
 def test_governed_fork_fronts_durable_session_service_when_db_flag_on(
@@ -439,7 +372,6 @@ def test_governed_fork_fronts_durable_session_service_when_db_flag_on(
     reset_durable_hosted_session_service()
     reset_default_session_service_registry()
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
-    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "1")
     monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "1")
     monkeypatch.setenv("MAGI_HOSTED_SESSION_DB", "1")
     monkeypatch.setenv("MAGI_STATE_DIR", str(tmp_path))
@@ -509,7 +441,6 @@ def test_governed_fork_builds_fresh_in_memory_service_when_db_flag_off(
 
     reset_default_session_service_registry()
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
-    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "1")
     monkeypatch.setenv("MAGI_HOSTED_SESSION_DB", "0")
 
     captured: dict[str, object] = {"session_service": "unset"}
@@ -559,12 +490,12 @@ def test_governed_fork_builds_fresh_in_memory_service_when_db_flag_off(
 # ---------------------------------------------------------------------------
 
 
-def test_flag_off_and_on_produce_same_response_top_level_shape(monkeypatch) -> None:
-    """Both paths produce responses with the same top-level key structure."""
-    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+def test_governed_response_has_expected_top_level_shape(monkeypatch) -> None:
+    """The governed path produces the expected top-level response key structure.
 
-    async def fake_boundary(*args: object, **kwargs: object) -> Gate5B4C3LiveRunnerBoundaryResult:
-        return _make_boundary_result(output_text="shape test answer OFF")
+    (Pre-M1b this compared the flag-OFF legacy path to the flag-ON governed path;
+    the legacy path is gone, so this now locks the governed response shape.)"""
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
 
     async def _noop_gen():  # noqa: ANN202
         yield EngineResult(terminal=Terminal.completed, session_id="s", turn_id="t")
@@ -573,51 +504,25 @@ def test_flag_off_and_on_produce_same_response_top_level_shape(monkeypatch) -> N
         return _noop_gen()
 
     async def fake_collect(*args: object, **kwargs: object) -> Gate5B4C3LiveRunnerBoundaryResult:
-        return _make_boundary_result(output_text="shape test answer ON")
+        return _make_boundary_result(output_text="shape test answer")
 
-    monkeypatch.setattr("magi_agent.transport.gate5b_serving.run_gate5b4c3_live_runner_boundary_async", fake_boundary)
     monkeypatch.setattr("magi_agent.transport.gate5b_serving.run_governed_turn", fake_governed_turn)
     monkeypatch.setattr("magi_agent.transport.gate5b_serving.collect_engine_to_boundary_result", fake_collect)
 
-    # --- Flag explicitly OFF ("0"; the flag now defaults ON, so force legacy) ---
-    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "0")
-    tmp_off = pathlib.Path(tempfile.mkdtemp())
-    runtime_off = _make_canary_runtime(tmp_off)
-    resp_off = TestClient(create_app(runtime_off)).post(
-        "/v1/chat/completions",
-        headers=_canary_headers("c" * 64),
-        json=_CANARY_BODY,
-    )
-
-    # --- Flag ON ---
-    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "1")
-    tmp_on = pathlib.Path(tempfile.mkdtemp())
-    runtime_on = _make_canary_runtime(tmp_on)
-    resp_on = TestClient(create_app(runtime_on)).post(
+    tmp = pathlib.Path(tempfile.mkdtemp())
+    runtime = _make_canary_runtime(tmp)
+    resp = TestClient(create_app(runtime)).post(
         "/v1/chat/completions",
         headers=_canary_headers("d" * 64),
         json=_CANARY_BODY,
     )
 
-    assert resp_off.status_code == 200, resp_off.json()
-    assert resp_on.status_code == 200, resp_on.json()
+    assert resp.status_code == 200, resp.json()
+    body = resp.json()
 
-    body_off = resp_off.json()
-    body_on = resp_on.json()
-
-    # Assert top-level key sets match exactly
-    assert set(body_off.keys()) == set(body_on.keys()), (
-        f"Response key mismatch.\nOFF keys: {sorted(body_off.keys())}\n"
-        f"ON keys:  {sorted(body_on.keys())}"
-    )
-
-    # Assert critical shared fields have the same type/structure
+    # Assert the critical top-level fields are present with the expected types.
     for key in ("status", "fallbackStatus", "responseAuthority", "adk", "counter"):
-        assert key in body_off and key in body_on, f"Missing key: {key}"
-        assert type(body_off[key]) == type(body_on[key]), (  # noqa: E721
-            f"Type mismatch for key {key!r}: "
-            f"OFF={type(body_off[key]).__name__}, ON={type(body_on[key]).__name__}"
-        )
+        assert key in body, f"Missing key: {key}"
 
 
 # ---------------------------------------------------------------------------
@@ -637,7 +542,6 @@ def test_governed_turn_defaults_primitives_loader_when_route_config_has_none(
     monkeypatch, tmp_path: Any
 ) -> None:
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
-    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "1")
 
     governed_called: dict[str, int] = {"count": 0}
     default_loader_called: dict[str, int] = {"count": 0}
@@ -711,22 +615,12 @@ def test_governed_dropped_input_uses_shim_not_legacy_boundary(
     )
 
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
-    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "1")
 
-    boundary_called: dict[str, int] = {"count": 0}
     governed_called: dict[str, int] = {"count": 0}
     shim_called: dict[str, object] = {"count": 0, "drop_reason": None}
 
-    async def fail_boundary(*args: object, **kwargs: object) -> object:
-        # The drop path must NOT reach the legacy boundary under M1a.
-        boundary_called["count"] += 1
-        raise AssertionError(
-            "run_gate5b4c3_live_runner_boundary_async must NOT be called on the "
-            "governed drop path (M1a)"
-        )
-
     def fake_governed_turn(ctx: object, *, runtime: object, cancel: object = None):  # noqa: ANN201
-        # A dropped input must never start a governed turn either.
+        # A dropped input must never start a governed turn.
         governed_called["count"] += 1
         raise AssertionError("run_governed_turn must NOT run for a dropped input")
 
@@ -748,10 +642,6 @@ def test_governed_dropped_input_uses_shim_not_legacy_boundary(
         return real_shim_fn(request, **kwargs)
 
     monkeypatch.setattr(
-        "magi_agent.transport.gate5b_serving.run_gate5b4c3_live_runner_boundary_async",
-        fail_boundary,
-    )
-    monkeypatch.setattr(
         "magi_agent.transport.gate5b_serving.run_governed_turn", fake_governed_turn
     )
     monkeypatch.setattr(
@@ -770,11 +660,11 @@ def test_governed_dropped_input_uses_shim_not_legacy_boundary(
         json=_CANARY_BODY,
     )
 
-    # A dropped input surfaces as the SAME structured refusal the legacy boundary
-    # produced pre-M1a: HTTP 502, python_error, reason input_adapter_drop,
-    # fallback_to_typescript. (Verified against the pre-M1a boundary path.)
+    # A dropped input surfaces as a structured refusal built by the drop shim:
+    # HTTP 502, python_error, reason input_adapter_drop, fallback_to_typescript.
+    # (Pre-M1a this refusal came from the legacy boundary's error-result path;
+    # M1a moved it to the shim and M1b retired the boundary entirely.)
     assert response.status_code == 502, response.json()
-    assert boundary_called["count"] == 0, "legacy boundary must not be called on a drop"
     assert governed_called["count"] == 0, "no governed turn for a dropped input"
     assert shim_called["count"] == 1, "the drop shim must build the refusal exactly once"
     assert shim_called["drop_reason"] == "input_token_budget_exceeded"
