@@ -111,7 +111,6 @@ def _install_lease_spies(monkeypatch, *, collect_raises: bool = False) -> tuple[
 
 def _governed_env(monkeypatch, tmp_path: Any, *, reuse: str, db: str) -> None:
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
-    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "1")
     monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", reuse)
     monkeypatch.setenv("MAGI_HOSTED_SESSION_DB", db)
     monkeypatch.setenv("MAGI_STATE_DIR", str(tmp_path))

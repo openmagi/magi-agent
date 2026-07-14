@@ -217,7 +217,6 @@ def _drive_flag_on_governed_turn(
     faked to a text_delta + terminal stream; collect is REAL so message /
     turn_end read a genuine boundary result."""
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
-    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "1")
 
     lease = _FakeLease(reused=True, service=_FakeSessionService())
 

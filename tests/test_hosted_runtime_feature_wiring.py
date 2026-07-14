@@ -225,7 +225,6 @@ def test_flag_on_serving_forwards_output_continuation_gated_on_toolhost(
     reset_durable_hosted_session_service()
 
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
-    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "1")
     monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "1")
     monkeypatch.setenv("MAGI_HOSTED_SESSION_DB", "1")
     monkeypatch.setenv("MAGI_STATE_DIR", str(tmp_path))
