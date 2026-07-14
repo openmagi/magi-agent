@@ -30,6 +30,7 @@ Auth is checked first (before the feature gate) on all three routes.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import hmac
 import inspect
@@ -632,6 +633,37 @@ def _runtime_event_frame(payload: Mapping[str, object], *, turn_id: str) -> byte
     )
 
 
+def _channel_from_session_id(session_id: str) -> str:
+    """Best-effort parse of the channel segment from the reset-aware session key
+    ``agent:main:app:<channel>[:<resetN>]``. Mirrors ``chat_routes_local``'s
+    ``_channel_for_log`` derivation so durable rows land under the same channel
+    from both the LOCAL and gate5b branches. Observability field only; fail-soft
+    (returns "" on any parse fault)."""
+    try:
+        parts = session_id.split(":")
+        app_idx = next((i for i, p in enumerate(parts) if p == "app"), -1)
+        if app_idx >= 0 and app_idx + 1 < len(parts):
+            return parts[app_idx + 1]
+        return ""
+    except Exception:  # noqa: BLE001, S110 -- observability field, never raise
+        return ""
+
+
+def _channel_message_store_accessor() -> object | None:
+    """Resolve the durable ``ChannelMessageStore`` the SAME way the GET
+    ``channel-messages`` endpoint does (``flag_str("MAGI_AGENT_WORKSPACE") or
+    os.getcwd()`` -> ``channel_message_store_for``). Returns None when the flag
+    is OFF or init fails. Lazy import keeps the pump import-light; called inside
+    the pump so any fault is caught by the accessor guard there."""
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
+    from magi_agent.storage.channel_message_store import (  # noqa: PLC0415
+        channel_message_store_for,
+    )
+
+    workspace_root = flag_str("MAGI_AGENT_WORKSPACE") or os.getcwd()
+    return channel_message_store_for(workspace_root)
+
+
 def _builder_accepts_agent_event_emitter(builder: object) -> bool:
     """Return True when *builder* declares an ``agent_event_emitter`` parameter
     (or accepts arbitrary ``**kwargs``).
@@ -846,8 +878,15 @@ async def _drive_selected_gate5b_stream(
     *,
     session_id: str,
     turn_id: str,
+    cancel: asyncio.Event | None = None,
 ) -> AsyncIterator[bytes]:
-    """Adapt the selected Gate5B chat response to the streaming SSE contract."""
+    """Adapt the selected Gate5B chat response to the streaming SSE contract.
+
+    ``cancel`` (F1) is the SAME event the detached pump's idle-abort watchdog
+    ``set()``s for a genuinely stuck turn. The heartbeat loop checks it each
+    tick; when set it cancels the in-flight ``response_task`` and emits an
+    error + aborted-terminal frame so the pump snapshot records an ``aborted``
+    terminal. Default None keeps every direct caller byte-identical."""
     live_events: asyncio.Queue[Mapping[str, object]] = asyncio.Queue()
     emitted_event_keys: set[str] = set()
     live_text_emitted = False
@@ -916,6 +955,29 @@ async def _drive_selected_gate5b_stream(
             float(_SELECTED_STREAM_HEARTBEAT_INTERVAL_SECONDS),
         )
         while True:
+            # F1: idle-abort watchdog (pump-owned) requested a stop. Cancel the
+            # in-flight response task, surface an error + aborted terminal, and
+            # return. The finally-detach guard below sees a done task and skips
+            # its detach (the task is already cancelled).
+            if cancel is not None and cancel.is_set():
+                response_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await response_task
+                frame = _runtime_event_frame(
+                    {"type": "error", "code": "idle_abort", "message": "idle_abort"},
+                    turn_id=turn_id,
+                )
+                if frame is not None:
+                    yield frame
+                for chunk in frame_for_terminal(
+                    EngineResult(
+                        terminal=Terminal.aborted,
+                        session_id=session_id,
+                        turn_id=turn_id,
+                    )
+                ):
+                    yield chunk
+                return
             if response_task.done() and live_events.empty():
                 break
             next_event_task = asyncio.create_task(live_events.get())
@@ -1290,14 +1352,33 @@ def register_streaming_chat_routes(
             )
 
         if _selected_gate5b_stream_active(runtime):
+            # F1: route the local-serve governed gate5b stream through the same
+            # detached pump the LOCAL branch uses so the turn gets a live
+            # snapshot (active-snapshot), an in-memory completed record
+            # (channel-messages), durable channel history (F1b), and refresh
+            # survival. A fresh cancel event is shared between the pump's
+            # idle-abort watchdog and the gate5b heartbeat loop (which honors it
+            # via the new ``cancel=`` param). Only the local-serve gate5b branch
+            # changes; the hosted_serve branch above stays byte-identical.
+            gate5b_cancel = asyncio.Event()
+            _gate5b_channel = _channel_from_session_id(session_id)
             return _streaming_response(
                 _wrap_handler_exit_trace(
-                    _drive_selected_gate5b_stream(
-                        runtime,
-                        body,
-                        request,
+                    drive_detached_local_stream(
+                        _drive_selected_gate5b_stream(
+                            runtime,
+                            body,
+                            request,
+                            session_id=session_id,
+                            turn_id=turn_id,
+                            cancel=gate5b_cancel,
+                        ),
                         session_id=session_id,
                         turn_id=turn_id,
+                        cancel=gate5b_cancel,
+                        user_message=prompt,
+                        channel=_gate5b_channel,
+                        store_accessor=_channel_message_store_accessor,
                     ),
                     session_id=session_id,
                     turn_id=turn_id,
@@ -1440,6 +1521,9 @@ def register_streaming_chat_routes(
                     session_id=session_id,
                     turn_id=turn_id,
                     cancel=cancel,
+                    user_message=prompt,
+                    channel=_channel_from_session_id(session_id),
+                    store_accessor=_channel_message_store_accessor,
                 ):
                     yield _frame
             finally:
@@ -1680,6 +1764,27 @@ def register_streaming_chat_routes(
                         }
                         for r in rows
                     ]
+                    # F2: when the durable read succeeds but is EMPTY, fall through
+                    # to the in-memory LOCAL_TURN_STORE instead of returning [] --
+                    # a just-finished turn whose durable write has not landed (or
+                    # was skipped) still rehydrates on refresh. When the durable
+                    # rows are non-empty, additionally append the in-memory
+                    # completed record iff its turnId is not already present
+                    # (covers a failed durable assistant write). Dedupe by turnId,
+                    # durable wins.
+                    if not messages:
+                        legacy = LOCAL_TURN_STORE.completed_messages(session_id)
+                        return JSONResponse(
+                            status_code=200, content={"messages": legacy}
+                        )
+                    durable_turn_ids = {
+                        m.get("turnId") for m in messages if m.get("turnId")
+                    }
+                    for legacy_msg in LOCAL_TURN_STORE.completed_messages(session_id):
+                        legacy_turn_id = legacy_msg.get("turnId")
+                        if legacy_turn_id and legacy_turn_id in durable_turn_ids:
+                            continue
+                        messages.append(legacy_msg)
                     return JSONResponse(
                         status_code=200, content={"messages": messages}
                     )
