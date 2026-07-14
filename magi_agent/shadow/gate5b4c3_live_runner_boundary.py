@@ -1585,6 +1585,91 @@ async def run_gate5b4c3_live_runner_boundary_async(
     return await boundary.invoke_async(request, config=config)
 
 
+def build_gate5b4c3_input_drop_boundary_result(
+    request: Gate5B4C3ShadowGenerationRequest,
+    *,
+    diagnostic: Gate5B4C3ShadowGenerationDiagnostic,
+    drop_reason: str,
+    active_tools: Sequence[object] = (),
+    gate1a_egress_correlation_context: Gate1AEgressCorrelationContext | None = None,
+    gate1a_egress_proxy_url: str | None = None,
+) -> Gate5B4C3LiveRunnerBoundaryResult:
+    """Synthesize the input-adapter-drop boundary result without the legacy engine.
+
+    P5-M1a: the governed serving path (``transport/gate5b_serving.py``) used to
+    delegate a dropped runner input to ``run_gate5b4c3_live_runner_boundary_async``
+    purely so the boundary's error-result path would build the drop response.
+    That was the last governed -> legacy-engine call. This helper reproduces that
+    exact wire shape directly, so the boundary class can retire (M1b) without the
+    governed path losing its refusal behavior.
+
+    The construction mirrors ``Gate5B4C3LiveRunnerBoundary._invoke_async_turn``'s
+    drop branch byte-for-byte:
+    ``_result(request, diagnostic, status="dropped", reason="input_adapter_drop",
+    started=..., error_preview=<adapter reason>, runner_error_diagnostic=...)``.
+    The drop path never starts the ADK runner and never registers a session
+    lease, so there is no orchestration to reproduce beyond the result object and
+    the boundary's turn-completion transcript emission (``_emit_turn_completion``).
+    For a drop, ``output_text_internal`` is ``None``, so only a ``turn_end`` record
+    is emitted (no ``message`` record), matching the legacy chokepoint exactly.
+
+    Note there is no ``public_event_sink`` parameter: the boundary drives its SSE
+    ``_emit_public_event`` seam only from inside the ADK runner event loop, which
+    a dropped input never enters, so the drop path emits no public/SSE event. The
+    process-global transcript sink below is the only side effect, matching the
+    boundary's ``_emit_turn_completion`` for a drop.
+    """
+    started = time.monotonic()
+    result = _result(
+        request,
+        diagnostic,
+        status="dropped",
+        reason="input_adapter_drop",
+        started=started,
+        error_preview=drop_reason,
+        runner_error_diagnostic=_runner_error_diagnostic(
+            request,
+            stage="runner_input_adapter",
+            reason_code=drop_reason,
+            exception_category="request_shape_runner_input_adapter_failure",
+            active_tools=active_tools,
+            gate1a_egress_correlation_context=gate1a_egress_correlation_context,
+            gate1a_egress_proxy_url=gate1a_egress_proxy_url,
+        ),
+    )
+    # Mirror Gate5B4C3LiveRunnerBoundary._emit_turn_completion for a drop: emit
+    # the assembled message ONLY when there is output text (None here), then
+    # always the turn_end record, through the SAME process-global transcript
+    # sink chokepoint (emit_transcript_record) the boundary uses.
+    from magi_agent.observability.transcript import emit_transcript_record
+
+    if result.output_text_internal:
+        emit_transcript_record(
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": result.output_text_internal,
+            },
+            _shadow_session_id(request),
+            request.turn.turn_id,
+        )
+    emit_transcript_record(
+        {
+            "type": "turn_end",
+            "terminal": result.status,
+            "reason": result.reason,
+            "usage": result.usage_internal,
+            "provider": result.selected_provider,
+            "model": result.selected_model,
+            "event_count": result.event_count,
+            "latency_ms": result.latency_ms,
+        },
+        _shadow_session_id(request),
+        request.turn.turn_id,
+    )
+    return result
+
+
 def _is_anthropic_route(provider_label: str, model_label: str) -> bool:
     """True when the route resolves to a Claude/Anthropic model via ADK.
 
