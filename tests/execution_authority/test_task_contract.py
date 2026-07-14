@@ -94,7 +94,7 @@ def test_plan_construction_example_is_frozen_and_alias_aware() -> None:
         }
     )
 
-    assert contract.schema_id == "openmagi.task_contract.v1"
+    assert contract.schema_id == "magi.task_contract.v1"
     assert contract.task_contract_id == "task_01"
     assert contract.version == 3
     assert contract.requirements == (requirement,)

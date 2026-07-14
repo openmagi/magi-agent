@@ -50,7 +50,7 @@ def _capability(
 
 def _request_payload(**overrides: object) -> dict[str, object]:
     payload: dict[str, object] = {
-        "schemaId": "openmagi.user_decision_request.v1",
+        "schemaId": "magi.user_decision_request.v1",
         "decisionRequestId": "decision_01",
         "principalId": "actor_01",
         "tenantId": "tenant_01",
@@ -86,7 +86,7 @@ def _receipt_payload(
 ) -> dict[str, object]:
     bound_request = request or _request()
     payload: dict[str, object] = {
-        "schemaId": "openmagi.user_decision_receipt.v1",
+        "schemaId": "magi.user_decision_receipt.v1",
         "receiptId": "receipt_01",
         "decisionRequestId": bound_request.decision_request_id,
         "decision": "approve",
@@ -226,7 +226,7 @@ def test_request_uses_exact_aliases_schema_and_complete_json_shape() -> None:
     request = _request()
     alias_json = request.model_dump(by_alias=True, mode="json")
 
-    assert request.schema_id == "openmagi.user_decision_request.v1"
+    assert request.schema_id == "magi.user_decision_request.v1"
     assert set(alias_json) == {
         "schemaId",
         "decisionRequestId",
@@ -254,7 +254,7 @@ def test_request_uses_exact_aliases_schema_and_complete_json_shape() -> None:
     assert alias_json["capabilitiesDigest"] == request.capabilities_digest
 
     with pytest.raises(ValidationError):
-        _request(schemaId="openmagi.user_decision_request.v2")
+        _request(schemaId="magi.user_decision_request.v2")
 
 
 @pytest.mark.parametrize(
@@ -368,7 +368,7 @@ def test_receipt_uses_exact_aliases_schema_and_json_round_trip() -> None:
     receipt = _receipt()
     alias_json = receipt.model_dump(by_alias=True, mode="json")
 
-    assert receipt.schema_id == "openmagi.user_decision_receipt.v1"
+    assert receipt.schema_id == "magi.user_decision_receipt.v1"
     assert set(alias_json) == {
         "schemaId",
         "receiptId",
@@ -402,7 +402,7 @@ def test_receipt_uses_exact_aliases_schema_and_json_round_trip() -> None:
     )
 
     with pytest.raises(ValidationError):
-        _receipt(schemaId="openmagi.user_decision_receipt.v2")
+        _receipt(schemaId="magi.user_decision_receipt.v2")
 
 
 @pytest.mark.parametrize(

@@ -63,8 +63,8 @@ class DependencyContract(_AuthorityContractModel):
 
 
 class TaskContractSnapshot(_AuthorityContractModel):
-    schema_id: Literal["openmagi.task_contract.v1"] = Field(
-        default="openmagi.task_contract.v1",
+    schema_id: Literal["magi.task_contract.v1"] = Field(
+        default="magi.task_contract.v1",
         alias="schemaId",
     )
     task_contract_id: str = Field(alias="taskContractId", min_length=1)
@@ -430,8 +430,8 @@ class AuthorityContract(_AuthorityContractModel):
 
 
 class UserDecisionRequest(_AuthorityContractModel):
-    schema_id: Literal["openmagi.user_decision_request.v1"] = Field(
-        default="openmagi.user_decision_request.v1",
+    schema_id: Literal["magi.user_decision_request.v1"] = Field(
+        default="magi.user_decision_request.v1",
         alias="schemaId",
     )
     decision_request_id: str = Field(alias="decisionRequestId", min_length=1)
@@ -550,8 +550,8 @@ class UserDecisionRequest(_AuthorityContractModel):
 
 
 class UserDecisionReceipt(_AuthorityContractModel):
-    schema_id: Literal["openmagi.user_decision_receipt.v1"] = Field(
-        default="openmagi.user_decision_receipt.v1",
+    schema_id: Literal["magi.user_decision_receipt.v1"] = Field(
+        default="magi.user_decision_receipt.v1",
         alias="schemaId",
     )
     receipt_id: str = Field(alias="receiptId", min_length=1)
