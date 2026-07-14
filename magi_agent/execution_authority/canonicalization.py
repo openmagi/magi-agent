@@ -14,6 +14,11 @@ import stat
 import unicodedata
 from urllib.parse import quote, unquote_to_bytes, urlsplit, urlunsplit
 
+# HTTPX is a directly pinned runtime dependency and requires ``idna``.  Reuse
+# that guaranteed IDNA 2008 implementation so authority identities match the
+# actual HTTP executor without adding another project dependency or lock entry.
+import idna
+
 from magi_agent.ops.safety import canonical_digest, contains_secret_marker, is_secret_key
 
 
@@ -45,6 +50,18 @@ _MAX_WORKSPACE_ENCODED_SUFFIX_CHARS = min(
     _MAX_WORKSPACE_CANDIDATE_BYTES * 3,
 )
 _MAX_WORKSPACE_REF_CHARS = len("workspace://sha256:") + 64 + 1 + _MAX_WORKSPACE_ENCODED_SUFFIX_CHARS
+# These bounds are checked before component canonicalization.  Besides limiting
+# memory, they keep percent decoding, query sorting, secret scanning, and path
+# normalization deterministic under adversarial input.
+_MAX_HTTP_URL_CHARS = 8_192
+_MAX_HTTP_URL_BYTES = 8_192
+_MAX_HTTP_AUTHORITY_BYTES = 260
+_MAX_HTTP_PATH_BYTES = 4_096
+_MAX_HTTP_QUERY_BYTES = 4_096
+_MAX_HTTP_PATH_SEGMENTS = 128
+_MAX_HTTP_QUERY_ITEMS = 128
+_MAX_HTTP_COMPONENT_BYTES = 1_024
+_MAX_HTTP_PORT_DIGITS = 5
 
 
 def canonical_file_resource(
@@ -159,7 +176,13 @@ def canonical_http_resource(url: str) -> str:
 
     if type(url) is not str or not url:
         raise CanonicalizationError("URL must be non-empty text")
-    if _has_surrogate(url) or any(character.isspace() for character in url):
+    if len(url) > _MAX_HTTP_URL_CHARS:
+        raise _http_url_budget_error()
+    if _has_surrogate(url):
+        raise CanonicalizationError("URL must contain valid Unicode")
+    if _http_utf8_bytes(url) > _MAX_HTTP_URL_BYTES:
+        raise _http_url_budget_error()
+    if any(character.isspace() for character in url):
         raise CanonicalizationError("URL must not contain whitespace")
     if _has_control(url):
         raise CanonicalizationError("URL must not contain control characters")
@@ -174,6 +197,11 @@ def canonical_http_resource(url: str) -> str:
         parsed = urlsplit(url)
     except ValueError as exc:
         raise CanonicalizationError("URL authority is malformed") from exc
+    _validate_http_component_budgets(
+        netloc=parsed.netloc,
+        path=parsed.path,
+        query=parsed.query,
+    )
 
     scheme = parsed.scheme.lower()
     if scheme not in {"http", "https"} or not parsed.netloc:
@@ -201,6 +229,38 @@ def _resolved_workspace_root(root: str | os.PathLike[str]) -> Path:
             "workspace root must be an existing resolved directory"
         ) from exc
     return resolved
+
+
+def _http_url_budget_error() -> CanonicalizationError:
+    return CanonicalizationError("URL exceeds the canonicalization budget")
+
+
+def _http_utf8_bytes(value: str) -> int:
+    try:
+        return len(value.encode("utf-8", errors="strict"))
+    except UnicodeError as exc:
+        raise CanonicalizationError("URL must contain valid Unicode") from exc
+
+
+def _validate_http_component_budgets(*, netloc: str, path: str, query: str) -> None:
+    if (
+        _http_utf8_bytes(netloc) > _MAX_HTTP_AUTHORITY_BYTES
+        or _http_utf8_bytes(path) > _MAX_HTTP_PATH_BYTES
+        or _http_utf8_bytes(query) > _MAX_HTTP_QUERY_BYTES
+        or path.count("/") > _MAX_HTTP_PATH_SEGMENTS
+        or (query and query.count("&") + 1 > _MAX_HTTP_QUERY_ITEMS)
+    ):
+        raise _http_url_budget_error()
+
+    if any(_http_utf8_bytes(segment) > _MAX_HTTP_COMPONENT_BYTES for segment in path.split("/")):
+        raise _http_url_budget_error()
+    for raw_item in query.split("&") if query else ():
+        raw_key, _separator, raw_value = raw_item.partition("=")
+        if (
+            _http_utf8_bytes(raw_key) > _MAX_HTTP_COMPONENT_BYTES
+            or _http_utf8_bytes(raw_value) > _MAX_HTTP_COMPONENT_BYTES
+        ):
+            raise _http_url_budget_error()
 
 
 def _workspace_path_budget_error() -> CanonicalizationError:
@@ -705,6 +765,8 @@ def _canonical_http_authority(netloc: str, *, scheme: str) -> str:
     if port_text is not None:
         if not port_text or not port_text.isascii() or not port_text.isdecimal():
             raise CanonicalizationError("URL port is malformed")
+        if len(port_text) > _MAX_HTTP_PORT_DIGITS:
+            raise _http_url_budget_error()
         port = int(port_text)
         if port < 1 or port > 65535:
             raise CanonicalizationError("URL port is outside the valid range")
@@ -739,15 +801,28 @@ def _canonical_host(raw_host: str, *, bracketed: bool) -> str:
         except ValueError as exc:
             raise CanonicalizationError("URL IPv4 host is malformed") from exc
 
-    try:
-        ascii_host = raw_host.encode("idna").decode("ascii").lower()
-    except UnicodeError as exc:
-        raise CanonicalizationError("URL host is not valid IDNA") from exc
+    ascii_host = raw_host.lower()
     if len(ascii_host) > 253:
         raise CanonicalizationError("URL host is too long")
-    if any(_HOST_LABEL_RE.fullmatch(label) is None for label in ascii_host.split(".")):
+    labels = ascii_host.split(".")
+    if any(_HOST_LABEL_RE.fullmatch(label) is None for label in labels):
         raise CanonicalizationError("URL host has an invalid label")
+    for label in labels:
+        if label.startswith("xn--"):
+            _validate_idna_alabel(label)
     return ascii_host
+
+
+def _validate_idna_alabel(label: str) -> None:
+    """Validate an A-label with the same IDNA 2008 profile used by HTTPX."""
+
+    try:
+        decoded = idna.ulabel(label)
+        encoded = idna.alabel(decoded).decode("ascii")
+    except (idna.IDNAError, UnicodeError) as exc:
+        raise CanonicalizationError("URL host is not valid IDNA") from exc
+    if encoded != label:
+        raise CanonicalizationError("URL host is not valid IDNA")
 
 
 def _canonical_http_path(raw_path: str) -> str:
@@ -844,37 +919,25 @@ def _decoded_url_component_text(value: str) -> str:
 
 
 def _remove_dot_segments(path: str) -> str:
-    input_buffer = path
-    output = ""
-    while input_buffer:
-        if input_buffer.startswith("../"):
-            input_buffer = input_buffer[3:]
-        elif input_buffer.startswith("./"):
-            input_buffer = input_buffer[2:]
-        elif input_buffer.startswith("/./"):
-            input_buffer = "/" + input_buffer[3:]
-        elif input_buffer == "/.":
-            input_buffer = "/"
-        elif input_buffer.startswith("/../"):
-            input_buffer = "/" + input_buffer[4:]
-            output = output.rsplit("/", 1)[0]
-        elif input_buffer == "/..":
-            input_buffer = "/"
-            output = output.rsplit("/", 1)[0]
-        elif input_buffer in {".", ".."}:
-            input_buffer = ""
-        else:
-            if input_buffer.startswith("/"):
-                next_slash = input_buffer.find("/", 1)
-            else:
-                next_slash = input_buffer.find("/")
-            if next_slash < 0:
-                output += input_buffer
-                input_buffer = ""
-            else:
-                output += input_buffer[:next_slash]
-                input_buffer = input_buffer[next_slash:]
-    return output
+    segments = path.split("/")
+    output: list[str] = []
+    root_segments = 1 if path.startswith("/") else 0
+    final_index = len(segments) - 1
+
+    for index, segment in enumerate(segments):
+        if segment == ".":
+            if index == final_index:
+                output.append("")
+            continue
+        if segment == "..":
+            if len(output) > root_segments:
+                output.pop()
+            if index == final_index:
+                output.append("")
+            continue
+        output.append(segment)
+
+    return "/".join(output)
 
 
 def _has_control(value: str) -> bool:

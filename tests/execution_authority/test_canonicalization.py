@@ -1058,6 +1058,161 @@ def test_http_resource_matches_exact_normalization_vector() -> None:
     )
 
 
+def test_http_resource_rejects_oversized_url_before_parsing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_parse(_url: str) -> None:
+        raise AssertionError("oversized URL reached the parser")
+
+    monkeypatch.setattr(canonicalization, "urlsplit", unexpected_parse)
+
+    with pytest.raises(CanonicalizationError, match="budget"):
+        canonical_http_resource("https://example.com/" + "a" * 9_000)
+
+
+def test_http_resource_rejects_oversized_utf8_url_before_parsing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_parse(_url: str) -> None:
+        raise AssertionError("oversized UTF-8 URL reached the parser")
+
+    monkeypatch.setattr(canonicalization, "urlsplit", unexpected_parse)
+
+    with pytest.raises(CanonicalizationError, match="budget"):
+        canonical_http_resource("https://example.com/" + "🙂" * 2_050)
+
+
+@pytest.mark.parametrize(
+    "source",
+    (
+        "https://example.com/" + "/".join("a" * 900 for _ in range(5)),
+        "https://example.com/" + "a" * 1_025,
+        "https://example.com/" + "/".join("a" for _ in range(129)),
+        "https://example.com/" + "/".join("🙂" * 225 for _ in range(5)),
+        "https://example.com/" + "🙂" * 257,
+        "https://example.com/?" + "&".join(f"{key}={'v' * 900}" for key in "abcde"),
+        "https://example.com/?" + "a" * 1_025 + "=value",
+        "https://example.com/?key=" + "v" * 1_025,
+        "https://example.com/?" + "&".join("a=1" for _ in range(129)),
+        "https://example.com/?" + "&".join(f"{key}={'🙂' * 225}" for key in "abcde"),
+        "https://example.com/?" + "🙂" * 257 + "=value",
+        "https://example.com/?key=" + "🙂" * 257,
+        "https://" + "é" * 131 + "/",
+    ),
+)
+def test_http_resource_rejects_path_query_and_component_budget_overruns(
+    source: str,
+) -> None:
+    with pytest.raises(CanonicalizationError, match="budget"):
+        canonical_http_resource(source)
+
+
+def test_http_resource_rejects_path_budget_before_component_canonicalization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_component_canonicalization(
+        _raw: str,
+        *,
+        raw_safe: frozenset[str],
+    ) -> str:
+        _ = raw_safe
+        raise AssertionError("over-budget path reached component canonicalization")
+
+    monkeypatch.setattr(
+        canonicalization,
+        "_canonical_url_component",
+        unexpected_component_canonicalization,
+    )
+
+    with pytest.raises(CanonicalizationError, match="budget"):
+        canonical_http_resource("https://example.com/" + "a" * 1_025)
+
+
+def test_http_resource_rejects_a_very_long_decimal_port_as_canonicalization_error() -> None:
+    with pytest.raises(CanonicalizationError, match="port|budget"):
+        canonical_http_resource("https://example.com:" + "9" * 5_000 + "/")
+
+
+def test_http_resource_rejects_port_over_digit_budget_before_integer_conversion() -> None:
+    with pytest.raises(CanonicalizationError, match="budget"):
+        canonical_http_resource("https://example.com:000080/")
+
+
+@pytest.mark.parametrize(
+    "host",
+    ("xn--a.example", "xn--0.example", "xn--abc.example", "example.xn--a"),
+)
+def test_http_resource_rejects_invalid_idna_alabels(host: str) -> None:
+    with pytest.raises(CanonicalizationError, match="IDNA"):
+        canonical_http_resource(f"https://{host}/")
+
+
+@pytest.mark.parametrize("host", ("xn--fa-hia.de", "xn--bcher-kva.example"))
+def test_http_resource_round_trips_valid_idna2008_alabels(host: str) -> None:
+    canonical = canonical_http_resource(f"HTTPS://{host.upper()}/")
+
+    assert canonical == f"https://{host}/"
+    assert canonical_http_resource(canonical) == canonical
+
+
+def test_remove_dot_segments_does_not_copy_a_quadratic_input_volume() -> None:
+    class CopyTrackedString(str):
+        copied_characters = 0
+        copy_limit = 0
+
+        def __getitem__(self, key: int | slice) -> str:
+            value = super().__getitem__(key)
+            if isinstance(key, slice):
+                type(self).copied_characters += len(value)
+                if type(self).copied_characters > type(self).copy_limit:
+                    raise AssertionError("dot-segment removal copied a quadratic input volume")
+                return type(self)(value)
+            return value
+
+    path = CopyTrackedString("/" + "/".join("a" for _ in range(2_000)))
+    CopyTrackedString.copy_limit = len(path) * 4
+
+    assert canonicalization._remove_dot_segments(path) == path
+
+
+@pytest.mark.parametrize(
+    ("source_path", "expected_path"),
+    (
+        ("/a//../c", "/a/c"),
+        ("/a///../c", "/a//c"),
+        ("//../c", "/c"),
+        ("/../c", "/c"),
+        ("/a/.", "/a/"),
+        ("/a/..", "/"),
+        ("/a//..", "/a/"),
+        ("///..", "//"),
+    ),
+)
+def test_http_resource_preserves_empty_segment_dot_removal_edges(
+    source_path: str,
+    expected_path: str,
+) -> None:
+    assert canonical_http_resource(f"https://example.com{source_path}") == (
+        f"https://example.com{expected_path}"
+    )
+
+
+def test_http_resource_near_budget_work_is_bounded() -> None:
+    path = "/" + "/".join("p" * 1_023 for _ in range(4))
+    value_sizes = (1_024, 1_024, 1_024, 993)
+    query = "&".join(
+        f"{key}={'v' * size}" for key, size in zip("abcd", value_sizes, strict=True)
+    )
+    source = f"https://example.com{path}?{query}"
+    assert len(source.encode("utf-8")) == 8_192
+
+    started = perf_counter()
+    for _ in range(5):
+        assert canonical_http_resource(source) == source
+
+    assert perf_counter() - started < 1.0
+
+
 @pytest.mark.parametrize(
     ("source", "expected"),
     (
