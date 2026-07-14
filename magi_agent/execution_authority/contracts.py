@@ -421,23 +421,348 @@ class AuthorityContract(_AuthorityContractModel):
             raise ValueError("duplicate capabilities are not allowed")
         if self.parent_authority_digest is None:
             if self.delegation_chain:
-                raise ValueError(
-                    "root authority contracts may not contain a delegationChain"
-                )
+                raise ValueError("root authority contracts may not contain a delegationChain")
         elif not self.delegation_chain:
-            raise ValueError(
-                "delegated authority contracts require a nonempty delegationChain"
-            )
+            raise ValueError("delegated authority contracts require a nonempty delegationChain")
         elif self.delegation_chain[-1] != self.parent_authority_digest:
-            raise ValueError(
-                "delegationChain must end with parentAuthorityDigest"
-            )
+            raise ValueError("delegationChain must end with parentAuthorityDigest")
         return self
+
+
+class UserDecisionRequest(_AuthorityContractModel):
+    schema_id: Literal["openmagi.user_decision_request.v1"] = Field(
+        default="openmagi.user_decision_request.v1",
+        alias="schemaId",
+    )
+    decision_request_id: str = Field(alias="decisionRequestId", min_length=1)
+    principal_id: str = Field(alias="principalId", min_length=1)
+    tenant_id: str = Field(alias="tenantId", min_length=1)
+    session_id: str = Field(alias="sessionId", min_length=1)
+    turn_id: str = Field(alias="turnId", min_length=1)
+    task_contract_id: str = Field(alias="taskContractId", min_length=1)
+    task_version: int = Field(alias="taskVersion", ge=1, strict=True)
+    task_contract_digest: str = Field(alias="taskContractDigest")
+    completion_epoch_id: str = Field(alias="completionEpochId", min_length=1)
+    action_id: str = Field(alias="actionId", min_length=1)
+    authority_partition_id: str = Field(alias="authorityPartitionId", min_length=1)
+    normalized_request_digest: str = Field(alias="normalizedRequestDigest")
+    capabilities: tuple[AuthorityCapability, ...] = Field(min_length=1)
+    capabilities_digest: str = Field(default="", alias="capabilitiesDigest")
+    authority_ceiling_digest: str = Field(alias="authorityCeilingDigest")
+    policy_digest: str = Field(alias="policyDigest")
+    pending_event_id: str = Field(alias="pendingEventId", min_length=1)
+    reason_codes: tuple[str, ...] = Field(alias="reasonCodes", min_length=1)
+    created_at: datetime = Field(alias="createdAt")
+    expires_at: datetime = Field(alias="expiresAt")
+    compare_version: int = Field(alias="compareVersion", ge=0, strict=True)
+
+    @field_validator(
+        "schema_id",
+        "decision_request_id",
+        "principal_id",
+        "tenant_id",
+        "session_id",
+        "turn_id",
+        "task_contract_id",
+        "completion_epoch_id",
+        "action_id",
+        "authority_partition_id",
+        "pending_event_id",
+        mode="before",
+    )
+    @classmethod
+    def _require_exact_identity_string(
+        cls,
+        value: object,
+        info: ValidationInfo,
+    ) -> object:
+        return _require_exact_string(value, field_name=info.field_name or "request identity")
+
+    @field_validator(
+        "task_contract_digest",
+        "normalized_request_digest",
+        "capabilities_digest",
+        "authority_ceiling_digest",
+        "policy_digest",
+        mode="before",
+    )
+    @classmethod
+    def _require_exact_digest_string(
+        cls,
+        value: object,
+        info: ValidationInfo,
+    ) -> object:
+        return _require_exact_string(value, field_name=info.field_name or "request digest")
+
+    @field_validator(
+        "task_contract_digest",
+        "normalized_request_digest",
+        "authority_ceiling_digest",
+        "policy_digest",
+    )
+    @classmethod
+    def _validate_digest(cls, value: str) -> str:
+        return require_digest(value)
+
+    @field_validator("capabilities", mode="before")
+    @classmethod
+    def _require_ordered_capabilities(cls, value: object) -> object:
+        return _require_ordered_model_collection(value, field_name="capabilities")
+
+    @field_validator("reason_codes", mode="before")
+    @classmethod
+    def _require_ordered_reason_codes(cls, value: object) -> object:
+        return _require_exact_string_sequence(value, field_name="reasonCodes")
+
+    @field_validator("created_at", "expires_at", mode="before")
+    @classmethod
+    def _require_datetime_wire_type(
+        cls,
+        value: object,
+    ) -> object:
+        return _require_exact_datetime_wire_type(value, contract_name="user decision request")
+
+    @field_validator("created_at", "expires_at")
+    @classmethod
+    def _require_utc_datetime(cls, value: datetime) -> datetime:
+        return _validate_exact_utc_datetime(value, contract_name="user decision request")
+
+    @model_validator(mode="after")
+    def _derive_capabilities_digest_and_validate_window(self) -> Self:
+        if len(self.capabilities) != len(set(self.capabilities)):
+            raise ValueError("duplicate capabilities are not allowed")
+        expected_digest = _validated_capabilities_digest(self.capabilities)
+        if self.capabilities_digest:
+            try:
+                supplied_digest = require_digest(self.capabilities_digest)
+            except ValueError as exc:
+                raise ValueError("capabilitiesDigest must use a canonical sha256 digest") from exc
+            if supplied_digest != expected_digest:
+                raise ValueError(
+                    "capabilitiesDigest must equal the canonical ordered capabilities digest"
+                )
+        elif "capabilities_digest" in self.model_fields_set:
+            raise ValueError("capabilitiesDigest must use a canonical sha256 digest")
+        object.__setattr__(self, "capabilities_digest", expected_digest)
+        if self.expires_at <= self.created_at:
+            raise ValueError("expiresAt must be later than createdAt")
+        return self
+
+
+class UserDecisionReceipt(_AuthorityContractModel):
+    schema_id: Literal["openmagi.user_decision_receipt.v1"] = Field(
+        default="openmagi.user_decision_receipt.v1",
+        alias="schemaId",
+    )
+    receipt_id: str = Field(alias="receiptId", min_length=1)
+    decision_request_id: str = Field(alias="decisionRequestId", min_length=1)
+    decision: Literal["approve", "deny", "revoke"]
+    authenticated_actor_id: str = Field(alias="authenticatedActorId", min_length=1)
+    authentication_key_id: str = Field(alias="authenticationKeyId", min_length=1)
+    authentication_context_digest: str = Field(alias="authenticationContextDigest")
+    authentication_nonce_digest: str = Field(alias="authenticationNonceDigest")
+    transport_receipt_digest: str = Field(alias="transportReceiptDigest")
+    principal_id: str = Field(alias="principalId", min_length=1)
+    tenant_id: str = Field(alias="tenantId", min_length=1)
+    session_id: str = Field(alias="sessionId", min_length=1)
+    turn_id: str = Field(alias="turnId", min_length=1)
+    task_contract_id: str = Field(alias="taskContractId", min_length=1)
+    task_version: int = Field(alias="taskVersion", ge=1, strict=True)
+    task_contract_digest: str = Field(alias="taskContractDigest")
+    completion_epoch_id: str = Field(alias="completionEpochId", min_length=1)
+    action_id: str = Field(alias="actionId", min_length=1)
+    authority_partition_id: str = Field(alias="authorityPartitionId", min_length=1)
+    normalized_request_digest: str = Field(alias="normalizedRequestDigest")
+    authority_ceiling_digest: str = Field(alias="authorityCeilingDigest")
+    policy_digest: str = Field(alias="policyDigest")
+    capabilities_digest: str = Field(alias="capabilitiesDigest")
+    issued_at: datetime = Field(alias="issuedAt")
+    expires_at: datetime = Field(alias="expiresAt")
+    revokes_receipt_digest: str | None = Field(default=None, alias="revokesReceiptDigest")
+
+    @field_validator(
+        "schema_id",
+        "receipt_id",
+        "decision_request_id",
+        "decision",
+        "authenticated_actor_id",
+        "authentication_key_id",
+        "principal_id",
+        "tenant_id",
+        "session_id",
+        "turn_id",
+        "task_contract_id",
+        "completion_epoch_id",
+        "action_id",
+        "authority_partition_id",
+        mode="before",
+    )
+    @classmethod
+    def _require_exact_identity_string(
+        cls,
+        value: object,
+        info: ValidationInfo,
+    ) -> object:
+        return _require_exact_string(value, field_name=info.field_name or "receipt identity")
+
+    @field_validator(
+        "authentication_context_digest",
+        "authentication_nonce_digest",
+        "transport_receipt_digest",
+        "task_contract_digest",
+        "normalized_request_digest",
+        "authority_ceiling_digest",
+        "policy_digest",
+        "capabilities_digest",
+        "revokes_receipt_digest",
+        mode="before",
+    )
+    @classmethod
+    def _require_exact_digest_string(
+        cls,
+        value: object,
+        info: ValidationInfo,
+    ) -> object:
+        if value is None:
+            return None
+        return _require_exact_string(value, field_name=info.field_name or "receipt digest")
+
+    @field_validator(
+        "authentication_context_digest",
+        "authentication_nonce_digest",
+        "transport_receipt_digest",
+        "task_contract_digest",
+        "normalized_request_digest",
+        "authority_ceiling_digest",
+        "policy_digest",
+        "capabilities_digest",
+        "revokes_receipt_digest",
+    )
+    @classmethod
+    def _validate_digest(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return require_digest(value)
+
+    @field_validator("issued_at", "expires_at", mode="before")
+    @classmethod
+    def _require_datetime_wire_type(
+        cls,
+        value: object,
+    ) -> object:
+        return _require_exact_datetime_wire_type(value, contract_name="user decision receipt")
+
+    @field_validator("issued_at", "expires_at")
+    @classmethod
+    def _require_utc_datetime(cls, value: datetime) -> datetime:
+        return _validate_exact_utc_datetime(value, contract_name="user decision receipt")
+
+    @model_validator(mode="after")
+    def _validate_receipt_invariants(self) -> Self:
+        if self.authenticated_actor_id != self.principal_id:
+            raise ValueError("authenticatedActorId must equal principalId")
+        if self.expires_at <= self.issued_at:
+            raise ValueError("expiresAt must be later than issuedAt")
+        if self.decision == "revoke":
+            if self.revokes_receipt_digest is None:
+                raise ValueError("revokesReceiptDigest is required for revoke decisions")
+        elif self.revokes_receipt_digest is not None:
+            raise ValueError("revokesReceiptDigest is forbidden for approve and deny decisions")
+        return self
+
+
+class AuthorityResumeBinding(_AuthorityContractModel):
+    decision_request_id: str = Field(alias="decisionRequestId", min_length=1)
+    authenticated_actor_id: str = Field(alias="authenticatedActorId", min_length=1)
+    session_id: str = Field(alias="sessionId", min_length=1)
+    turn_id: str = Field(alias="turnId", min_length=1)
+    run_id: str = Field(alias="runId", min_length=1)
+    action_id: str = Field(alias="actionId", min_length=1)
+    task_contract_id: str = Field(alias="taskContractId", min_length=1)
+    task_version: int = Field(alias="taskVersion", ge=1, strict=True)
+    task_contract_digest: str = Field(alias="taskContractDigest")
+    completion_epoch_id: str = Field(alias="completionEpochId", min_length=1)
+    transcript_digest: str = Field(alias="transcriptDigest")
+    checkpoint_digest: str = Field(alias="checkpointDigest")
+    authority_partition_id: str = Field(alias="authorityPartitionId", min_length=1)
+    expected_head_sequence: int = Field(alias="expectedHeadSequence", ge=0, strict=True)
+    expected_head_hash: str = Field(alias="expectedHeadHash")
+    expected_head_compare_version: int = Field(
+        alias="expectedHeadCompareVersion",
+        ge=0,
+        strict=True,
+    )
+    state_projection_id: str = Field(alias="stateProjectionId", min_length=1)
+    expected_state_sequence: int = Field(alias="expectedStateSequence", ge=0, strict=True)
+    expected_state_event_hash: str = Field(alias="expectedStateEventHash")
+    expected_state_root: str = Field(alias="expectedStateRoot")
+    expected_state_compare_version: int = Field(
+        alias="expectedStateCompareVersion",
+        ge=0,
+        strict=True,
+    )
+
+    @field_validator(
+        "decision_request_id",
+        "authenticated_actor_id",
+        "session_id",
+        "turn_id",
+        "run_id",
+        "action_id",
+        "task_contract_id",
+        "completion_epoch_id",
+        "authority_partition_id",
+        "state_projection_id",
+        mode="before",
+    )
+    @classmethod
+    def _require_exact_identity_string(
+        cls,
+        value: object,
+        info: ValidationInfo,
+    ) -> object:
+        return _require_exact_string(value, field_name=info.field_name or "resume identity")
+
+    @field_validator(
+        "task_contract_digest",
+        "transcript_digest",
+        "checkpoint_digest",
+        "expected_head_hash",
+        "expected_state_event_hash",
+        "expected_state_root",
+        mode="before",
+    )
+    @classmethod
+    def _require_exact_digest_string(
+        cls,
+        value: object,
+        info: ValidationInfo,
+    ) -> object:
+        return _require_exact_string(value, field_name=info.field_name or "resume digest")
+
+    @field_validator(
+        "task_contract_digest",
+        "transcript_digest",
+        "checkpoint_digest",
+        "expected_head_hash",
+        "expected_state_event_hash",
+        "expected_state_root",
+    )
+    @classmethod
+    def _validate_digest(cls, value: str) -> str:
+        return require_digest(value)
 
 
 def _require_ordered_collection(value: object, *, field_name: str) -> object:
     if isinstance(value, AbstractSet):
         raise ValueError(f"{field_name} must use an ordered collection")
+    return value
+
+
+def _require_ordered_model_collection(value: object, *, field_name: str) -> object:
+    value = _require_ordered_collection(value, field_name=field_name)
+    if type(value) not in (list, tuple):
+        raise ValueError(f"{field_name} must use an ordered list or tuple")
     return value
 
 
@@ -454,6 +779,26 @@ def _require_exact_string_sequence(value: object, *, field_name: str) -> object:
     assert isinstance(value, (list, tuple))
     for item in value:
         _require_exact_string(item, field_name=f"{field_name} elements")
+    return value
+
+
+def _require_exact_datetime_wire_type(value: object, *, contract_name: str) -> object:
+    if type(value) is datetime:
+        return value
+    if type(value) is str:
+        try:
+            float(value)
+        except ValueError:
+            return value
+        raise ValueError(f"{contract_name} datetimes must not use numeric timestamp strings")
+    raise ValueError(f"{contract_name} datetimes must be exact datetime instances or ISO strings")
+
+
+def _validate_exact_utc_datetime(value: datetime, *, contract_name: str) -> datetime:
+    if type(value) is not datetime:
+        raise ValueError(f"{contract_name} datetimes must be exact datetime instances")
+    if value.tzinfo is None or value.utcoffset() != timedelta(0):
+        raise ValueError(f"{contract_name} datetimes must use UTC")
     return value
 
 
@@ -645,3 +990,143 @@ def validate_delegated_authority(
             raise ValueError(f"{alias} may not differ from the parent authority contract")
 
     return validated_child
+
+
+def _validate_capability_instance(capability: object) -> AuthorityCapability:
+    if type(capability) is not AuthorityCapability:
+        raise TypeError("capabilities must be exact AuthorityCapability instances")
+    return AuthorityCapability.model_validate(capability)
+
+
+def _validate_capabilities_tuple(
+    capabilities: object,
+) -> tuple[AuthorityCapability, ...]:
+    if type(capabilities) is not tuple:
+        raise TypeError("capabilities must be an exact tuple")
+    validated = tuple(_validate_capability_instance(value) for value in capabilities)
+    if not validated:
+        raise ValueError("capabilities must not be empty")
+    if len(validated) != len(set(validated)):
+        raise ValueError("duplicate capabilities are not allowed")
+    return validated
+
+
+def _validated_capabilities_digest(
+    capabilities: tuple[AuthorityCapability, ...],
+) -> str:
+    payload = {
+        "capabilities": [
+            AuthorityCapability.model_dump(capability, by_alias=True, mode="json")
+            for capability in capabilities
+        ]
+    }
+    return canonical_digest(payload)
+
+
+def canonical_capabilities_digest(
+    capabilities: tuple[AuthorityCapability, ...],
+) -> str:
+    return _validated_capabilities_digest(_validate_capabilities_tuple(capabilities))
+
+
+def _validate_user_decision_request_instance(
+    request: object,
+) -> UserDecisionRequest:
+    if type(request) is not UserDecisionRequest:
+        raise TypeError("request must be an exact UserDecisionRequest")
+    return UserDecisionRequest.model_validate(request)
+
+
+def _validate_user_decision_receipt_instance(
+    receipt: object,
+) -> UserDecisionReceipt:
+    if type(receipt) is not UserDecisionReceipt:
+        raise TypeError("receipt must be an exact UserDecisionReceipt")
+    return UserDecisionReceipt.model_validate(receipt)
+
+
+def _validate_authority_resume_binding_instance(
+    binding: object,
+) -> AuthorityResumeBinding:
+    if type(binding) is not AuthorityResumeBinding:
+        raise TypeError("binding must be an exact AuthorityResumeBinding")
+    return AuthorityResumeBinding.model_validate(binding)
+
+
+def _validated_user_decision_request_digest(
+    request: UserDecisionRequest,
+) -> str:
+    payload = UserDecisionRequest.model_dump(request, by_alias=True, mode="json")
+    return canonical_digest(payload)
+
+
+def canonical_user_decision_request_digest(request: UserDecisionRequest) -> str:
+    return _validated_user_decision_request_digest(
+        _validate_user_decision_request_instance(request)
+    )
+
+
+def _validated_user_decision_receipt_digest(
+    receipt: UserDecisionReceipt,
+) -> str:
+    payload = UserDecisionReceipt.model_dump(receipt, by_alias=True, mode="json")
+    return canonical_digest(payload)
+
+
+def canonical_user_decision_receipt_digest(receipt: UserDecisionReceipt) -> str:
+    return _validated_user_decision_receipt_digest(
+        _validate_user_decision_receipt_instance(receipt)
+    )
+
+
+def _validated_authority_resume_binding_digest(
+    binding: AuthorityResumeBinding,
+) -> str:
+    payload = AuthorityResumeBinding.model_dump(binding, by_alias=True, mode="json")
+    return canonical_digest(payload)
+
+
+def canonical_authority_resume_binding_digest(
+    binding: AuthorityResumeBinding,
+) -> str:
+    return _validated_authority_resume_binding_digest(
+        _validate_authority_resume_binding_instance(binding)
+    )
+
+
+def validate_user_decision_receipt_binding(
+    request: UserDecisionRequest,
+    receipt: UserDecisionReceipt,
+) -> UserDecisionReceipt:
+    validated_request = _validate_user_decision_request_instance(request)
+    validated_receipt = _validate_user_decision_receipt_instance(receipt)
+
+    bindings = (
+        ("decisionRequestId", "decision_request_id"),
+        ("principalId", "principal_id"),
+        ("tenantId", "tenant_id"),
+        ("sessionId", "session_id"),
+        ("turnId", "turn_id"),
+        ("taskContractId", "task_contract_id"),
+        ("taskVersion", "task_version"),
+        ("taskContractDigest", "task_contract_digest"),
+        ("completionEpochId", "completion_epoch_id"),
+        ("actionId", "action_id"),
+        ("authorityPartitionId", "authority_partition_id"),
+        ("normalizedRequestDigest", "normalized_request_digest"),
+        ("authorityCeilingDigest", "authority_ceiling_digest"),
+        ("policyDigest", "policy_digest"),
+        ("capabilitiesDigest", "capabilities_digest"),
+    )
+    if validated_receipt.authenticated_actor_id != validated_request.principal_id:
+        raise ValueError("authenticatedActorId does not match the request principalId")
+    for alias, field_name in bindings:
+        if getattr(validated_receipt, field_name) != getattr(validated_request, field_name):
+            raise ValueError(f"{alias} does not match the user decision request")
+    if validated_receipt.issued_at < validated_request.created_at:
+        raise ValueError("issuedAt does not match the user decision request time window")
+    if validated_receipt.issued_at >= validated_request.expires_at:
+        raise ValueError("issuedAt does not match the user decision request time window")
+    if validated_receipt.expires_at > validated_request.expires_at:
+        raise ValueError("expiresAt does not match the user decision request time window")
+    return validated_receipt
