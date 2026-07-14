@@ -281,6 +281,19 @@ class OpenMagiEventBridge:
         # drive (``engine/driver.py`` ``_drive``), so this instance flag is
         # turn-scoped, mirroring ``_streamed_partial_text``.
         self._turn_text_emitted = False
+        # Interleaved-transcript paragraph boundary. The model emits distinct
+        # answer-text blocks around tool bursts with no separating newline, and
+        # every downstream sink concatenates `text_delta` payloads with "" (the
+        # store reducer, the frontend segment/stream reducers), so a heading or
+        # bold that opens a post-tool block glues onto the tail of the pre-tool
+        # narration ("...필요합니다.## 결과"). Track whether a tool event has been
+        # emitted since the last answer `text_delta`, and the last two chars of
+        # emitted answer text, so the FIRST text_delta resumed after a tool gets
+        # a minimal paragraph separator. Turn-scoped like the cells above and
+        # reset on `response_clear`; a None tail means no answer text has been
+        # emitted yet, so the very first text of a turn never gets a separator.
+        self._tool_since_text = False
+        self._prior_text_tail: str | None = None
         # HOSTED call/response correlation — mirrors gate5b4c3's
         # ``live_tool_event_ids_by_adk_id`` / ``pending_live_tool_event_ids_by_name``.
         # Populated on tool_start (HOSTED path only); consumed on tool_end so the
@@ -371,9 +384,16 @@ class OpenMagiEventBridge:
             # the promotion precondition. Reset the turn-scoped flag so a later
             # reasoning-only terminal can still be promoted.
             self._turn_text_emitted = False
+            # A fresh visible answer starts after response_clear: its first text
+            # must not be preceded by a paragraph separator, and no prior tool
+            # counts toward that boundary anymore.
+            self._tool_since_text = False
+            self._prior_text_tail = None
         partial_run = [self._streamed_partial_text]
         partial_public_text = [self._streamed_partial_public_text]
         turn_text_emitted = [self._turn_text_emitted]
+        tool_since_text = [self._tool_since_text]
+        prior_text_tail = [self._prior_text_tail]
         content_projection = _project_content_parts(
             event,
             turn_id=turn_id,
@@ -381,6 +401,8 @@ class OpenMagiEventBridge:
             partial_run=partial_run,
             partial_public_text=partial_public_text,
             turn_text_emitted=turn_text_emitted,
+            tool_since_text=tool_since_text,
+            prior_text_tail=prior_text_tail,
             wire_profile=self._wire_profile,
             hosted_tool_ids_by_adk_id=(
                 self._hosted_tool_ids_by_adk_id if self._wire_profile is not None else None
@@ -396,6 +418,8 @@ class OpenMagiEventBridge:
         self._streamed_partial_text = partial_run[0]
         self._streamed_partial_public_text = partial_public_text[0]
         self._turn_text_emitted = turn_text_emitted[0]
+        self._tool_since_text = tool_since_text[0]
+        self._prior_text_tail = prior_text_tail[0]
         if (
             content_projection.agent_events
             or content_projection.legacy_deltas
@@ -636,6 +660,8 @@ def _project_content_parts(
     partial_run: list[bool],
     partial_public_text: list[str],
     turn_text_emitted: list[bool] | None = None,
+    tool_since_text: list[bool] | None = None,
+    prior_text_tail: list[str | None] | None = None,
     wire_profile: WireProfile | None = None,
     hosted_tool_ids_by_adk_id: dict[str, str] | None = None,
     pending_hosted_ids_by_name: dict[str, list[str]] | None = None,
@@ -652,6 +678,32 @@ def _project_content_parts(
     # PR-3: turn-scoped "any real answer text emitted yet" cell. Optional so
     # direct unit callers stay compatible; the bridge always threads it.
     text_emitted = turn_text_emitted if turn_text_emitted is not None else [False]
+    # Interleaved paragraph-boundary cells (optional for direct unit callers;
+    # the bridge always threads them). ``tool_flag`` = a tool event was emitted
+    # since the last answer text_delta; ``text_tail`` = last two chars of emitted
+    # answer text (None until the first answer text of the turn).
+    tool_flag = tool_since_text if tool_since_text is not None else [False]
+    text_tail = prior_text_tail if prior_text_tail is not None else [None]
+
+    def _paragraph_bounded(public_text: str) -> str:
+        """Prepend a minimal paragraph break when an answer text block resumes
+        after a tool burst, so the two blocks do not glue into one markdown
+        paragraph. A no-op for the first answer text of the turn (``text_tail``
+        is None) and for consecutive fragments of the same block (``tool_flag``
+        is False), so byte-identical whenever no tool intervenes. The separator
+        rides the display ``text_delta`` only; ``partial_public_text`` (the
+        de-duplication ledger) is never widened by it."""
+        prefix = ""
+        tail = text_tail[0]
+        if tool_flag[0] and tail is not None:
+            have = _trailing_newlines(tail) + _leading_newlines(public_text)
+            need = 2 - have
+            if need > 0:
+                prefix = "\n" * need
+        tool_flag[0] = False
+        out = prefix + public_text
+        text_tail[0] = ((tail or "") + out)[-2:]
+        return out
     # PR-3: unsigned thought text of THIS event, buffered for the empty-text
     # terminal promotion fallback. ``saw_signed_thought`` records whether any
     # thought part on this event carries a ``thought_signature`` (Anthropic and
@@ -669,7 +721,9 @@ def _project_content_parts(
         if is_final_response:
             token_text = _unstreamed_final_text(public_text, partial_public_text[0])
             if token_text:
-                agent_events.append({"type": "text_delta", "delta": token_text})
+                agent_events.append(
+                    {"type": "text_delta", "delta": _paragraph_bounded(token_text)}
+                )
                 text_emitted[0] = True  # PR-3: a real answer was produced.
             # The final reply's aggregate has now been reconciled with any
             # partials streamed earlier in the turn; close the partial run.
@@ -706,7 +760,9 @@ def _project_content_parts(
             partial_run[0] = False
             partial_public_text[0] = ""
             return
-        agent_events.append({"type": "text_delta", "delta": public_text})
+        agent_events.append(
+            {"type": "text_delta", "delta": _paragraph_bounded(public_text)}
+        )
         text_emitted[0] = True  # PR-3: a real answer was produced.
         normalized_events.append(
             NormalizedEvent(
@@ -783,7 +839,9 @@ def _project_content_parts(
         if text:
             if event.partial:
                 public_text = _public_stream_text(text)
-                agent_events.append({"type": "text_delta", "delta": public_text})
+                agent_events.append(
+                    {"type": "text_delta", "delta": _paragraph_bounded(public_text)}
+                )
                 text_emitted[0] = True  # PR-3: a real answer was produced.
                 partial_run[0] = True
                 partial_public_text[0] += public_text
@@ -810,6 +868,9 @@ def _project_content_parts(
         if function_call:
             flush_final_text(public_if_non_final=True)
             saw_tool_part = True
+            # A tool now separates any prior answer text from the next block, so
+            # the next text_delta opens a fresh paragraph.
+            tool_flag[0] = True
             tool_projection = _project_function_call_part(
                 event,
                 turn_id=turn_id,
@@ -831,6 +892,8 @@ def _project_content_parts(
         if function_response:
             flush_final_text(public_if_non_final=True)
             saw_tool_part = True
+            # A tool result likewise starts a fresh paragraph for the next text.
+            tool_flag[0] = True
             tool_projection = _project_function_response_part(
                 event,
                 turn_id=turn_id,
@@ -1347,6 +1410,24 @@ def _public_stream_text(value: str) -> str:
     if _has_private_text_marker(value):
         return "[redacted-private]"
     return _public_text(value)
+
+
+def _leading_newlines(value: str) -> int:
+    count = 0
+    for char in value:
+        if char != "\n":
+            break
+        count += 1
+    return count
+
+
+def _trailing_newlines(value: str) -> int:
+    count = 0
+    for char in reversed(value):
+        if char != "\n":
+            break
+        count += 1
+    return count
 
 
 def _unstreamed_final_text(final_text: str, streamed_text: str) -> str:
