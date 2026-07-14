@@ -1,0 +1,1 @@
+"""Dormant execution-authority kernel."""
