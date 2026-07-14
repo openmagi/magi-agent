@@ -2,11 +2,18 @@
 
 P2.5 (issue H-1) deleted the 20 `*_contract.py` files under
 ``magi_agent/shadow/`` that had zero importers outside their own tests and the
-``shadow/__init__.py`` lazy re-export shim. The 5 contracts with live consumers
-stay. This guard encodes that contract permanently:
+``shadow/__init__.py`` lazy re-export shim. The contracts with live consumers
+stay. P5-M2 then deleted the two internal-endpoint contracts
+(``gate5b4_internal_endpoint_contract``,
+``gate5b4c2_shadow_invocation_contract``) once the fleet flip made their sole
+consumers extinct: chat-proxy stopped calling the canary-era internal endpoints
+at clawy C4 (#1812), the ``/v1/internal/gate5b/shadow-invocations`` route and
+its ``transport/shadow_invocations.py`` handler were removed, and the two names
+were dropped from the gate5 readiness surface table. This guard encodes that
+contract permanently:
 
-1. The 20 deleted contracts must stay gone (no module file, not importable).
-2. The 5 kept contracts must still be importable (they are on the live serving /
+1. The deleted contracts must stay gone (no module file, not importable).
+2. The kept contracts must still be importable (they are on the live serving /
    readiness / grounded-answer paths).
 3. No new ``*_contract.py`` may reappear in ``shadow/`` without a live importer
    outside ``shadow/`` and ``tests/`` (prevents the dead-scaffolding pattern from
@@ -23,7 +30,8 @@ import pytest
 SHADOW_DIR = Path(__file__).resolve().parents[2] / "magi_agent" / "shadow"
 MAGI_AGENT_DIR = SHADOW_DIR.parent
 
-# The 20 dead TS-parity contracts deleted by P2.5 H-1.
+# The 20 dead TS-parity contracts deleted by P2.5 H-1, plus the two
+# internal-endpoint contracts deleted by P5-M2 (caller extinct after clawy C4).
 DELETED_SHADOW_CONTRACTS = (
     "adk_eval_fixture_contract",
     "agent_methodology_contract",
@@ -32,6 +40,8 @@ DELETED_SHADOW_CONTRACTS = (
     "coding_verification_evidence_contract",
     "control_projection_contract",
     "delegated_workflow_evidence_contract",
+    "gate5b4_internal_endpoint_contract",
+    "gate5b4c2_shadow_invocation_contract",
     "legal_academic_citation_detector_contract",
     "memory_source_authority_contract",
     "mission_lifecycle_contract",
@@ -47,11 +57,9 @@ DELETED_SHADOW_CONTRACTS = (
     "web_acquisition_browser_provider_contract",
 )
 
-# The 5 contracts kept because they have live consumers outside shadow/+tests/.
+# The contracts kept because they have live consumers outside shadow/+tests/.
 KEPT_SHADOW_CONTRACTS = (
     "fact_grounding_verifier_contract",
-    "gate5b4_internal_endpoint_contract",
-    "gate5b4c2_shadow_invocation_contract",
     "gate5b4c3_shadow_generation_contract",
     "workspace_adoption_preflight_contract",
 )

@@ -28,7 +28,7 @@ meta-test itself just checks "is this (module, class) in any allowed bucket":
   the routing logic is real (not pure boilerplate) and must be preserved or
   folded into a kernel hook per-site.
 
-* ``_LEGACY_PASSTHROUGH_OVERRIDES`` (111) -- the cleanup-target follow-ups:
+* ``_LEGACY_PASSTHROUGH_OVERRIDES`` (106) -- the cleanup-target follow-ups:
   legacy ``return cls()`` / ``return super().model_construct(...)`` pass-throughs
   that exist for no semantic reason (typically pre-C-4 boilerplate that the
   kernel now handles uniformly). Removing the override entirely IS the
@@ -303,13 +303,8 @@ _LEGACY_PASSTHROUGH_OVERRIDES: frozenset[tuple[str, str]] = frozenset(
         ("shadow/gate5a_no_memory_shadow_canary.py", "Gate5ANoMemoryShadowCanaryAuthorityFlags"),
         ("shadow/gate5a_no_memory_shadow_canary.py", "Gate5ANoMemoryShadowCanaryPolicy"),
         ("shadow/gate5a_no_memory_shadow_canary.py", "_Gate5AModel"),
-        ("shadow/gate5b4_internal_endpoint_contract.py", "Gate5B4EndpointAuthorityFlags"),
-        ("shadow/gate5b4_internal_endpoint_contract.py", "_Gate5B4Model"),
-        ("shadow/gate5b4c2_shadow_invocation_contract.py", "Gate5B4C2ShadowAuthorityFlags"),
-        ("shadow/gate5b4c2_shadow_invocation_contract.py", "_Gate5B4C2Model"),
         ("shadow/gate5b4c3_live_runner_boundary.py", "Gate5B4C3LiveRunnerBoundaryResult"),
         ("shadow/gate5b4c3_runner_input_adapter.py", "_Gate5B4C3RunnerInputModel"),
-        ("shadow/gate5b4c3_shadow_comparison.py", "_Gate5B4C3ComparisonModel"),
         ("shadow/gate5b4c3_shadow_counter_store.py", "_Gate5B4C3CounterModel"),
         ("shadow/gate5b4c3_shadow_generation_contract.py", "Gate5B4C3ShadowGenerationAuthorityFlags"),
         ("shadow/gate5b4c3_shadow_generation_contract.py", "_Gate5B4C3Model"),

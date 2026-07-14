@@ -16,7 +16,6 @@ from .transport.streaming_chat_route import register_streaming_chat_routes
 from .transport.web_dashboard import register_dashboard_routes
 from .transport.health import health_payload, healthz_payload
 from .transport.plugins import register_plugin_admin_routes
-from .transport.shadow_invocations import register_shadow_invocation_routes
 from .transport.debug_trace import router as debug_trace_router
 from .transport.learning_dashboard import register_learning_dashboard_routes
 from .transport.tools import register_tool_admin_routes
@@ -174,7 +173,6 @@ def create_app(runtime: OpenMagiRuntime) -> FastAPI:
     register_chat_routes(app, runtime)
     register_streaming_chat_routes(app, runtime)
     register_control_request_routes(app, runtime)
-    register_shadow_invocation_routes(app, runtime)
     register_tool_admin_routes(app, runtime)
     register_customize_routes(app, runtime)
     # Default-OFF: dashboard pack-builder REST endpoints. Routes register
