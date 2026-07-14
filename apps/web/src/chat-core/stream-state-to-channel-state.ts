@@ -97,7 +97,9 @@ function toToolActivity(card: ToolCardState, index: number): ToolActivity {
     id: card.id,
     label: card.name || `tool-${index}`,
     status: mapToolStatus(card),
-    startedAt: 0,
+    // Real start time from the reducer card; the old hardcoded 0 poisoned the
+    // live-activity elapsed timer into an epoch-1970 delta ("29733585m").
+    startedAt: card.startedAt ?? 0,
     ...(card.inputPreview ? { inputPreview: card.inputPreview } : {}),
     ...(card.outputPreview !== null ? { outputPreview: card.outputPreview } : {}),
     ...(card.durationMs !== null ? { durationMs: card.durationMs } : {}),

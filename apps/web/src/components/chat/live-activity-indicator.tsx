@@ -83,7 +83,12 @@ export function LiveActivityIndicator({
   const parts = Array.from(counts.entries()).map(([label, count]) =>
     count > 1 ? `${label} ×${count}` : label,
   );
-  const oldest = Math.min(...running.map((tool) => tool.startedAt));
+  // Ignore missing/zero start times (legacy snapshots, synthetic cards): a 0
+  // would render the elapsed counter as an epoch-1970 delta ("29733585m").
+  const startTimes = running
+    .map((tool) => tool.startedAt)
+    .filter((t): t is number => typeof t === "number" && t > 0);
+  const oldest = startTimes.length > 0 ? Math.min(...startTimes) : now;
   const elapsed = Math.max(0, Math.floor((now - oldest) / 1000));
 
   return (
