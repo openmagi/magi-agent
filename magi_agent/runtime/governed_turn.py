@@ -49,6 +49,17 @@ async def run_governed_turn(
     # map can never break a turn — see budgets_apply.apply_budgets_if_enabled.
     _maybe_apply_customize_budgets()
 
+    # Managed-inference turn-boundary credit pre-check. Only active for the OSS
+    # desktop managed tier (gated on MAGI_MANAGED_INFERENCE_ENABLED + proxy env);
+    # inert for hosted bots / BYO key. Runs BEFORE any audit/gate/engine work so a
+    # hard-stop avoids all downstream cost. Fails OPEN — only a definitive
+    # insufficient balance yields a synthetic terminal; the api-proxy remains the
+    # billing source of truth.
+    blocked = await _maybe_run_managed_credit_precheck(ctx)
+    if blocked is not None:
+        yield blocked
+        return
+
     # PR-F-EXEC1: publish the active (session, turn) identity for the
     # shell-command per-turn budget. The 9 lifecycle_audit shell fan-out
     # helpers consult this via :func:`shell_budget_for` so a single shared
@@ -467,6 +478,39 @@ def _build_lifecycle_critic_factory() -> object | None:
         return _build_criterion_model_factory()
     except Exception:
         return None
+
+
+async def _maybe_run_managed_credit_precheck(ctx: TurnContext) -> object | None:
+    """Managed-inference turn-boundary credit gate.
+
+    Returns a synthetic terminal ``EngineResult`` when the subscriber's balance
+    cannot cover another turn, else ``None`` (turn proceeds). Inert for every
+    non-managed caller. Fail-open on any error: a missing dep, unreachable
+    api-proxy, or unexpected shape never blocks a turn — the api-proxy enforces
+    the real per-request credit limit.
+    """
+    try:
+        import os  # noqa: PLC0415
+
+        from magi_agent.runtime.managed_credit_precheck import (  # noqa: PLC0415
+            check_managed_credit_balance,
+            resolve_managed_precheck_config,
+        )
+
+        config = resolve_managed_precheck_config(os.environ)
+        if config is None:
+            return None
+
+        decision = await check_managed_credit_balance(config=config)
+        if decision.block:
+            return _build_policy_blocked_terminal(
+                ctx=ctx,
+                slot="managed_credit_precheck",
+                reason="insufficient_credits",
+            )
+    except Exception:  # noqa: BLE001 — never wedge a turn on the pre-check path
+        return None
+    return None
 
 
 def _build_policy_blocked_terminal(*, ctx: TurnContext, slot: str, reason: str) -> object:
