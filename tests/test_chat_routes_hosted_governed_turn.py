@@ -692,3 +692,93 @@ def test_governed_turn_defaults_primitives_loader_when_route_config_has_none(
     assert default_loader_called["count"] >= 1, (
         "the governed branch must fall back to load_gate5b4c3_live_adk_primitives"
     )
+
+
+# ---------------------------------------------------------------------------
+# 1d. P5-M1a: governed branch + dropped runner input -> the drop refusal is
+#     synthesized by build_gate5b4c3_input_drop_boundary_result WITHOUT calling
+#     the legacy run_gate5b4c3_live_runner_boundary_async. Pre-M1a the governed
+#     drop path fell through to that boundary call (the last governed ->
+#     legacy-engine call); this test locks the decoupling.
+# ---------------------------------------------------------------------------
+
+
+def test_governed_dropped_input_uses_shim_not_legacy_boundary(
+    monkeypatch, tmp_path: Any
+) -> None:
+    from magi_agent.shadow.gate5b4c3_runner_input_adapter import (
+        Gate5B4C3RunnerInputAdapterResult,
+    )
+
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "1")
+
+    boundary_called: dict[str, int] = {"count": 0}
+    governed_called: dict[str, int] = {"count": 0}
+    shim_called: dict[str, object] = {"count": 0, "drop_reason": None}
+
+    async def fail_boundary(*args: object, **kwargs: object) -> object:
+        # The drop path must NOT reach the legacy boundary under M1a.
+        boundary_called["count"] += 1
+        raise AssertionError(
+            "run_gate5b4c3_live_runner_boundary_async must NOT be called on the "
+            "governed drop path (M1a)"
+        )
+
+    def fake_governed_turn(ctx: object, *, runtime: object, cancel: object = None):  # noqa: ANN201
+        # A dropped input must never start a governed turn either.
+        governed_called["count"] += 1
+        raise AssertionError("run_governed_turn must NOT run for a dropped input")
+
+    def fake_build_runner_input(generation: object) -> Gate5B4C3RunnerInputAdapterResult:
+        # Force the input adapter to drop (an accepted-diagnostic request that the
+        # adapter rejects, e.g. input_token_budget_exceeded).
+        return Gate5B4C3RunnerInputAdapterResult(
+            status="dropped",
+            reason="input_token_budget_exceeded",
+        )
+
+    from magi_agent.shadow import gate5b4c3_live_runner_boundary as _boundary_mod
+
+    real_shim_fn = _boundary_mod.build_gate5b4c3_input_drop_boundary_result
+
+    def spy_shim(request: object, **kwargs: object):  # noqa: ANN201
+        shim_called["count"] = int(shim_called["count"]) + 1  # type: ignore[arg-type]
+        shim_called["drop_reason"] = kwargs.get("drop_reason")
+        return real_shim_fn(request, **kwargs)
+
+    monkeypatch.setattr(
+        "magi_agent.transport.gate5b_serving.run_gate5b4c3_live_runner_boundary_async",
+        fail_boundary,
+    )
+    monkeypatch.setattr(
+        "magi_agent.transport.gate5b_serving.run_governed_turn", fake_governed_turn
+    )
+    monkeypatch.setattr(
+        "magi_agent.transport.gate5b_serving.build_gate5b4c3_runner_input",
+        fake_build_runner_input,
+    )
+    monkeypatch.setattr(
+        "magi_agent.transport.gate5b_serving.build_gate5b4c3_input_drop_boundary_result",
+        spy_shim,
+    )
+
+    runtime = _make_canary_runtime(tmp_path)
+    response = TestClient(create_app(runtime)).post(
+        "/v1/chat/completions",
+        headers=_canary_headers("f" * 64),
+        json=_CANARY_BODY,
+    )
+
+    # A dropped input surfaces as the SAME structured refusal the legacy boundary
+    # produced pre-M1a: HTTP 502, python_error, reason input_adapter_drop,
+    # fallback_to_typescript. (Verified against the pre-M1a boundary path.)
+    assert response.status_code == 502, response.json()
+    assert boundary_called["count"] == 0, "legacy boundary must not be called on a drop"
+    assert governed_called["count"] == 0, "no governed turn for a dropped input"
+    assert shim_called["count"] == 1, "the drop shim must build the refusal exactly once"
+    assert shim_called["drop_reason"] == "input_token_budget_exceeded"
+    body = response.json()
+    assert body.get("status") == "python_error", body
+    assert body.get("reason") == "input_adapter_drop", body
+    assert body.get("fallbackStatus") == "fallback_to_typescript", body

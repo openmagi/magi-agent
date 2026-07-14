@@ -56,7 +56,7 @@ from magi_agent.runtime.per_turn_goal_loop_context import (
 from magi_agent.runtime.public_events import tool_end_event, tool_progress_event, tool_start_event, turn_phase_event
 from magi_agent.runtime.session_identity import _memory_mode_from_header
 from magi_agent.runtime.session_ownership import acquire_hosted_session_lease, probe_session_event_count, resolve_include_history, seeded_history_message_count
-from magi_agent.shadow.gate5b4c3_live_runner_boundary import _gate1a_correlated_model_or_label, _shadow_session_id, load_gate5b4c3_live_adk_primitives, run_gate5b4c3_live_runner_boundary_async
+from magi_agent.shadow.gate5b4c3_live_runner_boundary import _gate1a_correlated_model_or_label, _shadow_session_id, build_gate5b4c3_input_drop_boundary_result, load_gate5b4c3_live_adk_primitives, run_gate5b4c3_live_runner_boundary_async
 from magi_agent.shadow.gate5b4c3_runner_input_adapter import build_gate5b4c3_runner_input
 from magi_agent.shadow.gate5b4c3_shadow_generation_contract import build_gate5b4c3_shadow_generation_diagnostic
 from magi_agent.shadow.hosted_session_substrate import DEFAULT_NUM_RECENT_EVENTS, durable_hosted_session_factory
@@ -635,18 +635,22 @@ async def _run_live_chat_runner(
             # 1. Build the runner input (input adapter + policy checks).
             runner_input_result = build_gate5b4c3_runner_input(generation)
             if runner_input_result.status != "accepted" or runner_input_result.runner_input is None:
-                # Input adapter dropped the request — fall through to the legacy
-                # boundary so its error-result path handles the response exactly
-                # as today (the boundary emits the same error result for drops).
-                boundary_result = await run_gate5b4c3_live_runner_boundary_async(
+                # Input adapter dropped the request: synthesize the drop
+                # error-result directly (P5-M1a). Pre-M1a this fell through to
+                # run_gate5b4c3_live_runner_boundary_async purely so the legacy
+                # boundary's error-result path would build the same response; that
+                # was the last governed -> legacy-engine call. The helper produces
+                # the byte-identical wire shape (status="dropped",
+                # reason="input_adapter_drop", the same runner_error_diagnostic,
+                # and the same turn_end transcript record) WITHOUT starting the
+                # boundary orchestration, so the legacy engine can retire (M1b).
+                boundary_result = build_gate5b4c3_input_drop_boundary_result(
                     generation,
-                    config=generation_config,
-                    adk_primitives_loader=adk_primitives_loader,
-                    adk_tools=gate1a_bundle.tools if gate1a_bundle.status == "ready" else (),
+                    diagnostic=diagnostic,
+                    drop_reason=runner_input_result.reason,
+                    active_tools=gate1a_bundle.tools if gate1a_bundle.status == "ready" else (),
                     gate1a_egress_correlation_context=gate1a_egress_context,
                     gate1a_egress_proxy_url=gate1a_egress_proxy_url,
-                    public_event_sink=governance_event_sink,
-                    control_plane_plugins=control_plane_plugins,
                 )
             else:
                 runner_input = runner_input_result.runner_input
