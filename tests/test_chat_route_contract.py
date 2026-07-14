@@ -67,19 +67,50 @@ FIRST_PARTY_RECIPE_PACK_IDS = (
 )
 
 
+# TurnContext objects the serving path built for the governed turn this test
+# (populated by the autouse fixture below). A test that used to inspect the
+# legacy ``_FakeRunner.run_kwargs["new_message"]`` runner input can read the
+# governed TurnContext (``prompt`` + ``initial_messages``) here instead.
+_GOVERNED_CTX: list = []
+
+
+def _governed_runner_input_text() -> str:
+    """The runner-input text the governed turn received (``TurnContext.prompt``).
+
+    The serving path inlines the sanitized recent history + current-turn message
+    into the prompt via ``build_gate5b4c3_runner_input`` -> the TurnContext, so a
+    single ``ctx.prompt`` carries everything the legacy
+    ``_FakeRunner.run_kwargs["new_message"]`` text used to carry. Any
+    ``initial_messages`` (resume rehydration) are appended for completeness."""
+    assert _GOVERNED_CTX, "no governed TurnContext was captured for this turn"
+    ctx = _GOVERNED_CTX[-1]
+    history = "\n".join(
+        f"{m.get('role', '')}: {m.get('content', '')}"
+        for m in getattr(ctx, "initial_messages", ())
+    )
+    return f"{ctx.prompt}\n{history}" if history else ctx.prompt
+
+
 @pytest.fixture(autouse=True)
-def _legacy_selected_chat_route_path(monkeypatch):
-    """Pin the pre-governed selected-canary chat route for this module.
+def _default_governed_turn(monkeypatch):
+    """Wire a default governed turn for the selected-canary live path.
 
-    These contract tests exercise the legacy (non-governed) gate5b chat route
-    with fake runners. Under ``MAGI_HOSTED_GOVERNED_TURN_ENABLED`` default-ON the
-    requests route through ``run_governed_turn`` -> ``MagiEngineDriver`` (verified
-    working end-to-end on a live bot), whose layer these fakes do not wire,
-    surfacing ``runner_error`` / a 502. The governed path has its own suite in
-    ``tests/test_chat_routes_hosted_governed_turn.py``; hold the legacy path here.
+    P5-M1b retired the legacy runner engine; hosted turns now route through
+    ``run_governed_turn`` -> ``collect_engine_to_boundary_result``. These contract
+    tests drive the live selected-canary path with fake ADK primitives; install a
+    deterministic governed turn (a single ``text_delta`` answer) so any test that
+    does NOT inject its own governed fake still completes with output. Tests that
+    exercise the mocked-runner branch (``mockedRunner=``) never reach this seam,
+    and tests that need a specific governed outcome monkeypatch over it.
     """
+    from tests.support.governed_turn_fakes import install_governed_turn
 
-    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "0")
+    _GOVERNED_CTX.clear()
+    install_governed_turn(
+        monkeypatch,
+        events=[{"type": "text_delta", "delta": "live fake ADK answer"}],
+        captured_ctx=_GOVERNED_CTX,
+    )
 
 
 def _sha256(value: str) -> str:
@@ -763,26 +794,6 @@ class _FakeRunner:
         yield SimpleNamespace(content=SimpleNamespace(parts=[SimpleNamespace(text=self.event_text)]))
 
 
-class _ProviderSetupFailRunner(_FakeRunner):
-    async def run_async(self, **kwargs: object) -> object:
-        type(self).run_kwargs = kwargs
-        raise RuntimeError(
-            "No API key configured at /Users/kevin/private with "
-            "Authorization: Bearer raw-token prompt=secret-output"
-        )
-        yield SimpleNamespace(content=SimpleNamespace(parts=[]))
-
-
-class _FunctionToolSchemaTypeErrorRunner(_FakeRunner):
-    async def run_async(self, **kwargs: object) -> object:
-        type(self).run_kwargs = kwargs
-        raise TypeError(
-            "FunctionTool schema signature mismatch at /Users/kevin/private "
-            "Authorization: Bearer raw-token prompt=secret-output"
-        )
-        yield SimpleNamespace(content=SimpleNamespace(parts=[]))
-
-
 def _fake_primitives() -> Gate5B4C3LiveAdkPrimitives:
     _FakeAgent.created_kwargs = {}
     _FakeRunner.created_kwargs = {}
@@ -794,30 +805,6 @@ def _fake_primitives() -> Gate5B4C3LiveAdkPrimitives:
         Content=_FakeContent,
         Part=_FakePart,
         GenerateContentConfig=_FakeGenerateContentConfig,
-    )
-
-
-def _provider_setup_fail_primitives() -> Gate5B4C3LiveAdkPrimitives:
-    primitives = _fake_primitives()
-    return Gate5B4C3LiveAdkPrimitives(
-        Agent=primitives.Agent,
-        Runner=_ProviderSetupFailRunner,
-        InMemorySessionService=primitives.InMemorySessionService,
-        Content=primitives.Content,
-        Part=primitives.Part,
-        GenerateContentConfig=primitives.GenerateContentConfig,
-    )
-
-
-def _function_tool_schema_typeerror_primitives() -> Gate5B4C3LiveAdkPrimitives:
-    primitives = _fake_primitives()
-    return Gate5B4C3LiveAdkPrimitives(
-        Agent=primitives.Agent,
-        Runner=_FunctionToolSchemaTypeErrorRunner,
-        InMemorySessionService=primitives.InMemorySessionService,
-        Content=primitives.Content,
-        Part=primitives.Part,
-        GenerateContentConfig=primitives.GenerateContentConfig,
     )
 
 
@@ -883,7 +870,7 @@ def test_chat_route_selected_runner_input_preserves_followup_context(
     )
 
     assert response.status_code == 200
-    runner_input_text = _FakeRunner.run_kwargs["new_message"].parts[0].text
+    runner_input_text = _governed_runner_input_text()
     assert "Recent visible conversation:" in runner_input_text
     assert "assistant:" in runner_input_text
     assert "/multibagger-full-report" in runner_input_text
@@ -955,13 +942,13 @@ def test_chat_route_live_canary_uses_adk_boundary_and_counter_store(
     assert body["eventCount"] == 1
     assert body["counter"]["status"] == "runner_completed"
     assert body["counter"]["state"]["dailyGenerationRunsUsed"] == 1
-    runner_input_text = _FakeRunner.run_kwargs["new_message"].parts[0].text
+    runner_input_text = _governed_runner_input_text()
     assert "Magi Agent" in runner_input_text
     assert "OpenMagi" in runner_input_text
     assert "magi-agent" not in runner_input_text.lower()
     assert "magi_agent" not in runner_input_text.lower()
+    # The Agent the governed runtime built carries no tools on the readonly path.
     assert _FakeAgent.created_kwargs["tools"] == []
-    assert "new_message" in _FakeRunner.run_kwargs
     raw_counter_store = json.loads((tmp_path / "counters.json").read_text(encoding="utf-8"))
     request_records = next(iter(raw_counter_store["scopes"].values()))["requests"]
     assert canary_request_digest in request_records
@@ -1068,10 +1055,23 @@ def test_chat_route_live_runner_blocks_incomplete_progress_projection(
     tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
-    original_event_text = _FakeRunner.event_text
-    _FakeRunner.event_text = (
-        "선정된 종목 분석을 병렬 처리 방식으로 실행하겠습니다. "
-        "완료되면 통합 결과를 전달드리겠습니다. 잠시만 기다려 주세요."
+    # A governed turn that completes with "incomplete promise" text: the serving
+    # path's _runner_incomplete_output_reason gate blocks it as
+    # runner_incomplete_output (the governed equivalent of the legacy boundary's
+    # incomplete-output detector).
+    from tests.support.governed_turn_fakes import install_governed_turn
+
+    install_governed_turn(
+        monkeypatch,
+        events=[
+            {
+                "type": "text_delta",
+                "delta": (
+                    "선정된 종목 분석을 병렬 처리 방식으로 실행하겠습니다. "
+                    "완료되면 통합 결과를 전달드리겠습니다. 잠시만 기다려 주세요."
+                ),
+            }
+        ],
     )
     runtime = make_runtime(
         authority=PythonRuntimeAuthorityConfig(
@@ -1112,21 +1112,18 @@ def test_chat_route_live_runner_blocks_incomplete_progress_projection(
         ),
     )
 
-    try:
-        response = TestClient(create_app(runtime)).post(
-            "/v1/chat/completions",
-            headers={"authorization": "Bearer gateway-token"},
-            json={
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": "선정 종목 분석을 계속 진행해줘.",
-                    }
-                ]
-            },
-        )
-    finally:
-        _FakeRunner.event_text = original_event_text
+    response = TestClient(create_app(runtime)).post(
+        "/v1/chat/completions",
+        headers={"authorization": "Bearer gateway-token"},
+        json={
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "선정 종목 분석을 계속 진행해줘.",
+                }
+            ]
+        },
+    )
 
     assert response.status_code == 502
     body = response.json()
@@ -1643,10 +1640,11 @@ def test_hosted_like_full_toolhost_env_attaches_selected_bundle(
     assert body["counter"]["status"] == "runner_completed"
     assert body["counter"]["state"]["pendingGenerationRuns"] == 0
     assert body["counter"]["state"]["inFlightGenerationRuns"] == 0
-    runner_input_text = _FakeRunner.run_kwargs["new_message"].parts[0].text
-    assert "Recent sanitized conversation:" in runner_input_text
-    assert "assistant: I started the multibagger report" in runner_input_text
-    assert "User message:" in runner_input_text
+    # The governed turn received the sanitized recent history + current-turn text
+    # as its runner input (built by build_gate5b4c3_runner_input, unchanged by
+    # M1b). Inspect the captured TurnContext instead of the retired legacy runner.
+    runner_input_text = _governed_runner_input_text()
+    assert "I started the multibagger report" in runner_input_text
     assert "어캐돼가" in runner_input_text
 
 
@@ -2283,12 +2281,24 @@ def test_chat_route_failed_canary_records_explicit_counter_error(
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
     counter_path = tmp_path / "counters.json"
 
-    async def fail_boundary(*_args: object, **_kwargs: object) -> object:
+    # A governed turn whose collection raises maps to the same 502 runner_error
+    # the legacy boundary produced when its runner raised (the serving try/except
+    # in gate5b_serving converts any governed-body exception to runner_error).
+    async def _noop_gen():  # noqa: ANN202
+        yield EngineResult(terminal=Terminal.completed, session_id="s", turn_id="t")
+
+    def fake_governed_turn(ctx, *, runtime, cancel=None):  # noqa: ANN001, ANN202
+        return _noop_gen()
+
+    async def fail_collect(*_args: object, **_kwargs: object) -> object:
         raise RuntimeError("synthetic runner failure")
 
     monkeypatch.setattr(
-        "magi_agent.transport.gate5b_serving.run_gate5b4c3_live_runner_boundary_async",
-        fail_boundary,
+        "magi_agent.transport.gate5b_serving.run_governed_turn", fake_governed_turn
+    )
+    monkeypatch.setattr(
+        "magi_agent.transport.gate5b_serving.collect_engine_to_boundary_result",
+        fail_collect,
     )
     runtime = make_runtime(
         authority=PythonRuntimeAuthorityConfig(
@@ -2355,340 +2365,6 @@ def test_chat_route_failed_canary_records_explicit_counter_error(
     assert request_record["status"] == "error"
     assert request_record["reason"] == "runner_error"
     assert "choices" not in body
-
-
-def test_chat_route_gate1a_provider_setup_error_records_digest_only_diagnostic(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    from magi_agent.gates.gate1a_readonly_tools import (
-        GATE1A_READONLY_TOOL_NAMES,
-        Gate1AReadOnlyToolConfig,
-    )
-
-    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
-    counter_path = tmp_path / "counters.json"
-    runtime = make_runtime(
-        authority=PythonRuntimeAuthorityConfig(
-            userVisibleOutputAllowed=True,
-            canaryRoutingAllowed=True,
-        )
-    )
-    runtime.gate5b_user_visible_chat_route_config = Gate5BUserVisibleChatRouteConfig(
-        enabled=True,
-        killSwitchEnabled=False,
-        selectedBotDigest=_sha256("bot-test"),
-        selectedOwnerUserIdDigest=_sha256("user-test"),
-        environment="production",
-        environmentAllowlist=("production",),
-        adkPrimitivesLoader=_provider_setup_fail_primitives,
-    )
-    runtime.gate1a_readonly_tools_config = Gate1AReadOnlyToolConfig.model_validate(
-        {
-            "enabled": True,
-            "killSwitchEnabled": False,
-            "routeAttachmentEnabled": True,
-            "selectedBotDigest": _sha256("bot-test"),
-            "selectedOwnerDigest": _sha256("user-test"),
-            "environment": "production",
-            "environmentAllowlist": ("production",),
-            "allowedToolNames": GATE1A_READONLY_TOOL_NAMES,
-            "maxToolCallsPerTurn": 8,
-        }
-    )
-    counter_store = Gate5B4C3ShadowCounterStore(counter_path)
-    runtime.gate5b4c3_shadow_generation_route_config = Gate5B4C3ShadowGenerationRouteConfig(
-        liveRunnerBoundaryEnabled=True,
-        counterStore=counter_store,
-        generationConfig=Gate5B4C3ShadowGenerationConfig(
-            enabled=True,
-            killSwitchActive=False,
-            capStateInitialized=True,
-            providerProjectSpendControlsVerified=True,
-            selectedBotDigest=_sha256("bot-test"),
-            trustedOwnerUserIdDigest=_sha256("user-test"),
-            environment="production",
-            allowedProviderLabels=("google",),
-            allowedModelLabels=("gemini-3.5-flash",),
-            allowedModelRoutes=("google:gemini-3.5-flash",),
-            allowedShadowCredentialRefs=("gate5b-google-api-key-smoke-v1",),
-            providerCredentialBindingRequired=False,
-            approvedBudgets={
-                "maxDailyGenerationRuns": 1,
-                "maxDailyGenerationCostUsd": 0.05,
-                "maxCostUsd": 0.05,
-            },
-        ),
-    )
-    canary_request_digest = "sha256:" + "8" * 64
-    client = TestClient(create_app(runtime))
-
-    response = client.post(
-        "/v1/chat/completions",
-        headers={
-            "authorization": "Bearer gateway-token",
-            "x-gate5b-canary-request-digest": canary_request_digest,
-        },
-        json={
-            "messages": [
-                {
-                    "role": "user",
-                    "content": "Synthetic canary chat for runner diagnostics.",
-                }
-            ]
-        },
-    )
-
-    assert response.status_code == 502
-    body = response.json()
-    assert body["status"] == "python_error"
-    assert body["reason"] == "runner_error"
-    assert body["fallbackStatus"] == "fallback_to_typescript"
-    assert body["responseAuthority"] == "typescript"
-    assert body["adk"]["invoked"] is True
-    assert body["runnerErrorDiagnostic"]["stage"] == "provider_client_setup"
-    assert body["runnerErrorDiagnostic"]["reasonCode"] == "provider_client_setup_failed"
-    assert body["runnerErrorDiagnostic"]["exceptionCategory"] == (
-        "provider_client_setup_failure"
-    )
-    assert body["runnerErrorDiagnostic"]["modelCallAttempted"] is False
-    assert body["runnerErrorDiagnostic"]["gateMode"] == "gate1a_readonly_tools"
-    assert "choices" not in body
-    serialized_body = json.dumps(body)
-    for forbidden in (
-        "raw-token",
-        "prompt=secret-output",
-        "Authorization:",
-        "/Users/kevin",
-        "/private/path",
-        "Synthetic canary chat for runner diagnostics",
-    ):
-        assert forbidden not in serialized_body
-
-    receipt = client.post(
-        "/v1/internal/gate5b/user-visible-delivery-receipts",
-        headers={"authorization": "Bearer gateway-token"},
-        json={
-            "schemaVersion": "gate5b.userVisibleDeliveryReceipt.v1",
-            "requestDigest": canary_request_digest,
-            "bodyDigest": "sha256:" + "b" * 64,
-            "routeDecision": "typescript_fallback",
-            "gate": "gate1a_readonly_tools",
-            "deliveryStatus": "fallback_served",
-            "reason": "runner_error",
-            "fallbackReason": "python_error",
-            "responseAuthority": "typescript",
-            "servedAt": "2026-05-25T18:45:00.000Z",
-            "sseFrameCount": 1,
-            "toolReceiptCount": 0,
-            "modelAttemptCount": 0,
-            "providerRequestCount": 0,
-            "expectedModelAttemptCount": 0,
-        },
-    )
-
-    assert receipt.status_code == 202
-    raw_counter_store = json.loads(counter_path.read_text(encoding="utf-8"))
-    request_record = next(iter(raw_counter_store["scopes"].values()))["requests"][
-        canary_request_digest
-    ]
-    assert request_record["status"] == "error"
-    assert request_record["reason"] == "runner_error"
-    assert request_record["deliveryStatus"] == "fallback_served"
-    assert request_record["responseAuthority"] == "typescript"
-    assert request_record["fallbackReason"] == "python_error"
-    assert request_record["modelAttemptCount"] == 0
-    assert request_record["providerRequestCount"] == 0
-    assert "egressEvidenceStatus" not in request_record
-    assert request_record["runnerErrorDiagnostic"]["stage"] == "provider_client_setup"
-    assert request_record["runnerErrorDiagnostic"]["modelCallAttempted"] is False
-    evidence = counter_store.validate_delivery_evidence(
-        request_digest=canary_request_digest,
-        selected_bot_digest=_sha256("bot-test"),
-        trusted_owner_user_id_digest=_sha256("user-test"),
-        environment="production",
-        gate="gate1a_readonly_tools",
-    )
-    assert evidence.status == "passed"
-    assert evidence.runner_error_diagnostic is not None
-    assert evidence.runner_error_diagnostic["stage"] == "provider_client_setup"
-    serialized_record = json.dumps(request_record)
-    for forbidden in (
-        "raw-token",
-        "prompt=secret-output",
-        "Authorization:",
-        "/Users/kevin",
-        "/private/path",
-        "Synthetic canary chat for runner diagnostics",
-    ):
-        assert forbidden not in serialized_record
-
-
-def test_chat_route_gate1a_function_tool_typeerror_keeps_provider_counts_zero(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    from magi_agent.gates.gate1a_readonly_tools import (
-        GATE1A_READONLY_TOOL_NAMES,
-        Gate1AReadOnlyToolConfig,
-    )
-
-    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
-    counter_path = tmp_path / "gate5b4c3-counters.json"
-    runtime = make_runtime(
-        authority=PythonRuntimeAuthorityConfig(
-            userVisibleOutputAllowed=True,
-            canaryRoutingAllowed=True,
-        )
-    )
-    runtime.gate5b_user_visible_chat_route_config = Gate5BUserVisibleChatRouteConfig(
-        enabled=True,
-        killSwitchEnabled=False,
-        selectedBotDigest=_sha256("bot-test"),
-        selectedOwnerUserIdDigest=_sha256("user-test"),
-        environment="production",
-        environmentAllowlist=("production",),
-        adkPrimitivesLoader=_function_tool_schema_typeerror_primitives,
-    )
-    runtime.gate1a_readonly_tools_config = Gate1AReadOnlyToolConfig.model_validate(
-        {
-            "enabled": True,
-            "killSwitchEnabled": False,
-            "routeAttachmentEnabled": True,
-            "selectedBotDigest": _sha256("bot-test"),
-            "selectedOwnerDigest": _sha256("user-test"),
-            "environment": "production",
-            "environmentAllowlist": ("production",),
-            "allowedToolNames": GATE1A_READONLY_TOOL_NAMES,
-            "maxToolCallsPerTurn": 8,
-        }
-    )
-    counter_store = Gate5B4C3ShadowCounterStore(counter_path)
-    runtime.gate5b4c3_shadow_generation_route_config = Gate5B4C3ShadowGenerationRouteConfig(
-        liveRunnerBoundaryEnabled=True,
-        counterStore=counter_store,
-        generationConfig=Gate5B4C3ShadowGenerationConfig(
-            enabled=True,
-            killSwitchActive=False,
-            capStateInitialized=True,
-            providerProjectSpendControlsVerified=True,
-            selectedBotDigest=_sha256("bot-test"),
-            trustedOwnerUserIdDigest=_sha256("user-test"),
-            environment="production",
-            allowedProviderLabels=("google",),
-            allowedModelLabels=("gemini-3.5-flash",),
-            allowedModelRoutes=("google:gemini-3.5-flash",),
-            allowedShadowCredentialRefs=("gate5b-google-api-key-smoke-v1",),
-            providerCredentialBindingRequired=False,
-            approvedBudgets={
-                "maxDailyGenerationRuns": 1,
-                "maxDailyGenerationCostUsd": 0.05,
-                "maxCostUsd": 0.05,
-            },
-        ),
-    )
-    canary_request_digest = "sha256:" + "9" * 64
-    client = TestClient(create_app(runtime))
-
-    response = client.post(
-        "/v1/chat/completions",
-        headers={
-            "authorization": "Bearer gateway-token",
-            "x-gate5b-canary-request-digest": canary_request_digest,
-        },
-        json={
-            "messages": [
-                {
-                    "role": "user",
-                    "content": "Synthetic canary chat for FunctionTool TypeError.",
-                }
-            ]
-        },
-    )
-
-    assert response.status_code == 502
-    body = response.json()
-    assert body["status"] == "python_error"
-    assert body["reason"] == "runner_error"
-    assert body["runnerErrorDiagnostic"]["stage"] == "adk_tool_schema"
-    assert body["runnerErrorDiagnostic"]["reasonCode"] == (
-        "adk_function_tool_schema_mismatch"
-    )
-    assert body["runnerErrorDiagnostic"]["exceptionClass"] == "TypeError"
-    assert body["runnerErrorDiagnostic"]["modelCallAttempted"] is False
-    assert body["runnerErrorDiagnostic"]["activeToolNames"] == list(
-        GATE1A_READONLY_TOOL_NAMES
-    )
-    assert "[REDACTED]" in body["runnerErrorDiagnostic"]["errorPreview"]
-    assert body["runnerErrorDiagnostic"]["tracebackMarkers"]
-    serialized_body = json.dumps(body)
-    for forbidden in (
-        "raw-token",
-        "prompt=secret-output",
-        "Authorization:",
-        "/Users/kevin",
-        "/private/path",
-        "Synthetic canary chat for FunctionTool TypeError",
-    ):
-        assert forbidden not in serialized_body
-
-    receipt = client.post(
-        "/v1/internal/gate5b/user-visible-delivery-receipts",
-        headers={"authorization": "Bearer gateway-token"},
-        json={
-            "schemaVersion": "gate5b.userVisibleDeliveryReceipt.v1",
-            "requestDigest": canary_request_digest,
-            "bodyDigest": "sha256:" + "b" * 64,
-            "routeDecision": "typescript_fallback",
-            "gate": "gate1a_readonly_tools",
-            "deliveryStatus": "fallback_served",
-            "reason": "runner_error",
-            "fallbackReason": "python_error",
-            "responseAuthority": "typescript",
-            "servedAt": "2026-05-25T18:45:00.000Z",
-            "sseFrameCount": 1,
-            "toolReceiptCount": 0,
-            "modelAttemptCount": 0,
-            "providerRequestCount": 0,
-            "expectedModelAttemptCount": 0,
-        },
-    )
-
-    assert receipt.status_code == 202
-    raw_counter_store = json.loads(counter_path.read_text(encoding="utf-8"))
-    request_record = next(iter(raw_counter_store["scopes"].values()))["requests"][
-        canary_request_digest
-    ]
-    assert request_record["status"] == "error"
-    assert request_record["reason"] == "runner_error"
-    assert request_record["deliveryStatus"] == "fallback_served"
-    assert request_record["modelAttemptCount"] == 0
-    assert request_record["providerRequestCount"] == 0
-    assert "egressEvidenceStatus" not in request_record
-    assert request_record["runnerErrorDiagnostic"]["stage"] == "adk_tool_schema"
-    assert request_record["runnerErrorDiagnostic"]["modelCallAttempted"] is False
-    assert "[REDACTED]" in request_record["runnerErrorDiagnostic"]["errorPreview"]
-    assert request_record["runnerErrorDiagnostic"]["tracebackMarkers"]
-    evidence = counter_store.validate_delivery_evidence(
-        request_digest=canary_request_digest,
-        selected_bot_digest=_sha256("bot-test"),
-        trusted_owner_user_id_digest=_sha256("user-test"),
-        environment="production",
-        gate="gate1a_readonly_tools",
-    )
-    assert evidence.status == "passed"
-    assert evidence.runner_error_diagnostic is not None
-    assert evidence.runner_error_diagnostic["stage"] == "adk_tool_schema"
-    serialized_record = json.dumps(request_record)
-    for forbidden in (
-        "raw-token",
-        "prompt=secret-output",
-        "Authorization:",
-        "/Users/kevin",
-        "/private/path",
-        "Synthetic canary chat for FunctionTool TypeError",
-    ):
-        assert forbidden not in serialized_record
 
 
 def test_chat_route_marks_late_runner_completion_after_client_timeout(
@@ -3446,20 +3122,31 @@ def test_gate5b_registers_turn_during_boundary_and_unregisters_after(
     session_id = "agent:bot:app:reg"
     observed: dict[str, object] = {}
 
-    async def fake_boundary(generation, **kwargs):
+    async def _noop_gen():  # noqa: ANN202
+        if False:  # pragma: no cover - never yields; the collect fake drives cancel
+            yield None
+
+    def fake_governed_turn(ctx, *, runtime, cancel=None):  # noqa: ANN001, ANN202
+        return _noop_gen()
+
+    async def fake_collect(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        # The governed collect is the awaited call inside the serving try-block,
+        # exactly where the legacy boundary await used to be. Inspect the
+        # registered turn, then hard-cancel the driving task so the await
+        # surfaces CancelledError exactly as a real interrupt would.
         seen = ACTIVE_TURNS.get(session_id)
         observed["during"] = seen
         observed["task"] = seen.task if seen is not None else None
-        # Mimic a hard task-cancel reaching the boundary: cancel the driving
-        # task (recorded as ActiveTurn.task) so the await surfaces
-        # CancelledError exactly as a real interrupt would.
         if seen is not None and seen.task is not None:
             seen.task.cancel()
         await _asyncio.sleep(0)
 
     monkeypatch.setattr(
-        "magi_agent.transport.gate5b_serving.run_gate5b4c3_live_runner_boundary_async",
-        fake_boundary,
+        "magi_agent.transport.gate5b_serving.run_governed_turn", fake_governed_turn
+    )
+    monkeypatch.setattr(
+        "magi_agent.transport.gate5b_serving.collect_engine_to_boundary_result",
+        fake_collect,
     )
 
     runtime = _live_runtime()

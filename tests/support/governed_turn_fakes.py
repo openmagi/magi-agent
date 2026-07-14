@@ -104,19 +104,24 @@ def install_governed_turn(
     error: str | None = None,
     serving_module: str = _SERVING,
     track: dict[str, int] | None = None,
+    captured_ctx: list[object] | None = None,
 ) -> dict[str, int]:
     """Patch ``run_governed_turn`` on the serving module to a deterministic fake.
 
     The REAL ``collect_engine_to_boundary_result`` is left in place so text
     aggregation, terminal mapping, and public-event teeing all run exactly as in
     production. Returns a counter dict (``{"governed": N}``) so callers can assert
-    the governed engine was driven.
+    the governed engine was driven. When ``captured_ctx`` is supplied, each
+    ``TurnContext`` the serving path builds for the governed turn is appended to
+    it (so a test can inspect the runner input / prompt the driver received).
     """
     counts = track if track is not None else {"governed": 0}
     counts.setdefault("governed", 0)
 
     def _fake_run_governed_turn(ctx, *, runtime, cancel=None):  # noqa: ANN001, ANN202
         counts["governed"] += 1
+        if captured_ctx is not None:
+            captured_ctx.append(ctx)
         return build_governed_event_stream(
             events, terminal=terminal, usage=usage, error=error
         )()
