@@ -6,11 +6,14 @@ resources, perform network requests, or attach any live execution path.
 
 from __future__ import annotations
 
+import ctypes
+import errno
 import ipaddress
 import os
 from pathlib import Path, PurePosixPath
 import re
 import stat
+import sys
 import unicodedata
 from urllib.parse import quote, unquote_to_bytes, urlsplit, urlunsplit
 
@@ -43,6 +46,15 @@ _INET_ATON_NUMERIC_HOST_RE = re.compile(
 _MAX_WORKSPACE_RELATIVE_DEPTH = 32
 _MAX_WORKSPACE_SEGMENT_BYTES = 255
 _MAX_WORKSPACE_CANDIDATE_BYTES = 1_023
+# Bound physical prefix walks independently from the authority-relative path.
+# A short symlink or mount alias can otherwise expand to hundreds of one-byte
+# components while still fitting the byte budget.
+_MAX_WORKSPACE_PHYSICAL_DEPTH = 64
+_MAX_DIRECTORY_ENTRIES_SCANNED = 4_096
+_LINUX_OPENAT2_SYSCALL = 437
+_LINUX_RESOLVE_NO_XDEV = 0x01
+_LINUX_RESOLVE_NO_MAGICLINKS = 0x02
+_LINUX_RESOLVE_BENEATH = 0x08
 _MAX_WORKSPACE_ENCODED_SUFFIX_CHARS = min(
     _MAX_WORKSPACE_RELATIVE_DEPTH * (_MAX_WORKSPACE_SEGMENT_BYTES * 3)
     + _MAX_WORKSPACE_RELATIVE_DEPTH
@@ -91,11 +103,17 @@ def canonical_file_resource(
     if not candidate.is_absolute():
         candidate = root_path / candidate
 
+    mount_view_before = _validate_no_descendant_mount_crossing(root_path, candidate)
     traversal_first = _validate_existing_prefix_traversal(root_path, candidate)
     first = _resolve_candidate(candidate)
+    mount_view_after = _validate_no_descendant_mount_crossing(root_path, candidate)
     traversal_second = _validate_existing_prefix_traversal(root_path, candidate)
     second = _resolve_candidate(candidate)
-    if first != second or traversal_first != traversal_second:
+    if (
+        first != second
+        or traversal_first != traversal_second
+        or mount_view_before != mount_view_after
+    ):
         raise CanonicalizationError("path identity changed during canonicalization")
     resolved_path, ancestor_identity = first
 
@@ -119,6 +137,9 @@ def canonical_file_resource(
     _ = ancestor_identity
     relative = _relative_to_workspace(root_path, resolved_path)
     _validate_resolved_workspace_path_budget(root_path, relative.parts)
+    mount_view_final = _validate_no_descendant_mount_crossing(root_path, candidate)
+    if mount_view_final != mount_view_before:
+        raise CanonicalizationError("workspace mount view changed during canonicalization")
     digest = _workspace_digest(root_path, identity=root_identity_after)
     encoded = "/".join(_encode_workspace_segment(segment) for segment in relative.parts)
     return f"workspace://{digest}/{encoded}"
@@ -137,6 +158,7 @@ def workspace_relative_path(
     root_text = _path_text(root, field_name="root")
     match, decoded_segments = _parse_workspace_ref_before_filesystem(root_text, ref)
     root_path = _resolved_workspace_root(root_text)
+    _validate_resolved_workspace_path_budget(root_path, ())
 
     try:
         root_identity = _stat_identity(root_path)
@@ -215,10 +237,195 @@ def canonical_http_resource(url: str) -> str:
     return urlunsplit((scheme, authority, path, query, ""))
 
 
+class _LinuxOpenHow(ctypes.Structure):
+    _fields_ = (
+        ("flags", ctypes.c_uint64),
+        ("mode", ctypes.c_uint64),
+        ("resolve", ctypes.c_uint64),
+    )
+
+
+def _validate_no_descendant_mount_crossing(
+    root: Path,
+    candidate: Path,
+) -> tuple[int, int]:
+    """Prove that the current path walk does not cross a nested mount.
+
+    The configured root may itself be a PVC or bind mount.  Only mount
+    transitions below that already-bound root are forbidden.  Linux uses the
+    kernel path walker so same-filesystem bind mounts are covered; Darwin has
+    no supported bind-mount primitive and verifies every existing component's
+    mount/device boundary.  Unknown platforms fail closed.
+    """
+
+    if sys.platform.startswith("linux"):
+        return _validate_linux_mount_boundary(root, candidate)
+    if sys.platform == "darwin":
+        return _validate_darwin_mount_boundary(root, candidate)
+    raise CanonicalizationError(
+        "secure workspace mount-boundary verification is unavailable"
+    )
+
+
+def _validate_linux_mount_boundary(root: Path, candidate: Path) -> tuple[int, int]:
+    try:
+        namespace_before = os.stat("/proc/thread-self/ns/mnt")
+        o_path = os.O_PATH
+    except (AttributeError, OSError) as exc:
+        raise CanonicalizationError(
+            "secure workspace mount-boundary verification is unavailable"
+        ) from exc
+
+    try:
+        root_fd = os.open(root, o_path | os.O_DIRECTORY | os.O_CLOEXEC)
+    except OSError as exc:
+        raise CanonicalizationError(
+            "secure workspace mount-boundary verification is unavailable"
+        ) from exc
+
+    try:
+        parts = _parts_after_physical_root(root, candidate)
+        existing_parts = _linux_open_existing_prefix_without_mounts(
+            root_fd,
+            parts,
+            resolve_flags=_LINUX_RESOLVE_NO_XDEV | _LINUX_RESOLVE_NO_MAGICLINKS,
+        )
+        resolved_existing = root.joinpath(*existing_parts).resolve(strict=True)
+        try:
+            resolved_parts = resolved_existing.relative_to(root).parts
+        except ValueError as exc:
+            raise CanonicalizationError("path traverses outside the workspace") from exc
+        _linux_open_existing_prefix_without_mounts(
+            root_fd,
+            tuple(resolved_parts),
+            resolve_flags=(
+                _LINUX_RESOLVE_BENEATH
+                | _LINUX_RESOLVE_NO_XDEV
+                | _LINUX_RESOLVE_NO_MAGICLINKS
+            ),
+            require_complete=True,
+        )
+    except CanonicalizationError:
+        raise
+    except (OSError, RuntimeError) as exc:
+        if isinstance(exc, OSError) and exc.errno == errno.ELOOP:
+            raise CanonicalizationError("path contains a symlink loop or magic link") from exc
+        raise CanonicalizationError("workspace mount boundary could not be verified") from exc
+    finally:
+        os.close(root_fd)
+
+    try:
+        namespace_after = os.stat("/proc/thread-self/ns/mnt")
+    except OSError as exc:
+        raise CanonicalizationError("workspace mount view changed") from exc
+    before = (namespace_before.st_dev, namespace_before.st_ino)
+    after = (namespace_after.st_dev, namespace_after.st_ino)
+    if before != after:
+        raise CanonicalizationError("workspace mount view changed")
+    return before
+
+
+def _linux_open_existing_prefix_without_mounts(
+    root_fd: int,
+    parts: tuple[str, ...],
+    *,
+    resolve_flags: int,
+    require_complete: bool = False,
+) -> tuple[str, ...]:
+    end = len(parts)
+    while True:
+        relative = os.path.join(*parts[:end]) if end else "."
+        try:
+            opened_fd = _linux_openat2(root_fd, relative, resolve_flags=resolve_flags)
+        except OSError as exc:
+            if not require_complete and exc.errno in {errno.ENOENT, errno.ENOTDIR} and end:
+                end -= 1
+                continue
+            if exc.errno == errno.EXDEV:
+                raise CanonicalizationError(
+                    "path crosses a descendant mount boundary"
+                ) from exc
+            if exc.errno == errno.ELOOP:
+                raise CanonicalizationError(
+                    "path contains a symlink loop or magic link"
+                ) from exc
+            if exc.errno in {errno.ENOSYS, errno.EINVAL, errno.E2BIG, errno.EPERM}:
+                raise CanonicalizationError(
+                    "secure workspace mount-boundary verification is unavailable"
+                ) from exc
+            raise CanonicalizationError(
+                "workspace mount boundary could not be verified"
+            ) from exc
+        else:
+            os.close(opened_fd)
+            return parts[:end]
+
+
+def _linux_openat2(root_fd: int, relative: str, *, resolve_flags: int) -> int:
+    path_bytes = os.fsencode(relative)
+    if b"\x00" in path_bytes:
+        raise CanonicalizationError("path contains a noncanonical segment")
+    how = _LinuxOpenHow(
+        flags=os.O_PATH | os.O_CLOEXEC,
+        mode=0,
+        resolve=resolve_flags,
+    )
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.syscall.restype = ctypes.c_long
+    ctypes.set_errno(0)
+    result = libc.syscall(
+        ctypes.c_long(_LINUX_OPENAT2_SYSCALL),
+        ctypes.c_int(root_fd),
+        ctypes.c_char_p(path_bytes),
+        ctypes.byref(how),
+        ctypes.c_size_t(ctypes.sizeof(how)),
+    )
+    if result < 0:
+        error_number = ctypes.get_errno()
+        raise OSError(error_number, os.strerror(error_number), relative)
+    return int(result)
+
+
+def _validate_darwin_mount_boundary(root: Path, candidate: Path) -> tuple[int, int]:
+    try:
+        root_stat_before = root.stat()
+        remaining_parts = _parts_after_physical_root(root, candidate)
+        current = root
+        for part in remaining_parts:
+            proposed = current / part
+            try:
+                resolved = proposed.resolve(strict=True)
+            except FileNotFoundError:
+                break
+            if os.path.ismount(proposed) or resolved.stat().st_dev != root_stat_before.st_dev:
+                raise CanonicalizationError(
+                    "path crosses a descendant mount boundary"
+                )
+            try:
+                resolved.relative_to(root)
+            except ValueError as exc:
+                raise CanonicalizationError("path traverses outside the workspace") from exc
+            current = resolved
+        root_stat_after = root.stat()
+    except CanonicalizationError:
+        raise
+    except (OSError, RuntimeError) as exc:
+        if isinstance(exc, OSError) and exc.errno == errno.ELOOP:
+            raise CanonicalizationError("path contains a symlink loop") from exc
+        raise CanonicalizationError("workspace mount boundary could not be verified") from exc
+
+    before = (root_stat_before.st_dev, root_stat_before.st_ino)
+    after = (root_stat_after.st_dev, root_stat_after.st_ino)
+    if before != after:
+        raise CanonicalizationError("workspace mount view changed")
+    return before
+
+
 def _resolved_workspace_root(root: str | os.PathLike[str]) -> Path:
     root_text = _path_text(root, field_name="root")
     try:
         resolved = Path(root_text).resolve(strict=True)
+        _validate_physical_workspace_path_budget(resolved)
         if not resolved.is_dir():
             raise CanonicalizationError("workspace root must be an existing directory")
         resolved = _canonical_stored_path(resolved)
@@ -285,14 +492,39 @@ def _validate_candidate_byte_budget(candidate: str) -> None:
 
 def _lexical_absolute_workspace_root(root_text: str) -> Path:
     try:
+        if Path(root_text).is_absolute():
+            return Path(os.path.normpath(root_text))
         return Path(os.path.abspath(root_text))
     except OSError as exc:
         raise CanonicalizationError("workspace root could not be bounded safely") from exc
 
 
 def _validate_forward_workspace_path_budget(root_text: str, path_text: str) -> None:
-    raw_root = _lexical_absolute_workspace_root(root_text)
     raw_path = Path(path_text)
+    raw_root_input = Path(root_text)
+    if raw_path.is_absolute() and raw_root_input.is_absolute():
+        try:
+            raw_path_parts = raw_path.relative_to(raw_root_input).parts
+        except ValueError:
+            raw_path_parts = raw_path.parts[1:]
+    elif raw_path.is_absolute():
+        raw_path_parts = raw_path.parts[1:]
+    else:
+        raw_path_parts = raw_path.parts
+    _validate_relative_workspace_segments(tuple(raw_path_parts))
+    if raw_path.is_absolute():
+        _validate_candidate_byte_budget(os.fspath(raw_path))
+    else:
+        separator_bytes = 0 if not root_text or root_text.endswith(os.sep) else 1
+        raw_combined_bytes = (
+            _encoded_path_bytes(root_text)
+            + separator_bytes
+            + _encoded_path_bytes(path_text)
+        )
+        if raw_combined_bytes > _MAX_WORKSPACE_CANDIDATE_BYTES:
+            raise _workspace_path_budget_error()
+
+    raw_root = _lexical_absolute_workspace_root(root_text)
     if raw_path.is_absolute():
         candidate = raw_path
         try:
@@ -312,7 +544,16 @@ def _validate_forward_workspace_path_budget(root_text: str, path_text: str) -> N
 
 def _validate_resolved_workspace_path_budget(root: Path, parts: tuple[str, ...]) -> None:
     _validate_relative_workspace_segments(parts)
-    _validate_candidate_byte_budget(os.fspath(root.joinpath(*parts)))
+    candidate = root.joinpath(*parts)
+    _validate_candidate_byte_budget(os.fspath(candidate))
+    _validate_physical_workspace_path_budget(candidate)
+
+
+def _validate_physical_workspace_path_budget(path: Path) -> None:
+    _validate_candidate_byte_budget(os.fspath(path))
+    physical_parts = path.parts[1:] if path.is_absolute() else path.parts
+    if len(physical_parts) > _MAX_WORKSPACE_PHYSICAL_DEPTH:
+        raise _workspace_path_budget_error()
 
 
 def _parse_workspace_ref_before_filesystem(
@@ -457,6 +698,7 @@ def _validate_existing_prefix_traversal(
     candidate: Path,
 ) -> tuple[tuple[Path, tuple[int, int, str]], ...]:
     remaining_parts = _parts_after_physical_root(root, candidate)
+    stored_paths = _StoredPathResolver(seed=root)
     observed: list[tuple[Path, tuple[int, int, str]]] = []
     current = root
     current_kind: str | None = "directory"
@@ -469,7 +711,7 @@ def _validate_existing_prefix_traversal(
             current = current.parent
             try:
                 identity = _stat_identity(current)
-                resolved = _canonical_stored_path(current.resolve(strict=True))
+                resolved = stored_paths.canonicalize(current.resolve(strict=True))
             except FileNotFoundError:
                 current_kind = None
                 continue
@@ -519,7 +761,7 @@ def _validate_existing_prefix_traversal(
         except OSError as exc:
             raise CanonicalizationError("path traversal could not be verified") from exc
 
-        resolved = _canonical_stored_path(resolved)
+        resolved = stored_paths.canonicalize(resolved)
         try:
             resolved_identity = _stat_identity(resolved)
         except OSError as exc:
@@ -613,66 +855,124 @@ def _reject_observable_hard_link(path: Path) -> None:
         raise CanonicalizationError("existing hard link targets require typed authority")
 
 
+class _StoredPathResolver:
+    """Canonicalize stored spellings with a bounded, per-walk prefix cache."""
+
+    def __init__(self, *, seed: Path | None = None) -> None:
+        self._prefixes: dict[
+            tuple[str, ...],
+            tuple[Path, tuple[int, int, str]],
+        ] = {}
+        if seed is not None:
+            _validate_physical_workspace_path_budget(seed)
+            try:
+                seed_identity = _lstat_identity(seed)
+            except OSError as exc:
+                raise CanonicalizationError(
+                    "stored path identity changed during canonicalization"
+                ) from exc
+            self._prefixes[seed.parts] = (seed, seed_identity)
+
+    def canonicalize(self, path: Path) -> Path:
+        try:
+            if path.is_absolute():
+                _validate_physical_workspace_path_budget(path)
+            resolved = path.resolve(strict=True)
+            _validate_physical_workspace_path_budget(resolved)
+        except (OSError, RuntimeError) as exc:
+            raise CanonicalizationError("existing path identity could not be resolved") from exc
+        if not resolved.is_absolute():
+            raise CanonicalizationError("existing path identity must be absolute")
+
+        resolved_parts = resolved.parts
+        current = Path(resolved.anchor)
+        start_index = 1
+        for prefix_length in range(len(resolved_parts), 0, -1):
+            cached = self._prefixes.get(resolved_parts[:prefix_length])
+            if cached is None:
+                continue
+            current, expected_identity = cached
+            try:
+                if _lstat_identity(current) != expected_identity:
+                    raise CanonicalizationError(
+                        "stored path identity changed during canonicalization"
+                    )
+            except OSError as exc:
+                raise CanonicalizationError(
+                    "stored path identity changed during canonicalization"
+                ) from exc
+            start_index = prefix_length
+            break
+
+        for index in range(start_index, len(resolved_parts)):
+            component = resolved_parts[index]
+            requested = current / component
+            try:
+                requested_identity = _stat_identity(requested)
+                stored_component = _stored_component_name(
+                    current,
+                    component,
+                    requested_identity=requested_identity,
+                )
+            except OSError as exc:
+                raise CanonicalizationError(
+                    "stored path spelling could not be established"
+                ) from exc
+
+            current = current / stored_component
+            try:
+                if _lstat_identity(current) != requested_identity:
+                    raise CanonicalizationError(
+                        "stored path identity changed during canonicalization"
+                    )
+            except OSError as exc:
+                raise CanonicalizationError(
+                    "stored path identity changed during canonicalization"
+                ) from exc
+            self._prefixes[resolved_parts[: index + 1]] = (current, requested_identity)
+        return current
+
+
+def _stored_component_name(
+    parent: Path,
+    component: str,
+    *,
+    requested_identity: tuple[int, int, str],
+) -> str:
+    matches: list[str] = []
+    alias_key = _filesystem_alias_key(component)
+    with os.scandir(parent) as entries:
+        for scanned_count, entry in enumerate(entries, start=1):
+            if scanned_count > _MAX_DIRECTORY_ENTRIES_SCANNED:
+                raise _workspace_path_budget_error()
+            if entry.name == component:
+                exact_identity = _identity_from_stat(entry.stat(follow_symlinks=False))
+                if exact_identity != requested_identity:
+                    raise CanonicalizationError(
+                        "stored path identity changed during canonicalization"
+                    )
+                return component
+            if _filesystem_alias_key(entry.name) != alias_key:
+                continue
+            try:
+                entry_stat = entry.stat(follow_symlinks=False)
+            except OSError:
+                continue
+            if (
+                entry_stat.st_dev == requested_identity[0]
+                and entry_stat.st_ino == requested_identity[1]
+            ):
+                matches.append(entry.name)
+
+    if len(matches) == 1:
+        return matches[0]
+    raise CanonicalizationError("stored path spelling is ambiguous")
+
+
 def _canonical_stored_path(path: Path) -> Path:
     """Recover the filesystem's stored spelling for an existing resolved path."""
 
-    try:
-        resolved = path.resolve(strict=True)
-    except (OSError, RuntimeError) as exc:
-        raise CanonicalizationError("existing path identity could not be resolved") from exc
-    if not resolved.is_absolute():
-        raise CanonicalizationError("existing path identity must be absolute")
-
-    current = Path(resolved.anchor)
-    for component in resolved.parts[1:]:
-        requested = current / component
-        try:
-            requested_identity = _stat_identity(requested)
-            stored_component: str | None = None
-            matches: list[str] = []
-            alias_candidates: list[os.DirEntry[str]] = []
-            alias_key = _filesystem_alias_key(component)
-            with os.scandir(current) as entries:
-                for entry in entries:
-                    if entry.name == component:
-                        exact_identity = _identity_from_stat(entry.stat(follow_symlinks=False))
-                        if exact_identity != requested_identity:
-                            raise CanonicalizationError(
-                                "stored path identity changed during canonicalization"
-                            )
-                        stored_component = component
-                        break
-                    if _filesystem_alias_key(entry.name) == alias_key:
-                        alias_candidates.append(entry)
-                if stored_component is None:
-                    for entry in alias_candidates:
-                        try:
-                            entry_stat = entry.stat(follow_symlinks=False)
-                        except OSError:
-                            continue
-                        if (
-                            entry_stat.st_dev == requested_identity[0]
-                            and entry_stat.st_ino == requested_identity[1]
-                        ):
-                            matches.append(entry.name)
-        except OSError as exc:
-            raise CanonicalizationError("stored path spelling could not be established") from exc
-
-        if stored_component is None:
-            if len(matches) == 1:
-                stored_component = matches[0]
-            else:
-                raise CanonicalizationError("stored path spelling is ambiguous")
-
-        current = current / stored_component
-        try:
-            if _lstat_identity(current) != requested_identity:
-                raise CanonicalizationError("stored path identity changed during canonicalization")
-        except OSError as exc:
-            raise CanonicalizationError(
-                "stored path identity changed during canonicalization"
-            ) from exc
-    return current
+    return _StoredPathResolver().canonicalize(path)
 
 
 def _filesystem_alias_key(name: str) -> str:

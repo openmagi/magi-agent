@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from contextlib import contextmanager
+import errno
 import os
 from pathlib import Path, PurePosixPath
 import socket
+import subprocess
+import sys
 import tempfile
 from time import perf_counter
 import unicodedata
@@ -501,6 +504,30 @@ def test_file_resource_rejects_exact_total_budget_overflow_before_filesystem_acc
         canonical_file_resource("/workspace", path)
 
 
+def test_file_resource_rejects_raw_combined_overflow_before_cwd_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = "/".join("r" * 200 for _ in range(4))
+    path = "p" * 220
+    assert len(root.encode()) + 1 + len(path.encode()) == 1_024
+
+    def unexpected_absolute_resolution(_path: object) -> Path:
+        raise AssertionError("over-budget path reached cwd resolution")
+
+    def unexpected_root_resolution(_root: object) -> Path:
+        raise AssertionError("over-budget path reached the filesystem")
+
+    monkeypatch.setattr(
+        canonicalization,
+        "_lexical_absolute_workspace_root",
+        unexpected_absolute_resolution,
+    )
+    monkeypatch.setattr(canonicalization, "_resolved_workspace_root", unexpected_root_resolution)
+
+    with pytest.raises(CanonicalizationError, match="budget"):
+        canonical_file_resource(root, path)
+
+
 def test_workspace_segment_budget_counts_utf8_bytes(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -559,6 +586,11 @@ def test_filesystem_race_oserror_is_contained(
     candidate = root / "missing"
 
     monkeypatch.setattr(canonicalization, "_resolved_workspace_root", lambda _root: root)
+    monkeypatch.setattr(
+        canonicalization,
+        "_validate_no_descendant_mount_crossing",
+        lambda _root, _candidate: (0, 0),
+    )
     monkeypatch.setattr(
         canonicalization,
         "_validate_existing_prefix_traversal",
@@ -689,6 +721,28 @@ def test_workspace_relative_path_rejects_exact_budget_overflow_before_filesystem
         workspace_relative_path("/workspace", ref)
 
 
+def test_workspace_root_only_inverse_rechecks_resolved_root_budget_before_stat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resolved_root = Path("/" + "/".join("x" * 200 for _ in range(6)))
+    assert len(os.fspath(resolved_root).encode()) > 1_023
+    ref = f"workspace://sha256:{'0' * 64}/"
+
+    monkeypatch.setattr(
+        canonicalization,
+        "_resolved_workspace_root",
+        lambda _root: resolved_root,
+    )
+
+    def unexpected_stat(_path: Path) -> tuple[int, int, str]:
+        raise AssertionError("over-budget resolved root reached the filesystem")
+
+    monkeypatch.setattr(canonicalization, "_stat_identity", unexpected_stat)
+
+    with pytest.raises(CanonicalizationError, match="budget"):
+        workspace_relative_path("/short-root-alias", ref)
+
+
 def test_workspace_path_budget_accepts_documented_boundaries(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -796,6 +850,284 @@ def test_canonical_stored_path_exact_spelling_uses_one_no_follow_stat_per_compon
 
     assert stored == target.resolve(strict=True)
     assert entry_stat_calls == [False] * (len(target.resolve(strict=True).parts) - 1)
+
+
+def test_canonical_stored_path_rejects_excessive_physical_depth_before_stat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = Path("/" + "/".join("x" for _ in range(65)))
+
+    def unexpected_stat(_path: Path) -> tuple[int, int, str]:
+        raise AssertionError("over-depth path reached the filesystem")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "resolve", lambda self, strict=True: self)
+        patch.setattr(canonicalization, "_stat_identity", unexpected_stat)
+
+        with pytest.raises(CanonicalizationError, match="budget"):
+            canonicalization._canonical_stored_path(target)
+
+
+def test_canonical_stored_path_caps_sibling_scan_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = Path("/target")
+    requested_identity = (11, 22, "other")
+
+    class Entry:
+        def __init__(self, index: int) -> None:
+            self.name = f"unrelated-{index}"
+
+        def stat(self, *, follow_symlinks: bool = True) -> os.stat_result:
+            raise AssertionError("unrelated entries must not be statted")
+
+    @contextmanager
+    def excessive_scandir(_path: Path) -> object:
+        yield (Entry(index) for index in range(4_097))
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "resolve", lambda self, strict=True: self)
+        patch.setattr(
+            canonicalization,
+            "_stat_identity",
+            lambda _path: requested_identity,
+        )
+        patch.setattr(canonicalization.os, "scandir", excessive_scandir)
+
+        with pytest.raises(CanonicalizationError, match="budget"):
+            canonicalization._canonical_stored_path(target)
+
+
+def test_file_resource_stored_spelling_scans_scale_linearly_with_depth(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    target = workspace
+    for index in range(24):
+        target /= f"level-{index:02d}"
+        target.mkdir()
+    (target / "target.txt").write_text("target", encoding="utf-8")
+    target /= "target.txt"
+
+    real_scandir = os.scandir
+    scandir_calls = 0
+
+    @contextmanager
+    def counting_scandir(path: Path) -> object:
+        nonlocal scandir_calls
+        scandir_calls += 1
+        with real_scandir(path) as entries:
+            yield entries
+
+    monkeypatch.setattr(canonicalization.os, "scandir", counting_scandir)
+
+    canonical_file_resource(workspace, target)
+
+    physical_depth = len(target.resolve(strict=True).parts) - 1
+    assert scandir_calls <= physical_depth * 8
+
+
+def test_file_resource_uses_injected_nested_mount_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    ordinary = workspace / "ordinary"
+    nested_mount = workspace / "nested-mount"
+    ordinary.mkdir(parents=True)
+    nested_mount.mkdir()
+    (ordinary / "file.txt").write_text("ordinary", encoding="utf-8")
+    (nested_mount / "file.txt").write_text("mounted", encoding="utf-8")
+    nested_mount = nested_mount.resolve(strict=True)
+    boundary_checks: list[Path] = []
+
+    def injected_boundary(_root: Path, resolved: Path) -> None:
+        boundary_checks.append(resolved)
+        if resolved == nested_mount / "file.txt":
+            raise CanonicalizationError("path crosses a descendant mount boundary")
+
+    monkeypatch.setattr(
+        canonicalization,
+        "_validate_no_descendant_mount_crossing",
+        injected_boundary,
+        raising=False,
+    )
+
+    canonical_file_resource(workspace, ordinary / "file.txt")
+    with pytest.raises(CanonicalizationError, match="mount"):
+        canonical_file_resource(workspace, nested_mount / "file.txt")
+    assert ordinary / "file.txt" in boundary_checks
+    assert nested_mount / "file.txt" in boundary_checks
+
+
+def test_linux_mount_boundary_checks_original_walk_and_rejects_nested_mount(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class NamespaceStat:
+        st_dev = 7
+        st_ino = 11
+
+    lexical_parts = ("alias", "..", "real", "file.txt")
+    observed_paths: list[str] = []
+
+    def rejecting_openat2(
+        _root_fd: int,
+        relative: str,
+        *,
+        resolve_flags: int,
+    ) -> int:
+        _ = resolve_flags
+        observed_paths.append(relative)
+        raise OSError(errno.EXDEV, "nested bind mount")
+
+    monkeypatch.setattr(canonicalization.os, "O_PATH", 0, raising=False)
+    monkeypatch.setattr(canonicalization.os, "stat", lambda _path: NamespaceStat())
+    monkeypatch.setattr(canonicalization.os, "open", lambda *_args: 91)
+    monkeypatch.setattr(canonicalization.os, "close", lambda _fd: None)
+    monkeypatch.setattr(
+        canonicalization,
+        "_parts_after_physical_root",
+        lambda _root, _candidate: lexical_parts,
+    )
+    monkeypatch.setattr(canonicalization, "_linux_openat2", rejecting_openat2)
+
+    with pytest.raises(CanonicalizationError, match="mount"):
+        canonicalization._validate_linux_mount_boundary(
+            Path("/workspace"),
+            Path("/workspace/alias/../real/file.txt"),
+        )
+
+    assert observed_paths == [os.path.join(*lexical_parts)]
+
+
+def test_linux_mount_boundary_uses_beneath_for_resolved_existing_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class NamespaceStat:
+        st_dev = 7
+        st_ino = 11
+
+    calls: list[tuple[str, int]] = []
+    next_fd = iter((101, 102))
+
+    def recording_openat2(
+        _root_fd: int,
+        relative: str,
+        *,
+        resolve_flags: int,
+    ) -> int:
+        calls.append((relative, resolve_flags))
+        return next(next_fd)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(canonicalization.os, "O_PATH", 0, raising=False)
+        patch.setattr(canonicalization.os, "stat", lambda _path: NamespaceStat())
+        patch.setattr(canonicalization.os, "open", lambda *_args: 91)
+        patch.setattr(canonicalization.os, "close", lambda _fd: None)
+        patch.setattr(Path, "resolve", lambda self, strict=True: self)
+        patch.setattr(
+            canonicalization,
+            "_parts_after_physical_root",
+            lambda _root, _candidate: ("real", "file.txt"),
+        )
+        patch.setattr(canonicalization, "_linux_openat2", recording_openat2)
+
+        binding = canonicalization._validate_linux_mount_boundary(
+            Path("/workspace"),
+            Path("/workspace/real/file.txt"),
+        )
+
+    assert binding == (7, 11)
+    assert calls == [
+        (
+            "real/file.txt",
+            canonicalization._LINUX_RESOLVE_NO_XDEV
+            | canonicalization._LINUX_RESOLVE_NO_MAGICLINKS,
+        ),
+        (
+            "real/file.txt",
+            canonicalization._LINUX_RESOLVE_BENEATH
+            | canonicalization._LINUX_RESOLVE_NO_XDEV
+            | canonicalization._LINUX_RESOLVE_NO_MAGICLINKS,
+        ),
+    ]
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux bind mounts are required")
+def test_file_resource_linux_bind_mount_alias_converges_or_fails_closed(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    alias = tmp_path / "workspace-bind"
+    workspace.mkdir()
+    alias.mkdir()
+    target = workspace / "nested" / "target.txt"
+    target.parent.mkdir()
+    target.write_text("target", encoding="utf-8")
+
+    try:
+        subprocess.run(
+            ("mount", "--bind", os.fspath(workspace), os.fspath(alias)),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        pytest.skip("bind mount privilege is unavailable")
+
+    try:
+        original_ref = canonical_file_resource(workspace, target)
+        try:
+            alias_ref = canonical_file_resource(alias, alias / "nested" / "target.txt")
+        except CanonicalizationError:
+            return
+        assert alias_ref != original_ref
+        with pytest.raises(CanonicalizationError, match="different root"):
+            workspace_relative_path(alias, original_ref)
+    finally:
+        subprocess.run(
+            ("umount", os.fspath(alias)),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux bind mounts are required")
+def test_file_resource_linux_nested_bind_mount_fails_closed(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    real = workspace / "real"
+    alias = workspace / "alias"
+    real.mkdir(parents=True)
+    alias.mkdir()
+    target = real / "target.txt"
+    target.write_text("target", encoding="utf-8")
+
+    try:
+        subprocess.run(
+            ("mount", "--bind", os.fspath(real), os.fspath(alias)),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        pytest.skip("bind mount privilege is unavailable")
+
+    try:
+        canonical_file_resource(workspace, target)
+        with pytest.raises(CanonicalizationError, match="mount"):
+            canonical_file_resource(workspace, alias / "target.txt")
+    finally:
+        subprocess.run(
+            ("umount", os.fspath(alias)),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
 
 
 def test_workspace_relative_path_round_trips_to_safe_pure_posix_path(
