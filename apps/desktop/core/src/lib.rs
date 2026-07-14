@@ -9,5 +9,6 @@
 //! the full suite on any host without the GUI toolchain.
 
 pub mod lifecycle;
+pub mod managed;
 pub mod server;
 pub mod url_policy;
