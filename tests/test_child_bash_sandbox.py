@@ -361,6 +361,42 @@ def test_flag_on_bash_func_is_sandbox(monkeypatch, tmp_path: Path) -> None:
     )
 
 
+def test_wrapped_bash_func_passes_adk_declaration_build() -> None:
+    """After wrapping, the ADK declaration builder must not raise.
+
+    ``wrap_child_bash_tool`` previously kept ``_sandbox: ChildBashSandbox``
+    as a keyword-only parameter on ``_sandboxed_func``. The ADK
+    ``FunctionTool._get_declaration()`` path calls
+    ``build_function_declaration`` which iterates every parameter except
+    ``tool_context`` / ``input_stream`` -- it does NOT skip underscore-prefixed
+    names -- and cannot serialize ``ChildBashSandbox`` to a JSON schema, so it
+    raised before any LLM call.  The fix captures ``sandbox`` via closure and
+    removes the parameter entirely, making the signature
+    ``(arguments, tool_context)`` to match the clean first-party callable.
+    """
+    from google.adk.tools.function_tool import FunctionTool
+
+    from magi_agent.runtime.child_bash import wrap_child_bash_tool
+
+    async def _stub_bash(arguments: dict[str, object], tool_context: object) -> dict[str, object]:
+        return {}
+
+    real_tool = FunctionTool(_stub_bash)
+    real_tool.name = "Bash"  # type: ignore[assignment]
+
+    sandbox = ChildBashSandbox()
+    [wrapped] = wrap_child_bash_tool([real_tool], sandbox=sandbox)
+
+    # The production path: must not raise.
+    decl = wrapped._get_declaration()
+
+    assert decl is not None, "_get_declaration() returned None for the wrapped Bash tool"
+    param_names = list(decl.parameters.properties.keys()) if decl.parameters else []
+    assert "_sandbox" not in param_names, (
+        "_sandbox leaked into the ADK declaration; closure capture regression"
+    )
+
+
 def test_readonly_constant_unchanged_by_pr_s() -> None:
     """The static ``READONLY_TOOL_NAMES`` constant does NOT list Bash.
 

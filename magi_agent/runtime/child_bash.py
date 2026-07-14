@@ -722,8 +722,6 @@ def wrap_child_bash_tool(
         async def _sandboxed_func(
             arguments: dict[str, object],
             tool_context: object,  # noqa: ARG001 (unused, sandbox owns cwd/env)
-            *,
-            _sandbox: ChildBashSandbox = sandbox,
         ) -> dict[str, object]:
             command = arguments.get("command") if isinstance(arguments, dict) else None
             if not isinstance(command, str):
@@ -733,7 +731,7 @@ def wrap_child_bash_tool(
                     error_message="Bash tool requires a string 'command' argument",
                     metadata={"sandbox": "child_bash"},
                 ).model_dump(by_alias=True)
-            result = await _sandbox.run_async(command)
+            result = await sandbox.run_async(command)
             return result.model_dump(by_alias=True)
 
         _sandboxed_func.__name__ = "invoke_openmagi_tool"
