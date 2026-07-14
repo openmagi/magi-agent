@@ -165,14 +165,17 @@ jobs:
         run: cargo install tauri-cli --version '^2' --locked
 
       # ----------------------------------------------------------------------
-      # 5) Build + sign + notarize the .app (and attempt the .dmg) via tauri.
+      # 5) Build + sign + notarize the .app via tauri. We build ONLY the `app`
+      #    bundle — NOT the dmg. tauri's dmg bundler (bundle_dmg.sh) drives
+      #    Finder via AppleScript to lay out the disk-image window, which hangs
+      #    forever on a headless CI runner (no GUI session). The .dmg is instead
+      #    produced deterministically by the hdiutil fallback in step 6.
       #    APPLE_SIGNING_IDENTITY drives signing (config leaves it unset so env
       #    wins). APPLE_ID/PASSWORD/TEAM_ID trigger notarization + stapling of
-      #    the .app. continue-on-error tolerates ONLY a flaky dmg substep; the
-      #    .app is signed/notarized/stapled before dmg bundling, so if the app
-      #    phase failed the app won't exist and the next step fails the job.
+      #    the .app. continue-on-error tolerates a flaky notarization retry; the
+      #    next step fails the job if the signed .app was not produced.
       # ----------------------------------------------------------------------
-      - name: cargo tauri build (app + dmg)
+      - name: cargo tauri build (app only, no dmg)
         id: tauri_build
         working-directory: apps/desktop
         continue-on-error: true
@@ -183,7 +186,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: cargo tauri build --target aarch64-apple-darwin --bundles app dmg
+        run: cargo tauri build --target aarch64-apple-darwin --bundles app
 
       - name: Locate the signed .app
         id: locate_app
