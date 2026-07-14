@@ -1,15 +1,17 @@
-"""U10: the flip-readiness parity gate for the governed hosted turn path.
+"""U10: the governed hosted turn path regression gate (P5-M1b updated).
 
-This is the CONSOLIDATED merge gate for flipping
-``MAGI_HOSTED_GOVERNED_TURN_ENABLED`` default-ON. It is NOT a re-test of each
-blocker in isolation (each U1..U9 unit has its own file). It drives the governed
-hosted path across every blocker surface the stack fixed and asserts it has
-reached parity with the legacy boundary, so a future default-ON flip has real
-regression coverage. Each scenario is written so it FAILS if its underlying fix
-were absent (never a tautological assert).
+This is the regression gate for the governed hosted path. It drives the governed
+path across every blocker surface the stack fixed and asserts parity behavior.
+Each scenario is written so it FAILS if its underlying fix were absent (never a
+tautological assert).
 
 Design: docs/plans/2026-07-06-hosted-local-turn-engine-convergence-assessment.md
 section 7 (Hosted parity test design).
+
+P5-M1b update: the legacy gate5b4c3 boundary
+(``Gate5B4C3LiveRunnerBoundary`` / ``_build_user_message_parts``) was deleted.
+The governed path is now the ONLY hosted engine. ``MAGI_HOSTED_GOVERNED_TURN_ENABLED``
+no longer gates anything; governed is unconditional.
 
 Scenario -> reused harness map:
 
@@ -17,14 +19,15 @@ Scenario -> reused harness map:
    (real google.adk Runner + capturing fake BaseLlm + durable SQLite).
 2. Restart continuity                        -> same, with a registry + durable
    reset between turns (SQLite file kept) and the legacy identity triple pinned.
-3. Tool-loop turn on a reused session        -> shadow-parity both-branch tool
-   drivers (event parity) + real-Runner reused-session tool turn (no double-seed).
-4. Image parts                               -> legacy _build_user_message_parts
-   vs governed real-Runner opening Content.parts (shapes equal).
+3. Tool-loop turn on a reused session        -> real-Runner reused-session tool
+   turn (no double-seed). Cross-branch event-parity test retired (P5-M1b).
+4. Image parts                               -> governed real-Runner opening
+   Content.parts contain the expected text part and inline-data image part.
+   Legacy _build_user_message_parts comparison retired (P5-M1b).
 5. Continuity fields (miss / hit / busy)     -> serving harness, recording the
    real collector result's session_reused / session_event_count.
 6. Timeout                                   -> hanging governed stream + small
-   budget -> the shared runner_timeout handler (parity with legacy).
+   budget -> the shared runner_timeout handler.
 7. Transcript records                        -> observability serving harness
    (turn_start / message / turn_end + tool_call / tool_result translation).
 8. Live SSE streaming                        -> governed SSE route delivers the
@@ -32,12 +35,8 @@ Scenario -> reused harness map:
 9. output_continuation                       -> serving resolver gated on
    selected_full_toolhost under the same env/profile condition as legacy (U9).
 
-B9 (locked gap): the legacy no-tool finalizer has no governed equivalent, so a
-tool-only / empty-text selected_full_toolhost turn surfaces as
-``runner_output_missing`` instead of a finalizer-produced answer. It is a
-feature-sized follow-up, deliberately NOT fixed in this stack. The final test
-locks it with a strict xfail: it XFAILs today and will XPASS (alerting us) the
-moment B9 is fixed, forcing the tracking to stay honest.
+B9 (UNLOCKED in P5-M1b): the no-tool finalizer (U1-U4) is now wired into the
+governed path. The strict xfail that locked the gap is removed.
 
 All hermetic: no network (fake BaseLlm), tmp MAGI_STATE_DIR, registry / durable /
 transcript-sink resets in fixtures.
@@ -70,7 +69,7 @@ from magi_agent.transport.active_turn import ACTIVE_TURNS
 from magi_agent.transport.hosted_turn_context import hosted_request_to_turn_context
 
 # --- reused harness helpers (import, do not re-invent) ---------------------
-from tests.support.engine_fakes import MockRunner, call_event, response_event, text_event
+from tests.support.engine_fakes import call_event, response_event, text_event
 from tests.support.gate5b4c3_factories import make_shadow_generation_request
 from tests.test_chat_routes_hosted_governed_turn import (
     _canary_headers,
@@ -84,12 +83,8 @@ from tests.test_gate5b_serving_seed_on_empty import (
     _valid_agent_hosted_runtime,
 )
 from tests.test_hosted_shadow_parity import (
-    _assert_boundary_result_parity,
-    _assert_public_event_parity,
     _config_full_toolhost,
     _drive_governed_turn_path,
-    _drive_legacy_path,
-    _make_tool_then_final_legacy_primitives,
     _request_full_toolhost,
 )
 from tests.support.gate5b4c3_fakes import _ManualCalculationTool
@@ -123,7 +118,6 @@ def _reset_all_state() -> Any:
 
 def _governed_serving_env(monkeypatch, tmp_path: Any) -> None:
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
-    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "1")
     monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "1")
     monkeypatch.setenv("MAGI_HOSTED_SESSION_DB", "1")
     monkeypatch.setenv("MAGI_STATE_DIR", str(tmp_path))
@@ -294,42 +288,6 @@ def test_restart_continuity_under_legacy_identity(monkeypatch, tmp_path: Any) ->
 # ===========================================================================
 
 
-def test_tool_loop_event_and_result_parity_with_legacy() -> None:
-    """The governed tool loop (function_call -> tool execution -> final text)
-    must match the legacy boundary in result status/provider/model and in the
-    tool_start / tool_end / text_delta public events (after the documented
-    normalizations). This is the event-parity half of scenario 3, driven over
-    BOTH branches with semantically identical fakes."""
-    request = _request_full_toolhost()
-    config = _config_full_toolhost()
-
-    events_a, result_a = asyncio.run(
-        _drive_legacy_path(
-            request, config,
-            primitives_loader=_make_tool_then_final_legacy_primitives,
-            adk_tools=(_ManualCalculationTool,),
-        )
-    )
-    engine_runner = MockRunner([
-        call_event("Calculation", {"expression": "1 + 1"}, "calculation-call-001"),
-        response_event(
-            "Calculation",
-            {"status": "ok", "reason": "tool_completed", "outputPreview": {"value": 2}},
-            "calculation-call-001",
-        ),
-        text_event("final answer after manual tool execution", partial=True, turn_complete=True),
-    ])
-    events_b, result_b = asyncio.run(
-        _drive_governed_turn_path(request, config, engine_runner=engine_runner)
-    )
-
-    _assert_boundary_result_parity(result_a, result_b, scenario="flip/tool_loop")
-    for kind in ("tool_start", "tool_end", "text_delta"):
-        _assert_public_event_parity(
-            events_a, events_b, scenario=f"flip/tool_loop/{kind}", event_types={kind}
-        )
-
-
 def test_tool_route_on_reused_session_suppresses_inline_history() -> None:
     """The no-history-duplication half of scenario 3. Reused-session history
     suppression is computed at the serving seam BEFORE the turn and is
@@ -378,27 +336,6 @@ _PNG_BYTES = b"\x89PNG\r\n\x1a\n"
 _PNG_B64 = base64.b64encode(_PNG_BYTES).decode("ascii")
 
 
-def _legacy_image_parts() -> list:
-    """Legacy boundary's opening parts for one image block, via the same
-    _build_user_message_parts the legacy path uses in production."""
-    from types import SimpleNamespace
-
-    from magi_agent.shadow.gate5b4c3_live_runner_boundary import _build_user_message_parts
-
-    part_primitive = SimpleNamespace(
-        from_text=lambda *, text: ("text", text),
-        from_bytes=lambda *, data, mime_type: ("image", mime_type, data),
-    )
-    runner_input = SimpleNamespace(
-        sanitized_user_input="describe this image",
-        sanitized_recent_history=(),
-        sanitized_image_blocks=(SimpleNamespace(media_type="image/png", data=_PNG_B64),),
-    )
-    return _build_user_message_parts(
-        runner_input, primitives=SimpleNamespace(Part=part_primitive)
-    )
-
-
 def _governed_image_opening_parts() -> list:
     """Governed path's opening Content.parts for the same one image block,
     threaded through TurnContext + a real ADK Runner fronting a capturing model."""
@@ -433,23 +370,18 @@ def _governed_image_opening_parts() -> list:
 
 
 def test_image_parts_shapes_equal_across_branches() -> None:
-    """Both branches, given one sanitized PNG block, must produce an opening
-    message of [text part, inline-data image part] with the SAME text, mime
-    type, and raw bytes. Without U5 the governed path drops the image entirely
-    (text-only), so the governed opening would have no image part."""
-    legacy = _legacy_image_parts()
-    assert legacy[0] == ("text", "describe this image")
-    assert legacy[1] == ("image", "image/png", _PNG_BYTES)
-
+    """Governed path, given one sanitized PNG block, must produce an opening
+    message of [text part, inline-data image part] with the expected text,
+    mime type, and raw bytes. Without U5 the governed path drops the image
+    entirely (text-only), so the governed opening would have no image part.
+    The legacy comparison was retired in P5-M1b (legacy boundary deleted)."""
     governed = _governed_image_opening_parts()
     assert len(governed) >= 2, f"governed opening lacks the image part: {governed}"
     assert governed[0].text == "describe this image"
     img = governed[1]
     assert img.inline_data is not None, "second governed part must be inline-data image"
-    # Cross-branch shape parity: same text, same mime, same bytes.
-    assert governed[0].text == legacy[0][1]
-    assert img.inline_data.mime_type == legacy[1][1]
-    assert img.inline_data.data == legacy[1][2] == _PNG_BYTES
+    assert img.inline_data.mime_type == "image/png"
+    assert img.inline_data.data == _PNG_BYTES
 
 
 # ===========================================================================
@@ -578,7 +510,6 @@ async def test_governed_timeout_yields_runner_timeout_family(
     import tests.test_hosted_engine_result_timeout as _timeout
 
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
-    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "1")
 
     async def _hanging_gen():  # noqa: ANN202
         event = asyncio.Event()
@@ -715,7 +646,6 @@ def test_governed_sse_streams_multiple_live_text_deltas(monkeypatch, tmp_path: A
     monkeypatch.setenv(
         "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT", str(tmp_path)
     )
-    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "1")
     _wire_governed_real_runner(monkeypatch)
 
     runtime = _selected_runtime(tmp_path, full_toolhost=True)
