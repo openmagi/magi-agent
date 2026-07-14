@@ -5,6 +5,25 @@ export interface ModelOption {
   label: string;
 }
 
+// "Magi (managed)" — the optional hosted-inference tier for the OSS desktop app.
+// Selecting it routes inference through Magi's api-proxy with a subscription
+// gateway token instead of a BYO provider key (default model: GLM 5.2). It is a
+// routing MODE, not a concrete provider model, so it is provider-agnostic (never
+// filtered by key availability) and only surfaced in the local desktop app when
+// managed inference is available. See
+// docs (clawy): 2026-07-14-oss-magi-managed-inference-subscription-design.md.
+export const MAGI_MANAGED_MODEL_VALUE = "magi_managed";
+
+export const MAGI_MANAGED_MODEL_OPTION: ModelOption = {
+  value: MAGI_MANAGED_MODEL_VALUE,
+  label: "Magi (managed) — no API key",
+};
+
+/** True when a model selection is the managed-inference routing mode. */
+export function isMagiManagedModel(value: string | null | undefined): boolean {
+  return value === MAGI_MANAGED_MODEL_VALUE;
+}
+
 // Only concrete provider-backed models the local runtime can serve. Smart-routing
 // and Codex are hosted-only — OSS has no smart router backend, so surfacing them
 // would let the user pick a model that silently fails. They are deliberately
@@ -36,8 +55,18 @@ export function normalizeModelSelectionForSettings(value: string): string {
 
 export { filterModelOptionsByConfiguredProviders } from "./model-availability";
 
-export function getModelOptions(subscriptionPlan: string | null | undefined): ModelOption[] {
-  const baseOptions = [...BASE_MODEL_OPTIONS];
+export interface GetModelOptionsOpts {
+  /** When true, surface the "Magi (managed)" hosted-inference option at the top
+   * (OSS desktop app with managed inference available). */
+  includeManagedInference?: boolean;
+}
+
+export function getModelOptions(
+  subscriptionPlan: string | null | undefined,
+  opts: GetModelOptionsOpts = {},
+): ModelOption[] {
+  const managedPrefix = opts.includeManagedInference ? [MAGI_MANAGED_MODEL_OPTION] : [];
+  const baseOptions = [...managedPrefix, ...BASE_MODEL_OPTIONS];
   if (!isLocalLlmEnabledPlan(subscriptionPlan)) return baseOptions;
   return [
     ...baseOptions,

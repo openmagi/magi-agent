@@ -16,6 +16,9 @@ interface ChatModelPickerProps {
   persistMode?: "bot" | "local";
   menuPlacement?: "bottom" | "top";
   onModelSelectionChange?: (modelSelection: string) => void;
+  /** Surface the "Magi (managed)" hosted-inference option (OSS desktop app with
+   * managed inference available). Only meaningful in local mode. */
+  managedInferenceAvailable?: boolean;
 }
 
 // Friendly labels for selections that map to a router rather than a concrete
@@ -27,8 +30,8 @@ const LOCAL_FLAT_FALLBACK_LABELS: Record<string, string> = {
   clawy_smart_routing: "Smart Routing",
 };
 
-function localFlatOptions(selectedModel: string): ModelOption[] {
-  const options = getModelOptions(null);
+function localFlatOptions(selectedModel: string, includeManaged: boolean): ModelOption[] {
+  const options = getModelOptions(null, { includeManagedInference: includeManaged });
   if (options.some((option) => option.value === selectedModel)) return options;
   return [
     { value: selectedModel, label: LOCAL_FLAT_FALLBACK_LABELS[selectedModel] ?? selectedModel },
@@ -115,6 +118,7 @@ export function ChatModelPicker({
   persistMode = "bot",
   menuPlacement = "bottom",
   onModelSelectionChange,
+  managedInferenceAvailable = false,
 }: ChatModelPickerProps) {
   const authFetch = useAuthFetch();
   const [selectedModel, setSelectedModel] = useState(() =>
@@ -159,10 +163,12 @@ export function ChatModelPicker({
   }, [modelSelection]);
 
   const visibleOptions = useMemo(() => {
-    const base = localFlatOptions(selectedModel);
+    // Managed inference is a desktop-only (local) tier.
+    const includeManaged = persistMode === "local" && managedInferenceAvailable;
+    const base = localFlatOptions(selectedModel, includeManaged);
     if (persistMode !== "local" || !configuredProviders) return base;
     return filterModelOptionsByConfiguredProviders(base, configuredProviders, selectedModel);
-  }, [selectedModel, persistMode, configuredProviders]);
+  }, [selectedModel, persistMode, configuredProviders, managedInferenceAvailable]);
 
   const saveModel = useCallback(
     async (nextModelSelection: string) => {
