@@ -648,8 +648,8 @@ def test_hard_budget_limits_cannot_be_raised_by_request_payload() -> None:
         ("pythonRunnerTimeoutMs", 600_001),
         ("maxSanitizedInputBytes", 1_000_001),
         ("maxEstimatedInputTokens", 1_000_001),
-        ("maxOutputTokens", 4097),
-        ("maxTotalEstimatedTokens", 1_004_097),
+        ("maxOutputTokens", 65_537),
+        ("maxTotalEstimatedTokens", 1_065_537),
         ("maxDiagnosticOutputPreviewBytes", 2049),
         ("maxDiagnosticArtifactBytes", 16_385),
     ):
