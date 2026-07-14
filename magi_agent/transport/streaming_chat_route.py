@@ -781,6 +781,64 @@ def _detach_selected_turn_task(task: asyncio.Task[object]) -> None:
     task.add_done_callback(_DETACHED_SELECTED_TURN_TASKS.discard)
 
 
+def _build_hosted_citation_collector() -> object | None:
+    """Build a per-turn ``LocalToolEvidenceCollector`` for the hosted gate5b turn.
+
+    The hosted analogue of the collector the LOCAL headless runtime keeps
+    (cli/wiring.py): its per-session ``SessionSourceRegistry`` is the ONE registry
+    that web tools register sources into (threaded onto the ToolContext) AND the
+    serving driver reads at terminal time. Per-turn scope avoids any cross-turn
+    contamination. Fail-open: any construction fault yields ``None`` so the turn
+    proceeds with no citation capture (byte-identical to today)."""
+    try:
+        from magi_agent.evidence.local_tool_collector import (  # noqa: PLC0415
+            LocalToolEvidenceCollector,
+        )
+
+        return LocalToolEvidenceCollector()
+    except Exception:
+        return None
+
+
+def _hosted_citations_for(
+    visible_text: str | None,
+    collector: object | None,
+    session_id: str | None,
+) -> dict[str, object] | None:
+    """Compose the hosted SUCCESS terminal citations payload, fail-soft.
+
+    Thin wrapper over ``hosted_citations_payload_for`` so the driver body stays
+    readable. Returns ``None`` when citation is off / no collector / any fault,
+    keeping the terminal frame byte-identical to today on the default-OFF path."""
+    from magi_agent.evidence.citation_render import (  # noqa: PLC0415
+        hosted_citations_payload_for,
+    )
+
+    return hosted_citations_payload_for(visible_text, collector, session_id)
+
+
+def _hosted_partial_citations_for(
+    partial_text: str | None,
+    collector: object | None,
+    session_id: str | None,
+) -> dict[str, object] | None:
+    """Compose citations for a FAILED hosted turn, but only when a partial answer
+    with sources exists.
+
+    A bare failure (no live partial text, or no registered source) omits the
+    citations key entirely, so the error terminal frame stays byte-identical to
+    today. Fail-soft: any fault yields ``None``."""
+    if not partial_text:
+        return None
+    payload = _hosted_citations_for(partial_text, collector, session_id)
+    if not isinstance(payload, Mapping):
+        return None
+    sources = payload.get("sources")
+    if not isinstance(sources, (list, tuple)) or not sources:
+        return None
+    return dict(payload)
+
+
 async def _drive_selected_gate5b_stream(
     runtime: object,
     body: object,
@@ -794,6 +852,19 @@ async def _drive_selected_gate5b_stream(
     emitted_event_keys: set[str] = set()
     live_text_emitted = False
     live_thinking_emitted = False
+    # Source-citation (hosted convergence): a per-turn collector whose
+    # session-scoped SessionSourceRegistry web tools register sources into. Held
+    # here by reference and passed into run_gate5b_user_visible_chat_response so
+    # the SAME instance is reachable from the ToolContext build sites AND read at
+    # terminal-frame assembly below -- the hosted analogue of the LOCAL path's
+    # engine.local_tool_evidence_collector (transport/streaming_driver.py). When
+    # citation is off, source_registry_for returns None so no source is ever
+    # registered and the terminal frame carries no citations key (byte-identical).
+    _citation_collector = _build_hosted_citation_collector()
+    # Accumulate the model's visible text (live token deltas) so the terminal
+    # citations projection numbers inline src_N markers the SAME way the user saw
+    # them, mirroring the LOCAL streaming driver's visible_text_parts.
+    live_text_parts: list[str] = []
 
     def _enqueue_public_event(payload: Mapping[str, object]) -> None:
         nonlocal live_text_emitted, live_thinking_emitted
@@ -801,6 +872,9 @@ async def _drive_selected_gate5b_stream(
         event_type = event.get("type")
         if event_type == "text_delta":
             live_text_emitted = True
+            delta = event.get("delta")
+            if isinstance(delta, str) and delta:
+                live_text_parts.append(delta)
         elif event_type == "thinking_delta":
             live_thinking_emitted = True
         live_events.put_nowait(event)
@@ -811,6 +885,7 @@ async def _drive_selected_gate5b_stream(
             body,
             request=request,
             public_event_sink=_enqueue_public_event,
+            citation_collector=_citation_collector,
         )
 
     response_task = asyncio.create_task(_run_selected_response())
@@ -941,12 +1016,23 @@ async def _drive_selected_gate5b_stream(
             )
             if frame is not None:
                 yield frame
+        # Source-citation (hosted convergence): compose the terminal citations
+        # payload from the collector's per-turn registry (the SAME instance web
+        # tools registered into) and the model's visible text. Prefer the live
+        # token deltas so inline src_N markers number the way the user saw them;
+        # fall back to the final assistant content when no live deltas streamed.
+        # Every step is fail-soft via hosted_citations_payload_for so a citation
+        # fault NEVER breaks the hosted stream, and it returns None when citation
+        # is off (registry None) -- keeping the terminal frame byte-identical.
+        visible_text = "".join(live_text_parts) or content
+        citations = _hosted_citations_for(visible_text, _citation_collector, session_id)
         for chunk in frame_for_terminal(
             EngineResult(
                 terminal=Terminal.completed,
                 session_id=session_id,
                 turn_id=turn_id,
-            )
+            ),
+            citations=citations,
         ):
             yield chunk
         return
@@ -958,13 +1044,23 @@ async def _drive_selected_gate5b_stream(
     )
     if frame is not None:
         yield frame
+    # Source-citation (hosted convergence): on the failure path attach citations
+    # ONLY when a partial answer with sources exists (a partial answer the user
+    # already saw should keep its attributions). ``_hosted_partial_citations_for``
+    # returns None when there is no live partial text or no registered source, so
+    # a bare failure omits the citations key (byte-identical to today).
+    partial_text = "".join(live_text_parts)
+    error_citations = _hosted_partial_citations_for(
+        partial_text, _citation_collector, session_id
+    )
     for chunk in frame_for_terminal(
         EngineResult(
             terminal=Terminal.error,
             error=reason,
             session_id=session_id,
             turn_id=turn_id,
-        )
+        ),
+        citations=error_citations,
     ):
         yield chunk
 

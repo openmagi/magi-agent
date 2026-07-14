@@ -108,6 +108,7 @@ async def run_gate5b_user_visible_chat_response(
     *,
     request: Request,
     public_event_sink: Callable[[Mapping[str, object]], None] | None = None,
+    citation_collector: object | None = None,
 ) -> JSONResponse:
     """Run the selected Gate5B user-visible chat path for HTTP adapters.
 
@@ -149,6 +150,7 @@ async def run_gate5b_user_visible_chat_response(
             payload,
             request=request,
             public_event_sink=public_event_sink,
+            citation_collector=citation_collector,
         )
     finally:
         reset_per_turn_goal_loop_policy(_goal_loop_token)
@@ -161,6 +163,7 @@ async def _run_gate5b_user_visible_chat_response_inner(
     *,
     request: Request,
     public_event_sink: Callable[[Mapping[str, object]], None] | None = None,
+    citation_collector: object | None = None,
 ) -> JSONResponse:
     """Selected Gate5B user-visible chat body (behavior-preserving split of the
     public entry above so U6 can wrap it with the goal-mode ContextVar
@@ -192,6 +195,7 @@ async def _run_gate5b_user_visible_chat_response_inner(
         memory_mode=memory_mode,
         public_event_sink=public_event_sink,
         session_id=_local_chat_string(payload, "sessionId", "") or None,
+        citation_collector=citation_collector,
     )
     tool_bundle = (
         gate5b_full_bundle
@@ -313,6 +317,7 @@ def _gate5b_full_toolhost_bundle(
     memory_mode: "MemoryMode | str" = "normal",
     public_event_sink: Callable[[Mapping[str, object]], None] | None = None,
     session_id: str | None = None,
+    citation_collector: object | None = None,
 ) -> Gate5BFullToolBundle:
     return build_gate5b_full_toolhost_bundle(
         config=_gate5b_full_toolhost_config(runtime),
@@ -329,6 +334,10 @@ def _gate5b_full_toolhost_bundle(
         # 1). The session id gives spawned children a stable parent reference.
         session_id=session_id,
         spawn_depth=0,
+        # Source-citation (hosted convergence): the per-turn collector the
+        # serving driver holds by reference. None keeps every ToolContext's
+        # citationRegistry at None (byte-identical to today).
+        citation_collector=citation_collector,
     )
 
 
