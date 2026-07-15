@@ -6,7 +6,7 @@ turn at the BOUNDARY (before any model/tool cost) when the subscriber's balance
 can't cover it — instead of letting the api-proxy reject mid-stream with a 402,
 which would leave a half-applied agent turn.
 
-Design (clawy docs/plans/2026-07-14-oss-magi-managed-inference-subscription-design.md):
+Design (hosted-platform docs: 2026-07-14-oss-magi-managed-inference-subscription-design.md):
 
 * Only active for managed inference: gated on ``MAGI_MANAGED_INFERENCE_ENABLED``
   plus the proxy-routing env (``MAGI_LLM_API_BASE`` + ``MAGI_LLM_API_KEY``) the

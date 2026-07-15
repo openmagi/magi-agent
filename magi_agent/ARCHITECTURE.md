@@ -1705,7 +1705,7 @@ graph LR
 | goal_loop_policy.py | Runtime ``GoalLoopPolicy`` — the per-turn shape PR-C's clean-break judge | env | cli/wiring.py, runtime/goal_loop_judge.py, runtime/per_turn_goal_loop_context.py, transport/chat_routes_local.py, transport/gate5b_serving.py, transport/streaming_chat_route.py |
 | goal_nudge.py | PR4 — Lightweight goal-nudge continuation primitive. | final_output_gate, goal_loop_evidence | cli/goal_nudge_wiring.py, engine/driver.py |
 | governed_projection.py | — | safety | — |
-| governed_turn.py | The single primitive every governed turn flows through. | budgets_apply, child_runner_live, contracts, env, flags, ledger_store, lifecycle_audit, lifecycle_shell_command_control, run_bookend, store, turn_context, verification_policy, wiring | channels/turn_engine.py, cli/headless.py, gateway/heartbeat_watcher.py, gateway/watchers.py, runtime/child_runner_live.py, transport/chat_routes.py, transport/chat_routes_local.py, transport/gate5b_serving.py |
+| governed_turn.py | The single primitive every governed turn flows through. | budgets_apply, child_runner_live, contracts, env, flags, ledger_store, lifecycle_audit, lifecycle_shell_command_control, managed_credit_precheck, run_bookend, store, turn_context, verification_policy, wiring | channels/turn_engine.py, cli/headless.py, gateway/heartbeat_watcher.py, gateway/watchers.py, runtime/child_runner_live.py, transport/chat_routes.py, transport/chat_routes_local.py, transport/gate5b_serving.py |
 | heartbeat_boundary.py | — | heartbeat_contract, heartbeat_store | — |
 | heartbeat_contract.py | — | safety | runtime/events.py, runtime/heartbeat_boundary.py, runtime/heartbeat_store.py, runtime/resume_decision.py, runtime/stale_run_detector.py |
 | heartbeat_store.py | — | heartbeat_contract | runtime/heartbeat_boundary.py, runtime/stale_run_detector.py |
@@ -1716,6 +1716,7 @@ graph LR
 | long_running_activity.py | — | receipt_utils | missions/background_tasks.py |
 | loop_detectors.py | — | — | adk_bridge/resilience_plugin.py |
 | main_agent_profile.py | Orchestrator main-agent profile — toolset definitions (Seam 1a). | child_toolset | cli/wiring.py, gates/gate5b_full_toolhost.py |
+| managed_credit_precheck.py | Turn-boundary credit pre-check for the managed-inference desktop tier. | — | runtime/governed_turn.py |
 | manual_compaction_context.py | Process-level cross-turn one-shot signal for manual ``/compact`` (G7). | flags | adk_bridge/context_compaction.py, cli/headless.py, cli/tui/app.py |
 | memory_mode_context.py | Async-safe per-request memory-mode context for the live serve path. | flags, session_identity | cli/headless.py, transport/chat_routes_local.py, transport/streaming_chat_route.py |
 | memory_snapshot_cache.py | Session-scoped frozen snapshot cache for memory prompt projection. | prompt_projection | cli/tool_runtime.py |
