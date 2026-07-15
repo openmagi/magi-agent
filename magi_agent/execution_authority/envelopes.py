@@ -1071,8 +1071,6 @@ def _require_direct_event_successor(
         raise ValueError(f"{second_name}.previousHash must equal {first_name}.eventHash")
     if second.event_id == first.event_id or second.event_hash == first.event_hash:
         raise ValueError(f"{first_name} and {second_name} must be distinct events")
-    if second.created_at < first.created_at:
-        raise ValueError(f"{second_name}.createdAt cannot precede {first_name}.createdAt")
 
 
 def _draft_lifecycle_journal_event(
@@ -2694,35 +2692,6 @@ def canonical_workspace_view_binding_digest(
     return "sha256:" + sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
 
 
-def _require_canonical_workspace_root_ref(ref: str) -> str:
-    """Require the root identity form used by durable workspace snapshots."""
-
-    try:
-        require_canonical_workspace_resource_ref(ref)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("workspaceRef must be a canonical workspace root ref") from exc
-    parsed = urlsplit(ref)
-    if parsed.path != "/" or parsed.query or parsed.fragment:
-        raise ValueError("workspaceRef must be a canonical workspace root ref")
-    return ref
-
-
-def _workspace_root_identity(ref: str) -> str:
-    require_canonical_workspace_resource_ref(ref)
-    return urlsplit(ref).netloc
-
-
-def _require_workspace_resources_share_root(
-    workspace_ref: str,
-    resource_refs: tuple[str, ...],
-) -> None:
-    root_identity = _workspace_root_identity(workspace_ref)
-    for resource_ref in resource_refs:
-        require_canonical_workspace_resource_ref(resource_ref)
-        if _workspace_root_identity(resource_ref) != root_identity:
-            raise ValueError("workspace resource refs must share the workspaceRef root")
-
-
 class JournalHead(EnvelopeModel):
     schema_version: Literal[1] = Field(default=1, alias="schemaVersion")
     partition_id: str = Field(alias="partitionId", min_length=1)
@@ -2801,10 +2770,6 @@ class LeaseSnapshot(EnvelopeModel):
                 raise ValueError("held leases require ownerId and expiresAt")
             if self.fencing_token < 1:
                 raise ValueError("held leases require a positive fencing token")
-            if self.high_water_fencing_token != self.fencing_token:
-                raise ValueError(
-                    "held lease highWaterFencingToken must equal fencingToken"
-                )
         elif self.owner_id is not None or self.expires_at is not None:
             raise ValueError("released lease tombstones clear ownerId and expiresAt")
         return self
@@ -3087,7 +3052,6 @@ class WorkspaceSnapshot(EnvelopeModel):
 
     @model_validator(mode="after")
     def _validate_active_commit(self) -> Self:
-        _require_canonical_workspace_root_ref(self.workspace_ref)
         expected_view_digest = canonical_workspace_view_binding_digest(
             workspace_id=self.workspace_id,
             workspace_ref=self.workspace_ref,
@@ -3142,7 +3106,6 @@ class _WorkspaceTransactionFields(EnvelopeModel):
 
     @model_validator(mode="after")
     def _validate_manifest_ref(self) -> Self:
-        _require_canonical_workspace_root_ref(self.workspace_ref)
         if self.staging_manifest_ref != (f"authority-manifest://{self.staging_manifest_digest}"):
             raise ValueError("stagingManifestRef must bind stagingManifestDigest")
         return self
@@ -3150,150 +3113,6 @@ class _WorkspaceTransactionFields(EnvelopeModel):
 
 class WorkspaceTransactionRequest(_WorkspaceTransactionFields):
     schema_version: Literal[1] = Field(default=1, alias="schemaVersion")
-
-
-def canonical_workspace_transaction_request_digest(
-    request: WorkspaceTransactionRequest,
-) -> str:
-    if type(request) is not WorkspaceTransactionRequest:
-        raise TypeError("request must be an exact WorkspaceTransactionRequest")
-    return _canonical_model_digest(WorkspaceTransactionRequest.model_validate(request))
-
-
-def _workspace_transaction_staged_event_payload(
-    result: WorkspaceTransactionResult,
-) -> dict[str, object]:
-    request = result.request
-    return {
-        "actionId": request.action_id,
-        "attemptId": request.attempt_id,
-        "authorityContractDigest": result.authority_contract_digest,
-        "authorityPartitionId": request.authority_partition_id,
-        "changedResourceRefsDigest": request.changed_resource_refs_digest,
-        "expectedGeneration": result.expected_generation,
-        "mutationPlanDigest": result.mutation_plan_digest,
-        "stagingManifestDigest": request.staging_manifest_digest,
-        "stateRootAfter": result.state_root_after,
-        "stateRootBefore": result.state_root_before,
-        "targetGeneration": result.target_generation,
-        "transactionId": request.transaction_id,
-        "transactionRequestDigest": canonical_workspace_transaction_request_digest(request),
-        "transactionVersion": result.transaction_compare_version,
-        "workspaceId": result.workspace_id,
-        "workspaceViewBindingDigest": request.workspace_view_binding_digest,
-    }
-
-
-class WorkspaceTransactionResult(EnvelopeModel):
-    """Store-authored result proving which staged transaction a commit consumes."""
-
-    schema_id: Literal["magi.workspace_transaction_result.v1"] = Field(
-        default="magi.workspace_transaction_result.v1",
-        alias="schemaId",
-    )
-    request: WorkspaceTransactionRequest
-    workspace_id: str = Field(alias="workspaceId", min_length=1)
-    expected_generation: int = Field(alias="expectedGeneration", ge=0, strict=True)
-    target_generation: int = Field(alias="targetGeneration", ge=1, strict=True)
-    state_root_before: str = Field(alias="stateRootBefore")
-    state_root_after: str = Field(alias="stateRootAfter")
-    mutation_plan_digest: str = Field(alias="mutationPlanDigest")
-    changed_resource_refs: tuple[str, ...] = Field(
-        alias="changedResourceRefs",
-        min_length=1,
-    )
-    task_contract_id: str = Field(alias="taskContractId", min_length=1)
-    task_version: int = Field(alias="taskVersion", ge=1, strict=True)
-    task_contract_digest: str = Field(alias="taskContractDigest")
-    completion_epoch_id: str = Field(alias="completionEpochId", min_length=1)
-    admission_sequence: int = Field(alias="admissionSequence", ge=1, strict=True)
-    authority_contract_id: str = Field(alias="authorityContractId", min_length=1)
-    authority_contract_digest: str = Field(alias="authorityContractDigest")
-    transaction_compare_version: int = Field(
-        alias="transactionCompareVersion",
-        ge=1,
-        strict=True,
-    )
-    staged_event: JournalEvent = Field(alias="stagedEvent")
-    result_digest: str | None = Field(default=None, alias="resultDigest")
-
-    @field_validator("changed_resource_refs", mode="before")
-    @classmethod
-    def _require_ordered_changed_resources(cls, value: object) -> object:
-        if type(value) not in (list, tuple):
-            raise ValueError("changedResourceRefs must use an ordered list or tuple")
-        return value
-
-    @model_validator(mode="after")
-    def _validate_staged_result(self) -> Self:
-        request = self.request
-        if self.target_generation != self.expected_generation + 1:
-            raise ValueError("targetGeneration must equal expectedGeneration + 1")
-        if self.state_root_before == self.state_root_after:
-            raise ValueError("staged workspace transaction must change the state root")
-        _require_workspace_resources_share_root(
-            request.workspace_ref,
-            self.changed_resource_refs,
-        )
-        if self.changed_resource_refs != tuple(sorted(self.changed_resource_refs)) or len(
-            self.changed_resource_refs
-        ) != len(set(self.changed_resource_refs)):
-            raise ValueError("changedResourceRefs must be unique and sorted")
-        if request.changed_resource_refs_digest != canonical_resource_refs_digest(
-            self.changed_resource_refs
-        ):
-            raise ValueError("changedResourceRefs do not match the transaction request digest")
-        expected_view = canonical_workspace_view_binding_digest(
-            workspace_id=self.workspace_id,
-            workspace_ref=request.workspace_ref,
-            authority_partition_id=request.authority_partition_id,
-            generation=self.expected_generation,
-            state_root=self.state_root_before,
-        )
-        if request.workspace_view_binding_digest != expected_view:
-            raise ValueError("transaction workspaceViewBindingDigest does not match staged input")
-
-        event = self.staged_event
-        event_bindings: tuple[tuple[str, object, object], ...] = (
-            ("eventType", event.event_type, "workspace.transaction_staged"),
-            ("partitionId", event.partition_id, request.authority_partition_id),
-            ("actionId", event.action_id, request.action_id),
-            ("attemptId", event.attempt_id, request.attempt_id),
-            ("taskContractId", event.task_contract_id, self.task_contract_id),
-            ("taskVersion", event.task_version, self.task_version),
-            ("taskContractDigest", event.task_contract_digest, self.task_contract_digest),
-            ("completionEpochId", event.completion_epoch_id, self.completion_epoch_id),
-            ("admissionSequence", event.admission_sequence, self.admission_sequence),
-            ("authorityContractId", event.authority_contract_id, self.authority_contract_id),
-        )
-        for alias, observed, expected in event_bindings:
-            if observed != expected:
-                raise ValueError(f"stagedEvent.{alias} does not match transaction result")
-        if _strict_json_loads(event.payload_json) != _workspace_transaction_staged_event_payload(
-            self
-        ):
-            raise ValueError("stagedEvent payload does not bind the exact transaction result")
-
-        expected_digest = _canonical_model_digest(
-            self,
-            exclude=frozenset({"result_digest"}),
-        )
-        if self.result_digest is not None and self.result_digest != expected_digest:
-            raise ValueError("resultDigest does not match the staged transaction result")
-        object.__setattr__(self, "result_digest", expected_digest)
-        return self
-
-
-def canonical_workspace_transaction_result_digest(
-    result: WorkspaceTransactionResult,
-) -> str:
-    if type(result) is not WorkspaceTransactionResult:
-        raise TypeError("result must be an exact WorkspaceTransactionResult")
-    validated = WorkspaceTransactionResult.model_validate(result)
-    return _canonical_model_digest(
-        validated,
-        exclude=frozenset({"result_digest"}),
-    )
 
 
 class WorkspaceCommitDecisionRequest(_WorkspaceTransactionFields):
@@ -3305,8 +3124,7 @@ class WorkspaceCommitDecisionRequest(_WorkspaceTransactionFields):
     workspace_id: str = Field(alias="workspaceId", min_length=1)
     expected_generation: int = Field(alias="expectedGeneration", ge=0, strict=True)
     target_generation: int = Field(alias="targetGeneration", ge=1, strict=True)
-    expected_workspace_compare_version: int | None = Field(
-        default=None,
+    expected_workspace_compare_version: int = Field(
         alias="expectedWorkspaceCompareVersion",
         ge=0,
         strict=True,
@@ -3316,9 +3134,6 @@ class WorkspaceCommitDecisionRequest(_WorkspaceTransactionFields):
         ge=0,
         strict=True,
     )
-    # Older persisted commit intents predate the staged-result receipt.  Keep
-    # their wire shape readable; newly issued intents bind this digest.
-    staged_transaction_digest: str | None = Field(default=None, alias="stagedTransactionDigest")
     state_root_before: str = Field(alias="stateRootBefore")
     state_root_after: str = Field(alias="stateRootAfter")
     decision_fencing_token: int = Field(alias="decisionFencingToken", ge=1, strict=True)
@@ -3334,10 +3149,6 @@ class WorkspaceCommitDecisionRequest(_WorkspaceTransactionFields):
             raise ValueError("targetGeneration must equal expectedGeneration + 1")
         if self.state_root_before == self.state_root_after:
             raise ValueError("workspace commit must change the state root")
-        _require_workspace_resources_share_root(
-            self.workspace_ref,
-            self.changed_resource_refs,
-        )
         if len(self.changed_resource_refs) != len(set(self.changed_resource_refs)):
             raise ValueError("changedResourceRefs must be unique")
         if self.changed_resource_refs != tuple(sorted(self.changed_resource_refs)):
@@ -3383,11 +3194,6 @@ def _workspace_commit_decision_event_payload(
         "expectedWorkspaceCompareVersion": request.expected_workspace_compare_version,
         "mutationPlanDigest": request.mutation_plan_digest,
         "requestDigest": canonical_workspace_commit_decision_request_digest(request),
-        **(
-            {"stagedTransactionDigest": request.staged_transaction_digest}
-            if request.staged_transaction_digest is not None
-            else {}
-        ),
         "stagingManifestDigest": request.staging_manifest_digest,
         "stateRootAfter": request.state_root_after,
         "stateRootBefore": request.state_root_before,
@@ -3416,10 +3222,6 @@ class WorkspaceCommitSnapshot(EnvelopeModel):
 class WorkspaceCommitDecision(EnvelopeModel):
     schema_version: Literal[1] = Field(default=1, alias="schemaVersion")
     snapshot: WorkspaceCommitSnapshot
-    staged_transaction: WorkspaceTransactionResult | None = Field(
-        default=None,
-        alias="stagedTransaction",
-    )
     workspace_compare_version: int = Field(alias="workspaceCompareVersion", ge=1, strict=True)
     commit_event: JournalEvent = Field(alias="commitEvent")
 
@@ -3428,58 +3230,6 @@ class WorkspaceCommitDecision(EnvelopeModel):
         if self.snapshot.state != "decided":
             raise ValueError("workspace commit decision requires a decided snapshot")
         request = self.snapshot.request
-        staged = self.staged_transaction
-        if staged is None:
-            if self.commit_event.action_id != request.action_id:
-                raise ValueError("commitEvent.actionId does not match commit request")
-            return self
-        staged_request = staged.request
-        staged_bindings: tuple[tuple[str, object, object], ...] = (
-            ("transactionId", request.transaction_id, staged_request.transaction_id),
-            ("workspaceId", request.workspace_id, staged.workspace_id),
-            ("workspaceRef", request.workspace_ref, staged_request.workspace_ref),
-            (
-                "authorityPartitionId",
-                request.authority_partition_id,
-                staged_request.authority_partition_id,
-            ),
-            ("actionId", request.action_id, staged_request.action_id),
-            ("attemptId", request.attempt_id, staged_request.attempt_id),
-            ("expectedGeneration", request.expected_generation, staged.expected_generation),
-            ("targetGeneration", request.target_generation, staged.target_generation),
-            ("stateRootBefore", request.state_root_before, staged.state_root_before),
-            ("stateRootAfter", request.state_root_after, staged.state_root_after),
-            ("mutationPlanDigest", request.mutation_plan_digest, staged.mutation_plan_digest),
-            (
-                "stagingManifestDigest",
-                request.staging_manifest_digest,
-                staged_request.staging_manifest_digest,
-            ),
-            (
-                "changedResourceRefsDigest",
-                request.changed_resource_refs_digest,
-                staged_request.changed_resource_refs_digest,
-            ),
-            ("changedResourceRefs", request.changed_resource_refs, staged.changed_resource_refs),
-            (
-                "workspaceViewBindingDigest",
-                request.workspace_view_binding_digest,
-                staged_request.workspace_view_binding_digest,
-            ),
-            (
-                "expectedTransactionCompareVersion",
-                request.expected_transaction_compare_version,
-                staged.transaction_compare_version,
-            ),
-            (
-                "stagedTransactionDigest",
-                request.staged_transaction_digest,
-                staged.result_digest,
-            ),
-        )
-        for alias, observed, expected in staged_bindings:
-            if observed != expected:
-                raise ValueError(f"commit request {alias} does not match stagedTransaction")
         if self.snapshot.active_fencing_token != request.decision_fencing_token:
             raise ValueError("commit snapshot fence does not match decision request")
         if self.snapshot.commit_compare_version != 1:
@@ -3497,23 +3247,6 @@ class WorkspaceCommitDecision(EnvelopeModel):
                 request.authority_partition_id,
             ),
             ("fencingToken", event.fencing_token, request.decision_fencing_token),
-            ("taskContractId", event.task_contract_id, staged.task_contract_id),
-            ("taskVersion", event.task_version, staged.task_version),
-            ("taskContractDigest", event.task_contract_digest, staged.task_contract_digest),
-            ("completionEpochId", event.completion_epoch_id, staged.completion_epoch_id),
-            ("admissionSequence", event.admission_sequence, staged.admission_sequence),
-            ("authorityContractId", event.authority_contract_id, staged.authority_contract_id),
-            ("requestDigest", event.request_digest, staged.staged_event.request_digest),
-            (
-                "idempotencyKeyDigest",
-                event.idempotency_key_digest,
-                staged.staged_event.idempotency_key_digest,
-            ),
-            ("actorId", event.actor_id, staged.staged_event.actor_id),
-            ("policyDigest", event.policy_digest, staged.staged_event.policy_digest),
-            ("causationId", event.causation_id, staged.staged_event.event_id),
-            ("correlationId", event.correlation_id, staged.staged_event.correlation_id),
-            ("identityDigest", event.identity_digest, staged.staged_event.identity_digest),
         )
         for alias, observed, expected in bindings:
             if observed != expected:
@@ -3540,12 +3273,6 @@ class WorkspaceCommitDecision(EnvelopeModel):
             request
         ):
             raise ValueError("commitEvent payload does not bind the exact commit request")
-        _require_direct_event_successor(
-            staged.staged_event,
-            event,
-            first_name="stagedEvent",
-            second_name="commitEvent",
-        )
         return self
 
 
@@ -3596,40 +3323,11 @@ class WorkspaceCommitRecoveryClaimRequest(EnvelopeModel):
     expected_active_fence_event_hash: str = Field(alias="expectedActiveFenceEventHash")
     new_fencing_token: int = Field(alias="newFencingToken", ge=1, strict=True)
     workspace_view_binding_digest: str = Field(alias="workspaceViewBindingDigest")
-    recovery_decision: RecoveryDecision = Field(alias="recoveryDecision")
-    recovery_plan: PartitionRecoveryPlan = Field(alias="recoveryPlan")
-    recovery_lease: LeaseSnapshot = Field(alias="recoveryLease")
 
     @model_validator(mode="after")
     def _require_newer_fence(self) -> Self:
         if self.new_fencing_token <= self.expected_active_fencing_token:
             raise ValueError("newFencingToken must exceed expectedActiveFencingToken")
-        decision = self.recovery_decision
-        plan = self.recovery_plan
-        lease = self.recovery_lease
-        if decision.disposition is not RecoveryDisposition.REDO_COMMIT:
-            raise ValueError("workspace recovery claim requires a REDO_COMMIT decision")
-        if decision.resolution_attempt_id is None:
-            raise ValueError("REDO_COMMIT decision requires a resolution attempt")
-        bindings: tuple[tuple[str, object, object], ...] = (
-            ("recoveryPlanDigest", decision.recovery_plan_digest, plan.recovery_plan_digest),
-            ("partitionId", decision.partition_id, self.authority_partition_id),
-            ("plan.partitionId", plan.partition_id, self.authority_partition_id),
-            ("recoveryOwnerId", decision.recovery_owner_id, self.recovery_owner_id),
-            ("lease.ownerId", lease.owner_id, self.recovery_owner_id),
-            ("lease.partitionId", lease.partition_id, self.authority_partition_id),
-            ("lease.leaseName", lease.lease_name, decision.recovery_lease_name),
-            ("recoveryFencingToken", decision.recovery_fencing_token, self.new_fencing_token),
-            ("lease.fencingToken", lease.fencing_token, self.new_fencing_token),
-            ("taskContractDigest", plan.task_contract_digest, decision.task_contract_digest),
-        )
-        for alias, observed, expected in bindings:
-            if observed != expected:
-                raise ValueError(f"recovery claim {alias} binding does not match")
-        if lease.state is not LeaseState.HELD:
-            raise ValueError("workspace recovery claim requires a held recovery lease")
-        if decision.source_attempt_id not in plan.selected_source_attempt_ids:
-            raise ValueError("recovery plan must select the decision source attempt")
         return self
 
 
@@ -3646,20 +3344,10 @@ def _workspace_commit_recovery_claim_payload(
         "commitId": request.commit_id,
         "expectedCommitCompareVersion": request.expected_commit_compare_version,
         "expectedActiveFenceEventHash": request.expected_active_fence_event_hash,
-        "expectedActiveFenceEventId": request.expected_active_fence_event_id,
         "expectedActiveFenceEventSequence": request.expected_active_fence_event_sequence,
         "expectedWorkspaceCompareVersion": request.expected_workspace_compare_version,
         "priorActiveFence": request.expected_active_fencing_token,
-        "recoveryDecisionDigest": request.recovery_decision.decision_digest,
-        "recoveryEpochId": request.recovery_decision.recovery_epoch_id,
-        "recoveryLeaseCompareVersion": request.recovery_lease.compare_version,
-        "recoveryLeaseExpiresAt": request.recovery_lease.expires_at.isoformat()
-        if request.recovery_lease.expires_at is not None
-        else None,
         "recoveryOwnerId": request.recovery_owner_id,
-        "recoveryPlanDigest": request.recovery_plan.recovery_plan_digest,
-        "resolutionAttemptId": request.recovery_decision.resolution_attempt_id,
-        "sourceAttemptId": request.recovery_decision.source_attempt_id,
         "stateRootAfter": decision_request.state_root_after,
         "stateRootBefore": decision_request.state_root_before,
         "targetGeneration": decision_request.target_generation,
@@ -3676,7 +3364,6 @@ class WorkspaceCommitRecoveryClaim(EnvelopeModel):
     request: WorkspaceCommitRecoveryClaimRequest
     original_decision: WorkspaceCommitDecision = Field(alias="originalDecision")
     prior_snapshot: WorkspaceCommitSnapshot = Field(alias="priorSnapshot")
-    prior_fence_event: JournalEvent = Field(alias="priorFenceEvent")
     snapshot: WorkspaceCommitSnapshot
     workspace_compare_version: int = Field(alias="workspaceCompareVersion", ge=1, strict=True)
     claim_event: JournalEvent = Field(alias="claimEvent")
@@ -3687,8 +3374,6 @@ class WorkspaceCommitRecoveryClaim(EnvelopeModel):
         request = self.request
         original = self.original_decision
         decision_request = original.snapshot.request
-        recovery_decision = request.recovery_decision
-        recovery_plan = request.recovery_plan
 
         request_bindings = (
             ("commitId", request.commit_id, decision_request.commit_id),
@@ -3705,24 +3390,6 @@ class WorkspaceCommitRecoveryClaim(EnvelopeModel):
             ),
         )
         for alias, observed, expected in request_bindings:
-            if observed != expected:
-                raise ValueError(f"recovery claim {alias} does not match original decision")
-        recovery_bindings: tuple[tuple[str, object, object], ...] = (
-            ("actionId", recovery_decision.action_id, decision_request.action_id),
-            (
-                "sourceAttemptId",
-                recovery_decision.source_attempt_id,
-                decision_request.attempt_id,
-            ),
-            (
-                "taskContractDigest",
-                recovery_decision.task_contract_digest,
-                original.staged_transaction.task_contract_digest,
-            ),
-            ("partitionId", recovery_decision.partition_id, request.authority_partition_id),
-            ("plan.partitionId", recovery_plan.partition_id, request.authority_partition_id),
-        )
-        for alias, observed, expected in recovery_bindings:
             if observed != expected:
                 raise ValueError(f"recovery claim {alias} does not match original decision")
 
@@ -3743,22 +3410,6 @@ class WorkspaceCommitRecoveryClaim(EnvelopeModel):
             != request.expected_active_fence_event_hash
         ):
             raise ValueError("priorSnapshot active fence event provenance does not match claim")
-        prior_event_bindings: tuple[tuple[str, object, object], ...] = (
-            ("eventId", self.prior_fence_event.event_id, self.prior_snapshot.active_fence_event_id),
-            (
-                "sequence",
-                self.prior_fence_event.sequence,
-                self.prior_snapshot.active_fence_event_sequence,
-            ),
-            (
-                "eventHash",
-                self.prior_fence_event.event_hash,
-                self.prior_snapshot.active_fence_event_hash,
-            ),
-        )
-        for alias, observed, expected in prior_event_bindings:
-            if observed != expected:
-                raise ValueError(f"priorFenceEvent.{alias} does not match priorSnapshot")
         if request.expected_workspace_compare_version < original.workspace_compare_version:
             raise ValueError("claim request cannot precede the original workspace decision")
         if request.expected_active_fencing_token < decision_request.decision_fencing_token:
@@ -3768,8 +3419,6 @@ class WorkspaceCommitRecoveryClaim(EnvelopeModel):
                 raise ValueError("first recovery claim priorSnapshot must be the decision snapshot")
             if request.expected_active_fence_event_id != original.commit_event.event_id:
                 raise ValueError("first recovery claim must follow the commit decision event")
-            if self.prior_fence_event != original.commit_event:
-                raise ValueError("first recovery claim priorFenceEvent must be commitEvent")
 
         if self.snapshot.request != decision_request:
             raise ValueError("recovery snapshot must preserve the immutable commit request")
@@ -3787,11 +3436,7 @@ class WorkspaceCommitRecoveryClaim(EnvelopeModel):
             ("eventType", event.event_type, "workspace.commit_recovery_claimed"),
             ("partitionId", event.partition_id, decision_request.authority_partition_id),
             ("actionId", event.action_id, decision_request.action_id),
-            (
-                "attemptId",
-                event.attempt_id,
-                recovery_decision.resolution_attempt_id,
-            ),
+            ("attemptId", event.attempt_id, decision_request.attempt_id),
             ("fencingToken", event.fencing_token, request.new_fencing_token),
             ("actorId", event.actor_id, request.recovery_owner_id),
             ("causationId", event.causation_id, request.expected_active_fence_event_id),
@@ -3853,15 +3498,10 @@ class WorkspaceCommitRecoveryClaim(EnvelopeModel):
                 raise ValueError(
                     f"claimEvent.{inherited_alias} does not match original decision event"
                 )
-        _require_direct_event_successor(
-            self.prior_fence_event,
-            event,
-            first_name="priorFenceEvent",
-            second_name="claimEvent",
-        )
-        lease_expiry = request.recovery_lease.expires_at
-        if lease_expiry is None or event.created_at >= lease_expiry:
-            raise ValueError("claimEvent must be created before the recovery lease expires")
+        if event.sequence != self.prior_snapshot.active_fence_event_sequence + 1:
+            raise ValueError("claimEvent must directly follow the prior active fence event")
+        if event.previous_hash != self.prior_snapshot.active_fence_event_hash:
+            raise ValueError("claimEvent previousHash must bind the prior active fence event")
         if _strict_json_loads(event.payload_json) != _workspace_commit_recovery_claim_payload(
             request,
             decision_request,
@@ -3894,17 +3534,9 @@ class WorkspacePublicationObservation(EnvelopeModel):
     """Filesystem durability result before the Journal advances authority state."""
 
     schema_version: Literal[1] = Field(default=1, alias="schemaVersion")
-    commit_decision: WorkspaceCommitDecision = Field(alias="commitDecision")
-    recovery_claim: WorkspaceCommitRecoveryClaim | None = Field(
-        default=None,
-        alias="recoveryClaim",
-    )
-    active_commit_snapshot: WorkspaceCommitSnapshot | None = Field(
-        default=None,
-        alias="activeCommitSnapshot",
-    )
+    active_commit_snapshot: WorkspaceCommitSnapshot = Field(alias="activeCommitSnapshot")
     commit_id: str = Field(alias="commitId", min_length=1)
-    commit_decision_digest: str | None = Field(default=None, alias="commitDecisionDigest")
+    commit_decision_digest: str = Field(alias="commitDecisionDigest")
     transaction_id: str = Field(alias="transactionId", min_length=1)
     workspace_id: str = Field(alias="workspaceId", min_length=1)
     workspace_ref: str = Field(alias="workspaceRef", min_length=1)
@@ -3948,33 +3580,7 @@ class WorkspacePublicationObservation(EnvelopeModel):
 
     @model_validator(mode="after")
     def _validate_publication_resources(self) -> Self:
-        decision = self.commit_decision
-        expected_decision_digest = canonical_workspace_commit_decision_digest(decision)
-        if (
-            self.commit_decision_digest is not None
-            and self.commit_decision_digest != expected_decision_digest
-        ):
-            raise ValueError("commitDecisionDigest does not match commitDecision")
-        object.__setattr__(self, "commit_decision_digest", expected_decision_digest)
-
-        claim = self.recovery_claim
-        if claim is None:
-            expected_snapshot = decision.snapshot
-            expected_workspace_version = decision.workspace_compare_version
-            expected_attempt_id = decision.snapshot.request.attempt_id
-        else:
-            if claim.original_decision != decision:
-                raise ValueError("recoveryClaim does not preserve commitDecision")
-            expected_snapshot = claim.snapshot
-            expected_workspace_version = claim.workspace_compare_version
-            expected_attempt_id = claim.request.recovery_decision.resolution_attempt_id
-        if self.active_commit_snapshot is not None and (
-            self.active_commit_snapshot != expected_snapshot
-        ):
-            raise ValueError("activeCommitSnapshot does not match the active commit authority")
-        object.__setattr__(self, "active_commit_snapshot", expected_snapshot)
-
-        snapshot = expected_snapshot
+        snapshot = self.active_commit_snapshot
         if snapshot.state != "decided":
             raise ValueError("activeCommitSnapshot must be a decided commit")
         request = snapshot.request
@@ -3989,12 +3595,7 @@ class WorkspacePublicationObservation(EnvelopeModel):
                 request.authority_partition_id,
             ),
             ("actionId", self.action_id, request.action_id),
-            ("attemptId", self.attempt_id, expected_attempt_id),
-            (
-                "expectedWorkspaceCompareVersion",
-                self.expected_workspace_compare_version,
-                expected_workspace_version,
-            ),
+            ("attemptId", self.attempt_id, request.attempt_id),
             (
                 "expectedCommitCompareVersion",
                 self.expected_commit_compare_version,
@@ -4027,13 +3628,6 @@ class WorkspacePublicationObservation(EnvelopeModel):
         for alias, observed, expected in snapshot_bindings:
             if observed != expected:
                 raise ValueError(f"publication {alias} does not match activeCommitSnapshot")
-        if snapshot.active_fencing_token < decision.snapshot.active_fencing_token:
-            raise ValueError("publication active fence cannot regress commitDecision")
-        _require_canonical_workspace_root_ref(self.workspace_ref)
-        _require_workspace_resources_share_root(
-            self.workspace_ref,
-            self.changed_resource_refs,
-        )
         if len(self.changed_resource_refs) != len(set(self.changed_resource_refs)):
             raise ValueError("changedResourceRefs must be unique")
         if self.changed_resource_refs != tuple(sorted(self.changed_resource_refs)):
@@ -4089,144 +3683,63 @@ def canonical_workspace_publication_observation_digest(
     return _workspace_publication_observation_digest_from_model(validated)
 
 
-def _workspace_publication_source_event(
-    observation: WorkspacePublicationObservation,
-) -> JournalEvent:
-    if observation.recovery_claim is not None:
-        return observation.recovery_claim.claim_event
-    return observation.commit_decision.commit_event
-
-
-def _workspace_publication_event_payload(
-    receipt: WorkspacePublicationReceipt,
-) -> dict[str, object]:
-    recovery_claim_digest = (
-        canonical_workspace_commit_recovery_claim_digest(receipt.recovery_claim)
-        if receipt.recovery_claim is not None
-        else None
-    )
-    return {
-        "actionId": receipt.action_id,
-        "activeFence": receipt.active_fencing_token,
-        "activeFenceEventId": receipt.active_fence_event_id,
-        "attemptId": receipt.attempt_id,
-        "authorityPartitionId": receipt.authority_partition_id,
-        "changedResourceRefsDigest": receipt.changed_resource_refs_digest,
-        "commitCompareVersion": receipt.commit_compare_version,
-        "commitDecisionDigest": receipt.commit_decision_digest,
-        "commitId": receipt.commit_id,
-        "durabilityEvidenceDigest": receipt.durability_evidence_digest,
-        "expectedCommitCompareVersion": receipt.expected_commit_compare_version,
-        "expectedWorkspaceCompareVersion": receipt.expected_workspace_compare_version,
-        "observationRefs": list(receipt.observation_refs),
-        "publicationObservationDigest": receipt.publication_observation_digest,
-        "publishedGeneration": receipt.published_generation,
-        "recoveryClaimDigest": recovery_claim_digest,
-        "stateRootAfter": receipt.state_root_after,
-        "stateRootBefore": receipt.state_root_before,
-        "transactionId": receipt.transaction_id,
-        "workspaceCompareVersion": receipt.workspace_compare_version,
-        "workspaceId": receipt.workspace_id,
-        "workspaceRef": receipt.workspace_ref,
-        "workspaceViewBindingDigest": receipt.workspace_view_binding_digest,
-    }
-
-
 class WorkspacePublicationReceipt(WorkspacePublicationObservation):
     workspace_compare_version: int = Field(alias="workspaceCompareVersion", ge=1, strict=True)
     commit_compare_version: int = Field(alias="commitCompareVersion", ge=1, strict=True)
     publication_event: JournalEvent = Field(alias="publicationEvent")
-    workspace_snapshot: WorkspaceSnapshot = Field(alias="workspaceSnapshot")
-    commit_snapshot: WorkspaceCommitSnapshot = Field(alias="commitSnapshot")
 
     @model_validator(mode="after")
     def _validate_publication_event(self) -> Self:
-        event = self.publication_event
-        source_event = _workspace_publication_source_event(self)
-        if event.event_type != "workspace.published":
+        if self.publication_event.event_type != "workspace.published":
             raise ValueError("publicationEvent.eventType must be workspace.published")
-        if event.partition_id != self.authority_partition_id:
+        if self.publication_event.partition_id != self.authority_partition_id:
             raise ValueError("publicationEvent.partitionId does not match authority partition")
-        event_bindings: tuple[tuple[str, object, object], ...] = (
-            ("actionId", event.action_id, self.action_id),
-            ("attemptId", event.attempt_id, self.attempt_id),
+        event_bindings = (
+            ("actionId", self.publication_event.action_id, self.action_id),
+            ("attemptId", self.publication_event.attempt_id, self.attempt_id),
             (
                 "fencingToken",
-                event.fencing_token,
+                self.publication_event.fencing_token,
                 self.active_fencing_token,
             ),
-            ("taskContractId", event.task_contract_id, source_event.task_contract_id),
-            ("taskVersion", event.task_version, source_event.task_version),
-            ("taskContractDigest", event.task_contract_digest, source_event.task_contract_digest),
-            ("completionEpochId", event.completion_epoch_id, source_event.completion_epoch_id),
-            ("admissionSequence", event.admission_sequence, source_event.admission_sequence),
-            ("authorityContractId", event.authority_contract_id, source_event.authority_contract_id),
-            ("requestDigest", event.request_digest, source_event.request_digest),
             (
-                "idempotencyKeyDigest",
-                event.idempotency_key_digest,
-                source_event.idempotency_key_digest,
+                "causationId",
+                self.publication_event.causation_id,
+                self.active_fence_event_id,
             ),
-            ("actorId", event.actor_id, source_event.actor_id),
-            ("policyDigest", event.policy_digest, source_event.policy_digest),
-            ("causationId", event.causation_id, source_event.event_id),
-            ("correlationId", event.correlation_id, source_event.correlation_id),
-            ("identityDigest", event.identity_digest, source_event.identity_digest),
         )
         for alias, observed, expected in event_bindings:
             if observed != expected:
                 raise ValueError(f"publicationEvent.{alias} does not match observation")
-        _require_direct_event_successor(
-            source_event,
-            event,
-            first_name="activeFenceEvent",
-            second_name="publicationEvent",
-        )
+        if (
+            self.publication_event.sequence
+            != self.active_commit_snapshot.active_fence_event_sequence + 1
+        ):
+            raise ValueError("publicationEvent must directly follow the active fence event")
+        if (
+            self.publication_event.previous_hash
+            != self.active_commit_snapshot.active_fence_event_hash
+        ):
+            raise ValueError("publicationEvent previousHash must bind the active fence event")
         if self.workspace_compare_version != self.expected_workspace_compare_version + 1:
             raise ValueError("workspaceCompareVersion must advance the expected version")
         if self.commit_compare_version != self.expected_commit_compare_version + 1:
             raise ValueError("commitCompareVersion must advance the expected version")
-        if _strict_json_loads(event.payload_json) != _workspace_publication_event_payload(self):
-            raise ValueError("publicationEvent payload does not bind the exact publication receipt")
-
-        workspace = self.workspace_snapshot
-        workspace_bindings: tuple[tuple[str, object, object], ...] = (
-            ("workspaceId", workspace.workspace_id, self.workspace_id),
-            ("workspaceRef", workspace.workspace_ref, self.workspace_ref),
-            (
-                "authorityPartitionId",
-                workspace.authority_partition_id,
-                self.authority_partition_id,
-            ),
-            ("currentGeneration", workspace.current_generation, self.published_generation),
-            ("stateRoot", workspace.state_root, self.state_root_after),
-            (
-                "workspaceViewBindingDigest",
-                workspace.workspace_view_binding_digest,
-                self.workspace_view_binding_digest,
-            ),
-            ("publicationState", workspace.publication_state, WorkspacePublicationState.READY),
-            ("compareVersion", workspace.compare_version, self.workspace_compare_version),
-        )
-        for alias, observed, expected in workspace_bindings:
-            if observed != expected:
-                raise ValueError(f"workspaceSnapshot.{alias} does not match publication")
-
-        active_snapshot = self.active_commit_snapshot
-        assert active_snapshot is not None
-        commit = self.commit_snapshot
-        commit_bindings: tuple[tuple[str, object, object], ...] = (
-            ("request", commit.request, active_snapshot.request),
-            ("state", commit.state, "published"),
-            ("activeFencingToken", commit.active_fencing_token, self.active_fencing_token),
-            ("activeFenceEventId", commit.active_fence_event_id, event.event_id),
-            ("activeFenceEventSequence", commit.active_fence_event_sequence, event.sequence),
-            ("activeFenceEventHash", commit.active_fence_event_hash, event.event_hash),
-            ("commitCompareVersion", commit.commit_compare_version, self.commit_compare_version),
-        )
-        for alias, observed, expected in commit_bindings:
-            if observed != expected:
-                raise ValueError(f"commitSnapshot.{alias} does not match publication")
+        payload = _strict_json_loads(self.publication_event.payload_json)
+        if not isinstance(payload, Mapping):
+            raise ValueError("publicationEvent payload must be an object")
+        expected_payload: dict[str, object] = {
+            "commitId": self.commit_id,
+            "transactionId": self.transaction_id,
+            "commitDecisionDigest": self.commit_decision_digest,
+            "publicationObservationDigest": self.publication_observation_digest,
+            "durabilityEvidenceDigest": self.durability_evidence_digest,
+        }
+        for payload_key, payload_expected in expected_payload.items():
+            if payload.get(payload_key) != payload_expected:
+                raise ValueError(
+                    f"publicationEvent payload {payload_key} does not match observation"
+                )
         return self
 
 
@@ -4244,10 +3757,6 @@ class WorkspaceQuarantineReceipt(EnvelopeModel):
         ge=0,
         strict=True,
     )
-    prior_workspace_snapshot: WorkspaceSnapshot | None = Field(
-        default=None,
-        alias="priorWorkspaceSnapshot",
-    )
     workspace_compare_version: int = Field(alias="workspaceCompareVersion", ge=1, strict=True)
     prior_commit_snapshot: WorkspaceCommitSnapshot | None = Field(
         default=None,
@@ -4259,93 +3768,23 @@ class WorkspaceQuarantineReceipt(EnvelopeModel):
         ge=1,
         strict=True,
     )
-    prior_fence_event: JournalEvent | None = Field(
+    quarantine_event: JournalEvent | None = Field(
         default=None,
-        alias="priorFenceEvent",
+        alias="quarantineEvent",
     )
-    quarantine_event: JournalEvent | None = Field(default=None, alias="quarantineEvent")
 
     @model_validator(mode="after")
     def _validate_quarantine_commit_binding(self) -> Self:
-        workspace = self.prior_workspace_snapshot
-        if workspace is None or self.quarantine_event is None:
-            if (
-                self.commit_id is None
-                and self.fencing_token == 0
-                and self.expected_workspace_compare_version is None
-                and workspace is None
-                and self.quarantine_event is None
-            ):
-                return self
-            raise ValueError("quarantine receipt requires workspace snapshot and event evidence")
-        assert self.expected_workspace_compare_version is not None
-        workspace_bindings: tuple[tuple[str, object, object], ...] = (
-            ("workspaceId", workspace.workspace_id, self.workspace_id),
-            (
-                "authorityPartitionId",
-                workspace.authority_partition_id,
-                self.authority_partition_id,
-            ),
-            (
-                "compareVersion",
-                workspace.compare_version,
-                self.expected_workspace_compare_version,
-            ),
-        )
-        for alias, observed, expected in workspace_bindings:
-            if observed != expected:
-                raise ValueError(f"priorWorkspaceSnapshot.{alias} does not match quarantine")
-        if workspace.publication_state is WorkspacePublicationState.QUARANTINED:
-            raise ValueError("priorWorkspaceSnapshot must not already be quarantined")
-        if self.workspace_compare_version != self.expected_workspace_compare_version + 1:
-            raise ValueError("workspaceCompareVersion must advance exactly once")
-
         commit_fields = (
+            self.expected_workspace_compare_version,
             self.prior_commit_snapshot,
             self.commit_compare_version,
-            self.prior_fence_event,
+            self.quarantine_event,
         )
         if self.commit_id is None:
             if any(value is not None for value in commit_fields):
                 raise ValueError(
                     "workspace-only quarantine cannot contain commit-specific bindings"
-                )
-            if self.fencing_token != 0:
-                raise ValueError("workspace-only quarantine requires fencingToken zero")
-            event = self.quarantine_event
-            event_bindings: tuple[tuple[str, object, object], ...] = (
-                ("eventType", event.event_type, "workspace.quarantined"),
-                ("partitionId", event.partition_id, self.authority_partition_id),
-                ("actionId", event.action_id, None),
-                ("attemptId", event.attempt_id, None),
-                ("fencingToken", event.fencing_token, 0),
-                (
-                    "causationId",
-                    event.causation_id,
-                    f"workspace:{self.workspace_id}:v{self.expected_workspace_compare_version}",
-                ),
-                ("createdAt", event.created_at, self.quarantined_at),
-            )
-            for alias, observed, expected in event_bindings:
-                if observed != expected:
-                    raise ValueError(
-                        f"quarantineEvent.{alias} does not match workspace quarantine"
-                    )
-            expected_payload: dict[str, object] = {
-                "expectedWorkspaceCompareVersion": self.expected_workspace_compare_version,
-                "priorGeneration": workspace.current_generation,
-                "priorPublicationState": workspace.publication_state.value,
-                "priorStateRoot": workspace.state_root,
-                "priorWorkspaceSnapshotDigest": _canonical_model_digest(workspace),
-                "quarantinedAt": self.quarantined_at.isoformat(),
-                "reasonDigest": self.reason_digest,
-                "workspaceCompareVersion": self.workspace_compare_version,
-                "workspaceId": self.workspace_id,
-                "workspaceRef": workspace.workspace_ref,
-            }
-            if _strict_json_loads(event.payload_json) != expected_payload:
-                raise ValueError(
-                    "quarantineEvent payload does not bind exact workspace quarantine"
                 )
             return self
 
@@ -4358,10 +3797,11 @@ class WorkspaceQuarantineReceipt(EnvelopeModel):
 
         prior = self.prior_commit_snapshot
         event = self.quarantine_event
+        expected_workspace_version = self.expected_workspace_compare_version
         commit_version = self.commit_compare_version
-        prior_event = self.prior_fence_event
         assert prior is not None
-        assert prior_event is not None
+        assert event is not None
+        assert expected_workspace_version is not None
         assert commit_version is not None
 
         request = prior.request
@@ -4378,18 +3818,10 @@ class WorkspaceQuarantineReceipt(EnvelopeModel):
         for alias, observed, expected in snapshot_bindings:
             if observed != expected:
                 raise ValueError(f"quarantine receipt {alias} does not match priorCommitSnapshot")
-        publishing_bindings: tuple[tuple[str, object, object], ...] = (
-            ("publicationState", workspace.publication_state, WorkspacePublicationState.PUBLISHING),
-            ("activeCommitId", workspace.active_commit_id, request.commit_id),
-            ("pendingGeneration", workspace.pending_generation, request.target_generation),
-            ("pendingStateRoot", workspace.pending_state_root, request.state_root_after),
-            ("activeFencingToken", workspace.active_fencing_token, prior.active_fencing_token),
-        )
-        for alias, observed, expected in publishing_bindings:
-            if observed != expected:
-                raise ValueError(f"priorWorkspaceSnapshot.{alias} does not match active commit")
         if prior.state == "quarantined":
             raise ValueError("priorCommitSnapshot must be an active commit")
+        if self.workspace_compare_version != expected_workspace_version + 1:
+            raise ValueError("workspaceCompareVersion must advance exactly once")
         if commit_version != prior.commit_compare_version + 1:
             raise ValueError("commitCompareVersion must advance exactly once")
 
@@ -4405,20 +3837,10 @@ class WorkspaceQuarantineReceipt(EnvelopeModel):
         for alias, observed, expected in event_bindings:
             if observed != expected:
                 raise ValueError(f"quarantineEvent.{alias} does not match the quarantine receipt")
-        prior_event_bindings: tuple[tuple[str, object, object], ...] = (
-            ("eventId", prior_event.event_id, prior.active_fence_event_id),
-            ("sequence", prior_event.sequence, prior.active_fence_event_sequence),
-            ("eventHash", prior_event.event_hash, prior.active_fence_event_hash),
-        )
-        for alias, observed, expected in prior_event_bindings:
-            if observed != expected:
-                raise ValueError(f"priorFenceEvent.{alias} does not match priorCommitSnapshot")
-        _require_direct_event_successor(
-            prior_event,
-            event,
-            first_name="priorFenceEvent",
-            second_name="quarantineEvent",
-        )
+        if event.sequence != prior.active_fence_event_sequence + 1:
+            raise ValueError("quarantineEvent must directly follow the prior active fence event")
+        if event.previous_hash != prior.active_fence_event_hash:
+            raise ValueError("quarantineEvent previousHash must bind the prior active fence event")
 
         expected_payload: dict[str, object] = {
             "actionId": request.action_id,
@@ -4427,7 +3849,7 @@ class WorkspaceQuarantineReceipt(EnvelopeModel):
             "commitId": request.commit_id,
             "commitCompareVersion": commit_version,
             "expectedCommitCompareVersion": prior.commit_compare_version,
-            "expectedWorkspaceCompareVersion": self.expected_workspace_compare_version,
+            "expectedWorkspaceCompareVersion": expected_workspace_version,
             "priorActiveFenceEventHash": prior.active_fence_event_hash,
             "priorActiveFenceEventId": prior.active_fence_event_id,
             "priorActiveFenceEventSequence": prior.active_fence_event_sequence,
@@ -4435,7 +3857,6 @@ class WorkspaceQuarantineReceipt(EnvelopeModel):
                 canonical_workspace_commit_decision_request_digest(request)
             ),
             "priorCommitState": prior.state,
-            "priorWorkspaceSnapshotDigest": _canonical_model_digest(workspace),
             "quarantinedAt": self.quarantined_at.isoformat(),
             "reasonDigest": self.reason_digest,
             "transactionId": request.transaction_id,
@@ -4532,12 +3953,6 @@ class PartitionRecoveryPlan(EnvelopeModel):
             raise ValueError("recoveryPlanDigest does not match PartitionRecoveryPlan")
         object.__setattr__(self, "recovery_plan_digest", expected)
         return self
-
-
-# Workspace recovery claim contracts are declared before the recovery-plan
-# section so the workspace transaction state machine remains contiguous.
-WorkspaceCommitRecoveryClaimRequest.model_rebuild()
-WorkspaceCommitRecoveryClaim.model_rebuild()
 
 
 class RecoverySessionSnapshot(EnvelopeModel):
@@ -5591,9 +5006,12 @@ class ExecutionStartRequest(EnvelopeModel):
         for alias, observed, expected in preparation_bindings:
             if observed != expected:
                 raise ValueError(f"ExecutionStartRequest {alias} does not match preparation")
+        approval_required = self.preparation.authority_contract.decision_request_id is not None
+        if approval_required != (self.approval_consumption is not None):
+            raise ValueError(
+                "approvalConsumption is required exactly for user-approved authority"
+            )
         if self.approval_consumption is not None:
-            if self.preparation.authority_contract.decision_request_id is None:
-                raise ValueError("approvalConsumption requires user-approved authority")
             if self.approval_consumption.preparation != self.preparation:
                 raise ValueError("approvalConsumption does not contain preparation")
             if self.approval_consumption.authority_contract_digest != (
