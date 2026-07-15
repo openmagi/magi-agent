@@ -1433,7 +1433,7 @@ def test_workspace_relative_path_rejects_forged_symlink_alias(tmp_path: Path) ->
 def test_http_resource_matches_exact_normalization_vector() -> None:
     assert (
         canonical_http_resource("HTTPS://EXAMPLE.COM:443/a/../b?z=2&a=1")
-        == "https://example.com/b?a=1&z=2"
+        == "https://example.com/b?z=2&a=1"
     )
 
 
@@ -1642,22 +1642,22 @@ def test_http_resource_canonicalizes_path_without_changing_reserved_structure(
 def test_http_resource_preserves_query_multiplicity_presence_and_plus_semantics() -> None:
     source = "https://example.com/?b=2&a=&a&a=+&a=%2b&b=1=2&a=+"
 
-    assert canonical_http_resource(source) == ("https://example.com/?a=&a&a=+&a=%2B&a=+&b=2&b=1=2")
+    assert canonical_http_resource(source) == ("https://example.com/?b=2&a=&a&a=+&a=%2B&b=1=2&a=+")
 
 
-def test_http_resource_preserves_duplicate_key_order_while_sorting_unique_keys() -> None:
+def test_http_resource_preserves_the_complete_query_pair_order() -> None:
     victim_first = canonical_http_resource("https://example.com/?z=2&a=victim&a=attacker&b=1")
     attacker_first = canonical_http_resource("https://example.com/?z=2&a=attacker&a=victim&b=1")
 
-    assert victim_first == "https://example.com/?a=victim&a=attacker&b=1&z=2"
-    assert attacker_first == "https://example.com/?a=attacker&a=victim&b=1&z=2"
+    assert victim_first == "https://example.com/?z=2&a=victim&a=attacker&b=1"
+    assert attacker_first == "https://example.com/?z=2&a=attacker&a=victim&b=1"
     assert victim_first != attacker_first
 
 
-def test_http_resource_sorts_query_stably_after_component_canonicalization() -> None:
+def test_http_resource_canonicalizes_components_without_reordering_query_pairs() -> None:
     source = "https://example.com/?z=%7e&%61=2&a=1&a=1"
 
-    assert canonical_http_resource(source) == "https://example.com/?a=2&a=1&a=1&z=~"
+    assert canonical_http_resource(source) == "https://example.com/?z=~&a=2&a=1&a=1"
 
 
 @pytest.mark.parametrize(

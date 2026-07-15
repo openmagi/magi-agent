@@ -64,7 +64,7 @@ _MAX_WORKSPACE_ENCODED_SUFFIX_CHARS = min(
 )
 _MAX_WORKSPACE_REF_CHARS = len("workspace://sha256:") + 64 + 1 + _MAX_WORKSPACE_ENCODED_SUFFIX_CHARS
 # These bounds are checked before component canonicalization.  Besides limiting
-# memory, they keep percent decoding, query sorting, secret scanning, and path
+# memory, they keep percent decoding, query scanning, secret scanning, and path
 # normalization deterministic under adversarial input.
 _MAX_HTTP_URL_CHARS = 8_192
 _MAX_HTTP_URL_BYTES = 8_192
@@ -1170,7 +1170,7 @@ def _canonical_http_path(raw_path: str) -> str:
 def _canonical_http_query(raw_query: str) -> str:
     if not raw_query:
         return ""
-    items: list[tuple[str, str]] = []
+    items: list[str] = []
     for raw_item in raw_query.split("&"):
         raw_key, separator, raw_value = raw_item.partition("=")
         key = _canonical_url_component(raw_key, raw_safe=_QUERY_RAW_SAFE)
@@ -1191,9 +1191,12 @@ def _canonical_http_query(raw_query: str) -> str:
             or contains_secret_marker(f"{decoded_key}={decoded_value}")
         ):
             raise CanonicalizationError("URL query key or value is classified as secret")
-        items.append((key, item))
-    items.sort(key=lambda pair: pair[0])
-    return "&".join(item for _key, item in items)
+        # Query order is part of the request target.  Frameworks and remote
+        # services may resolve the first or last duplicate key differently,
+        # and signatures frequently cover the original pair order.  Preserve
+        # it while canonicalizing only each component's byte spelling.
+        items.append(item)
+    return "&".join(items)
 
 
 def _canonical_url_component(raw: str, *, raw_safe: frozenset[str]) -> str:
