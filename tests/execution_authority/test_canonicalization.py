@@ -1091,7 +1091,7 @@ def test_linux_mount_boundary_uses_beneath_for_resolved_existing_path(
     assert calls == [
         (
             "real/file.txt",
-            canonicalization._LINUX_RESOLVE_NO_XDEV | canonicalization._LINUX_RESOLVE_NO_MAGICLINKS,
+            canonicalization._LINUX_RESOLVE_NO_MAGICLINKS,
         ),
         (
             "real/file.txt",

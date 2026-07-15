@@ -1084,8 +1084,23 @@ def _leaf(name: str) -> str:
 def _digest_ast(node: ast.AST | None) -> str:
     if node is None:
         return _DIGEST_PREFIX + hashlib.sha256(b"missing").hexdigest()
-    material = ast.dump(node, annotate_fields=True, include_attributes=False)
+    material = repr(_stable_ast_value(node))
     return _DIGEST_PREFIX + hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _stable_ast_value(value: object) -> object:
+    """Serialize semantic AST fields without interpreter-version empty fields."""
+
+    if isinstance(value, ast.AST):
+        fields = tuple(
+            (name, _stable_ast_value(field_value))
+            for name, field_value in ast.iter_fields(value)
+            if field_value is not None and field_value != []
+        )
+        return (type(value).__name__, fields)
+    if isinstance(value, list):
+        return tuple(_stable_ast_value(item) for item in value)
+    return value
 
 
 def _keyword_string(node: ast.Call, name: str) -> str | None:

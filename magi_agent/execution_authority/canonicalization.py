@@ -307,7 +307,10 @@ def _validate_linux_mount_boundary(root: Path, candidate: Path) -> tuple[int, in
         existing_parts = _linux_open_existing_prefix_without_mounts(
             root_fd,
             parts,
-            resolve_flags=_LINUX_RESOLVE_NO_XDEV | _LINUX_RESOLVE_NO_MAGICLINKS,
+            # Resolve ordinary symlinks before applying the beneath/no-mount proof.
+            # NO_XDEV here misclassifies an absolute symlink as a mount crossing
+            # because the kernel restarts its walk at the namespace root.
+            resolve_flags=_LINUX_RESOLVE_NO_MAGICLINKS,
         )
         resolved_existing = root.joinpath(*existing_parts).resolve(strict=True)
         try:
