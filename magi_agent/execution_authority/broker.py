@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 from collections.abc import Callable, Iterable, Mapping
+from datetime import UTC, datetime
+from enum import StrEnum
 from hashlib import sha256
 import hmac
 import json
@@ -18,8 +20,25 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from magi_agent.execution_authority.envelopes import EffectDeclarationBinding
-from magi_agent.ops.safety import require_digest
+from magi_agent.execution_authority.contracts import (
+    AuthorityCapability,
+    AuthorityContract,
+    AuthorityDecision,
+    canonical_authority_contract_digest,
+)
+from magi_agent.execution_authority.envelopes import (
+    ActionIntent,
+    ActionProposal,
+    BackendObservation,
+    EffectDeclarationBinding,
+    NormalizedInputSnapshot,
+    canonical_action_intent_digest,
+    canonical_action_proposal_digest,
+    canonical_backend_observation_digest,
+    canonical_resource_refs_digest,
+)
+from magi_agent.execution_authority.state_machine import EvidenceKind
+from magi_agent.ops.safety import canonical_digest, require_digest
 
 
 class BrokerError(RuntimeError):
@@ -239,12 +258,553 @@ class ExecutionTokenIssuer:
         return claims
 
 
+class _BrokerModel(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class BrokerMismatch(BrokerError):
+    """Raised before executor handoff when any upstream binding disagrees."""
+
+
+class BrokerDisposition(StrEnum):
+    DENIED = "denied"
+    OBSERVED = "observed"
+
+
+class ActionProposalContext(_BrokerModel):
+    effect_name: str
+    action_id: str
+    attempt_id: str
+    partition_id: str
+    actor_id: str
+    tenant_id: str
+    identity_digest: str
+    policy_digest: str
+    session_id: str
+    turn_id: str
+    run_id: str
+    task_contract_id: str
+    task_version: int
+    task_contract_digest: str
+    completion_epoch_id: str
+    capabilities: tuple[AuthorityCapability, ...]
+    evidence_obligations: tuple[EvidenceKind, ...]
+
+
+class NormalizedRequestMaterial(_BrokerModel):
+    effect_declaration_digest: str
+    normalizer_digest: str
+    payload: bytes
+    normalized_input_digest: str
+
+    @classmethod
+    def from_payload(
+        cls, *, effect_declaration_digest: str, normalizer_digest: str, payload: bytes
+    ) -> NormalizedRequestMaterial:
+        return cls(
+            effect_declaration_digest=effect_declaration_digest,
+            normalizer_digest=normalizer_digest,
+            payload=payload,
+            normalized_input_digest="sha256:" + sha256(payload).hexdigest(),
+        )
+
+
+class DerivedResourceSet(_BrokerModel):
+    normalized_input_digest: str
+    effect_declaration_digest: str
+    resource_deriver_digest: str
+    read_set: tuple[str, ...]
+    absence_set: tuple[str, ...]
+    write_set: tuple[str, ...]
+    egress_set: tuple[str, ...]
+    read_set_digest: str
+    absence_set_digest: str
+    write_set_digest: str
+    egress_set_digest: str
+    workspace_view_binding_digest: str | None
+    idempotency_key_digest: str
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        material: NormalizedRequestMaterial,
+        declaration: EffectDeclarationBinding,
+        resource_deriver_digest: str,
+        read_set: tuple[str, ...],
+        absence_set: tuple[str, ...],
+        write_set: tuple[str, ...],
+        egress_set: tuple[str, ...],
+        workspace_view_binding_digest: str | None,
+        idempotency_key_digest: str,
+    ) -> DerivedResourceSet:
+        return cls(
+            normalized_input_digest=material.normalized_input_digest,
+            effect_declaration_digest=declaration.effect_declaration_digest or "",
+            resource_deriver_digest=resource_deriver_digest,
+            read_set=read_set,
+            absence_set=absence_set,
+            write_set=write_set,
+            egress_set=egress_set,
+            read_set_digest=canonical_resource_refs_digest(read_set),
+            absence_set_digest=canonical_resource_refs_digest(absence_set),
+            write_set_digest=canonical_resource_refs_digest(write_set),
+            egress_set_digest=canonical_resource_refs_digest(egress_set),
+            workspace_view_binding_digest=workspace_view_binding_digest,
+            idempotency_key_digest=idempotency_key_digest,
+        )
+
+
+class MaterialBinding(_BrokerModel):
+    snapshot: NormalizedInputSnapshot
+    binding_digest: str
+
+    @classmethod
+    def create(cls, snapshot: NormalizedInputSnapshot) -> MaterialBinding:
+        return cls(
+            snapshot=snapshot,
+            binding_digest=canonical_digest(snapshot.model_dump(by_alias=True, mode="json")),
+        )
+
+
+class BrokerAdmission(_BrokerModel):
+    intent: ActionIntent
+    intent_digest: str
+    proposal_digest: str
+    material_binding_digest: str
+    admission_sequence: int
+    epoch_compare_version: int
+    action_compare_version: int
+    attempt_compare_version: int
+    partition_compare_version: int
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        proposal: ActionProposal,
+        material_binding_digest: str,
+        admission_sequence: int,
+        epoch_compare_version: int,
+        action_compare_version: int,
+        attempt_compare_version: int,
+        partition_compare_version: int,
+    ) -> BrokerAdmission:
+        payload = proposal.model_dump(by_alias=True, mode="python")
+        payload["schemaId"] = "magi.action_intent.v1"
+        payload["admissionSequence"] = admission_sequence
+        intent = ActionIntent.model_validate(payload)
+        return cls(
+            intent=intent,
+            intent_digest=canonical_action_intent_digest(intent),
+            proposal_digest=canonical_action_proposal_digest(proposal),
+            material_binding_digest=material_binding_digest,
+            admission_sequence=admission_sequence,
+            epoch_compare_version=epoch_compare_version,
+            action_compare_version=action_compare_version,
+            attempt_compare_version=attempt_compare_version,
+            partition_compare_version=partition_compare_version,
+        )
+
+
+class AuthorizationEvaluation(_BrokerModel):
+    intent_digest: str
+    policy_digest: str
+    decision: AuthorityDecision
+    evaluation_digest: str
+
+    @classmethod
+    def create(
+        cls, *, intent: ActionIntent, policy_digest: str, decision: AuthorityDecision
+    ) -> AuthorizationEvaluation:
+        intent_digest = canonical_action_intent_digest(intent)
+        evaluation_digest = canonical_digest(
+            {
+                "intentDigest": intent_digest,
+                "policyDigest": policy_digest,
+                "decision": decision.model_dump(by_alias=True, mode="json"),
+            }
+        )
+        return cls(
+            intent_digest=intent_digest,
+            policy_digest=policy_digest,
+            decision=decision,
+            evaluation_digest=evaluation_digest,
+        )
+
+
+class FenceLease(_BrokerModel):
+    partition_id: str
+    lease_name: str
+    owner_id: str
+    effect_declaration_digest: str
+    fencing_token: int
+    compare_version: int
+
+
+class ResourcePrecondition(_BrokerModel):
+    resource_ref: str
+    state: str
+    identity_digest: str
+    content_digest: str | None
+    workspace_view_binding_digest: str | None
+
+
+class PreconditionObservation(_BrokerModel):
+    proposal_digest: str
+    material_binding_digest: str
+    fencing_token: int
+    observer_digest: str
+    resources: tuple[ResourcePrecondition, ...]
+    observation_digest: str
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        proposal_digest: str,
+        material_binding_digest: str,
+        fencing_token: int,
+        observer_digest: str,
+        resources: tuple[ResourcePrecondition, ...],
+    ) -> PreconditionObservation:
+        payload = {
+            "proposalDigest": proposal_digest,
+            "materialBindingDigest": material_binding_digest,
+            "fencingToken": fencing_token,
+            "observerDigest": observer_digest,
+            "resources": [resource.model_dump(mode="json") for resource in resources],
+        }
+        return cls(
+            proposal_digest=proposal_digest,
+            material_binding_digest=material_binding_digest,
+            fencing_token=fencing_token,
+            observer_digest=observer_digest,
+            resources=resources,
+            observation_digest=canonical_digest(payload),
+        )
+
+
+class ExecutorBinding(_BrokerModel):
+    executor_id: str
+    executor_version: str
+    executor_digest: str
+    sandbox_profile_digest: str
+
+
+class EffectRuntime(_BrokerModel):
+    normalizer: Any
+    resource_deriver: Any
+    executor: Any
+    executor_binding: ExecutorBinding
+
+
+class AuthorityGrantRequest(_BrokerModel):
+    context: ActionProposalContext
+    admission: BrokerAdmission
+    authorization: AuthorizationEvaluation
+    fence: FenceLease
+    preconditions: PreconditionObservation
+    executor: ExecutorBinding
+    decision_request: Any | None = None
+    resume_binding: Any | None = None
+    resume_binding_digest: str | None = None
+
+
+class PreparedExecution(_BrokerModel):
+    grant: AuthorityGrantRequest
+    admission: BrokerAdmission
+    fence: FenceLease
+    authority_contract: AuthorityContract
+    authority_contract_digest: str
+    precondition_digest: str
+    action_compare_version: int
+    attempt_compare_version: int
+    partition_compare_version: int
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        grant: AuthorityGrantRequest,
+        authority_contract: AuthorityContract,
+        authority_contract_digest: str,
+        action_compare_version: int,
+        attempt_compare_version: int,
+        partition_compare_version: int,
+    ) -> PreparedExecution:
+        return cls(
+            grant=grant,
+            admission=grant.admission,
+            fence=grant.fence,
+            authority_contract=authority_contract,
+            authority_contract_digest=authority_contract_digest,
+            precondition_digest=grant.preconditions.observation_digest,
+            action_compare_version=action_compare_version,
+            attempt_compare_version=attempt_compare_version,
+            partition_compare_version=partition_compare_version,
+        )
+
+
+class ExecutionStartRecord(_BrokerModel):
+    preparation: PreparedExecution
+    execution_token_digest: str
+    executor: ExecutorBinding
+    action_compare_version: int
+    attempt_compare_version: int
+    partition_compare_version: int
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        preparation: PreparedExecution,
+        execution_token_digest: str,
+        executor: ExecutorBinding,
+        action_compare_version: int,
+        attempt_compare_version: int,
+        partition_compare_version: int,
+    ) -> ExecutionStartRecord:
+        return cls(
+            preparation=preparation,
+            execution_token_digest=execution_token_digest,
+            executor=executor,
+            action_compare_version=action_compare_version,
+            attempt_compare_version=attempt_compare_version,
+            partition_compare_version=partition_compare_version,
+        )
+
+
+class ExecutorHandoff(_BrokerModel):
+    start: ExecutionStartRecord
+    execution_token: str
+
+
+class BrokerResult(_BrokerModel):
+    disposition: BrokerDisposition
+    observation: BackendObservation | None = None
+    observation_digest: str | None = None
+
+
+class UniversalMutationBroker:
+    """Fail-closed, sole ordered ingress for dormant governed effects."""
+
+    def __init__(
+        self,
+        *,
+        registry: EffectRegistry,
+        runtimes: Mapping[str, EffectRuntime],
+        material_store: Any,
+        authority: Any,
+        journal: Any,
+        fence: Any,
+        precondition_observer: Any,
+        contract_issuer: Any,
+        clock: Any,
+        token_issuer_key: bytes,
+        token_ttl_ms: int,
+    ) -> None:
+        self._registry = registry
+        self._runtimes = dict(runtimes)
+        self._material_store = material_store
+        self._authority = authority
+        self._journal = journal
+        self._fence = fence
+        self._observer = precondition_observer
+        self._contract_issuer = contract_issuer
+        self._clock = clock
+        self._token_issuer = ExecutionTokenIssuer(key=token_issuer_key)
+        self._token_ttl_ms = token_ttl_ms
+
+    async def execute(
+        self, *, context: ActionProposalContext, untrusted_request: dict[str, object]
+    ) -> BrokerResult:
+        declaration = self._registry.require(context.effect_name)
+        runtime = self._runtimes.get(context.effect_name)
+        if runtime is None:
+            raise UndeclaredEffect(context.effect_name)
+        material = runtime.normalizer.normalize(
+            untrusted_request=untrusted_request, declaration=declaration
+        )
+        if (
+            material.effect_declaration_digest != declaration.effect_declaration_digest
+            or material.normalizer_digest != declaration.normalizer_digest
+            or material.normalized_input_digest != "sha256:" + sha256(material.payload).hexdigest()
+        ):
+            raise BrokerMismatch("normalized material binding mismatch")
+        resources = runtime.resource_deriver.derive(material=material, declaration=declaration)
+        if (
+            resources.normalized_input_digest != material.normalized_input_digest
+            or resources.effect_declaration_digest != declaration.effect_declaration_digest
+            or resources.resource_deriver_digest != declaration.resource_deriver_digest
+        ):
+            raise BrokerMismatch("derived resource binding mismatch")
+        snapshot = self._material_store.persist(material=material, resources=resources)
+        self._require_snapshot(snapshot, material, resources)
+        material_binding = MaterialBinding.create(snapshot)
+        proposal = ActionProposal(
+            actionId=context.action_id,
+            attemptId=context.attempt_id,
+            partitionId=context.partition_id,
+            actorId=context.actor_id,
+            identityDigest=context.identity_digest,
+            policyDigest=context.policy_digest,
+            sessionId=context.session_id,
+            turnId=context.turn_id,
+            runId=context.run_id,
+            taskContractId=context.task_contract_id,
+            taskVersion=context.task_version,
+            taskContractDigest=context.task_contract_digest,
+            completionEpochId=context.completion_epoch_id,
+            declaration=declaration,
+            capabilities=context.capabilities,
+            normalizedInputDigest=material.normalized_input_digest,
+            normalizedRequestSnapshotRef=snapshot.snapshot_ref,
+            readSet=resources.read_set,
+            absenceSet=resources.absence_set,
+            writeSet=resources.write_set,
+            egressSet=resources.egress_set,
+            readSetDigest=resources.read_set_digest,
+            absenceSetDigest=resources.absence_set_digest,
+            writeSetDigest=resources.write_set_digest,
+            egressSetDigest=resources.egress_set_digest,
+            workspaceViewBindingDigest=resources.workspace_view_binding_digest,
+            idempotencyKeyDigest=resources.idempotency_key_digest,
+            evidenceObligations=context.evidence_obligations,
+        )
+        admission = self._journal.admit(proposal=proposal, material_binding=material_binding)
+        if admission.proposal_digest != canonical_action_proposal_digest(proposal):
+            raise BrokerMismatch("admission proposal mismatch")
+        authorization = self._authority.authorize(admission.intent)
+        if (
+            authorization.intent_digest != canonical_action_intent_digest(admission.intent)
+            or authorization.policy_digest != context.policy_digest
+        ):
+            raise BrokerMismatch("authority evaluation mismatch")
+        if authorization.decision.status == "deny":
+            self._journal.deny(admission=admission, authorization=authorization)
+            return BrokerResult(disposition=BrokerDisposition.DENIED)
+        if authorization.decision.capabilities != admission.intent.capabilities:
+            raise BrokerMismatch("authority capabilities mismatch")
+        lease = self._fence.acquire(admission=admission, declaration=declaration)
+        if (
+            lease.partition_id != context.partition_id
+            or lease.effect_declaration_digest != declaration.effect_declaration_digest
+        ):
+            raise BrokerMismatch("fence binding mismatch")
+        preconditions = self._observer.observe(
+            admission=admission, material_binding=material_binding, fence=lease
+        )
+        expected_refs = {*resources.read_set, *resources.absence_set}
+        if (
+            preconditions.proposal_digest != admission.proposal_digest
+            or preconditions.fencing_token != lease.fencing_token
+            or {item.resource_ref for item in preconditions.resources} != expected_refs
+        ):
+            raise BrokerMismatch("precondition coverage mismatch")
+        grant = AuthorityGrantRequest(
+            context=context,
+            admission=admission,
+            authorization=authorization,
+            fence=lease,
+            preconditions=preconditions,
+            executor=runtime.executor_binding,
+        )
+        authority_contract = self._contract_issuer.issue(grant)
+        if (
+            authority_contract.normalized_request_digest != material.normalized_input_digest
+            or authority_contract.fencing_token != lease.fencing_token
+            or authority_contract.capabilities != admission.intent.capabilities
+        ):
+            raise BrokerMismatch("authority contract mismatch")
+        authority_digest = canonical_authority_contract_digest(authority_contract)
+        prepared = self._journal.consume_authority_and_prepare(
+            grant=grant,
+            authority_contract=authority_contract,
+            authority_contract_digest=authority_digest,
+        )
+        if prepared.precondition_digest != preconditions.observation_digest:
+            raise BrokerMismatch("preparation binding mismatch")
+        now_ms = self._clock.now_unix_ms()
+        token = self._token_issuer.issue(
+            action_id=context.action_id,
+            attempt_id=context.attempt_id,
+            request_digest=material.normalized_input_digest,
+            authority_digest=authority_digest,
+            fencing_token=lease.fencing_token,
+            expires_unix_ms=now_ms + self._token_ttl_ms,
+            executor_digest=runtime.executor_binding.executor_digest,
+            precondition_digest=preconditions.observation_digest,
+        )
+        token_digest = self._token_issuer.token_digest(token)
+        start = self._journal.mark_executing(
+            preparation=prepared,
+            execution_token_digest=token_digest,
+            executor=runtime.executor_binding,
+        )
+        if start.execution_token_digest != token_digest or start.executor != runtime.executor_binding:
+            raise BrokerMismatch("execution start mismatch")
+        self._token_issuer.consume(
+            token,
+            action_id=context.action_id,
+            attempt_id=context.attempt_id,
+            request_digest=material.normalized_input_digest,
+            authority_digest=authority_digest,
+            fencing_token=lease.fencing_token,
+            now_unix_ms=now_ms,
+            executor_digest=runtime.executor_binding.executor_digest,
+            precondition_digest=preconditions.observation_digest,
+        )
+        observation = await runtime.executor.execute(
+            ExecutorHandoff(start=start, execution_token=token)
+        )
+        recorded = self._journal.record_observation(start=start, observation=observation)
+        return BrokerResult(
+            disposition=BrokerDisposition.OBSERVED,
+            observation=recorded,
+            observation_digest=canonical_backend_observation_digest(recorded),
+        )
+
+    @staticmethod
+    def _require_snapshot(
+        snapshot: NormalizedInputSnapshot,
+        material: NormalizedRequestMaterial,
+        resources: DerivedResourceSet,
+    ) -> None:
+        if (
+            snapshot.normalized_input_digest != material.normalized_input_digest
+            or snapshot.normalizer_digest != material.normalizer_digest
+            or snapshot.resource_deriver_digest != resources.resource_deriver_digest
+            or snapshot.read_set_digest != resources.read_set_digest
+            or snapshot.write_set_digest != resources.write_set_digest
+        ):
+            raise BrokerMismatch("persisted material binding mismatch")
+
 __all__ = [
+    "ActionProposalContext",
+    "AuthorizationEvaluation",
+    "AuthorityGrantRequest",
+    "BrokerAdmission",
+    "BrokerDisposition",
     "BrokerError",
+    "BrokerMismatch",
+    "BrokerResult",
+    "DerivedResourceSet",
     "DuplicateEffectRegistration",
     "EffectRegistry",
+    "EffectRuntime",
+    "ExecutionStartRecord",
     "ExecutionTokenClaims",
     "ExecutionTokenIssuer",
+    "ExecutorBinding",
+    "ExecutorHandoff",
+    "FenceLease",
     "InvalidExecutionToken",
+    "MaterialBinding",
+    "NormalizedRequestMaterial",
+    "PreconditionObservation",
+    "PreparedExecution",
+    "ResourcePrecondition",
+    "UniversalMutationBroker",
     "UndeclaredEffect",
 ]
