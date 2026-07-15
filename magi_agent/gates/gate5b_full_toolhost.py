@@ -789,6 +789,23 @@ class Gate5BFullToolHost:
         # every ToolContext so SpawnAgent can pass it to spawned children.
         # None => flag unset => byte-identical to today.
         spawn_cap: tuple[str, ...] | None = None,
+        # Source-citation (hosted convergence): the per-turn collector whose
+        # session-scoped SessionSourceRegistry web tools register sources into.
+        # None (default) keeps the ToolContext ``citationRegistry`` at None, so
+        # every non-citation caller is byte-identical to today. Mirrors the LOCAL
+        # path's collector-bound registry (cli/tool_runtime.py).
+        citation_collector: object | None = None,
+        # Source-citation registry KEY (hosted convergence P0 fix). The WRITE side
+        # (this host's ``_citation_registry``) and the READ side (the serving
+        # driver's terminal payload) MUST key the collector's per-session registry
+        # by the IDENTICAL string, or they land in two disconnected registries and
+        # the citations payload comes back silently empty. ``session_id`` is
+        # derived from the raw payload (None when the request omits ``sessionId``),
+        # while the driver resolves the same id WITH a header + uuid fallback. To
+        # keep them identical, the driver threads its resolved id here. None
+        # (default) falls back to ``session_id`` so every OTHER caller and every
+        # non-citation ``_session_id`` usage stay byte-identical to today.
+        citation_session_id: str | None = None,
     ) -> None:
         self.config = config
         self.workspace_root = workspace_root.resolve()
@@ -796,8 +813,16 @@ class Gate5BFullToolHost:
         self.now_ms = now_ms
         self.memory_mode = normalize_memory_mode(memory_mode)
         self._session_id = session_id
+        # Dedicated citation registry key (see ``citation_session_id`` above).
+        # Falls back to ``_session_id`` when unset so non-driver callers keep the
+        # exact current key, and every OTHER ``_session_id`` usage (the dispatch
+        # ToolContext ``sessionId`` at spawn time) is untouched.
+        self._citation_session_id = (
+            citation_session_id if citation_session_id is not None else session_id
+        )
         self._spawn_depth = max(0, int(spawn_depth))
         self._spawn_cap = spawn_cap
+        self._citation_collector = citation_collector
         self.counter = Gate5BFullToolCounter(config)
         self._tool_registry = tool_registry
         # First-party activity capture: pass ONLY the bundled producer pack's
@@ -1560,6 +1585,27 @@ class Gate5BFullToolHost:
             "numstat": numstat,
         }
 
+    def _citation_registry(self) -> object | None:
+        """Return the per-turn SessionSourceRegistry web tools register into.
+
+        Threaded onto ``ToolContext.citationRegistry`` so ``web_fetch`` /
+        ``research_fact`` can allocate session-global ``src_N`` through the SAME
+        registry the hosted serving driver reads at terminal time. Fail-quiet ->
+        ``None`` when no collector was passed (byte-identical to today) or when
+        citation is disabled (``source_registry_for`` itself gates on
+        ``MAGI_SOURCE_CITATION_ENABLED`` and returns ``None`` when off).
+        """
+        collector = self._citation_collector
+        if collector is None:
+            return None
+        try:
+            accessor = getattr(collector, "source_registry_for", None)
+            if not callable(accessor):
+                return None
+            return accessor(self._citation_session_id)
+        except Exception:
+            return None
+
     async def _dispatch_registry_tool(
         self,
         tool_name: str,
@@ -1604,6 +1650,12 @@ class Gate5BFullToolHost:
                     if self._public_event_sink is not None
                     else None
                 ),
+                # Source-citation (hosted convergence): thread the per-turn
+                # SessionSourceRegistry so web tools (web_fetch / research_fact)
+                # register sources into the SAME registry the serving driver
+                # reads at terminal time. None when no collector was passed or
+                # when citation is off, keeping the ToolContext byte-identical.
+                citationRegistry=self._citation_registry(),
             ),
             mode=mode,
             exposed_tool_names=self.exposed_tool_names,
@@ -2194,6 +2246,8 @@ def build_gate5b_full_toolhost_bundle(
     spawn_depth: int = 0,
     workspace_handlers: Mapping[str, object] | None = None,
     dispatch_policies: Sequence[object] | None = None,
+    citation_collector: object | None = None,
+    citation_session_id: str | None = None,
 ) -> Gate5BFullToolBundle:
     # C1 default-ON flip: when the caller supplies NEITHER seam kwarg, the live
     # path consumes the bundled packs (workspace tool handlers + tool_host
@@ -2251,6 +2305,8 @@ def build_gate5b_full_toolhost_bundle(
         workspace_handlers=workspace_handlers,
         dispatch_policies=dispatch_policies,
         spawn_cap=_serve_spawn_cap,
+        citation_collector=citation_collector,
+        citation_session_id=citation_session_id,
     )
     if selected_scope_error is not None:
         return Gate5BFullToolBundle(

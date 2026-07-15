@@ -37,6 +37,7 @@ __all__ = [
     "render_verdict",
     "build_citations_payload",
     "citations_payload_for",
+    "hosted_citations_payload_for",
     "render_cli_sources_footer",
 ]
 
@@ -220,6 +221,40 @@ def citations_payload_for(
     has_sources = bool(registry.snapshot())
     verdict = render_verdict(projection, has_registry_sources=has_sources)
     return build_citations_payload(projection, verdict)
+
+
+def hosted_citations_payload_for(
+    final_text: str | None,
+    collector: object | None,
+    session_id: str | None,
+) -> dict[str, object] | None:
+    """Compose the hosted terminal ``citations`` payload from a per-turn collector.
+
+    Hosted analogue of the LOCAL streaming driver's inline registry lookup plus
+    payload build (transport/streaming_driver.py): the LOCAL path reaches the
+    live ``SessionSourceRegistry`` through ``engine.local_tool_evidence_collector``
+    and calls :func:`citations_payload_for`; the hosted governed serving path has
+    no engine-bound collector, so the driver holds a per-turn collector by
+    reference and passes it here.
+
+    Fail-soft and byte-identity-when-off: returns ``None`` when the collector is
+    absent, exposes no ``source_registry_for`` accessor, or citation is disabled
+    (``source_registry_for`` itself gates on ``MAGI_SOURCE_CITATION_ENABLED`` and
+    returns ``None`` when off). Any fault in registry lookup or payload build
+    collapses to ``None`` so a citation fault never breaks the hosted stream.
+    """
+    if collector is None or not session_id:
+        return None
+    try:
+        accessor = getattr(collector, "source_registry_for", None)
+        if not callable(accessor):
+            return None
+        registry = accessor(session_id)
+        if registry is None:
+            return None
+        return citations_payload_for(final_text, registry)
+    except Exception:
+        return None
 
 
 def _host_of(uri: str) -> str:

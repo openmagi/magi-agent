@@ -167,7 +167,7 @@ async def _run_gate5b(payload: object, monkeypatch: pytest.MonkeyPatch) -> dict[
 
     captured: dict[str, object] = {}
 
-    async def _fake_inner(runtime, payload, *, request, public_event_sink=None):  # noqa: ANN001
+    async def _fake_inner(runtime, payload, *, request, public_event_sink=None, citation_collector=None, citation_session_id=None):  # noqa: ANN001
         # This runs at the exact scope the governed turn / driver runs at.
         captured["mission"] = current_per_turn_goal_mission()
         captured["policy"] = current_per_turn_goal_loop_policy()
