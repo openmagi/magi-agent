@@ -56,6 +56,7 @@ CREATE TABLE authority_events (
     payload_digest TEXT NOT NULL,
     row_checksum TEXT NOT NULL,
     payload_json TEXT NOT NULL,
+    event_json TEXT NOT NULL,
     created_at TEXT NOT NULL,
     PRIMARY KEY (partition_id, sequence),
     FOREIGN KEY (partition_id) REFERENCES authority_partitions(partition_id)
@@ -181,12 +182,24 @@ CREATE TABLE authority_outbox (
     outbox_id TEXT PRIMARY KEY,
     partition_id TEXT NOT NULL,
     event_sequence INTEGER NOT NULL,
+    event_id TEXT NOT NULL,
+    event_hash TEXT NOT NULL,
+    subject_id TEXT NOT NULL,
+    subject_digest TEXT NOT NULL,
     kind TEXT NOT NULL,
     payload_digest TEXT NOT NULL,
     payload_json TEXT NOT NULL,
-    delivery_state TEXT NOT NULL,
+    delivery_state TEXT NOT NULL CHECK (delivery_state IN ('pending', 'claimed', 'delivered')),
+    claim_owner_id TEXT,
+    claim_fencing_token INTEGER,
+    claim_expires_at TEXT,
     delivery_attempts INTEGER NOT NULL DEFAULT 0,
-    delivered_at TEXT
+    acknowledgement_digest TEXT,
+    compare_version INTEGER NOT NULL DEFAULT 1,
+    delivered_at TEXT,
+    UNIQUE (partition_id, event_sequence, kind),
+    FOREIGN KEY (partition_id, event_sequence)
+      REFERENCES authority_events(partition_id, sequence)
 );
 """.strip()
 
