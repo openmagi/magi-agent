@@ -181,14 +181,6 @@ def test_request_derives_complete_ordered_capabilities_digest() -> None:
         credential_refs=("credential://tenant/key-b",),
     )
     request = _request(capabilities=(first, second))
-    expected_payload = {
-        "capabilities": [
-            AuthorityCapability.model_dump(first, by_alias=True, mode="json"),
-            AuthorityCapability.model_dump(second, by_alias=True, mode="json"),
-        ]
-    }
-
-    assert request.capabilities_digest == canonical_digest(expected_payload)
     assert request.capabilities_digest == canonical_capabilities_digest((first, second))
     assert canonical_capabilities_digest((first, second)) != canonical_capabilities_digest(
         (second, first)

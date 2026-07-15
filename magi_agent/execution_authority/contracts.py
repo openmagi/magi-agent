@@ -19,6 +19,34 @@ _MAX_CONTRACT_INPUT_DEPTH = 64
 _MAX_CONTRACT_JSON_BYTES = 1_048_576
 _MAX_IJSON_INTEGER = (2**53) - 1
 
+_READ_ONLY_EFFECT_CLASSES = frozenset(
+    {
+        EffectClass.WORKSPACE_READ,
+        EffectClass.NETWORK_READ,
+    }
+)
+_PROCESS_EFFECT_CLASSES = frozenset(
+    {
+        EffectClass.PROCESS_EXEC,
+        EffectClass.PROCESS_EXECUTE,
+    }
+)
+_NETWORK_EFFECT_CLASSES = frozenset(
+    {
+        EffectClass.NETWORK_READ,
+        EffectClass.NETWORK_CONNECT,
+        EffectClass.NETWORK_WRITE,
+    }
+)
+_PAYLOAD_EFFECT_CLASSES = frozenset(
+    {
+        EffectClass.NETWORK_WRITE,
+        EffectClass.DATABASE_WRITE,
+        EffectClass.MESSAGE_SEND,
+        EffectClass.ARTIFACT_DELIVER,
+    }
+)
+
 
 def _preflight_json_depth(payload: str) -> None:
     depth = 0
@@ -43,13 +71,19 @@ def _preflight_json_depth(payload: str) -> None:
             depth -= 1
             if depth < 0:
                 raise ValueError("authority contract JSON has unbalanced containers")
+    if depth != 0 or in_string or escaped:
+        raise ValueError("authority contract JSON has unbalanced containers")
 
 
 def _load_authority_contract_json(payload: str | bytes | bytearray) -> object:
-    if type(payload) is str:
+    if isinstance(payload, str):
+        if type(payload) is not str:
+            raise TypeError("authority contract JSON must use an exact string")
         encoded = payload.encode("utf-8")
         text = payload
-    elif type(payload) in (bytes, bytearray):
+    elif isinstance(payload, (bytes, bytearray)):
+        if type(payload) not in (bytes, bytearray):
+            raise TypeError("authority contract JSON must use an exact byte sequence")
         encoded = bytes(payload)
         try:
             text = encoded.decode("utf-8")
@@ -125,18 +159,28 @@ class _AuthorityContractModel(FrozenContractModel):
                     "canonical JSON requires an exact string; exact integer 1 fields "
                     "cannot use binary aliases"
                 )
+            if isinstance(current, str) and current != "" and not current.strip():
+                raise ValueError("authority contract strings must not be whitespace-only")
+            if type(current) is float:
+                raise ValueError("authority contract input does not permit floating-point numbers")
             if type(current) is int and abs(current) > _MAX_IJSON_INTEGER:
                 raise ValueError("authority contract integer exceeds the I-JSON safe range")
             if isinstance(current, AbstractSet):
                 raise ValueError("authority contract input must use canonical JSON ordered arrays")
-            if type(current) is dict:
+            if isinstance(current, dict):
+                if type(current) is not dict:
+                    raise ValueError("authority contract input requires an exact dict")
                 for key, child in current.items():
                     if type(key) is not str:
                         raise ValueError(
                             "authority contract input must use canonical JSON object keys"
                         )
                     pending.append((child, depth + 1))
-            elif type(current) in (list, tuple):
+            elif isinstance(current, (list, tuple)):
+                if type(current) not in (list, tuple):
+                    raise ValueError(
+                        "authority contract input rejects Python-only iterable containers"
+                    )
                 pending.extend((child, depth + 1) for child in current)
             elif isinstance(current, Mapping):
                 raise ValueError("authority contract input requires an exact dict")
@@ -191,7 +235,7 @@ class ResearchClaimRequirement(_AuthorityContractModel):
 
     @model_validator(mode="after")
     def _bind_exact_proposition(self) -> Self:
-        expected = "sha256:" + sha256(self.proposition.encode("utf-8")).hexdigest()
+        expected = canonical_research_proposition_digest(self.proposition)
         if self.proposition_digest is not None and self.proposition_digest != expected:
             raise ValueError("propositionDigest does not match proposition")
         object.__setattr__(self, "proposition_digest", expected)
@@ -256,10 +300,27 @@ class ResearchProofObligation(_AuthorityContractModel):
         claim_ids = tuple(claim.claim_id for claim in self.claims)
         if len(claim_ids) != len(set(claim_ids)):
             raise ValueError("research claim IDs must be unique")
-        if len(self.query_classes) != len(set(self.query_classes)):
-            raise ValueError("research query classes must be unique")
-        if len(self.stopping_rules) != len(set(self.stopping_rules)):
-            raise ValueError("research stopping rules must be unique")
+        object.__setattr__(
+            self,
+            "claims",
+            tuple(claim for _, claim in sorted(zip(claim_ids, self.claims))),
+        )
+        object.__setattr__(
+            self,
+            "query_classes",
+            _canonical_string_set(
+                self.query_classes,
+                field_name="research query classes",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "stopping_rules",
+            _canonical_string_set(
+                self.stopping_rules,
+                field_name="research stopping rules",
+            ),
+        )
         return self
 
 
@@ -272,7 +333,7 @@ class ProofObligation(_AuthorityContractModel):
     @field_validator("evidence_kinds", mode="before")
     @classmethod
     def _reject_unordered_evidence_kinds(cls, value: object) -> object:
-        return _require_ordered_collection(value, field_name="evidenceKinds")
+        return _canonical_string_set(value, field_name="evidenceKinds")
 
 
 class Requirement(_AuthorityContractModel):
@@ -336,10 +397,16 @@ class TaskContractSnapshot(_AuthorityContractModel):
         value: object,
         info: ValidationInfo,
     ) -> object:
-        return _require_ordered_collection(
-            value,
-            field_name=info.field_name or "tuple field",
-        )
+        field_name = info.field_name or "tuple field"
+        if info.field_name in {
+            "source_message_digests",
+            "inclusions",
+            "exclusions",
+            "constraints",
+            "assumptions",
+        }:
+            return _canonical_string_set(value, field_name=field_name)
+        return _require_ordered_collection(value, field_name=field_name)
 
     @field_validator("source_message_digests")
     @classmethod
@@ -350,10 +417,25 @@ class TaskContractSnapshot(_AuthorityContractModel):
         return tuple(require_digest(digest) for digest in value)
 
     @model_validator(mode="after")
-    def _reject_duplicate_requirement_ids(self) -> Self:
+    def _canonicalize_task_sets(self) -> Self:
+        dependency_ids = tuple(dependency.dependency_id for dependency in self.dependencies)
+        if len(dependency_ids) != len(set(dependency_ids)):
+            raise ValueError("dependency IDs must be unique")
+        object.__setattr__(
+            self,
+            "dependencies",
+            tuple(dependency for _, dependency in sorted(zip(dependency_ids, self.dependencies))),
+        )
         requirement_ids = tuple(requirement.requirement_id for requirement in self.requirements)
         if len(requirement_ids) != len(set(requirement_ids)):
             raise ValueError("requirement IDs must be unique")
+        object.__setattr__(
+            self,
+            "requirements",
+            tuple(
+                requirement for _, requirement in sorted(zip(requirement_ids, self.requirements))
+            ),
+        )
         if (self.supersedes_task_contract_id is None) != (self.supersedes_version is None):
             raise ValueError("supersedesTaskContractId and supersedesVersion are both-or-neither")
         if (
@@ -421,7 +503,7 @@ class AuthorityCapability(_AuthorityContractModel):
         value: object,
         info: ValidationInfo,
     ) -> object:
-        return _require_exact_string_sequence(
+        return _canonical_string_set(
             value,
             field_name=info.field_name or "capability refs",
         )
@@ -502,7 +584,7 @@ class AuthorityDecision(_AuthorityContractModel):
     ) -> object:
         field_name = info.field_name or "tuple field"
         if info.field_name == "reason_codes":
-            return _require_exact_string_sequence(value, field_name=field_name)
+            return _canonical_string_set(value, field_name="reasonCodes")
         return _require_ordered_collection(value, field_name=field_name)
 
     @model_validator(mode="after")
@@ -511,6 +593,82 @@ class AuthorityDecision(_AuthorityContractModel):
             raise ValueError("non-deny authority decisions require capabilities")
         if len(self.capabilities) != len(set(self.capabilities)):
             raise ValueError("duplicate capabilities are not allowed")
+        return self
+
+
+class AuthorityEvaluationReceipt(_AuthorityContractModel):
+    """Replayable binding between resolver inputs, action, and resulting decision."""
+
+    schema_id: Literal["magi.authority_evaluation.v1"] = Field(
+        default="magi.authority_evaluation.v1",
+        alias="schemaId",
+    )
+    action_digest: str = Field(alias="actionDigest")
+    authority_inputs: tuple[AuthorityInput, ...] = Field(alias="authorityInputs")
+    authority_inputs_digest: str = Field(default="", alias="authorityInputsDigest")
+    decision: AuthorityDecision
+    decision_digest: str = Field(default="", alias="decisionDigest")
+    evaluator_id: str = Field(alias="evaluatorId", min_length=1)
+    evaluator_version: str = Field(alias="evaluatorVersion", min_length=1)
+    policy_digest: str = Field(alias="policyDigest")
+    evaluated_at: datetime = Field(alias="evaluatedAt")
+
+    @field_validator("authority_inputs", mode="before")
+    @classmethod
+    def _require_ordered_inputs(cls, value: object) -> object:
+        return _require_ordered_model_collection(value, field_name="authorityInputs")
+
+    @field_validator(
+        "action_digest",
+        "authority_inputs_digest",
+        "decision_digest",
+        "policy_digest",
+    )
+    @classmethod
+    def _validate_digest(cls, value: str, info: ValidationInfo) -> str:
+        if value == "" and info.field_name in {
+            "authority_inputs_digest",
+            "decision_digest",
+        }:
+            return value
+        return require_digest(value)
+
+    @field_validator("evaluated_at", mode="before")
+    @classmethod
+    def _require_datetime_wire_type(cls, value: object) -> object:
+        return _require_exact_datetime_wire_type(
+            value,
+            contract_name="authority evaluation receipt",
+        )
+
+    @field_validator("evaluated_at")
+    @classmethod
+    def _require_utc_datetime(cls, value: datetime) -> datetime:
+        return _validate_exact_utc_datetime(
+            value,
+            contract_name="authority evaluation receipt",
+        )
+
+    @model_validator(mode="after")
+    def _bind_evaluation(self) -> Self:
+        for field_name in ("authority_inputs_digest", "decision_digest"):
+            if field_name in self.model_fields_set and getattr(self, field_name) == "":
+                alias = type(self).model_fields[field_name].alias or field_name
+                raise ValueError(f"{alias} must use a canonical sha256 digest")
+        inputs_digest = _validated_authority_inputs_digest(self.authority_inputs)
+        if self.authority_inputs_digest and self.authority_inputs_digest != inputs_digest:
+            raise ValueError("authorityInputsDigest does not match authorityInputs")
+        decision_digest = _validated_authority_decision_digest(self.decision)
+        if self.decision_digest and self.decision_digest != decision_digest:
+            raise ValueError("decisionDigest does not match decision")
+        expected_decision = resolve_authority(
+            inputs=self.authority_inputs,
+            action_digest=self.action_digest,
+        )
+        if self.decision != expected_decision:
+            raise ValueError("decision does not match the deterministic authority evaluation")
+        object.__setattr__(self, "authority_inputs_digest", inputs_digest)
+        object.__setattr__(self, "decision_digest", decision_digest)
         return self
 
 
@@ -693,6 +851,23 @@ class AuthorityContract(_AuthorityContractModel):
             raise ValueError("resumeBindingDigest is required with decisionRequestId")
         if len(self.capabilities) != len(set(self.capabilities)):
             raise ValueError("duplicate capabilities are not allowed")
+        effect_classes = frozenset(capability.effect_class for capability in self.capabilities)
+        if effect_classes - _READ_ONLY_EFFECT_CLASSES and self.fencing_token <= 0:
+            raise ValueError("mutating capabilities require a positive fencingToken")
+        if effect_classes & _PROCESS_EFFECT_CLASSES and self.command_digest is None:
+            raise ValueError("process capabilities require commandDigest")
+        if effect_classes & _PAYLOAD_EFFECT_CLASSES and self.request_body_digest is None:
+            raise ValueError("payload-bearing capabilities require requestBodyDigest")
+        if (
+            effect_classes & _NETWORK_EFFECT_CLASSES
+            or any(capability.network_refs for capability in self.capabilities)
+        ) and self.network_digest is None:
+            raise ValueError("network capabilities require networkDigest")
+        if (
+            any(capability.credential_refs for capability in self.capabilities)
+            and self.credential_scope_digest is None
+        ):
+            raise ValueError("credential capabilities require credentialScopeDigest")
         workspace_bindings = {
             capability.workspace_view_binding_digest
             for capability in self.capabilities
@@ -791,6 +966,8 @@ class UserDecisionRequest(_AuthorityContractModel):
     ) -> object:
         if value is None:
             return None
+        if info.field_name == "capabilities_digest" and value == "":
+            return value
         return _require_exact_string(value, field_name=info.field_name or "request digest")
 
     @field_validator(
@@ -814,7 +991,7 @@ class UserDecisionRequest(_AuthorityContractModel):
     @field_validator("reason_codes", mode="before")
     @classmethod
     def _require_ordered_reason_codes(cls, value: object) -> object:
-        return _require_exact_string_sequence(value, field_name="reasonCodes")
+        return _canonical_string_set(value, field_name="reasonCodes")
 
     @field_validator("created_at", "expires_at", mode="before")
     @classmethod
@@ -1094,6 +1271,8 @@ def _require_ordered_model_collection(value: object, *, field_name: str) -> obje
 def _require_exact_string(value: object, *, field_name: str) -> str:
     if type(value) is not str:
         raise ValueError(f"{field_name} must be an exact string")
+    if not value.strip():
+        raise ValueError(f"{field_name} must not be whitespace-only")
     return value
 
 
@@ -1105,6 +1284,17 @@ def _require_exact_string_sequence(value: object, *, field_name: str) -> object:
     for item in value:
         _require_exact_string(item, field_name=f"{field_name} elements")
     return value
+
+
+def _canonical_string_set(value: object, *, field_name: str) -> tuple[str, ...]:
+    """Validate set-like wire strings and return their sole canonical order."""
+
+    value = _require_exact_string_sequence(value, field_name=field_name)
+    assert isinstance(value, (list, tuple))
+    items = tuple(value)
+    if len(items) != len(set(items)):
+        raise ValueError(f"{field_name} values must be unique")
+    return tuple(sorted(items))
 
 
 def _require_exact_datetime_wire_type(value: object, *, contract_name: str) -> object:
@@ -1137,6 +1327,18 @@ def _validate_binding_instance(binding: object) -> TaskContractBinding:
     if type(binding) is not TaskContractBinding:
         raise TypeError("task contract binding must be an exact TaskContractBinding")
     return TaskContractBinding.model_validate(binding)
+
+
+def canonical_research_proposition_digest(proposition: str) -> str:
+    """Hash a research proposition in its own versioned semantic domain."""
+
+    validated = _require_exact_string(proposition, field_name="proposition")
+    return canonical_digest(
+        {
+            "schemaId": "magi.research_proposition.v1",
+            "proposition": validated,
+        }
+    )
 
 
 def canonical_task_contract_json(snapshot: TaskContractSnapshot) -> str:
@@ -1208,6 +1410,75 @@ def _validate_authority_contract_instance(contract: object) -> AuthorityContract
     if type(contract) is not AuthorityContract:
         raise TypeError("authority contract must be an exact AuthorityContract")
     return AuthorityContract.model_validate(contract)
+
+
+def _validate_authority_inputs_tuple(
+    inputs: object,
+) -> tuple[AuthorityInput, ...]:
+    if type(inputs) is not tuple:
+        raise TypeError("authority resolver inputs must be an exact tuple")
+    return tuple(_validate_authority_input_instance(value) for value in inputs)
+
+
+def _validate_authority_decision_instance(decision: object) -> AuthorityDecision:
+    if type(decision) is not AuthorityDecision:
+        raise TypeError("authority decision must be an exact AuthorityDecision")
+    return AuthorityDecision.model_validate(decision)
+
+
+def _validated_authority_inputs_digest(inputs: tuple[AuthorityInput, ...]) -> str:
+    payload = {
+        "schemaId": "magi.authority_inputs.v1",
+        "inputs": [
+            AuthorityInput.model_dump(value, by_alias=True, mode="json") for value in inputs
+        ],
+    }
+    return canonical_digest(payload)
+
+
+def canonical_authority_inputs_digest(inputs: tuple[AuthorityInput, ...]) -> str:
+    return _validated_authority_inputs_digest(_validate_authority_inputs_tuple(inputs))
+
+
+def _validated_authority_decision_digest(decision: AuthorityDecision) -> str:
+    return canonical_digest(
+        {
+            "schemaId": "magi.authority_decision.v1",
+            "decision": AuthorityDecision.model_dump(
+                decision,
+                by_alias=True,
+                mode="json",
+            ),
+        }
+    )
+
+
+def canonical_authority_decision_digest(decision: AuthorityDecision) -> str:
+    return _validated_authority_decision_digest(_validate_authority_decision_instance(decision))
+
+
+def _validate_authority_evaluation_receipt_instance(
+    receipt: object,
+) -> AuthorityEvaluationReceipt:
+    if type(receipt) is not AuthorityEvaluationReceipt:
+        raise TypeError("receipt must be an exact AuthorityEvaluationReceipt")
+    return AuthorityEvaluationReceipt.model_validate(receipt)
+
+
+def canonical_authority_evaluation_receipt_digest(
+    receipt: AuthorityEvaluationReceipt,
+) -> str:
+    validated = _validate_authority_evaluation_receipt_instance(receipt)
+    return canonical_digest(
+        {
+            "schemaId": "magi.authority_evaluation_receipt_digest.v1",
+            "receipt": AuthorityEvaluationReceipt.model_dump(
+                validated,
+                by_alias=True,
+                mode="json",
+            ),
+        }
+    )
 
 
 def _authority_capability_json(capability: AuthorityCapability) -> str:
@@ -1337,9 +1608,7 @@ def resolve_authority(
     if type(action_digest) is not str:
         raise TypeError("action digest must be an exact string")
     validated_action_digest = require_digest(action_digest)
-    if type(inputs) is not tuple:
-        raise TypeError("authority resolver inputs must be an exact tuple")
-    validated_inputs = tuple(_validate_authority_input_instance(value) for value in inputs)
+    validated_inputs = _validate_authority_inputs_tuple(inputs)
 
     originating_inputs = tuple(
         value
@@ -1405,6 +1674,32 @@ def resolve_authority(
             "status": status,
             "reason_codes": ("authority_intersection", validated_action_digest),
             "capabilities": capabilities,
+        }
+    )
+
+
+def resolve_authority_evaluation(
+    *,
+    inputs: tuple[AuthorityInput, ...],
+    action_digest: str,
+    evaluator_id: str,
+    evaluator_version: str,
+    policy_digest: str,
+    evaluated_at: datetime,
+) -> AuthorityEvaluationReceipt:
+    """Resolve authority and return the replayable first-party evaluation receipt."""
+
+    validated_inputs = _validate_authority_inputs_tuple(inputs)
+    decision = resolve_authority(inputs=validated_inputs, action_digest=action_digest)
+    return AuthorityEvaluationReceipt.model_validate(
+        {
+            "actionDigest": action_digest,
+            "authorityInputs": validated_inputs,
+            "decision": decision,
+            "evaluatorId": evaluator_id,
+            "evaluatorVersion": evaluator_version,
+            "policyDigest": policy_digest,
+            "evaluatedAt": evaluated_at,
         }
     )
 
@@ -1481,10 +1776,11 @@ def _validated_capabilities_digest(
     capabilities: tuple[AuthorityCapability, ...],
 ) -> str:
     payload = {
+        "schemaId": "magi.authority_capabilities.v1",
         "capabilities": [
             AuthorityCapability.model_dump(capability, by_alias=True, mode="json")
             for capability in capabilities
-        ]
+        ],
     }
     return canonical_digest(payload)
 

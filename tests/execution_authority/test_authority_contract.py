@@ -537,7 +537,10 @@ def test_contract_rejects_numeric_datetime_inputs(
 ) -> None:
     companions = {"revocationDigest": _digest("0")} if field == "revokedAt" else {}
 
-    with pytest.raises(ValidationError, match="datetime instances or ISO strings"):
+    with pytest.raises(
+        ValidationError,
+        match="datetime instances or ISO strings|floating-point numbers",
+    ):
         _contract(**companions, **{field: numeric_time})
 
 
@@ -644,7 +647,7 @@ def test_literal_one_fields_require_the_exact_builtin_integer(
     field: str,
     invalid: object,
 ) -> None:
-    with pytest.raises(ValidationError, match="exact integer 1"):
+    with pytest.raises(ValidationError, match="exact integer 1|floating-point numbers"):
         _contract(**{field: invalid})
 
 

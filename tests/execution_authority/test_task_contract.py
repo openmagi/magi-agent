@@ -18,6 +18,7 @@ from magi_agent.execution_authority.contracts import (
     canonical_task_contract_bytes,
     canonical_task_contract_digest,
     canonical_task_contract_json,
+    canonical_research_proposition_digest,
     validate_task_contract_binding,
 )
 from magi_agent.execution_authority.state_machine import RequirementState
@@ -664,7 +665,7 @@ def test_task_contract_rejects_non_json_binary_and_unordered_inputs(
 
 def test_research_claim_requirement_binds_the_exact_proposition_text() -> None:
     proposition = "서울의 현재 기온은 섭씨 23도다."
-    digest = "sha256:" + sha256(proposition.encode()).hexdigest()
+    digest = canonical_research_proposition_digest(proposition)
     claim = ResearchClaimRequirement(
         claimId="claim_weather",
         claimClass="temporal_fact",
