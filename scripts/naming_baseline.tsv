@@ -259,7 +259,6 @@ openmagi	magi_agent/transport/integrations.py	2
 openmagi	magi_agent/transport/learning_dashboard.py	2
 openmagi	magi_agent/transport/plugins.py	4
 openmagi	magi_agent/transport/product_admin.py	16
-openmagi	magi_agent/transport/shadow_invocations.py	2
 openmagi	magi_agent/transport/streaming_chat_route.py	1
 openmagi	magi_agent/transport/tools.py	5
 openmagi	magi_agent/transport/web_dashboard.py	5

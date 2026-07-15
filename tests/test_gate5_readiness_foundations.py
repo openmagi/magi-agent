@@ -100,8 +100,6 @@ def test_gate5_readiness_accepts_selected_non_user_visible_diagnostics_only() ->
     assert gate5["shadowModulesReady"] is True
     assert gate5["readySurfaces"] == [
         "gate5a_no_memory_shadow_canary",
-        "gate5b4_internal_endpoint_contract",
-        "gate5b4c2_shadow_invocation_contract",
         "gate5b4c3_shadow_generation_contract",
         "gate5b4c3_shadow_generation_report",
         "gate5b4d_stream_fixture_audit",

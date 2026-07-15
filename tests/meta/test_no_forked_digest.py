@@ -111,7 +111,6 @@ _DIGEST_FORK_ALLOWLIST: frozenset[str] = frozenset(
         "shadow/gate2_activation_loop_a.py",
         "shadow/gate2_recipe_profile_resolver.py",
         "shadow/gate2_shadow_tool_policy.py",
-        "shadow/gate5b4c3_shadow_comparison.py",
         # content_digest_for_payload wraps a schema envelope; envelope-fold follow-up
         "storage/content_addressed.py",
         "storage/durable_store.py",
