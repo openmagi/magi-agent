@@ -146,6 +146,18 @@ def canonical_file_resource(
     return f"workspace://{digest}/{encoded}"
 
 
+def require_canonical_workspace_resource_ref(ref: str) -> str:
+    """Require the canonical workspace-resource wire shape without filesystem I/O.
+
+    This validates only the opaque identity's digest and encoded relative-path
+    shape.  Call :func:`workspace_relative_path` when the resource must also be
+    proven to belong to a concrete workspace root.
+    """
+
+    _parse_canonical_workspace_ref(ref)
+    return ref
+
+
 def workspace_relative_path(
     root: str | os.PathLike[str],
     ref: str,
@@ -238,6 +250,14 @@ def canonical_http_resource(url: str) -> str:
     return urlunsplit((scheme, authority, path, query, ""))
 
 
+def require_canonical_http_resource_ref(ref: str) -> str:
+    """Require an HTTP(S) resource that is already in canonical wire form."""
+
+    if canonical_http_resource(ref) != ref:
+        raise CanonicalizationError("HTTP resource must use the canonical form")
+    return ref
+
+
 class _LinuxOpenHow(ctypes.Structure):
     _fields_ = (
         ("flags", ctypes.c_uint64),
@@ -263,9 +283,7 @@ def _validate_no_descendant_mount_crossing(
         return _validate_linux_mount_boundary(root, candidate)
     if sys.platform == "darwin":
         return _validate_darwin_mount_boundary(root, candidate)
-    raise CanonicalizationError(
-        "secure workspace mount-boundary verification is unavailable"
-    )
+    raise CanonicalizationError("secure workspace mount-boundary verification is unavailable")
 
 
 def _validate_linux_mount_boundary(root: Path, candidate: Path) -> tuple[int, int]:
@@ -300,9 +318,7 @@ def _validate_linux_mount_boundary(root: Path, candidate: Path) -> tuple[int, in
             root_fd,
             tuple(resolved_parts),
             resolve_flags=(
-                _LINUX_RESOLVE_BENEATH
-                | _LINUX_RESOLVE_NO_XDEV
-                | _LINUX_RESOLVE_NO_MAGICLINKS
+                _LINUX_RESOLVE_BENEATH | _LINUX_RESOLVE_NO_XDEV | _LINUX_RESOLVE_NO_MAGICLINKS
             ),
             require_complete=True,
         )
@@ -343,20 +359,14 @@ def _linux_open_existing_prefix_without_mounts(
                 end -= 1
                 continue
             if exc.errno == errno.EXDEV:
-                raise CanonicalizationError(
-                    "path crosses a descendant mount boundary"
-                ) from exc
+                raise CanonicalizationError("path crosses a descendant mount boundary") from exc
             if exc.errno == errno.ELOOP:
-                raise CanonicalizationError(
-                    "path contains a symlink loop or magic link"
-                ) from exc
+                raise CanonicalizationError("path contains a symlink loop or magic link") from exc
             if exc.errno in {errno.ENOSYS, errno.EINVAL, errno.E2BIG, errno.EPERM}:
                 raise CanonicalizationError(
                     "secure workspace mount-boundary verification is unavailable"
                 ) from exc
-            raise CanonicalizationError(
-                "workspace mount boundary could not be verified"
-            ) from exc
+            raise CanonicalizationError("workspace mount boundary could not be verified") from exc
         else:
             os.close(opened_fd)
             return parts[:end]
@@ -390,9 +400,7 @@ def _linux_openat2(root_fd: int, relative: str, *, resolve_flags: int) -> int:
 def _linux_o_path_flag() -> int:
     flag = getattr(os, "O_PATH", None)
     if type(flag) is not int:
-        raise CanonicalizationError(
-            "secure workspace mount-boundary verification is unavailable"
-        )
+        raise CanonicalizationError("secure workspace mount-boundary verification is unavailable")
     return flag
 
 
@@ -412,9 +420,7 @@ def _validate_darwin_mount_boundary(root: Path, candidate: Path) -> tuple[int, i
                     "nearest existing path ancestor must be a directory"
                 ) from exc
             if os.path.ismount(proposed) or resolved.stat().st_dev != root_stat_before.st_dev:
-                raise CanonicalizationError(
-                    "path crosses a descendant mount boundary"
-                )
+                raise CanonicalizationError("path crosses a descendant mount boundary")
             try:
                 resolved.relative_to(root)
             except ValueError as exc:
@@ -424,7 +430,7 @@ def _validate_darwin_mount_boundary(root: Path, candidate: Path) -> tuple[int, i
     except CanonicalizationError:
         raise
     except (OSError, RuntimeError) as exc:
-        if isinstance(exc, OSError) and exc.errno == errno.ELOOP:
+        if _is_symlink_loop_error(exc):
             raise CanonicalizationError("path contains a symlink loop") from exc
         raise CanonicalizationError("workspace mount boundary could not be verified") from exc
 
@@ -433,6 +439,14 @@ def _validate_darwin_mount_boundary(root: Path, candidate: Path) -> tuple[int, i
     if before != after:
         raise CanonicalizationError("workspace mount view changed")
     return before
+
+
+def _is_symlink_loop_error(exc: OSError | RuntimeError) -> bool:
+    """Recognize the platform-specific errors emitted for symlink loops."""
+
+    if isinstance(exc, OSError):
+        return exc.errno == errno.ELOOP
+    return "symlink loop" in str(exc).casefold()
 
 
 def _resolved_workspace_root(root: str | os.PathLike[str]) -> Path:
@@ -531,9 +545,7 @@ def _validate_forward_workspace_path_budget(root_text: str, path_text: str) -> N
     else:
         separator_bytes = 0 if not root_text or root_text.endswith(os.sep) else 1
         raw_combined_bytes = (
-            _encoded_path_bytes(root_text)
-            + separator_bytes
-            + _encoded_path_bytes(path_text)
+            _encoded_path_bytes(root_text) + separator_bytes + _encoded_path_bytes(path_text)
         )
         if raw_combined_bytes > _MAX_WORKSPACE_CANDIDATE_BYTES:
             raise _workspace_path_budget_error()
@@ -574,6 +586,15 @@ def _parse_workspace_ref_before_filesystem(
     root_text: str,
     ref: str,
 ) -> tuple[re.Match[str], tuple[str, ...]]:
+    match, decoded = _parse_canonical_workspace_ref(ref)
+    lexical_root = _lexical_absolute_workspace_root(root_text)
+    _validate_candidate_byte_budget(os.fspath(lexical_root.joinpath(*decoded)))
+    return match, decoded
+
+
+def _parse_canonical_workspace_ref(
+    ref: str,
+) -> tuple[re.Match[str], tuple[str, ...]]:
     if type(ref) is not str:
         raise CanonicalizationError("workspace resource must be canonical text")
     if len(ref) > _MAX_WORKSPACE_REF_CHARS:
@@ -588,7 +609,6 @@ def _parse_workspace_ref_before_filesystem(
     if len(suffix) > _MAX_WORKSPACE_ENCODED_SUFFIX_CHARS:
         raise _workspace_path_budget_error()
     if suffix == "":
-        _validate_candidate_byte_budget(os.fspath(_lexical_absolute_workspace_root(root_text)))
         return match, ()
     if suffix.startswith("/") or suffix.endswith("/") or "//" in suffix:
         raise CanonicalizationError("workspace resource must use canonical path segments")
@@ -619,8 +639,6 @@ def _parse_workspace_ref_before_filesystem(
 
     decoded = tuple(decoded_segments)
     _validate_relative_workspace_segments(decoded)
-    lexical_root = _lexical_absolute_workspace_root(root_text)
-    _validate_candidate_byte_budget(os.fspath(lexical_root.joinpath(*decoded)))
     return match, decoded
 
 
@@ -779,9 +797,7 @@ def _validate_existing_prefix_traversal(
         try:
             resolved_identity = _stat_identity(resolved)
         except OSError as exc:
-            raise CanonicalizationError(
-                "path identity changed during canonicalization"
-            ) from exc
+            raise CanonicalizationError("path identity changed during canonicalization") from exc
         if resolved_identity != identity:
             raise CanonicalizationError("path identity changed during canonicalization")
         _require_workspace_containment(root, resolved)

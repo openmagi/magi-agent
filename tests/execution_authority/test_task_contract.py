@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from hashlib import sha256
 from types import SimpleNamespace
 
 import pytest
@@ -9,15 +10,17 @@ from pydantic import ConfigDict, Field, ValidationError
 from magi_agent.execution_authority.contracts import (
     DependencyContract,
     ProofObligation,
+    ResearchClaimRequirement,
     Requirement,
     TaskContractBinding,
     TaskContractSnapshot,
     bind_task_contract,
+    canonical_task_contract_bytes,
     canonical_task_contract_digest,
+    canonical_task_contract_json,
     validate_task_contract_binding,
 )
 from magi_agent.execution_authority.state_machine import RequirementState
-from magi_agent.ops.safety import canonical_digest
 
 
 def _digest(character: str) -> str:
@@ -119,6 +122,23 @@ def test_duplicate_requirement_ids_are_rejected() -> None:
         _snapshot(
             requirements=[_snapshot().model_dump(by_alias=True)["requirements"][0], duplicate]
         )
+
+
+def test_task_contract_supersession_is_paired_and_version_monotonic() -> None:
+    with pytest.raises(ValidationError, match="both-or-neither"):
+        _snapshot(supersedesTaskContractId="task_01")
+    with pytest.raises(ValidationError, match="advance supersedesVersion"):
+        _snapshot(
+            version=3,
+            supersedesTaskContractId="task_01",
+            supersedesVersion=1,
+        )
+    clarified = _snapshot(
+        version=3,
+        supersedesTaskContractId="task_01",
+        supersedesVersion=2,
+    )
+    assert clarified.version == clarified.supersedes_version + 1
 
 
 @pytest.mark.parametrize(
@@ -246,7 +266,7 @@ def test_contract_collections_are_tuples_and_copy_escape_hatches_are_closed() ->
     assert copied is not snapshot
 
 
-def test_non_ascii_snapshot_uses_the_repo_canonical_digest_kernel() -> None:
+def test_non_ascii_snapshot_uses_the_task_contract_unicode_byte_stream() -> None:
     snapshot = _snapshot(
         taskContractId="작업_01",
         completionEpochId="완료_01",
@@ -272,9 +292,13 @@ def test_non_ascii_snapshot_uses_the_repo_canonical_digest_kernel() -> None:
             }
         ],
     )
-    alias_json = snapshot.model_dump(by_alias=True, mode="json")
+    canonical_json = canonical_task_contract_json(snapshot)
+    canonical_bytes = canonical_task_contract_bytes(snapshot)
 
-    assert canonical_task_contract_digest(snapshot) == canonical_digest(alias_json)
+    assert "사용자가" in canonical_json
+    assert canonical_task_contract_digest(snapshot) == (
+        "sha256:" + sha256(canonical_bytes).hexdigest()
+    )
 
 
 def test_declared_minimum_lengths_and_versions_are_enforced() -> None:
@@ -620,3 +644,37 @@ def test_stale_binding_fails_against_same_id_and_version_mutated_snapshot() -> N
     assert mutated.version == original.version
     with pytest.raises(ValueError, match="taskContractDigest"):
         validate_task_contract_binding(mutated, binding)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("intent", b"binary intent"),
+        ("inclusions", [b"binary inclusion"]),
+        ("constraints", {"unordered constraint"}),
+    ),
+)
+def test_task_contract_rejects_non_json_binary_and_unordered_inputs(
+    field: str,
+    value: object,
+) -> None:
+    with pytest.raises(ValidationError, match="canonical JSON"):
+        _snapshot(**{field: value})
+
+
+def test_research_claim_requirement_binds_the_exact_proposition_text() -> None:
+    proposition = "서울의 현재 기온은 섭씨 23도다."
+    digest = "sha256:" + sha256(proposition.encode()).hexdigest()
+    claim = ResearchClaimRequirement(
+        claimId="claim_weather",
+        claimClass="temporal_fact",
+        proposition=proposition,
+        propositionDigest=digest,
+        freshness="same_retrieval_window",
+    )
+    assert claim.proposition_digest == digest
+
+    payload = claim.model_dump(by_alias=True, mode="json")
+    payload["proposition"] = "서울의 현재 기온은 섭씨 24도다."
+    with pytest.raises(ValidationError, match="propositionDigest"):
+        ResearchClaimRequirement.model_validate(payload)

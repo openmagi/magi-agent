@@ -1,14 +1,87 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Set as AbstractSet
+from collections.abc import Iterable, Mapping, Set as AbstractSet
 from datetime import datetime, timedelta
-from typing import Any, Literal, Self
+from hashlib import sha256
+import json
+from typing import TYPE_CHECKING, Any, Literal, Self
+from urllib.parse import urlsplit
 
 from pydantic import ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
-from magi_agent.execution_authority.state_machine import RequirementState
+from magi_agent.execution_authority.state_machine import EffectClass, RequirementState
 from magi_agent.ops.authority import FrozenContractModel
 from magi_agent.ops.safety import canonical_digest, require_digest
+
+
+_MAX_CONTRACT_INPUT_NODES = 20_000
+_MAX_CONTRACT_INPUT_DEPTH = 64
+_MAX_CONTRACT_JSON_BYTES = 1_048_576
+_MAX_IJSON_INTEGER = (2**53) - 1
+
+
+def _preflight_json_depth(payload: str) -> None:
+    depth = 0
+    in_string = False
+    escaped = False
+    for character in payload:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            if depth > _MAX_CONTRACT_INPUT_DEPTH:
+                raise ValueError("authority contract JSON exceeds the depth budget")
+        elif character in "]}":
+            depth -= 1
+            if depth < 0:
+                raise ValueError("authority contract JSON has unbalanced containers")
+
+
+def _load_authority_contract_json(payload: str | bytes | bytearray) -> object:
+    if type(payload) is str:
+        encoded = payload.encode("utf-8")
+        text = payload
+    elif type(payload) in (bytes, bytearray):
+        encoded = bytes(payload)
+        try:
+            text = encoded.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("authority contract JSON must use UTF-8") from exc
+    else:
+        raise TypeError("authority contract JSON must be an exact string or byte sequence")
+    if len(encoded) > _MAX_CONTRACT_JSON_BYTES:
+        raise ValueError("authority contract JSON exceeds the byte budget")
+    _preflight_json_depth(text)
+
+    def _pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("authority contract JSON contains a duplicate key")
+            result[key] = value
+        return result
+
+    try:
+        return json.loads(
+            text,
+            object_pairs_hook=_pairs,
+            parse_float=lambda value: (_ for _ in ()).throw(
+                ValueError(f"authority contract JSON contains floating-point number {value}")
+            ),
+            parse_constant=lambda value: (_ for _ in ()).throw(
+                ValueError(f"authority contract JSON contains non-finite number {value}")
+            ),
+        )
+    except (json.JSONDecodeError, RecursionError) as exc:
+        raise ValueError("authority contract JSON is invalid") from exc
 
 
 class _AuthorityContractModel(FrozenContractModel):
@@ -22,6 +95,63 @@ class _AuthorityContractModel(FrozenContractModel):
         hide_input_in_errors=True,
         revalidate_instances="always",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_noncanonical_python_inputs(
+        cls,
+        value: object,
+        info: ValidationInfo,
+    ) -> object:
+        """Reject Python-only aliases before they can become canonical wire bytes."""
+
+        if info.mode == "json":
+            raise ValueError(
+                "authority JSON must use the duplicate-safe model_validate_json decoder"
+            )
+        pending: list[tuple[object, int]] = [(value, 0)]
+        visited = 0
+        while pending:
+            current, depth = pending.pop()
+            visited += 1
+            if visited > _MAX_CONTRACT_INPUT_NODES:
+                raise ValueError("authority contract input exceeds the canonical JSON node budget")
+            if depth > _MAX_CONTRACT_INPUT_DEPTH:
+                raise ValueError("authority contract input exceeds the canonical JSON depth budget")
+            if isinstance(current, FrozenContractModel):
+                continue
+            if type(current) in (bytes, bytearray, memoryview):
+                raise ValueError(
+                    "canonical JSON requires an exact string; exact integer 1 fields "
+                    "cannot use binary aliases"
+                )
+            if type(current) is int and abs(current) > _MAX_IJSON_INTEGER:
+                raise ValueError("authority contract integer exceeds the I-JSON safe range")
+            if isinstance(current, AbstractSet):
+                raise ValueError("authority contract input must use canonical JSON ordered arrays")
+            if type(current) is dict:
+                for key, child in current.items():
+                    if type(key) is not str:
+                        raise ValueError(
+                            "authority contract input must use canonical JSON object keys"
+                        )
+                    pending.append((child, depth + 1))
+            elif type(current) in (list, tuple):
+                pending.extend((child, depth + 1) for child in current)
+            elif isinstance(current, Mapping):
+                raise ValueError("authority contract input requires an exact dict")
+            elif isinstance(current, Iterable) and not isinstance(current, str):
+                raise ValueError("authority contract input rejects Python-only iterable containers")
+        return value
+
+    @classmethod
+    def model_validate_json(  # type: ignore[override]
+        cls,
+        json_data: str | bytes | bytearray,
+        **kwargs: Any,
+    ) -> Self:
+        parsed = _load_authority_contract_json(json_data)
+        return cls.model_validate(parsed, **kwargs)
 
     def copy(  # type: ignore[override]
         self,
@@ -38,10 +168,106 @@ class _AuthorityContractModel(FrozenContractModel):
         return self.model_copy(deep=deep)
 
 
+class ResearchClaimRequirement(_AuthorityContractModel):
+    claim_id: str = Field(alias="claimId", min_length=1)
+    claim_class: Literal[
+        "factual",
+        "temporal_fact",
+        "comparative",
+        "causal",
+        "recommendation",
+    ] = Field(alias="claimClass")
+    proposition: str = Field(min_length=1)
+    proposition_digest: str | None = Field(
+        default=None,
+        alias="propositionDigest",
+    )
+    freshness: Literal[
+        "same_retrieval_window",
+        "same_state_root",
+        "current_release",
+        "historical_snapshot",
+    ]
+
+    @model_validator(mode="after")
+    def _bind_exact_proposition(self) -> Self:
+        expected = "sha256:" + sha256(self.proposition.encode("utf-8")).hexdigest()
+        if self.proposition_digest is not None and self.proposition_digest != expected:
+            raise ValueError("propositionDigest does not match proposition")
+        object.__setattr__(self, "proposition_digest", expected)
+        return self
+
+
+class ResearchProofObligation(_AuthorityContractModel):
+    """Research semantics frozen into the Task Contract v1 wire shape."""
+
+    claims: tuple[ResearchClaimRequirement, ...] = Field(min_length=1)
+    query_classes: tuple[
+        Literal[
+            "official_primary",
+            "peer_reviewed_primary",
+            "first_party_data",
+            "reputable_secondary",
+            "exploratory",
+        ],
+        ...,
+    ] = Field(alias="queryClasses", min_length=1)
+    primary_source_rule: Literal[
+        "required",
+        "required_when_available",
+        "preferred",
+        "not_required",
+    ] = Field(alias="primarySourceRule")
+    conflict_handling: Literal[
+        "resolve",
+        "resolve_or_disclose",
+        "disclose",
+        "block",
+    ] = Field(alias="conflictHandling")
+    stopping_rules: tuple[
+        Literal[
+            "claim_coverage_met",
+            "conflicts_resolved_or_disclosed",
+            "source_classes_exhausted",
+            "explicit_budget_reached",
+        ],
+        ...,
+    ] = Field(alias="stoppingRules", min_length=1)
+    limited_snippet_allowance: Literal[
+        "forbidden",
+        "discovery_only",
+        "explicitly_accepted_proof",
+    ] = Field(alias="limitedSnippetAllowance")
+
+    @field_validator("claims", "query_classes", "stopping_rules", mode="before")
+    @classmethod
+    def _require_ordered_research_sequences(
+        cls,
+        value: object,
+        info: ValidationInfo,
+    ) -> object:
+        return _require_ordered_collection(
+            value,
+            field_name=info.field_name or "research sequence",
+        )
+
+    @model_validator(mode="after")
+    def _require_unique_claims_and_queries(self) -> Self:
+        claim_ids = tuple(claim.claim_id for claim in self.claims)
+        if len(claim_ids) != len(set(claim_ids)):
+            raise ValueError("research claim IDs must be unique")
+        if len(self.query_classes) != len(set(self.query_classes)):
+            raise ValueError("research query classes must be unique")
+        if len(self.stopping_rules) != len(set(self.stopping_rules)):
+            raise ValueError("research stopping rules must be unique")
+        return self
+
+
 class ProofObligation(_AuthorityContractModel):
     evidence_kinds: tuple[str, ...] = Field(alias="evidenceKinds", min_length=1)
     freshness: str = Field(min_length=1)
     required_producer: str | None = Field(default=None, alias="requiredProducer")
+    research: ResearchProofObligation | None = None
 
     @field_validator("evidence_kinds", mode="before")
     @classmethod
@@ -128,6 +354,16 @@ class TaskContractSnapshot(_AuthorityContractModel):
         requirement_ids = tuple(requirement.requirement_id for requirement in self.requirements)
         if len(requirement_ids) != len(set(requirement_ids)):
             raise ValueError("requirement IDs must be unique")
+        if (self.supersedes_task_contract_id is None) != (self.supersedes_version is None):
+            raise ValueError("supersedesTaskContractId and supersedesVersion are both-or-neither")
+        if (
+            self.supersedes_task_contract_id == self.task_contract_id
+            and self.supersedes_version is not None
+            and self.version != self.supersedes_version + 1
+        ):
+            raise ValueError(
+                "same-task clarification version must advance supersedesVersion exactly once"
+            )
         return self
 
 
@@ -153,12 +389,16 @@ class TaskContractBinding(_AuthorityContractModel):
 
 
 class AuthorityCapability(_AuthorityContractModel):
-    effect_class: str = Field(alias="effectClass", min_length=1)
+    effect_class: EffectClass = Field(alias="effectClass")
     resource_ref: str = Field(alias="resourceRef", min_length=1)
     network_refs: tuple[str, ...] = Field(alias="networkRefs")
     credential_refs: tuple[str, ...] = Field(alias="credentialRefs")
+    workspace_view_binding_digest: str | None = Field(
+        default=None,
+        alias="workspaceViewBindingDigest",
+    )
 
-    @field_validator("effect_class", "resource_ref", mode="before")
+    @field_validator("resource_ref", mode="before")
     @classmethod
     def _require_exact_identity_string(
         cls,
@@ -166,6 +406,13 @@ class AuthorityCapability(_AuthorityContractModel):
         info: ValidationInfo,
     ) -> object:
         return _require_exact_string(value, field_name=info.field_name or "capability")
+
+    @field_validator("effect_class", mode="before")
+    @classmethod
+    def _require_effect_class_wire_type(cls, value: object) -> object:
+        if type(value) not in (str, EffectClass):
+            raise ValueError("effectClass must be an exact string or EffectClass")
+        return value
 
     @field_validator("network_refs", "credential_refs", mode="before")
     @classmethod
@@ -178,6 +425,27 @@ class AuthorityCapability(_AuthorityContractModel):
             value,
             field_name=info.field_name or "capability refs",
         )
+
+    @field_validator("workspace_view_binding_digest")
+    @classmethod
+    def _validate_workspace_view_binding_digest(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return require_digest(value)
+
+    @model_validator(mode="after")
+    def _require_workspace_view_for_workspace_effects(self) -> Self:
+        if (
+            self.resource_ref.startswith("workspace://")
+            or self.effect_class
+            in {
+                EffectClass.WORKSPACE_READ,
+                EffectClass.WORKSPACE_WRITE,
+                EffectClass.WORKSPACE_DELETE,
+            }
+        ) and self.workspace_view_binding_digest is None:
+            raise ValueError("workspaceViewBindingDigest is required for workspace capabilities")
+        return self
 
 
 class AuthorityInput(_AuthorityContractModel):
@@ -272,6 +540,10 @@ class AuthorityContract(_AuthorityContractModel):
     network_digest: str | None = Field(default=None, alias="networkDigest")
     disclosure_digest: str = Field(alias="disclosureDigest")
     capabilities: tuple[AuthorityCapability, ...] = Field(min_length=1)
+    workspace_view_binding_digest: str | None = Field(
+        default=None,
+        alias="workspaceViewBindingDigest",
+    )
     sandbox_profile_digest: str = Field(alias="sandboxProfileDigest")
     guardian_ceiling_digest: str = Field(alias="guardianCeilingDigest")
     expires_at: datetime = Field(alias="expiresAt")
@@ -313,6 +585,7 @@ class AuthorityContract(_AuthorityContractModel):
         "credential_scope_digest",
         "network_digest",
         "disclosure_digest",
+        "workspace_view_binding_digest",
         "sandbox_profile_digest",
         "guardian_ceiling_digest",
         "revocation_digest",
@@ -379,6 +652,7 @@ class AuthorityContract(_AuthorityContractModel):
         "credential_scope_digest",
         "network_digest",
         "disclosure_digest",
+        "workspace_view_binding_digest",
         "sandbox_profile_digest",
         "guardian_ceiling_digest",
         "revocation_digest",
@@ -419,6 +693,16 @@ class AuthorityContract(_AuthorityContractModel):
             raise ValueError("resumeBindingDigest is required with decisionRequestId")
         if len(self.capabilities) != len(set(self.capabilities)):
             raise ValueError("duplicate capabilities are not allowed")
+        workspace_bindings = {
+            capability.workspace_view_binding_digest
+            for capability in self.capabilities
+            if capability.workspace_view_binding_digest is not None
+        }
+        if workspace_bindings:
+            if workspace_bindings != {self.workspace_view_binding_digest}:
+                raise ValueError("workspaceViewBindingDigest must match every workspace capability")
+        elif self.workspace_view_binding_digest is not None:
+            raise ValueError("workspaceViewBindingDigest requires a workspace-bound capability")
         if self.parent_authority_digest is None:
             if self.delegation_chain:
                 raise ValueError("root authority contracts may not contain a delegationChain")
@@ -448,6 +732,10 @@ class UserDecisionRequest(_AuthorityContractModel):
     normalized_request_digest: str = Field(alias="normalizedRequestDigest")
     capabilities: tuple[AuthorityCapability, ...] = Field(min_length=1)
     capabilities_digest: str = Field(default="", alias="capabilitiesDigest")
+    workspace_view_binding_digest: str | None = Field(
+        default=None,
+        alias="workspaceViewBindingDigest",
+    )
     authority_ceiling_digest: str = Field(alias="authorityCeilingDigest")
     policy_digest: str = Field(alias="policyDigest")
     pending_event_id: str = Field(alias="pendingEventId", min_length=1)
@@ -456,8 +744,16 @@ class UserDecisionRequest(_AuthorityContractModel):
     expires_at: datetime = Field(alias="expiresAt")
     compare_version: int = Field(alias="compareVersion", ge=0, strict=True)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _require_exact_schema_id(cls, value: object) -> object:
+        if isinstance(value, Mapping):
+            for field_name in ("schemaId", "schema_id"):
+                if field_name in value:
+                    _require_exact_string(value[field_name], field_name="schemaId")
+        return value
+
     @field_validator(
-        "schema_id",
         "decision_request_id",
         "principal_id",
         "tenant_id",
@@ -482,6 +778,7 @@ class UserDecisionRequest(_AuthorityContractModel):
         "task_contract_digest",
         "normalized_request_digest",
         "capabilities_digest",
+        "workspace_view_binding_digest",
         "authority_ceiling_digest",
         "policy_digest",
         mode="before",
@@ -492,16 +789,21 @@ class UserDecisionRequest(_AuthorityContractModel):
         value: object,
         info: ValidationInfo,
     ) -> object:
+        if value is None:
+            return None
         return _require_exact_string(value, field_name=info.field_name or "request digest")
 
     @field_validator(
         "task_contract_digest",
         "normalized_request_digest",
+        "workspace_view_binding_digest",
         "authority_ceiling_digest",
         "policy_digest",
     )
     @classmethod
-    def _validate_digest(cls, value: str) -> str:
+    def _validate_digest(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return require_digest(value)
 
     @field_validator("capabilities", mode="before")
@@ -544,6 +846,15 @@ class UserDecisionRequest(_AuthorityContractModel):
         elif "capabilities_digest" in self.model_fields_set:
             raise ValueError("capabilitiesDigest must use a canonical sha256 digest")
         object.__setattr__(self, "capabilities_digest", expected_digest)
+        workspace_bindings = {
+            capability.workspace_view_binding_digest
+            for capability in self.capabilities
+            if capability.workspace_view_binding_digest is not None
+        }
+        if workspace_bindings and workspace_bindings != {self.workspace_view_binding_digest}:
+            raise ValueError("workspaceViewBindingDigest must match every requested capability")
+        if not workspace_bindings and self.workspace_view_binding_digest is not None:
+            raise ValueError("workspaceViewBindingDigest requires a workspace-bound capability")
         if self.expires_at <= self.created_at:
             raise ValueError("expiresAt must be later than createdAt")
         return self
@@ -576,12 +887,24 @@ class UserDecisionReceipt(_AuthorityContractModel):
     authority_ceiling_digest: str = Field(alias="authorityCeilingDigest")
     policy_digest: str = Field(alias="policyDigest")
     capabilities_digest: str = Field(alias="capabilitiesDigest")
+    workspace_view_binding_digest: str | None = Field(
+        default=None,
+        alias="workspaceViewBindingDigest",
+    )
     issued_at: datetime = Field(alias="issuedAt")
     expires_at: datetime = Field(alias="expiresAt")
     revokes_receipt_digest: str | None = Field(default=None, alias="revokesReceiptDigest")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _require_exact_schema_id(cls, value: object) -> object:
+        if isinstance(value, Mapping):
+            for field_name in ("schemaId", "schema_id"):
+                if field_name in value:
+                    _require_exact_string(value[field_name], field_name="schemaId")
+        return value
+
     @field_validator(
-        "schema_id",
         "receipt_id",
         "decision_request_id",
         "decision",
@@ -614,6 +937,7 @@ class UserDecisionReceipt(_AuthorityContractModel):
         "authority_ceiling_digest",
         "policy_digest",
         "capabilities_digest",
+        "workspace_view_binding_digest",
         "revokes_receipt_digest",
         mode="before",
     )
@@ -636,6 +960,7 @@ class UserDecisionReceipt(_AuthorityContractModel):
         "authority_ceiling_digest",
         "policy_digest",
         "capabilities_digest",
+        "workspace_view_binding_digest",
         "revokes_receipt_digest",
     )
     @classmethod
@@ -814,9 +1139,26 @@ def _validate_binding_instance(binding: object) -> TaskContractBinding:
     return TaskContractBinding.model_validate(binding)
 
 
+def canonical_task_contract_json(snapshot: TaskContractSnapshot) -> str:
+    """Return the sole canonical Task Contract v1 JSON representation."""
+
+    validated = _validate_snapshot_instance(snapshot)
+    payload = TaskContractSnapshot.model_dump(validated, by_alias=True, mode="json")
+    return json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+
+
+def canonical_task_contract_bytes(snapshot: TaskContractSnapshot) -> bytes:
+    return canonical_task_contract_json(snapshot).encode("utf-8")
+
+
 def _validated_snapshot_digest(snapshot: TaskContractSnapshot) -> str:
-    payload = TaskContractSnapshot.model_dump(snapshot, by_alias=True, mode="json")
-    return canonical_digest(payload)
+    return "sha256:" + sha256(canonical_task_contract_bytes(snapshot)).hexdigest()
 
 
 def canonical_task_contract_digest(snapshot: TaskContractSnapshot) -> str:
@@ -872,6 +1214,112 @@ def _authority_capability_json(capability: AuthorityCapability) -> str:
     return AuthorityCapability.model_dump_json(capability, by_alias=True)
 
 
+def _scope_contains(broader: str, narrower: str) -> bool:
+    """Return whether one canonical or logical scope wholly contains another."""
+
+    if broader == narrower:
+        return True
+    if broader.startswith(("http://", "https://")) and narrower.startswith(("http://", "https://")):
+        broader_url = urlsplit(broader)
+        narrower_url = urlsplit(narrower)
+        if (
+            broader_url.scheme != narrower_url.scheme
+            or broader_url.netloc != narrower_url.netloc
+            or broader_url.query
+            or broader_url.fragment
+        ):
+            return False
+        return narrower_url.path.startswith(broader_url.path.rstrip("/") + "/")
+    if broader.startswith("workspace://") and narrower.startswith("workspace://"):
+        broader_root, _, broader_path = broader.removeprefix("workspace://").partition("/")
+        narrower_root, _, narrower_path = narrower.removeprefix("workspace://").partition("/")
+        if broader_root != narrower_root:
+            return False
+        if not broader_path:
+            return True
+        return narrower_path.startswith(broader_path.rstrip("/") + "/")
+    return narrower.startswith(broader.rstrip("/") + "/")
+
+
+def _scopes_contain(
+    broader: tuple[str, ...],
+    narrower: tuple[str, ...],
+) -> bool:
+    if not narrower:
+        return True
+    if not broader:
+        return False
+    return all(any(_scope_contains(parent, child) for parent in broader) for child in narrower)
+
+
+def _capability_contains(
+    broader: AuthorityCapability,
+    narrower: AuthorityCapability,
+) -> bool:
+    return (
+        broader.effect_class is narrower.effect_class
+        and _scope_contains(broader.resource_ref, narrower.resource_ref)
+        and _scopes_contain(broader.network_refs, narrower.network_refs)
+        and _scopes_contain(broader.credential_refs, narrower.credential_refs)
+        and broader.workspace_view_binding_digest == narrower.workspace_view_binding_digest
+    )
+
+
+def _intersect_scope_sets(
+    left: tuple[str, ...],
+    right: tuple[str, ...],
+) -> tuple[str, ...]:
+    if not left or not right:
+        return ()
+    intersections = {
+        right_scope if _scope_contains(left_scope, right_scope) else left_scope
+        for left_scope in left
+        for right_scope in right
+        if _scope_contains(left_scope, right_scope) or _scope_contains(right_scope, left_scope)
+    }
+    return tuple(sorted(intersections))
+
+
+def _intersect_capabilities(
+    left: AuthorityCapability,
+    right: AuthorityCapability,
+) -> AuthorityCapability | None:
+    if left.effect_class is not right.effect_class:
+        return None
+    if left.workspace_view_binding_digest != right.workspace_view_binding_digest:
+        return None
+    if _scope_contains(left.resource_ref, right.resource_ref):
+        resource_ref = right.resource_ref
+    elif _scope_contains(right.resource_ref, left.resource_ref):
+        resource_ref = left.resource_ref
+    else:
+        return None
+    return AuthorityCapability(
+        effectClass=left.effect_class,
+        resourceRef=resource_ref,
+        networkRefs=_intersect_scope_sets(left.network_refs, right.network_refs),
+        credentialRefs=_intersect_scope_sets(
+            left.credential_refs,
+            right.credential_refs,
+        ),
+        workspaceViewBindingDigest=left.workspace_view_binding_digest,
+    )
+
+
+def _capabilities_overlap(
+    left: AuthorityCapability,
+    right: AuthorityCapability,
+) -> bool:
+    return (
+        left.effect_class is right.effect_class
+        and left.workspace_view_binding_digest == right.workspace_view_binding_digest
+        and (
+            _scope_contains(left.resource_ref, right.resource_ref)
+            or _scope_contains(right.resource_ref, left.resource_ref)
+        )
+    )
+
+
 def _validated_authority_contract_digest(contract: AuthorityContract) -> str:
     payload = AuthorityContract.model_dump(contract, by_alias=True, mode="json")
     return canonical_digest(payload)
@@ -893,8 +1341,12 @@ def resolve_authority(
         raise TypeError("authority resolver inputs must be an exact tuple")
     validated_inputs = tuple(_validate_authority_input_instance(value) for value in inputs)
 
-    allowing_inputs = tuple(value for value in validated_inputs if value.decision != "deny")
-    if not allowing_inputs:
+    originating_inputs = tuple(
+        value
+        for value in validated_inputs
+        if value.source != "guardian" and value.decision != "deny"
+    )
+    if not originating_inputs:
         return AuthorityDecision.model_validate(
             {
                 "status": "deny",
@@ -903,24 +1355,35 @@ def resolve_authority(
             }
         )
 
-    capabilities_by_key = {
-        _authority_capability_json(capability): capability
-        for capability in allowing_inputs[0].capabilities
-    }
-    effective_keys = set(capabilities_by_key)
-    for authority_input in allowing_inputs[1:]:
-        effective_keys.intersection_update(
-            _authority_capability_json(capability) for capability in authority_input.capabilities
-        )
+    allowing_inputs = tuple(value for value in validated_inputs if value.decision != "deny")
+    effective_capabilities = originating_inputs[0].capabilities
+    skipped_origin = False
+    for authority_input in allowing_inputs:
+        if authority_input is originating_inputs[0] and not skipped_origin:
+            skipped_origin = True
+            continue
+        intersections = {
+            _authority_capability_json(intersection): intersection
+            for current in effective_capabilities
+            for ceiling in authority_input.capabilities
+            if (intersection := _intersect_capabilities(current, ceiling)) is not None
+        }
+        effective_capabilities = tuple(intersections[key] for key in sorted(intersections))
+        if not effective_capabilities:
+            break
 
-    denied_keys = {
-        _authority_capability_json(capability)
+    denied_capabilities = tuple(
+        capability
         for authority_input in validated_inputs
         if authority_input.decision == "deny"
         for capability in authority_input.capabilities
-    }
-    effective_keys.difference_update(denied_keys)
-    if not effective_keys:
+    )
+    effective_capabilities = tuple(
+        capability
+        for capability in effective_capabilities
+        if not any(_capabilities_overlap(capability, denied) for denied in denied_capabilities)
+    )
+    if not effective_capabilities:
         return AuthorityDecision.model_validate(
             {
                 "status": "deny",
@@ -936,7 +1399,7 @@ def resolve_authority(
     else:
         status = "allow"
 
-    capabilities = tuple(capabilities_by_key[key] for key in sorted(effective_keys))
+    capabilities = tuple(sorted(effective_capabilities, key=_authority_capability_json))
     return AuthorityDecision.model_validate(
         {
             "status": status,
@@ -956,17 +1419,19 @@ def validate_delegated_authority(
 
     if validated_child.parent_authority_digest != parent_digest:
         raise ValueError("parentAuthorityDigest must equal the canonical parent digest")
+    if validated_child.authority_contract_id == validated_parent.authority_contract_id:
+        raise ValueError("delegated authority requires a distinct authorityContractId")
     expected_chain = (*validated_parent.delegation_chain, parent_digest)
     if validated_child.delegation_chain != expected_chain:
         raise ValueError("delegationChain must append the canonical parent digest")
 
-    parent_capabilities = {
-        _authority_capability_json(capability) for capability in validated_parent.capabilities
-    }
-    child_capabilities = {
-        _authority_capability_json(capability) for capability in validated_child.capabilities
-    }
-    if not child_capabilities or not child_capabilities.issubset(parent_capabilities):
+    if not validated_child.capabilities or any(
+        not any(
+            _capability_contains(parent_capability, child_capability)
+            for parent_capability in validated_parent.capabilities
+        )
+        for child_capability in validated_child.capabilities
+    ):
         raise ValueError("delegated capabilities must be a nonempty subset of the parent")
     if validated_child.expires_at > validated_parent.expires_at:
         raise ValueError("delegated expiresAt may not extend the parent expiry")
@@ -977,6 +1442,7 @@ def validate_delegated_authority(
             "issuer_id",
             "child_actor_id",
             "capabilities",
+            "workspace_view_binding_digest",
             "expires_at",
             "parent_authority_digest",
             "delegation_chain",
@@ -1057,7 +1523,14 @@ def _validated_user_decision_request_digest(
     request: UserDecisionRequest,
 ) -> str:
     payload = UserDecisionRequest.model_dump(request, by_alias=True, mode="json")
-    return canonical_digest(payload)
+    request_json = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+    return "sha256:" + sha256(request_json.encode("utf-8")).hexdigest()
 
 
 def canonical_user_decision_request_digest(request: UserDecisionRequest) -> str:
@@ -1117,6 +1590,7 @@ def validate_user_decision_receipt_binding(
         ("authorityCeilingDigest", "authority_ceiling_digest"),
         ("policyDigest", "policy_digest"),
         ("capabilitiesDigest", "capabilities_digest"),
+        ("workspaceViewBindingDigest", "workspace_view_binding_digest"),
     )
     if validated_receipt.authenticated_actor_id != validated_request.principal_id:
         raise ValueError("authenticatedActorId does not match the request principalId")
@@ -1130,3 +1604,127 @@ def validate_user_decision_receipt_binding(
     if validated_receipt.expires_at > validated_request.expires_at:
         raise ValueError("expiresAt does not match the user decision request time window")
     return validated_receipt
+
+
+# Cross-workstream envelopes live in a separate leaf module to keep the core
+# capability and user-decision contracts reviewable.  A lazy compatibility
+# export preserves ``execution_authority.contracts`` as the public import path
+# without making direct ``execution_authority.envelopes`` imports cyclic.
+if TYPE_CHECKING:
+    from magi_agent.execution_authority.envelopes import *  # noqa: F401,F403
+
+
+_ENVELOPE_EXPORTS = frozenset(
+    {
+        "ActionAdmission",
+        "ActionIntent",
+        "ActionProposal",
+        "ActionReceipt",
+        "ActionResolution",
+        "ActionSnapshot",
+        "AttemptObservationRecording",
+        "AttemptSnapshot",
+        "AttemptVerificationRecording",
+        "BackendObservation",
+        "CompletionPersistenceReceipt",
+        "CompletionVerdict",
+        "CoverageDescriptor",
+        "DependencyHealth",
+        "EffectDeclarationBinding",
+        "EpochSeal",
+        "EpochSnapshot",
+        "EvidenceNode",
+        "EvidenceNodeDraft",
+        "EvidenceEdge",
+        "EvidenceRecordDraft",
+        "EvidenceRecordRecording",
+        "ExecutionPreparation",
+        "ExecutionStart",
+        "ExecutionStartRequest",
+        "FinalizationRequest",
+        "FinalizationEvaluationRequest",
+        "FreshnessBinding",
+        "GenericJournalEventDraft",
+        "IntegrityScanResult",
+        "JournalCoverageWindow",
+        "JournalChainLink",
+        "JournalEvent",
+        "JournalEventDraft",
+        "JournalHead",
+        "LeaseSnapshot",
+        "NonExecutionProof",
+        "NormalizedInputDraft",
+        "NormalizedInputSnapshot",
+        "OutboxDraft",
+        "OutboxItem",
+        "PartitionGate",
+        "PartitionRecoveryPlan",
+        "ProjectionCursorBinding",
+        "ProjectionCursorSnapshot",
+        "RecoveryContext",
+        "RecoveryDecision",
+        "RecoverySessionSnapshot",
+        "RequiredProjection",
+        "RequirementResult",
+        "ResearchClaimResult",
+        "ResearchSourceBinding",
+        "ResponseClaim",
+        "ResponseClaimManifest",
+        "SourceSpan",
+        "UserApprovalConsumption",
+        "UserDecisionExpirationRequest",
+        "UserDecisionInvalidationRequest",
+        "UserDecisionRecording",
+        "UserDecisionSnapshot",
+        "UserDecisionTransition",
+        "VerificationEvidenceBinding",
+        "WorkspaceCommitDecision",
+        "WorkspaceCommitDecisionRequest",
+        "WorkspaceCommitRecoveryClaim",
+        "WorkspaceCommitRecoveryClaimRequest",
+        "WorkspaceCommitSnapshot",
+        "WorkspacePublicationObservation",
+        "WorkspacePublicationReceipt",
+        "WorkspaceQuarantineReceipt",
+        "WorkspaceSnapshot",
+        "WorkspaceTransactionRequest",
+        "canonical_backend_observation_digest",
+        "canonical_evidence_node_digest",
+        "canonical_evidence_edges_digest",
+        "canonical_effect_declaration_digest",
+        "canonical_action_intent_digest",
+        "canonical_action_identity_digest",
+        "canonical_action_proposal_digest",
+        "canonical_provider_guarantees_digest",
+        "canonical_recovery_decision_digest",
+        "canonical_required_projections_digest",
+        "canonical_resource_refs_digest",
+        "canonical_response_claim_manifest_digest",
+        "canonical_workspace_view_binding_digest",
+        "canonical_workspace_commit_decision_digest",
+        "canonical_workspace_commit_recovery_claim_digest",
+        "canonical_workspace_publication_observation_digest",
+        "draft_journal_event",
+        "validate_source_span",
+        "validate_recovery_decision_context",
+        "validate_completion_persistence_contract",
+        "validate_completion_persistence_receipt",
+        "validate_finalization_request_epoch",
+        "validate_same_action_identity",
+        "validate_action_proposal_input_snapshot",
+    }
+)
+
+
+def __getattr__(name: str) -> Any:
+    if name not in _ENVELOPE_EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from magi_agent.execution_authority import envelopes
+
+    value = getattr(envelopes, name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted({*globals(), *_ENVELOPE_EXPORTS})

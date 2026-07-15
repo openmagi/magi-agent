@@ -57,12 +57,18 @@ def _capability(
     *,
     network_refs: tuple[str, ...] = (),
     credential_refs: tuple[str, ...] = (),
+    workspace_view_binding_digest: str | None = None,
 ) -> AuthorityCapability:
+    if workspace_view_binding_digest is None and (
+        effect_class.startswith("workspace.") or resource_ref.startswith("workspace:")
+    ):
+        workspace_view_binding_digest = _digest("e")
     return AuthorityCapability(
         effectClass=effect_class,
         resourceRef=resource_ref,
         networkRefs=network_refs,
         credentialRefs=credential_refs,
+        workspaceViewBindingDigest=workspace_view_binding_digest,
     )
 
 
@@ -98,8 +104,10 @@ def _contract(**updates: object) -> AuthorityContract:
                 "resourceRef": "workspace:project",
                 "networkRefs": [],
                 "credentialRefs": [],
+                "workspaceViewBindingDigest": _digest("e"),
             }
         ],
+        "workspaceViewBindingDigest": _digest("e"),
         "sandboxProfileDigest": _digest("c"),
         "guardianCeilingDigest": _digest("d"),
         "expiresAt": datetime(2025, 1, 1, tzinfo=UTC),
@@ -203,6 +211,144 @@ def test_resolver_uses_review_and_user_decision_precedence(
     assert decision.status == expected
 
 
+@pytest.mark.parametrize(
+    "guardian_decision",
+    ("allow", "review_required", "user_decision_required"),
+)
+def test_guardian_cannot_originate_authority(guardian_decision: str) -> None:
+    capability = _capability("workspace.write", "workspace:project")
+
+    decision = resolve_authority(
+        inputs=(
+            AuthorityInput(
+                source="guardian",
+                decision=guardian_decision,  # type: ignore[arg-type]
+                capabilities=(capability,),
+            ),
+        ),
+        action_digest=_digest("e"),
+    )
+
+    assert decision.status == "deny"
+    assert decision.reason_codes == ("no_allowing_authority",)
+    assert decision.capabilities == ()
+
+
+def test_guardian_attenuates_non_guardian_capabilities() -> None:
+    workspace_write = _capability("workspace.write", "workspace:project")
+    process_exec = _capability("process.exec", "binary:git")
+
+    decision = resolve_authority(
+        inputs=(
+            AuthorityInput(
+                source="user",
+                decision="allow",
+                capabilities=(workspace_write, process_exec),
+            ),
+            AuthorityInput(
+                source="guardian",
+                decision="allow",
+                capabilities=(workspace_write,),
+            ),
+        ),
+        action_digest=_digest("e"),
+    )
+
+    assert decision.status == "allow"
+    assert decision.capabilities == (workspace_write,)
+
+
+def test_authority_intersection_selects_the_narrower_hierarchical_scope() -> None:
+    broad = _capability(
+        "workspace.write",
+        "workspace:project",
+        network_refs=("https://api.example.test/",),
+    )
+    narrow = _capability(
+        "workspace.write",
+        "workspace:project/reports",
+        network_refs=("https://api.example.test/reports",),
+    )
+
+    decision = resolve_authority(
+        inputs=(
+            AuthorityInput(source="platform", decision="allow", capabilities=(broad,)),
+            AuthorityInput(source="tool", decision="allow", capabilities=(narrow,)),
+        ),
+        action_digest=_digest("e"),
+    )
+
+    assert decision.status == "allow"
+    assert decision.capabilities == (narrow,)
+
+
+def test_broad_guardian_deny_blocks_a_descendant_capability() -> None:
+    broad = _capability("workspace.write", "workspace:project")
+    child = _capability("workspace.write", "workspace:project/secret")
+
+    decision = resolve_authority(
+        inputs=(
+            AuthorityInput(source="user", decision="allow", capabilities=(child,)),
+            AuthorityInput(source="guardian", decision="deny", capabilities=(broad,)),
+        ),
+        action_digest=_digest("e"),
+    )
+
+    assert decision.status == "deny"
+    assert decision.reason_codes == ("deny_wins",)
+    assert decision.capabilities == ()
+
+
+@pytest.mark.parametrize(
+    "guardian_decision",
+    ("review_required", "user_decision_required"),
+)
+def test_guardian_status_can_only_restrict_non_guardian_origin(
+    guardian_decision: str,
+) -> None:
+    capability = _capability("workspace.write", "workspace:project")
+
+    decision = resolve_authority(
+        inputs=(
+            AuthorityInput(
+                source="user",
+                decision="allow",
+                capabilities=(capability,),
+            ),
+            AuthorityInput(
+                source="guardian",
+                decision=guardian_decision,  # type: ignore[arg-type]
+                capabilities=(capability,),
+            ),
+        ),
+        action_digest=_digest("e"),
+    )
+
+    assert decision.status == guardian_decision
+    assert decision.capabilities == (capability,)
+
+
+def test_delegated_authority_requires_a_distinct_contract_identity() -> None:
+    parent = _contract()
+    child = _delegated_child(parent, authorityContractId=parent.authority_contract_id)
+
+    with pytest.raises(ValueError, match="distinct authorityContractId"):
+        validate_delegated_authority(parent, child)
+
+
+def test_delegation_can_remove_every_workspace_capability_and_binding() -> None:
+    workspace_write = _capability("workspace.write", "workspace:project")
+    process_exec = _capability("process.exec", "binary:git")
+    parent = _contract(capabilities=[workspace_write, process_exec])
+    child = _delegated_child(
+        parent,
+        capabilities=[process_exec],
+        workspaceViewBindingDigest=None,
+    )
+
+    assert validate_delegated_authority(parent, child) == child
+
+
 def test_authority_contract_binds_the_complete_action_envelope() -> None:
     contract = _contract()
 
@@ -220,6 +366,7 @@ def test_authority_contract_binds_the_complete_action_envelope() -> None:
     assert contract.credential_scope_digest == _digest("9")
     assert contract.network_digest == _digest("a")
     assert contract.disclosure_digest == _digest("b")
+    assert contract.workspace_view_binding_digest == _digest("e")
     assert contract.sandbox_profile_digest == _digest("c")
     assert contract.guardian_ceiling_digest == _digest("d")
     assert contract.expires_at == datetime(2025, 1, 1, tzinfo=UTC)
@@ -248,6 +395,25 @@ def test_valid_delegation_attenuates_to_a_subset_and_shorter_expiry() -> None:
     parent_digest = canonical_authority_contract_digest(parent)
     assert validated.parent_authority_digest == parent_digest
     assert validated.delegation_chain == (*parent.delegation_chain, parent_digest)
+
+
+def test_delegation_can_attenuate_resource_network_and_credential_scopes() -> None:
+    parent_capability = _capability(
+        "workspace.write",
+        "workspace:project",
+        network_refs=("https://api.example.test/",),
+        credential_refs=("credential:storage",),
+    )
+    child_capability = _capability(
+        "workspace.write",
+        "workspace:project/reports",
+        network_refs=("https://api.example.test/reports",),
+        credential_refs=("credential:storage/reports",),
+    )
+    parent = _contract(capabilities=(parent_capability,))
+    child = _delegated_child(parent, capabilities=(child_capability,))
+
+    assert validate_delegated_authority(parent, child) == child
 
 
 @pytest.mark.parametrize(
@@ -698,9 +864,7 @@ def test_authority_reason_code_elements_require_exact_strings(
             {
                 "status": "allow",
                 "reasonCodes": (make_invalid("authority_intersection"),),
-                "capabilities": (
-                    _capability("workspace.write", "workspace:project"),
-                ),
+                "capabilities": (_capability("workspace.write", "workspace:project"),),
             }
         )
 
@@ -810,6 +974,7 @@ def test_mutable_capability_subclass_is_normalized_to_the_exact_base_type() -> N
         resourceRef="workspace:project",
         networkRefs=(),
         credentialRefs=(),
+        workspaceViewBindingDigest=_digest("e"),
     )
 
     authority_input = AuthorityInput(
@@ -833,6 +998,7 @@ def test_hidden_capability_subclass_semantics_are_rejected() -> None:
         resourceRef="workspace:project",
         networkRefs=(),
         credentialRefs=(),
+        workspaceViewBindingDigest=_digest("e"),
         semanticVariant="hidden",
     )
 
@@ -905,13 +1071,13 @@ def test_resolver_reports_deny_wins_for_an_empty_effective_set(
 
 def test_resolver_capability_order_is_deterministic() -> None:
     capability_z = _capability(
-        "z.effect",
+        "workspace.write",
         "workspace:project",
         credential_refs=("credential:a",),
     )
     capability_a = _capability(
-        "a.effect",
-        "workspace:project",
+        "network.connect",
+        "network:provider",
         credential_refs=("credential:z",),
     )
     action_digest = _digest("e")

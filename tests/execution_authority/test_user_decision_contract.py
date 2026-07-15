@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta, timezone
+from hashlib import sha256
+import json
 from types import SimpleNamespace
-from typing import Callable
+from typing import Annotated, Callable
 
 import pytest
-from pydantic import ConfigDict, Field, ValidationError
+from pydantic import ConfigDict, Field, TypeAdapter, ValidationError
 
 from magi_agent.execution_authority.contracts import (
     AuthorityCapability,
@@ -27,6 +29,9 @@ from magi_agent.ops.safety import canonical_digest
 
 
 NOW = datetime(2026, 7, 14, 12, 0, tzinfo=UTC)
+WORKSPACE_ROOT_REF = f"workspace://sha256:{'0' * 64}/"
+WORKSPACE_A_REF = WORKSPACE_ROOT_REF + "a.txt"
+WORKSPACE_B_REF = WORKSPACE_ROOT_REF + "b.txt"
 
 
 def _digest(character: str) -> str:
@@ -34,17 +39,23 @@ def _digest(character: str) -> str:
 
 
 def _capability(
-    resource: str = "workspace://root/a.txt",
+    resource: str = WORKSPACE_A_REF,
     *,
     effect_class: str = "workspace.write",
     network_refs: tuple[str, ...] = (),
     credential_refs: tuple[str, ...] = (),
+    workspace_view_binding_digest: str | None = None,
 ) -> AuthorityCapability:
+    if workspace_view_binding_digest is None and (
+        effect_class.startswith("workspace.") or resource.startswith("workspace:")
+    ):
+        workspace_view_binding_digest = _digest("8")
     return AuthorityCapability(
         effectClass=effect_class,
         resourceRef=resource,
         networkRefs=network_refs,
         credentialRefs=credential_refs,
+        workspaceViewBindingDigest=workspace_view_binding_digest,
     )
 
 
@@ -64,6 +75,7 @@ def _request_payload(**overrides: object) -> dict[str, object]:
         "authorityPartitionId": "workspace_01",
         "normalizedRequestDigest": _digest("2"),
         "capabilities": (_capability(),),
+        "workspaceViewBindingDigest": _digest("8"),
         "authorityCeilingDigest": _digest("3"),
         "policyDigest": _digest("4"),
         "pendingEventId": "event_01",
@@ -109,6 +121,7 @@ def _receipt_payload(
         "authorityCeilingDigest": bound_request.authority_ceiling_digest,
         "policyDigest": bound_request.policy_digest,
         "capabilitiesDigest": bound_request.capabilities_digest,
+        "workspaceViewBindingDigest": bound_request.workspace_view_binding_digest,
         "issuedAt": bound_request.created_at + timedelta(seconds=1),
         "expiresAt": bound_request.expires_at,
         "revokesReceiptDigest": None,
@@ -162,7 +175,7 @@ def test_request_derives_complete_ordered_capabilities_digest() -> None:
         credential_refs=("credential://tenant/key-a",),
     )
     second = _capability(
-        "workspace://root/b.txt",
+        WORKSPACE_B_REF,
         effect_class="workspace.delete",
         network_refs=("https://api.example.test/v2",),
         credential_refs=("credential://tenant/key-b",),
@@ -214,7 +227,7 @@ def test_request_rejects_unordered_or_duplicate_capabilities(
     as_unordered: Callable[[tuple[AuthorityCapability, ...]], object],
 ) -> None:
     first = _capability()
-    second = _capability("workspace://root/b.txt")
+    second = _capability(WORKSPACE_B_REF)
 
     with pytest.raises(ValidationError, match="ordered"):
         _request(capabilities=as_unordered((first, second)))
@@ -243,6 +256,7 @@ def test_request_uses_exact_aliases_schema_and_complete_json_shape() -> None:
         "normalizedRequestDigest",
         "capabilities",
         "capabilitiesDigest",
+        "workspaceViewBindingDigest",
         "authorityCeilingDigest",
         "policyDigest",
         "pendingEventId",
@@ -255,6 +269,29 @@ def test_request_uses_exact_aliases_schema_and_complete_json_shape() -> None:
 
     with pytest.raises(ValidationError):
         _request(schemaId="magi.user_decision_request.v2")
+
+
+def test_user_decision_schema_id_is_a_strict_discriminated_union_tag() -> None:
+    adapter = TypeAdapter(
+        Annotated[
+            UserDecisionRequest | UserDecisionReceipt,
+            Field(discriminator="schema_id"),
+        ]
+    )
+
+    assert type(adapter.validate_python(_request_payload())) is UserDecisionRequest
+    assert type(adapter.validate_python(_receipt_payload())) is UserDecisionReceipt
+
+    with pytest.raises(ValidationError, match="union_tag_invalid"):
+        adapter.validate_python(_request_payload(schemaId="magi.user_decision_request.v2"))
+
+    class StringSubclass(str):
+        pass
+
+    with pytest.raises(ValidationError, match="exact string"):
+        adapter.validate_python(
+            _request_payload(schemaId=StringSubclass("magi.user_decision_request.v1"))
+        )
 
 
 @pytest.mark.parametrize(
@@ -290,6 +327,7 @@ def test_request_requires_every_identity_to_be_a_nonempty_exact_string(field: st
         "normalizedRequestDigest",
         "authorityCeilingDigest",
         "policyDigest",
+        "workspaceViewBindingDigest",
     ),
 )
 def test_request_requires_every_digest_to_be_a_canonical_exact_string(field: str) -> None:
@@ -393,6 +431,7 @@ def test_receipt_uses_exact_aliases_schema_and_json_round_trip() -> None:
         "authorityCeilingDigest",
         "policyDigest",
         "capabilitiesDigest",
+        "workspaceViewBindingDigest",
         "issuedAt",
         "expiresAt",
         "revokesReceiptDigest",
@@ -438,6 +477,7 @@ def test_receipt_requires_every_identity_to_be_nonempty(field: str) -> None:
         "authorityCeilingDigest",
         "policyDigest",
         "capabilitiesDigest",
+        "workspaceViewBindingDigest",
         "revokesReceiptDigest",
     ),
 )
@@ -505,7 +545,7 @@ def test_receipt_rejects_non_utc_numeric_and_subclass_datetimes(field: str) -> N
 )
 def test_raw_authentication_material_is_not_a_contract_field(extra_field: str) -> None:
     assert extra_field not in UserDecisionReceipt.model_fields
-    with pytest.raises(ValidationError, match="extra_forbidden"):
+    with pytest.raises(ValidationError, match="canonical JSON requires an exact string"):
         _receipt(**{extra_field: b"opaque-authentication-material"})
 
 
@@ -530,6 +570,7 @@ def test_raw_authentication_material_is_not_a_contract_field(extra_field: str) -
         pytest.param({"authorityCeilingDigest": _digest("c")}, id="ceiling"),
         pytest.param({"policyDigest": _digest("d")}, id="policy"),
         pytest.param({"capabilitiesDigest": _digest("e")}, id="capabilities"),
+        pytest.param({"workspaceViewBindingDigest": _digest("f")}, id="workspace-view"),
     ),
 )
 def test_binding_helper_rejects_every_request_binding_drift(
@@ -567,13 +608,29 @@ def test_binding_helper_returns_the_exact_validated_receipt() -> None:
     assert validate_user_decision_receipt_binding(request, receipt) == receipt
 
 
-def test_request_and_receipt_digests_use_complete_alias_json_and_repo_kernel() -> None:
+def test_request_digest_matches_snapshot_utf8_canonical_json() -> None:
+    request = _request(decisionRequestId="결정_01", principalId="사용자_01")
+    request_payload = UserDecisionRequest.model_dump(
+        request,
+        by_alias=True,
+        mode="json",
+    )
+    request_json = json.dumps(
+        request_payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+    snapshot_digest = "sha256:" + sha256(request_json.encode("utf-8")).hexdigest()
+
+    assert canonical_user_decision_request_digest(request) == snapshot_digest
+
+
+def test_request_and_receipt_digests_cover_complete_alias_json() -> None:
     request = _request(decisionRequestId="결정_01", principalId="사용자_01")
     receipt = _receipt(request, receiptId="영수증_01")
 
-    assert canonical_user_decision_request_digest(request) == canonical_digest(
-        UserDecisionRequest.model_dump(request, by_alias=True, mode="json")
-    )
     assert canonical_user_decision_receipt_digest(receipt) == canonical_digest(
         UserDecisionReceipt.model_dump(receipt, by_alias=True, mode="json")
     )
@@ -594,9 +651,10 @@ def test_request_normalizes_mutable_capability_subclasses_and_rejects_hidden_sem
 
     external = MutableCapability(
         effectClass="workspace.write",
-        resourceRef="workspace://root/a.txt",
+        resourceRef=WORKSPACE_A_REF,
         networkRefs=(),
         credentialRefs=(),
+        workspaceViewBindingDigest=_digest("8"),
     )
     request = _request(capabilities=(external,))
     assert type(request.capabilities[0]) is AuthorityCapability
@@ -607,9 +665,10 @@ def test_request_normalizes_mutable_capability_subclasses_and_rejects_hidden_sem
 
     semantic = SemanticCapability(
         effectClass="workspace.write",
-        resourceRef="workspace://root/a.txt",
+        resourceRef=WORKSPACE_A_REF,
         networkRefs=(),
         credentialRefs=(),
+        workspaceViewBindingDigest=_digest("8"),
         semanticVariant="hidden",
     )
     with pytest.raises(ValidationError, match="extra_forbidden"):

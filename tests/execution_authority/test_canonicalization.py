@@ -20,6 +20,8 @@ from magi_agent.execution_authority.canonicalization import (
     CanonicalizationError,
     canonical_file_resource,
     canonical_http_resource,
+    require_canonical_http_resource_ref,
+    require_canonical_workspace_resource_ref,
     workspace_relative_path,
 )
 from magi_agent.ops.safety import canonical_digest
@@ -36,6 +38,52 @@ def _workspace_prefix(root: Path) -> str:
         }
     )
     return f"workspace://{digest}/"
+
+
+def test_require_canonical_workspace_resource_ref_is_no_io_and_accepts_wire_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root_ref = f"workspace://sha256:{'0' * 64}/"
+    ref = f"workspace://sha256:{'0' * 64}/nested/hello%20world.txt"
+
+    monkeypatch.setattr(
+        canonicalization,
+        "_resolved_workspace_root",
+        lambda _root: (_ for _ in ()).throw(AssertionError("filesystem access")),
+    )
+    monkeypatch.setattr(
+        canonicalization,
+        "_lexical_absolute_workspace_root",
+        lambda _root: (_ for _ in ()).throw(AssertionError("root resolution")),
+    )
+
+    assert require_canonical_workspace_resource_ref(root_ref) == root_ref
+    assert require_canonical_workspace_resource_ref(ref) == ref
+
+
+@pytest.mark.parametrize(
+    "ref",
+    (
+        "workspace://root/a.txt",
+        f"workspace://sha256:{'0' * 64}/a/../b",
+        f"workspace://sha256:{'0' * 64}/한글.txt",
+        f"workspace://sha256:{'0' * 64}/%7e.txt",
+        f"workspace://sha256:{'0' * 64}/a//b",
+        f"workspace://sha256:{'0' * 64}/a/",
+    ),
+)
+def test_require_canonical_workspace_resource_ref_rejects_aliases(ref: str) -> None:
+    with pytest.raises(CanonicalizationError):
+        require_canonical_workspace_resource_ref(ref)
+
+
+def test_require_canonical_http_resource_ref_rejects_normalization_aliases() -> None:
+    canonical = "https://example.com/b?a=1&z=2"
+    alias = "HTTPS://EXAMPLE.COM:443/a/../b?z=2&a=1"
+
+    assert require_canonical_http_resource_ref(canonical) == canonical
+    with pytest.raises(CanonicalizationError, match="canonical"):
+        require_canonical_http_resource_ref(alias)
 
 
 def _case_alias_or_skip(path: Path) -> Path:
@@ -1043,8 +1091,7 @@ def test_linux_mount_boundary_uses_beneath_for_resolved_existing_path(
     assert calls == [
         (
             "real/file.txt",
-            canonicalization._LINUX_RESOLVE_NO_XDEV
-            | canonicalization._LINUX_RESOLVE_NO_MAGICLINKS,
+            canonicalization._LINUX_RESOLVE_NO_XDEV | canonicalization._LINUX_RESOLVE_NO_MAGICLINKS,
         ),
         (
             "real/file.txt",
@@ -1532,9 +1579,7 @@ def test_http_resource_preserves_empty_segment_dot_removal_edges(
 def test_http_resource_near_budget_work_is_bounded() -> None:
     path = "/" + "/".join("p" * 1_023 for _ in range(4))
     value_sizes = (1_024, 1_024, 1_024, 993)
-    query = "&".join(
-        f"{key}={'v' * size}" for key, size in zip("abcd", value_sizes, strict=True)
-    )
+    query = "&".join(f"{key}={'v' * size}" for key, size in zip("abcd", value_sizes, strict=True))
     source = f"https://example.com{path}?{query}"
     assert len(source.encode("utf-8")) == 8_192
 
@@ -1601,12 +1646,8 @@ def test_http_resource_preserves_query_multiplicity_presence_and_plus_semantics(
 
 
 def test_http_resource_preserves_duplicate_key_order_while_sorting_unique_keys() -> None:
-    victim_first = canonical_http_resource(
-        "https://example.com/?z=2&a=victim&a=attacker&b=1"
-    )
-    attacker_first = canonical_http_resource(
-        "https://example.com/?z=2&a=attacker&a=victim&b=1"
-    )
+    victim_first = canonical_http_resource("https://example.com/?z=2&a=victim&a=attacker&b=1")
+    attacker_first = canonical_http_resource("https://example.com/?z=2&a=attacker&a=victim&b=1")
 
     assert victim_first == "https://example.com/?a=victim&a=attacker&b=1&z=2"
     assert attacker_first == "https://example.com/?a=attacker&a=victim&b=1&z=2"

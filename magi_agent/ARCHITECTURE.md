@@ -995,11 +995,12 @@ graph LR
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
-| __init__.py | Dormant execution-authority kernel. | — | — |
+| __init__.py | Dormant execution-authority kernel. | — | execution_authority/contracts.py |
 | canonicalization.py | Deterministic, authority-safe resource canonicalization. | safety | — |
-| contracts.py | — | authority, safety, state_machine | execution_authority/ports.py |
+| contracts.py | — | authority, envelopes, execution_authority, safety, state_machine | execution_authority/envelopes.py, execution_authority/ports.py |
+| envelopes.py | Frozen cross-workstream execution-authority envelopes. | contracts, safety, state_machine | execution_authority/contracts.py |
 | ports.py | Dependency-inverted host boundaries for dormant execution authority. | contracts | — |
-| state_machine.py | — | — | execution_authority/contracts.py |
+| state_machine.py | — | — | execution_authority/contracts.py, execution_authority/envelopes.py |
 
 ### firstparty/
 
@@ -1465,7 +1466,7 @@ graph LR
 | job_queue.py | Agent job-queue FSM — reference contract (NOT wired into the OSS runtime). | authority, safety | — |
 | metrics.py | — | authority, safety | — |
 | otel_noise.py | Suppress a benign OpenTelemetry teardown log line. | — | (root)/main.py, cli/app.py |
-| safety.py | — | authority | artifacts/delivery_receipts.py, artifacts/local_result_store.py, artifacts/render_verification.py, billing/quota.py, billing/spend_guard.py, composio/redaction.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, engine/driver.py, evidence/ledger.py, evidence/reports.py, evidence/run_redaction.py, evidence/tool_boundary.py, execution_authority/canonicalization.py, execution_authority/contracts.py, gates/gate2_readiness.py, harness/verifier_bus.py, memory/adapters/local_file_writable.py, memory/adk_bridge.py, memory/prompt_projection.py, ops/health.py, ops/job_queue.py, ops/metrics.py, permissions/auto_control.py, runtime/governed_projection.py, runtime/heartbeat_contract.py, runtime/model_tiers.py, runtime/no_agent_watchdog.py, runtime/plan_ledger.py, runtime/resume_decision.py, security/compliance.py, shadow/gate2_recipe_profile_resolver.py, shared/tool_preview.py, tenancy/context.py, tools/kernel.py, tools/output_budget.py, tools/schema_validation.py, transport/product_admin.py, web_acquisition/policy.py |
+| safety.py | — | authority | artifacts/delivery_receipts.py, artifacts/local_result_store.py, artifacts/render_verification.py, billing/quota.py, billing/spend_guard.py, composio/redaction.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, engine/driver.py, evidence/ledger.py, evidence/reports.py, evidence/run_redaction.py, evidence/tool_boundary.py, execution_authority/canonicalization.py, execution_authority/contracts.py, execution_authority/envelopes.py, gates/gate2_readiness.py, harness/verifier_bus.py, memory/adapters/local_file_writable.py, memory/adk_bridge.py, memory/prompt_projection.py, ops/health.py, ops/job_queue.py, ops/metrics.py, permissions/auto_control.py, runtime/governed_projection.py, runtime/heartbeat_contract.py, runtime/model_tiers.py, runtime/no_agent_watchdog.py, runtime/plan_ledger.py, runtime/resume_decision.py, security/compliance.py, shadow/gate2_recipe_profile_resolver.py, shared/tool_preview.py, tenancy/context.py, tools/kernel.py, tools/output_budget.py, tools/schema_validation.py, transport/product_admin.py, web_acquisition/policy.py |
 
 ### packs/
 

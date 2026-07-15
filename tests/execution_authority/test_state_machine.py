@@ -112,9 +112,10 @@ def test_shared_state_enum_members_are_canonical(
     expected_members: tuple[tuple[str, str], ...],
 ) -> None:
     assert issubclass(enum_type, StrEnum)
-    assert tuple(
-        (name, member.value) for name, member in enum_type.__members__.items()
-    ) == expected_members
+    assert (
+        tuple((name, member.value) for name, member in enum_type.__members__.items())
+        == expected_members
+    )
 
 
 _LEGAL_ACTION_TRANSITIONS = frozenset(
