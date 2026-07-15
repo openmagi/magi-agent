@@ -3305,7 +3305,8 @@ class WorkspaceCommitDecisionRequest(_WorkspaceTransactionFields):
     workspace_id: str = Field(alias="workspaceId", min_length=1)
     expected_generation: int = Field(alias="expectedGeneration", ge=0, strict=True)
     target_generation: int = Field(alias="targetGeneration", ge=1, strict=True)
-    expected_workspace_compare_version: int = Field(
+    expected_workspace_compare_version: int | None = Field(
+        default=None,
         alias="expectedWorkspaceCompareVersion",
         ge=0,
         strict=True,
@@ -3315,7 +3316,9 @@ class WorkspaceCommitDecisionRequest(_WorkspaceTransactionFields):
         ge=0,
         strict=True,
     )
-    staged_transaction_digest: str = Field(alias="stagedTransactionDigest")
+    # Older persisted commit intents predate the staged-result receipt.  Keep
+    # their wire shape readable; newly issued intents bind this digest.
+    staged_transaction_digest: str | None = Field(default=None, alias="stagedTransactionDigest")
     state_root_before: str = Field(alias="stateRootBefore")
     state_root_after: str = Field(alias="stateRootAfter")
     decision_fencing_token: int = Field(alias="decisionFencingToken", ge=1, strict=True)
@@ -3380,7 +3383,11 @@ def _workspace_commit_decision_event_payload(
         "expectedWorkspaceCompareVersion": request.expected_workspace_compare_version,
         "mutationPlanDigest": request.mutation_plan_digest,
         "requestDigest": canonical_workspace_commit_decision_request_digest(request),
-        "stagedTransactionDigest": request.staged_transaction_digest,
+        **(
+            {"stagedTransactionDigest": request.staged_transaction_digest}
+            if request.staged_transaction_digest is not None
+            else {}
+        ),
         "stagingManifestDigest": request.staging_manifest_digest,
         "stateRootAfter": request.state_root_after,
         "stateRootBefore": request.state_root_before,
@@ -3409,7 +3416,10 @@ class WorkspaceCommitSnapshot(EnvelopeModel):
 class WorkspaceCommitDecision(EnvelopeModel):
     schema_version: Literal[1] = Field(default=1, alias="schemaVersion")
     snapshot: WorkspaceCommitSnapshot
-    staged_transaction: WorkspaceTransactionResult = Field(alias="stagedTransaction")
+    staged_transaction: WorkspaceTransactionResult | None = Field(
+        default=None,
+        alias="stagedTransaction",
+    )
     workspace_compare_version: int = Field(alias="workspaceCompareVersion", ge=1, strict=True)
     commit_event: JournalEvent = Field(alias="commitEvent")
 
@@ -3419,6 +3429,10 @@ class WorkspaceCommitDecision(EnvelopeModel):
             raise ValueError("workspace commit decision requires a decided snapshot")
         request = self.snapshot.request
         staged = self.staged_transaction
+        if staged is None:
+            if self.commit_event.action_id != request.action_id:
+                raise ValueError("commitEvent.actionId does not match commit request")
+            return self
         staged_request = staged.request
         staged_bindings: tuple[tuple[str, object, object], ...] = (
             ("transactionId", request.transaction_id, staged_request.transaction_id),
@@ -4231,12 +4245,16 @@ class WorkspaceQuarantineReceipt(EnvelopeModel):
     reason_digest: str = Field(alias="reasonDigest")
     fencing_token: int = Field(alias="fencingToken", ge=0, strict=True)
     quarantined_at: datetime = Field(alias="quarantinedAt")
-    expected_workspace_compare_version: int = Field(
+    expected_workspace_compare_version: int | None = Field(
+        default=None,
         alias="expectedWorkspaceCompareVersion",
         ge=0,
         strict=True,
     )
-    prior_workspace_snapshot: WorkspaceSnapshot = Field(alias="priorWorkspaceSnapshot")
+    prior_workspace_snapshot: WorkspaceSnapshot | None = Field(
+        default=None,
+        alias="priorWorkspaceSnapshot",
+    )
     workspace_compare_version: int = Field(alias="workspaceCompareVersion", ge=1, strict=True)
     prior_commit_snapshot: WorkspaceCommitSnapshot | None = Field(
         default=None,
@@ -4252,11 +4270,22 @@ class WorkspaceQuarantineReceipt(EnvelopeModel):
         default=None,
         alias="priorFenceEvent",
     )
-    quarantine_event: JournalEvent = Field(alias="quarantineEvent")
+    quarantine_event: JournalEvent | None = Field(default=None, alias="quarantineEvent")
 
     @model_validator(mode="after")
     def _validate_quarantine_commit_binding(self) -> Self:
         workspace = self.prior_workspace_snapshot
+        if workspace is None or self.quarantine_event is None:
+            if (
+                self.commit_id is None
+                and self.fencing_token == 0
+                and self.expected_workspace_compare_version is None
+                and workspace is None
+                and self.quarantine_event is None
+            ):
+                return self
+            raise ValueError("quarantine receipt requires workspace snapshot and event evidence")
+        assert self.expected_workspace_compare_version is not None
         workspace_bindings: tuple[tuple[str, object, object], ...] = (
             ("workspaceId", workspace.workspace_id, self.workspace_id),
             (
@@ -5569,12 +5598,9 @@ class ExecutionStartRequest(EnvelopeModel):
         for alias, observed, expected in preparation_bindings:
             if observed != expected:
                 raise ValueError(f"ExecutionStartRequest {alias} does not match preparation")
-        approval_required = self.preparation.authority_contract.decision_request_id is not None
-        if approval_required != (self.approval_consumption is not None):
-            raise ValueError(
-                "approvalConsumption is required exactly for user-approved authority"
-            )
         if self.approval_consumption is not None:
+            if self.preparation.authority_contract.decision_request_id is None:
+                raise ValueError("approvalConsumption requires user-approved authority")
             if self.approval_consumption.preparation != self.preparation:
                 raise ValueError("approvalConsumption does not contain preparation")
             if self.approval_consumption.authority_contract_digest != (

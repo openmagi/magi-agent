@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from importlib import import_module
 from importlib.util import find_spec
 from hashlib import sha256
@@ -168,7 +169,7 @@ def _resource_observation(
         resourceStateDigest=D5 if present else D6,
         workspaceGeneration=WORKSPACE_GENERATION,
         workspaceStateRoot=WORKSPACE_STATE_ROOT,
-        observedAt=NOW,
+        observedAt=NOW + timedelta(seconds=2),
     )
 
 
@@ -189,7 +190,7 @@ def _workspace_observation(
         observerId="workspace-observer",
         observerVersion="1.0.0",
         observerArtifactDigest=D8,
-        observedAt=NOW,
+        observedAt=NOW + timedelta(seconds=2),
         resources=(
             _resource_observation(WORKSPACE_A_REF, expected_presence="present"),
             _resource_observation(WORKSPACE_B_REF, expected_presence="absent"),

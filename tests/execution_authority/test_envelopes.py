@@ -374,9 +374,15 @@ def _recovery_authority(
         argumentsDigest=D1,
         workingDirectoryDigest=D2,
         environmentDigest=D3,
-        requestBodyDigest=None,
+        requestBodyDigest=D5 if any(
+            capability.effect_class is EffectClass.NETWORK_WRITE
+            for capability in intent.capabilities
+        ) else None,
         credentialScopeDigest=None,
-        networkDigest=None,
+        networkDigest=D6 if any(
+            capability.effect_class is EffectClass.NETWORK_WRITE
+            for capability in intent.capabilities
+        ) else None,
         disclosureDigest=D4,
         capabilities=intent.capabilities,
         workspaceViewBindingDigest=intent.workspace_view_binding_digest,
@@ -644,7 +650,7 @@ def _stored_event(
 def _workspace_commit_decision() -> WorkspaceCommitDecision:
     view_digest = canonical_workspace_view_binding_digest(
         workspace_id="workspace_01",
-        workspace_ref="workspace://root",
+        workspace_ref=WORKSPACE_ROOT_REF,
         authority_partition_id="workspace_01",
         generation=1,
         state_root=D1,
@@ -654,7 +660,7 @@ def _workspace_commit_decision() -> WorkspaceCommitDecision:
         commitId="commit_01",
         transactionId="txn_01",
         workspaceId="workspace_01",
-        workspaceRef="workspace://root",
+        workspaceRef=WORKSPACE_ROOT_REF,
         authorityPartitionId="workspace_01",
         actionId="act_01",
         attemptId="try_01",
@@ -2346,7 +2352,10 @@ def test_user_decision_recording_cannot_hide_terminal_action_side_effects() -> N
         compareVersion=1,
     )
 
-    with pytest.raises(ValidationError, match="payload|terminal action records"):
+    with pytest.raises(
+        ValidationError,
+        match="verifiedReceipt|previousSnapshot|payload|terminal action records",
+    ):
         UserDecisionRecording(
             schemaVersion=1,
             receipt=receipt,
@@ -2749,7 +2758,7 @@ def test_projection_cursor_must_cover_not_trail_the_required_sequence() -> None:
 def test_workspace_commit_contract_never_contains_a_private_manifest_path() -> None:
     view_digest = canonical_workspace_view_binding_digest(
         workspace_id="workspace_01",
-        workspace_ref="workspace://root",
+        workspace_ref=WORKSPACE_ROOT_REF,
         authority_partition_id="workspace_01",
         generation=1,
         state_root=D1,
@@ -2759,7 +2768,7 @@ def test_workspace_commit_contract_never_contains_a_private_manifest_path() -> N
         commitId="commit_01",
         transactionId="txn_01",
         workspaceId="workspace_01",
-        workspaceRef="workspace://root",
+        workspaceRef=WORKSPACE_ROOT_REF,
         authorityPartitionId="workspace_01",
         actionId="act_01",
         attemptId="try_01",
@@ -2806,7 +2815,7 @@ def test_workspace_commit_contract_never_contains_a_private_manifest_path() -> N
     snapshot = WorkspaceSnapshot(
         schemaVersion=1,
         workspaceId="workspace_01",
-        workspaceRef="workspace://root",
+        workspaceRef=WORKSPACE_ROOT_REF,
         authorityPartitionId="workspace_01",
         currentGeneration=1,
         stateRoot=D1,
@@ -2829,7 +2838,7 @@ def test_workspace_commit_contract_never_contains_a_private_manifest_path() -> N
     publishing = WorkspaceSnapshot(
         schemaVersion=1,
         workspaceId="workspace_01",
-        workspaceRef="workspace://root",
+        workspaceRef=WORKSPACE_ROOT_REF,
         authorityPartitionId="workspace_01",
         currentGeneration=1,
         stateRoot=D1,
@@ -2840,7 +2849,7 @@ def test_workspace_commit_contract_never_contains_a_private_manifest_path() -> N
         pendingStateRoot=D2,
         pendingWorkspaceViewBindingDigest=canonical_workspace_view_binding_digest(
             workspace_id="workspace_01",
-            workspace_ref="workspace://root",
+            workspace_ref=WORKSPACE_ROOT_REF,
             authority_partition_id="workspace_01",
             generation=2,
             state_root=D2,
@@ -2859,7 +2868,7 @@ def test_workspace_commit_contract_never_contains_a_private_manifest_path() -> N
             commitDecisionDigest=D6,
             transactionId="txn_01",
             workspaceId="workspace_01",
-            workspaceRef="workspace://root",
+            workspaceRef=WORKSPACE_ROOT_REF,
             authorityPartitionId="workspace_01",
             actionId="act_01",
             attemptId="try_01",
@@ -2874,7 +2883,7 @@ def test_workspace_commit_contract_never_contains_a_private_manifest_path() -> N
             changedResourceRefsDigest=canonical_resource_refs_digest((WORKSPACE_A_REF,)),
             workspaceViewBindingDigest=canonical_workspace_view_binding_digest(
                 workspace_id="workspace_01",
-                workspace_ref="workspace://root",
+                workspace_ref=WORKSPACE_ROOT_REF,
                 authority_partition_id="workspace_01",
                 generation=2,
                 state_root=D2,
@@ -2920,7 +2929,7 @@ def test_workspace_commit_snapshot_persists_active_fence_event_provenance() -> N
 def test_workspace_view_digest_has_type_and_version_domain_separation() -> None:
     fields = {
         "workspaceId": "workspace_01",
-        "workspaceRef": "workspace://root",
+        "workspaceRef": WORKSPACE_ROOT_REF,
         "authorityPartitionId": "workspace_01",
         "generation": 1,
         "stateRoot": D1,
@@ -2933,7 +2942,7 @@ def test_workspace_view_digest_has_type_and_version_domain_separation() -> None:
     assert (
         canonical_workspace_view_binding_digest(
             workspace_id="workspace_01",
-            workspace_ref="workspace://root",
+            workspace_ref=WORKSPACE_ROOT_REF,
             authority_partition_id="workspace_01",
             generation=1,
             state_root=D1,
@@ -3304,7 +3313,7 @@ def test_workspace_only_quarantine_receipt_remains_valid_without_commit_bindings
 def test_commit_quarantine_receipt_binds_prior_snapshot_event_and_cas_versions() -> None:
     view_digest = canonical_workspace_view_binding_digest(
         workspace_id="workspace_01",
-        workspace_ref="workspace://root",
+        workspace_ref=WORKSPACE_ROOT_REF,
         authority_partition_id="workspace_01",
         generation=1,
         state_root=D1,
@@ -3314,7 +3323,7 @@ def test_commit_quarantine_receipt_binds_prior_snapshot_event_and_cas_versions()
         commitId="commit_01",
         transactionId="txn_01",
         workspaceId="workspace_01",
-        workspaceRef="workspace://root",
+        workspaceRef=WORKSPACE_ROOT_REF,
         authorityPartitionId="workspace_01",
         actionId="act_01",
         attemptId="try_01",

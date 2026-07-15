@@ -67,8 +67,8 @@ from magi_agent.execution_authority.state_machine import (
 NOW = datetime(2026, 7, 15, 8, 0, tzinfo=UTC)
 DIGESTS = tuple(f"sha256:{index:064x}" for index in range(32))
 D0, D1, D2, D3, D4, D5, D6, D7, D8, D9 = DIGESTS[:10]
-WORKSPACE_REF = "workspace://root"
-RESOURCE_REF = f"workspace://sha256:{'a' * 64}/src/main.py"
+WORKSPACE_REF = f"workspace://{D0}/"
+RESOURCE_REF = f"workspace://{D0}/src/main.py"
 
 
 def _canonical_json(value: object) -> str:
@@ -310,7 +310,10 @@ def _authority(
         argumentsDigest=D1,
         workingDirectoryDigest=D2,
         environmentDigest=D3,
-        requestBodyDigest=None,
+        requestBodyDigest=D6 if any(
+            capability.effect_class is EffectClass.NETWORK_WRITE
+            for capability in intent.capabilities
+        ) else None,
         credentialScopeDigest=None,
         networkDigest=None,
         disclosureDigest=D4,
