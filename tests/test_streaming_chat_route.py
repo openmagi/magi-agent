@@ -605,6 +605,7 @@ def test_selected_gate5b_stream_detaches_turn_when_socket_closes_midturn(
         request: object,
         public_event_sink=None,
         citation_collector=None,
+        citation_session_id=None,
     ) -> JSONResponse:
         assert public_event_sink is not None
         public_event_sink({"type": "text_delta", "delta": "early live chunk"})
@@ -668,6 +669,7 @@ def test_selected_gate5b_stream_emits_live_sink_events_before_completion(
         request: object,
         public_event_sink=None,
         citation_collector=None,
+        citation_session_id=None,
     ) -> JSONResponse:
         assert public_event_sink is not None
         public_event_sink({"type": "text_delta", "delta": "early live chunk"})
@@ -733,6 +735,7 @@ def test_selected_gate5b_stream_emits_tool_events_before_final_text(
         request: object,
         public_event_sink=None,
         citation_collector=None,
+        citation_session_id=None,
     ) -> JSONResponse:
         assert public_event_sink is not None
         public_event_sink(
@@ -1099,6 +1102,7 @@ def test_selected_full_toolhost_stream_starts_work_events_before_response_finish
         request: object,
         public_event_sink=None,
         citation_collector=None,
+        citation_session_id=None,
     ) -> JSONResponse:
         assert public_event_sink is not None
         await release_response.wait()
@@ -1205,6 +1209,7 @@ def test_selected_full_toolhost_stream_ticks_progress_while_response_pending(
         request: object,
         public_event_sink=None,
         citation_collector=None,
+        citation_session_id=None,
     ) -> JSONResponse:
         assert public_event_sink is not None
         await release_response.wait()
@@ -1330,6 +1335,7 @@ def test_selected_gate5b_stream_skips_posthoc_text_after_live_text(
         request: object,
         public_event_sink=None,
         citation_collector=None,
+        citation_session_id=None,
     ) -> JSONResponse:
         assert public_event_sink is not None
         public_event_sink({"type": "text_delta", "delta": "live chunk"})
@@ -1399,6 +1405,7 @@ def test_selected_gate5b_stream_tracks_detached_turn_when_client_closes(
         request: object,
         public_event_sink=None,
         citation_collector=None,
+        citation_session_id=None,
     ) -> JSONResponse:
         assert public_event_sink is not None
         public_event_sink({"type": "text_delta", "delta": "first chunk"})
@@ -3053,6 +3060,7 @@ def test_replay_skips_thinking_delta_after_live_thinking(monkeypatch) -> None:
         request: object,
         public_event_sink=None,
         citation_collector=None,
+        citation_session_id=None,
     ) -> JSONResponse:
         assert public_event_sink is not None
         public_event_sink({"type": "thinking_delta", "delta": "live think"})
@@ -3103,6 +3111,7 @@ def test_stream_frames_bounded_under_token_stream(monkeypatch) -> None:
         request: object,
         public_event_sink=None,
         citation_collector=None,
+        citation_session_id=None,
     ) -> JSONResponse:
         assert public_event_sink is not None
         for i in range(500):

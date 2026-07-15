@@ -886,6 +886,14 @@ async def _drive_selected_gate5b_stream(
             request=request,
             public_event_sink=_enqueue_public_event,
             citation_collector=_citation_collector,
+            # Source-citation registry KEY (hosted convergence P0 fix): the driver
+            # reads the terminal citations payload with THIS resolved session_id
+            # (header + uuid fallback, computed at the handler entry). Thread it to
+            # the WRITE side so the bundle keys the collector's registry the SAME
+            # way. Without it the write side re-derives from the raw payload (None
+            # when the request omits ``sessionId``), landing writes and reads in two
+            # disconnected registries and returning a silently empty payload.
+            citation_session_id=session_id,
         )
 
     response_task = asyncio.create_task(_run_selected_response())

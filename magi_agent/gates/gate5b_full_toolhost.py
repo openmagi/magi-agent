@@ -795,6 +795,17 @@ class Gate5BFullToolHost:
         # every non-citation caller is byte-identical to today. Mirrors the LOCAL
         # path's collector-bound registry (cli/tool_runtime.py).
         citation_collector: object | None = None,
+        # Source-citation registry KEY (hosted convergence P0 fix). The WRITE side
+        # (this host's ``_citation_registry``) and the READ side (the serving
+        # driver's terminal payload) MUST key the collector's per-session registry
+        # by the IDENTICAL string, or they land in two disconnected registries and
+        # the citations payload comes back silently empty. ``session_id`` is
+        # derived from the raw payload (None when the request omits ``sessionId``),
+        # while the driver resolves the same id WITH a header + uuid fallback. To
+        # keep them identical, the driver threads its resolved id here. None
+        # (default) falls back to ``session_id`` so every OTHER caller and every
+        # non-citation ``_session_id`` usage stay byte-identical to today.
+        citation_session_id: str | None = None,
     ) -> None:
         self.config = config
         self.workspace_root = workspace_root.resolve()
@@ -802,6 +813,13 @@ class Gate5BFullToolHost:
         self.now_ms = now_ms
         self.memory_mode = normalize_memory_mode(memory_mode)
         self._session_id = session_id
+        # Dedicated citation registry key (see ``citation_session_id`` above).
+        # Falls back to ``_session_id`` when unset so non-driver callers keep the
+        # exact current key, and every OTHER ``_session_id`` usage (the dispatch
+        # ToolContext ``sessionId`` at spawn time) is untouched.
+        self._citation_session_id = (
+            citation_session_id if citation_session_id is not None else session_id
+        )
         self._spawn_depth = max(0, int(spawn_depth))
         self._spawn_cap = spawn_cap
         self._citation_collector = citation_collector
@@ -1584,7 +1602,7 @@ class Gate5BFullToolHost:
             accessor = getattr(collector, "source_registry_for", None)
             if not callable(accessor):
                 return None
-            return accessor(self._session_id)
+            return accessor(self._citation_session_id)
         except Exception:
             return None
 
@@ -2229,6 +2247,7 @@ def build_gate5b_full_toolhost_bundle(
     workspace_handlers: Mapping[str, object] | None = None,
     dispatch_policies: Sequence[object] | None = None,
     citation_collector: object | None = None,
+    citation_session_id: str | None = None,
 ) -> Gate5BFullToolBundle:
     # C1 default-ON flip: when the caller supplies NEITHER seam kwarg, the live
     # path consumes the bundled packs (workspace tool handlers + tool_host
@@ -2287,6 +2306,7 @@ def build_gate5b_full_toolhost_bundle(
         dispatch_policies=dispatch_policies,
         spawn_cap=_serve_spawn_cap,
         citation_collector=citation_collector,
+        citation_session_id=citation_session_id,
     )
     if selected_scope_error is not None:
         return Gate5BFullToolBundle(

@@ -214,6 +214,160 @@ def test_dispatch_tool_context_citation_registry_none_when_off(tmp_path: Any, mo
 
 
 # ---------------------------------------------------------------------------
+# B2. Write/read session-id KEY parity (hosted convergence P0 regression).
+#
+# The WRITE side (the serving bundle that builds the host) derived the registry
+# key from the raw payload: session_id = _local_chat_string(payload, "sessionId",
+# "") or None. The READ side (the streaming driver's terminal payload) derives it
+# WITH a header + uuid fallback. They matched only when the request carried an
+# explicit sessionId; when it did NOT, write keyed by None and read keyed by the
+# resolved id, landing in two disconnected registries -> a silently empty
+# citations payload. The fix threads the driver-resolved id into the bundle as a
+# dedicated citation_session_id so both sides key the collector identically.
+# ---------------------------------------------------------------------------
+
+
+def _serving_bundle(runtime_config, collector, *, session_id, citation_session_id):
+    """Build the gate5b full-toolhost bundle through the SAME seam the serving
+    inner uses (_gate5b_full_toolhost_bundle), so the write-side registry key is
+    exercised exactly as in production."""
+    from magi_agent.transport.gate5b_serving import _gate5b_full_toolhost_bundle
+
+    return _gate5b_full_toolhost_bundle(
+        runtime_config,
+        SimpleNamespace(environment="local"),
+        session_id=session_id,
+        citation_collector=collector,
+        citation_session_id=citation_session_id,
+    )
+
+
+def _serving_runtime():
+    from magi_agent.gates.gate5b_full_toolhost import Gate5BFullToolHostConfig
+
+    return SimpleNamespace(
+        config=SimpleNamespace(bot_id="bot-x", user_id="owner-x"),
+        gate5b_full_toolhost_config=Gate5BFullToolHostConfig(),
+        tool_registry=None,
+    )
+
+
+def test_bundle_registry_key_parity_when_session_absent(monkeypatch) -> None:
+    """No explicit sessionId (write session_id=None) but the driver resolves a
+    fallback id and threads it as citation_session_id. The host must key the
+    collector's registry by the RESOLVED id, so it is the SAME instance the
+    driver reads at terminal time. This FAILS on the pre-fix code (write keyed by
+    None, read keyed by the resolved id -> two disconnected empty registries)."""
+    monkeypatch.setenv("MAGI_SOURCE_CITATION_ENABLED", "1")
+    collector = LocalToolEvidenceCollector()
+    resolved = "resolved-fallback-id"
+    bundle = _serving_bundle(
+        _serving_runtime(),
+        collector,
+        session_id=None,
+        citation_session_id=resolved,
+    )
+    write_registry = bundle.host._citation_registry()
+    read_registry = collector.source_registry_for(resolved)
+    assert write_registry is not None
+    assert write_registry is read_registry
+
+
+def test_bundle_registered_source_is_visible_to_driver_read(monkeypatch) -> None:
+    """End to end at the key level: a web tool registers a source through the
+    host (write side) with NO explicit sessionId, and the driver's terminal
+    composer (hosted_citations_payload_for keyed by the resolved id) sees it.
+    Pre-fix this returns an empty payload (sources:[], markers:[])."""
+    monkeypatch.setenv("MAGI_SOURCE_CITATION_ENABLED", "1")
+    collector = LocalToolEvidenceCollector()
+    resolved = "resolved-fallback-id"
+    bundle = _serving_bundle(
+        _serving_runtime(),
+        collector,
+        session_id=None,
+        citation_session_id=resolved,
+    )
+    registry = bundle.host._citation_registry()
+    assert registry is not None
+    record = registry.register(
+        "web_fetch",
+        "https://sec.gov/tsla",
+        turn_id="t1",
+        tool_name="web_fetch",
+        title="Tesla 10-Q",
+        trust_tier="official",
+        inspected=True,
+    )
+    assert record is not None
+    src = record.source_id
+    payload = hosted_citations_payload_for(
+        f"Revenue was 12.77B [{src}].", collector, resolved
+    )
+    assert payload is not None
+    assert payload["sources"], payload
+    assert payload["sources"][0]["uri"] == "https://sec.gov/tsla"
+    assert payload["markers"] == [[src, 1]]
+    assert payload["verdict"] == "cited"
+
+
+def test_write_key_none_vs_resolved_read_key_is_the_bug(monkeypatch) -> None:
+    """Characterizes the exact divergence: the OLD write side keyed the registry
+    by the raw-payload id (None when sessionId is absent), while the driver reads
+    by a resolved fallback id. Those two keys land in DISCONNECTED registries, so
+    a source written under None is invisible to a read under the resolved id and
+    the citations payload comes back empty. This locks in WHY the fix is needed
+    and stays true regardless of the fix's param plumbing."""
+    monkeypatch.setenv("MAGI_SOURCE_CITATION_ENABLED", "1")
+    collector = LocalToolEvidenceCollector()
+    write_key = None  # _local_chat_string(payload, "sessionId", "") or None
+    read_key = "resolved-fallback-id"  # header + uuid fallback in the driver
+    # The OLD write side keyed by None. source_registry_for(None) yields no usable
+    # registry at all, so a web tool cannot even register a source on that side.
+    assert collector.source_registry_for(write_key) is None
+    # Reading by the driver-resolved key sees an EMPTY, disconnected registry.
+    empty_payload = hosted_citations_payload_for("plain answer", collector, read_key)
+    assert empty_payload is not None
+    assert empty_payload["sources"] == []
+    assert empty_payload["markers"] == []
+    # The fix makes the write side key by the SAME resolved id, so a read by that
+    # id sees the registered source.
+    aligned_registry = collector.source_registry_for(read_key)
+    record = aligned_registry.register(
+        "web_fetch",
+        "https://sec.gov/tsla",
+        turn_id="t1",
+        tool_name="web_fetch",
+        title="Tesla 10-Q",
+        trust_tier="official",
+        inspected=True,
+    )
+    assert record is not None
+    payload = hosted_citations_payload_for(
+        f"Revenue was 12B [{record.source_id}].", collector, read_key
+    )
+    assert payload is not None
+    assert payload["sources"], payload
+
+
+def test_bundle_registry_key_defaults_to_session_id_when_no_citation_id(
+    monkeypatch,
+) -> None:
+    """citation_session_id None falls back to session_id: non-driver callers keep
+    the exact current key (byte-identical to today)."""
+    monkeypatch.setenv("MAGI_SOURCE_CITATION_ENABLED", "1")
+    collector = LocalToolEvidenceCollector()
+    bundle = _serving_bundle(
+        _serving_runtime(),
+        collector,
+        session_id="explicit-sess",
+        citation_session_id=None,
+    )
+    write_registry = bundle.host._citation_registry()
+    assert write_registry is not None
+    assert write_registry is collector.source_registry_for("explicit-sess")
+
+
+# ---------------------------------------------------------------------------
 # C. _drive_selected_gate5b_stream builds the terminal citations payload
 # ---------------------------------------------------------------------------
 
@@ -242,7 +396,7 @@ async def _drive(monkeypatch, *, register_source: bool, content: str) -> list[by
     reference, then return the terminal python_ready response."""
     from magi_agent.transport import streaming_chat_route as route
 
-    async def fake_run(runtime, body, *, request, public_event_sink=None, citation_collector=None):  # noqa: ANN001, ANN201
+    async def fake_run(runtime, body, *, request, public_event_sink=None, citation_collector=None, citation_session_id=None):  # noqa: ANN001, ANN201
         # Stream the visible text as a live token delta (numbers markers the way
         # the user saw them), like the real serving path does.
         if public_event_sink is not None:
