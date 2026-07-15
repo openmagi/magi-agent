@@ -179,6 +179,43 @@ def test_journal_port_covers_system_decisions_outbox_and_recovery_takeover() -> 
     assert "now" not in _parameters(JournalPort, "append_with_outbox")
 
 
+def test_user_decision_ingress_accepts_only_a_trusted_verified_receipt() -> None:
+    assert _parameters(JournalPort, "record_user_decision") == (
+        "self",
+        "verified_receipt",
+    )
+    hints = get_type_hints(JournalPort.record_user_decision)
+    assert hints["verified_receipt"].__name__ == "VerifiedUserDecisionReceipt"
+    assert hints["return"].__name__ == "UserDecisionRecording"
+
+
+def test_resume_verifier_returns_a_typed_current_state_attestation() -> None:
+    hints = get_type_hints(ResumeBindingVerifierPort.verify_current)
+    assert hints["return"].__name__ == "VerifiedAuthorityResumeBinding"
+
+
+def test_approval_consumption_accepts_only_the_verified_resume_attestation() -> None:
+    parameters = _parameters(JournalPort, "consume_user_approval")
+    assert "verified_resume_binding" in parameters
+    assert "resume_binding" not in parameters
+    assert "current_policy_digest" not in parameters
+    assert "current_capabilities_digest" not in parameters
+    assert get_type_hints(JournalPort.consume_user_approval)[
+        "verified_resume_binding"
+    ].__name__ == "VerifiedAuthorityResumeBinding"
+
+
+def test_request_deny_and_resolve_uows_return_persistence_receipts() -> None:
+    hints = get_type_hints
+    assert hints(JournalPort.request_user_decision)["return"].__name__ == (
+        "UserDecisionRequestRecording"
+    )
+    assert hints(JournalPort.deny_action)["return"].__name__ == "ActionDenialRecording"
+    assert hints(JournalPort.resolve_action)["return"].__name__ == (
+        "ActionResolutionRecording"
+    )
+
+
 def test_projection_outbox_and_completion_uows_are_compare_and_swap_bound() -> None:
     assert "expected_compare_version" in _parameters(JournalPort, "advance_projection_cursor")
     assert "expected_compare_version" in _parameters(JournalPort, "claim_outbox_item")

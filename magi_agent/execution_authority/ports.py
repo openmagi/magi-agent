@@ -8,9 +8,11 @@ from typing import Protocol, runtime_checkable
 
 from magi_agent.execution_authority.contracts import (
     ActionAdmission,
+    ActionDenialRecording,
     ActionIntent,
     ActionProposal,
     ActionResolution,
+    ActionResolutionRecording,
     ActionSnapshot,
     AttemptObservationRecording,
     AttemptSnapshot,
@@ -58,8 +60,11 @@ from magi_agent.execution_authority.contracts import (
     UserDecisionReceipt,
     UserDecisionRecording,
     UserDecisionRequest,
+    UserDecisionRequestRecording,
     UserDecisionSnapshot,
     UserDecisionTransition,
+    VerifiedAuthorityResumeBinding,
+    VerifiedUserDecisionReceipt,
     VerificationEvidenceBinding,
     WorkspaceCommitDecision,
     WorkspaceCommitDecisionRequest,
@@ -160,7 +165,7 @@ class JournalPort(Protocol):
     def request_user_decision(
         self,
         request: UserDecisionRequest,
-    ) -> UserDecisionSnapshot: ...
+    ) -> UserDecisionRequestRecording: ...
 
     def get_user_decision(
         self,
@@ -170,9 +175,7 @@ class JournalPort(Protocol):
     def record_user_decision(
         self,
         *,
-        decision_request_id: str,
-        opaque_envelope: object,
-        verifier: UserDecisionVerifierPort,
+        verified_receipt: VerifiedUserDecisionReceipt,
     ) -> UserDecisionRecording: ...
 
     def invalidate_user_decision(
@@ -194,12 +197,10 @@ class JournalPort(Protocol):
         expected_attempt_compare_version: int,
         expected_partition_compare_version: int,
         approval_receipt_digest: str,
-        current_policy_digest: str,
-        current_capabilities_digest: str,
         authority_contract: AuthorityContract,
         authority_contract_digest: str,
         fencing_token: int,
-        resume_binding: AuthorityResumeBinding,
+        verified_resume_binding: VerifiedAuthorityResumeBinding,
     ) -> UserApprovalConsumption: ...
 
     def consume_authority_and_prepare(
@@ -234,7 +235,7 @@ class JournalPort(Protocol):
         expected_attempt_compare_version: int,
         expected_partition_compare_version: int,
         reason_codes: tuple[str, ...],
-    ) -> ActionResolution: ...
+    ) -> ActionDenialRecording: ...
 
     def mark_executing(
         self,
@@ -269,7 +270,7 @@ class JournalPort(Protocol):
         resolution: ActionResolution,
         expected_action_compare_version: int,
         expected_partition_compare_version: int,
-    ) -> ActionResolution: ...
+    ) -> ActionResolutionRecording: ...
 
     def begin_recovery(
         self,
@@ -521,7 +522,7 @@ class ResumeBindingVerifierPort(Protocol):
     def verify_current(
         self,
         binding: AuthorityResumeBinding,
-    ) -> AuthorityResumeBinding: ...
+    ) -> VerifiedAuthorityResumeBinding: ...
 
 
 @runtime_checkable

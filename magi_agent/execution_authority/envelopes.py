@@ -29,6 +29,7 @@ from magi_agent.execution_authority.contracts import (
     UserDecisionReceipt,
     UserDecisionRequest,
     _AuthorityContractModel,
+    canonical_capabilities_digest,
     canonical_authority_contract_digest,
     canonical_authority_resume_binding_digest,
     canonical_task_contract_digest,
@@ -4926,6 +4927,10 @@ class ExecutionPreparation(EnvelopeModel):
 class ExecutionStartRequest(EnvelopeModel):
     schema_version: Literal[1] = Field(default=1, alias="schemaVersion")
     preparation: ExecutionPreparation
+    approval_consumption: UserApprovalConsumption | None = Field(
+        default=None,
+        alias="approvalConsumption",
+    )
     action_id: str = Field(alias="actionId", min_length=1)
     attempt_id: str = Field(alias="attemptId", min_length=1)
     partition_id: str = Field(alias="partitionId", min_length=1)
@@ -4992,6 +4997,18 @@ class ExecutionStartRequest(EnvelopeModel):
         for alias, observed, expected in preparation_bindings:
             if observed != expected:
                 raise ValueError(f"ExecutionStartRequest {alias} does not match preparation")
+        approval_required = self.preparation.authority_contract.decision_request_id is not None
+        if approval_required != (self.approval_consumption is not None):
+            raise ValueError(
+                "approvalConsumption is required exactly for user-approved authority"
+            )
+        if self.approval_consumption is not None:
+            if self.approval_consumption.preparation != self.preparation:
+                raise ValueError("approvalConsumption does not contain preparation")
+            if self.approval_consumption.authority_contract_digest != (
+                self.authority_contract_digest
+            ):
+                raise ValueError("approvalConsumption authority does not match start request")
         return self
 
 
@@ -5008,6 +5025,11 @@ class ExecutionStart(ExecutionStartRequest):
     @model_validator(mode="after")
     def _validate_executing_event(self) -> Self:
         event = self.executing_event
+        predecessor = self.preparation.prepared_event
+        predecessor_name = "preparedEvent"
+        if self.approval_consumption is not None:
+            predecessor = self.approval_consumption.consumed_event
+            predecessor_name = "approvalConsumedEvent"
         bindings = (
             ("eventType", event.event_type, "action.executing"),
             ("actionId", event.action_id, self.action_id),
@@ -5053,7 +5075,7 @@ class ExecutionStart(ExecutionStartRequest):
             (
                 "causationId",
                 event.causation_id,
-                self.preparation.prepared_event.event_id,
+                predecessor.event_id,
             ),
         )
         for alias, observed, expected in bindings:
@@ -5073,14 +5095,24 @@ class ExecutionStart(ExecutionStartRequest):
             "providerCapabilitiesDigest": self.provider_capabilities_digest,
             "executionGrantDigest": self.execution_token_digest,
         }
+        if self.approval_consumption is not None:
+            expected_payload.update(
+                {
+                    "approvalConsumedEventId": predecessor.event_id,
+                    "approvalConsumedEventSequence": predecessor.sequence,
+                    "approvalConsumedEventHash": predecessor.event_hash,
+                }
+            )
         if _strict_json_loads(event.payload_json) != expected_payload:
             raise ValueError("executingEvent payload does not bind execution start")
         _require_direct_event_successor(
-            self.preparation.prepared_event,
+            predecessor,
             event,
-            first_name="preparedEvent",
+            first_name=predecessor_name,
             second_name="executingEvent",
         )
+        if event.causation_id != predecessor.event_id:
+            raise ValueError(f"executingEvent must be caused by {predecessor_name}")
         return self
 
 
@@ -5253,11 +5285,251 @@ class UserDecisionSnapshot(EnvelopeModel):
         return self
 
 
+class UserDecisionRequestRecording(EnvelopeModel):
+    """Durable result of atomically recording a pending decision request."""
+
+    schema_version: Literal[1] = Field(default=1, alias="schemaVersion")
+    request: UserDecisionRequest
+    snapshot: UserDecisionSnapshot
+    decision_compare_version: int = Field(
+        alias="decisionCompareVersion",
+        ge=0,
+        strict=True,
+    )
+    requested_event: JournalEvent = Field(alias="requestedEvent")
+
+    @model_validator(mode="after")
+    def _validate_request_recording(self) -> Self:
+        if self.snapshot.request != self.request:
+            raise ValueError("request snapshot does not preserve the recorded request")
+        if self.snapshot.state is not UserDecisionState.PENDING:
+            raise ValueError("request snapshot must be pending")
+        if self.decision_compare_version != self.request.compare_version:
+            raise ValueError("decisionCompareVersion does not match request compareVersion")
+        if self.snapshot.compare_version != self.decision_compare_version:
+            raise ValueError("snapshot compareVersion does not match decisionCompareVersion")
+        event = self.requested_event
+        bindings = (
+            ("eventId", event.event_id, self.request.pending_event_id),
+            ("eventType", event.event_type, "user_decision.pending"),
+            ("actionId", event.action_id, self.request.action_id),
+            ("partitionId", event.partition_id, self.request.authority_partition_id),
+            ("taskContractId", event.task_contract_id, self.request.task_contract_id),
+            ("taskVersion", event.task_version, self.request.task_version),
+            ("taskContractDigest", event.task_contract_digest, self.request.task_contract_digest),
+            ("completionEpochId", event.completion_epoch_id, self.request.completion_epoch_id),
+            ("requestDigest", event.request_digest, self.request.normalized_request_digest),
+            ("actorId", event.actor_id, self.request.principal_id),
+            ("policyDigest", event.policy_digest, self.request.policy_digest),
+        )
+        for alias, observed, expected in bindings:
+            if observed != expected:
+                raise ValueError(f"requestedEvent.{alias} does not match request")
+        if not self.request.created_at <= event.created_at < self.request.expires_at:
+            raise ValueError("requestedEvent createdAt is outside the request time window")
+        expected_payload = {
+            "decisionRequestDigest": canonical_user_decision_request_digest(self.request),
+            "decisionRequestId": self.request.decision_request_id,
+            "decisionCompareVersion": self.decision_compare_version,
+        }
+        if _strict_json_loads(event.payload_json) != expected_payload:
+            raise ValueError("requestedEvent payload does not exactly bind request persistence")
+        return self
+
+
+class ActionDenialRecording(EnvelopeModel):
+    """Atomic denied-and-resolved action persistence receipt."""
+
+    schema_version: Literal[1] = Field(default=1, alias="schemaVersion")
+    resolution: ActionResolution
+    expected_action_compare_version: int = Field(
+        alias="expectedActionCompareVersion", ge=0, strict=True
+    )
+    expected_attempt_compare_version: int = Field(
+        alias="expectedAttemptCompareVersion", ge=0, strict=True
+    )
+    expected_partition_compare_version: int = Field(
+        alias="expectedPartitionCompareVersion", ge=0, strict=True
+    )
+    action_compare_version: int = Field(alias="actionCompareVersion", ge=1, strict=True)
+    attempt_compare_version: int = Field(alias="attemptCompareVersion", ge=1, strict=True)
+    partition_compare_version: int = Field(
+        alias="partitionCompareVersion", ge=1, strict=True
+    )
+    denied_event: JournalEvent = Field(alias="deniedEvent")
+    resolution_event: JournalEvent = Field(alias="resolutionEvent")
+
+    @model_validator(mode="after")
+    def _validate_denial_recording(self) -> Self:
+        if self.resolution.logical_state is not ActionState.DENIED:
+            raise ValueError("denial recording requires a DENIED resolution")
+        versions = (
+            (
+                "actionCompareVersion",
+                self.action_compare_version,
+                self.expected_action_compare_version + 1,
+            ),
+            (
+                "attemptCompareVersion",
+                self.attempt_compare_version,
+                self.expected_attempt_compare_version + 1,
+            ),
+            (
+                "partitionCompareVersion",
+                self.partition_compare_version,
+                self.expected_partition_compare_version + 1,
+            ),
+        )
+        for alias, observed, expected in versions:
+            if observed != expected:
+                raise ValueError(f"{alias} does not advance the expected CAS version")
+        for field_name, event, event_type in (
+            ("deniedEvent", self.denied_event, "action.denied"),
+            ("resolutionEvent", self.resolution_event, "action.resolved"),
+        ):
+            if event.event_type != event_type:
+                raise ValueError(f"{field_name}.eventType does not match denial recording")
+            if event.action_id != self.resolution.action_id:
+                raise ValueError(f"{field_name}.actionId does not match resolution")
+            if event.task_contract_digest != self.resolution.task_contract_digest:
+                raise ValueError(f"{field_name}.taskContractDigest does not match resolution")
+        resolution_digest = _canonical_model_digest(self.resolution)
+        expected_denied_payload = {
+            "actionResolutionDigest": resolution_digest,
+            "reasonCodes": list(self.resolution.reason_codes),
+            "sourceAttemptIds": list(self.resolution.source_attempt_ids),
+        }
+        if _strict_json_loads(self.denied_event.payload_json) != expected_denied_payload:
+            raise ValueError("deniedEvent payload does not exactly bind denial")
+        expected_resolution_payload = {
+            "actionResolutionDigest": resolution_digest,
+            "logicalState": self.resolution.logical_state.value,
+            "sourceEventId": self.denied_event.event_id,
+        }
+        if _strict_json_loads(self.resolution_event.payload_json) != expected_resolution_payload:
+            raise ValueError("resolutionEvent payload does not exactly bind resolution")
+        _require_direct_event_successor(
+            self.denied_event,
+            self.resolution_event,
+            first_name="deniedEvent",
+            second_name="resolutionEvent",
+        )
+        if self.resolution_event.causation_id != self.denied_event.event_id:
+            raise ValueError("resolutionEvent must be caused by deniedEvent")
+        return self
+
+
+class ActionResolutionRecording(EnvelopeModel):
+    """Durable result of atomically materializing a logical action resolution."""
+
+    schema_version: Literal[1] = Field(default=1, alias="schemaVersion")
+    resolution: ActionResolution
+    expected_action_compare_version: int = Field(
+        alias="expectedActionCompareVersion", ge=0, strict=True
+    )
+    expected_partition_compare_version: int = Field(
+        alias="expectedPartitionCompareVersion", ge=0, strict=True
+    )
+    action_compare_version: int = Field(alias="actionCompareVersion", ge=1, strict=True)
+    partition_compare_version: int = Field(
+        alias="partitionCompareVersion", ge=1, strict=True
+    )
+    source_event: JournalEvent = Field(alias="sourceEvent")
+    resolution_event: JournalEvent = Field(alias="resolutionEvent")
+
+    @model_validator(mode="after")
+    def _validate_resolution_recording(self) -> Self:
+        if self.action_compare_version != self.expected_action_compare_version + 1:
+            raise ValueError("actionCompareVersion does not advance the expected CAS version")
+        if self.partition_compare_version != self.expected_partition_compare_version + 1:
+            raise ValueError("partitionCompareVersion does not advance the expected CAS version")
+        for field_name, event in (
+            ("sourceEvent", self.source_event),
+            ("resolutionEvent", self.resolution_event),
+        ):
+            if event.action_id != self.resolution.action_id:
+                raise ValueError(f"{field_name}.actionId does not match resolution")
+            if event.task_contract_digest != self.resolution.task_contract_digest:
+                raise ValueError(f"{field_name}.taskContractDigest does not match resolution")
+        if self.resolution_event.event_type != "action.resolved":
+            raise ValueError("resolutionEvent.eventType does not match resolution recording")
+        expected_payload = {
+            "actionResolutionDigest": _canonical_model_digest(self.resolution),
+            "logicalState": self.resolution.logical_state.value,
+            "sourceEventId": self.source_event.event_id,
+        }
+        if _strict_json_loads(self.resolution_event.payload_json) != expected_payload:
+            raise ValueError("resolutionEvent payload does not exactly bind resolution")
+        _require_direct_event_successor(
+            self.source_event,
+            self.resolution_event,
+            first_name="sourceEvent",
+            second_name="resolutionEvent",
+        )
+        if self.resolution_event.causation_id != self.source_event.event_id:
+            raise ValueError("resolutionEvent must be caused by sourceEvent")
+        return self
+
+
+class VerifiedUserDecisionReceipt(EnvelopeModel):
+    """Decision receipt accepted by a configured first-party ingress verifier."""
+
+    schema_version: Literal[1] = Field(default=1, alias="schemaVersion")
+    receipt: UserDecisionReceipt
+    receipt_digest: str = Field(alias="receiptDigest")
+    verifier_id: str = Field(alias="verifierId", min_length=1)
+    verifier_artifact_digest: str = Field(alias="verifierArtifactDigest")
+    verified_at: datetime = Field(alias="verifiedAt")
+
+    @model_validator(mode="after")
+    def _validate_verified_receipt(self) -> Self:
+        expected_digest = canonical_user_decision_receipt_digest(self.receipt)
+        if self.receipt_digest != expected_digest:
+            raise ValueError("receiptDigest does not match the verified receipt")
+        if self.verified_at < self.receipt.issued_at:
+            raise ValueError("verifiedAt cannot precede receipt issuedAt")
+        if self.verified_at > self.receipt.expires_at:
+            raise ValueError("verifiedAt cannot follow receipt expiresAt")
+        return self
+
+
+class VerifiedAuthorityResumeBinding(EnvelopeModel):
+    """Store-consumable attestation that a resume binding is still current."""
+
+    schema_version: Literal[1] = Field(default=1, alias="schemaVersion")
+    binding: AuthorityResumeBinding
+    binding_digest: str = Field(alias="bindingDigest")
+    current_policy_digest: str = Field(alias="currentPolicyDigest")
+    current_capabilities_digest: str = Field(alias="currentCapabilitiesDigest")
+    verifier_id: str = Field(alias="verifierId", min_length=1)
+    verifier_artifact_digest: str = Field(alias="verifierArtifactDigest")
+    verified_at: datetime = Field(alias="verifiedAt")
+
+    @model_validator(mode="after")
+    def _validate_verified_binding(self) -> Self:
+        expected_digest = canonical_authority_resume_binding_digest(self.binding)
+        if self.binding_digest != expected_digest:
+            raise ValueError("bindingDigest does not match the resume binding")
+        return self
+
+
 class UserDecisionRecording(EnvelopeModel):
     schema_version: Literal[1] = Field(default=1, alias="schemaVersion")
+    verified_receipt: VerifiedUserDecisionReceipt = Field(alias="verifiedReceipt")
     receipt: UserDecisionReceipt
     applied_from_state: UserDecisionState = Field(alias="appliedFromState")
     applied_to_state: UserDecisionState = Field(alias="appliedToState")
+    previous_snapshot: UserDecisionSnapshot = Field(alias="previousSnapshot")
+    expected_decision_compare_version: int = Field(
+        alias="expectedDecisionCompareVersion",
+        ge=0,
+        strict=True,
+    )
+    decision_compare_version: int = Field(
+        alias="decisionCompareVersion",
+        ge=1,
+        strict=True,
+    )
     recorded_event: JournalEvent = Field(alias="recordedEvent")
     action_resolution: ActionResolution | None = Field(
         default=None,
@@ -5273,6 +5545,8 @@ class UserDecisionRecording(EnvelopeModel):
 
     @model_validator(mode="after")
     def _validate_recording_and_atomic_terminal_records(self) -> Self:
+        if self.verified_receipt.receipt != self.receipt:
+            raise ValueError("verifiedReceipt does not contain receipt")
         expected_transition = {
             "approve": (UserDecisionState.PENDING, UserDecisionState.APPROVED),
             "deny": (UserDecisionState.PENDING, UserDecisionState.DENIED),
@@ -5280,6 +5554,17 @@ class UserDecisionRecording(EnvelopeModel):
         }[self.receipt.decision]
         if (self.applied_from_state, self.applied_to_state) != expected_transition:
             raise ValueError("receipt decision does not match applied state transition")
+
+        if self.previous_snapshot.request != self.current_snapshot.request:
+            raise ValueError("decision recording snapshots must preserve the request")
+        if self.previous_snapshot.state is not self.applied_from_state:
+            raise ValueError("previousSnapshot does not match appliedFromState")
+        if self.previous_snapshot.compare_version != self.expected_decision_compare_version:
+            raise ValueError("previousSnapshot does not match expected decision CAS version")
+        if self.decision_compare_version != self.expected_decision_compare_version + 1:
+            raise ValueError("decisionCompareVersion does not advance expected decision CAS")
+        if self.current_snapshot.compare_version != self.decision_compare_version:
+            raise ValueError("currentSnapshot does not match decisionCompareVersion")
 
         validate_user_decision_receipt_binding(
             self.current_snapshot.request,
@@ -5350,12 +5635,21 @@ class UserDecisionRecording(EnvelopeModel):
             "decisionRequestDigest": self.current_snapshot.decision_request_digest,
             "receiptId": self.receipt.receipt_id,
             "receiptDigest": expected_receipt_digest,
+            "verifiedReceiptDigest": _canonical_model_digest(self.verified_receipt),
             "authenticationNonceDigest": self.receipt.authentication_nonce_digest,
             "appliedFromState": self.applied_from_state.value,
             "appliedToState": self.applied_to_state.value,
+            "previousSnapshotCompareVersion": self.previous_snapshot.compare_version,
+            "currentSnapshotCompareVersion": self.current_snapshot.compare_version,
         }
         if _strict_json_loads(self.recorded_event.payload_json) != expected_recorded_payload:
             raise ValueError("recordedEvent payload does not bind the decision request and receipt")
+        if self.recorded_event.causation_id != self.current_snapshot.request.pending_event_id:
+            raise ValueError("recordedEvent must be caused by the pending decision event")
+        if self.recorded_event.created_at < self.receipt.issued_at:
+            raise ValueError("recordedEvent createdAt cannot precede receipt issuedAt")
+        if self.recorded_event.created_at > self.receipt.expires_at:
+            raise ValueError("recordedEvent createdAt cannot follow receipt expiresAt")
 
         terminal_records = (
             self.action_resolution,
@@ -5418,6 +5712,26 @@ class UserDecisionRecording(EnvelopeModel):
             first_name="deniedEvent",
             second_name="resolutionEvent",
         )
+        if denied_event.causation_id != self.recorded_event.event_id:
+            raise ValueError("deniedEvent must be caused by recordedEvent")
+        if resolution_event.causation_id != denied_event.event_id:
+            raise ValueError("resolutionEvent must be caused by deniedEvent")
+        resolution_digest = _canonical_model_digest(resolution)
+        expected_denied_payload = {
+            "actionResolutionDigest": resolution_digest,
+            "decisionReceiptDigest": expected_receipt_digest,
+            "decisionRequestId": self.receipt.decision_request_id,
+            "recordedEventId": self.recorded_event.event_id,
+        }
+        if _strict_json_loads(denied_event.payload_json) != expected_denied_payload:
+            raise ValueError("deniedEvent payload does not exactly bind decision denial")
+        expected_resolution_payload = {
+            "actionResolutionDigest": resolution_digest,
+            "deniedEventId": denied_event.event_id,
+            "logicalState": resolution.logical_state.value,
+        }
+        if _strict_json_loads(resolution_event.payload_json) != expected_resolution_payload:
+            raise ValueError("resolutionEvent payload does not exactly bind decision resolution")
         return self
 
 
@@ -5619,6 +5933,11 @@ class UserDecisionTransition(EnvelopeModel):
         for transition_alias, transition_observed, transition_expected in transition_bindings:
             if transition_observed != transition_expected:
                 raise ValueError(f"transitionEvent.{transition_alias} does not match request")
+        if isinstance(self.request, UserDecisionExpirationRequest):
+            if self.transition_event.created_at < snapshot_request.expires_at:
+                raise ValueError("expiration transitionEvent createdAt must reach request expiresAt")
+        elif self.transition_event.created_at < snapshot_request.created_at:
+            raise ValueError("invalidation transitionEvent createdAt cannot precede request createdAt")
         expected_transition_payload = {
             "actionResolutionDigest": _canonical_model_digest(self.action_resolution),
             "currentSnapshotCompareVersion": self.current_snapshot.compare_version,
@@ -5640,11 +5959,25 @@ class UserDecisionTransition(EnvelopeModel):
                 ("eventType", event.event_type, event_type),
                 ("actionId", event.action_id, self.request.action_id),
                 ("partitionId", event.partition_id, self.request.partition_id),
+                ("taskContractId", event.task_contract_id, snapshot_request.task_contract_id),
+                ("taskVersion", event.task_version, snapshot_request.task_version),
                 (
                     "taskContractDigest",
                     event.task_contract_digest,
                     self.request.task_contract_digest,
                 ),
+                (
+                    "completionEpochId",
+                    event.completion_epoch_id,
+                    snapshot_request.completion_epoch_id,
+                ),
+                (
+                    "requestDigest",
+                    event.request_digest,
+                    snapshot_request.normalized_request_digest,
+                ),
+                ("actorId", event.actor_id, snapshot_request.principal_id),
+                ("policyDigest", event.policy_digest, snapshot_request.policy_digest),
             )
             for event_alias, event_observed, event_expected in event_bindings:
                 if event_observed != event_expected:
@@ -5665,6 +5998,26 @@ class UserDecisionTransition(EnvelopeModel):
             raise ValueError("deniedEvent must be caused by transitionEvent")
         if self.resolution_event.causation_id != self.denied_event.event_id:
             raise ValueError("resolutionEvent must be caused by deniedEvent")
+        if self.denied_event.created_at < self.transition_event.created_at:
+            raise ValueError("deniedEvent createdAt cannot precede transitionEvent")
+        if self.resolution_event.created_at < self.denied_event.created_at:
+            raise ValueError("resolutionEvent createdAt cannot precede deniedEvent")
+        resolution_digest = _canonical_model_digest(self.action_resolution)
+        transition_request_digest = _canonical_model_digest(self.request)
+        expected_denied_payload = {
+            "actionResolutionDigest": resolution_digest,
+            "transitionEventId": self.transition_event.event_id,
+            "transitionRequestDigest": transition_request_digest,
+        }
+        if _strict_json_loads(self.denied_event.payload_json) != expected_denied_payload:
+            raise ValueError("deniedEvent payload does not exactly bind decision transition")
+        expected_resolution_payload = {
+            "actionResolutionDigest": resolution_digest,
+            "deniedEventId": self.denied_event.event_id,
+            "logicalState": self.action_resolution.logical_state.value,
+        }
+        if _strict_json_loads(self.resolution_event.payload_json) != expected_resolution_payload:
+            raise ValueError("resolutionEvent payload does not exactly bind decision transition")
         return self
 
 
@@ -5674,9 +6027,15 @@ class UserApprovalConsumption(EnvelopeModel):
     task_contract_digest: str = Field(alias="taskContractDigest")
     approval_receipt: UserDecisionReceipt = Field(alias="approvalReceipt")
     approval_receipt_digest: str = Field(alias="approvalReceiptDigest")
+    approval_recording: UserDecisionRecording = Field(alias="approvalRecording")
     approved_snapshot: UserDecisionSnapshot = Field(alias="approvedSnapshot")
     resume_binding: AuthorityResumeBinding = Field(alias="resumeBinding")
     resume_binding_digest: str = Field(alias="resumeBindingDigest")
+    verified_resume_binding: VerifiedAuthorityResumeBinding = Field(
+        alias="verifiedResumeBinding"
+    )
+    current_policy_digest: str = Field(alias="currentPolicyDigest")
+    current_capabilities_digest: str = Field(alias="currentCapabilitiesDigest")
     authority_contract: AuthorityContract = Field(alias="authorityContract")
     authority_contract_digest: str = Field(alias="authorityContractDigest")
     expected_action_compare_version: int = Field(
@@ -5713,6 +6072,13 @@ class UserApprovalConsumption(EnvelopeModel):
         if request.task_contract_digest != self.task_contract_digest:
             raise ValueError("Task Contract does not match approvedSnapshot")
 
+        if self.approval_recording.receipt != self.approval_receipt:
+            raise ValueError("approvalRecording does not contain approvalReceipt")
+        if self.approval_recording.current_snapshot != self.approved_snapshot:
+            raise ValueError("approvalRecording does not produce approvedSnapshot")
+        if self.approval_recording.applied_to_state is not UserDecisionState.APPROVED:
+            raise ValueError("approvalRecording must durably record approval")
+
         validate_user_decision_receipt_binding(request, self.approval_receipt)
         if self.approval_receipt.decision != "approve":
             raise ValueError("approvalReceipt must carry an approve decision")
@@ -5729,6 +6095,21 @@ class UserApprovalConsumption(EnvelopeModel):
         expected_resume_digest = canonical_authority_resume_binding_digest(self.resume_binding)
         if self.resume_binding_digest != expected_resume_digest:
             raise ValueError("resumeBindingDigest does not match resumeBinding")
+        if self.verified_resume_binding.binding != self.resume_binding:
+            raise ValueError("verifiedResumeBinding does not contain resumeBinding")
+        if self.verified_resume_binding.binding_digest != expected_resume_digest:
+            raise ValueError("verifiedResumeBinding bindingDigest does not match resumeBinding")
+        if self.current_policy_digest != self.verified_resume_binding.current_policy_digest:
+            raise ValueError("currentPolicyDigest does not match verifiedResumeBinding")
+        if (
+            self.current_capabilities_digest
+            != self.verified_resume_binding.current_capabilities_digest
+        ):
+            raise ValueError("currentCapabilitiesDigest does not match verifiedResumeBinding")
+        if self.current_policy_digest != request.policy_digest:
+            raise ValueError("currentPolicyDigest no longer matches the approval request")
+        if self.current_capabilities_digest != request.capabilities_digest:
+            raise ValueError("currentCapabilitiesDigest no longer matches the approval request")
         resume_bindings = (
             (
                 "decisionRequestId",
@@ -5840,6 +6221,12 @@ class UserApprovalConsumption(EnvelopeModel):
                 raise ValueError(
                     f"authorityContract.{authority_alias} does not match approval request"
                 )
+        if self.authority_contract.policy_digest != self.current_policy_digest:
+            raise ValueError("authorityContract.policyDigest does not match current policy")
+        if canonical_capabilities_digest(self.authority_contract.capabilities) != (
+            self.current_capabilities_digest
+        ):
+            raise ValueError("authorityContract capabilities do not match current capabilities")
 
         preparation = self.preparation
         preparation_bindings = (
@@ -5957,6 +6344,11 @@ class UserApprovalConsumption(EnvelopeModel):
             "decisionRequestId": request.decision_request_id,
             "approvalReceiptDigest": expected_approval_digest,
             "resumeBindingDigest": expected_resume_digest,
+            "verifiedResumeBindingDigest": _canonical_model_digest(
+                self.verified_resume_binding
+            ),
+            "currentPolicyDigest": self.current_policy_digest,
+            "currentCapabilitiesDigest": self.current_capabilities_digest,
             "authorityContractDigest": expected_authority_digest,
             "preparedEventId": preparation.prepared_event.event_id,
         }
@@ -5968,6 +6360,34 @@ class UserApprovalConsumption(EnvelopeModel):
             first_name="preparedEvent",
             second_name="consumedEvent",
         )
+        if self.consumed_event.causation_id != preparation.prepared_event.event_id:
+            raise ValueError("consumedEvent must be caused by preparedEvent")
+        _require_direct_event_successor(
+            self.approval_recording.recorded_event,
+            preparation.authority_event,
+            first_name="approvalRecordedEvent",
+            second_name="authorityEvent",
+        )
+        if preparation.authority_event.causation_id != (
+            self.approval_recording.recorded_event.event_id
+        ):
+            raise ValueError("authorityEvent must be caused by approval recordedEvent")
+        chronology = (
+            ("approval recordedEvent", self.approval_recording.recorded_event.created_at),
+            ("resume verification", self.verified_resume_binding.verified_at),
+            ("authorityEvent", preparation.authority_event.created_at),
+            ("preparedEvent", preparation.prepared_event.created_at),
+            ("consumedEvent", self.consumed_event.created_at),
+        )
+        previous_name, previous_at = chronology[0]
+        if previous_at < self.approval_receipt.issued_at:
+            raise ValueError("approval recordedEvent cannot precede receipt issuedAt")
+        for current_name, current_at in chronology[1:]:
+            if current_at < previous_at:
+                raise ValueError(f"{current_name} cannot precede {previous_name}")
+            previous_name, previous_at = current_name, current_at
+        if self.consumed_event.created_at > self.approval_receipt.expires_at:
+            raise ValueError("consumedEvent cannot follow approval receipt expiresAt")
 
         required_event_payload = {
             "decisionRequestId": request.decision_request_id,
@@ -5985,3 +6405,7 @@ class UserApprovalConsumption(EnvelopeModel):
                 if payload.get(key) != expected:
                     raise ValueError(f"{field_name} payload {key} does not match approval")
         return self
+
+
+ExecutionStartRequest.model_rebuild()
+ExecutionStart.model_rebuild()

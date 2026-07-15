@@ -20,8 +20,10 @@ from magi_agent.execution_authority.contracts import (
     canonical_user_decision_request_digest,
 )
 from magi_agent.execution_authority.envelopes import (
+    ActionDenialRecording,
     ActionIntent,
     ActionResolution,
+    ActionResolutionRecording,
     EffectDeclarationBinding,
     ExecutionPreparation,
     ExecutionStart,
@@ -30,8 +32,11 @@ from magi_agent.execution_authority.envelopes import (
     UserDecisionExpirationRequest,
     UserDecisionInvalidationRequest,
     UserDecisionRecording,
+    UserDecisionRequestRecording,
     UserDecisionSnapshot,
     UserDecisionTransition,
+    VerifiedAuthorityResumeBinding,
+    VerifiedUserDecisionReceipt,
     canonical_action_intent_digest,
     canonical_provider_guarantees_digest,
     canonical_resource_refs_digest,
@@ -146,6 +151,33 @@ def _request_json(request: UserDecisionRequest) -> str:
     )
 
 
+def _verified_receipt(receipt: UserDecisionReceipt) -> VerifiedUserDecisionReceipt:
+    return VerifiedUserDecisionReceipt(
+        schemaVersion=1,
+        receipt=receipt,
+        receiptDigest=canonical_user_decision_receipt_digest(receipt),
+        verifierId="decision-ingress",
+        verifierArtifactDigest=D8,
+        verifiedAt=NOW + timedelta(seconds=1),
+    )
+
+
+def _verified_resume(
+    request: UserDecisionRequest,
+    resume: AuthorityResumeBinding,
+) -> VerifiedAuthorityResumeBinding:
+    return VerifiedAuthorityResumeBinding(
+        schemaVersion=1,
+        binding=resume,
+        bindingDigest=canonical_authority_resume_binding_digest(resume),
+        currentPolicyDigest=request.policy_digest,
+        currentCapabilitiesDigest=request.capabilities_digest,
+        verifierId="resume-binding-verifier",
+        verifierArtifactDigest=D9,
+        verifiedAt=NOW + timedelta(seconds=3),
+    )
+
+
 def _model_digest(
     value: (UserDecisionInvalidationRequest | UserDecisionExpirationRequest | ActionResolution),
 ) -> str:
@@ -219,6 +251,7 @@ def _event(
     previous_hash: str = D0,
     event_hash: str = D1,
     row_checksum: str = D2,
+    created_at: datetime = NOW + timedelta(seconds=2),
 ) -> JournalEvent:
     draft = _draft_lifecycle_journal_event(
         event_id=event_id,
@@ -248,7 +281,7 @@ def _event(
         previousHash=previous_hash,
         eventHash=event_hash,
         rowChecksum=row_checksum,
-        createdAt=NOW,
+        createdAt=created_at,
     )
 
 
@@ -280,7 +313,7 @@ def _resume(request: UserDecisionRequest) -> AuthorityResumeBinding:
 
 def _authority(
     request: UserDecisionRequest,
-    resume: AuthorityResumeBinding,
+    resume: AuthorityResumeBinding | None,
     *,
     attempt_id: str = "attempt_01",
 ) -> AuthorityContract:
@@ -319,8 +352,12 @@ def _authority(
         revocationDigest=None,
         fencingToken=7,
         maximumUses=1,
-        decisionRequestId=request.decision_request_id,
-        resumeBindingDigest=canonical_authority_resume_binding_digest(resume),
+        decisionRequestId=(request.decision_request_id if resume is not None else None),
+        resumeBindingDigest=(
+            canonical_authority_resume_binding_digest(resume)
+            if resume is not None
+            else None
+        ),
         parentAuthorityDigest=None,
         delegationChain=(),
     )
@@ -388,13 +425,18 @@ def _preparation(
     intent = _intent(request, authority)
     intent_digest = canonical_action_intent_digest(intent)
     resume_digest = authority.resume_binding_digest
-    assert resume_digest is not None
     payload = {
-        "decisionRequestId": request.decision_request_id,
-        "resumeBindingDigest": payload_resume_digest or resume_digest,
         "authorityContractDigest": authority_digest,
         "actionIntentDigest": intent_digest,
     }
+    if resume_digest is not None:
+        payload.update(
+            {
+                "decisionRequestId": request.decision_request_id,
+                "resumeBindingDigest": payload_resume_digest or resume_digest,
+            }
+        )
+    approval_flow = resume_digest is not None
     return ExecutionPreparation(
         schemaVersion=1,
         intent=intent,
@@ -417,7 +459,13 @@ def _preparation(
             event_id="event_authorized",
             attempt_id=authority.attempt_id,
             authority_contract_id=authority.authority_contract_id,
+            causation_id=("event_approval_recorded" if approval_flow else request.turn_id),
             payload=payload,
+            sequence=(2 if approval_flow else 1),
+            previous_hash=(D1 if approval_flow else D0),
+            event_hash=(D2 if approval_flow else D1),
+            row_checksum=(D3 if approval_flow else D2),
+            created_at=NOW + timedelta(seconds=(4 if approval_flow else 1)),
         ),
         preparedEvent=_event(
             "action.prepared",
@@ -425,12 +473,70 @@ def _preparation(
             event_id="event_prepared",
             attempt_id=authority.attempt_id,
             authority_contract_id=authority.authority_contract_id,
+            causation_id="event_authorized",
             payload=payload,
-            sequence=2,
-            previous_hash=D1,
-            event_hash=D2,
-            row_checksum=D3,
+            sequence=(3 if approval_flow else 2),
+            previous_hash=(D2 if approval_flow else D1),
+            event_hash=(D3 if approval_flow else D2),
+            row_checksum=(D4 if approval_flow else D3),
+            created_at=NOW + timedelta(seconds=(5 if approval_flow else 2)),
         ),
+    )
+
+
+def _approval_recording(
+    request: UserDecisionRequest,
+    receipt: UserDecisionReceipt,
+) -> UserDecisionRecording:
+    receipt_digest = canonical_user_decision_receipt_digest(receipt)
+    verified = _verified_receipt(receipt)
+    previous = _snapshot(
+        request,
+        state="pending",
+        approval_receipt_digest=None,
+        latest_receipt_id=None,
+        latest_receipt_digest=None,
+        compare_version=0,
+    )
+    current = _snapshot(
+        request,
+        state="approved",
+        approval_receipt_digest=receipt_digest,
+        latest_receipt_id=receipt.receipt_id,
+        latest_receipt_digest=receipt_digest,
+        compare_version=1,
+    )
+    return UserDecisionRecording(
+        schemaVersion=1,
+        verifiedReceipt=verified,
+        receipt=receipt,
+        appliedFromState="pending",
+        appliedToState="approved",
+        previousSnapshot=previous,
+        expectedDecisionCompareVersion=0,
+        decisionCompareVersion=1,
+        recordedEvent=_event(
+            "user_decision.recorded",
+            request,
+            event_id="event_approval_recorded",
+            causation_id=request.pending_event_id,
+            payload={
+                "decision": receipt.decision,
+                "decisionRequestId": receipt.decision_request_id,
+                "decisionRequestDigest": current.decision_request_digest,
+                "receiptId": receipt.receipt_id,
+                "receiptDigest": receipt_digest,
+                "verifiedReceiptDigest": _model_digest(verified),
+                "authenticationNonceDigest": receipt.authentication_nonce_digest,
+                "appliedFromState": "pending",
+                "appliedToState": "approved",
+                "previousSnapshotCompareVersion": 0,
+                "currentSnapshotCompareVersion": 1,
+            },
+            created_at=NOW + timedelta(seconds=2),
+        ),
+        currentSnapshot=current,
+        replayed=False,
     )
 
 
@@ -447,10 +553,12 @@ def _consumption_payload() -> dict[str, object]:
         compare_version=1,
     )
     resume = _resume(request)
+    verified_resume = _verified_resume(request, resume)
     authority = _authority(request, resume)
     authority_digest = canonical_authority_contract_digest(authority)
     resume_digest = canonical_authority_resume_binding_digest(resume)
     preparation = _preparation(request, authority)
+    approval_recording = _approval_recording(request, receipt)
     consumed_snapshot = _snapshot(
         request,
         state="consumed",
@@ -465,9 +573,13 @@ def _consumption_payload() -> dict[str, object]:
         "taskContractDigest": request.task_contract_digest,
         "approvalReceipt": receipt,
         "approvalReceiptDigest": receipt_digest,
+        "approvalRecording": approval_recording,
         "approvedSnapshot": snapshot,
         "resumeBinding": resume,
         "resumeBindingDigest": resume_digest,
+        "verifiedResumeBinding": verified_resume,
+        "currentPolicyDigest": request.policy_digest,
+        "currentCapabilitiesDigest": request.capabilities_digest,
         "authorityContract": authority,
         "authorityContractDigest": authority_digest,
         "expectedActionCompareVersion": 2,
@@ -486,13 +598,18 @@ def _consumption_payload() -> dict[str, object]:
                 "decisionRequestId": request.decision_request_id,
                 "approvalReceiptDigest": receipt_digest,
                 "resumeBindingDigest": resume_digest,
+                "verifiedResumeBindingDigest": _model_digest(verified_resume),
+                "currentPolicyDigest": request.policy_digest,
+                "currentCapabilitiesDigest": request.capabilities_digest,
                 "authorityContractDigest": authority_digest,
                 "preparedEventId": preparation.prepared_event.event_id,
             },
-            sequence=3,
-            previous_hash=D2,
-            event_hash=D3,
-            row_checksum=D4,
+            sequence=4,
+            previous_hash=D3,
+            event_hash=D4,
+            row_checksum=D5,
+            causation_id=preparation.prepared_event.event_id,
+            created_at=NOW + timedelta(seconds=6),
         ),
     }
 
@@ -515,6 +632,130 @@ def test_snapshot_uses_the_contract_canonical_digest_for_unicode_request() -> No
     assert snapshot.decision_request_digest == helper_digest
 
 
+def test_request_user_decision_returns_an_event_bound_persistence_receipt() -> None:
+    request = _request()
+    snapshot = _snapshot(
+        request,
+        state="pending",
+        approval_receipt_digest=None,
+        latest_receipt_id=None,
+        latest_receipt_digest=None,
+        compare_version=0,
+    )
+    recording = UserDecisionRequestRecording(
+        schemaVersion=1,
+        request=request,
+        snapshot=snapshot,
+        decisionCompareVersion=0,
+        requestedEvent=_event(
+            "user_decision.pending",
+            request,
+            event_id=request.pending_event_id,
+            payload={
+                "decisionRequestDigest": canonical_user_decision_request_digest(request),
+                "decisionRequestId": request.decision_request_id,
+                "decisionCompareVersion": 0,
+            },
+        ),
+    )
+
+    assert recording.snapshot == snapshot
+
+
+def test_deny_and_resolve_persistence_receipts_bind_events_and_cas() -> None:
+    request = _request()
+    denial = ActionResolution(
+        schemaId="magi.action_resolution.v1",
+        actionId=request.action_id,
+        taskContractDigest=request.task_contract_digest,
+        sourceAttemptIds=("attempt_01",),
+        resolutionAttemptId=None,
+        logicalState="denied",
+        reasonCodes=("policy_denied",),
+    )
+    denial_digest = _model_digest(denial)
+    denied_event = _event(
+        "action.denied",
+        request,
+        event_id="event_denied",
+        payload={
+            "actionResolutionDigest": denial_digest,
+            "reasonCodes": list(denial.reason_codes),
+            "sourceAttemptIds": list(denial.source_attempt_ids),
+        },
+    )
+    resolution_event = _event(
+        "action.resolved",
+        request,
+        event_id="event_resolved",
+        causation_id=denied_event.event_id,
+        payload={
+            "actionResolutionDigest": denial_digest,
+            "logicalState": "denied",
+            "sourceEventId": denied_event.event_id,
+        },
+        sequence=2,
+        previous_hash=denied_event.event_hash,
+        event_hash=D2,
+        row_checksum=D3,
+    )
+    denial_recording = ActionDenialRecording(
+        schemaVersion=1,
+        resolution=denial,
+        expectedActionCompareVersion=1,
+        expectedAttemptCompareVersion=2,
+        expectedPartitionCompareVersion=3,
+        actionCompareVersion=2,
+        attemptCompareVersion=3,
+        partitionCompareVersion=4,
+        deniedEvent=denied_event,
+        resolutionEvent=resolution_event,
+    )
+    assert denial_recording.action_compare_version == 2
+
+    terminal = _event(
+        "action.verified",
+        request,
+        event_id="event_verified",
+    )
+    verified_resolution = ActionResolution(
+        schemaId="magi.action_resolution.v1",
+        actionId=request.action_id,
+        taskContractDigest=request.task_contract_digest,
+        sourceAttemptIds=("attempt_01",),
+        resolutionAttemptId=None,
+        logicalState="verified",
+        reasonCodes=("verified",),
+    )
+    verified_digest = _model_digest(verified_resolution)
+    resolved = _event(
+        "action.resolved",
+        request,
+        event_id="event_verified_resolved",
+        causation_id=terminal.event_id,
+        payload={
+            "actionResolutionDigest": verified_digest,
+            "logicalState": "verified",
+            "sourceEventId": terminal.event_id,
+        },
+        sequence=2,
+        previous_hash=terminal.event_hash,
+        event_hash=D2,
+        row_checksum=D3,
+    )
+    resolution_recording = ActionResolutionRecording(
+        schemaVersion=1,
+        resolution=verified_resolution,
+        expectedActionCompareVersion=4,
+        expectedPartitionCompareVersion=5,
+        actionCompareVersion=5,
+        partitionCompareVersion=6,
+        sourceEvent=terminal,
+        resolutionEvent=resolved,
+    )
+    assert resolution_recording.resolution == verified_resolution
+
+
 def test_fresh_approval_recording_binds_approval_pointer_to_canonical_receipt() -> None:
     request = _request()
     receipt = _receipt(request)
@@ -527,21 +768,83 @@ def test_fresh_approval_recording_binds_approval_pointer_to_canonical_receipt() 
         latest_receipt_digest=receipt_digest,
         compare_version=1,
     )
-
+    recording = _approval_recording(request, receipt)
+    payload = recording.model_dump(by_alias=True, mode="json")
+    payload["currentSnapshot"] = snapshot.model_dump(by_alias=True, mode="json")
     with pytest.raises(ValidationError, match="approvalReceiptDigest"):
-        UserDecisionRecording(
-            schemaVersion=1,
-            receipt=receipt,
-            appliedFromState="pending",
-            appliedToState="approved",
-            recordedEvent=_event(
-                "user_decision.recorded",
-                request,
-                event_id="event_approval_recorded",
-            ),
-            currentSnapshot=snapshot,
-            replayed=False,
-        )
+        UserDecisionRecording.model_validate(payload)
+
+
+def test_approval_recording_embeds_verified_ingress_and_exact_cas_transition() -> None:
+    request = _request()
+    receipt = _receipt(request)
+    receipt_digest = canonical_user_decision_receipt_digest(receipt)
+    verified = VerifiedUserDecisionReceipt(
+        schemaVersion=1,
+        receipt=receipt,
+        receiptDigest=receipt_digest,
+        verifierId="decision-ingress",
+        verifierArtifactDigest=D8,
+        verifiedAt=NOW + timedelta(seconds=1),
+    )
+    previous = _snapshot(
+        request,
+        state="pending",
+        approval_receipt_digest=None,
+        latest_receipt_id=None,
+        latest_receipt_digest=None,
+        compare_version=0,
+    )
+    current = _snapshot(
+        request,
+        state="approved",
+        approval_receipt_digest=receipt_digest,
+        latest_receipt_id=receipt.receipt_id,
+        latest_receipt_digest=receipt_digest,
+        compare_version=1,
+    )
+    verified_digest = _model_digest(verified)
+    payload = {
+        "decision": receipt.decision,
+        "decisionRequestId": receipt.decision_request_id,
+        "decisionRequestDigest": current.decision_request_digest,
+        "receiptId": receipt.receipt_id,
+        "receiptDigest": receipt_digest,
+        "verifiedReceiptDigest": verified_digest,
+        "authenticationNonceDigest": receipt.authentication_nonce_digest,
+        "appliedFromState": "pending",
+        "appliedToState": "approved",
+        "previousSnapshotCompareVersion": 0,
+        "currentSnapshotCompareVersion": 1,
+    }
+
+    recording = UserDecisionRecording(
+        schemaVersion=1,
+        verifiedReceipt=verified,
+        receipt=receipt,
+        appliedFromState="pending",
+        appliedToState="approved",
+        previousSnapshot=previous,
+        expectedDecisionCompareVersion=0,
+        decisionCompareVersion=1,
+        recordedEvent=_event(
+            "user_decision.recorded",
+            request,
+            event_id="event_approval_recorded",
+            causation_id=request.pending_event_id,
+            payload=payload,
+        ),
+        currentSnapshot=current,
+        replayed=False,
+    )
+
+    assert recording.previous_snapshot == previous
+    assert recording.decision_compare_version == 1
+
+    drifted = recording.model_dump(by_alias=True, mode="json")
+    drifted["expectedDecisionCompareVersion"] = 1
+    with pytest.raises(ValidationError, match="expected decision CAS|decisionCompareVersion"):
+        UserDecisionRecording.model_validate(drifted)
 
 
 def test_replayed_approval_cannot_claim_an_unreachable_snapshot_state() -> None:
@@ -574,6 +877,113 @@ def test_replayed_approval_cannot_claim_an_unreachable_snapshot_state() -> None:
             currentSnapshot=snapshot_payload,
             replayed=True,
         )
+
+
+def test_denial_recording_exactly_binds_terminal_event_payloads_and_causation() -> None:
+    request = _request()
+    receipt = _receipt(request, decision="deny", receipt_id="receipt_deny")
+    verified = _verified_receipt(receipt)
+    receipt_digest = canonical_user_decision_receipt_digest(receipt)
+    previous = _snapshot(
+        request,
+        state="pending",
+        approval_receipt_digest=None,
+        latest_receipt_id=None,
+        latest_receipt_digest=None,
+        compare_version=0,
+    )
+    current = _snapshot(
+        request,
+        state="denied",
+        approval_receipt_digest=None,
+        latest_receipt_id=receipt.receipt_id,
+        latest_receipt_digest=receipt_digest,
+        compare_version=1,
+    )
+    resolution = ActionResolution(
+        schemaId="magi.action_resolution.v1",
+        actionId=request.action_id,
+        taskContractDigest=request.task_contract_digest,
+        sourceAttemptIds=("attempt_01",),
+        resolutionAttemptId=None,
+        logicalState="denied",
+        reasonCodes=("user_denied",),
+    )
+    resolution_digest = _model_digest(resolution)
+    recorded_event = _event(
+        "user_decision.recorded",
+        request,
+        event_id="event_denial_recorded",
+        causation_id=request.pending_event_id,
+        payload={
+            "decision": receipt.decision,
+            "decisionRequestId": receipt.decision_request_id,
+            "decisionRequestDigest": current.decision_request_digest,
+            "receiptId": receipt.receipt_id,
+            "receiptDigest": receipt_digest,
+            "verifiedReceiptDigest": _model_digest(verified),
+            "authenticationNonceDigest": receipt.authentication_nonce_digest,
+            "appliedFromState": "pending",
+            "appliedToState": "denied",
+            "previousSnapshotCompareVersion": 0,
+            "currentSnapshotCompareVersion": 1,
+        },
+    )
+    denied_event = _event(
+        "action.denied",
+        request,
+        event_id="event_action_denied",
+        causation_id=recorded_event.event_id,
+        payload={
+            "actionResolutionDigest": resolution_digest,
+            "decisionReceiptDigest": receipt_digest,
+            "decisionRequestId": request.decision_request_id,
+            "recordedEventId": recorded_event.event_id,
+        },
+        sequence=2,
+        previous_hash=recorded_event.event_hash,
+        event_hash=D2,
+        row_checksum=D3,
+    )
+    resolution_event = _event(
+        "action.resolved",
+        request,
+        event_id="event_action_resolved",
+        causation_id=denied_event.event_id,
+        payload={
+            "actionResolutionDigest": resolution_digest,
+            "deniedEventId": denied_event.event_id,
+            "logicalState": "denied",
+        },
+        sequence=3,
+        previous_hash=denied_event.event_hash,
+        event_hash=D3,
+        row_checksum=D4,
+    )
+    payload = {
+        "schemaVersion": 1,
+        "verifiedReceipt": verified,
+        "receipt": receipt,
+        "appliedFromState": "pending",
+        "appliedToState": "denied",
+        "previousSnapshot": previous,
+        "expectedDecisionCompareVersion": 0,
+        "decisionCompareVersion": 1,
+        "recordedEvent": recorded_event,
+        "actionResolution": resolution,
+        "deniedEvent": denied_event,
+        "resolutionEvent": resolution_event,
+        "currentSnapshot": current,
+        "replayed": False,
+    }
+
+    recording = UserDecisionRecording.model_validate(payload)
+    assert recording.resolution_event.causation_id == denied_event.event_id
+
+    drifted = resolution_event.model_dump(by_alias=True, mode="json")
+    drifted["causationId"] = request.turn_id
+    with pytest.raises(ValidationError, match="caused by deniedEvent"):
+        UserDecisionRecording.model_validate({**payload, "resolutionEvent": drifted})
 
 
 def test_transition_carries_both_cas_snapshots_and_preserves_approval_history() -> None:
@@ -638,6 +1048,7 @@ def test_transition_carries_both_cas_snapshots_and_preserves_approval_history() 
                 current=current,
                 resolution=resolution,
             ),
+            created_at=request.expires_at,
         ),
         "actionResolution": resolution,
         "deniedEvent": _event(
@@ -645,6 +1056,12 @@ def test_transition_carries_both_cas_snapshots_and_preserves_approval_history() 
             request,
             event_id="event_action_denied",
             causation_id="event_decision_expired",
+            payload={
+                "actionResolutionDigest": _model_digest(resolution),
+                "transitionEventId": "event_decision_expired",
+                "transitionRequestDigest": _model_digest(transition_request),
+            },
+            created_at=request.expires_at,
             sequence=2,
             previous_hash=D1,
             event_hash=D2,
@@ -655,6 +1072,12 @@ def test_transition_carries_both_cas_snapshots_and_preserves_approval_history() 
             request,
             event_id="event_action_resolved",
             causation_id="event_action_denied",
+            payload={
+                "actionResolutionDigest": _model_digest(resolution),
+                "deniedEventId": "event_action_denied",
+                "logicalState": "denied",
+            },
+            created_at=request.expires_at,
             sequence=3,
             previous_hash=D2,
             event_hash=D3,
@@ -664,6 +1087,13 @@ def test_transition_carries_both_cas_snapshots_and_preserves_approval_history() 
 
     transition = UserDecisionTransition.model_validate(payload)
     assert transition.current_snapshot.approval_receipt_digest == receipt_digest
+
+    early = transition.model_dump(by_alias=True, mode="json")
+    early["transitionEvent"]["createdAt"] = (
+        request.expires_at - timedelta(microseconds=1)
+    ).isoformat()
+    with pytest.raises(ValidationError, match="expiresAt"):
+        UserDecisionTransition.model_validate(early)
 
     drifted = current.model_dump(by_alias=True, mode="json")
     drifted["approvalReceiptDigest"] = D9
@@ -690,6 +1120,23 @@ def test_user_approval_consumption_binds_every_approved_resume_and_preparation_i
     ):
         with pytest.raises(ValidationError, match=message):
             UserApprovalConsumption.model_validate({**payload, field: value})
+
+
+def test_user_approval_consumption_rejects_stale_current_state_or_expired_chronology() -> None:
+    payload = _consumption_payload()
+    verified = payload["verifiedResumeBinding"].model_dump(by_alias=True, mode="json")
+    verified["currentPolicyDigest"] = D9
+    with pytest.raises(ValidationError, match="currentPolicyDigest"):
+        UserApprovalConsumption.model_validate(
+            {**payload, "verifiedResumeBinding": verified}
+        )
+
+    consumed = payload["consumedEvent"].model_dump(by_alias=True, mode="json")
+    consumed["createdAt"] = (
+        payload["approvalReceipt"].expires_at + timedelta(microseconds=1)
+    ).isoformat()
+    with pytest.raises(ValidationError, match="expiresAt"):
+        UserApprovalConsumption.model_validate({**payload, "consumedEvent": consumed})
 
 
 def test_user_approval_consumption_rejects_authority_attempt_and_event_payload_drift() -> None:
@@ -734,6 +1181,7 @@ def test_user_approval_consumption_rejects_resume_actor_or_run_substitution(
                 **payload,
                 "resumeBinding": resume,
                 "resumeBindingDigest": canonical_authority_resume_binding_digest(resume),
+                "verifiedResumeBinding": _verified_resume(request, resume),
                 "authorityContract": authority,
                 "authorityContractDigest": canonical_authority_contract_digest(authority),
                 "preparation": _preparation(request, authority),
@@ -744,31 +1192,17 @@ def test_user_approval_consumption_rejects_resume_actor_or_run_substitution(
 def test_user_decision_record_event_payload_commits_request_receipt_and_nonce() -> None:
     request = _request()
     receipt = _receipt(request)
-    receipt_digest = canonical_user_decision_receipt_digest(receipt)
-    snapshot = _snapshot(
+    recording = _approval_recording(request, receipt)
+    payload = recording.model_dump(by_alias=True, mode="json")
+    payload["recordedEvent"] = _event(
+        "user_decision.recorded",
         request,
-        state="approved",
-        approval_receipt_digest=receipt_digest,
-        latest_receipt_id=receipt.receipt_id,
-        latest_receipt_digest=receipt_digest,
-        compare_version=1,
-    )
-
+        event_id="event_approval_recorded",
+        causation_id=request.pending_event_id,
+        payload={},
+    ).model_dump(by_alias=True, mode="json")
     with pytest.raises(ValidationError, match="recordedEvent payload"):
-        UserDecisionRecording(
-            schemaVersion=1,
-            receipt=receipt,
-            appliedFromState="pending",
-            appliedToState="approved",
-            recordedEvent=_event(
-                "user_decision.recorded",
-                request,
-                event_id="event_approval_recorded",
-                payload={},
-            ),
-            currentSnapshot=snapshot,
-            replayed=False,
-        )
+        UserDecisionRecording.model_validate(payload)
 
 
 def test_execution_preparation_rejects_digest_transplant_and_context_drift() -> None:
@@ -789,15 +1223,19 @@ def test_execution_preparation_rejects_digest_transplant_and_context_drift() -> 
 
 
 def test_execution_start_binds_recorded_preparation_executor_and_token_digest() -> None:
-    request = _request()
-    authority = _authority(request, _resume(request))
-    preparation = _preparation(request, authority)
+    consumption = UserApprovalConsumption.model_validate(_consumption_payload())
+    request = consumption.approved_snapshot.request
+    authority = consumption.authority_contract
+    preparation = consumption.preparation
     payload = {
         "actionIntentDigest": preparation.action_intent_digest,
         "authorityContractDigest": preparation.authority_contract_digest,
         "preparedEventId": preparation.prepared_event.event_id,
         "preparedEventSequence": preparation.prepared_event.sequence,
         "preparedEventHash": preparation.prepared_event.event_hash,
+        "approvalConsumedEventId": consumption.consumed_event.event_id,
+        "approvalConsumedEventSequence": consumption.consumed_event.sequence,
+        "approvalConsumedEventHash": consumption.consumed_event.event_hash,
         "executorId": "executor_01",
         "executorVersion": "1.0.0",
         "sandboxProfileDigest": authority.sandbox_profile_digest,
@@ -809,6 +1247,7 @@ def test_execution_start_binds_recorded_preparation_executor_and_token_digest() 
     start = ExecutionStart(
         schemaVersion=1,
         preparation=preparation,
+        approvalConsumption=consumption,
         actionId=request.action_id,
         attemptId=authority.attempt_id,
         partitionId=request.authority_partition_id,
@@ -834,12 +1273,13 @@ def test_execution_start_binds_recorded_preparation_executor_and_token_digest() 
             event_id="event_executing",
             attempt_id=authority.attempt_id,
             authority_contract_id=authority.authority_contract_id,
-            causation_id=preparation.prepared_event.event_id,
+            causation_id=consumption.consumed_event.event_id,
             payload=payload,
-            sequence=3,
-            previous_hash=preparation.prepared_event.event_hash,
-            event_hash=D3,
-            row_checksum=D4,
+            sequence=5,
+            previous_hash=consumption.consumed_event.event_hash,
+            event_hash=D5,
+            row_checksum=D6,
+            created_at=NOW + timedelta(seconds=7),
         ),
     )
     assert start.preparation == preparation
@@ -853,6 +1293,72 @@ def test_execution_start_binds_recorded_preparation_executor_and_token_digest() 
     )
     with pytest.raises(ValidationError, match="payload"):
         ExecutionStart.model_validate(drifted)
+
+
+def test_execution_start_without_approval_directly_follows_prepared_event() -> None:
+    request = _request()
+    authority = _authority(request, None)
+    preparation = _preparation(request, authority)
+    payload = {
+        "actionIntentDigest": preparation.action_intent_digest,
+        "authorityContractDigest": preparation.authority_contract_digest,
+        "preparedEventId": preparation.prepared_event.event_id,
+        "preparedEventSequence": preparation.prepared_event.sequence,
+        "preparedEventHash": preparation.prepared_event.event_hash,
+        "executorId": "executor_01",
+        "executorVersion": "1.0.0",
+        "sandboxProfileDigest": authority.sandbox_profile_digest,
+        "providerId": None,
+        "providerVersion": None,
+        "providerCapabilitiesDigest": None,
+        "executionGrantDigest": D8,
+    }
+    executing_event = _event(
+        "action.executing",
+        request,
+        event_id="event_executing",
+        attempt_id=authority.attempt_id,
+        authority_contract_id=authority.authority_contract_id,
+        causation_id=preparation.prepared_event.event_id,
+        payload=payload,
+        sequence=3,
+        previous_hash=preparation.prepared_event.event_hash,
+        event_hash=D3,
+        row_checksum=D4,
+        created_at=NOW + timedelta(seconds=3),
+    )
+
+    start = ExecutionStart(
+        schemaVersion=1,
+        preparation=preparation,
+        actionId=request.action_id,
+        attemptId=authority.attempt_id,
+        partitionId=request.authority_partition_id,
+        taskContractDigest=request.task_contract_digest,
+        actionIntentDigest=preparation.action_intent_digest,
+        requestDigest=request.normalized_request_digest,
+        authorityContractId=authority.authority_contract_id,
+        authorityContractDigest=preparation.authority_contract_digest,
+        fencingToken=authority.fencing_token,
+        executorId="executor_01",
+        executorVersion="1.0.0",
+        sandboxProfileDigest=authority.sandbox_profile_digest,
+        providerId=None,
+        providerVersion=None,
+        providerCapabilitiesDigest=None,
+        executionTokenDigest=D8,
+        actionCompareVersion=4,
+        attemptCompareVersion=5,
+        partitionCompareVersion=6,
+        executingEvent=executing_event,
+    )
+
+    assert start.approval_consumption is None
+
+    skipped = start.model_dump(by_alias=True, mode="json")
+    skipped["executingEvent"]["previousHash"] = D1
+    with pytest.raises(ValidationError, match="previousHash"):
+        ExecutionStart.model_validate(skipped)
 
 
 def test_invalidation_transition_preserves_pending_snapshot_without_inventing_receipts() -> None:
@@ -926,6 +1432,11 @@ def test_invalidation_transition_preserves_pending_snapshot_without_inventing_re
             request,
             event_id="event_action_denied",
             causation_id="event_decision_invalidated",
+            payload={
+                "actionResolutionDigest": _model_digest(resolution),
+                "transitionEventId": "event_decision_invalidated",
+                "transitionRequestDigest": _model_digest(transition_request),
+            },
             sequence=2,
             previous_hash=D1,
             event_hash=D2,
@@ -936,6 +1447,11 @@ def test_invalidation_transition_preserves_pending_snapshot_without_inventing_re
             request,
             event_id="event_action_resolved",
             causation_id="event_action_denied",
+            payload={
+                "actionResolutionDigest": _model_digest(resolution),
+                "deniedEventId": "event_action_denied",
+                "logicalState": "denied",
+            },
             sequence=3,
             previous_hash=D2,
             event_hash=D3,
