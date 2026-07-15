@@ -149,18 +149,65 @@ fn spawn_serve(bin: &Path, port: u16, log: File) -> std::io::Result<Child> {
     // some state to relative paths (e.g. the observability store ".openmagi").
     // Pin the child's working directory to the home dir so those writes land in
     // a writable location instead of crashing on a read-only filesystem.
-    Command::new(bin)
-        .current_dir(home_dir())
+    let mut cmd = Command::new(bin);
+    cmd.current_dir(home_dir())
         .arg("--host")
         .arg("127.0.0.1")
         .arg("--port")
         .arg(port.to_string())
         .env("CORE_AGENT_PORT", port.to_string())
-        .env("MAGI_SERVE_HOST", "127.0.0.1")
-        .stdout(Stdio::from(log))
+        .env("MAGI_SERVE_HOST", "127.0.0.1");
+    // Managed-inference tier: when a subscription gateway token is persisted,
+    // inject the proxy-routing env so the runtime routes model calls through
+    // Magi's api-proxy. Empty (byte-identical) for BYO-key / unconnected users.
+    for (key, value) in managed_serve_env() {
+        cmd.env(key, value);
+    }
+    cmd.stdout(Stdio::from(log))
         .stderr(Stdio::from(err_log))
         .stdin(Stdio::null())
         .spawn()
+}
+
+/// If any argv entry is the managed-inference deep link, persist the token to
+/// the managed-token file. Best-effort: a write failure is logged (stderr) but
+/// never aborts startup. The next serve spawn picks up the token.
+fn persist_managed_token_from_args<I, S>(args: I)
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let Some(token) = magi_desktop_core::managed::extract_token_from_args(args) else {
+        return;
+    };
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let config_dir = std::env::var("MAGI_CONFIG_DIR").ok();
+    let path = magi_desktop_core::managed::managed_token_path(
+        home.as_deref(),
+        config_dir.as_deref(),
+    );
+    if let Err(e) = magi_desktop_core::managed::write_managed_token(&path, &token) {
+        eprintln!("[managed] failed to persist gateway token: {e}");
+    }
+}
+
+/// Read the persisted managed gateway token (if any) and build the runtime env
+/// overrides that switch `magi serve` into managed-inference routing. Returns an
+/// empty map for unconnected users. Never panics — a missing/unreadable token
+/// file simply yields no overrides.
+fn managed_serve_env() -> std::collections::BTreeMap<String, String> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let config_dir = std::env::var("MAGI_CONFIG_DIR").ok();
+    let token_path = magi_desktop_core::managed::managed_token_path(
+        home.as_deref(),
+        config_dir.as_deref(),
+    );
+    let token = std::fs::read_to_string(&token_path).ok();
+    let api_proxy_override = std::env::var("MAGI_MANAGED_API_PROXY_URL").ok();
+    magi_desktop_core::managed::managed_env_vars(
+        token.as_deref(),
+        api_proxy_override.as_deref(),
+    )
 }
 
 /// Minimal blocking HTTP GET over loopback. Returns (status, body). We avoid an
@@ -259,8 +306,12 @@ are much faster.</p>\
 }
 
 fn main() {
-    let single_instance = tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-        // A second launch just focuses the existing window (dashboard or loading).
+    let single_instance = tauri_plugin_single_instance::init(|app, argv, _cwd| {
+        // A second launch may carry the managed-inference deep link
+        // (ai.openmagi://token?gw=...) — the OS re-launches the app with the URL
+        // as an argv entry. Persist the token if present, then focus the window
+        // (dashboard or loading).
+        persist_managed_token_from_args(argv.iter().map(String::as_str));
         if let Some(win) = app
             .get_webview_window("main")
             .or_else(|| app.get_webview_window("loading"))
@@ -275,6 +326,12 @@ fn main() {
         .manage(ServeProcess(Mutex::new(None)))
         .setup(|app| {
             let handle = app.handle().clone();
+
+            // 0. If this cold start was launched via the managed-inference deep
+            //    link (ai.openmagi://token?gw=...), persist the token BEFORE
+            //    spawning serve so the very first serve process routes through
+            //    the proxy without a restart.
+            persist_managed_token_from_args(std::env::args());
 
             // 1. Choose a port and resolve the binary.
             let port = match server::pick_free_port() {

@@ -60,6 +60,8 @@ export default {
       "src/chat-core/merge-server-messages.test.ts",
       "src/chat-core/persist-messages.test.ts",
       "app/dashboard/[botId]/chat/chat-view-client-reset-listener.test.ts",
+      // Managed-inference "Magi (managed)" model-picker option (OSS desktop tier).
+      "src/lib/models/model-options.managed.test.ts",
     ],
   },
 };

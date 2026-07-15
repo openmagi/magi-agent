@@ -15,6 +15,13 @@
       "capabilities": []
     }
   },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["ai.openmagi"]
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["app", "dmg", "deb", "appimage", "msi"],
