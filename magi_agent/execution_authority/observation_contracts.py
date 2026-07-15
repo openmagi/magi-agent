@@ -377,7 +377,7 @@ class ExecutionObservationBinding(EnvelopeModel):
             if observed != expected:
                 raise ValueError(f"{alias} does not match the embedded contract")
 
-        observation_bindings = (
+        observation_bindings: tuple[tuple[str, object, object], ...] = (
             ("actionId", observation.action_id, start.action_id),
             ("attemptId", observation.attempt_id, start.attempt_id),
             ("partitionId", observation.partition_id, start.partition_id),
@@ -413,11 +413,13 @@ class ExecutionObservationBinding(EnvelopeModel):
                 start.provider_capabilities_digest,
             ),
         )
-        for alias, observed, expected in observation_bindings:
-            if observed != expected:
-                raise ValueError(f"BackendObservation {alias} does not match ExecutionStart")
+        for observation_alias, observation_value, start_value in observation_bindings:
+            if observation_value != start_value:
+                raise ValueError(
+                    f"BackendObservation {observation_alias} does not match ExecutionStart"
+                )
 
-        version_bindings = (
+        version_bindings: tuple[tuple[str, int, int], ...] = (
             (
                 "expectedActionCompareVersion",
                 self.expected_action_compare_version,
@@ -434,10 +436,10 @@ class ExecutionObservationBinding(EnvelopeModel):
                 start.partition_compare_version,
             ),
         )
-        for alias, observed, expected in version_bindings:
-            if observed != expected:
-                raise ValueError(f"{alias} does not match ExecutionStart result CAS")
-        for name, expected, result in (
+        for version_alias, requested_version, start_version in version_bindings:
+            if requested_version != start_version:
+                raise ValueError(f"{version_alias} does not match ExecutionStart result CAS")
+        cas_bindings: tuple[tuple[str, int, int], ...] = (
             (
                 "actionCompareVersion",
                 self.expected_action_compare_version,
@@ -453,8 +455,13 @@ class ExecutionObservationBinding(EnvelopeModel):
                 self.expected_partition_compare_version,
                 self.partition_compare_version,
             ),
-        ):
-            _require_exact_cas_increment(name=name, expected=expected, result=result)
+        )
+        for cas_name, expected_version, result_version in cas_bindings:
+            _require_exact_cas_increment(
+                name=cas_name,
+                expected=expected_version,
+                result=result_version,
+            )
 
         _validate_execution_event_header(
             event=self.observed_event,
