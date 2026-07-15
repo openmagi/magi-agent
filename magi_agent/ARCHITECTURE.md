@@ -1489,7 +1489,7 @@ graph LR
 | runtime_sink.py | Process-global event-sink registry. | — | cli/wiring.py, observability/integration.py, observability/transcript.py, transport/gate5b_serving.py |
 | store.py | — | models | observability/api.py, observability/core.py |
 | taxonomy.py | Single source of truth for the observability event taxonomy. | — | evidence/audit_labels.py, observability/api.py, observability/core.py, observability/integration.py |
-| transcript.py | Per-session JSONL transcript writer + process-global sink registry. | flags, integration, runtime_sink | cli/wiring.py, observability/__init__.py, shadow/gate5b4c3_live_runner_boundary.py, transport/gate5b_serving.py |
+| transcript.py | Per-session JSONL transcript writer + process-global sink registry. | flags, integration, runtime_sink | cli/wiring.py, observability/__init__.py, shadow/gate5b4c3_live_runner_boundary.py, transport/gate5b_serving.py, transport/local_turn_pump.py |
 
 ### ops/
 
@@ -2120,7 +2120,7 @@ graph LR
 | kb_context.py | Local KB_CONTEXT turn resolver (self-host parity with chat-proxy). | context, file_markdown | transport/chat_routes_local.py |
 | learning_dashboard.py | Learning governance dashboard API — FastAPI router. | api, config, models, openmagi_runtime, store | (root)/app.py |
 | local_session_registry.py | Process-level ADK session-service reuse for LOCAL serve chat surfaces. | session_service, session_service_registry | transport/chat_routes_local.py, transport/streaming_chat_route.py |
-| local_turn_pump.py | Detached background pump for the LOCAL streaming-chat branch. | local_turn_store | transport/streaming_chat_route.py |
+| local_turn_pump.py | Detached background pump for the LOCAL streaming-chat branch. | local_turn_store, transcript | transport/streaming_chat_route.py |
 | local_turn_store.py | Process-local in-flight turn store + SSE snapshot reducer for local serve. | — | transport/local_turn_pump.py, transport/streaming_chat_route.py |
 | packs_dashboard.py | Dashboard pack-builder REST endpoints (self-host only, default-OFF, 410 gate). | catalog, dashboard_authored, discovery, env | (root)/app.py |
 | plugins.py | — | audit, manager, openmagi_runtime | (root)/app.py |
