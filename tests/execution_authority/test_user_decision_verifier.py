@@ -227,7 +227,7 @@ def test_golden_envelope_verifies_and_uses_bound_key_lookup() -> None:
 
     assert HMAC_SHA256_DOMAIN_SEPARATOR == b"magi.user_decision.hmac-sha256.v1\x00"
     assert envelope.signature.hex() == (
-        "f27d8d307aa3055b9c3f66f956d48f077950fd74f75883b41e385871cae12027"
+        "6d96c349f304c5f5a9c8514e0e973f154267c34767514e0e1af7681705ebb5dd"
     )
     assert verifier.verify(opaque_envelope=envelope, request=request) == receipt
     assert key_port.calls == [

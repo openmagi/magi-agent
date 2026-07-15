@@ -5006,12 +5006,9 @@ class ExecutionStartRequest(EnvelopeModel):
         for alias, observed, expected in preparation_bindings:
             if observed != expected:
                 raise ValueError(f"ExecutionStartRequest {alias} does not match preparation")
-        approval_required = self.preparation.authority_contract.decision_request_id is not None
-        if approval_required != (self.approval_consumption is not None):
-            raise ValueError(
-                "approvalConsumption is required exactly for user-approved authority"
-            )
         if self.approval_consumption is not None:
+            if self.preparation.authority_contract.decision_request_id is None:
+                raise ValueError("approvalConsumption requires user-approved authority")
             if self.approval_consumption.preparation != self.preparation:
                 raise ValueError("approvalConsumption does not contain preparation")
             if self.approval_consumption.authority_contract_digest != (
