@@ -1514,6 +1514,17 @@ for name in (
     "magi_agent.execution_authority.contracts",
     "magi_agent.execution_authority.ports",
     "magi_agent.execution_authority.canonicalization",
+    "magi_agent.execution_authority.broker",
+    "magi_agent.execution_authority.evidence_closure",
+    "magi_agent.execution_authority.evidence_lineage",
+    "magi_agent.execution_authority.execution_material",
+    "magi_agent.execution_authority.journal_integrity",
+    "magi_agent.execution_authority.observation_contracts",
+    "magi_agent.execution_authority.projection_registry",
+    "magi_agent.execution_authority.recovery_protocol",
+    "magi_agent.execution_authority.sandbox",
+    "magi_agent.execution_authority.user_decision",
+    "magi_agent.execution_authority.workspace_writer",
 ):
     importlib.import_module(name)
 
