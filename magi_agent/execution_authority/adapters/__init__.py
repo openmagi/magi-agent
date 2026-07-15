@@ -2,5 +2,3 @@
 
 Importing this package never registers tools, handlers, hooks, or routes.
 """
-
-
