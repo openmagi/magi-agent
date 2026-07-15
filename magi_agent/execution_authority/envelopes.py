@@ -1682,7 +1682,7 @@ class RecoveryContext(EnvelopeModel):
         if self.recovery_authority_digest != expected_authority_digest:
             raise ValueError("recoveryAuthorityDigest does not match recoveryAuthority")
         expected_authority_attempt = self.resolution_attempt_id or self.source_attempt_id
-        authority_bindings = (
+        authority_bindings: tuple[tuple[str, object, object], ...] = (
             ("principal", self.recovery_authority.principal_id, self.action_intent.actor_id),
             ("session", self.recovery_authority.session_id, self.action_intent.session_id),
             ("turn", self.recovery_authority.turn_id, self.action_intent.turn_id),
@@ -1740,9 +1740,11 @@ class RecoveryContext(EnvelopeModel):
                 self.recovery_fencing_token,
             ),
         )
-        for label, observed, expected_value in authority_bindings:
-            if observed != expected_value:
-                raise ValueError(f"recoveryAuthority {label} does not match RecoveryContext")
+        for binding_label, binding_observed, binding_expected in authority_bindings:
+            if binding_observed != binding_expected:
+                raise ValueError(
+                    f"recoveryAuthority {binding_label} does not match RecoveryContext"
+                )
         objectively_valid_authority = (
             self.recovery_authority.revoked_at is None
             and self.recovery_authority.expires_at > self.evaluated_at
@@ -3249,7 +3251,7 @@ class WorkspaceCommitDecision(EnvelopeModel):
         for alias, observed, expected in bindings:
             if observed != expected:
                 raise ValueError(f"commitEvent.{alias} does not match commit request")
-        snapshot_event_bindings = (
+        snapshot_event_bindings: tuple[tuple[str, object, object], ...] = (
             ("activeFenceEventId", self.snapshot.active_fence_event_id, event.event_id),
             (
                 "activeFenceEventSequence",
@@ -3262,9 +3264,11 @@ class WorkspaceCommitDecision(EnvelopeModel):
                 event.event_hash,
             ),
         )
-        for alias, observed, expected in snapshot_event_bindings:
-            if observed != expected:
-                raise ValueError(f"commit snapshot {alias} does not match commitEvent")
+        for binding_alias, binding_observed, binding_expected in snapshot_event_bindings:
+            if binding_observed != binding_expected:
+                raise ValueError(
+                    f"commit snapshot {binding_alias} does not match commitEvent"
+                )
         if _strict_json_loads(event.payload_json) != _workspace_commit_decision_event_payload(
             request
         ):
@@ -3453,9 +3457,11 @@ class WorkspaceCommitRecoveryClaim(EnvelopeModel):
                 event.event_hash,
             ),
         )
-        for alias, observed, expected in snapshot_event_bindings:
-            if observed != expected:
-                raise ValueError(f"recovery snapshot {alias} does not match claimEvent")
+        for binding_alias, binding_observed, binding_expected in snapshot_event_bindings:
+            if binding_observed != binding_expected:
+                raise ValueError(
+                    f"recovery snapshot {binding_alias} does not match claimEvent"
+                )
 
         source_event = original.commit_event
         inherited_event_bindings: tuple[tuple[str, object, object], ...] = (
@@ -4571,8 +4577,8 @@ class CompletionPersistenceReceipt(EnvelopeModel):
             raise ValueError("completion event payload must be an object")
         if set(event_payload) != set(expected_event_payload):
             raise ValueError("completion event payload shape does not match receipt")
-        for key, expected in expected_event_payload.items():
-            if event_payload[key] != expected:
+        for key, payload_expected in expected_event_payload.items():
+            if event_payload[key] != payload_expected:
                 raise ValueError(f"completion event payload {key} does not match receipt")
 
         outbox = self.outbox_item
@@ -4586,9 +4592,9 @@ class CompletionPersistenceReceipt(EnvelopeModel):
             ("completionEventHash", self.completion_event_hash, outbox.event_hash),
             ("completionEventSequence", event.sequence, outbox.event_sequence),
         )
-        for alias, expected, observed in outbox_bindings:
-            if observed != expected:
-                raise ValueError(f"outbox item {alias} does not match receipt")
+        for binding_alias, binding_expected, binding_observed in outbox_bindings:
+            if binding_observed != binding_expected:
+                raise ValueError(f"outbox item {binding_alias} does not match receipt")
         if outbox.kind != "final_response":
             raise ValueError("completion outbox item must use final_response kind")
         if outbox.state is not OutboxState.PENDING:
@@ -4898,15 +4904,18 @@ class ExecutionPreparation(EnvelopeModel):
             for alias, observed, expected in bindings:
                 if observed != expected:
                     raise ValueError(f"{field_name}.{alias} does not match preparation")
-        expected_payload = {
+        expected_payload: dict[str, object] = {
             "actionIntentDigest": expected_intent_digest,
             "authorityContractDigest": expected_authority_digest,
         }
         if self.authority_contract.decision_request_id is not None:
+            resume_binding_digest = self.authority_contract.resume_binding_digest
+            if resume_binding_digest is None:
+                raise ValueError("user-approved authority requires resumeBindingDigest")
             expected_payload.update(
                 {
                     "decisionRequestId": self.authority_contract.decision_request_id,
-                    "resumeBindingDigest": self.authority_contract.resume_binding_digest,
+                    "resumeBindingDigest": resume_binding_digest,
                 }
             )
         for field_name, event in (
@@ -6308,7 +6317,7 @@ class UserApprovalConsumption(EnvelopeModel):
         ):
             raise ValueError("consumedSnapshot must preserve the approval receipt pointers")
 
-        consumed_event_bindings = (
+        consumed_event_bindings: tuple[tuple[str, object, object], ...] = (
             ("eventType", self.consumed_event.event_type, "user_decision.consumed"),
             ("actionId", self.consumed_event.action_id, request.action_id),
             (
@@ -6337,9 +6346,11 @@ class UserApprovalConsumption(EnvelopeModel):
             ("policyDigest", self.consumed_event.policy_digest, request.policy_digest),
             ("correlationId", self.consumed_event.correlation_id, self.resume_binding.run_id),
         )
-        for alias, observed, expected in consumed_event_bindings:
-            if observed != expected:
-                raise ValueError(f"consumedEvent.{alias} does not match approval consumption")
+        for binding_alias, binding_observed, binding_expected in consumed_event_bindings:
+            if binding_observed != binding_expected:
+                raise ValueError(
+                    f"consumedEvent.{binding_alias} does not match approval consumption"
+                )
         expected_consumed_payload = {
             "decisionRequestId": request.decision_request_id,
             "approvalReceiptDigest": expected_approval_digest,
