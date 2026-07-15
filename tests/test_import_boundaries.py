@@ -1518,7 +1518,9 @@ for name in (
     "magi_agent.execution_authority.evidence_closure",
     "magi_agent.execution_authority.evidence_lineage",
     "magi_agent.execution_authority.execution_material",
+    "magi_agent.execution_authority.journal",
     "magi_agent.execution_authority.journal_integrity",
+    "magi_agent.execution_authority.journal_sqlite",
     "magi_agent.execution_authority.migrations",
     "magi_agent.execution_authority.observation_contracts",
     "magi_agent.execution_authority.projection_registry",
@@ -1526,6 +1528,7 @@ for name in (
     "magi_agent.execution_authority.sandbox",
     "magi_agent.execution_authority.sandbox.linux_bwrap",
     "magi_agent.execution_authority.sandbox.macos_seatbelt",
+    "magi_agent.execution_authority.adapters.tool_manifest",
     "magi_agent.execution_authority.user_decision",
     "magi_agent.execution_authority.workspace_writer",
 ):
