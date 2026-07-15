@@ -996,11 +996,46 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | Dormant execution-authority kernel. | — | execution_authority/contracts.py |
-| canonicalization.py | Deterministic, authority-safe resource canonicalization. | safety | — |
-| contracts.py | — | authority, envelopes, execution_authority, safety, state_machine | execution_authority/envelopes.py, execution_authority/ports.py |
-| envelopes.py | Frozen cross-workstream execution-authority envelopes. | contracts, safety, state_machine | execution_authority/contracts.py |
-| ports.py | Dependency-inverted host boundaries for dormant execution authority. | contracts | — |
-| state_machine.py | — | — | execution_authority/contracts.py, execution_authority/envelopes.py |
+| broker.py | Dormant universal effect-admission broker. | contracts, envelopes, safety, state_machine | — |
+| canonicalization.py | Deterministic, authority-safe resource canonicalization. | safety | execution_authority/envelopes.py, execution_authority/observation_contracts.py, execution_authority/workspace_writer.py |
+| contracts.py | — | authority, envelopes, execution_authority, safety, state_machine | execution_authority/broker.py, execution_authority/envelopes.py, execution_authority/evidence_closure.py, execution_authority/execution_material.py, execution_authority/ports.py, execution_authority/recovery_protocol.py, execution_authority/sandbox/base.py, execution_authority/user_decision.py |
+| envelopes.py | Frozen cross-workstream execution-authority envelopes. | canonicalization, contracts, safety, state_machine | execution_authority/broker.py, execution_authority/contracts.py, execution_authority/evidence_closure.py, execution_authority/evidence_lineage.py, execution_authority/execution_material.py, execution_authority/journal.py, execution_authority/journal_integrity.py, execution_authority/journal_sqlite.py, execution_authority/observation_contracts.py, execution_authority/projection_registry.py, execution_authority/recovery_protocol.py |
+| evidence_closure.py | Authoritative evidence closure contracts for completion evaluation. | contracts, envelopes, state_machine | — |
+| evidence_lineage.py | Dormant deterministic evidence-lineage projection. | envelopes, state_machine | — |
+| execution_material.py | Byte-exact normalized-input and one-shot execution-grant contracts. | contracts, envelopes, state_machine | — |
+| journal.py | Durable journal port and fail-closed storage errors. | envelopes, journal_integrity | execution_authority/journal_sqlite.py |
+| journal_integrity.py | First-party journal integrity and transactional outbox wire contracts. | envelopes, safety, state_machine | execution_authority/journal.py, execution_authority/journal_sqlite.py |
+| journal_sqlite.py | SQLite implementation of the integrity journal and transactional outbox. | envelopes, journal, journal_integrity, migrations, state_machine | — |
+| migrations.py | Versioned local SQLite schema for the dormant authority journal. | — | execution_authority/journal_sqlite.py |
+| observation_contracts.py | Dormant read-before-write and execution-observation wire contracts. | canonicalization, envelopes, state_machine | — |
+| ports.py | Dependency-inverted host boundaries for dormant execution authority. | contracts | execution_authority/user_decision.py |
+| projection_registry.py | Trusted projection registry and finalization-evaluation wire contracts. | envelopes, state_machine | — |
+| recovery_protocol.py | Replay-complete contracts for fenced recovery execution. | contracts, envelopes, state_machine | — |
+| state_machine.py | — | — | execution_authority/broker.py, execution_authority/contracts.py, execution_authority/envelopes.py, execution_authority/evidence_closure.py, execution_authority/evidence_lineage.py, execution_authority/execution_material.py, execution_authority/journal_integrity.py, execution_authority/journal_sqlite.py, execution_authority/observation_contracts.py, execution_authority/projection_registry.py, execution_authority/recovery_protocol.py |
+| user_decision.py | Dormant reference authentication for first-party user-decision receipts. | contracts, ports, safety | — |
+| workspace_writer.py | Dormant transactional workspace writer. | canonicalization | — |
+
+### execution_authority/adapters/
+
+| Module | Purpose | Depends On | Depended By |
+|---|---|---|---|
+| __init__.py | Read-only adapters for dormant execution-authority conformance checks. | — | — |
+| tool_manifest.py | Read-only coverage audit for every effect-capable Magi Agent surface. | — | — |
+
+### execution_authority/fixtures/
+
+| Module | Purpose | Depends On | Depended By |
+|---|---|---|---|
+| __init__.py | Reviewed golden fixtures for execution-authority conformance. | — | — |
+
+### execution_authority/sandbox/
+
+| Module | Purpose | Depends On | Depended By |
+|---|---|---|---|
+| __init__.py | Dormant fail-closed OS sandbox contracts and invocation builders. | base | — |
+| base.py | Frozen sandbox profiles and fail-closed OS capability selection. | contracts, safety | execution_authority/sandbox/__init__.py, execution_authority/sandbox/linux_bwrap.py, execution_authority/sandbox/macos_seatbelt.py |
+| linux_bwrap.py | Pure Linux bubblewrap invocation construction. | base | — |
+| macos_seatbelt.py | Pure macOS seatbelt profile and invocation construction. | base | — |
 
 ### firstparty/
 
@@ -1466,7 +1501,7 @@ graph LR
 | job_queue.py | Agent job-queue FSM — reference contract (NOT wired into the OSS runtime). | authority, safety | — |
 | metrics.py | — | authority, safety | — |
 | otel_noise.py | Suppress a benign OpenTelemetry teardown log line. | — | (root)/main.py, cli/app.py |
-| safety.py | — | authority | artifacts/delivery_receipts.py, artifacts/local_result_store.py, artifacts/render_verification.py, billing/quota.py, billing/spend_guard.py, composio/redaction.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, engine/driver.py, evidence/ledger.py, evidence/reports.py, evidence/run_redaction.py, evidence/tool_boundary.py, execution_authority/canonicalization.py, execution_authority/contracts.py, execution_authority/envelopes.py, gates/gate2_readiness.py, harness/verifier_bus.py, memory/adapters/local_file_writable.py, memory/adk_bridge.py, memory/prompt_projection.py, ops/health.py, ops/job_queue.py, ops/metrics.py, permissions/auto_control.py, runtime/governed_projection.py, runtime/heartbeat_contract.py, runtime/model_tiers.py, runtime/no_agent_watchdog.py, runtime/plan_ledger.py, runtime/resume_decision.py, security/compliance.py, shadow/gate2_recipe_profile_resolver.py, shared/tool_preview.py, tenancy/context.py, tools/kernel.py, tools/output_budget.py, tools/schema_validation.py, transport/product_admin.py, web_acquisition/policy.py |
+| safety.py | — | authority | artifacts/delivery_receipts.py, artifacts/local_result_store.py, artifacts/render_verification.py, billing/quota.py, billing/spend_guard.py, composio/redaction.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, engine/driver.py, evidence/ledger.py, evidence/reports.py, evidence/run_redaction.py, evidence/tool_boundary.py, execution_authority/broker.py, execution_authority/canonicalization.py, execution_authority/contracts.py, execution_authority/envelopes.py, execution_authority/journal_integrity.py, execution_authority/sandbox/base.py, execution_authority/user_decision.py, gates/gate2_readiness.py, harness/verifier_bus.py, memory/adapters/local_file_writable.py, memory/adk_bridge.py, memory/prompt_projection.py, ops/health.py, ops/job_queue.py, ops/metrics.py, permissions/auto_control.py, runtime/governed_projection.py, runtime/heartbeat_contract.py, runtime/model_tiers.py, runtime/no_agent_watchdog.py, runtime/plan_ledger.py, runtime/resume_decision.py, security/compliance.py, shadow/gate2_recipe_profile_resolver.py, shared/tool_preview.py, tenancy/context.py, tools/kernel.py, tools/output_budget.py, tools/schema_validation.py, transport/product_admin.py, web_acquisition/policy.py |
 
 ### packs/
 
