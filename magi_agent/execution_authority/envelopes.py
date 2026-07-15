@@ -3708,9 +3708,11 @@ class WorkspaceCommitRecoveryClaim(EnvelopeModel):
             ("partitionId", recovery_decision.partition_id, request.authority_partition_id),
             ("plan.partitionId", recovery_plan.partition_id, request.authority_partition_id),
         )
-        for alias, observed, expected in recovery_bindings:
-            if observed != expected:
-                raise ValueError(f"recovery claim {alias} does not match original decision")
+        for binding_alias, binding_observed, binding_expected in recovery_bindings:
+            if binding_observed != binding_expected:
+                raise ValueError(
+                    f"recovery claim {binding_alias} does not match original decision"
+                )
 
         if self.prior_snapshot.request != decision_request:
             raise ValueError("priorSnapshot must preserve the immutable commit request")
@@ -3742,9 +3744,11 @@ class WorkspaceCommitRecoveryClaim(EnvelopeModel):
                 self.prior_snapshot.active_fence_event_hash,
             ),
         )
-        for alias, observed, expected in prior_event_bindings:
-            if observed != expected:
-                raise ValueError(f"priorFenceEvent.{alias} does not match priorSnapshot")
+        for binding_alias, binding_observed, binding_expected in prior_event_bindings:
+            if binding_observed != binding_expected:
+                raise ValueError(
+                    f"priorFenceEvent.{binding_alias} does not match priorSnapshot"
+                )
         if request.expected_workspace_compare_version < original.workspace_compare_version:
             raise ValueError("claim request cannot precede the original workspace decision")
         if request.expected_active_fencing_token < decision_request.decision_fencing_token:
@@ -3953,7 +3957,10 @@ class WorkspacePublicationObservation(EnvelopeModel):
                 raise ValueError("recoveryClaim does not preserve commitDecision")
             expected_snapshot = claim.snapshot
             expected_workspace_version = claim.workspace_compare_version
-            expected_attempt_id = claim.request.recovery_decision.resolution_attempt_id
+            recovery_attempt_id = claim.request.recovery_decision.resolution_attempt_id
+            if recovery_attempt_id is None:
+                raise ValueError("recoveryClaim requires a resolution attempt")
+            expected_attempt_id = recovery_attempt_id
         if self.active_commit_snapshot is not None and (
             self.active_commit_snapshot != expected_snapshot
         ):
@@ -4284,7 +4291,7 @@ class WorkspaceQuarantineReceipt(EnvelopeModel):
             if self.fencing_token != 0:
                 raise ValueError("workspace-only quarantine requires fencingToken zero")
             event = self.quarantine_event
-            event_bindings: tuple[tuple[str, object, object], ...] = (
+            workspace_event_bindings: tuple[tuple[str, object, object], ...] = (
                 ("eventType", event.event_type, "workspace.quarantined"),
                 ("partitionId", event.partition_id, self.authority_partition_id),
                 ("actionId", event.action_id, None),
@@ -4297,12 +4304,12 @@ class WorkspaceQuarantineReceipt(EnvelopeModel):
                 ),
                 ("createdAt", event.created_at, self.quarantined_at),
             )
-            for alias, observed, expected in event_bindings:
+            for alias, observed, expected in workspace_event_bindings:
                 if observed != expected:
                     raise ValueError(
                         f"quarantineEvent.{alias} does not match workspace quarantine"
                     )
-            expected_payload: dict[str, object] = {
+            expected_workspace_payload: dict[str, object] = {
                 "expectedWorkspaceCompareVersion": self.expected_workspace_compare_version,
                 "priorGeneration": workspace.current_generation,
                 "priorPublicationState": workspace.publication_state.value,
@@ -4314,7 +4321,7 @@ class WorkspaceQuarantineReceipt(EnvelopeModel):
                 "workspaceId": self.workspace_id,
                 "workspaceRef": workspace.workspace_ref,
             }
-            if _strict_json_loads(event.payload_json) != expected_payload:
+            if _strict_json_loads(event.payload_json) != expected_workspace_payload:
                 raise ValueError(
                     "quarantineEvent payload does not bind exact workspace quarantine"
                 )
@@ -4364,7 +4371,7 @@ class WorkspaceQuarantineReceipt(EnvelopeModel):
         if commit_version != prior.commit_compare_version + 1:
             raise ValueError("commitCompareVersion must advance exactly once")
 
-        event_bindings: tuple[tuple[str, object, object], ...] = (
+        commit_event_bindings: tuple[tuple[str, object, object], ...] = (
             ("eventType", event.event_type, "workspace.quarantined"),
             ("partitionId", event.partition_id, request.authority_partition_id),
             ("actionId", event.action_id, request.action_id),
@@ -4373,7 +4380,7 @@ class WorkspaceQuarantineReceipt(EnvelopeModel):
             ("causationId", event.causation_id, prior.active_fence_event_id),
             ("createdAt", event.created_at, self.quarantined_at),
         )
-        for alias, observed, expected in event_bindings:
+        for alias, observed, expected in commit_event_bindings:
             if observed != expected:
                 raise ValueError(f"quarantineEvent.{alias} does not match the quarantine receipt")
         prior_event_bindings: tuple[tuple[str, object, object], ...] = (
@@ -4391,7 +4398,7 @@ class WorkspaceQuarantineReceipt(EnvelopeModel):
             second_name="quarantineEvent",
         )
 
-        expected_payload: dict[str, object] = {
+        expected_commit_payload: dict[str, object] = {
             "actionId": request.action_id,
             "activeFence": prior.active_fencing_token,
             "attemptId": request.attempt_id,
@@ -4413,7 +4420,7 @@ class WorkspaceQuarantineReceipt(EnvelopeModel):
             "workspaceCompareVersion": self.workspace_compare_version,
             "workspaceId": request.workspace_id,
         }
-        if _strict_json_loads(event.payload_json) != expected_payload:
+        if _strict_json_loads(event.payload_json) != expected_commit_payload:
             raise ValueError("quarantineEvent payload does not bind the exact quarantine receipt")
         return self
 
