@@ -626,6 +626,8 @@ def task_board_event(
 __all__ = [
     "result_digest",
     "tool_event_id",
+    "text_chunks_from_parts",
+    "thinking_chunks_from_parts",
     "tool_input_preview",
     "tool_start_event",
     "tool_progress_event",
@@ -718,6 +720,62 @@ def tool_event_id(
             "index": index,
         }
     )[7:19]
+
+
+# ---------------------------------------------------------------------------
+# Thinking / answer split - shared wire-shape invariant
+#
+# Visible answer text must EXCLUDE model reasoning parts (ADK marks them
+# ``thought=True``); reasoning is surfaced separately on the thinking channel.
+# These pure helpers were previously private to the gate5b4c3 live runner
+# boundary; that engine was retired (P5-M1b) but the split is a wire-shape
+# invariant the governed path (adk_bridge.event_adapter._project_content_parts)
+# still performs inline. They are promoted here as the shared home so the
+# byte-shape can be asserted in isolation, mirroring ``_te_digest`` /
+# ``tool_event_id`` above.
+# ---------------------------------------------------------------------------
+
+
+def _te_mapping_or_attr(value: object, name: str) -> object:
+    """Read ``name`` from a Mapping key or an object attribute (None on miss)."""
+    if isinstance(value, Mapping):
+        return value.get(name)
+    try:
+        return getattr(value, name, None)
+    except Exception:
+        return None
+
+
+def text_chunks_from_parts(parts: Sequence[object]) -> list[str]:
+    """Collect visible answer text from *parts*, EXCLUDING ``thought=True`` parts.
+
+    Byte-identical to the retired
+    ``gate5b4c3_live_runner_boundary._text_chunks_from_parts``.
+    """
+    chunks: list[str] = []
+    for part in parts:
+        if bool(_te_mapping_or_attr(part, "thought")):
+            continue
+        text = _te_mapping_or_attr(part, "text")
+        if isinstance(text, str) and text:
+            chunks.append(text)
+    return chunks
+
+
+def thinking_chunks_from_parts(parts: Sequence[object]) -> list[str]:
+    """Collect model-reasoning text from *parts*, ONLY the ``thought=True`` parts.
+
+    Byte-identical to the retired
+    ``gate5b4c3_live_runner_boundary._thinking_chunks_from_parts``.
+    """
+    chunks: list[str] = []
+    for part in parts:
+        if not bool(_te_mapping_or_attr(part, "thought")):
+            continue
+        text = _te_mapping_or_attr(part, "text")
+        if isinstance(text, str) and text:
+            chunks.append(text)
+    return chunks
 
 
 def _require_event_family(event_family: str, allowed: set[str]) -> None:
