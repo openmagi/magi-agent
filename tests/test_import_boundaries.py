@@ -1519,6 +1519,7 @@ for name in (
     "magi_agent.execution_authority.evidence_lineage",
     "magi_agent.execution_authority.execution_material",
     "magi_agent.execution_authority.journal_integrity",
+    "magi_agent.execution_authority.migrations",
     "magi_agent.execution_authority.observation_contracts",
     "magi_agent.execution_authority.projection_registry",
     "magi_agent.execution_authority.recovery_protocol",
