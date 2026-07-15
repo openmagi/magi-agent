@@ -26,15 +26,31 @@ def test_result_digest_equals_te_digest() -> None:
     assert result_digest({"a": 1}) == _te_digest({"a": 1})
 
 
-def test_result_digest_byte_identity_with_gate5b4c3() -> None:
-    """result_digest must be byte-identical to gate5b4c3_live_runner_boundary._digest.
+def test_result_digest_byte_identity_with_wire_format() -> None:
+    """result_digest must be byte-identical to the retired gate5b4c3._digest.
 
-    This is the whole point of T2: a future bridge (T3) imports result_digest
-    from the public API instead of reaching into the private _digest.  If the
-    two ever diverge, this test fails.
+    The retired boundary computed the digest as
+    ``"sha256:" + sha256(canonical-json).hexdigest()``. That engine is gone
+    (P5-M1b), so this locks the wire-shape against a recomputed reference of
+    that exact format rather than the deleted private symbol. If result_digest
+    ever drifts from the canonical-JSON sha256 form the hosted wire consumers
+    depend on, this test fails.
     """
+    import hashlib
+    import json
+
     from magi_agent.runtime.public_events import result_digest  # type: ignore[attr-defined]
-    from magi_agent.shadow.gate5b4c3_live_runner_boundary import _digest  # type: ignore[attr-defined]
+
+    def _reference_digest(value: object) -> str:
+        # Mirrors the retired gate5b4c3._digest / _json_dumps byte-for-byte.
+        canonical = json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            default=repr,
+        )
+        return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     cases: list[object] = [
         {"a": 1},
@@ -47,10 +63,10 @@ def test_result_digest_byte_identity_with_gate5b4c3() -> None:
     ]
     for value in cases:
         public = result_digest(value)
-        private = _digest(value)
-        assert public == private, (
+        reference = _reference_digest(value)
+        assert public == reference, (
             f"byte-identity FAILED for {value!r}: "
-            f"result_digest={public!r}, gate5b4c3._digest={private!r}"
+            f"result_digest={public!r}, wire-format reference={reference!r}"
         )
 
 

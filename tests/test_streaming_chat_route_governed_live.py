@@ -102,7 +102,6 @@ def test_governed_sse_delivers_answer_as_live_text_deltas(
     monkeypatch.setenv(
         "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT", str(tmp_path)
     )
-    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "1")
     _wire_governed_real_runner(monkeypatch)
 
     runtime = _selected_runtime(tmp_path, full_toolhost=True)

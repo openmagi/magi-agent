@@ -62,21 +62,25 @@ from magi_agent.transport.streaming_sink import build_streaming_prompt_sink
 
 
 @pytest.fixture(autouse=True)
-def _legacy_selected_stream_path(monkeypatch):
-    """Pin the pre-governed selected-canary streaming path for this module.
+def _default_governed_stream(monkeypatch):
+    """Wire a default governed turn for the selected-canary streaming path.
 
-    These tests exercise the legacy (non-governed) gate5b selected-canary /
-    full-toolhost streaming route with fake runners. When
-    ``MAGI_HOSTED_GOVERNED_TURN_ENABLED`` flips to profile-aware default-ON,
-    the requests would instead route through ``run_governed_turn`` ->
-    ``MagiEngineDriver`` (verified working end-to-end on a live bot), whose
-    layer these fakes deliberately do not wire, surfacing ``runner_error``.
-    The governed streaming path has its own suite in
-    ``tests/test_chat_routes_hosted_governed_turn.py``; here we hold the legacy
-    path explicitly so each test keeps asserting the behavior it was written for.
+    P5-M1b retired the legacy runner engine; the streaming route now serves every
+    turn through ``run_governed_turn`` -> ``collect_engine_to_boundary_result``,
+    which tees the governed public events to the SSE sink LIVE. Install a default
+    governed turn that emits the base answer text ("selected full-toolhost ADK
+    stream answer") so a test that does NOT inject its own governed events still
+    streams a completed answer. Tests asserting specific tool / child / multi-
+    chunk output install their own ``install_governed_turn(events=[...])`` over
+    this. Tests using the mocked-runner branch (``mockedRunner=``) never reach
+    this seam.
     """
+    from tests.support.governed_turn_fakes import install_governed_turn
 
-    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "0")
+    install_governed_turn(
+        monkeypatch,
+        events=[{"type": "text_delta", "delta": "selected full-toolhost ADK stream answer"}],
+    )
 
 
 def _make_runtime(
@@ -814,58 +818,30 @@ def test_selected_full_toolhost_stream_does_not_replay_posthoc_tool_progress(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
+    from tests.support.governed_turn_fakes import install_governed_turn
+
     monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
     monkeypatch.setenv(
         "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
         str(tmp_path),
     )
-
-    class _CalculationFunctionCallPart:
-        function_call = {
-            "name": "Calculation",
-            "args": {"expression": "2 + 2"},
-            "id": "route-live-calculation",
-        }
-
-    class _CalculationFunctionCallEvent:
-        content = SimpleNamespace(
-            parts=[_CalculationFunctionCallPart()],
-            role="model",
-        )
-
-    class _CalculationThenFinalRunner(_FakeRunner):
-        calls: list[dict[str, object]] = []
-
-        async def run_async(self, **kwargs: object) -> object:
-            type(self).run_kwargs = kwargs
-            type(self).calls.append(kwargs)
-            if len(type(self).calls) == 1:
-                yield _CalculationFunctionCallEvent()
-                return
-            yield SimpleNamespace(
-                content=SimpleNamespace(
-                    parts=[SimpleNamespace(text="final answer after live calculation")]
-                )
-            )
-
-    def _calculation_primitives() -> Gate5B4C3LiveAdkPrimitives:
-        _CalculationThenFinalRunner.calls = []
-        return Gate5B4C3LiveAdkPrimitives(
-            Agent=_FakeAgent,
-            Runner=_CalculationThenFinalRunner,
-            InMemorySessionService=_FakeSessionService,
-            Content=_FakeContent,
-            Part=_FakePart,
-            GenerateContentConfig=_FakeGenerateContentConfig,
-        )
+    # The governed driver emits a tool_start / tool_progress / tool_end sequence
+    # (same tool id) followed by the final text. This verifies the STREAMING route
+    # surfaces those live tool frames in order without re-replaying posthoc
+    # progress and never leaks the raw tool args.
+    install_governed_turn(
+        monkeypatch,
+        events=[
+            {"type": "tool_start", "id": "tu_calc_1", "name": "Calculation"},
+            {"type": "tool_progress", "id": "tu_calc_1", "status": "in_progress"},
+            {"type": "tool_end", "id": "tu_calc_1", "status": "ok"},
+            {"type": "text_delta", "delta": "final answer after live calculation"},
+        ],
+    )
 
     async def _collect() -> list[dict]:
         frames = _drive_selected_gate5b_stream(
-            _selected_runtime(
-                tmp_path,
-                full_toolhost=True,
-                primitives_loader=_calculation_primitives,
-            ),
+            _selected_runtime(tmp_path, full_toolhost=True),
             {"messages": [{"role": "user", "content": "calculate 2 + 2"}]},
             SimpleNamespace(headers={}),
             session_id="s-selected-full-toolhost-live",
@@ -898,61 +874,33 @@ def test_selected_full_toolhost_stream_surfaces_tool_input_preview(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
+    from tests.support.governed_turn_fakes import install_governed_turn
+
     monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
     monkeypatch.setenv(
         "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
         str(tmp_path),
     )
-
-    class _WebSearchFunctionCallPart:
-        function_call = {
-            "name": "WebSearch",
-            "args": {
-                "query": "openmagi gate5b streaming",
-                "content": "private prompt content that must not be shown",
+    # The governed driver's public-event bridge already redacts a tool_start's
+    # input_preview to the safe keys (dropping private prose). This test verifies
+    # the STREAMING route surfaces that redacted tool_start as an SSE frame ahead
+    # of the final text and never leaks the private content. (The input_preview
+    # redaction itself is covered by the driver/adk_bridge tool-event tests.)
+    install_governed_turn(
+        monkeypatch,
+        events=[
+            {
+                "type": "tool_start",
+                "name": "WebSearch",
+                "input_preview": '{"query":"openmagi gate5b streaming"}',
             },
-            "id": "route-live-web-search",
-        }
-
-    class _WebSearchFunctionCallEvent:
-        content = SimpleNamespace(
-            parts=[_WebSearchFunctionCallPart()],
-            role="model",
-        )
-
-    class _WebSearchThenFinalRunner(_FakeRunner):
-        calls: list[dict[str, object]] = []
-
-        async def run_async(self, **kwargs: object) -> object:
-            type(self).run_kwargs = kwargs
-            type(self).calls.append(kwargs)
-            if len(type(self).calls) == 1:
-                yield _WebSearchFunctionCallEvent()
-                return
-            yield SimpleNamespace(
-                content=SimpleNamespace(
-                    parts=[SimpleNamespace(text="final answer after live web search")]
-                )
-            )
-
-    def _web_search_primitives() -> Gate5B4C3LiveAdkPrimitives:
-        _WebSearchThenFinalRunner.calls = []
-        return Gate5B4C3LiveAdkPrimitives(
-            Agent=_FakeAgent,
-            Runner=_WebSearchThenFinalRunner,
-            InMemorySessionService=_FakeSessionService,
-            Content=_FakeContent,
-            Part=_FakePart,
-            GenerateContentConfig=_FakeGenerateContentConfig,
-        )
+            {"type": "text_delta", "delta": "final answer after live web search"},
+        ],
+    )
 
     async def _collect() -> list[dict]:
         frames = _drive_selected_gate5b_stream(
-            _selected_runtime(
-                tmp_path,
-                full_toolhost=True,
-                primitives_loader=_web_search_primitives,
-            ),
+            _selected_runtime(tmp_path, full_toolhost=True),
             {"messages": [{"role": "user", "content": "search the web"}]},
             SimpleNamespace(headers={}),
             session_id="s-selected-web-preview",
@@ -976,80 +924,41 @@ def test_selected_full_toolhost_stream_emits_live_child_events_before_final(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
+    from tests.support.governed_turn_fakes import install_governed_turn
+
     monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
-    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
-    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
     monkeypatch.setenv(
         "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
         str(tmp_path),
     )
-
-    import magi_agent.runtime.child_runner_live as _live_mod
-
-    class _FakeLiveChildRunner:
-        openmagi_live_provider = True
-
-        def __init__(self, **kwargs: object) -> None:
-            pass
-
-        async def run_child(self, request: object) -> dict[str, object]:
-            return {
-                "childExecutionId": "child-exec-stream-live",
-                "status": "completed",
+    # The governed driver emits child_started / child_progress / child_completed
+    # public events (with receipt refs + a completed summary, and NEVER the child
+    # prompt body) followed by the final text. This verifies the STREAMING route
+    # surfaces those live child frames before the final answer.
+    _receipt = "receipt:sha256:" + "a" * 64
+    install_governed_turn(
+        monkeypatch,
+        events=[
+            {"type": "child_started", "taskId": "child-1", "childReceiptRef": _receipt},
+            {
+                "type": "child_progress",
+                "taskId": "child-1",
+                "childReceiptRef": _receipt,
+                "detail": "working",
+            },
+            {
+                "type": "child_completed",
+                "taskId": "child-1",
+                "childReceiptRef": _receipt,
                 "summary": "Delegated child completed.",
-                "evidenceRefs": (),
-                "artifactRefs": (),
-                "auditEventRefs": (),
-            }
-
-    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _FakeLiveChildRunner)
-
-    class _SpawnAgentFunctionCallPart:
-        function_call = {
-            "name": "SpawnAgent",
-            "args": {"prompt": "assign helper"},
-            "id": "route-live-spawn",
-        }
-
-    class _SpawnAgentFunctionCallEvent:
-        content = SimpleNamespace(
-            parts=[_SpawnAgentFunctionCallPart()],
-            role="model",
-        )
-
-    class _SpawnThenFinalRunner(_FakeRunner):
-        calls: list[dict[str, object]] = []
-
-        async def run_async(self, **kwargs: object) -> object:
-            type(self).run_kwargs = kwargs
-            type(self).calls.append(kwargs)
-            if len(type(self).calls) == 1:
-                yield _SpawnAgentFunctionCallEvent()
-                return
-            yield SimpleNamespace(
-                content=SimpleNamespace(
-                    parts=[SimpleNamespace(text="final answer after delegated child")]
-                )
-            )
-
-    def _spawn_primitives() -> Gate5B4C3LiveAdkPrimitives:
-        _SpawnThenFinalRunner.calls = []
-        return Gate5B4C3LiveAdkPrimitives(
-            Agent=_FakeAgent,
-            Runner=_SpawnThenFinalRunner,
-            InMemorySessionService=_FakeSessionService,
-            Content=_FakeContent,
-            Part=_FakePart,
-            GenerateContentConfig=_FakeGenerateContentConfig,
-        )
+            },
+            {"type": "text_delta", "delta": "final answer after delegated child"},
+        ],
+    )
 
     async def _collect() -> list[dict]:
         frames = _drive_selected_gate5b_stream(
-            _selected_runtime(
-                tmp_path,
-                full_toolhost=True,
-                primitives_loader=_spawn_primitives,
-            ),
+            _selected_runtime(tmp_path, full_toolhost=True),
             {"messages": [{"role": "user", "content": "delegate a child"}]},
             SimpleNamespace(headers={}),
             session_id="s-selected-child-live",
@@ -1976,36 +1885,6 @@ def test_hosted_stream_counter_receipt_critic_equivalence_with_completions(
     assert stream_critic == completions_critic
 
 
-class _MultiChunkFakeRunner(_FakeRunner):
-    """Fake ADK runner that streams N distinct text chunks across N events."""
-
-    chunks = ("first progressive chunk. ", "second progressive chunk. ", "third progressive chunk.")
-
-    async def run_async(self, **kwargs: object) -> object:
-        type(self).run_kwargs = kwargs
-        for index, chunk in enumerate(self.chunks):
-            event = SimpleNamespace(content=SimpleNamespace(parts=[SimpleNamespace(text=chunk)]))
-            if index == len(self.chunks) - 1:
-                event.usage_metadata = SimpleNamespace(
-                    prompt_token_count=11,
-                    candidates_token_count=7,
-                    total_token_count=18,
-                )
-            yield event
-
-
-def _multi_chunk_fake_primitives() -> Gate5B4C3LiveAdkPrimitives:
-    primitives = _fake_primitives()
-    return Gate5B4C3LiveAdkPrimitives(
-        Agent=primitives.Agent,
-        Runner=_MultiChunkFakeRunner,
-        InMemorySessionService=primitives.InMemorySessionService,
-        Content=primitives.Content,
-        Part=primitives.Part,
-        GenerateContentConfig=primitives.GenerateContentConfig,
-    )
-
-
 def test_hosted_stream_emits_one_text_delta_frame_per_chunk(
     monkeypatch,
     tmp_path: Path,
@@ -2015,17 +1894,23 @@ def test_hosted_stream_emits_one_text_delta_frame_per_chunk(
     N live runner chunks must surface as N separate text_delta SSE frames in
     chunk order — NOT buffered into one aggregated frame at the end.
     """
+    from tests.support.governed_turn_fakes import install_governed_turn
+
     monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
     monkeypatch.setenv("MAGI_HOSTED_STREAMING_SERVE", "1")
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
     monkeypatch.setenv("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT", str(tmp_path))
+    # The governed turn emits N distinct text_delta events; collect_engine_to_
+    # boundary_result tees each to the SSE sink LIVE, so they must surface as N
+    # separate text_delta frames in order (NOT one buffered aggregate).
+    chunks = ("first progressive chunk. ", "second progressive chunk. ", "third progressive chunk.")
+    install_governed_turn(
+        monkeypatch,
+        events=[{"type": "text_delta", "delta": chunk} for chunk in chunks],
+    )
     client = TestClient(
         _make_app(
-            runtime=_selected_runtime(
-                tmp_path,
-                full_toolhost=True,
-                primitives_loader=_multi_chunk_fake_primitives,
-            ),
+            runtime=_selected_runtime(tmp_path, full_toolhost=True),
             engine_builder=_bypass_canary_builder,
         )
     )
@@ -2043,9 +1928,9 @@ def test_hosted_stream_emits_one_text_delta_frame_per_chunk(
     assert response.status_code == 200, response.text
     payloads = _data_lines(response.text)
     text_deltas = [payload["delta"] for payload in payloads if payload.get("type") == "text_delta"]
-    assert text_deltas == list(_MultiChunkFakeRunner.chunks)
+    assert text_deltas == list(chunks)
     # The aggregated final answer must NOT be re-emitted as one extra frame.
-    aggregated = "".join(_MultiChunkFakeRunner.chunks)
+    aggregated = "".join(chunks)
     assert aggregated not in text_deltas
     assert payloads[-1]["type"] == "turn_result"
     assert payloads[-1]["terminal"] == "completed"

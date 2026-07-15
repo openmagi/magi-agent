@@ -40,21 +40,7 @@ from magi_agent.transport.chat import Gate5BUserVisibleChatRouteConfig
 from magi_agent.transport.shadow_generations import (
     Gate5B4C3ShadowGenerationRouteConfig,
 )
-
-
-@pytest.fixture(autouse=True)
-def _legacy_selected_gate5b_path(monkeypatch):
-    """Pin the pre-governed selected-canary gate5b path for this module.
-
-    These tests exercise the legacy (non-governed) gate5b chat route with fake
-    runners; under MAGI_HOSTED_GOVERNED_TURN_ENABLED default-ON the requests
-    route through run_governed_turn -> MagiEngineDriver (verified working on a
-    live bot) whose layer these fakes do not wire, surfacing runner_error / 502.
-    Governed streaming has its own suite in
-    tests/test_chat_routes_hosted_governed_turn.py; hold the legacy path here.
-    """
-
-    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "0")
+from tests.support.governed_turn_fakes import install_governed_turn
 
 
 def _digest(value: str) -> str:
@@ -506,6 +492,12 @@ def test_gate8_live_selected_path_fails_closed_without_correlated_egress(
     tmp_path,
 ) -> None:
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    # The governed turn completes WITH output so adk.invoked is True and the turn
+    # does not short-circuit on runner_output_missing; the gate8 pre-egress check
+    # is then the thing that fails closed (503) for the missing egress evidence.
+    install_governed_turn(
+        monkeypatch, events=[{"type": "text_delta", "delta": "A brief answer."}]
+    )
     request_digest = "sha256:" + "9" * 64
     telemetry_path = tmp_path / "egress.jsonl"
     telemetry_path.write_text("", encoding="utf-8")
@@ -575,6 +567,10 @@ def test_gate8_live_selected_path_reuses_egress_proxy_correlation_without_gate1a
     tmp_path,
 ) -> None:
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    install_governed_turn(
+        monkeypatch,
+        events=[{"type": "text_delta", "delta": "gate8 live fake answer"}],
+    )
     request_digest = "sha256:" + "9" * 64
     model_attempt_digest = _digest(
         f"{request_digest}:google:gemini-3.5-flash:attempt:1"

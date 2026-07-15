@@ -226,7 +226,7 @@ openmagi	magi_agent/shadow/gate2_activation_loop_a.py	1
 openmagi	magi_agent/shadow/gate2_recipe_profile_resolver.py	1
 openmagi	magi_agent/shadow/gate3a_replay.py	1
 openmagi	magi_agent/shadow/gate4c1_runner_shadow_invoker.py	6
-openmagi	magi_agent/shadow/gate5b4c3_live_runner_boundary.py	5
+openmagi	magi_agent/shadow/gate5b4c3_live_runner_boundary.py	1
 openmagi	magi_agent/shadow/gate5b4c3_runner_input_adapter.py	4
 openmagi	magi_agent/shadow/research_runner_capture.py	1
 openmagi	magi_agent/shadow/tool_policy.py	1

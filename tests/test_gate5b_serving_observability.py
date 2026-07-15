@@ -217,7 +217,16 @@ def _drive_flag_on_governed_turn(
     faked to a text_delta + terminal stream; collect is REAL so message /
     turn_end read a genuine boundary result."""
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
-    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "1")
+    # Isolate the process-global observability sink these tests register
+    # (set_active_sink) from create_app's own observability wiring. When
+    # MAGI_OBSERVABILITY_ENABLED leaks into the environment (e.g. a prior
+    # hosted-overlay test in the same xdist worker sets it via the production
+    # main() serve path), register_observability would call set_active_sink
+    # with the app's real ObservabilityCore, SHADOWING the test's capturing
+    # sink so the composed public_event_sink forwards to the core instead of
+    # the test lambda. Deleting it here keeps create_app inert on the sink so
+    # the governed path composes the test's registered sink deterministically.
+    monkeypatch.delenv("MAGI_OBSERVABILITY_ENABLED", raising=False)
 
     lease = _FakeLease(reused=True, service=_FakeSessionService())
 

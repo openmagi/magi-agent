@@ -219,7 +219,6 @@ def test_serving_seam_suppresses_history_once_durable_session_has_events(
     durable session holds events. Probing under the wrong identity would read 0
     and seed both turns (the #1364 re-open)."""
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
-    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "1")
     monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "1")
     monkeypatch.setenv("MAGI_HOSTED_SESSION_DB", "1")
     monkeypatch.setenv("MAGI_STATE_DIR", str(tmp_path))

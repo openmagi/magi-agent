@@ -6,12 +6,13 @@ Covers the three guarantees the wiring must provide:
    * ``build_gate5b_control_plane_plugins`` returns ``[]`` so the gate5b Runner
      gets NO ``plugins`` kwarg.
    * the pre-final grounding gate is inert (returns ``None``; never blocks).
-   * the live runner boundary builds its Runner with NO ``plugins`` kwarg.
+   * the governed runner build (``build_hosted_runtime``) omits the ``plugins``
+     kwarg.
 
 2. Flag ON runs the control plane on the gate5b runner:
    * ``build_gate5b_control_plane_plugins`` returns the SAME
      ``_ExtendedControlPlanePlugin`` the cli/engine runner uses.
-   * the live runner boundary forwards that plugin into the ADK Runner.
+   * ``build_hosted_runtime`` forwards that plugin into the ADK Runner.
 
 3. Flag ON blocks on a missing-evidence / ungrounded answer:
    * an answer asserting a specific value absent from the turn's evidence corpus
@@ -24,13 +25,9 @@ detector only. Every test isolates ``MAGI_GATE5B_GOVERNANCE_ENABLED`` via
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
-from magi_agent.shadow.gate5b4c3_live_runner_boundary import (
-    Gate5B4C3LiveRunnerBoundary,
-)
+from magi_agent.runtime.hosted_runtime import build_hosted_runtime
 from magi_agent.transport.gate5b_governance import (
     build_gate5b_control_plane_plugins,
     corpus_from_public_events,
@@ -38,13 +35,13 @@ from magi_agent.transport.gate5b_governance import (
     gate5b_pre_final_grounding_status,
 )
 
-# Reuse the boundary test's request payload + fake ADK primitives so this test
-# drives the SAME live-runner path the serving boundary uses.
-from tests.test_gate5b4c3_live_runner_boundary import (  # noqa: PLC0415
-    _FakeRunner,
-    _enabled_config,
-    _fake_primitives,
-    _request,
+# P5-M1b: the legacy Gate5B4C3LiveRunnerBoundary engine was retired. The
+# governed serving path forwards ``control_plane_plugins`` into the ADK Runner
+# via ``build_hosted_runtime`` (the same place the legacy boundary constructed
+# its Runner), so the plugin-wiring assertions below drive that seam with a fake
+# Runner that records its construction kwargs.
+from tests.support.gate5b_governance_fakes import (  # noqa: PLC0415
+    build_plugin_recording_primitives,
 )
 
 
@@ -54,21 +51,6 @@ _ENV = "MAGI_GATE5B_GOVERNANCE_ENABLED"
 # ---------------------------------------------------------------------------
 # 1. Flag OFF — inert, byte-identical
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture(autouse=True)
-def _legacy_selected_gate5b_path(monkeypatch):
-    """Pin the pre-governed selected-canary gate5b path for this module.
-
-    These tests exercise the legacy (non-governed) gate5b chat route with fake
-    runners; under MAGI_HOSTED_GOVERNED_TURN_ENABLED default-ON the requests
-    route through run_governed_turn -> MagiEngineDriver (verified working on a
-    live bot) whose layer these fakes do not wire, surfacing runner_error / 502.
-    Governed streaming has its own suite in
-    tests/test_chat_routes_hosted_governed_turn.py; hold the legacy path here.
-    """
-
-    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "0")
 
 
 def test_flag_off_by_default(monkeypatch) -> None:
@@ -96,19 +78,20 @@ def test_off_grounding_status_is_inert(monkeypatch) -> None:
 
 
 def test_off_boundary_runner_gets_no_plugins_kwarg(monkeypatch) -> None:
-    """Flag OFF: the caller passes control_plane_plugins=() -> no plugins kwarg."""
+    """Flag OFF: control_plane_plugins=() -> the governed Runner gets no plugins kwarg."""
     monkeypatch.delenv(_ENV, raising=False)
-    primitives = _fake_primitives()
-    boundary = Gate5B4C3LiveRunnerBoundary(
-        lambda: primitives,
+    primitives, RunnerClass = build_plugin_recording_primitives()
+    build_hosted_runtime(
+        adk_primitives_loader=lambda: primitives,
         adk_tools=(),
+        model="gemini-3.5-flash",
+        instruction="be helpful",
+        generate_content_config=primitives.GenerateContentConfig(),
         # control_plane_plugins defaults to () — exactly what the OFF caller passes.
     )
-    result = asyncio.run(boundary.invoke_async(_request(), config=_enabled_config()))
-    assert result.status == "completed"
     # The Runner construction must NOT carry a ``plugins`` kwarg when none were
-    # supplied — byte-identical to the pre-governance boundary.
-    assert "plugins" not in _FakeRunner.created_kwargs
+    # supplied — byte-identical to the pre-governance / pre-M1b Runner build.
+    assert "plugins" not in RunnerClass.created_kwargs
 
 
 # ---------------------------------------------------------------------------
@@ -128,23 +111,24 @@ def test_on_builds_extended_control_plane_plugin(monkeypatch) -> None:
 
 
 def test_on_boundary_runner_receives_control_plane_plugin(monkeypatch) -> None:
-    """Flag ON: the control-plane plugin is forwarded into the ADK Runner."""
+    """Flag ON: the control-plane plugin is forwarded into the governed ADK Runner."""
     monkeypatch.setenv(_ENV, "1")
     plugins = build_gate5b_control_plane_plugins()
     assert plugins, "governance ON must yield a control-plane plugin"
 
-    primitives = _fake_primitives()
-    boundary = Gate5B4C3LiveRunnerBoundary(
-        lambda: primitives,
+    primitives, RunnerClass = build_plugin_recording_primitives()
+    build_hosted_runtime(
+        adk_primitives_loader=lambda: primitives,
         adk_tools=(),
+        model="gemini-3.5-flash",
+        instruction="be helpful",
+        generate_content_config=primitives.GenerateContentConfig(),
         control_plane_plugins=plugins,
     )
-    result = asyncio.run(boundary.invoke_async(_request(), config=_enabled_config()))
-    assert result.status == "completed"
-    # The control plane reached the gate5b runner exactly as it reaches the
+    # The control plane reaches the governed runner exactly as it reaches the
     # cli/engine runner (ADK App/Runner plugins).
-    forwarded = _FakeRunner.created_kwargs.get("plugins")
-    assert forwarded == plugins
+    forwarded = RunnerClass.created_kwargs.get("plugins")
+    assert forwarded == list(plugins)
 
 
 # ---------------------------------------------------------------------------
@@ -275,21 +259,17 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from magi_agent.app import create_app  # noqa: E402
 from magi_agent.config.models import PythonRuntimeAuthorityConfig  # noqa: E402
-from magi_agent.shadow.gate5b4c3_live_runner_boundary import (  # noqa: E402
-    Gate5B4C3LiveRunnerBoundaryResult,
-)
 from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (  # noqa: E402
     Gate5B4C3ShadowGenerationConfig as _ShadowGenConfig,
-    Gate5B4C3ShadowGenerationDiagnostic as _ShadowGenDiagnostic,
 )
 from magi_agent.shadow.gate5b4c3_shadow_counter_store import (  # noqa: E402
     Gate5B4C3ShadowCounterStore,
 )
-from magi_agent.transport import chat_routes as _chat_routes_module  # noqa: E402
 from magi_agent.transport.chat import Gate5BUserVisibleChatRouteConfig  # noqa: E402
 from magi_agent.transport.shadow_generations import (  # noqa: E402
     Gate5B4C3ShadowGenerationRouteConfig,
 )
+from tests.support.governed_turn_fakes import install_governed_turn  # noqa: E402
 from tests.test_chat_route_contract import (  # noqa: E402,PLC0415
     _fake_primitives as _contract_fake_primitives,
     _sha256,
@@ -339,48 +319,27 @@ def _live_canary_runtime(tmp_path) -> object:
     return runtime
 
 
-def _install_stub_boundary(
+def _install_governed_answer(
     monkeypatch,
     *,
     answer_text: str,
     tool_preview: str,
 ) -> None:
-    """Stub the live runner boundary: emit ONE tool-evidence event on the sink
-    (so the grounding corpus has the tool ``output_preview``) and return a
-    completed result whose internal output is ``answer_text``."""
+    """Drive a deterministic governed turn: emit ONE tool-evidence event (so the
+    grounding corpus has the tool ``output_preview``) followed by the answer as a
+    ``text_delta``. The REAL ``collect_engine_to_boundary_result`` tees the tool
+    event to the route's public sink and aggregates the text_delta into
+    ``outputTextInternal`` -- exactly the two signals the pre-final grounding gate
+    reads. (P5-M1b: this replaces the stub of the retired legacy boundary; the
+    grounding-gate assertions are unchanged.)"""
 
-    diagnostic = _ShadowGenDiagnostic(
-        accepted=True,
-        status="accepted",
-        reason="accepted",
-        shadowGenerationId="shadow_gen_governance",
-        provider="google",
-        model="gemini-3.5-flash",
-        routingSource="per_turn_injected",
-    )
-
-    async def _stub_boundary(*_args: object, **kwargs: object) -> object:
-        sink = kwargs.get("public_event_sink")
-        if sink is not None:
-            sink({"type": "tool_end", "output_preview": tool_preview})
-        return Gate5B4C3LiveRunnerBoundaryResult(
-            diagnostic=diagnostic.model_dump(by_alias=True, mode="python", warnings=False),
-            status="completed",
-            reason="runner_completed",
-            adkInvoked=True,
-            runnerAttempted=True,
-            modelCallViaAdkRunnerAttempted=True,
-            eventCount=1,
-            routingSource="per_turn_injected",
-            selectedProvider="google",
-            selectedModel="gemini-3.5-flash",
-            outputTextInternal=answer_text,
-            usageInternal=None,
-        )
-
-    monkeypatch.setattr(
-        "magi_agent.transport.gate5b_serving.run_gate5b4c3_live_runner_boundary_async",
-        _stub_boundary,
+    install_governed_turn(
+        monkeypatch,
+        events=[
+            {"type": "tool_end", "output_preview": tool_preview},
+            {"type": "text_delta", "delta": answer_text},
+        ],
+        terminal="completed",
     )
 
 
@@ -399,7 +358,7 @@ def test_e2e_flag_on_blocks_ungrounded_answer(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
     monkeypatch.setenv(_ENV, "1")
     # Answer asserts 776,665; the only tool evidence mentions a different figure.
-    _install_stub_boundary(
+    _install_governed_answer(
         monkeypatch,
         answer_text="The channel has 776665 subscribers.",
         tool_preview="the page showed about 12,000 subscribers",
@@ -420,7 +379,7 @@ def test_e2e_flag_on_allows_grounded_answer(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
     monkeypatch.setenv(_ENV, "1")
     # Same value, now SUPPORTED by the tool evidence -> grounded -> emitted.
-    _install_stub_boundary(
+    _install_governed_answer(
         monkeypatch,
         answer_text="The channel has 776665 subscribers.",
         tool_preview="subscriber count reported as 776,665",
@@ -439,7 +398,7 @@ def test_e2e_flag_off_emits_same_ungrounded_answer(monkeypatch, tmp_path) -> Non
     monkeypatch.delenv(_ENV, raising=False)
     # The SAME ungrounded answer that blocks with the flag ON: with the flag OFF
     # the gate5b serving path emits it unchanged (byte-identical behavior).
-    _install_stub_boundary(
+    _install_governed_answer(
         monkeypatch,
         answer_text="The channel has 776665 subscribers.",
         tool_preview="the page showed about 12,000 subscribers",

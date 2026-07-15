@@ -1,14 +1,19 @@
-"""gate5b4c3 (hosted live chat) must split model thinking from the answer.
+"""Hosted live chat must split model thinking from the answer.
 
-`_text_chunks_from_parts` previously collected text from ALL parts including
+Visible answer text previously collected text from ALL parts including
 `thought=True`, so model reasoning was concatenated into the visible answer and
 no thinking channel was emitted. Visible text must exclude thought parts, and a
 parallel helper must collect thought text for a thinking_delta stream.
+
+P5-M1b: the split helpers were promoted from the retired gate5b4c3 live runner
+boundary into the shared ``runtime.public_events`` home (byte-identical), which
+is where the governed path's wire-shape invariants live alongside
+``result_digest`` / ``tool_event_id``.
 """
 
-from magi_agent.shadow.gate5b4c3_live_runner_boundary import (
-    _text_chunks_from_parts,
-    _thinking_chunks_from_parts,
+from magi_agent.runtime.public_events import (
+    text_chunks_from_parts as _text_chunks_from_parts,
+    thinking_chunks_from_parts as _thinking_chunks_from_parts,
 )
 
 

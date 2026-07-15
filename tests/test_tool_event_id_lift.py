@@ -26,12 +26,49 @@ def test_tool_event_id_prefix_and_length() -> None:
     )
 
 
-def test_tool_event_id_byte_identity_with_gate5b4c3() -> None:
-    """Lifted fn must produce exactly the same string as gate5b4c3's private fn."""
+def test_tool_event_id_byte_identity_with_wire_format() -> None:
+    """Lifted fn must produce exactly the id the retired gate5b4c3 fn produced.
+
+    The retired boundary's ``_manual_tool_event_id`` already delegated to this
+    shared ``tool_event_id`` (P5-M1b removed the thin wrapper), so this locks
+    the wire-shape against a recomputed reference of the exact ``tu_<12-hex>``
+    format the hosted wire consumers depend on rather than the deleted symbol.
+    """
+    import hashlib
+    import json
+
     from magi_agent.runtime.public_events import tool_event_id  # type: ignore[attr-defined]
-    from magi_agent.shadow.gate5b4c3_live_runner_boundary import (  # type: ignore[attr-defined]
-        _manual_tool_event_id,
-    )
+
+    def _reference_tool_event_id(
+        *, name: str, args: dict, call_id: object, index: int
+    ) -> str:
+        # Mirrors the retired gate5b4c3 id scheme byte-for-byte:
+        # tu_ + first-12-hex of sha256(canonical-json of the bounded struct).
+        def _json_dumps(value: object) -> str:
+            return json.dumps(
+                value,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+                default=repr,
+            )
+
+        def _digest(value: object) -> str:
+            return "sha256:" + hashlib.sha256(_json_dumps(value).encode("utf-8")).hexdigest()
+
+        def _bounded(value: object, *, max_bytes: int) -> object:
+            if len(_json_dumps(value).encode("utf-8")) <= max_bytes:
+                return value
+            return {"truncated": True, "digest": _digest(value)}
+
+        return "tu_" + _digest(
+            {
+                "name": name,
+                "args": _bounded(args, max_bytes=512),
+                "id": str(call_id or ""),
+                "index": index,
+            }
+        )[7:19]
 
     cases = [
         dict(name="Read", args={"path": "x"}, call_id="c1", index=0),
@@ -43,9 +80,9 @@ def test_tool_event_id_byte_identity_with_gate5b4c3() -> None:
     ]
     for kwargs in cases:
         lifted = tool_event_id(**kwargs)
-        original = _manual_tool_event_id(**kwargs)
-        assert lifted == original, (
-            f"byte-identity FAILED for {kwargs!r}: lifted={lifted!r}, original={original!r}"
+        reference = _reference_tool_event_id(**kwargs)
+        assert lifted == reference, (
+            f"byte-identity FAILED for {kwargs!r}: lifted={lifted!r}, reference={reference!r}"
         )
 
 

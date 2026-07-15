@@ -38,9 +38,12 @@ from magi_agent.transport.streaming_chat_route import (
 
 
 @pytest.fixture(autouse=True)
-def _pin_legacy_path(monkeypatch):
-    """Hold the legacy (non-governed) path so we exercise the local engine."""
-    monkeypatch.setenv("MAGI_HOSTED_GOVERNED_TURN_ENABLED", "0")
+def _local_streaming_path(monkeypatch):
+    """Exercise the local-engine streaming path (MAGI_STREAMING_CHAT).
+
+    These tests assert slash-to-skill resolution at the engine input, which is
+    unaffected by the P5-M1b hosted gate5b engine deletion.
+    """
     monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
 
 

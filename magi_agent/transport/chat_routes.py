@@ -84,12 +84,11 @@ from magi_agent.runtime.user_visible_model_routing import (
     _safe_label_or_none,
 )
 from magi_agent.runtime.hosted_runtime import build_hosted_runtime
-# flip-pr4 (done): the hosted governed-turn path is now profile-aware default-ON,
-# so this couples to the PUBLIC boundary surface only (no private underscore
-# symbols).
+# The hosted governed serving path (gate5b_serving) owns the runner engine; this
+# module couples to the PUBLIC boundary surface only (no private underscore
+# symbols). (P5-M1b retired run_gate5b4c3_live_runner_boundary_async.)
 from magi_agent.shadow.gate5b4c3_live_runner_boundary import (
     gate1a_correlated_model_or_label,
-    run_gate5b4c3_live_runner_boundary_async,
 )
 from magi_agent.shadow.gate5b4c3_runner_input_adapter import (
     build_gate5b4c3_runner_input,
