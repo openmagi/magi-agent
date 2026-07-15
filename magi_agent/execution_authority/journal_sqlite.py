@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import sqlite3
 
@@ -12,6 +12,12 @@ from magi_agent.execution_authority.journal_integrity import (
     AppendWithOutboxReceipt,
     AppendWithOutboxRequest,
     JournalChainAnchor,
+    OutboxAckReceipt,
+    OutboxAckRequest,
+    OutboxAttemptReceipt,
+    OutboxAttemptRequest,
+    OutboxClaimReceipt,
+    OutboxClaimRequest,
     ReadPartitionReceipt,
     ReadPartitionRequest,
     canonical_journal_event_hash,
@@ -194,6 +200,10 @@ class SQLiteAuthorityJournal:
                     None,
                 ),
             )
+            connection.execute(
+                "INSERT INTO authority_outbox_fences VALUES (?, 0)",
+                (item.outbox_id,),
+            )
             connection.commit()
         except sqlite3.IntegrityError as exc:
             connection.rollback()
@@ -248,6 +258,162 @@ class SQLiteAuthorityJournal:
             events=tuple(events),
             hasMore=request.after_sequence + len(events) < head.sequence,
             capturedAt=captured_at,
+        )
+
+    @staticmethod
+    def _outbox_for(connection: sqlite3.Connection, outbox_id: str) -> OutboxItem:
+        row = connection.execute(
+            "SELECT outbox_id, partition_id, event_sequence, event_id, event_hash, "
+            "subject_id, subject_digest, kind, payload_digest, payload_json, delivery_state, "
+            "claim_owner_id, claim_fencing_token, claim_expires_at, delivery_attempts, "
+            "acknowledgement_digest, compare_version FROM authority_outbox WHERE outbox_id = ?",
+            (outbox_id,),
+        ).fetchone()
+        if row is None:
+            raise JournalConflict("outbox item does not exist")
+        return OutboxItem(
+            outboxId=row[0],
+            partitionId=row[1],
+            eventSequence=row[2],
+            eventId=row[3],
+            eventHash=row[4],
+            subjectId=row[5],
+            subjectDigest=row[6],
+            kind=row[7],
+            payloadDigest=row[8],
+            payloadJson=row[9],
+            state=OutboxState(row[10]),
+            claimOwnerId=row[11],
+            claimFencingToken=row[12],
+            claimExpiresAt=datetime.fromisoformat(row[13]) if row[13] else None,
+            deliveryAttempt=row[14],
+            acknowledgementDigest=row[15],
+            compareVersion=row[16],
+        )
+
+    def claim_outbox(self, request: OutboxClaimRequest) -> OutboxClaimReceipt:
+        claimed_at = datetime.now(UTC)
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            previous = self._outbox_for(connection, request.outbox_id)
+            high_water_row = connection.execute(
+                "SELECT fencing_token_high_water FROM authority_outbox_fences WHERE outbox_id = ?",
+                (request.outbox_id,),
+            ).fetchone()
+            if high_water_row is None:
+                raise JournalIntegrityError("outbox fencing high-water is missing")
+            previous_high_water = int(high_water_row[0])
+            if (
+                previous.state is not OutboxState.PENDING
+                or previous.delivery_attempt != request.expected_delivery_attempt
+                or previous.compare_version != request.expected_compare_version
+                or previous_high_water != request.expected_fencing_token_high_water
+            ):
+                raise JournalConflict("outbox claim precondition is stale")
+            resulting_high_water = previous_high_water + 1
+            expires_at = claimed_at + timedelta(seconds=request.claim_ttl_seconds)
+            connection.execute(
+                "UPDATE authority_outbox SET delivery_state = 'claimed', claim_owner_id = ?, "
+                "claim_fencing_token = ?, claim_expires_at = ?, compare_version = compare_version + 1 "
+                "WHERE outbox_id = ?",
+                (request.owner_id, resulting_high_water, expires_at.isoformat(), request.outbox_id),
+            )
+            connection.execute(
+                "UPDATE authority_outbox_fences SET fencing_token_high_water = ? WHERE outbox_id = ?",
+                (resulting_high_water, request.outbox_id),
+            )
+            resulting = self._outbox_for(connection, request.outbox_id)
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+        return OutboxClaimReceipt(
+            request=request,
+            previousItem=previous,
+            resultingItem=resulting,
+            previousFencingTokenHighWater=previous_high_water,
+            resultingFencingTokenHighWater=resulting_high_water,
+            claimedAt=claimed_at,
+        )
+
+    def record_outbox_attempt(self, request: OutboxAttemptRequest) -> OutboxAttemptReceipt:
+        attempted_at = datetime.now(UTC)
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            previous = self._outbox_for(connection, request.outbox_id)
+            if (
+                previous.state is not OutboxState.CLAIMED
+                or previous.claim_owner_id != request.owner_id
+                or previous.claim_fencing_token != request.claim_fencing_token
+                or previous.subject_digest != request.subject_digest
+                or previous.payload_digest != request.payload_digest
+                or previous.delivery_attempt != request.expected_delivery_attempt
+                or previous.compare_version != request.expected_compare_version
+                or previous.claim_expires_at is None
+                or attempted_at > previous.claim_expires_at
+            ):
+                raise JournalConflict("outbox attempt precondition is stale")
+            connection.execute(
+                "UPDATE authority_outbox SET delivery_attempts = delivery_attempts + 1, "
+                "compare_version = compare_version + 1 WHERE outbox_id = ?",
+                (request.outbox_id,),
+            )
+            resulting = self._outbox_for(connection, request.outbox_id)
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+        return OutboxAttemptReceipt(
+            request=request,
+            previousItem=previous,
+            resultingItem=resulting,
+            fencingTokenHighWater=request.claim_fencing_token,
+            attemptedAt=attempted_at,
+        )
+
+    def ack_outbox(self, request: OutboxAckRequest) -> OutboxAckReceipt:
+        acknowledged_at = datetime.now(UTC)
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            previous = self._outbox_for(connection, request.outbox_id)
+            if (
+                previous.state is not OutboxState.CLAIMED
+                or previous.claim_owner_id != request.owner_id
+                or previous.claim_fencing_token != request.claim_fencing_token
+                or previous.subject_digest != request.subject_digest
+                or previous.payload_digest != request.payload_digest
+                or previous.delivery_attempt != request.delivery_attempt
+                or previous.compare_version != request.expected_compare_version
+                or previous.claim_expires_at is None
+                or acknowledged_at > previous.claim_expires_at
+            ):
+                raise JournalConflict("outbox acknowledgement precondition is stale")
+            connection.execute(
+                "UPDATE authority_outbox SET delivery_state = 'delivered', claim_owner_id = NULL, "
+                "claim_fencing_token = NULL, claim_expires_at = NULL, acknowledgement_digest = ?, "
+                "compare_version = compare_version + 1, delivered_at = ? WHERE outbox_id = ?",
+                (request.acknowledgement_digest, acknowledged_at.isoformat(), request.outbox_id),
+            )
+            resulting = self._outbox_for(connection, request.outbox_id)
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+        return OutboxAckReceipt(
+            request=request,
+            previousItem=previous,
+            resultingItem=resulting,
+            fencingTokenHighWater=request.claim_fencing_token,
+            acknowledgedAt=acknowledged_at,
         )
 
     def pending_outbox_count(self) -> int:

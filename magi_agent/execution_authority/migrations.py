@@ -201,6 +201,10 @@ CREATE TABLE authority_outbox (
     FOREIGN KEY (partition_id, event_sequence)
       REFERENCES authority_events(partition_id, sequence)
 );
+CREATE TABLE authority_outbox_fences (
+    outbox_id TEXT PRIMARY KEY REFERENCES authority_outbox(outbox_id),
+    fencing_token_high_water INTEGER NOT NULL DEFAULT 0
+);
 """.strip()
 
 _V1_CHECKSUM = sha256(_V1_SCHEMA.encode("utf-8")).hexdigest()

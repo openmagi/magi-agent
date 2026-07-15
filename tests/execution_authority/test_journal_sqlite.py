@@ -16,6 +16,9 @@ from magi_agent.execution_authority.journal import (
 )
 from magi_agent.execution_authority.journal_integrity import (
     AppendWithOutboxRequest,
+    OutboxAckRequest,
+    OutboxAttemptRequest,
+    OutboxClaimRequest,
     ReadPartitionRequest,
     canonical_journal_genesis_hash,
     canonical_safe_object_json,
@@ -110,3 +113,46 @@ def test_read_fails_closed_when_a_physical_row_is_corrupted(tmp_path) -> None:
             ReadPartitionRequest(partitionId=PARTITION, afterSequence=0, limit=10)
         )
 
+
+def test_outbox_delivery_is_fenced_and_compare_versioned(tmp_path) -> None:
+    journal = SQLiteAuthorityJournal(tmp_path / "authority.db")
+    journal.append_with_outbox(_request(event_id="event_01", expected=journal.head(PARTITION)))
+
+    claim = journal.claim_outbox(
+        OutboxClaimRequest(
+            outboxId="outbox_event_01",
+            ownerId="delivery_01",
+            claimTtlSeconds=300,
+            expectedDeliveryAttempt=0,
+            expectedCompareVersion=1,
+            expectedFencingTokenHighWater=0,
+        )
+    )
+    attempt = journal.record_outbox_attempt(
+        OutboxAttemptRequest(
+            outboxId="outbox_event_01",
+            ownerId="delivery_01",
+            claimFencingToken=claim.resulting_fencing_token_high_water,
+            subjectDigest=D1,
+            payloadDigest=claim.resulting_item.payload_digest,
+            expectedDeliveryAttempt=0,
+            expectedCompareVersion=2,
+        )
+    )
+    ack = journal.ack_outbox(
+        OutboxAckRequest(
+            outboxId="outbox_event_01",
+            ownerId="delivery_01",
+            claimFencingToken=claim.resulting_fencing_token_high_water,
+            subjectDigest=D1,
+            payloadDigest=attempt.resulting_item.payload_digest,
+            acknowledgementDigest=D5,
+            deliveryAttempt=1,
+            expectedCompareVersion=3,
+        )
+    )
+
+    assert ack.resulting_item.state.value == "delivered"
+    assert ack.resulting_item.compare_version == 4
+    with pytest.raises(JournalConflict):
+        journal.ack_outbox(ack.request)
