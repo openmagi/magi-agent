@@ -1524,6 +1524,8 @@ for name in (
     "magi_agent.execution_authority.projection_registry",
     "magi_agent.execution_authority.recovery_protocol",
     "magi_agent.execution_authority.sandbox",
+    "magi_agent.execution_authority.sandbox.linux_bwrap",
+    "magi_agent.execution_authority.sandbox.macos_seatbelt",
     "magi_agent.execution_authority.user_decision",
     "magi_agent.execution_authority.workspace_writer",
 ):

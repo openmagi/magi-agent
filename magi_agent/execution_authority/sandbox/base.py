@@ -32,6 +32,13 @@ class SandboxUnavailable(RuntimeError):
     """Raised before launch when the required OS primitive is not available."""
 
 
+class SandboxInvocation(_AuthorityContractModel):
+    """Pure launch description; constructing it never starts a process."""
+
+    command: tuple[str, ...]
+    profile_text: str | None = Field(default=None, alias="profileText")
+
+
 class NetworkMode(StrEnum):
     NONE = "none"
     PROXY = "proxy"
