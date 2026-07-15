@@ -136,7 +136,10 @@ _LEGAL_ACTION_TRANSITIONS = frozenset(
 )
 
 
-@pytest.mark.parametrize(("current", "target"), _LEGAL_ACTION_TRANSITIONS)
+@pytest.mark.parametrize(
+    ("current", "target"),
+    sorted(_LEGAL_ACTION_TRANSITIONS, key=lambda transition: tuple(map(str, transition))),
+)
 def test_legal_action_transition_returns_target(
     current: ActionState,
     target: ActionState,
@@ -200,7 +203,13 @@ _LEGAL_USER_DECISION_TRANSITIONS = {
 }
 
 
-@pytest.mark.parametrize(("current", "target"), _LEGAL_USER_DECISION_TRANSITIONS)
+@pytest.mark.parametrize(
+    ("current", "target"),
+    sorted(
+        _LEGAL_USER_DECISION_TRANSITIONS,
+        key=lambda transition: tuple(map(str, transition)),
+    ),
+)
 def test_legal_user_decision_transition_returns_target(
     current: UserDecisionState,
     target: UserDecisionState,
