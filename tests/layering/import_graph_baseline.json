@@ -71,7 +71,7 @@
       "ops"
     ]
   ],
-  "package_count": 53,
+  "package_count": 55,
   "package_edges": [
     "adk_bridge->config",
     "adk_bridge->harness",
@@ -147,6 +147,7 @@
     "evidence->shared",
     "evidence->telemetry",
     "evidence->tools",
+    "execution_authority->ops",
     "firstparty->harness",
     "firstparty->hooks",
     "firstparty->packs",
