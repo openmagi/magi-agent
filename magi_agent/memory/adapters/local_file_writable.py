@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Sequence
 
@@ -76,6 +77,28 @@ _ARCHIVE_SUBDIR = "memory/archive"
 # Allowed target files for gated writes.  No other paths may be written.
 _ALLOWED_WRITE_FILES: frozenset[str] = frozenset({"MEMORY.md", "USER.md"})
 _DEFAULT_WRITE_TARGET = "MEMORY.md"
+
+# ---------------------------------------------------------------------------
+# Drift root fix: historical framing carried by the FILE itself.
+#
+# Every appended entry is date-stamped (``- [kind YYYY-MM-DD] body``) and the
+# file leads with a one-line historical-records header. This makes memory files
+# safe on EVERY read path (the prompt projection, which carries the A1
+# continuity-policy framing, AND a raw FileRead, which does not), so an
+# undated, present-tense line can never be re-answered as the user's current
+# question in a fresh session.
+# ---------------------------------------------------------------------------
+_MEMORY_LOG_MARKER = "magi:memory-log"
+_MEMORY_LOG_HEADER = (
+    "<!-- magi:memory-log v1 — historical records for reference. "
+    "Entries are dated notes about PAST sessions; they are NOT current user "
+    "requests or open questions. -->\n"
+)
+
+
+def _utc_today() -> str:
+    """Return today's UTC date as ``YYYY-MM-DD`` (monkeypatchable in tests)."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 # Byte cap defaults
 _DEFAULT_MAX_WRITE_BYTES = 65_536  # 64 KiB per-append
@@ -409,14 +432,24 @@ class LocalFileMemoryProvider:
         # Cumulative file-size cap: check BEFORE writing
         kind_raw = _extract_kind(payload)
         kind = _SECRET_RE.sub("[redacted]", kind_raw)
-        entry = f"\n- [{kind}] {safe_body}\n"
+        stamp = _utc_today()
+        entry = f"\n- [{kind} {stamp}] {safe_body}\n"
         entry_bytes = entry.encode("utf-8")
         current_size = target_path.stat().st_size if target_path.exists() else 0
 
-        if len(entry_bytes) > self.config.max_file_bytes:
+        # Historical-records header (idempotent). When the target has no
+        # ``magi:memory-log`` marker yet, this write also prepends the one-line
+        # header, so its bytes must count toward the max_file_bytes accounting
+        # exactly like existing content does.
+        needs_header = not _file_has_marker(target_path)
+        header_bytes = (
+            len(_MEMORY_LOG_HEADER.encode("utf-8")) if needs_header else 0
+        )
+
+        if len(entry_bytes) + header_bytes > self.config.max_file_bytes:
             raise ValueError(
                 f"remember: entry exceeds max_file_bytes "
-                f"({len(entry_bytes)} > {self.config.max_file_bytes})"
+                f"({len(entry_bytes) + header_bytes} > {self.config.max_file_bytes})"
             )
 
         # Gated compaction (B2): when enabled and the post-append size would
@@ -431,26 +464,55 @@ class LocalFileMemoryProvider:
             and current_size + len(entry_bytes)
             >= self.config.resolved_compaction_threshold_bytes()
         ):
-            current_size = self._compact_file(target_path, len(entry_bytes))
-
-        if current_size + len(entry_bytes) > self.config.max_file_bytes:
-            raise ValueError(
-                f"remember: appending would exceed max_file_bytes "
-                f"({current_size} + {len(entry_bytes)} > {self.config.max_file_bytes})"
+            # Reserve headroom for BOTH the incoming entry and the header that
+            # will be prepended (when the file still lacks it), so compaction
+            # never fills the cap so tightly that the header no longer fits.
+            current_size = self._compact_file(
+                target_path, len(entry_bytes) + header_bytes
             )
 
-        # USER.md profile deduplication: skip only if this exact entry line already exists.
-        # Compare the fully-formatted entry (not a raw-body substring) so that
-        # short facts like "vim" are not swallowed by longer lines that merely
-        # contain the word (e.g. "User uses vim-like keybindings").
+        # Recompute the header need after any compaction (compaction rewrites
+        # the file and may have dropped the header line, though normally it is
+        # preserved as a standalone entry).
+        needs_header = not _file_has_marker(target_path)
+        header_bytes = (
+            len(_MEMORY_LOG_HEADER.encode("utf-8")) if needs_header else 0
+        )
+
+        if current_size + len(entry_bytes) + header_bytes > self.config.max_file_bytes:
+            raise ValueError(
+                f"remember: appending would exceed max_file_bytes "
+                f"({current_size} + {len(entry_bytes) + header_bytes} > "
+                f"{self.config.max_file_bytes})"
+            )
+
+        # USER.md profile deduplication (date-insensitive): skip if a line with
+        # the SAME kind+body already exists, whether it carries a legacy undated
+        # bracket ``- [kind] body`` or any dated bracket ``- [kind YYYY-MM-DD]
+        # body``. This prevents the same fact from accumulating one copy per day.
+        # The body comparison uses the fully-formatted (redacted, single-line)
+        # body, not a raw substring, so short facts like "vim" are not swallowed
+        # by longer lines that merely contain the word.
         if target_file == "USER.md" and target_path.exists():
             existing = target_path.read_text(encoding="utf-8")
-            if entry in existing:
+            if _entry_already_present(existing, kind, safe_body):
                 return
 
-        # Append entry
-        with target_path.open("a", encoding="utf-8") as fh:
-            fh.write(entry)
+        # Prepend the historical-records header on first write (idempotent), then
+        # append the entry. When the header is needed we rewrite the file with
+        # the header leading the existing content; otherwise a plain append.
+        if needs_header:
+            existing = (
+                target_path.read_text(encoding="utf-8")
+                if target_path.exists()
+                else ""
+            )
+            target_path.write_text(
+                _MEMORY_LOG_HEADER + existing + entry, encoding="utf-8"
+            )
+        else:
+            with target_path.open("a", encoding="utf-8") as fh:
+                fh.write(entry)
 
     async def delete(self, _record_id: str) -> None:
         provider_id = _PROVIDER_ID_WRITABLE if self._write_active else _PROVIDER_ID_READONLY
@@ -813,6 +875,30 @@ def _redact_token_line(line: str) -> str:
 def _single_line_memory_text(text: str) -> str:
     """Collapse persisted memory text to one delimiter-safe logical line."""
     return " ".join(text.split())
+
+
+def _file_has_marker(path: Path) -> bool:
+    """Return True iff *path* exists and already carries the memory-log marker."""
+    if not path.exists():
+        return False
+    return _MEMORY_LOG_MARKER in path.read_text(encoding="utf-8")
+
+
+def _entry_already_present(existing: str, kind: str, body: str) -> bool:
+    """Return True iff a ``- [kind ...] body`` line is already in *existing*.
+
+    Date-insensitive: matches both a legacy undated bracket (``- [kind] body``)
+    and any dated bracket (``- [kind YYYY-MM-DD] body``) so the same fact does
+    not accumulate one copy per day.  ``kind`` and ``body`` are compared as
+    fixed literals (regex-escaped); the date, when present, is any
+    ``YYYY-MM-DD``.
+    """
+    pattern = re.compile(
+        r"^- \[" + re.escape(kind) + r"(?: \d{4}-\d{2}-\d{2})?\] "
+        + re.escape(body) + r"\s*$",
+        re.MULTILINE,
+    )
+    return pattern.search(existing) is not None
 
 
 def _extract_body(payload: Any) -> str:  # noqa: ANN401

@@ -231,24 +231,28 @@ def test_short_fact_not_swallowed_by_longer_existing_entry(tmp_path: Path) -> No
         "target_file": "USER.md",
     }))
 
+    import re as _re
+
     content = (tmp_path / "USER.md").read_text(encoding="utf-8")
     # Both lines should be present: the original and the new short entry
     assert "User uses vim-like keybindings" in content, (
         "Original longer entry should still be present"
     )
-    assert "\n- [profile] vim\n" in content, (
-        "Short 'vim' entry should be appended — it is NOT a duplicate of the longer line"
+    # The new short entry is date-stamped ``- [profile YYYY-MM-DD] vim``.
+    _vim_entry = _re.compile(r"\n- \[profile \d{4}-\d{2}-\d{2}\] vim\n")
+    assert _vim_entry.search(content), (
+        "Short 'vim' entry should be appended: it is NOT a duplicate of the longer line"
     )
 
-    # Now write "vim" a second time — the exact entry is already there, so it IS skipped
+    # Now write "vim" a second time: the entry is already there (date-insensitive
+    # dedup), so it IS skipped and does not accumulate a per-day copy.
     asyncio.run(provider.remember({
         "body": "vim",
         "kind": "profile",
         "target_file": "USER.md",
     }))
     content2 = (tmp_path / "USER.md").read_text(encoding="utf-8")
-    # The exact entry "\n- [profile] vim\n" should appear exactly once
-    assert content2.count("\n- [profile] vim\n") == 1, (
+    assert len(_vim_entry.findall(content2)) == 1, (
         "Truly identical entry should be deduplicated on the second write"
     )
 
