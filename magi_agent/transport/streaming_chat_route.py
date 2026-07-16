@@ -1017,10 +1017,14 @@ async def _drive_selected_gate5b_stream(
                     yield frame
         response = response_task.result()
         payload = _json_response_mapping(response)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 -- surfaced on the wire, never swallowed silently
         reason = "selected_stream_bridge_error"
+        # Carry the real failure reason (mirrors the #1435 B1 lesson: a
+        # flattened generic code makes the dashboard/model confabulate the
+        # cause). The error-event sanitizer redacts private text downstream.
+        detail = f"{reason}: {type(exc).__name__}: {exc}"[:300]
         frame = _runtime_event_frame(
-            {"type": "error", "code": reason, "message": reason},
+            {"type": "error", "code": reason, "message": detail},
             turn_id=turn_id,
         )
         if frame is not None:
@@ -1028,7 +1032,7 @@ async def _drive_selected_gate5b_stream(
         for chunk in frame_for_terminal(
             EngineResult(
                 terminal=Terminal.error,
-                error=reason,
+                error=detail,
                 session_id=session_id,
                 turn_id=turn_id,
             )

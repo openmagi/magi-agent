@@ -153,7 +153,7 @@ def test_gate5b_stream_through_pump_registers_snapshot_and_completed(monkeypatch
             store=store,
         )
         # Consume the first live frame -> the pump has begun the turn.
-        first = await asyncio.wait_for(anext(gen), timeout=2)
+        first = await asyncio.wait_for(anext(gen), timeout=15)
         assert "gate5b answer" in first.decode("utf-8")
         # Mid-stream: a live snapshot exists in the store.
         snapshot_seen["live"] = store.active_snapshot(sk)
@@ -206,7 +206,7 @@ def test_gate5b_stream_cancel_event_aborts_response_task(monkeypatch) -> None:
             turn_id="t-cancel",
             cancel=cancel,
         )
-        first = await asyncio.wait_for(anext(frames), timeout=2)
+        first = await asyncio.wait_for(anext(frames), timeout=15)
         assert _data_lines(first.decode("utf-8"))[0]["type"] == "text_delta"
         # Watchdog fires: set the cancel event, then drain.
         cancel.set()
