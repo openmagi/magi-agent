@@ -23,7 +23,23 @@ deterministic control plane you program decides which of those proposals become
 state, evidence, side effects, or user-visible output. It runs locally, works
 with any provider you bring, and is Apache-2.0.
 
-## Install & quickstart
+## Install
+
+### Desktop app — easiest, no terminal (macOS)
+
+Download the signed, notarized app, drag it to Applications, and double-click —
+no terminal, no build step. It launches the local runtime and opens the
+dashboard in a native window.
+
+**[⬇︎ Download Open Magi for Mac](https://openmagi.ai/desktop)** · or grab the
+`.dmg` from the [latest release](https://github.com/openmagi/magi-agent/releases/latest)
+(Apple Silicon).
+
+Set a provider key once in the app's Settings (or `~/.magi/config.toml`) and
+you're running. Windows/Linux desktop builds are on the way; use the CLI below
+in the meantime.
+
+### CLI & local server (all platforms)
 
 ```bash
 # 1. Install (Homebrew, prebuilt bottle)
