@@ -114,7 +114,7 @@ def test_gate5b_stream_through_pump_registers_snapshot_and_completed(monkeypatch
     snapshot_seen: dict[str, object] = {}
 
     async def fake_selected_chat_response(
-        runtime, body, *, request, public_event_sink=None
+        runtime, body, *, request, public_event_sink=None, **_kwargs
     ) -> JSONResponse:
         assert public_event_sink is not None
         public_event_sink({"type": "text_delta", "delta": "gate5b answer"})
@@ -180,7 +180,7 @@ def test_gate5b_stream_cancel_event_aborts_response_task(monkeypatch) -> None:
     released = asyncio.Event()
 
     async def fake_selected_chat_response(
-        runtime, body, *, request, public_event_sink=None
+        runtime, body, *, request, public_event_sink=None, **_kwargs
     ) -> JSONResponse:
         assert public_event_sink is not None
         public_event_sink({"type": "text_delta", "delta": "early chunk"})
