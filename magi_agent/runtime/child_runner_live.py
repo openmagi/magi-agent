@@ -835,21 +835,27 @@ def _classify_child_event_error(event: object) -> str | None:
 
 
 #: Hard ceiling for a single child turn (seconds), regardless of the request's
-#: ``budget_ms``. Keeps a runaway/huge budget from blocking indefinitely.
-_MAX_TURN_TIMEOUT_S = 600.0
+#: ``budget_ms``. This is a LAST-RESORT hang backstop, NOT a work budget:
+#: subagent work must never be destroyed by an artificial time ceiling
+#: (owner directive). Raised to 7 days so an operator ``MAGI_CHILD_TURN_TIMEOUT_S``
+#: (or a request ``budget_ms``) is never silently clamped down to something
+#: shorter than intended; the only thing it still bounds is a genuinely-hung
+#: dispatch that would otherwise block the parent forever. Even when this
+#: fires, the timeout preserves the child's best-effort partial work as
+#: ``partialSummary`` (see the ``asyncio.TimeoutError`` handler in ``run_child``).
+_MAX_TURN_TIMEOUT_S = 604800.0
 
 #: Default bound for a child turn when the parent passes NO positive
-#: ``budget_ms`` (the common case: the model rarely sets one). Delegated
-#: subtasks should be TIGHT by default: without this a "compute 1+1" child that
-#: spirals (ramble hundreds of deltas, call tools it lacks, loop internal turns)
-#: ran the full 600s ceiling before ending non-completed, which starved the
-#: parent turn and surfaced as ``child_turn_timeout`` /
-#: ``child_llm_collector_status_failed``. Generous but finite (generous-budget
-#: policy: comfortably fits a legitimate multi-fetch deep-research or coding
-#: child, while still killing a "1+1" child that spirals for minutes);
-#: env-tunable via ``MAGI_CHILD_TURN_TIMEOUT_S``. Still clamped to
+#: ``budget_ms`` (the common case: the model rarely sets one). Effectively
+#: unlimited (24h): a delegated subtask is real work and must be allowed to
+#: run to completion. The timeout is a hang backstop, not a work budget --
+#: a legitimate multi-fetch deep-research or long coding child must never be
+#: killed mid-work. A truly spiraling child is stopped by the genuine-error
+#: fast-fails (the missing-tool streak cap), not by this ceiling; and if this
+#: ever does fire, commit 1 guarantees the child's partial work is preserved.
+#: Env-tunable via ``MAGI_CHILD_TURN_TIMEOUT_S``; still clamped to
 #: ``_MAX_TURN_TIMEOUT_S`` (and lowered by ``MAGI_MODEL_TIMEOUT_S`` when set).
-_DEFAULT_CHILD_TURN_TIMEOUT_S = 300.0
+_DEFAULT_CHILD_TURN_TIMEOUT_S = 86400.0
 _CHILD_TURN_TIMEOUT_ENV = "MAGI_CHILD_TURN_TIMEOUT_S"
 
 
@@ -1888,16 +1894,18 @@ class RealLocalChildRunner:
     def _turn_timeout_s(self, request: object) -> float:
         """Resolve the per-turn timeout (seconds) from ``request.budget_ms``.
 
-        EVERY child turn is bounded — a turn that never finishes would otherwise
+        EVERY child turn is bounded, but the bound is a LAST-RESORT hang
+        backstop, not a work budget: a turn that never finishes would otherwise
         hang the parent turn forever (the spawn_agent tool awaits the child
         boundary inline on the dispatch loop with no outer bound). When no
-        positive ``budget_ms`` is present the bound falls back to the TIGHT
-        per-turn default (``_DEFAULT_CHILD_TURN_TIMEOUT_S``, env-tunable via
-        ``MAGI_CHILD_TURN_TIMEOUT_S``) rather than the full ceiling: a delegated
-        subtask should be tight by default so a runaway child cannot burn the
-        whole 600s. A positive ``budget_ms`` is clamped to ``[0, ceiling]``.
-        Everything is still clamped to ``_MAX_TURN_TIMEOUT_S`` (lowered by
-        ``MAGI_MODEL_TIMEOUT_S`` when set).
+        positive ``budget_ms`` is present the bound falls back to the generous
+        per-turn default (``_DEFAULT_CHILD_TURN_TIMEOUT_S``, effectively
+        unlimited, env-tunable via ``MAGI_CHILD_TURN_TIMEOUT_S``): a delegated
+        subtask is real work and must be allowed to run to completion rather
+        than be killed mid-work. A positive ``budget_ms`` is clamped to
+        ``[0, ceiling]``. Everything is still clamped to ``_MAX_TURN_TIMEOUT_S``
+        (7 days, lowered by ``MAGI_MODEL_TIMEOUT_S`` when set). Even if the
+        backstop fires, commit 1 preserves the child's best-effort partial work.
         """
         ceiling = _MAX_TURN_TIMEOUT_S
         env_ceiling = _clean_str(self._env.get("MAGI_MODEL_TIMEOUT_S"))

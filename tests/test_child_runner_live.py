@@ -555,9 +555,11 @@ def test_run_child_no_budget_ms_still_times_out_on_hang() -> None:
     assert output["summary"] == _DEGRADE_TIMEOUT
 
 
-def test_turn_timeout_no_budget_uses_tight_default_not_ceiling() -> None:
-    """A child with NO budget_ms is bounded by the TIGHT default, not the full
-    600s ceiling: a runaway delegated subtask must not burn the whole ceiling."""
+def test_turn_timeout_no_budget_uses_default_below_ceiling() -> None:
+    """A child with NO budget_ms is bounded by the generous default, which is
+    below the (effectively unlimited) hard ceiling. The default is a hang
+    backstop, not a work budget: legitimate long-running work runs to
+    completion, and even a timeout preserves partial work (commit 1)."""
     runner = RealLocalChildRunner(provider_config=_provider_config(), env={})
     timeout = runner._turn_timeout_s(_request())  # budget_ms defaults to 0
     assert timeout == _DEFAULT_CHILD_TURN_TIMEOUT_S
@@ -572,10 +574,10 @@ def test_turn_timeout_no_budget_env_override() -> None:
     )
     assert runner._turn_timeout_s(_request()) == 42.0
 
-    # A huge override is still clamped to the hard ceiling.
+    # An override ABOVE the (now 7-day) hard ceiling is still clamped to it.
     runner_hi = RealLocalChildRunner(
         provider_config=_provider_config(),
-        env={"MAGI_CHILD_TURN_TIMEOUT_S": "99999"},
+        env={"MAGI_CHILD_TURN_TIMEOUT_S": str(_MAX_TURN_TIMEOUT_S + 1000)},
     )
     assert runner_hi._turn_timeout_s(_request()) == _MAX_TURN_TIMEOUT_S
 
@@ -590,7 +592,7 @@ def test_turn_timeout_no_budget_model_timeout_clamps_default() -> None:
     """MAGI_MODEL_TIMEOUT_S lowers the no-budget default below its own value."""
     runner = RealLocalChildRunner(
         provider_config=_provider_config(),
-        env={"MAGI_MODEL_TIMEOUT_S": "60"},  # below the 300s default
+        env={"MAGI_MODEL_TIMEOUT_S": "60"},  # below the generous default
     )
     assert runner._turn_timeout_s(_request()) == 60.0
 

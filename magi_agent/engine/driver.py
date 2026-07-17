@@ -316,16 +316,17 @@ def _extract_objective_text(runner_input: object) -> str:
     return "\n".join(texts)
 
 
-# A sane default cap so a runaway stream can't yield forever; headless can
-# tolerate a generous bound on ADK events consumed per turn.
+# A last-resort backstop so a genuinely runaway stream can't yield forever;
+# this is NOT a work budget. Legitimate long-running work (deep-research /
+# coding turns that make many tool calls) must never be truncated by this
+# ceiling, so the default is effectively unlimited (1,000,000).
 #
 # The cap counts ADK events that represent real WORK (final model events and
 # tool calls), NOT fine-grained streaming text/thinking deltas: see
 # ``_adk_event_counts_toward_budget``. Before that gate a single long answer
 # could self-exhaust a 4096 cap purely on its own streamed deltas and get cut
-# off mid-sentence, so the default is also raised here (generous-budget policy)
-# and made env-tunable via ``MAGI_MAX_TURN_EVENT_COUNT``.
-_DEFAULT_MAX_EVENT_COUNT = 20000
+# off mid-sentence. Env-tunable via ``MAGI_MAX_TURN_EVENT_COUNT``.
+_DEFAULT_MAX_EVENT_COUNT = 1_000_000
 _MAX_TURN_EVENT_COUNT_ENV = "MAGI_MAX_TURN_EVENT_COUNT"
 
 
