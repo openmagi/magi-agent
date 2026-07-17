@@ -35,7 +35,7 @@
     },
     {
       "payload": {
-        "delta": "done",
+        "delta": "\n\ndone",
         "type": "text_delta"
       },
       "turn_id": "t1",
