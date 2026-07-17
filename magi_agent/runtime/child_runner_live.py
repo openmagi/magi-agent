@@ -918,6 +918,15 @@ class RealLocalChildRunner:
         #: propagated to any public event or SSE channel.  A raising sink is
         #: swallowed (never-raise contract preserved).
         self._full_text_sink: Callable[[str], None] | None = full_text_sink
+        #: Live best-effort partial-answer accumulator for the CURRENT turn.
+        #: The collectors append every text chunk here AS it streams so that when
+        #: the ``asyncio.wait_for`` turn timeout cancels the collector coroutine
+        #: (before it can build/return a terminal), the timeout handler in
+        #: ``run_child`` can still recover the work the child produced and carry
+        #: it as ``partialSummary`` (mirrors #1458's best-effort seam, which the
+        #: timeout path never reaches because cancellation loses the local
+        #: accumulator). Reset at the start of every ``_drive_one_turn``.
+        self._live_partial_chunks: list[str] = []
         self._env: Mapping[str, str] = os.environ if env is None else env
         #: Orchestrator-imposed tool-name ceiling (Seam 2b). Stored for a future
         #: task (Seam 4) that will intersect the child's toolset against it.
@@ -988,9 +997,17 @@ class RealLocalChildRunner:
             )
         except asyncio.TimeoutError:
             # Hung/slow model exceeded the turn budget — degrade (never raise).
+            # #1458 does NOT reach this path: the timeout cancels the collector
+            # coroutine BEFORE it builds a terminal, so the local text
+            # accumulator (``text_chunks`` / ``texts``) is lost. The collectors
+            # mirror every chunk into ``self._live_partial_chunks`` as it
+            # streams, so recover the best-effort answer here and carry it as
+            # ``partialSummary`` so the orchestrating model gets the child's
+            # real work instead of a bare ``child_turn_timeout`` reason token.
             return self._failed(
                 child_execution_id,
                 reason=_DEGRADE_TIMEOUT,
+                partial_text="".join(self._live_partial_chunks)[:_MAX_SUMMARY_CHARS],
             )
         except asyncio.CancelledError:
             # Cooperative cancellation MUST propagate — never convert it to a
@@ -1175,6 +1192,10 @@ class RealLocalChildRunner:
             model=getattr(config, "model", None),
             config_id=id(config),
         )
+        # Reset the live partial accumulator for THIS turn. On timeout the
+        # collector coroutine is cancelled before it can return its text, so
+        # ``run_child`` reads this accumulator to recover the best-effort answer.
+        self._live_partial_chunks = []
         try:
             return await asyncio.wait_for(
                 self._collect_turn_text(config, request),
@@ -1347,6 +1368,10 @@ class RealLocalChildRunner:
             # does not have). cap<=0 disables (byte-identical collection).
             missing_tool_streak_cap=resolve_missing_tool_streak_cap(self._env),
             cancel=cancel,
+            # Mirror the live text into the runner's partial accumulator so a
+            # turn timeout (which cancels this await before it returns) can
+            # still recover the child's best-effort answer.
+            partial_sink=self._live_partial_chunks,
         )
         # Debug observability (default-OFF). Kevin's 0.1.77 repro showed
         # status=ok with empty content even though the guard below should
@@ -1508,6 +1533,10 @@ class RealLocalChildRunner:
                 if isinstance(text, str) and text:
                     texts.append(text)
                     event_texts.append(text)
+                    # Mirror into the live partial accumulator so a turn
+                    # timeout (which cancels this coroutine before it returns
+                    # ``texts``) can still recover the best-effort answer.
+                    self._live_partial_chunks.append(text)
                 # PR2: forward the child's tool lifecycle into the parent's
                 # progress stream so the per-subagent panel shows real activity
                 # ("Tool: WebSearch | start") instead of a fixed placeholder.

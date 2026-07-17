@@ -168,3 +168,104 @@ async def test_governed_non_completed_with_text_returns_best_partial(
     assert "collector_status_failed" in str(result.get("summary", "")), dict(result)
     # ...but the child's actual answer is preserved on partialSummary.
     assert result.get("partialSummary") == "The answer is 2.", dict(result)
+
+
+@pytest.mark.asyncio
+async def test_governed_turn_timeout_returns_streamed_partial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A governed child that STREAMS real text then hangs past the turn budget
+    must still return that text as ``partialSummary``. The #1458 best-effort
+    seam is unreachable on the timeout path (``asyncio.wait_for`` CANCELS the
+    collector coroutine before it builds a terminal, discarding its local
+    accumulator); the runner's live partial accumulator recovers the work.
+    """
+    import asyncio
+
+    import magi_agent.runtime.child_runner_live as crl
+
+    async def _streaming_then_hangs_collector(
+        _stream: object, *, partial_sink: "list[str] | None" = None, **_kw: object
+    ) -> tuple[str, tuple[str, ...], str, str | None]:
+        # Stream real text into the live accumulator (as the real collector
+        # would per text_delta), then block past the turn budget so
+        # ``asyncio.wait_for`` cancels this coroutine before it can return.
+        if partial_sink is not None:
+            partial_sink.append("Partial work: the plan is ")
+            partial_sink.append("step 1, step 2, step 3.")
+        await asyncio.sleep(3600)
+        return "unreached", (), "completed", None  # pragma: no cover
+
+    monkeypatch.setattr(
+        "magi_agent.runtime.child_governed_collector.collect_governed_child_turn",
+        _streaming_then_hangs_collector,
+    )
+    monkeypatch.setattr(
+        "magi_agent.cli.wiring.build_headless_runtime",
+        lambda **_kw: object(),
+    )
+    monkeypatch.setattr(
+        "magi_agent.runtime.governed_turn.run_governed_turn",
+        lambda *_a, **_kw: object(),
+    )
+    # Tight per-turn budget so the timeout fires immediately.
+    monkeypatch.setenv("MAGI_CHILD_TURN_TIMEOUT_S", "0.05")
+
+    child = crl.RealLocalChildRunner(
+        provider_config=_provider_config(),
+        runner=_EmptyStreamRunner(),
+    )
+    result = await child.run_child(_request())
+
+    # Timed out -> failed with the timeout reason...
+    assert result["status"] == "failed", dict(result)
+    assert "child_turn_timeout" in str(result.get("summary", "")), dict(result)
+    # ...but the streamed partial answer is preserved for the parent.
+    assert (
+        result.get("partialSummary")
+        == "Partial work: the plan is step 1, step 2, step 3."
+    ), dict(result)
+
+
+@pytest.mark.asyncio
+async def test_governed_turn_timeout_with_no_text_has_no_fabricated_partial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A child that streamed NOTHING before the timeout must return the plain
+    timeout reason with NO ``partialSummary`` key (never fabricate an answer).
+    """
+    import asyncio
+
+    import magi_agent.runtime.child_runner_live as crl
+
+    async def _silent_then_hangs_collector(
+        _stream: object, *, partial_sink: "list[str] | None" = None, **_kw: object
+    ) -> tuple[str, tuple[str, ...], str, str | None]:
+        # No text streamed at all, then hang past the budget.
+        await asyncio.sleep(3600)
+        return "unreached", (), "completed", None  # pragma: no cover
+
+    monkeypatch.setattr(
+        "magi_agent.runtime.child_governed_collector.collect_governed_child_turn",
+        _silent_then_hangs_collector,
+    )
+    monkeypatch.setattr(
+        "magi_agent.cli.wiring.build_headless_runtime",
+        lambda **_kw: object(),
+    )
+    monkeypatch.setattr(
+        "magi_agent.runtime.governed_turn.run_governed_turn",
+        lambda *_a, **_kw: object(),
+    )
+    monkeypatch.setenv("MAGI_CHILD_TURN_TIMEOUT_S", "0.05")
+
+    child = crl.RealLocalChildRunner(
+        provider_config=_provider_config(),
+        runner=_EmptyStreamRunner(),
+    )
+    result = await child.run_child(_request())
+
+    assert result["status"] == "failed", dict(result)
+    assert "child_turn_timeout" in str(result.get("summary", "")), dict(result)
+    # No streamed text -> no partialSummary key (no fabrication).
+    assert "partialSummary" not in result, dict(result)
