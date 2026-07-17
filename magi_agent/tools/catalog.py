@@ -365,7 +365,10 @@ _CORE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
             "Persist a declarative fact about the user or session to long-term memory. "
             "Only stable preferences and user-level facts are accepted — task-state "
             "(PR numbers, commit SHAs, 'done/merged/in progress') is rejected. "
-            "Writes are gated: real persistence requires MAGI_MEMORY_WRITE_ENABLED=1."
+            "Writes are gated: real persistence requires MAGI_MEMORY_WRITE_ENABLED=1. "
+            "Store facts in PAST TENSE with self-contained context. NEVER store open "
+            "questions, in-flight requests, or 'the user is asking X': a question "
+            "belongs to its turn, not to long-term memory."
         ),
         kind="core",
         source=CORE_TOOL_SOURCE,

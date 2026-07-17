@@ -66,8 +66,10 @@ def test_gate_off_no_compaction_even_when_large(tmp_path: Path, monkeypatch) -> 
     asyncio.run(provider.remember({"body": "new fact", "kind": "note"}))
 
     after = target.read_text(encoding="utf-8")
-    # Gate OFF: original content preserved verbatim, just appended to.
-    assert after.startswith(before)
+    # Gate OFF: original content preserved verbatim (now after the one-line
+    # historical-records header prepended on first write to a legacy file).
+    assert before in after
+    assert after.startswith("<!-- magi:memory-log")
     assert "new fact" in after
     # No archive created.
     assert not _archive_dir(tmp_path).exists()
@@ -195,8 +197,10 @@ def test_gate_on_under_threshold_plain_append(tmp_path: Path, monkeypatch) -> No
     )
     asyncio.run(provider.remember({"body": "another", "kind": "note"}))
     after = target.read_text(encoding="utf-8")
-    # Under threshold: plain append, original preserved, no archive.
-    assert after.startswith(before)
+    # Under threshold: no compaction, original preserved (after the one-line
+    # historical-records header prepended on first write), no archive.
+    assert before in after
+    assert after.startswith("<!-- magi:memory-log")
     assert "another" in after
     assert not _archive_dir(tmp_path).exists()
 
@@ -218,22 +222,24 @@ def test_gate_on_all_unique_near_cap_new_fact_succeeds(
     entry — the subsequent max_file_bytes guard then raised ValueError and the
     new fact was LOST.
     """
+    from magi_agent.memory.adapters.local_file_writable import _MEMORY_LOG_HEADER
+
     monkeypatch.setenv(MAGI_MEMORY_COMPACTION_ENABLED_ENV, "1")
     target = tmp_path / "MEMORY.md"
-
-    # 11 unique entries render (via _render) to exactly 264 bytes.
-    # Setting max_file_bytes=264 means consolidate(original, max_bytes=264)
-    # keeps all 264 bytes of unique entries, leaving ZERO headroom for the
-    # incoming entry (36 bytes). Without the fix: 264 + 36 > 264 → ValueError.
-    # With the fix: consolidate(original, max_bytes=264-36=228) drops the
-    # oldest entries to make room, then the append succeeds at ≤264 bytes.
-    max_file_bytes = 264
 
     # Build all-unique entries: 11 × "- [note] unique-factXX\n" → 264 bytes rendered.
     lines = "".join(f"\n- [note] unique-fact{i:02d}\n" for i in range(11))
     target.write_text(lines, encoding="utf-8")
     pre_size = len(target.read_bytes())
-    assert pre_size == max_file_bytes, "pre-fill must exactly fill the cap"
+
+    # The cap is set to exactly the pre-fill size PLUS the one-line historical-
+    # records header (prepended on this first write to a legacy file). This
+    # leaves ZERO headroom for the incoming entry, so compaction must reserve
+    # room for BOTH the header and the new entry and drop the oldest facts to
+    # make it fit (Fix 1, headroom reservation). Without it, the new fact is
+    # LOST to a ValueError.
+    header_bytes = len(_MEMORY_LOG_HEADER.encode("utf-8"))
+    max_file_bytes = pre_size + header_bytes
 
     # Set threshold so the compaction branch triggers.
     threshold = pre_size - 10
@@ -405,4 +411,10 @@ def test_gate_on_multiline_body_is_single_memory_entry(
     after = target.read_text(encoding="utf-8")
     assert "first line second continuation" in after
     assert "\nsecond continuation" not in after
-    assert all(line.startswith("- [") for line in after.splitlines() if line.strip())
+    # Every non-empty line is either the historical-records header comment or a
+    # bullet entry, so there are no bare continuation lines.
+    assert all(
+        line.startswith("- [") or line.startswith("<!-- magi:memory-log")
+        for line in after.splitlines()
+        if line.strip()
+    )
