@@ -719,7 +719,19 @@ def _project_content_parts(
         final_text_chunks.clear()
         public_text = _public_stream_text(text)
         if is_final_response:
-            token_text = _unstreamed_final_text(public_text, partial_public_text[0])
+            streamed_public_text = partial_public_text[0]
+            token_text = _unstreamed_final_text(public_text, streamed_public_text)
+            # When the guard above dropped a mismatched aggregate (something
+            # streamed, yet the aggregate shares no overlap with it), the streamed
+            # text is the source of truth. The durable transcript must then carry
+            # the streamed text, not the truncated aggregate, so the stored message
+            # matches exactly what was displayed rather than a cut-off copy.
+            aggregate_mismatch = (
+                bool(streamed_public_text)
+                and not token_text
+                and public_text != streamed_public_text
+            )
+            durable_text = streamed_public_text if aggregate_mismatch else public_text
             if token_text:
                 agent_events.append(
                     {"type": "text_delta", "delta": _paragraph_bounded(token_text)}
@@ -730,7 +742,7 @@ def _project_content_parts(
             partial_run[0] = False
             partial_public_text[0] = ""
             transcript_entries.append(
-                AssistantTextEntry(ts=_event_ts(event), turn_id=turn_id, text=public_text)
+                AssistantTextEntry(ts=_event_ts(event), turn_id=turn_id, text=durable_text)
             )
             normalized_events.append(
                 NormalizedEvent(
@@ -742,8 +754,12 @@ def _project_content_parts(
                     ts=_event_ts(event),
                     turnId=turn_id,
                     source="adk",
-                    payload={"textPreview": public_text},
-                    metadata={"contentDigest": metadata_digest(text)},
+                    payload={"textPreview": durable_text},
+                    metadata={
+                        "contentDigest": metadata_digest(
+                            durable_text if aggregate_mismatch else text
+                        )
+                    },
                 )
             )
             return
@@ -1435,7 +1451,18 @@ def _unstreamed_final_text(final_text: str, streamed_text: str) -> str:
     # lazy import keeps event_adapter cold-start clean.
     from magi_agent.shared.text_overlap import unstreamed_suffix  # noqa: PLC0415
 
-    return unstreamed_suffix(final_text, streamed_text)
+    tail = unstreamed_suffix(final_text, streamed_text)
+    # Mismatch guard: text already streamed this run, but the reconciliation
+    # found no overlap between the streamed tail and the aggregate, so the
+    # "unstreamed" tail is the ENTIRE aggregate. That means the provider's final
+    # aggregate does not continue what streamed (a truncated, re-prefixed copy);
+    # re-emitting it would duplicate the already-streamed text. The streamed text
+    # is the source of truth, so emit nothing for the delta channel. When nothing
+    # streamed, ``streamed_text`` is empty and the aggregate emits whole (the
+    # reasoning-promotion / no-stream path is preserved).
+    if streamed_text and tail == final_text:
+        return ""
+    return tail
 
 
 def _has_private_text_marker(value: str) -> bool:
