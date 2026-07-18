@@ -470,9 +470,14 @@ async def _run_deep_solve_live(
         # A3 gap: no native thinking_budget param on RealLocalChildRunner.
         # Instead, give solver/verifier stages an elevated budgetMs so the
         # model has more time to reason. See module docstring for the gap note.
-        solver_budget_ms = 120_000  # 2 min per stage
+        # The budget is a last-resort hang backstop, not a work budget: a
+        # deep-solve stage is real long-form reasoning work and must not be
+        # killed mid-solve, so these are effectively unlimited (raised ~30x).
+        # A genuinely-hung stage is still bounded; commit 1 preserves partial
+        # work even if the backstop fires.
+        solver_budget_ms = 3_600_000  # 60 min per solver stage (was 2 min)
         is_solver_stage = role == "coding"
-        stage_budget_ms = solver_budget_ms if is_solver_stage else 60_000
+        stage_budget_ms = solver_budget_ms if is_solver_stage else 1_800_000
 
         runner = RealLocalChildRunner(
             toolset_profile=toolset_profile,

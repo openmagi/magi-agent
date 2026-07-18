@@ -117,6 +117,7 @@ async def collect_governed_child_turn(
     *,
     missing_tool_streak_cap: int = 0,
     cancel: "asyncio.Event | None" = None,
+    partial_sink: "list[str] | None" = None,
 ) -> tuple[str, tuple[str, ...], str, str | None]:
     """Consume *stream* and return ``(summary, evidence_refs, status, trip_reason)``.
 
@@ -127,6 +128,13 @@ async def collect_governed_child_turn(
         objects followed by a terminal :class:`~magi_agent.cli.contracts.EngineResult`
         as its final item.  This matches the ``EngineDriver.run_turn_stream``
         consumption convention defined in ``cli.contracts``.
+    partial_sink:
+        Optional mutable list that mirrors the live ``text_chunks`` accumulator
+        (same response-block-boundary semantics: cleared on ``response_clear``
+        and on the deferred boundary reset). The caller reads it to recover the
+        child's best-effort partial answer when a turn timeout CANCELS this
+        coroutine before it can return (mirrors #1458 for the timeout path).
+        Default ``None`` → byte-identical collection.
 
     Returns
     -------
@@ -195,6 +203,8 @@ async def collect_governed_child_turn(
             # exists in the invocation. Evidence refs are intentionally
             # preserved (see module docstring).
             text_chunks.clear()
+            if partial_sink is not None:
+                partial_sink.clear()
             boundary_pending = False
             continue
         if payload_type == "tool_end":
@@ -227,8 +237,12 @@ async def collect_governed_child_turn(
             if isinstance(delta, str) and delta:
                 if boundary_pending:
                     text_chunks.clear()
+                    if partial_sink is not None:
+                        partial_sink.clear()
                     boundary_pending = False
                 text_chunks.append(delta)
+                if partial_sink is not None:
+                    partial_sink.append(delta)
 
     if terminal is None:
         # Fix F defensive: if the missing-tool guard tripped and signalled

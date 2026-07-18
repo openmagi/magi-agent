@@ -835,21 +835,27 @@ def _classify_child_event_error(event: object) -> str | None:
 
 
 #: Hard ceiling for a single child turn (seconds), regardless of the request's
-#: ``budget_ms``. Keeps a runaway/huge budget from blocking indefinitely.
-_MAX_TURN_TIMEOUT_S = 600.0
+#: ``budget_ms``. This is a LAST-RESORT hang backstop, NOT a work budget:
+#: subagent work must never be destroyed by an artificial time ceiling
+#: (owner directive). Raised to 7 days so an operator ``MAGI_CHILD_TURN_TIMEOUT_S``
+#: (or a request ``budget_ms``) is never silently clamped down to something
+#: shorter than intended; the only thing it still bounds is a genuinely-hung
+#: dispatch that would otherwise block the parent forever. Even when this
+#: fires, the timeout preserves the child's best-effort partial work as
+#: ``partialSummary`` (see the ``asyncio.TimeoutError`` handler in ``run_child``).
+_MAX_TURN_TIMEOUT_S = 604800.0
 
 #: Default bound for a child turn when the parent passes NO positive
-#: ``budget_ms`` (the common case: the model rarely sets one). Delegated
-#: subtasks should be TIGHT by default: without this a "compute 1+1" child that
-#: spirals (ramble hundreds of deltas, call tools it lacks, loop internal turns)
-#: ran the full 600s ceiling before ending non-completed, which starved the
-#: parent turn and surfaced as ``child_turn_timeout`` /
-#: ``child_llm_collector_status_failed``. Generous but finite (generous-budget
-#: policy: comfortably fits a legitimate multi-fetch deep-research or coding
-#: child, while still killing a "1+1" child that spirals for minutes);
-#: env-tunable via ``MAGI_CHILD_TURN_TIMEOUT_S``. Still clamped to
+#: ``budget_ms`` (the common case: the model rarely sets one). Effectively
+#: unlimited (24h): a delegated subtask is real work and must be allowed to
+#: run to completion. The timeout is a hang backstop, not a work budget --
+#: a legitimate multi-fetch deep-research or long coding child must never be
+#: killed mid-work. A truly spiraling child is stopped by the genuine-error
+#: fast-fails (the missing-tool streak cap), not by this ceiling; and if this
+#: ever does fire, commit 1 guarantees the child's partial work is preserved.
+#: Env-tunable via ``MAGI_CHILD_TURN_TIMEOUT_S``; still clamped to
 #: ``_MAX_TURN_TIMEOUT_S`` (and lowered by ``MAGI_MODEL_TIMEOUT_S`` when set).
-_DEFAULT_CHILD_TURN_TIMEOUT_S = 300.0
+_DEFAULT_CHILD_TURN_TIMEOUT_S = 86400.0
 _CHILD_TURN_TIMEOUT_ENV = "MAGI_CHILD_TURN_TIMEOUT_S"
 
 
@@ -918,6 +924,15 @@ class RealLocalChildRunner:
         #: propagated to any public event or SSE channel.  A raising sink is
         #: swallowed (never-raise contract preserved).
         self._full_text_sink: Callable[[str], None] | None = full_text_sink
+        #: Live best-effort partial-answer accumulator for the CURRENT turn.
+        #: The collectors append every text chunk here AS it streams so that when
+        #: the ``asyncio.wait_for`` turn timeout cancels the collector coroutine
+        #: (before it can build/return a terminal), the timeout handler in
+        #: ``run_child`` can still recover the work the child produced and carry
+        #: it as ``partialSummary`` (mirrors #1458's best-effort seam, which the
+        #: timeout path never reaches because cancellation loses the local
+        #: accumulator). Reset at the start of every ``_drive_one_turn``.
+        self._live_partial_chunks: list[str] = []
         self._env: Mapping[str, str] = os.environ if env is None else env
         #: Orchestrator-imposed tool-name ceiling (Seam 2b). Stored for a future
         #: task (Seam 4) that will intersect the child's toolset against it.
@@ -988,9 +1003,17 @@ class RealLocalChildRunner:
             )
         except asyncio.TimeoutError:
             # Hung/slow model exceeded the turn budget — degrade (never raise).
+            # #1458 does NOT reach this path: the timeout cancels the collector
+            # coroutine BEFORE it builds a terminal, so the local text
+            # accumulator (``text_chunks`` / ``texts``) is lost. The collectors
+            # mirror every chunk into ``self._live_partial_chunks`` as it
+            # streams, so recover the best-effort answer here and carry it as
+            # ``partialSummary`` so the orchestrating model gets the child's
+            # real work instead of a bare ``child_turn_timeout`` reason token.
             return self._failed(
                 child_execution_id,
                 reason=_DEGRADE_TIMEOUT,
+                partial_text="".join(self._live_partial_chunks)[:_MAX_SUMMARY_CHARS],
             )
         except asyncio.CancelledError:
             # Cooperative cancellation MUST propagate — never convert it to a
@@ -1175,6 +1198,10 @@ class RealLocalChildRunner:
             model=getattr(config, "model", None),
             config_id=id(config),
         )
+        # Reset the live partial accumulator for THIS turn. On timeout the
+        # collector coroutine is cancelled before it can return its text, so
+        # ``run_child`` reads this accumulator to recover the best-effort answer.
+        self._live_partial_chunks = []
         try:
             return await asyncio.wait_for(
                 self._collect_turn_text(config, request),
@@ -1347,6 +1374,10 @@ class RealLocalChildRunner:
             # does not have). cap<=0 disables (byte-identical collection).
             missing_tool_streak_cap=resolve_missing_tool_streak_cap(self._env),
             cancel=cancel,
+            # Mirror the live text into the runner's partial accumulator so a
+            # turn timeout (which cancels this await before it returns) can
+            # still recover the child's best-effort answer.
+            partial_sink=self._live_partial_chunks,
         )
         # Debug observability (default-OFF). Kevin's 0.1.77 repro showed
         # status=ok with empty content even though the guard below should
@@ -1508,6 +1539,10 @@ class RealLocalChildRunner:
                 if isinstance(text, str) and text:
                     texts.append(text)
                     event_texts.append(text)
+                    # Mirror into the live partial accumulator so a turn
+                    # timeout (which cancels this coroutine before it returns
+                    # ``texts``) can still recover the best-effort answer.
+                    self._live_partial_chunks.append(text)
                 # PR2: forward the child's tool lifecycle into the parent's
                 # progress stream so the per-subagent panel shows real activity
                 # ("Tool: WebSearch | start") instead of a fixed placeholder.
@@ -1859,16 +1894,18 @@ class RealLocalChildRunner:
     def _turn_timeout_s(self, request: object) -> float:
         """Resolve the per-turn timeout (seconds) from ``request.budget_ms``.
 
-        EVERY child turn is bounded — a turn that never finishes would otherwise
+        EVERY child turn is bounded, but the bound is a LAST-RESORT hang
+        backstop, not a work budget: a turn that never finishes would otherwise
         hang the parent turn forever (the spawn_agent tool awaits the child
         boundary inline on the dispatch loop with no outer bound). When no
-        positive ``budget_ms`` is present the bound falls back to the TIGHT
-        per-turn default (``_DEFAULT_CHILD_TURN_TIMEOUT_S``, env-tunable via
-        ``MAGI_CHILD_TURN_TIMEOUT_S``) rather than the full ceiling: a delegated
-        subtask should be tight by default so a runaway child cannot burn the
-        whole 600s. A positive ``budget_ms`` is clamped to ``[0, ceiling]``.
-        Everything is still clamped to ``_MAX_TURN_TIMEOUT_S`` (lowered by
-        ``MAGI_MODEL_TIMEOUT_S`` when set).
+        positive ``budget_ms`` is present the bound falls back to the generous
+        per-turn default (``_DEFAULT_CHILD_TURN_TIMEOUT_S``, effectively
+        unlimited, env-tunable via ``MAGI_CHILD_TURN_TIMEOUT_S``): a delegated
+        subtask is real work and must be allowed to run to completion rather
+        than be killed mid-work. A positive ``budget_ms`` is clamped to
+        ``[0, ceiling]``. Everything is still clamped to ``_MAX_TURN_TIMEOUT_S``
+        (7 days, lowered by ``MAGI_MODEL_TIMEOUT_S`` when set). Even if the
+        backstop fires, commit 1 preserves the child's best-effort partial work.
         """
         ceiling = _MAX_TURN_TIMEOUT_S
         env_ceiling = _clean_str(self._env.get("MAGI_MODEL_TIMEOUT_S"))
