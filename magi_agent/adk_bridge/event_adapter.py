@@ -1204,6 +1204,15 @@ def _project_function_response_part(
                 _err_code = response.get("error_code") or response.get("errorCode")
             if isinstance(_err_code, str) and _err_code:
                 agent_event["errorCode"] = _err_code
+            # Additive observability field (local path only): surface the
+            # approval-required control ref so the auto-continue brake can
+            # fingerprint the owed approval set across continuation attempts
+            # (an unshrinking set pauses instead of spinning). Only emitted when
+            # the tool result carries an ``approval_required`` control
+            # projection; every other error tool_end is byte-identical.
+            _approval_ref = _approval_required_control_ref(response)
+            if _approval_ref is not None:
+                agent_event["approvalControlRef"] = _approval_ref
         if local_duration_ms is not None:
             agent_event["durationMs"] = local_duration_ms
         if live_compatible:
@@ -1901,6 +1910,33 @@ def _parse_json_container(value: str) -> object | None:
     except json.JSONDecodeError:
         return None
     return parsed if isinstance(parsed, dict | list) else None
+
+
+def _approval_required_control_ref(response: object) -> str | None:
+    """Return the ``controlRef`` of an ``approval_required`` control, if any.
+
+    The general-automation live gate attaches its control projection at
+    ``response["metadata"]["controlProjection"]`` on a needs-approval / blocked
+    tool result. The ``controlRef`` is a stable digest over the owed subject
+    (including any owed artifactRef), so it is identical across attempts while
+    the same obligation remains unresolved and shifts only when the obligation
+    changes. Returns ``None`` for every non-approval result, so the additive
+    tool_end field stays absent in the common case.
+    """
+    if not isinstance(response, dict):
+        return None
+    metadata = response.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+    projection = metadata.get("controlProjection")
+    if not isinstance(projection, dict):
+        return None
+    if projection.get("controlType") != "approval_required":
+        return None
+    control_ref = projection.get("controlRef")
+    if isinstance(control_ref, str) and control_ref:
+        return control_ref
+    return None
 
 
 def _is_error_response(response: object) -> bool:

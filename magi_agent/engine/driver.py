@@ -3072,6 +3072,15 @@ class MagiEngineDriver:
         # so it never counts as progress.
         auto_continue_ok_tool_ends = 0
         auto_continue_blocked_tool_ends = 0
+        # Approval-set escalation state. ``auto_continue_approval_refs`` collects
+        # the approval-required control refs seen in THIS attempt's tool_end
+        # stream (reset per attempt, like the ok / blocked counters);
+        # ``auto_continue_prev_approval_fp`` is the immediately-prior attempt's
+        # sorted fingerprint so the brake can tell whether the owed approval set
+        # is shrinking. Empty in the no-approval common case, so the decision is
+        # byte-identical when no approval-required control ever fires.
+        auto_continue_approval_refs: set[str] = set()
+        auto_continue_prev_approval_fp: tuple[str, ...] = ()
         # Monotonic turn clock for the wall-clock budget backstop.
         import time as _auto_continue_time  # noqa: PLC0415
 
@@ -3153,6 +3162,7 @@ class MagiEngineDriver:
                 # snapshots so the clean-break progress gate can diff them.
                 auto_continue_ok_tool_ends = 0
                 auto_continue_blocked_tool_ends = 0
+                auto_continue_approval_refs = set()
                 if self._auto_continue_enabled:
                     auto_continue_prev_ledger = (
                         tuple(plan_ledger_reader(session_id))
@@ -3255,6 +3265,14 @@ class MagiEngineDriver:
                                     auto_continue_ok_tool_ends += 1
                                 else:
                                     auto_continue_blocked_tool_ends += 1
+                                    # Collect the approval-required control ref
+                                    # (additive public tool_end field) so the
+                                    # brake can fingerprint the owed approval set
+                                    # across attempts. Only present on an
+                                    # approval_required control; absent otherwise.
+                                    _approval_ref = safe.get("approvalControlRef")
+                                    if isinstance(_approval_ref, str) and _approval_ref:
+                                        auto_continue_approval_refs.add(_approval_ref)
                             # U2 substance signal S1 (inert until U5): count every
                             # tool_end this turn, ok OR blocked, ungated by the
                             # auto-continue flag, and NEVER reset per attempt so
@@ -3700,6 +3718,12 @@ class MagiEngineDriver:
                                     ),
                                     runner_turn_input_cls=runner_turn_input_cls,
                                     types_mod=types,
+                                    approval_fingerprint=tuple(
+                                        sorted(auto_continue_approval_refs)
+                                    ),
+                                    prior_approval_fingerprint=(
+                                        auto_continue_prev_approval_fp
+                                    ),
                                 )
                                 for _ac_event in ac_events:
                                     yield _ac_event
@@ -3709,6 +3733,9 @@ class MagiEngineDriver:
                                 )
                                 auto_continue_wrap_up_spent = (
                                     ac_result.wrap_up_spent
+                                )
+                                auto_continue_prev_approval_fp = tuple(
+                                    sorted(auto_continue_approval_refs)
                                 )
                                 if ac_result.action == "continue":
                                     runner_input = ac_result.runner_input
@@ -3891,6 +3918,9 @@ class MagiEngineDriver:
                                 else ()
                             )
                             judge_evidence_now = self._collect_evidence(turn_id)
+                            judge_approval_fp = tuple(
+                                sorted(auto_continue_approval_refs)
+                            )
                             judge_progress = AttemptProgress(
                                 ok_tool_ends=auto_continue_ok_tool_ends,
                                 blocked_tool_ends=auto_continue_blocked_tool_ends,
@@ -3902,6 +3932,7 @@ class MagiEngineDriver:
                                     len(judge_evidence_now)
                                     - auto_continue_prev_evidence_count,
                                 ),
+                                approval_fingerprint=judge_approval_fp,
                             )
                             judge_brake = decide_auto_continue(
                                 ledger_wants_continue=True,
@@ -3920,10 +3951,14 @@ class MagiEngineDriver:
                                 wrap_up_already_spent=(
                                     auto_continue_wrap_up_spent
                                 ),
+                                prior_approval_fingerprint=(
+                                    auto_continue_prev_approval_fp
+                                ),
                             )
                             auto_continue_no_progress_streak = (
                                 judge_brake.no_progress_streak
                             )
+                            auto_continue_prev_approval_fp = judge_approval_fp
                             judge_open_todos = self._open_todo_count(
                                 judge_ledger_now
                             )
@@ -4149,6 +4184,12 @@ class MagiEngineDriver:
                                 effective_harness_state=effective_harness_state,
                                 runner_turn_input_cls=runner_turn_input_cls,
                                 types_mod=types,
+                                approval_fingerprint=tuple(
+                                    sorted(auto_continue_approval_refs)
+                                ),
+                                prior_approval_fingerprint=(
+                                    auto_continue_prev_approval_fp
+                                ),
                             )
                             for _ac_event in ac_events:
                                 yield _ac_event
@@ -4158,6 +4199,9 @@ class MagiEngineDriver:
                             )
                             auto_continue_wrap_up_spent = (
                                 ac_result.wrap_up_spent
+                            )
+                            auto_continue_prev_approval_fp = tuple(
+                                sorted(auto_continue_approval_refs)
                             )
                             if ac_result.action == "continue":
                                 runner_input = ac_result.runner_input
@@ -5267,6 +5311,8 @@ class MagiEngineDriver:
         effective_harness_state: object,
         runner_turn_input_cls: Callable[..., object],
         types_mod: object,
+        approval_fingerprint: tuple[str, ...] = (),
+        prior_approval_fingerprint: tuple[str, ...] = (),
     ) -> tuple[list[RuntimeEvent], _AutoContinueExecResult]:
         """SEAM 2 deterministic auto-continue executor (extracted, byte-identical).
 
@@ -5309,6 +5355,7 @@ class MagiEngineDriver:
                 0,
                 len(evidence_now) - prev_evidence_count,
             ),
+            approval_fingerprint=approval_fingerprint,
         )
         decision = decide_auto_continue(
             ledger_wants_continue=True,
@@ -5320,6 +5367,7 @@ class MagiEngineDriver:
             ),
             budgets=budgets_for_intensity(mission=auto_continue_mission),
             wrap_up_already_spent=wrap_up_spent,
+            prior_approval_fingerprint=prior_approval_fingerprint,
         )
         no_progress_streak = decision.no_progress_streak
         open_todos_now = self._open_todo_count(seam2_snapshot)
