@@ -17,7 +17,8 @@ seams from ``customize.json`` to a fresh env dict:
   ``MAGI_SOURCE_CITATION_GATE_MODE``,
 * ``MAGI_SOURCE_CITATION_ENABLED`` is NEVER touched (the boolean disable stays
   floored: capture / inline citations / Sources stay on in every mode),
-* and the no-override path leaves the env byte-identical.
+* a genuinely new install seeds ``execution_integrity=enforce``, while an
+  existing defaults-only Customize file remains byte-identical.
 
 This also covers the pre-existing #1403 restart-revert: the boolean opt-out is an
 overwrite projection, so it re-applies cleanly on boot.
@@ -34,6 +35,7 @@ from magi_agent.main import _apply_persisted_customize_policy_overrides
 VERIFY_ENV = "MAGI_VERIFY_BEFORE_REPLYING_ENABLED"
 CITATION_ENABLED_ENV = "MAGI_SOURCE_CITATION_ENABLED"
 CITATION_MODE_ENV = "MAGI_SOURCE_CITATION_GATE_MODE"
+EXECUTION_INTEGRITY_ENV = "MAGI_EXECUTION_INTEGRITY_MODE"
 
 
 def _point_customize_at(monkeypatch, cfile) -> None:
@@ -108,19 +110,22 @@ def test_startup_projects_both_seams_together(tmp_path, monkeypatch) -> None:
     assert CITATION_ENABLED_ENV not in env
 
 
-def test_startup_is_byte_identical_when_no_override(tmp_path, monkeypatch) -> None:
-    # No customize file exists -> the projection must be a strict no-op: the env
-    # dict is byte-identical before and after (default mode stays repair, verify
-    # untouched, citation ENABLED untouched).
+def test_startup_seeds_enforce_for_a_genuinely_new_install(tmp_path, monkeypatch) -> None:
+    # No customize or config file exists: this is a genuinely new install, so
+    # startup persists and projects the safer enforce default.
     cfile = tmp_path / "customize.json"
     _point_customize_at(monkeypatch, cfile)
     assert not cfile.exists()
 
-    env: dict[str, str] = {"SOME_UNRELATED": "keepme"}
-    before = dict(env)
+    env: dict[str, str] = {
+        "SOME_UNRELATED": "keepme",
+        "MAGI_CONFIG": str(tmp_path / "absent-config.toml"),
+    }
     _apply_persisted_customize_policy_overrides(env)
 
-    assert env == before
+    assert env["SOME_UNRELATED"] == "keepme"
+    assert env[EXECUTION_INTEGRITY_ENV] == "enforce"
+    assert cfile.exists()
     assert VERIFY_ENV not in env
     assert CITATION_MODE_ENV not in env
     assert CITATION_ENABLED_ENV not in env

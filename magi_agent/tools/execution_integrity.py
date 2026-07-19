@@ -10,7 +10,6 @@ the hash-chained SQLite authority journal.
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from hashlib import sha256
@@ -21,6 +20,7 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 import secrets
 
+from magi_agent.config.flags import flag_str
 from magi_agent.tools.context import ToolContext
 from magi_agent.tools.manifest import ToolManifest
 from magi_agent.tools.result import ToolResult
@@ -49,8 +49,7 @@ def _canonical_request_digest(name: str, arguments: dict[str, object]) -> str:
 
 
 def execution_integrity_mode(env: Mapping[str, str] | None = None) -> str:
-    source = os.environ if env is None else env
-    raw = (source.get("MAGI_EXECUTION_INTEGRITY_MODE") or "").strip().lower()
+    raw = (flag_str("MAGI_EXECUTION_INTEGRITY_MODE", env=env) or "").strip().lower()
     return raw if raw in {"off", "audit", "enforce"} else "audit"
 
 
@@ -416,7 +415,7 @@ class ExecutionIntegrityBoundary:
         )
 
         if self._journal is None:
-            raw = os.environ.get("MAGI_EXECUTION_AUTHORITY_DB")
+            raw = flag_str("MAGI_EXECUTION_AUTHORITY_DB")
             path = Path(raw) if raw else Path.home() / ".magi" / "execution-authority.db"
             # Tool dispatch is latency-sensitive. Contention is surfaced to the
             # policy (audit fail-open / enforce fail-closed) instead of parking
@@ -555,7 +554,7 @@ def unclosed_execution_attempts(session_id: str, turn_id: str) -> tuple[str, ...
 
     if not session_id or not turn_id:
         return None
-    raw = os.environ.get("MAGI_EXECUTION_AUTHORITY_DB")
+    raw = flag_str("MAGI_EXECUTION_AUTHORITY_DB")
     path = Path(raw) if raw else Path.home() / ".magi" / "execution-authority.db"
     if not path.exists():
         return ()
