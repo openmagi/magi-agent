@@ -24,6 +24,13 @@ bounds it deterministically:
   least one *ok* ``tool_end`` (blocked / needs-approval / errored tool ends do
   NOT count), OR the durable todo ledger changed (a delta), OR new evidence
   records were collected.
+* An attempt that carries the SAME non-empty approval-required control set as
+  the immediately-prior attempt (the owed approvals did NOT shrink) pauses with
+  ``goal_paused(waiting_on_approvals)`` EVEN when unrelated ok tool ends made
+  the attempt look productive. Progress on unrelated tools must not defeat the
+  approval brake when the approval set itself is not shrinking; otherwise a run
+  that mixes blocked approval calls with successful unrelated calls re-injects
+  the same obligations forever until the wall-clock ceiling.
 * Two consecutive no-progress continuations trigger ONE wrap-up invocation
   ("report what is done / not done"); if that too makes no progress the turn
   pauses honestly with ``goal_paused(no_progress)``.
@@ -149,6 +156,12 @@ class AttemptProgress:
     #: Count of NEW evidence records collected during this attempt (delta vs the
     #: count captured before it).
     new_evidence_records: int
+    #: Sorted, de-duplicated approval-required control identifiers observed in
+    #: THIS attempt's tool_end stream (the ``controlRef`` of every ``tool_end``
+    #: whose control projection is ``approval_required``, plus owed-artifact
+    #: markers). Empty when the attempt raised no approval-required control, so
+    #: the approval brake below is inert and decisions stay byte-identical.
+    approval_fingerprint: tuple[str, ...] = ()
 
 
 def attempt_made_progress(progress: AttemptProgress) -> bool:
@@ -214,8 +227,16 @@ def decide_auto_continue(
     elapsed_seconds: float,
     budgets: AutoContinueBudgets,
     wrap_up_already_spent: bool,
+    prior_approval_fingerprint: tuple[str, ...] = (),
 ) -> AutoContinueDecision:
     """Decide whether a computed ledger ``continue`` is allowed to re-invoke.
+
+    ``prior_approval_fingerprint`` is the approval-required control set observed
+    on the IMMEDIATELY-PRIOR attempt (``progress.approval_fingerprint`` is this
+    attempt's). Each attempt is exactly one model invocation, so an approval set
+    that is non-empty and IDENTICAL across the prior and current attempt is two
+    consecutive occurrences of an unchanged obligation (N=2) and triggers the
+    approval brake; that is why the comparison needs no separate counter.
 
     Ladder (deterministic, no model call):
 
@@ -223,15 +244,22 @@ def decide_auto_continue(
        engine keeps its existing terminal behaviour; this function is inert).
     2. Hard budget: continuations already at ``max_continuations`` OR wall-clock
        exceeded -> ``stop_budget``.
-    3. The attempt made measurable progress -> ``continue`` (streak resets to 0).
-    4. No progress AND the ONLY activity was blocked / needs-approval tool ends
+    3. Approval brake: this attempt's approval-required control set is non-empty
+       and IDENTICAL to the prior attempt's (the owed approvals did not shrink)
+       -> ``paused_waiting_on_approvals``, EVEN if the attempt otherwise made
+       measurable progress. Unrelated ok tool ends must not defeat the brake
+       while the approval set is stuck. A shrunk / grown / first-seen set does
+       not match the prior fingerprint, so it falls through to the progress
+       gate (genuine movement on the obligations).
+    4. The attempt made measurable progress -> ``continue`` (streak resets to 0).
+    5. No progress AND the ONLY activity was blocked / needs-approval tool ends
        (no ok tool end, no ledger delta, no new evidence, >=1 blocked end) ->
        ``paused_waiting_on_approvals`` immediately (do not spin on approvals).
-    5. No progress, folding this attempt into the streak reaches the
+    6. No progress, folding this attempt into the streak reaches the
        ``no_progress_limit``:
          * if the single wrap-up invocation has NOT been spent -> ``wrap_up``.
          * otherwise -> ``paused_no_progress``.
-    6. No progress but still under the streak limit -> ``continue`` (give the
+    7. No progress but still under the streak limit -> ``continue`` (give the
        agent another concrete step; the streak carries forward).
     """
     if not ledger_wants_continue:
@@ -251,6 +279,20 @@ def decide_auto_continue(
         return AutoContinueDecision(
             outcome="stop_budget",
             reason="wall_clock",
+            no_progress_streak=prior_no_progress_streak,
+        )
+
+    if (
+        progress.approval_fingerprint
+        and progress.approval_fingerprint == prior_approval_fingerprint
+    ):
+        # The same non-empty approval-required control set came back this
+        # attempt as last attempt: the owed approvals are not shrinking, so
+        # re-invoking cannot clear them. Pause honestly instead of riding
+        # unrelated ok tool ends into a re-injection loop.
+        return AutoContinueDecision(
+            outcome="paused_waiting_on_approvals",
+            reason="waiting_on_approvals",
             no_progress_streak=prior_no_progress_streak,
         )
 
