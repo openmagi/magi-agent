@@ -368,6 +368,52 @@ class TestAutoContinueProgressGate:
         assert not _payloads_of_type(items, "goal_loop_continuation")
         assert items[-1].terminal == Terminal.completed
 
+    def test_repeated_approval_set_with_interleaved_ok_pauses(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Incident shape: every attempt mixes an approval-required (blocked)
+        # tool end for the SAME control with an unrelated ok tool end. The ok
+        # end used to reset progress and re-invoke forever, re-injecting the
+        # obligations. Attempt 1 (first sighting) continues; attempt 2 (the same
+        # approval control comes back) pauses instead of spinning.
+        approval_ref = "control:general-automation:sha256:" + "c" * 64
+
+        def _approval_tool_end() -> dict[str, Any]:
+            return {
+                "type": "tool_end",
+                "id": "call-approve",
+                "status": "error",
+                "approvalControlRef": approval_ref,
+            }
+
+        runner = FakeRunner(
+            events_per_call=[
+                [_approval_tool_end(), _ok_tool_end("ok-1"), _text("Delivering.")],
+                [_approval_tool_end(), _ok_tool_end("ok-2"), _text("Delivering.")],
+            ]
+        )
+        _patch_lazy_deps(monkeypatch, runner)
+        reader = _LedgerReader([_todos(("t1", "in_progress"))])
+        driver = MagiEngineDriver(
+            runner=runner,
+            user_id="cli",
+            evidence_first=True,
+            plan_ledger_reader=reader,
+            required_evidence=(),
+            auto_continue_enabled=True,
+        )
+        items = _run_drive(driver)
+        # Attempt 1 continued (interleaved ok = progress, first approval
+        # sighting); attempt 2 paused (approval set did not shrink). Exactly one
+        # re-invocation, not a runaway.
+        assert len(runner.calls) == 2
+        cont = _payloads_of_type(items, "goal_loop_continuation")
+        assert len(cont) == 1
+        paused = _payloads_of_type(items, "goal_paused")
+        assert len(paused) == 1
+        assert paused[0].get("reason") == "waiting_on_approvals"
+        assert items[-1].terminal == Terminal.completed
+
 
 # ---------------------------------------------------------------------------
 # Budget backstop

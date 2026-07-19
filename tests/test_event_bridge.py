@@ -1243,3 +1243,67 @@ def test_event_bridge_tool_end_ok_has_no_error_code_key() -> None:
     projection = bridge.project_adk_event(event, turn_id="turn-1")
     end = next(e for e in projection.agent_events if e["type"] == "tool_end")
     assert "errorCode" not in end
+
+
+def test_event_bridge_tool_end_carries_approval_control_ref() -> None:
+    """A needs-approval tool_end whose result carries an ``approval_required``
+    control projection surfaces the ``controlRef`` as an additive
+    ``approvalControlRef`` field so the auto-continue brake can fingerprint the
+    owed approval set across continuation attempts."""
+    bridge = OpenMagiEventBridge()
+    control_ref = "control:general-automation:sha256:" + "a" * 64
+    event = Event(
+        id="event-approve",
+        author="tool",
+        content=types.Content(
+            role="tool",
+            parts=[
+                types.Part(
+                    function_response=types.FunctionResponse(
+                        id="tool-approve",
+                        name="Bash",
+                        response={
+                            "status": "needs_approval",
+                            "metadata": {
+                                "controlProjection": {
+                                    "controlType": "approval_required",
+                                    "controlRef": control_ref,
+                                }
+                            },
+                        },
+                    )
+                )
+            ],
+        ),
+        invocation_id="turn-1",
+    )
+    projection = bridge.project_adk_event(event, turn_id="turn-1")
+    end = next(e for e in projection.agent_events if e["type"] == "tool_end")
+    assert end["status"] == "error"
+    assert end["approvalControlRef"] == control_ref
+
+
+def test_event_bridge_tool_end_ok_has_no_approval_control_ref() -> None:
+    """Shape preservation: a successful tool_end must NOT gain an
+    approvalControlRef key."""
+    bridge = OpenMagiEventBridge()
+    event = Event(
+        id="event-ok2",
+        author="tool",
+        content=types.Content(
+            role="tool",
+            parts=[
+                types.Part(
+                    function_response=types.FunctionResponse(
+                        id="tool-ok2",
+                        name="FileRead",
+                        response={"status": "ok", "content": "hi"},
+                    )
+                )
+            ],
+        ),
+        invocation_id="turn-1",
+    )
+    projection = bridge.project_adk_event(event, turn_id="turn-1")
+    end = next(e for e in projection.agent_events if e["type"] == "tool_end")
+    assert "approvalControlRef" not in end
