@@ -584,3 +584,32 @@ def test_source_citation_boolean_still_404_after_gate_mode_feature(
     )
     assert resp.status_code == 404
     assert os.environ["MAGI_SOURCE_CITATION_ENABLED"] == "1"
+
+
+def test_patch_execution_integrity_mode_persists_and_live_projects(
+    tmp_path, monkeypatch
+) -> None:
+    cfile = tmp_path / "customize.json"
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
+    client = TestClient(create_app(_build_runtime(tmp_path)))
+    client.headers.update({"x-gateway-token": _TOKEN})
+
+    for mode in ("audit", "enforce", "off"):
+        response = client.patch(
+            "/v1/app/customize/gate-mode/execution_integrity",
+            json={"mode": mode},
+        )
+        assert response.status_code == 200
+        assert response.json()["overrides"]["gate_modes"]["execution_integrity"] == mode
+        assert os.environ["MAGI_EXECUTION_INTEGRITY_MODE"] == mode
+
+
+def test_patch_execution_integrity_rejects_invalid_mode(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
+    client = TestClient(create_app(_build_runtime(tmp_path)))
+    client.headers.update({"x-gateway-token": _TOKEN})
+    response = client.patch(
+        "/v1/app/customize/gate-mode/execution_integrity",
+        json={"mode": "pretend"},
+    )
+    assert response.status_code == 400

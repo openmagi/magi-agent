@@ -72,6 +72,18 @@ function userPolicy(): PolicyCatalogEntry {
   };
 }
 
+function executionIntegrity(): PolicyCatalogEntry {
+  return citationFloor({
+    id: "execution_integrity",
+    displayName: "Execution Integrity",
+    gateMode: { value: "audit", options: ["enforce", "audit", "off"] },
+    components: [
+      { id: "read-before-write", label: "Read before write", status: "live" },
+      { id: "sandbox-execution", label: "Sandbox execution", status: "available" },
+    ],
+  });
+}
+
 const NOOP = () => {};
 
 function baseProps(
@@ -99,6 +111,10 @@ function baseProps(
     onCitationGateModeChange: NOOP,
     citationGateModePending: false,
     citationGateModeError: null,
+    gateModes: {},
+    onGateModeChange: NOOP,
+    pendingGateModes: new Set(),
+    gateModeError: null,
     ...over,
   };
 }
@@ -171,5 +187,23 @@ describe("PolicyCardList - source_citation gate-mode selector", () => {
     // the hub binds to patchCitationGateMode (PATCH /citation-gate-mode).
     expect(src).toContain("onChange={(e) => onChange(e.target.value)}");
     expect(src).toContain("onCitationGateModeChange");
+  });
+
+
+  it("renders and resolves a generalized execution-integrity mode", () => {
+    const html = render({
+      catalogPolicies: [executionIntegrity()],
+      gateModes: { execution_integrity: "enforce" },
+    });
+    expect(html).toContain("Execution Integrity");
+    expect(html).toMatch(/<option[^>]*value="enforce"[^>]*selected/);
+    expect(html).toContain("Read before write");
+    expect(html).toContain("live");
+    expect(html).toContain("Sandbox execution");
+    expect(html).toContain("available");
+  });
+
+  it("routes generalized selectors with their policy id", () => {
+    expect(src).toContain("onGateModeChange?.(vm.policyId, mode)");
   });
 });

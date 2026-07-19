@@ -327,8 +327,12 @@ def agent(
             apply_citation_gate_mode_override_to_env,
             apply_gate_mode_overrides_to_env,
         )
-        from magi_agent.customize.store import load_overrides  # noqa: PLC0415
+        from magi_agent.customize.store import (  # noqa: PLC0415
+            initialize_execution_integrity_mode,
+            load_overrides,
+        )
 
+        initialize_execution_integrity_mode(env=os.environ)
         overrides = load_overrides()
         apply_builtin_policy_overrides_to_env(os.environ, overrides)
         # source_citation gate-mode opt-down (repair/audit/off). Boolean-disable

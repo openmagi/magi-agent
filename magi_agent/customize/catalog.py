@@ -363,6 +363,25 @@ def _policy_entries() -> list[dict[str, Any]]:
                     "value": gate_mode_effective(policy.policy_id),
                     "options": list(gate.values),
                 }
+        if policy.policy_id == "execution_integrity":
+            entry["components"] = [
+                {"id": "read-before-write", "label": "Read before write", "status": "live"},
+                {"id": "exact-effect-admission", "label": "Exact effect admission", "status": "live"},
+                {"id": "one-shot-authority", "label": "One-shot authority", "status": "live"},
+                {"id": "durable-journal-recovery", "label": "Durable journal & recovery", "status": "live"},
+                {"id": "evidence-lineage", "label": "Evidence lineage", "status": "live"},
+                {"id": "verification-before-completion", "label": "Verify before completion", "status": "live"},
+                {
+                    "id": "sandbox-execution",
+                    "label": "OS sandbox execution",
+                    "status": "available",
+                },
+                {
+                    "id": "universal-broker",
+                    "label": "Universal mutation broker",
+                    "status": "available",
+                },
+            ]
         entries.append(entry)
 
     # Behavior→policy adapter (PR-3 / design D4): the 4 in-context control-plane

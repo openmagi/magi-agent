@@ -1,5 +1,6 @@
 """Mode-gated first-party policy cards (answer_verifier / research_governance /
 edit_match): registry, effective resolver, env projection, and catalog descriptor."""
+
 from __future__ import annotations
 
 
@@ -10,15 +11,35 @@ def test_registry_has_three_mode_gates() -> None:
     )
 
     ids = {g.id for g in GATE_MODE_POLICIES}
-    assert ids == {"answer_verifier", "research_governance", "edit_match"}
+    assert ids == {
+        "answer_verifier",
+        "research_governance",
+        "edit_match",
+        "execution_integrity",
+    }
     # strongest-first ordering per gate
     assert gate_mode_policy_by_id("answer_verifier").values == ("enforce", "audit", "off")
+    assert gate_mode_policy_by_id("execution_integrity").values == (
+        "enforce",
+        "audit",
+        "off",
+    )
     assert gate_mode_policy_by_id("edit_match").values == (
         "block_final_answer",
         "audit",
         "off",
     )
     assert gate_mode_policy_by_id("nope") is None
+
+
+def test_execution_integrity_defaults_to_audit_for_legacy_environment() -> None:
+    from magi_agent.customize.builtin_policy_overrides import gate_mode_effective
+
+    assert gate_mode_effective("execution_integrity", {}) == "audit"
+    assert (
+        gate_mode_effective("execution_integrity", {"MAGI_EXECUTION_INTEGRITY_MODE": "enforce"})
+        == "enforce"
+    )
 
 
 def test_effective_reads_through_resolver() -> None:
@@ -30,9 +51,7 @@ def test_effective_reads_through_resolver() -> None:
         == "enforce"
     )
     assert (
-        gate_mode_effective(
-            "edit_match", {"MAGI_EDIT_MATCH_EVIDENCE_ENFORCEMENT": "audit"}
-        )
+        gate_mode_effective("edit_match", {"MAGI_EDIT_MATCH_EVIDENCE_ENFORCEMENT": "audit"})
         == "audit"
     )
     # unset answer_verifier -> off (resolver default)
@@ -81,12 +100,59 @@ def test_store_roundtrip_gate_modes(tmp_path) -> None:
     assert loaded2["gate_modes"]["answer_verifier"] == "enforce"
 
 
+def test_new_install_seeds_execution_integrity_enforce(tmp_path) -> None:
+    from magi_agent.customize.store import (
+        initialize_execution_integrity_mode,
+        load_overrides,
+    )
+
+    path = tmp_path / "customize.json"
+    env: dict[str, str] = {"MAGI_CONFIG": str(tmp_path / "absent-config.toml")}
+    assert initialize_execution_integrity_mode(path=path, env=env) == "enforce"
+    assert env["MAGI_EXECUTION_INTEGRITY_MODE"] == "enforce"
+    assert load_overrides(path)["gate_modes"]["execution_integrity"] == "enforce"
+
+
+def test_existing_install_keeps_legacy_audit_default(tmp_path) -> None:
+    from magi_agent.customize.store import initialize_execution_integrity_mode
+
+    path = tmp_path / "customize.json"
+    path.write_text("{}", encoding="utf-8")
+    env: dict[str, str] = {}
+    assert initialize_execution_integrity_mode(path=path, env=env) == "audit"
+    assert "MAGI_EXECUTION_INTEGRITY_MODE" not in env
+
+
+def test_existing_install_without_customize_file_uses_config_marker(tmp_path) -> None:
+    from magi_agent.customize.store import initialize_execution_integrity_mode
+
+    config = tmp_path / "config.toml"
+    config.write_text("[model]\n", encoding="utf-8")
+    customize = tmp_path / "customize.json"
+    env = {"MAGI_CONFIG": str(config)}
+    assert initialize_execution_integrity_mode(path=customize, env=env) == "audit"
+    assert not customize.exists()
+
+
 def test_catalog_attaches_gate_mode_descriptor() -> None:
     from magi_agent.customize.catalog import _policy_entries
 
     by_id = {e["id"]: e for e in _policy_entries()}
-    for pid in ("answer_verifier", "research_governance", "edit_match"):
+    for pid in (
+        "answer_verifier",
+        "research_governance",
+        "edit_match",
+        "execution_integrity",
+    ):
         assert "gateMode" in by_id[pid], f"{pid} missing gateMode descriptor"
         gm = by_id[pid]["gateMode"]
         assert "value" in gm and "options" in gm
         assert gm["value"] in gm["options"]
+
+    integrity = by_id["execution_integrity"]
+    components = {item["id"]: item["status"] for item in integrity["components"]}
+    assert components["read-before-write"] == "live"
+    assert components["one-shot-authority"] == "live"
+    assert components["durable-journal-recovery"] == "live"
+    assert components["verification-before-completion"] == "live"
+    assert components["sandbox-execution"] == "available"

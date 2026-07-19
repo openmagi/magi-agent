@@ -523,10 +523,33 @@ _EDIT_MATCH_POLICY = Policy(
 )
 
 
+_EXECUTION_INTEGRITY_POLICY = Policy(
+    id="execution_integrity",
+    displayName="Execution Integrity",
+    intent=(
+        "Require effect-capable work to pass exact authority admission, read "
+        "the state it will mutate, consume one-shot execution authority, retain "
+        "durable evidence and recovery state, and verify that completion claims "
+        "are closed by backend observations. Audit records violations without "
+        "blocking; enforce fails closed before effects or unsupported completion."
+    ),
+    ruleIds=(
+        "execution_integrity.read_before_write",
+        "execution_integrity.authority_admission",
+        "execution_integrity.evidence_closure",
+        "execution_integrity.verification_before_completion",
+    ),
+    origin="builtin",
+    # Strictness is controlled by the off/audit/enforce gate-mode selector.
+    userDisableable=False,
+)
+
+
 BUILTIN_POLICIES: tuple[Policy, ...] = (
     _ANSWER_VERIFIER_POLICY,
     _CROSS_VERIFY_POLICY,
     _EDIT_MATCH_POLICY,
+    _EXECUTION_INTEGRITY_POLICY,
     _EGRESS_GUARD_POLICY,
     _FINAL_OUTPUT_GATE_POLICY,
     _GROUNDED_ANSWER_GUARD_POLICY,

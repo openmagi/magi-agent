@@ -1,4 +1,9 @@
-"""Dormant execution-authority kernel."""
+"""Execution-authority kernel and live execution-integrity policy adapter.
+
+The full universal broker remains an explicit governed-workflow API; the live
+tool runtime consumes the shared journal, admission identities, read authority,
+observations, and completion closure through :mod:`magi_agent.tools.execution_integrity`.
+"""
 
 SUPPORTED_SCHEMA_VERSIONS: tuple[str, ...] = (
     "magi.action_intent.v1",

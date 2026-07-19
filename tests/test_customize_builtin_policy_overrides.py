@@ -224,6 +224,21 @@ def test_user_disableable_surfaces_in_policy_payload() -> None:
     assert payload["userDisableable"] is False
 
 
+def test_execution_integrity_is_a_mode_gated_builtin_policy() -> None:
+    from magi_agent.customize.policies import get_policy
+
+    policy = get_policy("execution_integrity")
+    assert policy is not None
+    assert policy.origin == "builtin"
+    assert policy.user_disableable is False
+    assert policy.rule_ids == (
+        "execution_integrity.read_before_write",
+        "execution_integrity.authority_admission",
+        "execution_integrity.evidence_closure",
+        "execution_integrity.verification_before_completion",
+    )
+
+
 # --------------------------------------------------------------------------- #
 # source_citation gate-mode opt-down (repair/audit/off), NOT a boolean switch    #
 # --------------------------------------------------------------------------- #

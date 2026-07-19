@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from collections.abc import MutableMapping
 from typing import Any
 
 DEFAULT_OVERRIDES: dict[str, Any] = {
@@ -193,9 +194,7 @@ def _normalize(data: dict[str, Any]) -> dict[str, Any]:
     # against its gate's ordered enum, so we only shape-check the container here.
     gate_modes_raw = data.get("gate_modes")
     if isinstance(gate_modes_raw, dict):
-        merged["gate_modes"] = {
-            str(k): v for k, v in gate_modes_raw.items() if isinstance(v, str)
-        }
+        merged["gate_modes"] = {str(k): v for k, v in gate_modes_raw.items() if isinstance(v, str)}
     return merged
 
 
@@ -295,9 +294,7 @@ def set_builtin_policy_override(
     return overrides
 
 
-def set_citation_gate_mode_override(
-    mode: str, path: Path | None = None
-) -> dict[str, Any]:
+def set_citation_gate_mode_override(mode: str, path: Path | None = None) -> dict[str, Any]:
     """Persist the source_citation gate-mode opt-down, save, return overrides.
 
     ``mode`` must be one of ``repair`` / ``audit`` / ``off``. Validation that the
@@ -313,9 +310,7 @@ def set_citation_gate_mode_override(
     return overrides
 
 
-def set_gate_mode_override(
-    policy_id: str, mode: str, path: Path | None = None
-) -> dict[str, Any]:
+def set_gate_mode_override(policy_id: str, mode: str, path: Path | None = None) -> dict[str, Any]:
     """Persist a mode-gated first-party policy's mode selection, save, return.
 
     Records ``overrides['gate_modes'][policy_id] = mode`` for the generalized
@@ -334,6 +329,33 @@ def set_gate_mode_override(
     overrides["gate_modes"] = section
     save_overrides(overrides, target)
     return overrides
+
+
+def initialize_execution_integrity_mode(
+    *, path: Path | None = None, env: MutableMapping[str, str] | None = None
+) -> str:
+    """Seed new installations to enforce while preserving upgraded installs.
+
+    Existence of the Customize document is the migration boundary: an existing
+    document without this new key resolves through the policy's conservative
+    ``audit`` default; a genuinely absent document receives an explicit
+    persisted ``enforce`` choice. An operator-provided env value always wins.
+    """
+
+    target = path or customize_path()
+    target_env = os.environ if env is None else env
+    explicit = (target_env.get("MAGI_EXECUTION_INTEGRITY_MODE") or "").strip().lower()
+    if explicit in {"off", "audit", "enforce"}:
+        return explicit
+    if target.exists():
+        return "audit"
+    configured = target_env.get("MAGI_CONFIG")
+    config_path = Path(configured) if configured else Path.home() / ".magi" / "config.toml"
+    if config_path.exists():
+        return "audit"
+    set_gate_mode_override("execution_integrity", "enforce", target)
+    target_env["MAGI_EXECUTION_INTEGRITY_MODE"] = "enforce"
+    return "enforce"
 
 
 def set_verification_override(
@@ -409,7 +431,8 @@ def delete_custom_rule(rule_id: str, path: Path | None = None) -> dict[str, Any]
     overrides = load_overrides(target)
     verification = overrides["verification"]
     verification["custom_rules"] = [
-        r for r in verification["custom_rules"]
+        r
+        for r in verification["custom_rules"]
         if not (isinstance(r, dict) and r.get("id") == rule_id)
     ]
     save_overrides(overrides, target)
@@ -456,9 +479,7 @@ def set_custom_rules_group(
     return overrides
 
 
-def delete_custom_rule_group(
-    group_id: str, path: Path | None = None
-) -> dict[str, Any]:
+def delete_custom_rule_group(group_id: str, path: Path | None = None) -> dict[str, Any]:
     """PR-F-UX6: remove every custom rule whose ``groupId`` matches.
 
     Sibling to :func:`delete_custom_rule` but groupId-keyed. No-op when no
@@ -468,16 +489,15 @@ def delete_custom_rule_group(
     overrides = load_overrides(target)
     verification = overrides["verification"]
     verification["custom_rules"] = [
-        r for r in verification["custom_rules"]
+        r
+        for r in verification["custom_rules"]
         if not (isinstance(r, dict) and r.get("groupId") == group_id)
     ]
     save_overrides(overrides, target)
     return overrides
 
 
-def set_verification_budgets(
-    budgets: dict[str, Any], path: Path | None = None
-) -> dict[str, Any]:
+def set_verification_budgets(budgets: dict[str, Any], path: Path | None = None) -> dict[str, Any]:
     """Replace the persisted ``verification.budgets`` map (PR-F7).
 
     The caller is responsible for shape-validating the values; non-positive
@@ -528,7 +548,8 @@ def delete_seam_spec(spec_id: str, path: Path | None = None) -> dict[str, Any]:
     overrides = load_overrides(target)
     verification = overrides["verification"]
     verification["seam_specs"] = [
-        s for s in verification["seam_specs"]
+        s
+        for s in verification["seam_specs"]
         if not (isinstance(s, dict) and s.get("id") == spec_id)
     ]
     save_overrides(overrides, target)

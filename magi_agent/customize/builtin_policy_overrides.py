@@ -407,6 +407,20 @@ def _edit_match_mode_effective(env: Mapping[str, str]) -> str:
     return "off"
 
 
+def _execution_integrity_mode_effective(env: Mapping[str, str]) -> str:
+    """Resolve execution-integrity mode conservatively for upgraded installs.
+
+    An explicit environment projection represents either a persisted Customize
+    choice or the new-install seed.  An absent or malformed value is treated as
+    ``audit`` so upgrading cannot unexpectedly block an existing workflow.
+    """
+
+    raw = (env.get("MAGI_EXECUTION_INTEGRITY_MODE") or "").strip().lower()
+    if raw in ("off", "audit", "enforce"):
+        return raw
+    return "audit"
+
+
 GATE_MODE_POLICIES: tuple[GateModePolicy, ...] = (
     GateModePolicy(
         id="answer_verifier",
@@ -425,6 +439,12 @@ GATE_MODE_POLICIES: tuple[GateModePolicy, ...] = (
         env_var="MAGI_EDIT_MATCH_EVIDENCE_ENFORCEMENT",
         values=("block_final_answer", "audit", "off"),
         effective=_edit_match_mode_effective,
+    ),
+    GateModePolicy(
+        id="execution_integrity",
+        env_var="MAGI_EXECUTION_INTEGRITY_MODE",
+        values=("enforce", "audit", "off"),
+        effective=_execution_integrity_mode_effective,
     ),
 )
 

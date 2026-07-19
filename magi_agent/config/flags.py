@@ -640,6 +640,30 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
+    FlagSpec(
+        name="MAGI_EXECUTION_INTEGRITY_MODE",
+        default="audit",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Execution-integrity policy mode (off|audit|enforce). Audit records "
+            "effect admission and observations; enforce also fails closed on "
+            "missing read authority, reused attempts, journal failure, and "
+            "unclosed completion evidence."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_EXECUTION_AUTHORITY_DB",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Optional path for the local hash-chained execution-authority SQLite "
+            "journal; defaults to ~/.magi/execution-authority.db."
+        ),
+        kind="str",
+    ),
     _b(
         "MAGI_RESEARCH_FACT_GUIDANCE_ENABLED",
         summary=(

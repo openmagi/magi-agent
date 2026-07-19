@@ -40,7 +40,9 @@ def _driver(*, with_model: bool = True, evidence: tuple = ()) -> MagiEngineDrive
 
 def _block(driver: MagiEngineDriver, *, final_text: str = "Done — task complete.") -> str | None:
     return asyncio.run(
-        driver._completion_evidence_llm_block(turn_id="t", final_text=final_text)
+        driver._completion_evidence_llm_block(
+            session_id="s", turn_id="t", final_text=final_text
+        )
     )
 
 
@@ -70,6 +72,36 @@ def test_inert_when_flag_off(monkeypatch, cfile):
     monkeypatch.delenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", raising=False)
     monkeypatch.setattr(criterion_engine, "evaluate_criterion", _never_called())
     assert _block(_driver()) is None
+
+
+def test_execution_integrity_enforce_blocks_unclosed_attempt_without_model(
+    monkeypatch, cfile
+):
+    import magi_agent.tools.execution_integrity as runtime_policy
+
+    monkeypatch.setenv("MAGI_EXECUTION_INTEGRITY_MODE", "enforce")
+    monkeypatch.setattr(
+        runtime_policy,
+        "unclosed_execution_attempts",
+        lambda session_id, turn_id: ("attempt:open",),
+    )
+    assert _block(_driver(with_model=False)) == (
+        "execution integrity has 1 effect attempt without a backend observation"
+    )
+
+
+def test_execution_integrity_enforce_fails_closed_when_journal_unreadable(
+    monkeypatch, cfile
+):
+    import magi_agent.tools.execution_integrity as runtime_policy
+
+    monkeypatch.setenv("MAGI_EXECUTION_INTEGRITY_MODE", "enforce")
+    monkeypatch.setattr(
+        runtime_policy,
+        "unclosed_execution_attempts",
+        lambda session_id, turn_id: None,
+    )
+    assert _block(_driver(with_model=False)) == "execution integrity closure unavailable"
 
 
 def test_inert_when_no_model(monkeypatch, cfile):
