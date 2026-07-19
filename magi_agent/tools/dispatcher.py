@@ -62,6 +62,7 @@ class ToolDispatcher:
         max_offload_concurrency: int | None = None,
         first_party_activity_collector: object | None = None,
         first_party_evidence_refs: tuple[str, ...] | None = None,
+        execution_integrity_boundary: object | None = None,
     ) -> None:
         self.registry = registry
         # Inject the evidence collector so a tool_perm ``requireEvidence`` gate
@@ -122,6 +123,13 @@ class ToolDispatcher:
         # wiring sites pass refs from enabled packs' static manifests).
         self._fp_collector = first_party_activity_collector
         self._fp_refs: tuple[str, ...] = tuple(first_party_evidence_refs or ())
+        if execution_integrity_boundary is None:
+            from magi_agent.tools.execution_integrity import (  # noqa: PLC0415
+                ExecutionIntegrityBoundary,
+            )
+
+            execution_integrity_boundary = ExecutionIntegrityBoundary()
+        self._execution_integrity_boundary = execution_integrity_boundary
 
     async def dispatch(
         self,
@@ -333,25 +341,50 @@ class ToolDispatcher:
         if decision.action == "ask":
             return ToolResult(status="needs_approval", metadata=decision.metadata)
 
+        integrity_grant = self._execution_integrity_boundary.issue_grant(
+            manifest,
+            arguments,
+            context,
+            permission_metadata=decision.metadata,
+        )
+        integrity_decision = self._execution_integrity_boundary.preflight(
+            manifest, arguments, context, grant=integrity_grant
+        )
+        if integrity_decision.blocked:
+            return ToolResult(
+                status="blocked",
+                error_code=integrity_decision.error_code,
+                error_message="execution integrity admission denied",
+                metadata={
+                    "blockedBy": "execution_integrity",
+                    "mode": integrity_decision.mode,
+                    "reasonCodes": list(integrity_decision.reason_codes),
+                },
+            )
+
         _t0 = time.monotonic_ns()
         handler = registration.handler
-        if self._should_offload(manifest, handler):
-            # Readonly / concurrency_safe synchronous handler: run off the event
-            # loop so ADK's same-turn gather actually overlaps the blocking I/O.
-            # Bounded by a shared semaphore so the fan-out stays within
-            # MAGI_MAX_TOOL_CONCURRENCY. The same permission/path checks above
-            # have already run on this call path before we get here.
-            semaphore = self._get_offload_semaphore()
-            async with semaphore:
-                result = await asyncio.to_thread(handler, arguments, context)
-            # Defensive: a sync handler that returns an awaitable (rare) must
-            # still be awaited — but on the event loop, not in the worker thread.
-            if isawaitable(result):
-                result = await result
-        else:
-            result = handler(arguments, context)
-            if isawaitable(result):
-                result = await result
+        try:
+            if self._should_offload(manifest, handler):
+                # Readonly / concurrency_safe synchronous handler: run off the event
+                # loop so ADK's same-turn gather actually overlaps the blocking I/O.
+                # Bounded by a shared semaphore so the fan-out stays within
+                # MAGI_MAX_TOOL_CONCURRENCY. The same permission/path checks above
+                # have already run on this call path before we get here.
+                semaphore = self._get_offload_semaphore()
+                async with semaphore:
+                    result = await asyncio.to_thread(handler, arguments, context)
+                # Defensive: a sync handler that returns an awaitable (rare) must
+                # still be awaited — but on the event loop, not in the worker thread.
+                if isawaitable(result):
+                    result = await result
+            else:
+                result = handler(arguments, context)
+                if isawaitable(result):
+                    result = await result
+        except BaseException as exc:
+            self._execution_integrity_boundary.observe_exception(integrity_decision, exc)
+            raise
         _latency_ms = max(0, (time.monotonic_ns() - _t0) // 1_000_000)
         if trace is not None:
             trace.record(
@@ -363,6 +396,7 @@ class ToolDispatcher:
             )
         result = _attach_latency(result, _latency_ms)
         result = self._attach_coding_receipt(name, arguments, result)
+        result = self._execution_integrity_boundary.observe(integrity_decision, result)
         return result
 
     def _should_offload(self, manifest: ToolManifest, handler: object) -> bool:

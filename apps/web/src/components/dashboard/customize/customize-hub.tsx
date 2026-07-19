@@ -35,6 +35,7 @@ import {
   patchControlPlaneOverride,
   patchBuiltinPolicyOverride,
   patchCitationGateMode,
+  patchGateMode,
   putRules,
   putCustomRule,
   deleteCustomRule,
@@ -480,6 +481,42 @@ export function CustomizeHub({
     [agentFetch, citationGateMode],
   );
 
+  const [gateModes, setGateModes] = useState<Record<string, string>>({});
+  const [gateModePending, setGateModePending] = useState<Set<string>>(new Set());
+  const [gateModeError, setGateModeError] = useState<string | null>(null);
+
+  useEffect(() => setGateModes(data?.overrides.gate_modes ?? {}), [data]);
+
+  const handleGateModeChange = useCallback(
+    (policyId: string, mode: string) => {
+      const previous = gateModes[policyId];
+      setGateModes((current) => ({ ...current, [policyId]: mode }));
+      setGateModeError(null);
+      setGateModePending((current) => new Set(current).add(policyId));
+      patchGateMode(agentFetch, policyId, mode)
+        .then((overrides) => setGateModes(overrides.gate_modes ?? {}))
+        .catch((err: unknown) => {
+          setGateModes((current) => {
+            const next = { ...current };
+            if (previous === undefined) delete next[policyId];
+            else next[policyId] = previous;
+            return next;
+          });
+          setGateModeError(
+            err instanceof Error ? err.message : "Failed to update gate mode",
+          );
+        })
+        .finally(() => {
+          setGateModePending((current) => {
+            const next = new Set(current);
+            next.delete(policyId);
+            return next;
+          });
+        });
+    },
+    [agentFetch, gateModes],
+  );
+
   // --- Recipes allowlist (F-UX10) ------------------------------------------
   // ``verification.recipes[]`` is allowlist-shaped: empty = no opt-out
   // (legacy default, every recipe behaves as enabled); non-empty filters out
@@ -732,6 +769,10 @@ export function CustomizeHub({
             onCitationGateModeChange={handleCitationGateModeChange}
             citationGateModePending={citationGateModePending}
             citationGateModeError={citationGateModeError}
+            gateModes={gateModes}
+            onGateModeChange={handleGateModeChange}
+            pendingGateModes={gateModePending}
+            gateModeError={gateModeError}
             userRules={userRules}
             rulesSaving={rulesSaving}
             onSaveRules={handleSaveRules}
@@ -830,6 +871,10 @@ function RulesSectionMount({
   onCitationGateModeChange,
   citationGateModePending,
   citationGateModeError,
+  gateModes,
+  onGateModeChange,
+  pendingGateModes,
+  gateModeError,
   userRules,
   rulesSaving,
   onSaveRules,
@@ -863,6 +908,10 @@ function RulesSectionMount({
   onCitationGateModeChange: (mode: string) => void;
   citationGateModePending: boolean;
   citationGateModeError: string | null;
+  gateModes: Record<string, string>;
+  onGateModeChange: (policyId: string, mode: string) => void;
+  pendingGateModes: Set<string>;
+  gateModeError: string | null;
   // "Your guidance" freeform system-prompt text, relocated from the retired
   // Behaviors tab into the Policies surface.
   userRules: string;
@@ -1222,6 +1271,10 @@ function RulesSectionMount({
             onCitationGateModeChange={onCitationGateModeChange}
             citationGateModePending={citationGateModePending}
             citationGateModeError={citationGateModeError}
+            gateModes={gateModes}
+            onGateModeChange={onGateModeChange}
+            pendingGateModes={pendingGateModes}
+            gateModeError={gateModeError}
           />
 
           {/* "Your guidance": freeform soft system-prompt text, relocated from

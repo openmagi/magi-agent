@@ -1114,7 +1114,7 @@ class MagiEngineDriver:
             return None
 
     async def _completion_evidence_llm_block(
-        self, *, turn_id: str, final_text: str
+        self, *, session_id: str | None = None, turn_id: str, final_text: str
     ) -> str | None:
         """C-MERGE-1 — reason if a completion/promise claim has no action evidence.
 
@@ -1138,6 +1138,23 @@ class MagiEngineDriver:
             parse_completion_evidence_verification_enabled,
         )
         from magi_agent.customize.runtime_gate import preset_enabled  # noqa: PLC0415
+
+        from magi_agent.tools.execution_integrity import (  # noqa: PLC0415
+            execution_integrity_mode,
+            unclosed_execution_attempts,
+        )
+
+        if execution_integrity_mode() == "enforce":
+            open_attempts = (
+                unclosed_execution_attempts(session_id, turn_id) if session_id else None
+            )
+            if open_attempts is None:
+                return "execution integrity closure unavailable"
+            if open_attempts:
+                return (
+                    f"execution integrity has {len(open_attempts)} effect attempt"
+                    f"{'s' if len(open_attempts) != 1 else ''} without a backend observation"
+                )
 
         if self._criterion_model_factory is None:
             return None
@@ -4505,7 +4522,7 @@ class MagiEngineDriver:
             # the det pre-gate; fail-open → None.
             if llm_block_reason is None:
                 llm_block_reason = await self._completion_evidence_llm_block(
-                    turn_id=turn_id, final_text=emitted_text
+                    session_id=session_id, turn_id=turn_id, final_text=emitted_text
                 )
             # C-MERGE-2: built-in resource/self-claim llm gate. Same shape, but
             # the det pre-gate counts SOURCE/READ evidence (SourceInspection /

@@ -77,6 +77,7 @@ type CardKind = "native" | "adapter";
 
 interface PolicyCardVM {
   key: string;
+  policyId?: string;
   kind: CardKind;
   displayName: string;
   intent: string;
@@ -114,6 +115,7 @@ interface PolicyCardVM {
    * disable stays floored (no off switch).
    */
   gateMode?: CitationGateModeDescriptor;
+  components?: PolicyCatalogEntry["components"];
   /** Delete affordance: native policies cascade member rules; adapters can't delete. */
   deletable: boolean;
 }
@@ -155,6 +157,11 @@ export interface PolicyCardListProps {
   citationGateModePending?: boolean;
   /** Last gate-mode PATCH error, surfaced under the selector. */
   citationGateModeError?: string | null;
+  /** Explicit generalized gate modes, keyed by first-party policy id. */
+  gateModes?: Readonly<Record<string, string>>;
+  onGateModeChange?: (policyId: string, mode: string) => void;
+  pendingGateModes?: Set<string>;
+  gateModeError?: string | null;
   // Adapter-row routing (built-in presets + orphan user rows).
   onTogglePreset: (presetId: string, next: boolean) => void;
   onToggleCustomRule: (rule: CustomRule, next: boolean) => void;
@@ -244,6 +251,7 @@ export function PolicyCardList(props: PolicyCardListProps): React.ReactElement {
       }
       return {
         key: `native:${p.id}`,
+        policyId: p.id,
         kind: "native" as const,
         displayName: p.displayName,
         intent: p.intent,
@@ -258,6 +266,7 @@ export function PolicyCardList(props: PolicyCardListProps): React.ReactElement {
         toggle,
         // Only the floored source_citation policy carries a gate-mode descriptor.
         gateMode: p.gateMode,
+        components: p.components,
         deletable: p.origin === "user",
       };
     });
@@ -453,6 +462,10 @@ function PolicyCard({
   onCitationGateModeChange,
   citationGateModePending,
   citationGateModeError,
+  gateModes,
+  onGateModeChange,
+  pendingGateModes,
+  gateModeError,
   catalogPolicies,
 }: { vm: PolicyCardVM } & PolicyCardListProps): React.ReactElement {
   // Strongest member action wins; when there are no members (control-plane
@@ -589,8 +602,16 @@ function PolicyCard({
 
         <div className="flex shrink-0 items-center gap-3">
           {vm.toggle.kind === "floor" ? (
-            <span className="inline-flex items-center rounded-full bg-emerald-700/15 px-2 py-0.5 text-[10px] font-medium text-emerald-800">
-              always-on
+            <span
+              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                vm.gateMode && vm.policyId !== "source_citation"
+                  ? "bg-amber-500/12 text-amber-700"
+                  : "bg-emerald-700/15 text-emerald-800"
+              }`}
+            >
+              {vm.gateMode && vm.policyId !== "source_citation"
+                ? "mode-controlled"
+                : "always-on"}
             </span>
           ) : isManaged ? (
             <span
@@ -688,14 +709,72 @@ function PolicyCard({
         </div>
       </div>
 
-      {vm.toggle.kind === "floor" && vm.gateMode && onCitationGateModeChange ? (
+      {vm.toggle.kind === "floor" && vm.gateMode &&
+      (vm.policyId === "source_citation"
+        ? onCitationGateModeChange
+        : onGateModeChange) ? (
         <CitationGateModeSelector
+          policyId={vm.policyId}
           descriptor={vm.gateMode}
-          value={citationGateMode ?? vm.gateMode.value}
-          pending={citationGateModePending ?? false}
-          error={citationGateModeError ?? null}
-          onChange={onCitationGateModeChange}
+          value={
+            vm.policyId === "source_citation"
+              ? citationGateMode ?? vm.gateMode.value
+              : (vm.policyId && gateModes?.[vm.policyId]) ?? vm.gateMode.value
+          }
+          pending={
+            vm.policyId === "source_citation"
+              ? citationGateModePending ?? false
+              : Boolean(vm.policyId && pendingGateModes?.has(vm.policyId))
+          }
+          error={
+            vm.policyId === "source_citation"
+              ? citationGateModeError ?? null
+              : gateModeError ?? null
+          }
+          onChange={(mode) => {
+            if (vm.policyId === "source_citation") {
+              onCitationGateModeChange?.(mode);
+            } else if (vm.policyId) {
+              onGateModeChange?.(vm.policyId, mode);
+            }
+          }}
         />
+      ) : null}
+
+      {vm.components && vm.components.length > 0 ? (
+        <details
+          className="group mt-3 rounded-lg border border-black/[0.05] bg-gray-50/40"
+          data-testid={`policy-components-${vm.policyId ?? vm.key}`}
+        >
+          <summary className="flex cursor-pointer items-center justify-between gap-2 rounded-lg px-3 py-2 text-[11px] font-semibold text-secondary/80 hover:bg-black/[0.02]">
+            <span>Harness coverage</span>
+            <span className="font-mono text-[10px] font-normal tracking-tight text-secondary/65">
+              {vm.components.filter((item) => item.status === "live").length} live ·{" "}
+              {vm.components.filter((item) => item.status === "available").length} available
+            </span>
+          </summary>
+          <div className="grid gap-x-4 border-t border-black/[0.05] px-3 py-2 sm:grid-cols-2">
+            {vm.components.map((component) => (
+              <div
+                key={component.id}
+                className="flex items-center justify-between gap-2 py-1 text-[11px]"
+              >
+                <span className="font-medium text-foreground">{component.label}</span>
+                <span
+                  className={
+                    component.status === "live"
+                      ? "text-emerald-700"
+                      : component.status === "available"
+                        ? "text-amber-700"
+                        : "text-secondary"
+                  }
+                >
+                  {component.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        </details>
       ) : null}
 
       <MemberDrillDown vm={vm} />
@@ -708,6 +787,7 @@ function PolicyCard({
 // ---------------------------------------------------------------------------
 
 const GATE_MODE_LABELS: Record<string, string> = {
+  enforce: "Enforce (block integrity violations)",
   repair: "Repair (revise or search to ground claims)",
   audit: "Audit (record findings, never alter the answer)",
   off: "Off (skip the gate)",
@@ -720,12 +800,14 @@ const GATE_MODE_LABELS: Record<string, string> = {
  * citations and the Sources panel stay on in every mode.
  */
 function CitationGateModeSelector({
+  policyId,
   descriptor,
   value,
   pending,
   error,
   onChange,
 }: {
+  policyId?: string;
   descriptor: CitationGateModeDescriptor;
   value: string;
   pending: boolean;
@@ -747,10 +829,9 @@ function CitationGateModeSelector({
         onChange={(e) => onChange(e.target.value)}
       />
       <p className="mt-1.5 text-[10px] leading-relaxed text-secondary/70">
-        Always on and cannot be turned off. This only steps its enforcement down.
-        Repair can revise or search to ground claims, audit records but never
-        alters the answer, off skips the gate. Inline citations and the Sources
-        panel stay on in all modes.
+        {policyId === "source_citation"
+          ? "Always on and cannot be turned off. This only steps its enforcement down. Repair can revise or search to ground claims, audit records but never alters the answer, off skips the gate. Inline citations and the Sources panel stay on in all modes."
+          : "Choose whether this first-party policy blocks violations, records them for audit only, or stays off. The selected mode is persisted and applied to the next tool call and completion check."}
       </p>
     </div>
   );

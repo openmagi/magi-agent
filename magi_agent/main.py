@@ -314,8 +314,12 @@ def _apply_persisted_customize_policy_overrides(environ) -> None:
             apply_citation_gate_mode_override_to_env,
             apply_gate_mode_overrides_to_env,
         )
-        from .customize.store import load_overrides
+        from .customize.store import (
+            initialize_execution_integrity_mode,
+            load_overrides,
+        )
 
+        initialize_execution_integrity_mode(env=environ)
         overrides = load_overrides()
         apply_builtin_policy_overrides_to_env(environ, overrides)
         apply_citation_gate_mode_override_to_env(environ, overrides)

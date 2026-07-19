@@ -445,7 +445,7 @@ def inventory_document_for_surfaces(surfaces: tuple[EffectSurface, ...]) -> dict
             "id": "exemption:effect-inventory-source-read",
             "owner": "execution-authority",
             "reason": (
-                "The dormant auditor may only read Python source and its own golden; "
+                "The coverage auditor may only read Python source and its own golden; "
                 "it cannot dispatch, publish, or mutate runtime state."
             ),
             "enforcement": "read_only_source_audit",

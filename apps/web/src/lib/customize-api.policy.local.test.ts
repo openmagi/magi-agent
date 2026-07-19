@@ -75,4 +75,9 @@ describe("customize-api: conversational policy compile + persist", () => {
     expect(src).toContain("export interface PolicyInteractiveResponse");
     expect(src).toContain("producer_reused");
   });
+
+  it("exposes generalized first-party gate-mode persistence", () => {
+    expect(src).toContain("export async function patchGateMode");
+    expect(src).toContain("/v1/app/customize/gate-mode/${encodeURIComponent(policyId)}");
+  });
 });

@@ -186,6 +186,12 @@ export interface PolicyCatalogEntry {
    * Absent on every other policy, so consumers must treat it as optional.
    */
   gateMode?: CitationGateModeDescriptor;
+  /** Runtime coverage disclosed by composite first-party policies. */
+  components?: Array<{
+    id: string;
+    label: string;
+    status: "live" | "available" | "unavailable";
+  }>;
 }
 
 export interface CustomizeCatalog {
@@ -292,6 +298,8 @@ export interface CustomizeOverrides {
    * in all three modes).
    */
   citation_gate_mode?: string | null;
+  /** Explicit modes for generalized first-party gates, keyed by policy id. */
+  gate_modes?: Record<string, string>;
 }
 
 /**
@@ -434,6 +442,25 @@ export async function patchCitationGateMode(
     body: JSON.stringify({ mode }),
   });
   if (!res.ok) throw new Error(`Failed to update citation gate mode (${res.status})`);
+  const data = (await res.json()) as { overrides: CustomizeOverrides };
+  return data.overrides;
+}
+
+/** Persist and live-project a generalized first-party policy gate mode. */
+export async function patchGateMode(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  policyId: string,
+  mode: string,
+): Promise<CustomizeOverrides> {
+  const res = await fetch(
+    `/v1/app/customize/gate-mode/${encodeURIComponent(policyId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode }),
+    },
+  );
+  if (!res.ok) throw new Error(`Failed to update gate mode (${res.status})`);
   const data = (await res.json()) as { overrides: CustomizeOverrides };
   return data.overrides;
 }
