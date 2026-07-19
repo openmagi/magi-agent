@@ -7811,6 +7811,19 @@ class MagiEngineDriver:
             )
             decision = await gate.check(req)
 
+            # Defensive normalization: HostedRuntime documents "any object
+            # with a check method is acceptable", and its original no-op gate
+            # returned the bare str "allow". A str decision here crashed every
+            # hosted governed tool call (AttributeError on .kind). Map legacy
+            # str verdicts onto the PermissionDecision contract instead of
+            # trusting every third-party gate to return the dataclass.
+            if isinstance(decision, str):
+                from magi_agent.engine.contracts import (  # noqa: PLC0415
+                    PermissionDecision as _PD,
+                )
+
+                decision = _PD(kind="allow" if decision == "allow" else "deny")
+
             if decision.kind == "deny":
                 if decision.interrupt:
                     cancel.set()

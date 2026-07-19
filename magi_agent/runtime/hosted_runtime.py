@@ -68,10 +68,20 @@ class _NoOpGate:
     human-in-the-loop REPL loop.  Hosted pods run behind egress controls
     (gate1a / network policy), so a no-op gate is the correct hosted
     default.  PR3 can substitute a stricter gate if needed.
+
+    ``check`` must honor the ``PermissionGate`` contract and return a
+    ``PermissionDecision`` object: the driver's before-tool callback reads
+    ``decision.kind`` / ``decision.updated_input``. The original str
+    ``"allow"`` return killed EVERY tool call on the hosted governed path
+    with ``AttributeError: 'str' object has no attribute 'kind'`` once
+    MAGI_HOSTED_GOVERNED_TURN_ENABLED went fleet-default-ON (live incident,
+    canary 186bf3d7, 2026-07-19).
     """
 
-    async def check(self, *args: object, **kwargs: object) -> str:  # noqa: ARG002
-        return "allow"
+    async def check(self, *args: object, **kwargs: object):  # noqa: ARG002
+        from magi_agent.engine.contracts import PermissionDecision  # noqa: PLC0415
+
+        return PermissionDecision(kind="allow")
 
 
 _HOSTED_NOOP_GATE = _NoOpGate()
