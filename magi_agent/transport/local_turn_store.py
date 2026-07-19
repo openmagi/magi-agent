@@ -55,6 +55,8 @@ __all__ = [
     "LocalTurnStore",
     "LOCAL_TURN_STORE",
     "CompletedTurnRecord",
+    "stable_assistant_message_id",
+    "stable_user_message_id",
 ]
 
 # --- Generous budgets (Kevin policy: budgets generous, default-ON) ----------
@@ -104,6 +106,20 @@ _TERMINAL_MISSION_STATUSES = frozenset({"completed", "cancelled", "failed"})
 
 def _clock_ms(now: float) -> int:
     return int(now * 1000)
+
+
+def stable_user_message_id(turn_id: str | None) -> str:
+    """``<turn_id>:user`` durable/legacy message id (mirrors the ADK path)."""
+    return f"{turn_id}:user" if turn_id else "local:user"
+
+
+def stable_assistant_message_id(turn_id: str | None) -> str:
+    """``<turn_id>:assistant`` durable/legacy message id (mirrors the ADK path)."""
+    return f"{turn_id}:assistant" if turn_id else "local:assistant"
+
+
+# Internal alias kept for the in-module call site (finish()).
+_assistant_message_id_for = stable_assistant_message_id
 
 
 def _safe_label(value: object, fallback: str = "tool") -> str:
@@ -227,10 +243,16 @@ class CompletedTurnRecord:
     turn_id: str | None
     role: str
     content: str
-    terminal: str
+    terminal: str | None
     created_at_ms: int
     stored_at: float
     detached_snapshot: dict[str, Any] | None = None
+    # Stable cross-source message id (``<turn_id>:assistant``), mirroring the
+    # durable channel_messages id scheme + the ADK path's ``<log_turn_id>:*`` ids
+    # so the legacy ``completed_messages`` projection and the durable ``full=1``
+    # rows agree on identity for the same logical message (no duplicate bubble
+    # from a random per-source id).
+    message_id: str = ""
 
 
 class LocalSnapshotReducer:
@@ -269,6 +291,17 @@ class LocalSnapshotReducer:
         self._active_goal_mission_id: str | None = None
         self._current_goal: str | None = None
         self._terminal: str | None = None
+        # Status carried by the ``turn_end`` frame (``committed`` / ``aborted``).
+        # This is the AUTHORITATIVE turn outcome for durability: a turn can commit
+        # (turn_end status=committed) yet still ship a ``turn_result`` frame whose
+        # terminal is ``error`` (a citation-gate refusal / blank-turn notice rides
+        # the terminal frame). The durable ``incomplete``/``terminal`` fields must
+        # follow the committed turn_end, not the contradictory turn_result -- else
+        # a fully-committed answer is persisted incomplete=1 terminal='error' and
+        # then loses to nothing / reappears truncated. ``None`` means no turn_end
+        # frame was seen (e.g. a cancel mid-stream), in which case the turn_result
+        # terminal is the only signal and its error/aborted stamping stands.
+        self._turn_end_status: str | None = None
         self._last_ingest_monotonic = self._now()
 
     # -- public API ---------------------------------------------------------
@@ -361,6 +394,31 @@ class LocalSnapshotReducer:
     @property
     def terminal(self) -> str | None:
         return self._terminal
+
+    @property
+    def turn_end_status(self) -> str | None:
+        return self._turn_end_status
+
+    def effective_terminal(self) -> str | None:
+        """Terminal reason for durability, honoring a committed turn_end.
+
+        A committed turn_end wins over a contradictory ``turn_result`` terminal:
+        the answer committed, so the durable row is NOT incomplete even when the
+        terminal frame carried ``error`` (citation gate / blank-turn notice). An
+        aborted turn_end (or, when no turn_end was seen, an error/aborted
+        ``turn_result``) keeps the error/aborted stamping. Returns ``None`` when
+        the turn is complete (nothing to flag).
+        """
+        if self._turn_end_status == "committed":
+            return None
+        if self._turn_end_status == "aborted":
+            return "aborted"
+        if self._terminal in ("error", "aborted"):
+            return self._terminal
+        return None
+
+    def effective_incomplete(self) -> bool:
+        return self.effective_terminal() is not None
 
     @property
     def started_at_ms(self) -> int | None:
@@ -482,6 +540,27 @@ class LocalSnapshotReducer:
             )
         self._mark_live()
 
+    def _apply_final_text(self, payload: Mapping[str, Any]) -> None:
+        """Fold a final authoritative assistant-text frame with longer-wins.
+
+        Reads the full answer text from ``content`` / ``text`` / ``delta`` (in
+        that order). The streamed deltas are the source of truth for length: the
+        final text only REPLACES ``_content`` when it is strictly longer than the
+        text accumulated from deltas so far, so a truncated or already-streamed
+        aggregate can never shorten the durable answer.
+        """
+        final = None
+        for key in ("content", "text", "delta"):
+            value = payload.get(key)
+            if isinstance(value, str) and value:
+                final = value
+                break
+        if final is None:
+            return
+        if len(final) > len(self._content):
+            self._content = final
+            self._mark_live()
+
     def _apply(self, is_agent: bool, payload: Mapping[str, Any]) -> None:
         kind = payload.get("type") if "type" in payload else payload.get("kind")
 
@@ -593,12 +672,25 @@ class LocalSnapshotReducer:
         elif kind == "turn_interrupted":
             self._turn_phase = "aborted"
             self._mark_live()
+        elif kind in ("message", "message_completed", "final_text", "response_completed"):
+            # Final authoritative assistant text frame (A1). The public SSE wire
+            # today carries answer text ONLY as incremental ``text_delta`` frames
+            # (and OpenAI-compat ``choices[].delta.content``), both folded above,
+            # so this handler is a no-op on the current wire and stays byte-
+            # identical. It exists so that IF a transport ever emits a final full-
+            # text aggregate frame (the whole answer in one frame, distinct from a
+            # delta), the durable content adopts it with LONGER-WINS semantics
+            # instead of appending it -- so the durable row can never be a prefix
+            # of, nor a duplicate-concatenation of, the streamed answer.
+            self._apply_final_text(payload)
         elif kind == "turn_end":
             status = payload.get("status")
             if status == "aborted":
                 self._turn_phase = "aborted"
+                self._turn_end_status = "aborted"
             elif status == "committed":
                 self._turn_phase = "committed"
+                self._turn_end_status = "committed"
             self._mark_live()
         elif kind == "turn_result":
             tid = payload.get("turn_id") or payload.get("turnId")
@@ -701,10 +793,13 @@ class LocalTurnStore:
                 turn_id=reducer.turn_id,
                 role="assistant",
                 content=reducer.content,
-                terminal=reducer.terminal or "completed",
+                # Honor a committed turn_end over a contradictory turn_result
+                # terminal so a committed answer is not persisted incomplete.
+                terminal=reducer.effective_terminal(),
                 created_at_ms=reducer.started_at_ms or _clock_ms(time.time()),
                 stored_at=time.time(),
                 detached_snapshot=detached,
+                message_id=_assistant_message_id_for(reducer.turn_id),
             )
 
     # -- reader side (GET endpoints) ----------------------------------------
@@ -749,6 +844,10 @@ class LocalTurnStore:
                 "content": record.content,
                 "createdAt": record.created_at_ms,
                 "turnId": record.turn_id,
+                # Stable cross-source id so the legacy projection and the durable
+                # full=1 rows agree on identity (the frontend dedups by id first).
+                "messageId": record.message_id
+                or stable_assistant_message_id(record.turn_id),
             }
             if record.terminal in ("error", "aborted"):
                 message["incomplete"] = True

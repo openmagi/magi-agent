@@ -47,7 +47,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import uuid
 from collections.abc import AsyncIterator
 from typing import Callable
 
@@ -56,6 +55,8 @@ from magi_agent.transport.local_turn_store import (
     LOCAL_TURN_STORE,
     LocalSnapshotReducer,
     LocalTurnStore,
+    stable_assistant_message_id,
+    stable_user_message_id,
 )
 
 __all__ = ["drive_detached_local_stream"]
@@ -78,6 +79,7 @@ async def drive_detached_local_stream(
     idle_abort_s: float = IDLE_ABORT_WATCHDOG_S,
     watchdog_tick_s: float = _WATCHDOG_TICK_S,
     user_message: str | None = None,
+    user_message_id: str | None = None,
     channel: str | None = None,
     store_accessor: Callable[[], object | None] | None = None,
 ) -> AsyncIterator[bytes]:
@@ -102,9 +104,13 @@ async def drive_detached_local_stream(
         Turn store (defaults to the process singleton). Injectable for tests.
     idle_abort_s / watchdog_tick_s:
         Watchdog budget + poll interval (injectable for tests).
-    user_message / channel / store_accessor:
+    user_message / user_message_id / channel / store_accessor:
         F1b durable channel-history params (all default None = byte-identical to
-        the pre-F1b pump). ``store_accessor`` is a zero-arg closure returning a
+        the pre-F1b pump). ``user_message_id`` is the optimistic user bubble's id
+        (the client ``userMessageId``); when supplied the durable user row is
+        stored under it so the frontend collapses the row against the bubble,
+        else a stable ``<turn_id>:user`` id is used. ``store_accessor`` is a
+        zero-arg closure returning a
         :class:`~magi_agent.storage.channel_message_store.ChannelMessageStore`
         (or None); it is called lazily so the pump stays import-light. When a
         store is available and ``user_message`` is non-empty, a ``role=user`` row
@@ -131,7 +137,12 @@ async def drive_detached_local_stream(
     if _channel_store is not None and user_message:
         try:
             await _channel_store.append_message(  # type: ignore[attr-defined]
-                message_id=uuid.uuid4().hex,
+                # Prefer the client-supplied ``userMessageId`` (the optimistic
+                # user bubble's id) so the durable row shares identity with the
+                # bubble and the frontend collapses them instead of showing a
+                # duplicate; else a stable ``<turn_id>:user`` id (never a random
+                # uuid, so a re-write dedups via UNIQUE(session_id, message_id)).
+                message_id=user_message_id or stable_user_message_id(turn_id),
                 session_id=session_id,
                 role="user",
                 content=user_message,
@@ -164,19 +175,27 @@ async def drive_detached_local_stream(
             # the assistant produced no text (empty turns deliver nothing,
             # mirroring the existing honesty rule).
             _assistant_content = reducer.content
-            _reducer_terminal = reducer.terminal
+            # Durable truth: honor a committed turn_end over a contradictory
+            # turn_result terminal (citation gate / blank-turn notice), so a
+            # committed answer is stamped incomplete=0 terminal=NULL and cannot
+            # later lose to nothing or reappear as a truncated error copy.
+            _effective_terminal = reducer.effective_terminal()
+            _incomplete = reducer.effective_incomplete()
+            _reducer_terminal = _effective_terminal
             if _channel_store is not None and _assistant_content:
-                _incomplete = _reducer_terminal in ("error", "aborted")
                 try:
                     await _channel_store.append_message(  # type: ignore[attr-defined]
-                        message_id=uuid.uuid4().hex,
+                        # Stable ``<turn_id>:assistant`` id (not a random uuid) so
+                        # a re-write dedups and the frontend matches this row to the
+                        # streamed copy by id instead of showing a second bubble.
+                        message_id=stable_assistant_message_id(turn_id),
                         session_id=session_id,
                         role="assistant",
                         content=_assistant_content,
                         channel=channel or "",
                         turn_id=turn_id,
                         incomplete=_incomplete,
-                        terminal=_reducer_terminal if _incomplete else None,
+                        terminal=_effective_terminal if _incomplete else None,
                     )
                 except Exception:  # noqa: BLE001, S110 -- best-effort; never break the turn
                     pass

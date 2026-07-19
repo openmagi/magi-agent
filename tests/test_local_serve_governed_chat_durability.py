@@ -267,14 +267,117 @@ def test_pump_durable_writes_user_and_assistant_rows(tmp_path: Path) -> None:
         assert [r["role"] for r in rows] == ["user", "assistant"]
         assert rows[0]["content"] == "what did I ask"
         assert rows[0]["channel"] == "general"
+        # Stable ids (not random uuids) so a re-write dedups and the frontend can
+        # match these rows to its optimistic bubbles by id.
+        assert rows[0]["message_id"] == "t1:user"
         assert rows[1]["content"] == "durable body"
+        assert rows[1]["message_id"] == "t1:assistant"
         assert rows[1]["incomplete"] is False
         assert rows[1]["terminal"] is None
 
     asyncio.run(run())
 
 
-def test_pump_durable_assistant_row_incomplete_on_error(tmp_path: Path) -> None:
+def test_pump_durable_assistant_row_committed_turn_end_overrides_error(tmp_path: Path) -> None:
+    """A committed turn_end + a contradictory turn_result terminal=error (citation
+    gate / blank-turn notice) must persist the assistant row as COMPLETE, not as a
+    truncated error copy. Regression for the 33KB-committed / 6.4KB-error-prefix
+    incident: the durable row followed the terminal frame, not the committed turn."""
+
+    async def run() -> None:
+        turn_store = LocalTurnStore()
+        cancel = asyncio.Event()
+        sk = "agent:main:app:errch"
+        ch_store = ChannelMessageStore(workspace_root=tmp_path)
+        frames = [
+            _agent_frame({"type": "text_delta", "delta": "the committed answer"}),
+            _agent_frame({"type": "turn_end", "status": "committed", "turn_id": "t2"}),
+            _agent_frame(
+                {"type": "turn_result", "terminal": "error", "error": "boom", "turn_id": "t2"}
+            ),
+            b"data: [DONE]\n\n",
+        ]
+
+        async def _source():
+            for f in frames:
+                yield f
+                await asyncio.sleep(0)
+
+        gen = drive_detached_local_stream(
+            _source(),
+            session_id=sk,
+            turn_id="t2",
+            cancel=cancel,
+            store=turn_store,
+            user_message="ask",
+            channel="errch",
+            store_accessor=lambda: ch_store,
+        )
+        async for _ in gen:
+            pass
+
+        rows = await ch_store.list_messages(session_id=sk)
+        assistant = [r for r in rows if r["role"] == "assistant"]
+        assert len(assistant) == 1
+        assert assistant[0]["content"] == "the committed answer"
+        assert assistant[0]["incomplete"] is False
+        assert assistant[0]["terminal"] is None
+        # Stable id, not a random uuid.
+        assert assistant[0]["message_id"] == "t2:assistant"
+
+    asyncio.run(run())
+
+
+def test_pump_durable_assistant_row_incomplete_on_aborted_turn_end(tmp_path: Path) -> None:
+    """An aborted turn_end (genuine abort) keeps the partial answer flagged
+    incomplete so a truncated answer is never mistaken for a committed one."""
+
+    async def run() -> None:
+        turn_store = LocalTurnStore()
+        cancel = asyncio.Event()
+        sk = "agent:main:app:errch"
+        ch_store = ChannelMessageStore(workspace_root=tmp_path)
+        frames = [
+            _agent_frame({"type": "text_delta", "delta": "partial answer"}),
+            _agent_frame({"type": "turn_end", "status": "aborted", "turn_id": "t2"}),
+            _agent_frame(
+                {"type": "turn_result", "terminal": "aborted", "turn_id": "t2"}
+            ),
+            b"data: [DONE]\n\n",
+        ]
+
+        async def _source():
+            for f in frames:
+                yield f
+                await asyncio.sleep(0)
+
+        gen = drive_detached_local_stream(
+            _source(),
+            session_id=sk,
+            turn_id="t2",
+            cancel=cancel,
+            store=turn_store,
+            user_message="ask",
+            channel="errch",
+            store_accessor=lambda: ch_store,
+        )
+        async for _ in gen:
+            pass
+
+        rows = await ch_store.list_messages(session_id=sk)
+        assistant = [r for r in rows if r["role"] == "assistant"]
+        assert len(assistant) == 1
+        assert assistant[0]["content"] == "partial answer"
+        assert assistant[0]["incomplete"] is True
+        assert assistant[0]["terminal"] == "aborted"
+
+    asyncio.run(run())
+
+
+def test_pump_durable_assistant_row_incomplete_on_error_no_turn_end(tmp_path: Path) -> None:
+    """A turn_result terminal=error with NO turn_end (e.g. a cancel mid-stream)
+    keeps the error stamping: there is no committed signal to trust."""
+
     async def run() -> None:
         turn_store = LocalTurnStore()
         cancel = asyncio.Event()
