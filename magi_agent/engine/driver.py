@@ -5118,8 +5118,8 @@ class MagiEngineDriver:
                 )
                 return
 
-        # PR5b terminal-side honest blocked notice. Computed HERE (not cached at
-        # the recovery-loop exit) on the CURRENT ``emitted_text``, because the
+        # Terminal-side honest blocked notice. Computed HERE (not cached at the
+        # recovery-loop exit) on the CURRENT ``emitted_text``, because the
         # zero-edit guard and the coding-repair fork above can mutate it and a
         # ``response_clear`` can blank it. Reaching this point means every
         # finalizer error-terminal pre-emption already returned: the cancel /
@@ -5127,24 +5127,37 @@ class MagiEngineDriver:
         # (custom_llm_criterion_blocked), and the pre-final-gate / coding-repair
         # loop (pre_final_evidence_gate_blocked). So a gated turn correctly
         # surfaces Terminal.error and never reaches this notice (gates win).
-        # When escalation is OFF the whole block is a no-op (escalated_blank is
-        # False), so the OFF and PR5a paths stay byte-identical.
-        escalated_blank = (
-            bool(empty_response_recovery)
-            and getattr(empty_response_recovery, "escalate", False)
-            and recoveries_used > 0
-            and not budget_exhausted
-            and not emitted_text
-            and not net_user_text_streamed
-        )
-        if escalated_blank:
+        #
+        # Invariant: a committed turn must NEVER end with zero streamed answer
+        # text and no notice. The notice therefore fires for ANY blank completed
+        # terminal, regardless of which re-invoke branch drove the last attempt
+        # (empty-response recovery, grace, goal-nudge, or goal-loop/auto-continue)
+        # and regardless of recovery bookkeeping. The old escalation conditions
+        # only distinguish the reason label (``exhausted_empty`` when the
+        # empty-response-recovery escalation specifically drove it, ``blank_turn``
+        # otherwise). Gate / cancel / error paths have already returned above, so
+        # they still win.
+        blank_turn = (not emitted_text) and (not net_user_text_streamed)
+        if blank_turn:
+            escalation_held = (
+                bool(empty_response_recovery)
+                and getattr(empty_response_recovery, "escalate", False)
+                and recoveries_used > 0
+                and not budget_exhausted
+            )
+            if escalation_held:
+                blocked_reason = "exhausted_empty"
+                # initial invocation + the corrective re-invocations.
+                blocked_attempts = recoveries_used + 1
+            else:
+                blocked_reason = "blank_turn"
+                blocked_attempts = llm_call_attempt
             yield RuntimeEvent(
                 type="status",
                 payload={
                     "type": "empty_response_blocked",
-                    "reason": "exhausted_empty",
-                    # initial invocation + the corrective re-invocations.
-                    "attempts": recoveries_used + 1,
+                    "reason": blocked_reason,
+                    "attempts": blocked_attempts,
                 },
                 turn_id=turn_id,
             )

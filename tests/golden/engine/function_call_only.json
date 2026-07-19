@@ -11,6 +11,23 @@
       },
       "turn_id": "t1",
       "type": "tool"
+    },
+    {
+      "payload": {
+        "attempts": 1,
+        "reason": "blank_turn",
+        "type": "empty_response_blocked"
+      },
+      "turn_id": "t1",
+      "type": "status"
+    },
+    {
+      "payload": {
+        "delta": "I was not able to produce a final answer for this turn after retrying. The tools ran but I could not synthesize a result. Please rephrase or narrow the request, or check the tool output above.",
+        "type": "text_delta"
+      },
+      "turn_id": "t1",
+      "type": "token"
     }
   ],
   "terminal": {

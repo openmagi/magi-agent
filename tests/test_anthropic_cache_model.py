@@ -707,3 +707,69 @@ class TestRoutingSeam:
             "google", "gemini-3.5-flash", None, None
         )
         assert result == "gemini-3.5-flash"
+
+
+# ---------------------------------------------------------------------------
+# max_tokens resolution: model caps, operator override, malformed fallback
+# ---------------------------------------------------------------------------
+
+
+class TestResolveAnthropicMaxTokens:
+    """ADK's ``AnthropicLlm.max_tokens`` defaults to 8192, which silently
+    truncates long answers (finish_reason is dropped by ADK so the engine cannot
+    see the truncation; incident 2026-07-19). ``build_cache_aware_claude`` raises
+    the cap per model family via ``_resolve_anthropic_max_tokens``.
+    """
+
+    def test_opus_model_gets_32k(self) -> None:
+        resolve = _model_module()._resolve_anthropic_max_tokens
+        assert resolve("claude-opus-4-6", env={}) == 32000
+        # Case-insensitive substring match.
+        assert resolve("anthropic/Claude-OPUS-4-8", env={}) == 32000
+
+    def test_sonnet_model_gets_64k(self) -> None:
+        resolve = _model_module()._resolve_anthropic_max_tokens
+        assert resolve("claude-sonnet-5", env={}) == 64000
+
+    def test_haiku_model_gets_64k(self) -> None:
+        resolve = _model_module()._resolve_anthropic_max_tokens
+        assert resolve("claude-3-5-haiku", env={}) == 64000
+
+    def test_env_override_wins_verbatim(self) -> None:
+        resolve = _model_module()._resolve_anthropic_max_tokens
+        # Override wins for both families, with no clamping.
+        assert resolve("claude-opus-4-6", env={"MAGI_ANTHROPIC_MAX_TOKENS": "12000"}) == 12000
+        assert resolve("claude-sonnet-5", env={"MAGI_ANTHROPIC_MAX_TOKENS": "999999"}) == 999999
+        assert resolve("claude-sonnet-5", env={"MAGI_ANTHROPIC_MAX_TOKENS": " 8192 "}) == 8192
+
+    def test_malformed_env_falls_back_to_model_default(self) -> None:
+        resolve = _model_module()._resolve_anthropic_max_tokens
+        for bad in ("", "  ", "abc", "0", "-5", "3.5"):
+            assert resolve("claude-sonnet-5", env={"MAGI_ANTHROPIC_MAX_TOKENS": bad}) == 64000
+            assert resolve("claude-opus-4-6", env={"MAGI_ANTHROPIC_MAX_TOKENS": bad}) == 32000
+
+    def test_default_env_reads_os_environ(self, monkeypatch) -> None:
+        resolve = _model_module()._resolve_anthropic_max_tokens
+        monkeypatch.setenv("MAGI_ANTHROPIC_MAX_TOKENS", "5000")
+        assert resolve("claude-sonnet-5") == 5000
+        monkeypatch.delenv("MAGI_ANTHROPIC_MAX_TOKENS", raising=False)
+        assert resolve("claude-sonnet-5") == 64000
+
+    def test_build_cache_aware_claude_applies_resolved_max_tokens(
+        self, monkeypatch
+    ) -> None:
+        pytest.importorskip("anthropic")
+        monkeypatch.delenv("MAGI_ANTHROPIC_MAX_TOKENS", raising=False)
+        module = _model_module()
+        sonnet = module.build_cache_aware_claude("claude-sonnet-5")
+        assert sonnet.max_tokens == 64000
+        assert sonnet.max_tokens == module._resolve_anthropic_max_tokens("claude-sonnet-5")
+
+        opus = module.build_cache_aware_claude("claude-opus-4-6")
+        assert opus.max_tokens == 32000
+
+    def test_build_cache_aware_claude_honors_env_override(self, monkeypatch) -> None:
+        pytest.importorskip("anthropic")
+        monkeypatch.setenv("MAGI_ANTHROPIC_MAX_TOKENS", "16384")
+        model = _model_module().build_cache_aware_claude("claude-sonnet-5")
+        assert model.max_tokens == 16384
