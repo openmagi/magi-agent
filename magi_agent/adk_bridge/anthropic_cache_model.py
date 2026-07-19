@@ -103,6 +103,43 @@ MESSAGE_TAIL_MAX_BREAKPOINTS = 2
 
 _EPHEMERAL_CACHE_CONTROL = {"type": "ephemeral"}
 
+# Per-model output-token ceilings for the native ADK Anthropic path. ADK's
+# ``AnthropicLlm.max_tokens`` defaults to 8192, which silently truncates any
+# answer longer than that at the provider, and ADK never populates
+# ``finish_reason`` on this path so the engine cannot even see the truncation
+# (incident 2026-07-19: two ~125s Sonnet 5 calls each generated exactly 8192
+# tokens and surfaced zero public text, then committed a blank turn). We raise
+# the cap to the model family's real output limit: current Claude Opus caps
+# output at 32K, Sonnet/Haiku families at 64K.
+_OPUS_MAX_OUTPUT_TOKENS = 32000
+_DEFAULT_ANTHROPIC_MAX_OUTPUT_TOKENS = 64000
+_MAX_TOKENS_ENV = "MAGI_ANTHROPIC_MAX_TOKENS"
+
+
+def _resolve_anthropic_max_tokens(
+    model: str, env: Mapping[str, str] | None = None
+) -> int:
+    """Return the ``max_tokens`` cap for *model* on the native ADK Anthropic path.
+
+    An operator override via ``MAGI_ANTHROPIC_MAX_TOKENS`` (a positive integer)
+    wins verbatim with no clamping. Otherwise the cap is derived from the model
+    id: any id containing "opus" (case-insensitive) gets 32000, every other
+    Anthropic model gets 64000. Malformed override values (non-int or <= 0) fall
+    back to the model-derived default and never raise.
+    """
+    source = os.environ if env is None else env
+    raw = source.get(_MAX_TOKENS_ENV)
+    if raw is not None:
+        try:
+            override = int(str(raw).strip())
+        except (TypeError, ValueError):
+            override = 0
+        if override > 0:
+            return override
+    if "opus" in (model or "").lower():
+        return _OPUS_MAX_OUTPUT_TOKENS
+    return _DEFAULT_ANTHROPIC_MAX_OUTPUT_TOKENS
+
 # Literal boundary marker between the static system-prompt prefix and the
 # per-turn dynamic tail. It is a copy of
 # ``magi_agent.runtime.message_builder.PROMPT_DYNAMIC_BOUNDARY`` kept here to
@@ -523,14 +560,22 @@ def build_cache_aware_claude(model: str):
     This is the seam the live runner boundary calls when a Claude/anthropic
     model id is routed through ADK. The base class (and therefore the
     ``_anthropic_client`` credential path) is selected to match the deployment.
+
+    The ``max_tokens`` cap is resolved per model via
+    :func:`_resolve_anthropic_max_tokens` (Opus 32K, Sonnet/Haiku 64K, or the
+    ``MAGI_ANTHROPIC_MAX_TOKENS`` operator override) instead of inheriting ADK's
+    8192 default, which silently truncates long answers (finish_reason is dropped
+    by ADK on this path so the engine cannot see the truncation; incident
+    2026-07-19).
     """
     cls = get_cache_aware_claude_class(model)
-    return cls(model=model)
+    return cls(model=model, max_tokens=_resolve_anthropic_max_tokens(model))
 
 
 __all__ = [
     "MESSAGE_TAIL_MAX_BREAKPOINTS",
     "PROMPT_DYNAMIC_BOUNDARY",
+    "_resolve_anthropic_max_tokens",
     "build_cache_aware_claude",
     "get_cache_aware_claude_class",
     "get_prompt_cache_metrics",

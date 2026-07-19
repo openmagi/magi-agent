@@ -14,7 +14,10 @@ from typing import Any
 import pytest
 
 from magi_agent.cli.engine import MagiEngineDriver
-from magi_agent.runtime.empty_response_recovery import EmptyResponseRecoveryConfig
+from magi_agent.runtime.empty_response_recovery import (
+    EmptyResponseRecoveryConfig,
+    build_blocked_notice,
+)
 from magi_agent.runtime.no_tool_finalizer import NoToolFinalizerConfig
 
 from tests.cli.test_engine_auto_continue import (
@@ -76,7 +79,10 @@ def test_blank_tool_turn_gets_finalizer_answer(monkeypatch):
 
 
 def test_no_finalizer_when_config_none(monkeypatch):
-    # RED baseline: without the finalizer, the same script commits blank.
+    # Without the finalizer the runner is NOT re-invoked (one call, no finalizer
+    # pass). Intentional behavior change (widened blank-turn invariant): the blank
+    # terminal now surfaces the honest blocked notice instead of committing a
+    # silent blank turn, so the streamed answer text is the deterministic notice.
     runner = FakeRunner(
         events_per_call=[
             [_ok_tool_end(), {"type": "tool_end", "id": "call-x", "status": "error"}],
@@ -89,7 +95,8 @@ def test_no_finalizer_when_config_none(monkeypatch):
 
     assert len(runner.calls) == 1
     assert "no_tool_finalizer" not in _payload_types(items)
-    assert _answer_text(items) == ""
+    assert "empty_response_blocked" in _payload_types(items)
+    assert _answer_text(items) == build_blocked_notice()
 
 
 def test_byte_identical_when_text_produced(monkeypatch):

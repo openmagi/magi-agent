@@ -72,6 +72,14 @@ class TestEscalationOffParity:
     def test_escalation_off_is_pr5a_identical(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Escalation OFF keeps PR5a recovery bookkeeping (initial + one recovery,
+        the plain corrective message, one recovery status).
+
+        Intentional behavior change (widened blank-turn invariant): a committed
+        turn that ends fully blank now ALWAYS surfaces the honest blocked notice,
+        even with escalation OFF, so the notice fires with reason ``blank_turn``
+        (the escalation bookkeeping did not drive it).
+        """
         # Make sure no process-wide ON env leaks in: this test builds its config
         # directly, but delete the escalation env to be belt-and-suspenders.
         monkeypatch.delenv(
@@ -88,10 +96,13 @@ class TestEscalationOffParity:
         assert len(runner.calls) == 2
         assert runner.calls[1].new_message_text == build_empty_response_message()
         assert len(_status_events(items, "empty_response_recovery")) == 1
-        assert _status_events(items, "empty_response_blocked") == []
-        # No synthetic blocked notice was streamed.
-        assert all(
-            d.payload.get("delta") != build_blocked_notice()
+        # Widened invariant: the fully blank terminal now gets a notice with
+        # reason "blank_turn" (escalation did not drive it).
+        blocked = _status_events(items, "empty_response_blocked")
+        assert len(blocked) == 1
+        assert blocked[0].payload["reason"] == "blank_turn"
+        assert any(
+            d.payload.get("delta") == build_blocked_notice()
             for d in _text_deltas(items)
         )
         assert _terminal(items).terminal == Terminal.completed
@@ -255,9 +266,14 @@ class TestEscalationGraceNotDouble:
         assert len(runner.calls) == 2
         assert len(_status_events(items, "empty_response_grace")) == 1
         assert _status_events(items, "empty_response_recovery") == []
-        assert _status_events(items, "empty_response_blocked") == []
-        assert all(
-            d.payload.get("delta") != build_blocked_notice()
+        # Widened blank-turn invariant (intentional): the blank grace terminal now
+        # surfaces the honest notice with reason "blank_turn"; grace itself stays
+        # single-shot (the recovery branch never fires).
+        blocked = _status_events(items, "empty_response_blocked")
+        assert len(blocked) == 1
+        assert blocked[0].payload["reason"] == "blank_turn"
+        assert any(
+            d.payload.get("delta") == build_blocked_notice()
             for d in _text_deltas(items)
         )
 
@@ -391,10 +407,16 @@ class TestEscalationRequiresMaster:
         )
         assert cfg is None
 
-    def test_escalation_inert_turn_is_byte_identical(
+    def test_master_off_blank_turn_surfaces_notice(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # Config None (master OFF) -> single invocation, no events.
+        """Intentional behavior change (widened blank-turn invariant): with the
+        master recovery flag OFF (config None) a single tools-only invocation that
+        commits fully blank now surfaces the honest notice (reason "blank_turn")
+        instead of ending silently. Recovery bookkeeping is still inert (one call,
+        no recovery status).
+        """
+        # Config None (master OFF) -> single invocation, no recovery events.
         runner = FakeRunner(events_per_call=[list(_TOOL_EVENTS)])
         _patch_lazy_deps(monkeypatch, runner)
         driver = MagiEngineDriver(runner=runner)  # config defaults to None
@@ -402,7 +424,15 @@ class TestEscalationRequiresMaster:
 
         assert len(runner.calls) == 1
         assert _status_events(items, "empty_response_recovery") == []
-        assert _status_events(items, "empty_response_blocked") == []
+        blocked = _status_events(items, "empty_response_blocked")
+        assert len(blocked) == 1
+        assert blocked[0].payload["reason"] == "blank_turn"
+        assert blocked[0].payload["attempts"] == 1
+        assert any(
+            d.payload.get("delta") == build_blocked_notice()
+            for d in _text_deltas(items)
+        )
+        assert _terminal(items).terminal == Terminal.completed
 
 
 # ---------------------------------------------------------------------------
@@ -553,6 +583,56 @@ class TestEscalationGoalLoopInteraction:
         if notice_deltas:
             assert items.index(notice_deltas[0]) == len(items) - 2
         assert isinstance(_terminal(items), RuntimeEvent) is False  # terminal is EngineResult
+
+
+class TestBlankTurnFromNonRecoveryBranch:
+    """Incident 2026-07-19: two long LLM calls each emitted only a committed
+    turn_end with zero public text (the ADK Anthropic 8192 max_tokens truncation
+    surfaced no deltas), and the terminal fell through silently because a
+    NON-recovery re-invoke branch (grace) drove the second attempt. The widened
+    invariant requires the honest notice on ANY blank committed terminal.
+    """
+
+    def test_two_blank_attempts_grace_branch_surfaces_notice(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # attempt 1: two tool events exhaust the event budget (no text) -> grace
+        # re-invoke drives attempt 2, which is fully empty (no text, no tools).
+        runner = FakeRunner(
+            events_per_call=[
+                list(_TOOL_EVENTS),
+                [],
+            ]
+        )
+        _patch_lazy_deps(monkeypatch, runner)
+        driver = MagiEngineDriver(
+            runner=runner,
+            max_event_count=2,
+            empty_response_recovery=_ESC_CFG,
+        )
+        items = _run_drive(driver)
+
+        # Grace (a non-recovery branch) drove attempt 2; recovery never fired.
+        assert len(runner.calls) == 2
+        assert len(_status_events(items, "empty_response_grace")) == 1
+        assert _status_events(items, "empty_response_recovery") == []
+
+        # (b) the status event carries reason "blank_turn" (non-recovery branch).
+        blocked = _status_events(items, "empty_response_blocked")
+        assert len(blocked) == 1
+        assert blocked[0].payload["reason"] == "blank_turn"
+
+        # (a) the deterministic blocked-notice text_delta was streamed.
+        notice_deltas = [
+            d
+            for d in _text_deltas(items)
+            if d.payload.get("delta") == build_blocked_notice()
+        ]
+        assert len(notice_deltas) == 1
+        assert notice_deltas[0].type == "token"
+
+        # (c) the terminal is a normal completion (gates/cancel/error win above).
+        assert _terminal(items).terminal == Terminal.completed
 
 
 class TestBuildConfigEscalate:
