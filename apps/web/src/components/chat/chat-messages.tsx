@@ -199,12 +199,33 @@ function shouldDropLocalAssistantForServer(
   return shouldPreferIncomingAssistantMessageCopy(localMessage, serverMessage);
 }
 
+function assistantCopyIsIncomplete(message: ChatMessage): boolean {
+  return (
+    message.incomplete === true ||
+    message.terminal === "error" ||
+    message.terminal === "aborted"
+  );
+}
+
 function preferredAssistantCopy(existing: ChatMessage, incoming: ChatMessage): ChatMessage {
-  if (!existing.serverId && incoming.serverId) return incoming;
-  if (existing.serverId && !incoming.serverId) return existing;
+  // A complete copy always wins over an incomplete one: a truncated server row
+  // (error/aborted terminal) must never replace a finalized streamed answer.
+  const existingIncomplete = assistantCopyIsIncomplete(existing);
+  const incomingIncomplete = assistantCopyIsIncomplete(incoming);
+  if (existingIncomplete !== incomingIncomplete) {
+    return existingIncomplete ? incoming : existing;
+  }
+  // Never let a shorter copy replace a longer one (regardless of serverId): the
+  // durable prefix must not overwrite the fuller streamed answer.
   const existingContent = normalizedDuplicateContent(existing)?.length ?? 0;
   const incomingContent = normalizedDuplicateContent(incoming)?.length ?? 0;
-  return incomingContent >= existingContent ? incoming : existing;
+  if (incomingContent !== existingContent) {
+    return incomingContent > existingContent ? incoming : existing;
+  }
+  // Equal length + equal completeness: prefer the server-adopted copy so the
+  // stable serverId is carried forward.
+  if (!existing.serverId && incoming.serverId) return incoming;
+  return existing;
 }
 
 function shouldDedupeSameTurnAssistant(
@@ -321,6 +342,13 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
 
     // Build set of local serverIds for exact match
     const localServerIds = new Set(localMessages.map((m) => m.serverId).filter(Boolean));
+    // Build set of local message ids so a durable server row whose STABLE id
+    // matches an optimistic local bubble's id is recognized as the SAME logical
+    // message. The local-serve backend stores the user row under the client
+    // `userMessageId` (== the bubble id), so this collapses a short user message
+    // that the content-length dedup heuristic (>=80 chars) structurally skips,
+    // without touching that heuristic.
+    const localIds = new Set(localMessages.map((m) => m.id));
 
     // Build timestamp index for proximity dedup (same role within 10s = duplicate)
     const localByRole = new Map<string, number[]>();
@@ -349,6 +377,9 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
     const filtered = serverMessages.filter((sm) => {
       // Exact serverId match — already present locally
       if (sm.serverId && localServerIds.has(sm.serverId)) return false;
+      // Stable-id collapse: the durable row shares its id with an optimistic
+      // local bubble (same logical message), which already renders it.
+      if (localIds.has(sm.id)) return false;
       const smTs = sm.timestamp ?? 0;
       // Timestamp-only proximity dedup: only for messages without a serverId
       // (optimistic locally-created messages). Server messages with a serverId

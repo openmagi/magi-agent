@@ -851,6 +851,9 @@ export async function fetchLocalChannelMessages(
       content?: string;
       createdAt?: number;
       turnId?: string | null;
+      messageId?: string;
+      incomplete?: boolean;
+      terminal?: string | null;
     };
     type FullRow = LegacyRow & {
       seq: number;
@@ -871,14 +874,19 @@ export async function fetchLocalChannelMessages(
     );
 
     if (!isFullMode) {
-      // Legacy path — behave exactly as before (no cursor update).
+      // Legacy path (no cursor update). Prefer the stable server messageId as the
+      // id so this row shares identity with the full=1 durable row for the same
+      // logical message (the merge/dedup layer keys on id first); fall back to the
+      // legacy `local-turn-<turnId>` id when the server omitted messageId.
       return messages
         .filter((m) => typeof m?.content === "string" && m.content.length > 0)
         .map((m, index) => ({
           id:
-            typeof m.turnId === "string" && m.turnId
-              ? `local-turn-${m.turnId}`
-              : `local-turn-${sessionId}-${index}`,
+            typeof m.messageId === "string" && m.messageId
+              ? m.messageId
+              : typeof m.turnId === "string" && m.turnId
+                ? `local-turn-${m.turnId}`
+                : `local-turn-${sessionId}-${index}`,
           role: (m.role === "system" ? "system" : "assistant") as "assistant" | "system",
           content: m.content as string,
           created_at: new Date(
@@ -886,6 +894,8 @@ export async function fetchLocalChannelMessages(
               ? m.createdAt
               : Date.now(),
           ).toISOString(),
+          ...(m.incomplete ? { incomplete: true } : {}),
+          ...(typeof m.terminal === "string" && m.terminal ? { terminal: m.terminal } : {}),
         }));
     }
 
@@ -913,6 +923,7 @@ export async function fetchLocalChannelMessages(
         ).toISOString(),
         seq: m.seq,
         ...(m.incomplete ? { incomplete: true } : {}),
+        ...(typeof m.terminal === "string" && m.terminal ? { terminal: m.terminal } : {}),
       }));
 
     // Update cursor to the highest seq we received (only when rows arrived).

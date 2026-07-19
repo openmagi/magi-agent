@@ -135,6 +135,11 @@ function mapServerMessages(msgs: ServerMessage[]): ChatMessage[] {
     timestamp: new Date(m.created_at).getTime(),
     serverId: m.id,
     researchEvidence: researchEvidenceFromServerMessage(m),
+    // Propagate the durable row's terminal state so the reconcile/dedup backstop
+    // never lets an incomplete (error/aborted) server copy replace or win over a
+    // finalized streamed answer.
+    ...(m.incomplete ? { incomplete: true } : {}),
+    ...(typeof m.terminal === "string" && m.terminal ? { terminal: m.terminal } : {}),
   }));
 }
 
@@ -720,8 +725,20 @@ export function ChatViewClient({
       if (!isCurrentBot()) return;
       const responseLanguage = detectMessageResponseLanguage(messageText);
 
+      // Generate the user-message id once so the optimistic bubble and the POST
+      // body carry the same value: the local-serve backend writes the durable
+      // user row under this id, so a refresh / second window collapses it against
+      // the bubble instead of duplicating (critical for short user messages that
+      // the content-length dedup heuristic skips). Also mint a unique per-turn id
+      // so each turn's durable rows get a stable, distinct <turnId>:* identity.
+      const userMessageId = `user-${Date.now()}`;
+      const turnId =
+        typeof crypto !== "undefined" &&
+        typeof (crypto as { randomUUID?: () => string }).randomUUID === "function"
+          ? (crypto as { randomUUID: () => string }).randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const userMsg = {
-        id: `user-${Date.now()}`,
+        id: userMessageId,
         role: "user" as const,
         content: messageText,
         timestamp: Date.now(),
@@ -779,6 +796,8 @@ export function ChatViewClient({
             ...(sendOptions?.goalMode ? { goalMode: true } : {}),
             ...(sendOptions?.reasoningEffort ? { reasoningEffort: sendOptions.reasoningEffort } : {}),
             ...(sendOptions?.agentMode ? { agentMode: sendOptions.agentMode } : {}),
+            turnId,
+            userMessageId,
             onDelta: (delta) => {
               if (!isCurrentBot()) return;
               const s = useChatStore.getState().channelStates[channel];
@@ -1018,7 +1037,12 @@ export function ChatViewClient({
                       ) {
                         continue;
                       }
-                      if (shouldPatchAssistantTextFromServer(assistantText, latest.content)) {
+                      if (
+                        shouldPatchAssistantTextFromServer(assistantText, latest.content, {
+                          incomplete: latest.incomplete,
+                          terminal: latest.terminal,
+                        })
+                      ) {
                         store.addMessage(channel, {
                           id: assistantMsgId,
                           role: "assistant",
