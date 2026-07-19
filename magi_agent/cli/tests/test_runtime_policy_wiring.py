@@ -695,7 +695,14 @@ def test_engine_pre_final_verifier_bus_passes_with_collected_evidence(
     items = asyncio.run(_drive())
     events = [item for item in items if isinstance(item, RuntimeEvent)]
     terminal = items[-1]
-    gate_event = events[-1].payload
+    # Select the gate event by type, not position: a blank completed turn now
+    # appends the honest blank-turn notice (empty_response_blocked status +
+    # blocked-notice token) after the gate event.
+    gate_event = next(
+        event.payload
+        for event in events
+        if event.payload.get("type") == "pre_final_evidence_gate"
+    )
 
     assert isinstance(terminal, EngineResult)
     assert terminal.terminal == Terminal.completed
@@ -1474,12 +1481,17 @@ def test_engine_audits_active_phase_denial_and_continues_configured_route(
         },
     }
     types_in_order = [event.payload.get("type") for event in events]
+    # The trailing empty_response_blocked status + text_delta are the honest
+    # blank-turn notice: this turn streams no answer text, so the driver now
+    # surfaces the deterministic non-answer instead of committing silently.
     assert types_in_order == [
         "runner_policy_assembly",
         "runner_policy_route_selection",
         "phase_route_decision",
         "runner_policy_route_blocked",
         "pre_final_evidence_gate",
+        "empty_response_blocked",
+        "text_delta",
     ]
 
 
