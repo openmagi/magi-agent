@@ -173,9 +173,21 @@ class ChannelMessageStore:
         # Build WHERE clause.  channel (when provided) is the cross-session
         # scope; session_id is the reset-aware per-session scope.  app_name is
         # only constrained when the caller passes a truthy value.
+        #
+        # When channel is provided we use a two-arm OR so that:
+        #   arm 1  channel = ?                  -- rows written with an explicit
+        #                                          channel value (post-fix writes)
+        #   arm 2  channel = '' AND session_id = ?  -- rows written before the
+        #                                          channel column was populated
+        #                                          (legacy rows, migration
+        #                                          back-fill, test seeds that
+        #                                          omit channel=)
+        # This keeps backward compatibility: a channel-scoped full=1 read
+        # correctly returns both old session-only rows AND new multi-session rows
+        # for the same channel.
         if channel is not None:
-            clauses: list[str] = ["channel = ?"]
-            params: list[Any] = [channel]
+            clauses: list[str] = ["(channel = ? OR (channel = '' AND session_id = ?))"]
+            params: list[Any] = [channel, session_id]
         else:
             clauses = ["session_id = ?"]
             params = [session_id]
