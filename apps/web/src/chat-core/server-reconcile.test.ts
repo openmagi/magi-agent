@@ -60,6 +60,52 @@ describe("server chat reconciliation", () => {
     ).toBe(false);
   });
 
+  it("refuses an incomplete server row even when it is longer than the local copy", () => {
+    // The 33KB-committed / durable-error-prefix incident: the durable row was
+    // LONGER but ended on an error terminal. It must never replace the finalized
+    // streamed answer (that is exactly how the answer reappeared truncated).
+    expect(
+      shouldPatchAssistantTextFromServer(
+        "This streamed answer is complete and final.",
+        "This streamed answer is complete and final, plus a lot more error-prefix text that was truncated.",
+        { incomplete: true },
+      ),
+    ).toBe(false);
+    expect(
+      shouldPatchAssistantTextFromServer(
+        "This streamed answer is complete and final.",
+        "This streamed answer is complete and final, plus a lot more error-prefix text that was truncated.",
+        { terminal: "error" },
+      ),
+    ).toBe(false);
+    expect(
+      shouldPatchAssistantTextFromServer(
+        "This streamed answer is complete and final.",
+        "This streamed answer is complete and final, plus a lot more aborted-prefix text.",
+        { terminal: "aborted" },
+      ),
+    ).toBe(false);
+  });
+
+  it("refuses a shorter (complete) server row without replacement characters", () => {
+    expect(
+      shouldPatchAssistantTextFromServer(
+        "The full streamed answer with all of its content intact.",
+        "A shorter durable prefix.",
+      ),
+    ).toBe(false);
+  });
+
+  it("still patches a longer complete server row (no terminal flags)", () => {
+    expect(
+      shouldPatchAssistantTextFromServer(
+        "This streamed response stopped early.",
+        "This streamed response stopped early, then the committed history included the missing final sentence.",
+        { incomplete: false, terminal: null },
+      ),
+    ).toBe(true);
+  });
+
   it("finds the latest assistant message from ordered server history", () => {
     const messages: ServerMessage[] = [
       {

@@ -205,6 +205,11 @@ function mapServerMessages(msgs: ServerMessage[]): ChatMessage[] {
     // Thread seq onto ChatMessage so seq-aware sort can use server ordering.
     // Absent on legacy/hosted rows -- comparator falls back to timestamp.
     ...(m.seq != null ? { seq: m.seq } : {}),
+    // Propagate the durable row's terminal state so the reconcile/dedup backstop
+    // never lets an incomplete (error/aborted) server copy win over a finalized
+    // streamed answer.
+    ...(m.incomplete ? { incomplete: true } : {}),
+    ...(typeof m.terminal === "string" && m.terminal ? { terminal: m.terminal } : {}),
   }));
 }
 
@@ -1394,7 +1399,12 @@ export function ChatViewClient({
                       ) {
                         continue;
                       }
-                      if (shouldPatchAssistantTextFromServer(assistantText, latest.content)) {
+                      if (
+                        shouldPatchAssistantTextFromServer(assistantText, latest.content, {
+                          incomplete: latest.incomplete,
+                          terminal: latest.terminal,
+                        })
+                      ) {
                         store.addMessage(channel, {
                           id: assistantMsgId,
                           role: "assistant",

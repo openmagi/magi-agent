@@ -1309,6 +1309,11 @@ def register_streaming_chat_routes(
         if not session_id:
             session_id = uuid.uuid4().hex
         turn_id = _body_string(body, "turnId", f"{session_id}:turn")
+        # The client (local dashboard) sends ``userMessageId`` = the optimistic
+        # user bubble's id; the durable user row is stored under it so the two
+        # windows / a refresh collapse it against the bubble instead of showing a
+        # duplicate. Empty when absent (the pump falls back to <turn_id>:user).
+        user_message_id = _body_string(body, "userMessageId", "") or None
         # PR-H: stamp handler entry. Pairs with the exit stamp wrapped
         # around the streaming body below. Default-OFF (no-op unless
         # MAGI_CHILD_RUNNER_EMPTY_DEBUG is truthy).
@@ -1381,6 +1386,7 @@ def register_streaming_chat_routes(
                         turn_id=turn_id,
                         cancel=gate5b_cancel,
                         user_message=prompt,
+                        user_message_id=user_message_id,
                         channel=_gate5b_channel,
                         store_accessor=_channel_message_store_accessor,
                     ),
@@ -1526,6 +1532,7 @@ def register_streaming_chat_routes(
                     turn_id=turn_id,
                     cancel=cancel,
                     user_message=prompt,
+                    user_message_id=user_message_id,
                     channel=_channel_from_session_id(session_id),
                     store_accessor=_channel_message_store_accessor,
                 ):

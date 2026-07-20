@@ -114,6 +114,15 @@ export interface ChatMessage {
    * instead of above the entire finalized assistant message.
    */
   injectedAfterChars?: number;
+  /**
+   * Set when this message was rehydrated from a durable server row that ended
+   * on an error/aborted terminal (local-serve only). A server row flagged
+   * incomplete must never win over a locally-finalized streamed copy, and never
+   * replace a longer local copy (server-reconcile backstop).
+   */
+  incomplete?: boolean;
+  /** Terminal reason (``error`` / ``aborted``) carried alongside ``incomplete``. */
+  terminal?: string | null;
 }
 
 /**
@@ -656,6 +665,8 @@ export interface ServerMessage {
   created_at: string;
   seq?: number;
   incomplete?: boolean;
+  /** Terminal reason (``error`` / ``aborted``) carried alongside ``incomplete``. */
+  terminal?: string | null;
   research_evidence?: ResearchEvidenceSnapshot | null;
   researchEvidence?: ResearchEvidenceSnapshot | null;
   usage?: ResponseUsage | null;

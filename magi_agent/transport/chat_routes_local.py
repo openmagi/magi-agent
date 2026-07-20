@@ -375,6 +375,13 @@ async def _local_adk_chat_sse(
         used_tool = False
         turn_errored = False
         turn_error_reason: str | None = None  # U2: captured for assistant-row terminal field
+        # Terminal truth: a turn can commit (turn_end status=committed) yet still
+        # carry an EngineResult error (citation-gate refusal / blank-turn notice).
+        # When a committed turn_end is seen, the assistant row is NOT flagged
+        # incomplete -- the answer committed, so it must not be persisted as an
+        # error copy that later vanishes / reappears truncated. No turn_end (or an
+        # aborted one) leaves ``turn_errored`` authoritative.
+        saw_committed_turn_end = False
         async for item in stream:
             # Drain any agent-events SpawnAgent (or other tools) pushed during
             # the previous engine step, so the dashboard sees them in causal
@@ -395,6 +402,20 @@ async def _local_adk_chat_sse(
                     )
                 break
             event_payload = dict(item.payload)
+            if event_payload.get("type") == "turn_end":
+                _te_status = event_payload.get("status")
+                if _te_status == "committed" or (
+                    _te_status == "aborted"
+                    and event_payload.get("reason") == "missing_runtime_receipt"
+                ):
+                    # The ADK bridge emits the final-response turn_end as committed
+                    # but the local OSS runner has no receipt, so the projection
+                    # can downgrade it to aborted/missing_runtime_receipt; that is
+                    # a genuinely committed turn (mirrors streaming_chat.py's
+                    # _reconcile_missing_receipt_turn_end).
+                    saw_committed_turn_end = True
+                elif _te_status == "aborted":
+                    saw_committed_turn_end = False
             if event_payload.get("type") == "tool_start":
                 used_tool = True
             yield _sse_event("agent", event_payload)
@@ -475,6 +496,10 @@ async def _local_adk_chat_sse(
         # deliver nothing, mirroring the existing honesty rule).
         if _ch_store is not None:
             _assistant_content = "".join(assistant_parts)
+            # Terminal truth: a committed turn_end overrides an EngineResult error
+            # so a committed answer is stored incomplete=0 terminal=NULL.
+            _effective_incomplete = turn_errored and not saw_committed_turn_end
+            _effective_terminal = turn_error_reason if _effective_incomplete else None
             if _assistant_content:
                 try:
                     await _ch_store.append_message(
@@ -484,8 +509,8 @@ async def _local_adk_chat_sse(
                         content=_assistant_content,
                         channel=_channel_for_log,
                         turn_id=log_turn_id,
-                        incomplete=turn_errored,
-                        terminal=turn_error_reason,
+                        incomplete=_effective_incomplete,
+                        terminal=_effective_terminal,
                     )
                 except Exception:  # noqa: BLE001, S110 -- best-effort; never break the turn
                     pass

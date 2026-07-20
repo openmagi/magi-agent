@@ -372,3 +372,85 @@ def test_completed_turn_record_shape() -> None:
     )
     assert rec.role == "assistant"
     assert rec.detached_snapshot is None
+
+
+# ---------------------------------------------------------------------------
+# A1: final authoritative text frame (longer-wins), A2: committed turn_end truth,
+# A3: stable cross-source message id in the completed_messages projection.
+# ---------------------------------------------------------------------------
+
+
+def test_reducer_final_aggregate_frame_replaces_prefix_longer_wins() -> None:
+    # Streamed deltas carry a PREFIX; a final aggregate frame carries the full
+    # text -> content becomes the full text (adopted, not appended). This is the
+    # 33KB-prefix incident shape in miniature.
+    r = LocalSnapshotReducer(session_id="s", turn_id="t")
+    r.ingest(_agent_frame({"type": "text_delta", "delta": "Hello "}))
+    r.ingest(_agent_frame({"type": "message", "content": "Hello world, the full answer"}))
+    assert r.content == "Hello world, the full answer"
+
+
+def test_reducer_final_aggregate_shorter_than_deltas_keeps_streamed_text() -> None:
+    # A final aggregate SHORTER than the accumulated deltas must never shorten
+    # the durable answer (streamed text is truth per the aggregate-mismatch guard).
+    r = LocalSnapshotReducer(session_id="s", turn_id="t")
+    r.ingest(_agent_frame({"type": "text_delta", "delta": "The complete streamed answer"}))
+    r.ingest(_agent_frame({"type": "message", "content": "short"}))
+    assert r.content == "The complete streamed answer"
+
+
+def test_reducer_effective_terminal_committed_turn_end_overrides_error() -> None:
+    r = LocalSnapshotReducer(session_id="s", turn_id="t")
+    r.ingest(_agent_frame({"type": "text_delta", "delta": "answer"}))
+    r.ingest(_agent_frame({"type": "turn_end", "status": "committed", "turn_id": "t"}))
+    r.ingest(_agent_frame({"type": "turn_result", "terminal": "error", "turn_id": "t"}))
+    # Raw terminal still reflects the turn_result frame ...
+    assert r.terminal == "error"
+    # ... but the effective (durability) terminal follows the committed turn_end.
+    assert r.turn_end_status == "committed"
+    assert r.effective_terminal() is None
+    assert r.effective_incomplete() is False
+
+
+def test_reducer_effective_terminal_aborted_turn_end_stays_incomplete() -> None:
+    r = LocalSnapshotReducer(session_id="s", turn_id="t")
+    r.ingest(_agent_frame({"type": "text_delta", "delta": "half"}))
+    r.ingest(_agent_frame({"type": "turn_end", "status": "aborted", "turn_id": "t"}))
+    assert r.effective_terminal() == "aborted"
+    assert r.effective_incomplete() is True
+
+
+def test_reducer_effective_terminal_no_turn_end_uses_turn_result() -> None:
+    r = LocalSnapshotReducer(session_id="s", turn_id="t")
+    r.ingest(_agent_frame({"type": "text_delta", "delta": "half"}))
+    r.ingest(_agent_frame({"type": "turn_result", "terminal": "error", "turn_id": "t"}))
+    assert r.effective_terminal() == "error"
+    assert r.effective_incomplete() is True
+
+
+def test_store_completed_messages_committed_turn_end_not_incomplete() -> None:
+    store = LocalTurnStore()
+    sk = "agent:main:app:general"
+    reducer = LocalSnapshotReducer(session_id=sk, turn_id="t1")
+    store.begin(sk, reducer)
+    reducer.ingest(_agent_frame({"type": "text_delta", "delta": "committed answer"}))
+    reducer.ingest(_agent_frame({"type": "turn_end", "status": "committed", "turn_id": "t1"}))
+    reducer.ingest(_agent_frame({"type": "turn_result", "terminal": "error", "turn_id": "t1"}))
+    store.finish(sk, reducer)
+    msgs = store.completed_messages(sk)
+    assert len(msgs) == 1
+    assert msgs[0]["content"] == "committed answer"
+    assert "incomplete" not in msgs[0]
+    assert "terminal" not in msgs[0]
+
+
+def test_store_completed_messages_emits_stable_message_id() -> None:
+    store = LocalTurnStore()
+    sk = "agent:main:app:general"
+    reducer = LocalSnapshotReducer(session_id=sk, turn_id="t-abc")
+    store.begin(sk, reducer)
+    _feed_completed(reducer, "answer")
+    store.finish(sk, reducer)
+    msgs = store.completed_messages(sk)
+    assert msgs[0]["messageId"] == "t-abc:assistant"
+    assert msgs[0]["turnId"] == "t-abc"
