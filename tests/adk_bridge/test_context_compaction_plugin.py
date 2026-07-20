@@ -252,14 +252,20 @@ def test_tail_entirely_function_responses_widens_to_originating_call() -> None:
 
     _run(plugin.before_model_callback(callback_context=None, llm_request=req))
 
-    # The kept window must START with the function_call, not an orphan response.
+    # U1 pin: the last genuine user-text turn (index 8) is preserved ahead of the
+    # widened tail, so contents START with that user turn (never an orphan
+    # response). The orphan-widened function_call sits right after the pin.
     first = req.contents[0]
-    assert first.parts[0].function_call is not None
+    assert first.role == "user"
+    assert first.parts[0].text == "x" * 1600
+    assert first.parts[0].function_call is None
     assert not any(
         getattr(p, "function_response", None) is not None for p in (first.parts or [])
     )
-    # call (10) + 3 responses == 4 kept (widened from 3).
-    assert len(req.contents) == 4
+    # The widening still included the originating call before its responses.
+    assert req.contents[1].parts[0].function_call is not None
+    # pin (1) + call (10) + 3 responses == 5 kept (widened from 3, plus the pin).
+    assert len(req.contents) == 5
 
 
 def test_reused_session_does_not_accumulate_provenance_events() -> None:
@@ -1651,3 +1657,182 @@ def test_build_plugin_manual_enabled_forwarded() -> None:
     )
     assert plugin is not None
     assert plugin._manual_enabled is True
+
+
+# ---------------------------------------------------------------------------
+# U1: pin the active user task across a tail-drop
+# ---------------------------------------------------------------------------
+
+
+def _user_text(index: int, text: str) -> types.Content:
+    """A genuine user text turn (no function parts)."""
+    return types.Content(role="user", parts=[types.Part(text=text)])
+
+
+def _model_text(index: int, text: str) -> types.Content:
+    return types.Content(role="model", parts=[types.Part(text=text)])
+
+
+def _pin_fn_response(name: str) -> types.Content:
+    return types.Content(
+        role="user",
+        parts=[
+            types.Part(
+                function_response=types.FunctionResponse(
+                    name=name, response={"ok": True}
+                )
+            )
+        ],
+    )
+
+
+def test_pin_last_user_task_survives_tail_drop_summarize_off() -> None:
+    plugin = MagiContextCompactionPlugin(token_threshold=2_000, tail_events=4)
+    req = LlmRequest()
+    # The active user task is the FIRST content and would be dropped by a naive
+    # last-4 tail keep. It must survive, prepended ahead of the kept tail.
+    task = _user_text(0, "TASK: analyze the six uploaded documents")
+    contents = [task]
+    contents += [_model_text(i, "x" * 1600) for i in range(1, 30)]
+    req.contents = contents
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    # The pinned user task is present and is the FIRST content.
+    assert req.contents[0].parts[0].text == "TASK: analyze the six uploaded documents"
+    # The recent tail is preserved (last content unchanged).
+    assert req.contents[-1].parts[0].text == "x" * 1600
+    # Pinned task + tail (kept window is tail_events; pin adds one ahead).
+    assert len(req.contents) == plugin.tail_events + 1
+
+
+def test_pin_last_user_task_survives_tail_drop_summarize_on() -> None:
+    # summarize ON but the summary generation fails -> falls through to pure
+    # tail-drop; the pin must still preserve the active user task ahead of tail.
+    plugin = MagiContextCompactionPlugin(
+        token_threshold=2_000, tail_events=4, summarize_enabled=True
+    )
+    req = LlmRequest()
+    task = _user_text(0, "TASK: build the quarterly report")
+    contents = [task]
+    contents += [_model_text(i, "x" * 1600) for i in range(1, 30)]
+    req.contents = contents
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    texts = [
+        c.parts[0].text
+        for c in req.contents
+        if c.parts and getattr(c.parts[0], "text", None)
+    ]
+    # The exact active user task survives verbatim (head + [pinned_user] + tail).
+    assert "TASK: build the quarterly report" in texts
+    # The pinned task appears before the "xxxx" tail bodies.
+    task_pos = texts.index("TASK: build the quarterly report")
+    tail_pos = texts.index("x" * 1600)
+    assert task_pos < tail_pos
+
+
+def test_pin_not_applied_when_last_user_text_is_in_tail() -> None:
+    # When the last real user-text content is already inside the kept tail, no
+    # extra content is prepended (no double-inject).
+    plugin = MagiContextCompactionPlugin(token_threshold=2_000, tail_events=6)
+    req = LlmRequest()
+    contents = [_model_text(i, "x" * 1600) for i in range(20)]
+    # Put a genuine user turn well inside the last-6 window (index 18).
+    contents[18] = _user_text(18, "USER: latest instruction")
+    req.contents = contents
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    # No pin prepended: kept window is exactly tail_events.
+    assert len(req.contents) == plugin.tail_events
+    texts = [c.parts[0].text for c in req.contents]
+    assert "USER: latest instruction" in texts
+
+
+def test_pin_ignores_function_response_carrier_user_role() -> None:
+    # A function_response is carried on a role=="user" Content but is NOT a
+    # genuine user message; the pin must skip it and preserve the real user text.
+    plugin = MagiContextCompactionPlugin(token_threshold=2_000, tail_events=4)
+    req = LlmRequest()
+    task = _user_text(0, "TASK: the real user instruction")
+    contents = [task]
+    # A tool cycle: model text then a function_response carrier (role user).
+    for i in range(1, 30):
+        if i % 2 == 0:
+            contents.append(_pin_fn_response("Read"))
+        else:
+            contents.append(_model_text(i, "x" * 1600))
+    req.contents = contents
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    assert req.contents[0].parts[0].text == "TASK: the real user instruction"
+
+
+def test_pin_preserves_huge_user_task_without_size_condition() -> None:
+    plugin = MagiContextCompactionPlugin(token_threshold=2_000, tail_events=4)
+    req = LlmRequest()
+    huge = _user_text(0, "TASK: " + ("y" * 200_000))
+    contents = [huge]
+    contents += [_model_text(i, "x" * 1600) for i in range(1, 30)]
+    req.contents = contents
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    assert req.contents[0].parts[0].text == "TASK: " + ("y" * 200_000)
+
+
+# ---------------------------------------------------------------------------
+# U2: window-aware default threshold (env var unset)
+# ---------------------------------------------------------------------------
+
+
+def test_window_aware_default_does_not_compact_above_24k() -> None:
+    # token_threshold NOT explicit -> effective threshold derives from the model
+    # window (150_000 default). A context that exceeds 24k estimate but sits under
+    # the effective window-aware threshold must NOT compact.
+    plugin = MagiContextCompactionPlugin(
+        token_threshold=24_000, tail_events=16, token_threshold_explicit=False
+    )
+    req = LlmRequest()
+    # ~50k estimated tokens (100 * ~501): above 24k, far below effective
+    # ~106_500 for the 150_000 default window. Content count (100) stays under
+    # the event-count threshold (128) so the token threshold is isolated.
+    req.contents = [_content(i, "x" * 4000) for i in range(100)]
+    est_before = len(req.contents)
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    assert len(req.contents) == est_before  # untouched
+
+
+def test_explicit_threshold_24k_still_compacts_at_24k() -> None:
+    # env var explicitly set (explicit=True) -> 24k is authoritative; a context
+    # over 24k compacts even though the window-aware value would be higher.
+    plugin = MagiContextCompactionPlugin(
+        token_threshold=24_000, tail_events=16, token_threshold_explicit=True
+    )
+    req = LlmRequest()
+    # ~50k estimated tokens, 100 contents (under the 128 event-count threshold).
+    req.contents = [_content(i, "x" * 4000) for i in range(100)]
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    assert len(req.contents) < 100  # compacted
+
+
+def test_window_aware_default_compacts_when_over_effective() -> None:
+    plugin = MagiContextCompactionPlugin(
+        token_threshold=24_000, tail_events=16, token_threshold_explicit=False
+    )
+    req = LlmRequest()
+    # ~120k estimated tokens (120 * ~1001): above the effective ~106_500
+    # threshold -> must compact. 120 contents stays under the 128 event-count
+    # threshold so the token threshold is the sole trigger.
+    req.contents = [_content(i, "x" * 8000) for i in range(120)]
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    assert len(req.contents) < 120

@@ -180,6 +180,7 @@ class MagiContextCompactionPlugin(BasePlugin):
         *,
         token_threshold: int,
         tail_events: int,
+        token_threshold_explicit: bool = True,
         event_count_threshold: int = _EVENT_COUNT_THRESHOLD_DEFAULT,
         name: str = CONTEXT_COMPACTION_PLUGIN_NAME,
         real_tokens_enabled: bool = False,
@@ -219,6 +220,11 @@ class MagiContextCompactionPlugin(BasePlugin):
         if proactive_recovery_enabled and not (0.0 < proactive_critical_pct <= 1.0):
             raise ValueError("proactive_critical_pct must be in the range (0, 1]")
         self.token_threshold = token_threshold
+        # When False, the boundary-decision path derives a per-request,
+        # window-aware effective threshold from the model context window instead
+        # of the flat ``token_threshold`` default (fixes the turn-1 24k firing on
+        # 150k+ windows). When True, ``token_threshold`` is authoritative.
+        self._token_threshold_explicit = bool(token_threshold_explicit)
         self.tail_events = tail_events
         self.event_count_threshold = event_count_threshold
         # G4 deterministic tool-output prune pre-tier (default-OFF). When OFF the
@@ -695,6 +701,19 @@ class MagiContextCompactionPlugin(BasePlugin):
             )
 
             session_service, session, state = await self._decision_inputs()
+            # U2: window-aware default threshold. When the operator did NOT set
+            # MAGI_COMPACTION_TOKEN_THRESHOLD, the flat 24k default fires far
+            # below real model windows (150k+), compacting on turn 1. Derive a
+            # per-request effective threshold from the model's context window and
+            # decide against that instead. When the env var IS explicit, the
+            # configured value stays authoritative (byte-identical).
+            decision_config = self._config
+            if not self._token_threshold_explicit:
+                effective = self._effective_token_threshold(llm_request)
+                if effective > self._config.token_estimate_threshold:
+                    decision_config = self._config.model_copy(
+                        update={"token_estimate_threshold": effective}
+                    )
             decision = await self._boundary.compact_if_needed(
                 session_service=session_service,
                 session=session,
@@ -702,7 +721,7 @@ class MagiContextCompactionPlugin(BasePlugin):
                 events=events,
                 approvedSummaryRef=_COMPACTION_SUMMARY_REF,
                 approvedSummaryDigest=_COMPACTION_SUMMARY_DIGEST,
-                config=self._config,
+                config=decision_config,
             )
             if decision.status != "compacted":
                 return None
@@ -722,6 +741,23 @@ class MagiContextCompactionPlugin(BasePlugin):
             # finally) needs it to compute the incremented count. It is reset at
             # the next turn's READ instead, alongside the PRODUCE-side fields.
             self._pending_anchor_summary = None
+
+    def _effective_token_threshold(self, llm_request: Any) -> int:
+        """U2: window-aware default threshold for the boundary decision.
+
+        Returns ``max(token_threshold, int((window - output_reserve) *
+        real_tokens_pct))`` where ``window`` is the model's effective context
+        window (unknown model -> the conservative 150_000 default). Reuses the
+        existing ``real_tokens_pct`` (0.75) and ``output_reserve`` (8_000)
+        defaults so a 150k window yields ~106_500. Never raises: a degenerate
+        window falls back to the flat configured threshold.
+        """
+        try:
+            window = _window_for_model(_resolve_model_id(llm_request))
+            effective = int((window - self._output_reserve) * self._real_tokens_pct)
+            return max(self.token_threshold, effective)
+        except Exception:
+            return self.token_threshold
 
     def _real_token_decision(self) -> bool | None:
         """Return the real-token compaction decision, or ``None`` to defer.
@@ -823,12 +859,29 @@ class MagiContextCompactionPlugin(BasePlugin):
                 len(contents),
             )
         dropped_count = split_index
+        # U1: pin the active user task. Locate the LAST genuine user-text
+        # message (role == "user" carrying real text and NO function_call /
+        # function_response part). If it sits in the about-to-be-dropped prefix
+        # (index < split_index), preserve that single Content ahead of the kept
+        # tail on BOTH exit paths so the model never loses the task it was asked
+        # to do. Never conditioned on size: the user instruction is never
+        # expendable. Fail-open: a lookup error leaves ``pinned`` empty and the
+        # existing behaviour runs. Prepending a user turn cannot orphan a
+        # function pair (orphan widening already ran), and the downstream
+        # GeminiContentOrderingRepairControl merges adjacent same-role turns.
+        pinned: list[Any] = []
+        try:
+            pin_index = _last_real_user_text_index(contents)
+            if pin_index is not None and pin_index < split_index:
+                pinned = [contents[pin_index]]
+        except Exception:
+            pinned = []
         if self._summarize_enabled and split_index > 0:
             dropped = contents[:split_index]
             if dropped:
                 head = await self._build_summary_head(llm_request, dropped)
                 if head is not None:
-                    llm_request.contents = head + contents[split_index:]
+                    llm_request.contents = head + pinned + contents[split_index:]
                     # PR-F-LIFE3: after_compaction emit — fires on successful
                     # summary-head injection path.
                     try:
@@ -841,8 +894,11 @@ class MagiContextCompactionPlugin(BasePlugin):
                     except Exception:
                         pass
                     return None
-        # Fall through to the EXISTING pure tail-drop (byte-identical to today).
-        llm_request.contents = contents[split_index:]
+        # Fall through to the EXISTING pure tail-drop, now with the pinned active
+        # user task prepended (empty list => byte-identical to today). When the
+        # pin fires here, contents start with a user turn, so the gemini repair
+        # no longer needs its synthetic opener (the honest outcome).
+        llm_request.contents = pinned + contents[split_index:]
         # PR-F-LIFE3: after_compaction emit — fires on the pure tail-drop path.
         try:
             await self._maybe_emit_compaction_audit(
@@ -1350,6 +1406,39 @@ def _anchor_from_dropped(dropped: list[Any]) -> str | None:
         if body is not None:
             found = body
     return found
+
+
+def _last_real_user_text_index(contents: list[Any]) -> int | None:
+    """Index of the LAST genuine user-text message, or ``None`` when absent.
+
+    A genuine user message has ``role == "user"`` and carries at least one part
+    with non-empty ``text`` and NO ``function_call`` / ``function_response``
+    part (those are tool-cycle carriers that ride a ``user`` role, not real user
+    turns). Never raises: a malformed content is skipped.
+    """
+    for index in range(len(contents) - 1, -1, -1):
+        content = contents[index]
+        try:
+            if getattr(content, "role", None) != "user":
+                continue
+            parts = getattr(content, "parts", None) or []
+            has_text = False
+            has_function = False
+            for part in parts:
+                if getattr(part, "function_call", None) is not None:
+                    has_function = True
+                    break
+                if getattr(part, "function_response", None) is not None:
+                    has_function = True
+                    break
+                text = getattr(part, "text", None)
+                if isinstance(text, str) and text:
+                    has_text = True
+            if has_text and not has_function:
+                return index
+        except Exception:
+            continue
+    return None
 
 
 def _resolve_model_id(llm_request: Any) -> str | None:
@@ -2035,6 +2124,7 @@ def build_context_compaction_plugin(
     enabled: bool,
     token_threshold: int,
     tail_events: int,
+    token_threshold_explicit: bool = True,
     real_tokens_enabled: bool = False,
     real_tokens_pct: float = 0.75,
     output_reserve: int = 8_000,
@@ -2062,6 +2152,7 @@ def build_context_compaction_plugin(
     return MagiContextCompactionPlugin(
         token_threshold=token_threshold,
         tail_events=tail_events,
+        token_threshold_explicit=token_threshold_explicit,
         real_tokens_enabled=real_tokens_enabled,
         real_tokens_pct=real_tokens_pct,
         output_reserve=output_reserve,
