@@ -717,7 +717,11 @@ def _project_content_parts(
             return
         text = "".join(final_text_chunks)
         final_text_chunks.clear()
-        public_text = _public_stream_text(text)
+        # ANSWER PROSE: redact but do NOT truncate to the 400-char tool-preview
+        # ceiling. A truncated aggregate becomes a prefix of the fully streamed
+        # partials, defeating ``unstreamed_suffix`` overlap detection and
+        # replaying a duplicate truncated copy into durable history.
+        public_text = _public_stream_text_unbounded(text)
         if is_final_response:
             token_text = _unstreamed_final_text(public_text, partial_public_text[0])
             if token_text:
@@ -838,7 +842,10 @@ def _project_content_parts(
         text = getattr(part, "text", None)
         if text:
             if event.partial:
-                public_text = _public_stream_text(text)
+                # ANSWER PROSE: build the streamed delta and the overlap ledger
+                # with the SAME untruncated redaction the final-flush aggregate
+                # uses, so ``unstreamed_suffix`` compares like against like.
+                public_text = _public_stream_text_unbounded(text)
                 agent_events.append(
                     {"type": "text_delta", "delta": _paragraph_bounded(public_text)}
                 )
@@ -1421,6 +1428,18 @@ def _public_stream_text(value: str) -> str:
     return _public_text(value)
 
 
+def _public_stream_text_unbounded(value: str) -> str:
+    # Same private-marker guard and redaction as ``_public_stream_text`` but
+    # without the 400-char tool-preview truncation. Used for model ANSWER PROSE
+    # (the streamed partial deltas and the final-flush aggregate) so BOTH sides
+    # of the ``unstreamed_suffix`` overlap computation are built by the SAME
+    # untruncated function, preserving the prefix/overlap invariant it depends
+    # on.
+    if _has_private_text_marker(value):
+        return "[redacted-private]"
+    return _public_text_unbounded(value)
+
+
 def _leading_newlines(value: str) -> int:
     count = 0
     for char in value:
@@ -1443,6 +1462,19 @@ def _unstreamed_final_text(final_text: str, streamed_text: str) -> str:
     # Body single-homed in magi_agent/shared/text_overlap.py (PR-D4 / N-38);
     # lazy import keeps event_adapter cold-start clean.
     from magi_agent.shared.text_overlap import unstreamed_suffix  # noqa: PLC0415
+
+    # Defense in depth: if the final aggregate is a "..."-truncated PREFIX of the
+    # already-streamed text (the tool-preview truncation footgun this PR removes
+    # at the source), it carries NO new content. ``unstreamed_suffix`` would fail
+    # to overlap the trailing "..." and replay the whole truncated prefix as a
+    # duplicate; treat it as fully streamed instead. Kept adapter-local so the
+    # generic overlap helper stays a pure suffix computation.
+    if (
+        final_text.endswith("...")
+        and len(final_text) > 3
+        and streamed_text.startswith(final_text[:-3])
+    ):
+        return ""
 
     return unstreamed_suffix(final_text, streamed_text)
 
@@ -1774,7 +1806,23 @@ def _public_json_safe_preview_value(
 
 
 def _public_text(value: str) -> str:
-    redacted = _tool_preview.sanitize_tool_preview(value)
+    return _apply_public_text_redactions(_tool_preview.sanitize_tool_preview(value))
+
+
+def _public_text_unbounded(value: str) -> str:
+    # Redaction parity with ``_public_text`` (same secret/path/private-ref
+    # substitutions) MINUS the 400-char tool-preview truncation. Model ANSWER
+    # PROSE must never be clipped to the tool-preview ceiling: doing so makes the
+    # final aggregate a truncated PREFIX of the fully streamed partials, which
+    # breaks ``unstreamed_suffix`` overlap detection and replays a duplicate
+    # truncated copy into durable history. ``redact_secret_tokens`` is the same
+    # kernel ``sanitize_tool_preview`` wraps, without its length cap, so secret
+    # redaction is byte-identical up to the truncation ``_public_text`` would
+    # have applied.
+    return _apply_public_text_redactions(_tool_preview.redact_secret_tokens(value))
+
+
+def _apply_public_text_redactions(redacted: str) -> str:
     redacted = _GITHUB_PAT_RE.sub("[redacted]", redacted)
     redacted = _SLACK_TOKEN_RE.sub("[redacted]", redacted)
     redacted = _AWS_ACCESS_KEY_RE.sub("[redacted]", redacted)
