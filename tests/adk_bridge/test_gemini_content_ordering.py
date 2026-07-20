@@ -196,3 +196,14 @@ def test_provider_repair_flag_gates_registration() -> None:
         is None
     )
     assert build_gemini_content_ordering_control({"MAGI_RUNTIME_PROFILE": "safe"}) is None
+
+
+def test_user_opener_wording_is_honest_about_truncation() -> None:
+    from magi_agent.adk_bridge.control_plane import _genai_user_opener_content
+
+    content = _genai_user_opener_content()
+    text = content.parts[0].text
+    assert "truncated to fit the model's context window" in text
+    assert "restate the goal" in text
+    # The old, false "summarized" wording is gone.
+    assert "summarized" not in text

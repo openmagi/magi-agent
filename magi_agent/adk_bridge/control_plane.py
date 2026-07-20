@@ -275,7 +275,15 @@ def _genai_user_opener_content() -> Any:
 
     return types.Content(
         role="user",
-        parts=[types.Part(text="(Earlier conversation context was summarized.)")],
+        parts=[
+            types.Part(
+                text=(
+                    "(Earlier conversation context was truncated to fit the "
+                    "model's context window. The original instructions may be "
+                    "missing; ask the user to restate the goal if it is unclear.)"
+                )
+            )
+        ],
     )
 
 
@@ -1599,6 +1607,7 @@ def build_core_default_plane(
     compaction_plugin = build_context_compaction_plugin(
         enabled=compaction_env.enabled,
         token_threshold=compaction_env.token_threshold,
+        token_threshold_explicit=compaction_env.token_threshold_explicit,
         tail_events=compaction_env.tail_events,
         real_tokens_enabled=compaction_env.real_tokens_enabled,
         real_tokens_pct=compaction_env.real_tokens_pct,

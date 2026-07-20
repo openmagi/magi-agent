@@ -291,3 +291,19 @@ def test_manual_enabled_strict_truthy(value: str) -> None:
 def test_manual_enabled_falsy_garbage() -> None:
     cfg = parse_context_compaction_env({"MAGI_COMPACTION_MANUAL_ENABLED": "nope"})
     assert cfg.manual_enabled is False
+
+
+def test_token_threshold_explicit_false_when_env_absent() -> None:
+    cfg = parse_context_compaction_env({})
+    assert cfg.token_threshold_explicit is False
+
+
+def test_token_threshold_explicit_true_when_env_present() -> None:
+    cfg = parse_context_compaction_env(
+        {
+            "MAGI_CONTEXT_COMPACTION_ENABLED": "1",
+            "MAGI_COMPACTION_TOKEN_THRESHOLD": "24000",
+        }
+    )
+    assert cfg.token_threshold == 24_000
+    assert cfg.token_threshold_explicit is True

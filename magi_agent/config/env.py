@@ -700,6 +700,11 @@ _COMPACTION_CRITICAL_PCT_DEFAULT = 0.90
 class ContextCompactionEnv:
     enabled: bool = False
     token_threshold: int = _COMPACTION_TOKEN_THRESHOLD_DEFAULT
+    # True iff MAGI_COMPACTION_TOKEN_THRESHOLD is explicitly present in the env.
+    # When False the plugin derives a per-request, window-aware effective
+    # threshold instead of the flat default; when True the env value is
+    # authoritative (byte-identical to pre-existing env-set deployments).
+    token_threshold_explicit: bool = False
     tail_events: int = _COMPACTION_TAIL_EVENTS_DEFAULT
     real_tokens_enabled: bool = False
     real_tokens_pct: float = _COMPACTION_REAL_TOKENS_PCT_DEFAULT
@@ -727,6 +732,7 @@ def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv
     )
     if token_threshold < 1:
         raise RuntimeEnvError(f"{COMPACTION_TOKEN_THRESHOLD_ENV} must be >= 1")
+    token_threshold_explicit = COMPACTION_TOKEN_THRESHOLD_ENV in env
     tail_events = _int_env(
         env,
         COMPACTION_TAIL_EVENTS_ENV,
@@ -820,6 +826,7 @@ def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv
     return ContextCompactionEnv(
         enabled=enabled,
         token_threshold=token_threshold,
+        token_threshold_explicit=token_threshold_explicit,
         tail_events=tail_events,
         real_tokens_enabled=real_tokens_enabled,
         real_tokens_pct=real_tokens_pct,
