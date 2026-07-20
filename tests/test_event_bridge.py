@@ -1183,8 +1183,113 @@ def test_event_bridge_drops_duplicate_aggregate_text_after_streaming_partials() 
     )
     projection = bridge.project_adk_event(mixed, turn_id="t1")
 
-    # Only the tool_start survives — the duplicate text aggregate is dropped.
+    # Only the tool_start survives; the duplicate text aggregate is dropped.
     assert [e["type"] for e in projection.agent_events] == ["tool_start"]
+
+
+def _final_text_event(text: str) -> Event:
+    return Event(
+        author="model",
+        content=types.Content(role="model", parts=[types.Part(text=text)]),
+        partial=False,
+        turn_complete=True,
+        invocation_id="t1",
+    )
+
+
+def test_final_flush_emits_no_text_delta_when_long_answer_fully_streamed() -> None:
+    """A >400-char answer streamed fully as partials must leave the final
+    is_final_response flush with NOTHING unstreamed.
+
+    Regression: the final aggregate was redacted through the tool-preview
+    sanitizer, which truncates at 400 chars to ``s[:397] + "..."``. The
+    truncated aggregate became a PREFIX of the fully streamed partials, so
+    ``unstreamed_suffix`` never overlapped, and the whole 400-char truncated
+    string was replayed as a duplicate ``text_delta`` into durable history.
+    """
+    bridge = OpenMagiEventBridge(live_compatible=True)
+    turn_id = "t1"
+
+    # A single answer, streamed token by token, whose total exceeds the
+    # 400-char tool-preview ceiling.
+    chunks = ["sentence number %d is here. " % i for i in range(30)]
+    aggregate = "".join(chunks)
+    assert len(aggregate) > 400
+
+    streamed_deltas: list[str] = []
+    for chunk in chunks:
+        projection = bridge.project_adk_event(
+            text_event(chunk, partial=True), turn_id=turn_id
+        )
+        streamed_deltas.extend(
+            str(e["delta"]) for e in projection.agent_events if e["type"] == "text_delta"
+        )
+
+    # The final non-partial event repeats the full aggregate (is_final_response).
+    final_projection = bridge.project_adk_event(_final_text_event(aggregate), turn_id=turn_id)
+
+    final_text_deltas = [
+        e for e in final_projection.agent_events if e["type"] == "text_delta"
+    ]
+    # Nothing new: the answer was already fully streamed. No duplicate replay.
+    assert final_text_deltas == []
+
+    # And the durable transcript entry carries the FULL, untruncated answer,
+    # not a 400-char tool-preview prefix ending in "...".
+    assistant_entries = [
+        entry
+        for entry in final_projection.transcript_entries
+        if entry.kind == "assistant_text"
+    ]
+    assert len(assistant_entries) == 1
+    assert assistant_entries[0].text == aggregate
+    assert not assistant_entries[0].text.endswith("...")
+
+
+def test_final_flush_emits_only_genuinely_unstreamed_tail() -> None:
+    """When a real suffix was never streamed, the final flush must emit exactly
+    that missing tail (no truncation, no duplication)."""
+    bridge = OpenMagiEventBridge(live_compatible=True)
+    turn_id = "t1"
+
+    streamed = "the quick brown fox jumps over the lazy dog. " * 12  # > 400 chars
+    tail = "and then it finally stops."
+    aggregate = streamed + tail
+    assert len(streamed) > 400
+
+    bridge.project_adk_event(text_event(streamed, partial=True), turn_id=turn_id)
+
+    final_projection = bridge.project_adk_event(
+        _final_text_event(aggregate), turn_id=turn_id
+    )
+    final_text_deltas = [
+        str(e["delta"]) for e in final_projection.agent_events if e["type"] == "text_delta"
+    ]
+    assert final_text_deltas == [tail]
+
+
+def test_final_only_long_answer_is_not_truncated_to_tool_preview() -> None:
+    """A >400-char answer delivered as a single non-streamed final event must be
+    projected in FULL, not clipped to the 400-char tool-preview ceiling."""
+    bridge = OpenMagiEventBridge(live_compatible=True)
+
+    aggregate = "answer sentence %d. " % 0 + "x" * 500
+    assert len(aggregate) > 400
+
+    projection = bridge.project_adk_event(
+        _final_text_event(aggregate), turn_id="t1"
+    )
+
+    text_deltas = [
+        str(e["delta"]) for e in projection.agent_events if e["type"] == "text_delta"
+    ]
+    assert text_deltas == [aggregate]
+    assert not text_deltas[0].endswith("...")
+
+    assistant_entries = [
+        entry for entry in projection.transcript_entries if entry.kind == "assistant_text"
+    ]
+    assert assistant_entries[0].text == aggregate
 
 
 def test_event_bridge_tool_end_carries_error_code_on_missing_tool() -> None:
