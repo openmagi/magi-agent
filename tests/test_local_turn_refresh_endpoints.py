@@ -335,14 +335,33 @@ def _clear_channel_store_registry():
     _reset_channel_message_store_singletons_for_tests()
 
 
+def _channel_from_sk(session_id: str) -> str:
+    """Mirror of streaming_chat_route._channel_from_session_id for test helpers."""
+    try:
+        parts = session_id.split(":")
+        app_idx = next((i for i, p in enumerate(parts) if p == "app"), -1)
+        if app_idx >= 0 and app_idx + 1 < len(parts):
+            return parts[app_idx + 1]
+        return ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _seed_store(tmp_path: Path, session_id: str) -> ChannelMessageStore:
-    """Create a ChannelMessageStore with three messages pre-seeded."""
+    """Create a ChannelMessageStore with three messages pre-seeded.
+
+    Sets ``channel`` to the plain channel segment extracted from ``session_id``
+    so that full=1 channel-scoped reads find these rows (the transport now
+    queries by channel, not session_id, on the initial page load).
+    """
+    ch = _channel_from_sk(session_id)
     store = ChannelMessageStore(workspace_root=tmp_path)
     store.append_message_sync(
         message_id="msg-u",
         session_id=session_id,
         role="user",
         content="Hello",
+        channel=ch,
         turn_id="t1",
         created_at_ms=1760000000001,
     )
@@ -351,6 +370,7 @@ def _seed_store(tmp_path: Path, session_id: str) -> ChannelMessageStore:
         session_id=session_id,
         role="assistant",
         content="Hi there",
+        channel=ch,
         turn_id="t1",
         created_at_ms=1760000000002,
     )
@@ -359,6 +379,7 @@ def _seed_store(tmp_path: Path, session_id: str) -> ChannelMessageStore:
         session_id=session_id,
         role="user",
         content="Second question",
+        channel=ch,
         turn_id="t2",
         created_at_ms=1760000000003,
     )
@@ -515,6 +536,7 @@ def test_full_mode_returns_incomplete_and_terminal_fields(
         session_id=sk,
         role="assistant",
         content="partial answer",
+        channel=_channel_from_sk(sk),  # ch11; required for channel-scoped full=1 read
         turn_id="t-err",
         incomplete=True,
         terminal="runner_error",
@@ -592,3 +614,114 @@ def test_cursor_convergence_two_windows_reconstruct_full_set(
     )
     assert resp_tip.status_code == 200
     assert resp_tip.json()["messages"] == []
+
+
+# Test 17: Reset regression shape -- full=1 with post-reset sessionId returns
+# BOTH pre-reset and post-reset rows (channel-scoped query).
+def test_full_load_after_reset_includes_prior_session_rows(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Regression guard for the Reset-button history disappearance bug.
+
+    Before the fix, full=1 queried by session_id so rows from the pre-reset
+    session were unreachable.  After the fix it queries by channel so all
+    resets for the same channel are visible.
+    """
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("MAGI_LOCAL_CHANNEL_HISTORY_ENABLED", "1")
+
+    ch = "rchat"
+    pre_sk = f"agent:main:app:{ch}"   # reset counter 0 (no suffix)
+    post_sk = f"agent:main:app:{ch}:1"  # reset counter 1
+
+    store = ChannelMessageStore(workspace_root=tmp_path)
+    store.append_message_sync(
+        message_id="pre-msg",
+        session_id=pre_sk,
+        role="user",
+        content="before reset",
+        channel=ch,
+    )
+    store.append_message_sync(
+        message_id="post-msg",
+        session_id=post_sk,
+        role="user",
+        content="after reset",
+        channel=ch,
+    )
+
+    monkeypatch.setenv("MAGI_AGENT_WORKSPACE", str(tmp_path))
+    from magi_agent.storage.channel_message_store import _STORE_REGISTRY  # noqa: PLC0415
+    _STORE_REGISTRY[str(tmp_path.resolve())] = store
+
+    client = TestClient(_make_app())
+    # Client loads with post-reset sessionId but must see BOTH messages
+    resp = client.get(
+        f"/v1/chat/channel-messages?sessionId={post_sk}&full=1", headers=_auth()
+    )
+    assert resp.status_code == 200
+    msgs = resp.json()["messages"]
+    message_ids = {m["messageId"] for m in msgs}
+    assert "pre-msg" in message_ids, "pre-reset message must survive Reset"
+    assert "post-msg" in message_ids
+    assert len(msgs) == 2
+    # Chronological (seq ASC) order
+    seqs = [m["seq"] for m in msgs]
+    assert seqs == sorted(seqs)
+
+
+# Test 18: after=<seq> cursor remains session-scoped (does not cross-contaminate
+# with messages from a concurrent unrelated channel).
+def test_after_seq_cursor_stays_session_scoped(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """after=<seq> should NOT use channel scope -- it must stay session-scoped
+    so that incremental polls on one channel do not surface messages from a
+    different concurrent channel sharing the same db.
+    """
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("MAGI_LOCAL_CHANNEL_HISTORY_ENABLED", "1")
+
+    sk_a = "agent:main:app:cursor-a"
+    sk_b = "agent:main:app:cursor-b"
+
+    store = ChannelMessageStore(workspace_root=tmp_path)
+    seq_a1 = store.append_message_sync(
+        message_id="a-msg-1",
+        session_id=sk_a,
+        role="user",
+        content="channel a first",
+        channel="cursor-a",
+    )
+    assert seq_a1 is not None
+    store.append_message_sync(
+        message_id="a-msg-2",
+        session_id=sk_a,
+        role="assistant",
+        content="channel a second",
+        channel="cursor-a",
+    )
+    store.append_message_sync(
+        message_id="b-msg-1",
+        session_id=sk_b,
+        role="user",
+        content="channel b first",
+        channel="cursor-b",
+    )
+
+    monkeypatch.setenv("MAGI_AGENT_WORKSPACE", str(tmp_path))
+    from magi_agent.storage.channel_message_store import _STORE_REGISTRY  # noqa: PLC0415
+    _STORE_REGISTRY[str(tmp_path.resolve())] = store
+
+    client = TestClient(_make_app())
+    # Cursor on channel-a past its first message
+    resp = client.get(
+        f"/v1/chat/channel-messages?sessionId={sk_a}&after={seq_a1}", headers=_auth()
+    )
+    assert resp.status_code == 200
+    msgs = resp.json()["messages"]
+    message_ids = {m["messageId"] for m in msgs}
+    # Must get channel-a's second message
+    assert "a-msg-2" in message_ids
+    # Must NOT see channel-b's message
+    assert "b-msg-1" not in message_ids, "cursor must not leak cross-channel rows"
