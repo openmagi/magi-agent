@@ -149,6 +149,7 @@ class ChannelMessageStore:
         app_name: str = "",
         after_seq: int | None = None,
         limit: int | None = None,
+        channel: str | None = None,
     ) -> list[dict[str, Any]]:
         """Return rows ordered by seq ASC.
 
@@ -159,13 +160,37 @@ class ChannelMessageStore:
 
         When both ``after_seq`` and ``limit`` are given, ``after_seq`` is
         applied first (in the inner query) and then the tail cap is applied.
+
+        ``channel`` and ``session_id`` are alternative primary scopes:
+        - When ``channel`` is provided, filter by ``channel = ?`` (cross-session
+          scope) instead of ``session_id = ?``.  This makes the initial full-load
+          return ALL reset sessions for the same channel so prior-session messages
+          remain visible after a Reset.
+        - When ``channel`` is None (default), filter by ``session_id = ?`` as
+          before -- byte-identical behaviour for all existing callers.
+        ``app_name`` and ``after_seq`` compose with whichever scope is active.
         """
-        # Build WHERE clause. session_id (the reset-aware channel key) is the
-        # globally-unique lookup key; app_name is only constrained when the
-        # caller passes a truthy value, so a reader that omits app_name still
-        # sees rows the writer stored under a specific app_name.
-        clauses = ["session_id = ?"]
-        params: list[Any] = [session_id]
+        # Build WHERE clause.  channel (when provided) is the cross-session
+        # scope; session_id is the reset-aware per-session scope.  app_name is
+        # only constrained when the caller passes a truthy value.
+        #
+        # When channel is provided we use a two-arm OR so that:
+        #   arm 1  channel = ?                  -- rows written with an explicit
+        #                                          channel value (post-fix writes)
+        #   arm 2  channel = '' AND session_id = ?  -- rows written before the
+        #                                          channel column was populated
+        #                                          (legacy rows, migration
+        #                                          back-fill, test seeds that
+        #                                          omit channel=)
+        # This keeps backward compatibility: a channel-scoped full=1 read
+        # correctly returns both old session-only rows AND new multi-session rows
+        # for the same channel.
+        if channel is not None:
+            clauses: list[str] = ["(channel = ? OR (channel = '' AND session_id = ?))"]
+            params: list[Any] = [channel, session_id]
+        else:
+            clauses = ["session_id = ?"]
+            params = [session_id]
         if app_name:
             clauses.append("app_name = ?")
             params.append(app_name)
@@ -247,6 +272,7 @@ class ChannelMessageStore:
         app_name: str = "",
         after_seq: int | None = None,
         limit: int | None = None,
+        channel: str | None = None,
     ) -> list[dict[str, Any]]:
         return await asyncio.to_thread(
             self.list_messages_sync,
@@ -254,6 +280,7 @@ class ChannelMessageStore:
             app_name=app_name,
             after_seq=after_seq,
             limit=limit,
+            channel=channel,
         )
 
 

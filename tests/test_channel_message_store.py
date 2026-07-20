@@ -311,3 +311,146 @@ def test_concurrent_writers_do_not_lose_rows(tmp_path: Path) -> None:
     # Rows are in ascending seq order
     seqs = [r["seq"] for r in rows]
     assert seqs == sorted(seqs)
+
+
+# ---------------------------------------------------------------------------
+# Test 7: channel-scoped query spans multiple session_ids
+# ---------------------------------------------------------------------------
+
+
+def test_channel_scope_spans_multiple_sessions(store: ChannelMessageStore) -> None:
+    """channel= query returns ALL sessions sharing that channel in seq ASC order.
+
+    This is the regression shape for the Reset bug: after Reset the client
+    uses a new session_id (higher reset counter) but must still see messages
+    from the prior session.
+    """
+    # Two sessions on the same channel (simulates pre-reset and post-reset)
+    store.append_message_sync(
+        message_id="pre-1",
+        session_id="agent:main:app:ch-reset",
+        role="user",
+        content="before reset",
+        channel="ch-reset",
+    )
+    store.append_message_sync(
+        message_id="post-1",
+        session_id="agent:main:app:ch-reset:1",
+        role="user",
+        content="after reset",
+        channel="ch-reset",
+    )
+
+    rows = store.list_messages_sync(
+        session_id="agent:main:app:ch-reset:1",  # new session; required arg
+        channel="ch-reset",
+    )
+
+    assert len(rows) == 2
+    contents = [r["content"] for r in rows]
+    assert "before reset" in contents
+    assert "after reset" in contents
+    # Ascending seq order
+    seqs = [r["seq"] for r in rows]
+    assert seqs == sorted(seqs)
+
+
+def test_channel_scope_excludes_other_channels(store: ChannelMessageStore) -> None:
+    """channel= query does not leak rows from a different channel."""
+    store.append_message_sync(
+        message_id="ch-a-msg",
+        session_id="sess-cha",
+        role="user",
+        content="channel a",
+        channel="ch-a",
+    )
+    store.append_message_sync(
+        message_id="ch-b-msg",
+        session_id="sess-chb",
+        role="user",
+        content="channel b",
+        channel="ch-b",
+    )
+
+    rows = store.list_messages_sync(session_id="sess-cha", channel="ch-a")
+
+    assert len(rows) == 1
+    assert rows[0]["content"] == "channel a"
+
+
+# ---------------------------------------------------------------------------
+# Test 8: session_id scope unchanged when channel=None (backward compat)
+# ---------------------------------------------------------------------------
+
+
+def test_session_id_scope_unchanged_when_channel_is_none(
+    store: ChannelMessageStore,
+) -> None:
+    """Omitting channel= keeps the original session_id-scoped behaviour."""
+    store.append_message_sync(
+        message_id="s1-msg",
+        session_id="sess-alpha",
+        role="user",
+        content="alpha message",
+        channel="shared-ch",
+    )
+    store.append_message_sync(
+        message_id="s2-msg",
+        session_id="sess-beta",
+        role="user",
+        content="beta message",
+        channel="shared-ch",
+    )
+
+    # Without channel=, each session_id sees only its own rows
+    rows_alpha = store.list_messages_sync(session_id="sess-alpha")
+    rows_beta = store.list_messages_sync(session_id="sess-beta")
+
+    assert len(rows_alpha) == 1
+    assert rows_alpha[0]["content"] == "alpha message"
+    assert len(rows_beta) == 1
+    assert rows_beta[0]["content"] == "beta message"
+
+
+# ---------------------------------------------------------------------------
+# Test 9: after_seq composes with channel scope
+# ---------------------------------------------------------------------------
+
+
+def test_after_seq_with_channel_scope(store: ChannelMessageStore) -> None:
+    """after_seq works correctly when combined with channel= scoping."""
+    ch = "ch-cursor"
+    seq1 = store.append_message_sync(
+        message_id="c-msg-1",
+        session_id="sess-c1",
+        role="user",
+        content="first",
+        channel=ch,
+    )
+    _seq2 = store.append_message_sync(
+        message_id="c-msg-2",
+        session_id="sess-c1",
+        role="assistant",
+        content="second",
+        channel=ch,
+    )
+    seq3 = store.append_message_sync(
+        message_id="c-msg-3",
+        session_id="sess-c2",  # different session, same channel (post-reset)
+        role="user",
+        content="third",
+        channel=ch,
+    )
+
+    # after_seq=seq1 should yield rows with seq > seq1 for the channel
+    rows = store.list_messages_sync(
+        session_id="sess-c2",
+        channel=ch,
+        after_seq=seq1,
+    )
+
+    returned_seqs = [r["seq"] for r in rows]
+    assert all(s > seq1 for s in returned_seqs), returned_seqs
+    assert seq3 in returned_seqs
+    # Ascending order
+    assert returned_seqs == sorted(returned_seqs)
