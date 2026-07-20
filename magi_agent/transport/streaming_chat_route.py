@@ -1756,11 +1756,26 @@ def register_streaming_chat_routes(
                         if after_seq is not None
                         else _LOCAL_CHANNEL_HISTORY_FULL_LIMIT
                     )
+                    # full=1 (initial page load): query by CHANNEL so that
+                    # prior-session messages (older reset-counter values) are
+                    # included.  The channel column stores the plain channel
+                    # name without the reset suffix, so all resets for the
+                    # same channel converge in one query and are returned in
+                    # chronological (seq ASC) order.
+                    # after=<seq> (incremental cursor): session_id scope is
+                    # correct -- the cursor is already channel-wide (seq is a
+                    # global monotonic autoincrement shared across sessions on
+                    # the same db), so staying session-scoped avoids surfacing
+                    # messages from concurrent unrelated windows.
+                    channel_scope = (
+                        _channel_from_session_id(session_id) if full else None
+                    )
                     rows = await store.list_messages(
                         session_id=session_id,
                         app_name="",
                         after_seq=after_seq,
                         limit=limit,
+                        channel=channel_scope,
                     )
                     messages = [
                         {
