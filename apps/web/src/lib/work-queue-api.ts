@@ -63,6 +63,29 @@ export const STATUS_COLUMNS = [
 export type StatusColumn = (typeof STATUS_COLUMNS)[number];
 
 // ---------------------------------------------------------------------------
+// Polling interval
+// ---------------------------------------------------------------------------
+
+export type PollInterval = "off" | "5s" | "10s" | "30s";
+
+/**
+ * Converts a poll interval option to milliseconds.
+ * Returns `null` when `"off"`, otherwise returns the delay in milliseconds.
+ */
+export function computePollDelayMs(opt: PollInterval): number | null {
+  switch (opt) {
+    case "off":
+      return null;
+    case "5s":
+      return 5_000;
+    case "10s":
+      return 10_000;
+    case "30s":
+      return 30_000;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Pure grouping helper
 // ---------------------------------------------------------------------------
 
