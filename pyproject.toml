@@ -148,6 +148,10 @@ browser = [
   "browser-use>=0.11.13,<0.12",
   "playwright>=1.45.0",
 ]
+# Optional keyless web search through Parallel Search MCP.
+parallel = [
+  "mcp>=1.27,<2",
+]
 # macOS computer-use: talks to the external `cua-driver` MCP binary over stdio.
 # Install the binary separately with `magi computer-use install`.
 computer = [

@@ -81,6 +81,32 @@ are set, or when `MAGI_WEB_SEARCH_PROVIDER=serpapi`, `SERPAPI_API_KEY`, and
 they do not by themselves provide live search. With router providers set, the
 handlers delegate to `magi_agent/web_acquisition/research_tools.py`.
 
+#### Optional keyless Parallel search
+
+Enable [Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp)
+for free web search in the native `WebSearch` tool, with no Parallel account or
+API key. Anonymous searches use Fast mode and are intended for light use.
+From a source checkout:
+
+```bash
+uv sync --extra cli --extra parallel
+export MAGI_LIVE_WEB_ACQUISITION_ENABLED=1
+export MAGI_WEB_PROVIDER_ROUTER_ENABLED=1
+export MAGI_PARALLEL_SEARCH_ENABLED=1
+uv run --no-sync magi -p "Use WebSearch to find the current Python release notes and cite your sources."
+```
+
+Configure a model provider as in [Getting Started](getting-started.md). The new
+flag defaults to off. A configured platform provider keeps priority; Parallel
+is the next search provider. Existing Brave/SerpAPI direct web tools keep their
+selection. `MAGI_LIVE_WEB_ACQUISITION_KILL_SWITCH=1` disables this path.
+
+Parallel returns source titles, URLs and excerpts through the existing research
+boundary. This option enables search only; `WebFetch` continues to use its
+configured fetch providers. Connection failures, timeouts and service limits
+produce a tool error when no other provider succeeds. This does not enable
+Magi's generic `magi mcp` stub.
+
 `WebReader` is **not exposed** by the native plugin — the catalog registers only
 `WebSearch` and `WebFetch`. The live provider router has a jina-reader path, but
 there is no `WebReader` tool handler today, so it is out of scope for this row.

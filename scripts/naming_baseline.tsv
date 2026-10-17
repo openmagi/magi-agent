@@ -272,6 +272,7 @@ openmagi	magi_agent/web_acquisition/providers/composio_mcp_shim.py	2
 openmagi	magi_agent/web_acquisition/providers/fake_provider.py	1
 openmagi	magi_agent/web_acquisition/providers/insane_fetch.py	1
 openmagi	magi_agent/web_acquisition/providers/jina_reader.py	1
+openmagi	magi_agent/web_acquisition/providers/parallel_search.py	1
 openmagi	magi_agent/web_acquisition/providers/platform_endpoint.py	2
 openmagi	magi_agent/web_acquisition/repo_research_tools.py	3
 openmagi	magi_agent/web_acquisition/research_tools.py	2

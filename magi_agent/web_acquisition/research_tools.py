@@ -704,6 +704,10 @@ PROVIDER_ROUTER_ENABLED_ENV = "MAGI_WEB_PROVIDER_ROUTER_ENABLED"
 PLATFORM_SEARCH_PROVIDER_NAME = "platform.search"
 PLATFORM_FETCH_PROVIDER_NAME = "platform.fetch"
 
+# Parallel Search MCP — default-OFF, lazily imported.
+PARALLEL_SEARCH_PROVIDER_NAME = "parallel.search"
+PARALLEL_SEARCH_ENABLED_ENV = "MAGI_PARALLEL_SEARCH_ENABLED"
+
 # Jina Reader provider — default-OFF, lazily imported.
 JINA_READER_PROVIDER_NAME = "jina.reader"
 JINA_READER_ENABLED_ENV = "MAGI_JINA_READER_ENABLED"
@@ -733,8 +737,8 @@ def build_live_research_boundary(
 
     When ``MAGI_PLATFORM_BASE_URL`` and ``MAGI_PLATFORM_API_KEY`` are present in
     the environment, a ``PlatformEndpointProvider`` is constructed and wired as
-    the primary provider.  If neither env var is set, the router's provider list
-    is empty and no live network calls are made.
+    the primary provider. Optional Parallel search, Jina Reader and InsaneFetch
+    providers can be enabled independently of the platform credentials.
 
     Parameters
     ----------
@@ -783,6 +787,15 @@ def build_live_research_boundary(
         providers[PLATFORM_SEARCH_PROVIDER_NAME] = platform_provider
         providers[PLATFORM_FETCH_PROVIDER_NAME] = platform_provider
         provider_names.extend([PLATFORM_SEARCH_PROVIDER_NAME, PLATFORM_FETCH_PROVIDER_NAME])
+
+    # Preserve configured platform priority; Parallel is an opt-in search fallback.
+    if flag_bool(PARALLEL_SEARCH_ENABLED_ENV, env=resolved_env):
+        from magi_agent.web_acquisition.providers.parallel_search import (
+            ParallelSearchProvider,
+        )
+
+        providers[PARALLEL_SEARCH_PROVIDER_NAME] = ParallelSearchProvider()
+        provider_names.append(PARALLEL_SEARCH_PROVIDER_NAME)
 
     # InsaneFetch (curl_cffi WAF-bypass) — fallback fetch provider, default-OFF.
     # Ordered AFTER platform so platform remains primary; insane.fetch is the
@@ -880,6 +893,8 @@ __all__ = [
     "MAGI_JINA_API_KEY_ENV",
     "MAGI_PLATFORM_API_KEY_ENV",
     "MAGI_PLATFORM_BASE_URL_ENV",
+    "PARALLEL_SEARCH_ENABLED_ENV",
+    "PARALLEL_SEARCH_PROVIDER_NAME",
     "PLATFORM_FETCH_PROVIDER_NAME",
     "PLATFORM_SEARCH_PROVIDER_NAME",
     "PROVIDER_ROUTER_ENABLED_ENV",

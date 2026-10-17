@@ -4596,6 +4596,18 @@ FLAGS: tuple[FlagSpec, ...] = (
         kind="bool",
     ),
     FlagSpec(
+        name="MAGI_PARALLEL_SEARCH_ENABLED",
+        default=False,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Enable anonymous Parallel Search MCP as an optional search "
+            "provider after the platform provider. Requires the parallel extra "
+            "and the live web-acquisition and provider-router gates. Default-OFF."
+        ),
+        kind="bool",
+    ),
+    FlagSpec(
         name="MAGI_JINA_READER_ENABLED",
         default=False,
         scope="public",

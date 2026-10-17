@@ -392,7 +392,7 @@ graph LR
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
-| __init__.py | — | — | (root)/main.py, cli/tui/app.py |
+| __init__.py | — | — | (root)/main.py, cli/tui/app.py, web_acquisition/providers/parallel_search.py |
 | __main__.py | — | main | — |
 | app.py | — | active_sessions, app_api, board_api, bootstrap, chat, composio_broker, config, control_requests, credentials, customize, daemon, debug_trace, health, integrations, learning_dashboard, observability, openmagi_runtime, packs_dashboard, plugins, streaming_chat_route, tools, web_dashboard | (root)/main.py |
 | facades.py | High-level entry-point facades that compose existing modules. | authored_prompt_append, bus, context, dispatcher, flags, lifecycle_audit, lifecycle_shell_command_control, manifest, output_rewrite, replace_payloads, resolved, result, store, verification_policy | cli/customize_tool_wiring.py |
@@ -2153,13 +2153,13 @@ graph LR
 | live_provider_pack.py | — | policy, provider_execution, provider_receipts | web_acquisition/provider_router.py, web_acquisition/research_tools.py, web_acquisition/tests/test_deep_research_orchestrator.py |
 | opencode_provider_router.py | — | policy, provider_boundary, research_tools, result | — |
 | page_navigator.py | Page content navigator for deep web research. | — | web_acquisition/cross_verifier.py, web_acquisition/deep_research.py, web_acquisition/tests/test_cross_verifier.py, web_acquisition/tests/test_page_navigator.py |
-| policy.py | — | run_redaction, safety, ssrf | browser/autonomous/safety_hooks.py, browser/autonomous/tool.py, browser/live_provider_pack.py, browser/provider_boundary.py, browser/source_tools.py, harness/general_automation/web_source_receipts.py, knowledge/source_tools.py, plugins/agentmemory/tools.py, plugins/native/_common.py, plugins/native/_hosted_knowledge.py, plugins/native/knowledge.py, plugins/native/missions.py, plugins/native/scheduled_work.py, recipes/first_party/general_automation/web_acquisition_contracts.py, tools/document_write/model.py, tools/document_write_tools.py, tools/web_search_tools.py, web_acquisition/acquisition_plan.py, web_acquisition/cross_verifier.py, web_acquisition/live_fetch_provider.py, web_acquisition/live_provider_pack.py, web_acquisition/opencode_provider_router.py, web_acquisition/provider_boundary.py, web_acquisition/provider_router.py, web_acquisition/providers/insane_fetch.py, web_acquisition/providers/jina_reader.py, web_acquisition/providers/platform_endpoint.py, web_acquisition/repo_research_tools.py, web_acquisition/research_tools.py |
+| policy.py | — | run_redaction, safety, ssrf | browser/autonomous/safety_hooks.py, browser/autonomous/tool.py, browser/live_provider_pack.py, browser/provider_boundary.py, browser/source_tools.py, harness/general_automation/web_source_receipts.py, knowledge/source_tools.py, plugins/agentmemory/tools.py, plugins/native/_common.py, plugins/native/_hosted_knowledge.py, plugins/native/knowledge.py, plugins/native/missions.py, plugins/native/scheduled_work.py, recipes/first_party/general_automation/web_acquisition_contracts.py, tools/document_write/model.py, tools/document_write_tools.py, tools/web_search_tools.py, web_acquisition/acquisition_plan.py, web_acquisition/cross_verifier.py, web_acquisition/live_fetch_provider.py, web_acquisition/live_provider_pack.py, web_acquisition/opencode_provider_router.py, web_acquisition/provider_boundary.py, web_acquisition/provider_router.py, web_acquisition/providers/insane_fetch.py, web_acquisition/providers/jina_reader.py, web_acquisition/providers/parallel_search.py, web_acquisition/providers/platform_endpoint.py, web_acquisition/repo_research_tools.py, web_acquisition/research_tools.py |
 | provider_boundary.py | — | policy | web_acquisition/__init__.py, web_acquisition/opencode_provider_router.py, web_acquisition/research_tools.py |
 | provider_router.py | Default-off provider router with retry and fallback for live web acquisition. | live_provider_pack, policy, provider_receipts | web_acquisition/__init__.py, web_acquisition/research_tools.py |
 | query_planner.py | Rule-based query planner for deep web research. | deep_research_config | web_acquisition/deep_research.py, web_acquisition/tests/test_query_planner.py |
 | reference_research_tools.py | — | catalog, context, kernel, local_readonly, read_ledger, registry | — |
 | repo_research_tools.py | — | policy, result, source_ledger, source_proof | — |
-| research_tools.py | — | _truthy, flags, insane_fetch, jina_reader, live_provider_pack, platform_endpoint, policy, provider_boundary, provider_router, result, source_ledger | cli/tests/test_real_runner.py, plugins/native/web.py, runtime/local_defaults.py, web_acquisition/deep_research.py, web_acquisition/opencode_provider_router.py, web_acquisition/tests/test_deep_research_orchestrator.py, web_acquisition/tests/test_gaia_web_tools_deep_research.py |
+| research_tools.py | — | _truthy, flags, insane_fetch, jina_reader, live_provider_pack, parallel_search, platform_endpoint, policy, provider_boundary, provider_router, result, source_ledger | cli/tests/test_real_runner.py, plugins/native/web.py, runtime/local_defaults.py, web_acquisition/deep_research.py, web_acquisition/opencode_provider_router.py, web_acquisition/tests/test_deep_research_orchestrator.py, web_acquisition/tests/test_gaia_web_tools_deep_research.py |
 
 ### web_acquisition/providers/
 
@@ -2170,6 +2170,7 @@ graph LR
 | fake_provider.py | Hermetic live provider for tests — no network, canned responses. | — | web_acquisition/providers/__init__.py |
 | insane_fetch.py | WAF-bypass live FETCH provider backed by ``curl_cffi`` browser impersonation. | live_fetch_provider, policy | web_acquisition/research_tools.py |
 | jina_reader.py | Jina Reader live provider for the research harness. | live_fetch_provider, policy | web_acquisition/research_tools.py |
+| parallel_search.py | Opt-in, anonymous Parallel Search MCP provider for native WebSearch. | policy | web_acquisition/research_tools.py |
 | platform_endpoint.py | Platform-endpoint live provider for web search, fetch, and reader. | policy | web_acquisition/providers/__init__.py, web_acquisition/research_tools.py |
 
 ### web_acquisition/tests/

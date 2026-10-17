@@ -1,4 +1,4 @@
-ERROR: env-reference document missing markers '<!-- BEGIN GENERATED FLAGS (scripts/generate_env_reference.py) -->
+<!-- BEGIN GENERATED FLAGS (scripts/generate_env_reference.py) -->
 ## Feature flags (auto-generated)
 
 Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/generate_env_reference.py`. Do not edit this section by hand; register the flag in the registry and regenerate.
@@ -214,6 +214,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_OUTPUT_CONTINUATION_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Enable automatic continuation of truncated model output (default-ON full profile).
 - `MAGI_PACK_CAPABILITY_ENFORCEMENT_ENABLED` (default off) — Hand user/untrusted pack impls a RESTRICTED capability set per primitive type so capability tokens are enforced through the typed context surface (defense-in-depth, not isolation). OFF: full set, byte-identical.
 - `MAGI_PACK_SIGNING_REQUIRED` (default off) — Curated-trust gate (trust model A): when ON, only packs whose content digest (see magi_agent.packs.signing.compute_pack_digest) appears in the MAGI_TRUSTED_PACK_DIGESTS allowlist are loaded; an untrusted user/third-party pack is dropped before load. Bundled first-party packs (the first-party pack-id prefix) are exempt (trusted by being bundled). Strict default-OFF: when unset NO digest is computed and the discover->enabled pipeline is byte-identical to today.
+- `MAGI_PARALLEL_SEARCH_ENABLED` (default off) — Enable anonymous Parallel Search MCP as an optional search provider after the platform provider. Requires the parallel extra and the live web-acquisition and provider-router gates. Default-OFF.
 - `MAGI_PERSISTENT_PYTHON_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Register + bind the neutral tools-persistent-python pack's PersistentPython tool (CodeAct: persistent interpreter namespace).
 - `MAGI_PERSIST_RUN_BOOKENDS_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Persist a per-turn run-bookend record (goal, one-line result, model, token usage, status) to the durable evidence ledger so a run-share page can render the top summary. Strict default-OFF; OFF keeps the evidence ledger byte-identical (no extra record written).
 - `MAGI_PLAN_ACT_GATE_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Live ``plan_gate -> plan_act_switch -> delegation`` chain activation. Profile-aware default-ON (full/lab; OFF under the safe-family). Downstream delegation still enforces MAGI_GA_LIVE_ENABLED + an approved control, so activating the seam does not auto-delegate.
@@ -325,4 +326,4 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_WORK_QUEUE_EXECUTOR_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Enable the durable work-queue dispatcher tick loop.
 - `MAGI_WORK_QUEUE_NOTIFY_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Enable the work-queue terminal-event notifier gateway watcher: polls for newly-completed/blocked/failed tasks and pushes each through the injected delivery sink (default sink = logging-only; real channel sinks are wired in P6). Default-OFF; when off the daemon does not poll.
 
-<!-- END GENERATED FLAGS -->'
+<!-- END GENERATED FLAGS -->
